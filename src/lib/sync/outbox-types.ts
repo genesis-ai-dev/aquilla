@@ -137,6 +137,13 @@ export interface OutboxEventPayloads {
      */
     ai_suggestion?: true
     /**
+     * Translation-agent provenance: the agent_runs ledger row this commit
+     * came from. Injected server-side at stage time (agent implementation
+     * plan, emit-stage.ts) and preserved verbatim by the client Apply path
+     * (src/lib/agent/apply.ts) so "undo run X" can find the run's events.
+     */
+    agent_run_id?: string
+    /**
      * FRO-186 / harmonization: when present, tags this commit as a harmonize
      * sweep event (`cell.commit.harmonize` variant per AD-2). The server uses
      * this to trigger the AD-14 endorsement-revocation cascade and the

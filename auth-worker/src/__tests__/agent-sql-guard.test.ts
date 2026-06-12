@@ -60,6 +60,24 @@ describe("guardSql — accepts", () => {
     const r = guard("SELECT payload::jsonb ->> 'value' FROM events WHERE project_id = :project;")
     expect(r.ok).toBe(true)
   })
+
+  // L3 escape hatch: pure catalog introspection touches no project data, so
+  // the :project requirement would only weld the hatch shut (2026-06-12
+  // review finding). Any project table in the query re-imposes it.
+  it("allows information_schema-only queries without :project", () => {
+    const r = guard(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'cells'",
+    )
+    expect(r.ok).toBe(true)
+  })
+
+  it("still requires :project when information_schema is joined with project tables", () => {
+    const r = guard(
+      "SELECT c.column_name FROM information_schema.columns c, cells x WHERE x.value = ''",
+    )
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain(":project")
+  })
 })
 
 describe("guardSql — rejects", () => {

@@ -97,7 +97,7 @@ export const workspaceActions: WorkspaceAction[] = [
   },
   {
     id: "export", label: "Export", icon: Download, group: "primary",
-    isAvailable: (c) => c.activeFileId != null,
+    isAvailable: (c) => c.activeFileId != null && c.canExportByOrgPolicy !== false,
     isDefault: (c) => {
       if (!c.activeFileId) return false
       const p = c.fileProgress.get(c.activeFileId)

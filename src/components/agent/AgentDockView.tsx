@@ -34,6 +34,8 @@ export interface AgentDockViewProps {
   roleLevel: number | null
   /** Focused file/cell ids — sent as run context when the pin is on. */
   context: { fileId?: string; cellId?: string }
+  /** Open file's name — keeps the pin pill honest when only file context is sent. */
+  fileName?: string
   /** Focused cell display info for the context pin strip. */
   currentCell: CellContext | null
   /** Project's active rules for proposal lint. */
@@ -50,6 +52,7 @@ export function AgentDockView({
   author,
   roleLevel,
   context,
+  fileName,
   currentCell,
   rules,
   resolveCell,
@@ -151,6 +154,7 @@ export function AgentDockView({
         includeCellContext={includeContext}
         onToggle={setIncludeContext}
         currentCell={currentCell}
+        fileName={fileName}
         compact
       />
 

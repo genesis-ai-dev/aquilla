@@ -12,6 +12,7 @@ import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { InactiveProjectBanner } from "@/components/InactiveProjectBanner"
 import { downloadProjectBundle } from "@/lib/sync/export-bundle"
 import { AssignWork } from "./AssignWork"
+import { MembersTab } from "@/components/ProjectMembersPage"
 import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
@@ -662,6 +663,16 @@ export function ProjectOverview() {
                   </div>
                 )}
               </div>
+
+              {/* ── Members card (FRO-335) — same add / change-role / revoke
+                  surface as the in-project members page, so access can be
+                  managed from the overview without opening the workspace. ── */}
+              {canManage && !isArchived && (
+                <div className="rounded-xl border bg-card shadow-sm p-5" data-testid="overview-members-card">
+                  <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Members</h2>
+                  <MembersTab projectId={id} className="space-y-6" />
+                </div>
+              )}
             </div>
           )}
           </div>

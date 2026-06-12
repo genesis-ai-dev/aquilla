@@ -36,7 +36,10 @@ function resolveOpenRouterUrl(env: Env): string {
 }
 /** Haiku-class default from the existing allowlist (lib/ai-budget.ts). */
 const AGENT_MODEL = "anthropic/claude-haiku-4-5"
-const MAX_TOOL_ITERATIONS = 8
+// Counted per model round that runs sql/emit (docs-only rounds are free).
+// Sized for: recipe query + exemplars + draft emit + one lint-redraft emit,
+// with headroom for error recovery (battery case 2 capped at 8 mid-redraft).
+const MAX_TOOL_ITERATIONS = 12
 const TOKEN_CEILING = 60_000
 /** code_result summaries are truncated for the UI per the contract. */
 const RESULT_SUMMARY_MAX = 2000
@@ -230,6 +233,39 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, signal, send }:
     aliases,
   }
 
+  // Situational grounding: resolve the focused file's name/kind and the
+  // project's language pair so the prompt can anchor relative requests
+  // ("this file", "segment 8") and the translation direction instead of
+  // leaving the model to reverse-engineer the project — or worse, stall the
+  // run to ask "what language?". Best-effort, cheap lookups.
+  let focusedFile: { name?: string; kind?: string } = {}
+  let languages: { sourceLanguage?: string; targetLanguage?: string } = {}
+  try {
+    if (body.context?.fileId) {
+      const row = await env.AQUILLA_PG.prepare(
+        "SELECT name, kind FROM files WHERE project_id = ? AND id = ?",
+      )
+        .bind(body.projectId, body.context.fileId)
+        .first<{ name: string; kind: string | null }>()
+      if (row) focusedFile = { name: row.name, kind: row.kind ?? undefined }
+    }
+    const settings = await env.AQUILLA_PG.prepare(
+      `SELECT settings::jsonb ->> 'sourceLanguage' AS source_language,
+              settings::jsonb ->> 'targetLanguage' AS target_language
+       FROM project_settings WHERE project_id = ?`,
+    )
+      .bind(body.projectId)
+      .first<{ source_language: string | null; target_language: string | null }>()
+    if (settings) {
+      languages = {
+        sourceLanguage: settings.source_language ?? undefined,
+        targetLanguage: settings.target_language ?? undefined,
+      }
+    }
+  } catch {
+    /* prompt grounding is best-effort — the run proceeds without it */
+  }
+
   const convo: ConvoMessage[] = [
     {
       role: "system",
@@ -239,6 +275,10 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, signal, send }:
         roleLevel,
         fileId: body.context?.fileId,
         cellId: body.context?.cellId,
+        fileName: focusedFile.name,
+        fileKind: focusedFile.kind,
+        sourceLanguage: languages.sourceLanguage,
+        targetLanguage: languages.targetLanguage,
       }),
     },
     ...body.messages,
@@ -261,7 +301,7 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, signal, send }:
       }
       if (iteration >= MAX_TOOL_ITERATIONS) {
         status = "capped"
-        send({ type: "error", message: "Tool-iteration cap reached (8) — run stopped." })
+        send({ type: "error", message: `Tool-iteration cap reached (${MAX_TOOL_ITERATIONS}) — run stopped.` })
         break
       }
       if (promptTokens + completionTokens > TOKEN_CEILING) {
@@ -316,7 +356,19 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, signal, send }:
       const toolCalls = message.tool_calls ?? []
       if (toolCalls.length === 0) break // final prose — the run is complete
 
-      iteration++
+      // Cookbook fetches are constant-cost and risk-free — a docs-only round
+      // does not consume iteration budget. Otherwise a run that reads the
+      // cookbook, explores, and then gets a NEEDS REVIEW lint verdict on its
+      // first emit can be capped before the redraft (battery case 2).
+      const docsOnly = toolCalls.every((call) => {
+        try {
+          const args = JSON.parse(call.function.arguments ?? "{}") as Record<string, unknown>
+          return typeof args.docs === "string" && args.sql === undefined && args.emit === undefined
+        } catch {
+          return false
+        }
+      })
+      if (!docsOnly) iteration++
       for (const call of toolCalls) {
         steps++
         const result = await executeToolCall(call, {

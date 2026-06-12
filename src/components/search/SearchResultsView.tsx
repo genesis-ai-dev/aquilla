@@ -12,6 +12,7 @@
 import { useMemo } from "react"
 import { X, FileText, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { MarkedSnippet } from "@/components/search/MarkedSnippet"
 import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
 
 export interface SearchResultsViewProps {
@@ -28,6 +29,9 @@ interface FileGroup {
 }
 
 function highlightSnippet(text: string, query: string): React.ReactNode {
+  // FTS5 snippets arrive with literal <mark>...</mark> markers — render
+  // those directly instead of token-matching the raw string.
+  if (text.includes("<mark>")) return <MarkedSnippet text={text} />
   if (!query.trim()) return text
   const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
   if (!tokens.length) return text
@@ -183,7 +187,7 @@ function ResultRow({
       </span>
       {result.paired && (
         <span className="text-[10px] text-muted-foreground/70 truncate italic">
-          {result.paired}
+          <MarkedSnippet text={result.paired} />
         </span>
       )}
     </button>

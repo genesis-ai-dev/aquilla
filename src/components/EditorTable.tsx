@@ -58,6 +58,7 @@ import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice } from "@/lib/audio/voices"
 import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
+import { looksLikeUuid } from "@/lib/uuid"
 import { isPerfLogEnabled } from "@/lib/perf-log"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { ViolationPopover } from "./ViolationPopover"
@@ -959,7 +960,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         {/* FRO-250: sticky section/chapter indicator strip. Appears above the
             column header when the file has section-tagged cells. Keeps the
             reader oriented while scrolling through long Bible chapters. */}
-        {currentSectionLabel && (
+        {currentSectionLabel && !looksLikeUuid(currentSectionLabel) && (
           <div className="flex items-center gap-1.5 border-b border-border/40 px-4 py-0.5">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
               {currentSectionLabel}

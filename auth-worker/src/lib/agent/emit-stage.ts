@@ -23,6 +23,7 @@
 
 import { AliasMap } from "./compress"
 import { AGENT_REQUIRED_ROLE, ROLE_NAME } from "./schema-card"
+import { loadLintRules, lintDraft } from "./lint"
 
 // ── Wire contract (must match the plan doc byte-for-byte) ───────────────────
 
@@ -140,7 +141,7 @@ async function fetchCellPair(
 }
 
 type Verdict =
-  | { kind: "staged"; event: StagedEvent }
+  | { kind: "staged"; event: StagedEvent; sourceValue?: string }
   | { kind: "rejected"; reason: string }
   | { kind: "stale"; reason: string }
 
@@ -193,6 +194,9 @@ async function stageOne(
   const display: StagedEvent["display"] = {}
   let parentId: string | undefined
 
+  // Source text of the paired cell — carried out for draft lint.
+  let sourceValue: string | undefined
+
   // 3–5. Cell-anchored kinds: fetch the live pair for chain + display context.
   const needsCell =
     kind.startsWith("target.cell.") || kind.startsWith("source.cell.") ||
@@ -236,6 +240,7 @@ async function stageOne(
         payload.ai_suggestion = true
         payload.agent_run_id = ctx.runId
         payload.sourceEventId = pair.source?.event_id ?? null
+        sourceValue = pair.source?.value
       } else if (kind === "cell.validate") {
         if (!pair.target) {
           return { kind: "rejected", reason: "no target cell exists to validate" }
@@ -276,7 +281,7 @@ async function stageOne(
   if (fileId) event.fileId = fileId
   if (cellId) event.cellId = cellId
   if (parentId) event.parentId = parentId
-  return { kind: "staged", event }
+  return { kind: "staged", event, sourceValue }
 }
 
 function summarize(events: StagedEvent[]): string {
@@ -308,6 +313,14 @@ export async function stageEvents(
   const staged: StagedEvent[] = []
   const lines: string[] = ["i|kind|ref|verdict"]
 
+  // Deterministic lint on staged drafts: load the project's enabled rules once
+  // per emit so the MODEL sees violations and can redraft before the user does.
+  const anyCommit = rawEvents.some(
+    (r) => (r as RawEmitEvent)?.kind === "target.cell.commit",
+  )
+  const lintRules = anyCommit ? await loadLintRules(db, ctx.projectId) : []
+  const lintLines: string[] = []
+
   for (let i = 0; i < rawEvents.length; i++) {
     const raw = rawEvents[i] as RawEmitEvent
     const kind = typeof raw?.kind === "string" ? raw.kind : "?"
@@ -320,9 +333,28 @@ export async function stageEvents(
     if (verdict.kind === "staged") {
       staged.push(verdict.event)
       lines.push(`${i + 1}|${kind}|${verdict.event.display.canonicalRef ?? "∅"}|staged`)
+      if (kind === "target.cell.commit" && lintRules.length > 0) {
+        const hits = lintDraft(
+          lintRules,
+          verdict.sourceValue ?? "",
+          typeof verdict.event.payload.value === "string" ? verdict.event.payload.value : "",
+        )
+        for (const h of hits) {
+          lintLines.push(
+            `NEEDS REVIEW ${verdict.event.display.canonicalRef ?? `#${i + 1}`}: rule "${h.ruleName}" — ${h.message}`,
+          )
+        }
+      }
     } else {
       lines.push(`${i + 1}|${kind}|∅|${verdict.kind}: ${verdict.reason}`)
     }
+  }
+
+  if (lintLines.length > 0) {
+    lines.push(
+      ...lintLines,
+      "Fix the NEEDS REVIEW drafts and re-emit them (same cellIds) — the corrected versions replace these in the proposal.",
+    )
   }
 
   lines.push(

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { getDefaultAction, getVisibleActions } from "./registry"
+import { getDefaultAction, getVisibleActions, workspaceActions } from "./registry"
 import type { WorkspaceAction, WorkspaceActionContext } from "./types"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -75,6 +75,26 @@ describe("getDefaultAction", () => {
     ]
     const def = getDefaultAction(acts, ctx())
     expect(def.id).toBe("b")
+  })
+})
+
+describe("export org-policy gate (FRO-253)", () => {
+  // The header's duplicate "Export file" overflow item was removed, so the
+  // registry action is the ONLY export entry point — it must honor the org
+  // export floor, not just rely on openExportFlow's runtime no-op.
+  const exportAction = workspaceActions.find((a) => a.id === "export")!
+
+  it("hides Export when org policy forbids it", () => {
+    expect(
+      exportAction.isAvailable(ctx({ activeFileId: "f1", canExportByOrgPolicy: false })),
+    ).toBe(false)
+  })
+
+  it("shows Export while policy is unknown (optimistic pre-fetch) or allowed", () => {
+    expect(exportAction.isAvailable(ctx({ activeFileId: "f1" }))).toBe(true)
+    expect(
+      exportAction.isAvailable(ctx({ activeFileId: "f1", canExportByOrgPolicy: true })),
+    ).toBe(true)
   })
 })
 

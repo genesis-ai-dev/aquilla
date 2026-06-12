@@ -25,14 +25,38 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 describe("ProjectsList", () => {
-  it("fetches projects scoped to the active org and renders them", async () => {
+  it("fetches the unfiltered project list and renders active-org projects", async () => {
     fetchAccessibleProjectsResultMock.mockResolvedValue({
       ok: true,
       projects: [{ id: "p1", name: "John", orgId: 7, role: { level: 700, name: "owner", source: "creator" }, files: [] }],
     })
     render(<MemoryRouter><OrgProvider><ProjectsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("John")).toBeInTheDocument())
-    expect(fetchAccessibleProjectsResultMock).toHaveBeenCalledWith("jwt", 7)
+    // FRO-335: the fetch must NOT be org-filtered — cross-org grants
+    // (invite-link / bulk-add) are partitioned client-side instead.
+    expect(fetchAccessibleProjectsResultMock).toHaveBeenCalledWith("jwt")
+    expect(screen.queryByTestId("shared-with-you")).not.toBeInTheDocument()
+  })
+
+  // FRO-335: a project joined via magic-link invite lives in the INVITER's
+  // org. The invitee isn't an org member, so an org-scoped list hid it —
+  // URL-accessible but unreachable from the dashboard. It must render under
+  // "Shared with you".
+  it("renders projects from orgs the user doesn't belong to under Shared with you", async () => {
+    fetchAccessibleProjectsResultMock.mockResolvedValue({
+      ok: true,
+      projects: [
+        { id: "p1", name: "John", orgId: 7, role: { level: 700, name: "owner", source: "creator" }, files: [] },
+        { id: "p503", name: "Joined Via Invite", orgId: 503, role: { level: 400, name: "contributor", source: "override" }, files: [] },
+      ],
+    })
+    render(<MemoryRouter><OrgProvider><ProjectsList /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("Joined Via Invite")).toBeInTheDocument())
+    const shared = screen.getByTestId("shared-with-you")
+    expect(shared).toHaveTextContent("Shared with you")
+    expect(shared).toHaveTextContent("Joined Via Invite")
+    // The active-org project stays in the main list, not the shared section.
+    expect(shared).not.toHaveTextContent("John")
   })
 
   // FRO-293: no infinite spinner when no session / org

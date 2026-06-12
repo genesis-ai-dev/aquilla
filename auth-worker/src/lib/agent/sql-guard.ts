@@ -111,8 +111,14 @@ export function guardSql(
     }
   }
 
-  // Project scoping is mandatory (v1 app-level RLS).
-  if (!/(?<!:):project\b/.test(sql)) {
+  // Project scoping is mandatory (v1 app-level RLS) — EXCEPT pure catalog
+  // introspection: a query whose only table references are information_schema
+  // touches no project data and is the L3 escape hatch ("the agent is never
+  // stuck"). Any project table name in the query re-imposes the requirement.
+  const PROJECT_TABLES =
+    /\b(cells|files|events|comments|assignments|assignment_cells|cell_validators|cell_waivers|cell_backtranslations|cell_audio|cell_word_morph|project_settings|project_members|users|agent_runs|chain_claims|project_seq_counters)\b/i
+  const catalogOnly = /\binformation_schema\s*\./i.test(masked) && !PROJECT_TABLES.test(masked)
+  if (!catalogOnly && !/(?<!:):project\b/.test(sql)) {
     return { ok: false, error: "query must reference :project (all reads are project-scoped)" }
   }
 

@@ -34,6 +34,21 @@ vi.mock("@/lib/frontier/teams", () => ({
 }))
 vi.mock("@/lib/sync/cloud-projects", () => ({ fetchAccessibleProjects: vi.fn(async () => []) }))
 
+// Drive the shadcn (Base UI) Select: open the trigger, hover-highlight the
+// option, commit with Enter fired on the option itself. Under happy-dom
+// clicking an option does not reliably commit a selection, but the keyboard
+// path does (recipe adapted from AssignModal.test.tsx; Enter targets the
+// option because outside a Dialog focus may never enter the popup).
+// Callers assert the resulting effect themselves.
+async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
+  const trigger = screen.getByRole("combobox", { name: triggerName })
+  fireEvent.click(trigger)
+  const option = await screen.findByRole("option", { name: optionName })
+  fireEvent.pointerMove(option)
+  fireEvent.mouseMove(option)
+  fireEvent.keyDown(option, { key: "Enter" })
+}
+
 function renderDetail() {
   // QueryClientProvider: the org shell's AccountSwitcher reaches useAccounts,
   // which clears the React Query cache on account switch (FRO-212).
@@ -73,9 +88,8 @@ describe("TeamDetail project management", () => {
     renderDetail()
     await waitFor(() => expect(screen.getByText(/projects/i)).toBeInTheDocument())
     await act(async () => { (await screen.findByRole("button", { name: /attach project/i })).click() })
-    const selects = screen.getAllByRole("combobox")
-    await act(async () => { fireEvent.change(selects[0], { target: { value: "pa" } }) })
-    await act(async () => { fireEvent.change(selects[1], { target: { value: "400" } }) })
+    await pickSelectOption(/project to attach/i, /bambara/i)
+    await pickSelectOption(/granted role/i, /contributor/i)
     await act(async () => { screen.getByRole("button", { name: /^attach$/i }).click() })
     await waitFor(() => expect(attachProject).toHaveBeenCalledWith("jwt", 1, 10, "pa", 400))
   })
@@ -94,12 +108,8 @@ describe("TeamDetail admin management", () => {
     renderDetail()
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
     await act(async () => { (await screen.findByRole("button", { name: /add member/i })).click() })
-    // After clicking "Add member", a username picker appears alongside any existing role selectors.
-    // Target by the first combobox that does NOT have a role-for-* aria-label.
-    const selects = screen.getAllByRole("combobox")
-    const usernameSelect = selects.find((s) => !s.getAttribute("aria-label")?.toLowerCase().startsWith("role for"))
-    if (!usernameSelect) throw new Error("username picker not found")
-    await act(async () => { fireEvent.change(usernameSelect, { target: { value: "anna" } }) })
+    // After clicking "Add member", the username picker appears (aria-label "Member to add").
+    await pickSelectOption(/member to add/i, /^anna$/)
     await act(async () => { screen.getByRole("button", { name: /^add$/i }).click() })
     await waitFor(() => expect(addTeamMember).toHaveBeenCalledWith("jwt", 1, 10, "anna"))
   })
@@ -158,8 +168,7 @@ describe("TeamDetail member role editing (FRO-139)", () => {
     getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [] })
     renderDetail()
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
-    const roleSelect = screen.getByRole("combobox", { name: /role for anna/i })
-    await act(async () => { fireEvent.change(roleSelect, { target: { value: "400" } }) })
+    await pickSelectOption(/role for anna/i, /^contributor$/)
     await waitFor(() => expect(addOrgMember).toHaveBeenCalledWith("jwt", 1, "anna", 400))
   })
 

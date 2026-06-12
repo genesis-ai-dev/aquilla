@@ -1,6 +1,11 @@
-import { useEffect, useRef } from "react"
-import { createPortal } from "react-dom"
 import { Pencil, FolderInput, Trash2, Download } from "lucide-react"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu"
 
 interface FileActionMenuProps {
   x: number
@@ -18,59 +23,46 @@ interface FileActionMenuProps {
 export function FileActionMenu({
   x, y, onClose, onRename, onMove, onDelete, onExportSource,
 }: FileActionMenuProps) {
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    function handler(e: MouseEvent | KeyboardEvent) {
-      if (e instanceof KeyboardEvent && e.key === "Escape") { onClose(); return }
-      if (e instanceof MouseEvent && !ref.current?.contains(e.target as Node)) onClose()
-    }
-    document.addEventListener("mousedown", handler)
-    document.addEventListener("keydown", handler)
-    return () => {
-      document.removeEventListener("mousedown", handler)
-      document.removeEventListener("keydown", handler)
-    }
-  }, [onClose])
-
-  return createPortal(
-    <div
-      ref={ref}
-      className="fixed z-40 w-44 rounded-md border bg-popover p-1 shadow-md text-sm"
-      style={{ left: x, top: y }}
-    >
-      <button
-        className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-accent"
-        onClick={() => { onRename(); onClose() }}
+  // Always-open menu anchored to the click coordinates; the caller unmounts
+  // us via onClose (fired on Escape, outside click, or item selection).
+  return (
+    <DropdownMenu open onOpenChange={(open) => { if (!open) onClose() }}>
+      <DropdownMenuContent
+        anchor={{
+          getBoundingClientRect: () =>
+            new DOMRect(x, y, 0, 0),
+        }}
+        align="start"
+        sideOffset={0}
+        className="w-44"
       >
-        <Pencil className="h-3.5 w-3.5" /> Rename
-      </button>
-      <button
-        className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-accent"
-        onClick={() => { onMove(); onClose() }}
-      >
-        <FolderInput className="h-3.5 w-3.5" /> Move to corpus…
-      </button>
-      {onExportSource && (
-        <button
-          className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-accent"
-          onClick={() => { onExportSource(); onClose() }}
-        >
-          <Download className="h-3.5 w-3.5" /> Export source (.SFM)
-        </button>
-      )}
-      {onDelete && (
-        <>
-          <div className="my-1 h-px bg-border" />
-          <button
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-destructive/10 text-destructive"
-            onClick={() => { onDelete(); onClose() }}
-          >
-            <Trash2 className="h-3.5 w-3.5" /> Delete
-          </button>
-        </>
-      )}
-    </div>,
-    document.body,
+        <DropdownMenuGroup>
+          <DropdownMenuItem onClick={() => { onRename(); onClose() }}>
+            <Pencil className="h-3.5 w-3.5" /> Rename
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => { onMove(); onClose() }}>
+            <FolderInput className="h-3.5 w-3.5" /> Move to corpus…
+          </DropdownMenuItem>
+          {onExportSource && (
+            <DropdownMenuItem onClick={() => { onExportSource(); onClose() }}>
+              <Download className="h-3.5 w-3.5" /> Export source (.SFM)
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuGroup>
+        {onDelete && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={() => { onDelete(); onClose() }}
+              >
+                <Trash2 className="h-3.5 w-3.5" /> Delete
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

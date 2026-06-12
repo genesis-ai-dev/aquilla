@@ -8,8 +8,9 @@
 // preview/retake step between stop and upload.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, Mic, Play, Square, X, Loader2, Volume2, VolumeX, RefreshCw, Check } from "lucide-react"
+import { ChevronLeft, ChevronRight, Mic, Play, Square, X, Volume2, VolumeX, RefreshCw, Check } from "lucide-react"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -426,7 +427,7 @@ export function AudioRecordingModal({
 
           {displayPhase === "uploading" && (
             <div className="flex flex-col items-center gap-3 text-muted-foreground">
-              <Loader2 className="h-7 w-7 animate-spin" />
+              <Spinner className="size-7" />
               <p className="text-sm">Uploading…</p>
             </div>
           )}

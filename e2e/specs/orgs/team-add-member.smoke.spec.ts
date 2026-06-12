@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { pickSelectOption } from "../../helpers/base-ui"
 import { ensureAuthState } from "../../helpers/auth"
 import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
 
@@ -37,9 +38,9 @@ test("team add member workflow shows new member in members list", async ({ alice
   await addMemberBtn.click()
 
   // Select appears with org members — select bob.
-  const memberSelect = alice.locator("select").first()
+  const memberSelect = alice.getByRole("combobox", { name: "Member to add" })
   await expect(memberSelect).toBeVisible({ timeout: 3_000 })
-  await memberSelect.selectOption({ label: "bob" })
+  await pickSelectOption(alice, memberSelect, "bob")
 
   // Click Add.
   const addBtn = alice.getByRole("button", { name: /^Add$/i })

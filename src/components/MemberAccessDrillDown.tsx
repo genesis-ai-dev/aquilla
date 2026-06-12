@@ -7,7 +7,8 @@
  * that passes orgId + a selected member). Self-contained so it doesn't
  * collide with the FRO-170 org-vs-project legibility redesign.
  */
-import { X, Loader2 } from "lucide-react"
+import { X } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { useMemberAccess } from "@/hooks/useMemberAccess"
 import type { ProjectAccessBreakdown } from "@/lib/frontier/orgs"
 import { roleName } from "@/lib/frontier/roles"
@@ -43,7 +44,7 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {state.kind === "loading" && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <Spinner />
             Loading access…
           </div>
         )}

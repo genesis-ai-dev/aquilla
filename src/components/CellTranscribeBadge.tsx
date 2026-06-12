@@ -5,7 +5,8 @@
 // click-to-expand: full message + actions (retry, dismiss).
 
 import { useEffect, useRef, useState } from "react"
-import { CheckCircle2, Loader2, Sparkles } from "lucide-react"
+import { CheckCircle2, Sparkles } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import {
   clearTranscribeStatus,
@@ -89,7 +90,7 @@ export function CellTranscribeBadge({ audioId, hasTimings, onJumpToTranscript, o
           "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
         )}
       >
-        <Loader2 className="h-2.5 w-2.5 animate-spin" />
+        <Spinner className="size-2.5" />
         {pct != null ? <span className="tabular-nums">{pct}%</span> : <span>load</span>}
       </button>
     )

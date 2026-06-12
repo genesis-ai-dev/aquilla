@@ -56,8 +56,9 @@ test("AI completions dialog opens with acknowledgement checkbox", async ({ alice
     }).first()
   ).toBeVisible({ timeout: 5_000 })
 
-  // Checkbox with acknowledgement label.
-  const checkbox = dialog.locator('input[type="checkbox"]')
+  // Checkbox with acknowledgement label (shadcn Checkbox — role="checkbox";
+  // the native input is hidden and no longer actionable).
+  const checkbox = dialog.getByRole("checkbox")
   await expect(checkbox).toBeVisible()
   await expect(checkbox).not.toBeChecked()
   await expect(

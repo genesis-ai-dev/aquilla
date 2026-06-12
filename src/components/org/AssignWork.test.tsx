@@ -21,6 +21,23 @@ const files = [
   { id: "f2", name: "Mark" },
 ]
 
+// Drive the shadcn (Base UI) Select: open the trigger, hover-highlight the
+// option, commit with Enter fired on the option itself. Under happy-dom
+// clicking an option does not reliably commit a selection, but the keyboard
+// path does (recipe adapted from AssignModal.test.tsx; Enter targets the
+// option because outside a Dialog focus may never enter the popup).
+// Waits for the trigger to render the chosen option's label.
+async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
+  const trigger = screen.getByRole("combobox", { name: triggerName })
+  fireEvent.click(trigger)
+  const option = await screen.findByRole("option", { name: optionName })
+  const label = option.textContent ?? ""
+  fireEvent.pointerMove(option)
+  fireEvent.mouseMove(option)
+  fireEvent.keyDown(option, { key: "Enter" })
+  await waitFor(() => expect(trigger.textContent).toContain(label))
+}
+
 function renderAssign(onAssigned = vi.fn()) {
   return render(
     <AssignWork projectId="p1" files={files} orgId={1} jwt="jwt" author="wendi" onAssigned={onAssigned} />,
@@ -46,9 +63,8 @@ describe("AssignWork", () => {
     renderAssign(onAssigned)
 
     fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
-    await waitFor(() => expect(screen.getByRole("option", { name: "anna" })).toBeInTheDocument())
-
-    fireEvent.change(screen.getByLabelText("Assignee"), { target: { value: "2" } })
+    // Picking "anna" waits for the member list to load into the popup.
+    await pickSelectOption(/^assignee$/i, /^anna$/)
     // Book defaults to the first file (John); chapter left empty → book scope.
     fireEvent.click(screen.getByRole("button", { name: "Assign" }))
 
@@ -76,12 +92,16 @@ describe("AssignWork", () => {
     renderAssign()
 
     fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
-    await waitFor(() => expect(screen.getByRole("option", { name: "anna" })).toBeInTheDocument())
+    await pickSelectOption(/^assignee$/i, /^anna$/)
     // The file's chapters load into the dropdown (alongside "Whole book").
-    await waitFor(() => expect(screen.getByRole("option", { name: "GEN 1" })).toBeInTheDocument())
+    const chapterTrigger = screen.getByRole("combobox", { name: /^chapter$/i })
+    fireEvent.click(chapterTrigger)
+    const chapterOption = await screen.findByRole("option", { name: "GEN 1" })
     expect(screen.getByRole("option", { name: "Whole book" })).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText("Assignee"), { target: { value: "2" } })
-    fireEvent.change(screen.getByLabelText("Chapter"), { target: { value: "GEN 1" } })
+    fireEvent.pointerMove(chapterOption)
+    fireEvent.mouseMove(chapterOption)
+    fireEvent.keyDown(chapterOption, { key: "Enter" })
+    await waitFor(() => expect(chapterTrigger.textContent).toContain("GEN 1"))
     fireEvent.click(screen.getByRole("button", { name: "Assign" }))
 
     await waitFor(() =>
@@ -102,8 +122,7 @@ describe("AssignWork", () => {
     renderAssign()
 
     fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
-    await waitFor(() => expect(screen.getByRole("option", { name: "anna" })).toBeInTheDocument())
-    fireEvent.change(screen.getByLabelText("Assignee"), { target: { value: "2" } })
+    await pickSelectOption(/^assignee$/i, /^anna$/)
     fireEvent.click(screen.getByRole("button", { name: "Assign" }))
 
     expect(await screen.findByText(/role too low/)).toBeInTheDocument()

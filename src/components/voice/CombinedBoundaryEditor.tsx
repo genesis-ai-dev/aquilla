@@ -12,8 +12,9 @@
 // to a proportional-by-text-length split as a starting guess.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Loader2, Pause, Play, X } from "lucide-react"
+import { Pause, Play, X } from "lucide-react"
 import { CellWaveform } from "@/components/CellWaveform"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { setCellPref } from "@/lib/store/audio-cell-prefs"
@@ -249,7 +250,7 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
 
           {duration <= 0 && (
             <div className="absolute inset-0 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading clip…
+              <Spinner className="size-3.5" /> Loading clip…
             </div>
           )}
         </div>
@@ -280,7 +281,7 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
         <div className="mt-4 flex items-center justify-end gap-2">
           <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
           <Button type="button" size="sm" onClick={() => void onSave()} disabled={saving || !cuts}>
-            {saving ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+            {saving ? <Spinner className="mr-1 size-3.5" /> : null}
             Save splits
           </Button>
         </div>

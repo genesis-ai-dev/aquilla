@@ -7,6 +7,7 @@
 
 import { useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import type { EBibleMatchResult, EBibleMatchedCell } from "@/lib/import"
@@ -165,11 +166,10 @@ function MatchedCellRow({ cell, checked, onToggle }: MatchedCellRowProps) {
       )}
     >
       <label className="flex cursor-pointer items-start gap-2">
-        <input
-          type="checkbox"
-          className="mt-0.5 shrink-0"
+        <Checkbox
+          className="mt-0.5"
           checked={checked}
-          onChange={onToggle}
+          onCheckedChange={onToggle}
         />
         <div className="min-w-0 flex-1 space-y-0.5">
           <div className="flex items-center gap-1.5">

@@ -34,8 +34,8 @@ test("file delete dialog opens with acknowledgement checkbox", async ({ alice })
   await expect(fileRow).toBeVisible({ timeout: 10_000 })
   await fileRow.click({ button: "right" })
 
-  // Click "Delete" in the context menu.
-  const deleteBtn = alice.getByRole("button", { name: /^Delete$/i })
+  // Click "Delete" in the context menu (shadcn DropdownMenu — role="menuitem").
+  const deleteBtn = alice.getByRole("menuitem", { name: /^Delete$/i })
   await expect(deleteBtn).toBeVisible({ timeout: 3_000 })
   await deleteBtn.click()
 
@@ -48,8 +48,9 @@ test("file delete dialog opens with acknowledgement checkbox", async ({ alice })
     dialog.getByText(/Remove ".*" from this project/i)
   ).toBeVisible({ timeout: 3_000 })
 
-  // Checkbox with acknowledgement label.
-  const checkbox = dialog.locator('input[type="checkbox"]')
+  // Checkbox with acknowledgement label (shadcn Checkbox — role="checkbox";
+  // the native input is hidden and no longer actionable).
+  const checkbox = dialog.getByRole("checkbox")
   await expect(checkbox).toBeVisible()
   await expect(checkbox).not.toBeChecked()
   await expect(

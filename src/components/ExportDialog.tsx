@@ -10,7 +10,7 @@
 // lost access.
 
 import { useState, useEffect, useRef } from "react"
-import { Download, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react"
+import { Download, AlertTriangle, CheckCircle2 } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -19,7 +19,10 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
 import { downloadBlob } from "@/lib/export/export-service"
 import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar } from "@/lib/sync/source-export"
 import { exportPlainText } from "@/lib/export/exporters/plaintext"
@@ -385,9 +388,10 @@ export function ExportDialog({
           <legend className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
             Format
           </legend>
-          <div
+          <RadioGroup
+            value={format}
+            onValueChange={(value) => setFormat(value as ExportFormat)}
             className="flex flex-col gap-0.5 max-h-64 overflow-y-auto overscroll-contain pr-0.5"
-            role="radiogroup"
             aria-label="Export format"
           >
             {FORMAT_OPTIONS.filter((f) => {
@@ -405,13 +409,9 @@ export function ExportDialog({
                     : "hover:bg-accent/40")
                 }
               >
-                <input
-                  type="radio"
-                  name="export-format"
+                <RadioGroupItem
                   value={f.id}
-                  checked={format === f.id}
-                  onChange={() => setFormat(f.id)}
-                  className="mt-0.5 shrink-0 accent-primary"
+                  className="mt-0.5 shrink-0"
                   aria-label={`${f.label} (${f.ext})`}
                 />
                 <span className="flex flex-col gap-0.5 min-w-0">
@@ -428,7 +428,7 @@ export function ExportDialog({
                 </span>
               </label>
             ))}
-          </div>
+          </RadioGroup>
         </fieldset>
 
         {/* Scope selector */}
@@ -436,9 +436,10 @@ export function ExportDialog({
           <legend className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
             Scope
           </legend>
-          <div
-            className="inline-flex items-center gap-0.5 rounded-full bg-muted/40 p-0.5 self-start"
-            role="radiogroup"
+          <RadioGroup
+            value={effectiveScope}
+            onValueChange={(value) => setScope(value as ExportScope)}
+            className="inline-flex w-auto items-center gap-0.5 rounded-full bg-muted/40 p-0.5 self-start"
             aria-label="Export scope"
           >
             {(["file", "project"] as const).map((s) => {
@@ -456,12 +457,8 @@ export function ExportDialog({
                       : (!isProjectDisabled ? "text-muted-foreground hover:text-foreground" : ""))
                   }
                 >
-                  <input
-                    type="radio"
-                    name="export-scope"
+                  <RadioGroupItem
                     value={s}
-                    checked={effectiveScope === s}
-                    onChange={() => !isProjectDisabled && setScope(s)}
                     disabled={isProjectDisabled}
                     className="sr-only"
                   />
@@ -469,7 +466,7 @@ export function ExportDialog({
                 </label>
               )
             })}
-          </div>
+          </RadioGroup>
           {isFileOnlyFormat && (
             <p className="text-[10px] text-muted-foreground mt-0.5">
               Project scope not supported for this format.
@@ -559,7 +556,14 @@ export function ExportDialog({
             Advanced
           </summary>
           <div className="mt-2.5 flex flex-col gap-2.5 pl-3 border-l border-border/40">
-            {/* Plain-text dump */}
+            {/* Plain-text dump — shares the `format` state with the main list
+                above, but lives in its own RadioGroup wrapper since Base UI
+                radios need a group ancestor. */}
+            <RadioGroup
+              value={format}
+              onValueChange={(value) => setFormat(value as ExportFormat)}
+              aria-label="Advanced export formats"
+            >
             <label
               className={
                 "flex items-start gap-2.5 rounded-xl px-2.5 py-2 cursor-pointer transition-colors " +
@@ -568,13 +572,9 @@ export function ExportDialog({
                   : "hover:bg-accent/40")
               }
             >
-              <input
-                type="radio"
-                name="export-format"
+              <RadioGroupItem
                 value="plain-text-dump"
-                checked={format === "plain-text-dump"}
-                onChange={() => setFormat("plain-text-dump")}
-                className="mt-0.5 shrink-0 accent-primary"
+                className="mt-0.5 shrink-0"
                 aria-label="Plain-text dump (.txt)"
               />
               <span className="flex flex-col gap-0.5 min-w-0">
@@ -594,11 +594,9 @@ export function ExportDialog({
                 </span>
                 {format === "plain-text-dump" && (
                   <label className="flex items-center gap-1.5 mt-1 cursor-pointer">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={dumpIncludeRefs}
-                      onChange={(e) => setDumpIncludeRefs(e.target.checked)}
-                      className="accent-primary"
+                      onCheckedChange={(checked) => setDumpIncludeRefs(checked === true)}
                     />
                     <span className="text-xs text-muted-foreground">
                       Prefix each line with canonical ref (e.g. <code className="font-mono">GEN 1:1</code>)
@@ -607,6 +605,7 @@ export function ExportDialog({
                 )}
               </span>
             </label>
+            </RadioGroup>
           </div>
         </details>
 
@@ -625,7 +624,7 @@ export function ExportDialog({
             }
           >
             {status.kind === "busy" && (
-              <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+              <Spinner className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
             )}
             {(status.kind === "ok" || status.kind === "ok-lossy") && (
               <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -657,7 +656,7 @@ export function ExportDialog({
             aria-busy={isBusy}
           >
             {isBusy ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              <Spinner aria-hidden="true" />
             ) : (
               <Download className="h-4 w-4" aria-hidden="true" />
             )}

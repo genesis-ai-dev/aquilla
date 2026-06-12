@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
-import { Loader2, Check, AtSign } from "lucide-react"
+import { Check, AtSign } from "lucide-react"
 import { Input } from "@/components/ui/input"
+import { Spinner } from "@/components/ui/spinner"
 import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
 
 export type RecipientMode = "username" | "email"
@@ -172,7 +173,7 @@ export function UsernameTypeahead({
 
           {!needsMorePrefix && isLoading && results.length === 0 && (
             <p className="flex items-center gap-1.5 px-3 py-2 text-[11px] text-muted-foreground">
-              <Loader2 className="h-3 w-3 animate-spin" /> Searching…
+              <Spinner className="size-3" /> Searching…
             </p>
           )}
 

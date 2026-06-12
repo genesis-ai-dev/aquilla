@@ -19,6 +19,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
+  Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select"
+import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
@@ -235,19 +238,37 @@ function MembersTab({ projectId }: { projectId: string }) {
                   <div className="ml-auto flex items-center gap-2">
                     {/* Role change dropdown — only for direct grants, not self */}
                     {!isLocked && !isSelf && (
-                      <select
-                        className="rounded border bg-background px-2 py-1 text-xs"
-                        value={m.role.level}
-                        onChange={(e) => {
-                          void add(m.username, parseInt(e.target.value, 10))
+                      <Select
+                        items={[
+                          // Current role may sit above the caller's grantable
+                          // cap; include it so the closed trigger renders the
+                          // role name instead of the raw level.
+                          ...(grantableRoles.some((r) => r.level === m.role.level)
+                            ? []
+                            : [{ value: String(m.role.level), label: m.role.name }]),
+                          ...grantableRoles.map((r) => ({
+                            value: String(r.level),
+                            label: r.name,
+                          })),
+                        ]}
+                        value={String(m.role.level)}
+                        onValueChange={(v) => {
+                          void add(m.username, parseInt(v ?? "", 10))
                         }}
                       >
-                        {grantableRoles.map((r) => (
-                          <option key={r.level} value={r.level}>
-                            {r.name}
-                          </option>
-                        ))}
-                      </select>
+                        <SelectTrigger size="sm" aria-label="Change role">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            {grantableRoles.map((r) => (
+                              <SelectItem key={r.level} value={String(r.level)}>
+                                {r.name}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
                     )}
 
                     {/* Remove button for direct grants */}
@@ -310,18 +331,28 @@ function MembersTab({ projectId }: { projectId: string }) {
             disabled={adding}
             className="flex-1"
           />
-          <select
-            className="rounded border bg-background px-2 text-sm"
-            value={newRole}
-            onChange={(e) => setNewRole(parseInt(e.target.value, 10))}
+          <Select
+            items={grantableRoles.map((r) => ({
+              value: String(r.level),
+              label: r.name,
+            }))}
+            value={String(newRole)}
+            onValueChange={(v) => setNewRole(parseInt(v ?? "", 10))}
             disabled={adding}
           >
-            {grantableRoles.map((r) => (
-              <option key={r.level} value={r.level}>
-                {r.name}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger aria-label="Role">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {grantableRoles.map((r) => (
+                  <SelectItem key={r.level} value={String(r.level)}>
+                    {r.name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
           <Button
             size="sm"
             onClick={() => void handleAdd()}
@@ -617,18 +648,28 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
         {/* Role */}
         <div className="space-y-1">
           <Label className="text-xs">Role</Label>
-          <select
-            className="w-full rounded border bg-background px-2 py-1 text-sm"
-            value={inviteRole}
-            onChange={(e) => setInviteRole(Number(e.target.value))}
+          <Select
+            items={LINK_ROLE_OPTIONS.map((opt) => ({
+              value: String(opt.level),
+              label: opt.name,
+            }))}
+            value={String(inviteRole)}
+            onValueChange={(v) => setInviteRole(Number(v ?? ""))}
             disabled={!session?.jwt}
           >
-            {LINK_ROLE_OPTIONS.map((opt) => (
-              <option key={opt.level} value={opt.level}>
-                {opt.name}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger className="w-full" aria-label="Role">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {LINK_ROLE_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.level} value={String(opt.level)}>
+                    {opt.name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
           <p className="text-[10px] text-muted-foreground">
             {session?.jwt
               ? LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.description
@@ -669,22 +710,32 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
         {/* Expiry */}
         <div className="space-y-1">
           <Label className="text-xs">Link expires</Label>
-          <select
-            className="w-full rounded border bg-background px-2 py-1 text-sm"
+          <Select
+            items={EXPIRY_OPTIONS.map((opt) => ({
+              value: String(opt.value),
+              label: opt.label,
+            }))}
             value={expiresInDays === null ? "null" : String(expiresInDays)}
-            onChange={(e) =>
+            onValueChange={(v) =>
               setExpiresInDays(
-                e.target.value === "null" ? null : Number(e.target.value),
+                v === "null" || v === null ? null : Number(v),
               )
             }
             disabled={!session?.jwt}
           >
-            {EXPIRY_OPTIONS.map((opt) => (
-              <option key={String(opt.value)} value={String(opt.value)}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger className="w-full" aria-label="Link expires">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {EXPIRY_OPTIONS.map((opt) => (
+                  <SelectItem key={String(opt.value)} value={String(opt.value)}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         </div>
 
         {serverError && (

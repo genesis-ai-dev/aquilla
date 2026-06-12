@@ -5,6 +5,14 @@ import { Label } from "@/components/ui/label"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import type { TranslationRule, RuleCheck } from "@/lib/parsers/types"
 import posthog from "@/lib/posthog"
 
@@ -120,18 +128,44 @@ export function RuleCreateDialog({ onAdd }: RuleCreateDialogProps) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Severity</Label>
-              <select value={severity} onChange={(e) => setSeverity(e.target.value as "major" | "minor")} className="w-full rounded border bg-background px-3 py-2 text-sm">
-                <option value="minor">Minor</option>
-                <option value="major">Major</option>
-              </select>
+              <Select
+                items={{ minor: "Minor", major: "Major" }}
+                value={severity}
+                onValueChange={(value) => setSeverity(value as "major" | "minor")}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="minor">Minor</SelectItem>
+                    <SelectItem value="major">Major</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label>Rule Type</Label>
-              <select value={checkType} onChange={(e) => setCheckType(e.target.value as Exclude<RuleCheck["type"], "builtin">)} className="w-full rounded border bg-background px-3 py-2 text-sm">
-                <option value="source-target-match">Source-target match</option>
-                <option value="source-requires-target">Source requires target</option>
-                <option value="target-forbids">Target forbids</option>
-              </select>
+              <Select
+                items={{
+                  "source-target-match": "Source-target match",
+                  "source-requires-target": "Source requires target",
+                  "target-forbids": "Target forbids",
+                }}
+                value={checkType}
+                onValueChange={(value) => setCheckType(value as Exclude<RuleCheck["type"], "builtin">)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="source-target-match">Source-target match</SelectItem>
+                    <SelectItem value="source-requires-target">Source requires target</SelectItem>
+                    <SelectItem value="target-forbids">Target forbids</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 

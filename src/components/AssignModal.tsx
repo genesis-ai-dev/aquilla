@@ -11,8 +11,11 @@
 // the same floor; the client gate is a UX affordance, not the security boundary.
 
 import { useCallback, useEffect, useState } from "react"
-import { UserCheck, Loader2 } from "lucide-react"
+import { UserCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Spinner } from "@/components/ui/spinner"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Dialog,
   DialogContent,
@@ -20,6 +23,14 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import type { ProjectMember } from "@/lib/frontier/members"
 import type { FileReference } from "@/lib/parsers/types"
 import { createAssignment, getFileChapters, AssignmentEmitError } from "@/lib/sync/assignments"
@@ -211,23 +222,36 @@ export function AssignModal({
           {/* Scope */}
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">Scope</label>
-            <select
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            <Select
+              items={SCOPE_OPTIONS.map((opt) => ({
+                value: opt.value,
+                label:
+                  opt.value === "selection" && selectedCellIds.size > 0
+                    ? `${opt.label} (${selectedCellIds.size})`
+                    : opt.label,
+              }))}
               value={scopeKind}
-              onChange={(e) => setScopeKind(e.target.value as ScopeKind)}
+              onValueChange={(v) => setScopeKind(v as ScopeKind)}
             >
-              {SCOPE_OPTIONS.map((opt) => {
-                const disabled = opt.value === "selection" && selectedCellIds.size === 0
-                return (
-                  <option key={opt.value} value={opt.value} disabled={disabled}>
-                    {opt.label}
-                    {opt.value === "selection" && selectedCellIds.size > 0
-                      ? ` (${selectedCellIds.size})`
-                      : ""}
-                  </option>
-                )
-              })}
-            </select>
+              <SelectTrigger className="w-full" aria-label="Scope">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {SCOPE_OPTIONS.map((opt) => {
+                    const disabled = opt.value === "selection" && selectedCellIds.size === 0
+                    return (
+                      <SelectItem key={opt.value} value={opt.value} disabled={disabled}>
+                        {opt.label}
+                        {opt.value === "selection" && selectedCellIds.size > 0
+                          ? ` (${selectedCellIds.size})`
+                          : ""}
+                      </SelectItem>
+                    )
+                  })}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Books picker */}
@@ -237,11 +261,10 @@ export function AssignModal({
               <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-md border p-2">
                 {projectFiles.map((f) => (
                   <label key={f.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-muted/50">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={selectedFileIds.has(f.id)}
-                      onChange={() => toggleFile(f.id)}
-                      className="h-3 w-3"
+                      onCheckedChange={() => toggleFile(f.id)}
+                      className="size-3"
                     />
                     {f.name}
                   </label>
@@ -256,7 +279,7 @@ export function AssignModal({
               <label className="text-xs font-medium text-muted-foreground">Chapters</label>
               {chaptersLoading ? (
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <Spinner className="size-3" />
                   Loading chapters…
                 </div>
               ) : availableChapters.length === 0 ? (
@@ -265,11 +288,10 @@ export function AssignModal({
                 <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-md border p-2">
                   {availableChapters.map((ch) => (
                     <label key={ch} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-muted/50">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={selectedChapters.has(ch)}
-                        onChange={() => toggleChapter(ch)}
-                        className="h-3 w-3"
+                        onCheckedChange={() => toggleChapter(ch)}
+                        className="size-3"
                       />
                       {ch}
                     </label>
@@ -282,28 +304,38 @@ export function AssignModal({
           {/* Assignee */}
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">Assign to</label>
-            <select
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            <Select
+              items={[
+                { value: "", label: "Select member…" },
+                ...members.map((m) => ({ value: String(m.userId), label: m.username })),
+              ]}
               value={selectedMemberId}
-              onChange={(e) => setSelectedMemberId(e.target.value)}
+              onValueChange={(v) => setSelectedMemberId(v ?? "")}
             >
-              <option value="">Select member…</option>
-              {members.map((m) => (
-                <option key={m.userId} value={String(m.userId)}>
-                  {m.username}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="w-full" aria-label="Assign to">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="">Select member…</SelectItem>
+                  {members.map((m) => (
+                    <SelectItem key={m.userId} value={String(m.userId)}>
+                      {m.username}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Optional note */}
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">Note (optional)</label>
-            <textarea
+            <Textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
               rows={2}
-              className="w-full resize-none rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              className="resize-none"
               placeholder="Any context for the assignee…"
             />
           </div>
@@ -318,7 +350,7 @@ export function AssignModal({
             Cancel
           </Button>
           <Button onClick={handleSubmit} disabled={!canSubmit}>
-            {submitting ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
+            {submitting ? <Spinner className="mr-1" /> : null}
             Assign
           </Button>
         </DialogFooter>

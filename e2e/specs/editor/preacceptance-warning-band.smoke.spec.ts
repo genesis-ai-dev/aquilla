@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { pickSelectOption } from "../../helpers/base-ui"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import path from "node:path"
@@ -50,10 +51,11 @@ test("pre-acceptance warning band appears when forbidden rendering is typed", as
   await dialog.locator("#concept-source-term").fill("sample")
   // Add a rendering and set it to forbidden.
   await dialog.locator('input[placeholder="rendering"]').fill("verboten")
-  // Set status to "forbidden" via the status select.
+  // Set status to "forbidden" via the status select (Base UI combobox trigger
+  // keeps the aria-label; the option label is "forbidden").
   const statusSelect = dialog.locator('[aria-label="Rendering 1 status"]')
   await expect(statusSelect).toBeVisible({ timeout: 3_000 })
-  await statusSelect.selectOption("forbidden")
+  await pickSelectOption(alice, statusSelect, "forbidden")
   await dialog.getByRole("button", { name: /Add concept/i }).click()
   await expect(dialog).not.toBeVisible({ timeout: 5_000 })
 

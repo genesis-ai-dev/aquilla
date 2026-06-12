@@ -1,11 +1,12 @@
 import { test, expect } from "../../helpers/multi-user"
+import { expectSelectValue, pickSelectOption } from "../../helpers/base-ui"
 
 /**
  * TeamsList (/teams) — search filter and sort select.
  *
  * TeamsList.tsx renders (when teams exist):
  *   - input type="search" placeholder="Search teams…"
- *   - select aria-label="Sort teams by" with options: Name (A–Z),
+ *   - Base UI Select aria-label="Sort teams by" with options: Name (A–Z),
  *     Members (most first), Projects (most first)
  *
  * This spec: creates a team → navigates to /teams → verifies the search
@@ -43,12 +44,12 @@ test("teams list filter and sort controls work", async ({ alice }) => {
   await expect(alice.getByText(teamName)).toBeVisible({ timeout: 3_000 })
 
   // Change sort to "Members (most first)".
-  const sortSelect = alice.locator('select[aria-label="Sort teams by"]')
+  const sortSelect = alice.getByRole("combobox", { name: "Sort teams by" })
   await expect(sortSelect).toBeVisible({ timeout: 3_000 })
-  await sortSelect.selectOption("members")
-  await expect(sortSelect).toHaveValue("members")
+  await pickSelectOption(alice, sortSelect, "Members (most first)")
+  await expectSelectValue(sortSelect, "Members (most first)")
 
   // Restore sort.
-  await sortSelect.selectOption("name")
-  await expect(sortSelect).toHaveValue("name")
+  await pickSelectOption(alice, sortSelect, "Name (A–Z)")
+  await expectSelectValue(sortSelect, "Name (A–Z)")
 })

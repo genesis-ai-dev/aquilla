@@ -16,6 +16,7 @@
  */
 
 import { useState, useRef, useEffect } from "react"
+import { Textarea } from "@/components/ui/textarea"
 import type { ExtractedFootnote } from "@/lib/footnotes/extract"
 import { cn } from "@/lib/utils"
 
@@ -164,12 +165,9 @@ function FootnoteRow({ index, sourceFn, targetFn, editable, onSave }: FootnoteRo
           <div className="min-w-0 flex-1">
             {editing ? (
               <div className="flex flex-col gap-1">
-                <textarea
+                <Textarea
                   ref={inputRef}
-                  className={cn(
-                    "w-full resize-none rounded border border-border bg-background px-2 py-1 text-xs",
-                    "focus:outline-none focus:ring-1 focus:ring-primary/50",
-                  )}
+                  className="min-h-0 resize-none text-xs"
                   rows={2}
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}

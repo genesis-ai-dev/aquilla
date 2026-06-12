@@ -1,13 +1,15 @@
 import { test, expect } from "../../helpers/multi-user"
+import { expectSelectValue, pickSelectOption } from "../../helpers/base-ui"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
  * Terminology concept dialog — concept status select.
  *
- * TerminologyPage.tsx ConceptDialog renders a #concept-status <select>:
- *   - "suggested" (draft)
- *   - "approved" (active)
- *   - "old" (deprecated)
+ * TerminologyPage.tsx ConceptDialog renders a Base UI Select whose trigger
+ * has id="concept-status", with options labeled:
+ *   - "suggested" (value "draft")
+ *   - "approved" (value "active")
+ *   - "old" (value "deprecated")
  *
  * Default is "suggested". Changing to "approved" then saving produces
  * an "approved" concept. The dialog closes and the concept appears in the list.
@@ -36,14 +38,14 @@ test("terminology concept dialog status select changes concept status", async ({
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
 
-  // Status select defaults to "suggested".
+  // Status select defaults to "suggested" (value "draft").
   const statusSelect = dialog.locator("#concept-status")
   await expect(statusSelect).toBeVisible({ timeout: 3_000 })
-  await expect(statusSelect).toHaveValue("draft")
+  await expectSelectValue(statusSelect, "suggested")
 
-  // Change to "approved".
-  await statusSelect.selectOption("active")
-  await expect(statusSelect).toHaveValue("active")
+  // Change to "approved" (value "active").
+  await pickSelectOption(alice, statusSelect, "approved")
+  await expectSelectValue(statusSelect, "approved")
 
   // Fill required fields and save.
   const sourceTerm = `StatusConcept ${Date.now()}`

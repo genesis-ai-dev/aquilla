@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react"
 import { Eye, EyeOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
@@ -80,11 +81,10 @@ export function ApiKeyField({
       </div>
 
       <label className="flex items-center gap-2 text-xs text-muted-foreground">
-        <input
-          type="checkbox"
+        <Checkbox
           checked={saveAcrossProjects}
-          onChange={(e) => {
-            const next = e.target.checked
+          onCheckedChange={(checked) => {
+            const next = checked
             setSaveAcrossProjects(next)
             onUserKeyChange(next ? draft.trim() : "")
           }}

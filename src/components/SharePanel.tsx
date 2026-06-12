@@ -1,8 +1,12 @@
 import { useState, useEffect, useCallback } from "react"
 import { Copy, AlertCircle, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
@@ -251,18 +255,28 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
         <div className="space-y-3">
           <div className="space-y-1">
             <Label className="text-xs">Role</Label>
-            <select
-              className="w-full rounded border bg-background px-2 py-1 text-sm"
-              value={inviteRole}
-              onChange={(e) => setInviteRole(Number(e.target.value))}
+            <Select
+              items={LINK_ROLE_OPTIONS.map((opt) => ({
+                value: String(opt.level),
+                label: opt.name,
+              }))}
+              value={String(inviteRole)}
+              onValueChange={(v) => setInviteRole(Number(v ?? ""))}
               disabled={!session?.jwt}
             >
-              {LINK_ROLE_OPTIONS.map((opt) => (
-                <option key={opt.level} value={opt.level}>
-                  {opt.name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="w-full" aria-label="Role">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {LINK_ROLE_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.level} value={String(opt.level)}>
+                      {opt.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
             <p className="text-[10px] text-muted-foreground">
               {session?.jwt
                 ? LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.description
@@ -298,20 +312,30 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Link expires</Label>
-            <select
-              className="w-full rounded border bg-background px-2 py-1 text-sm"
+            <Select
+              items={EXPIRY_OPTIONS.map((opt) => ({
+                value: String(opt.value),
+                label: opt.label,
+              }))}
               value={expiresInDays === null ? "null" : String(expiresInDays)}
-              onChange={(e) =>
-                setExpiresInDays(e.target.value === "null" ? null : Number(e.target.value))
+              onValueChange={(v) =>
+                setExpiresInDays(v === "null" || v === null ? null : Number(v))
               }
               disabled={!session?.jwt}
             >
-              {EXPIRY_OPTIONS.map((opt) => (
-                <option key={String(opt.value)} value={String(opt.value)}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="w-full" aria-label="Link expires">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {EXPIRY_OPTIONS.map((opt) => (
+                    <SelectItem key={String(opt.value)} value={String(opt.value)}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
           </div>
           {serverError && (
             <p className="flex items-start gap-1 text-xs text-destructive">
@@ -418,11 +442,10 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
             {revokeTarget === inv.token ? (
               <div className="flex shrink-0 items-center gap-1">
                 <label className="flex items-center gap-1 text-[10px] text-destructive cursor-pointer">
-                  <input
-                    type="checkbox"
-                    className="h-3 w-3"
+                  <Checkbox
+                    className="size-3"
                     checked={revokeConfirm}
-                    onChange={(e) => setRevokeConfirm(e.target.checked)}
+                    onCheckedChange={(checked) => setRevokeConfirm(checked)}
                   />
                   Confirm
                 </label>

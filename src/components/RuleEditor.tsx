@@ -15,6 +15,7 @@ import { useState, useMemo, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { X } from "lucide-react"
 import type { TranslationRule, RuleCheck, RuleAutofix } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
@@ -328,11 +329,10 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
 
         <div className="flex items-end">
           <label className="flex items-center gap-1.5 text-xs cursor-pointer">
-            <input
-              type="checkbox"
+            <Switch
+              size="sm"
               checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-              className="rounded"
+              onCheckedChange={(checked) => setEnabled(checked)}
             />
             <span className="text-muted-foreground">Enabled</span>
           </label>

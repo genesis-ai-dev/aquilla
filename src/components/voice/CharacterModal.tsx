@@ -18,13 +18,23 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  Check, Loader2, Pause, Play, Sparkles, Star, Trash2,
+  Check, Pause, Play, Sparkles, Star, Trash2,
 } from "lucide-react"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Spinner } from "@/components/ui/spinner"
+import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
@@ -333,12 +343,11 @@ function CharacterModalBody({
           {isGemini && (
             <div className="space-y-1.5">
               <Label htmlFor="character-guidance">Guidance</Label>
-              <textarea
+              <Textarea
                 id="character-guidance"
                 value={draft.prompt ?? ""}
                 onChange={(e) => update({ prompt: e.target.value || undefined })}
                 rows={3}
-                className="w-full rounded border bg-muted/20 px-3 py-2 text-sm"
                 placeholder="calm, warm, elderly; coastal Swahili reading"
               />
               <p className="text-xs text-muted-foreground">
@@ -421,7 +430,7 @@ function CharacterModalBody({
                   </p>
                   {takeBusy && (
                     <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Lifting take…
+                      <Spinner className="h-3.5 w-3.5" /> Lifting take…
                     </p>
                   )}
                   {takeError && (
@@ -443,7 +452,7 @@ function CharacterModalBody({
               disabled={preview.kind === "loading"}
               className="w-full"
             >
-              {preview.kind === "loading" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+              {preview.kind === "loading" ? <Spinner className="mr-1 h-4 w-4" />
                 : preview.kind === "playing" ? <Pause className="mr-1 h-4 w-4" />
                 : <Play className="mr-1 h-4 w-4" />}
               {preview.kind === "playing" ? "Stop preview" : "Preview voice"}
@@ -523,29 +532,42 @@ function PresetPicker({
   if (isMms) {
     const knownCode = POPULAR_MMS_LANGUAGES.some((l) => l.code === value)
     const selectValue = knownCode ? value : HAS_EXTENDED_MMS_MODELS ? "__other__" : ""
+    const mmsOptions: { value: string; label: string; disabled?: boolean }[] = [
+      ...(!knownCode && !HAS_EXTENDED_MMS_MODELS
+        ? [{
+            value: "",
+            label: value ? `Unsupported code: ${value}` : "Choose a language",
+            disabled: true,
+          }]
+        : []),
+      ...POPULAR_MMS_LANGUAGES.map((l) => ({ value: l.code, label: `${l.name} (${l.code})` })),
+      ...(HAS_EXTENDED_MMS_MODELS ? [{ value: "__other__", label: "Other MMS code" }] : []),
+    ]
     return (
       <div className="space-y-3">
         <div>
           <Label htmlFor="character-mms-lang">Language</Label>
-          <select
-            id="character-mms-lang"
+          <Select
+            items={mmsOptions.map((o) => ({ value: o.value, label: o.label }))}
             value={selectValue}
-            onChange={(e) => {
-              const next = e.target.value
+            onValueChange={(v) => {
+              const next = v ?? ""
               onChange(next === "__other__" ? "" : next)
             }}
-            className="mt-1 w-full rounded border bg-background px-3 py-2 text-sm"
           >
-            {!knownCode && !HAS_EXTENDED_MMS_MODELS && (
-              <option value="" disabled>
-                {value ? `Unsupported code: ${value}` : "Choose a language"}
-              </option>
-            )}
-            {POPULAR_MMS_LANGUAGES.map((l) => (
-              <option key={l.code} value={l.code}>{l.name} ({l.code})</option>
-            ))}
-            {HAS_EXTENDED_MMS_MODELS && <option value="__other__">Other MMS code</option>}
-          </select>
+            <SelectTrigger id="character-mms-lang" className="mt-1 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {mmsOptions.map((o) => (
+                  <SelectItem key={o.value} value={o.value} disabled={o.disabled}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         </div>
         {HAS_EXTENDED_MMS_MODELS && (
           <div>
@@ -567,16 +589,27 @@ function PresetPicker({
     return (
       <div>
         <Label htmlFor="character-gemini-voice">Gemini voice</Label>
-        <select
-          id="character-gemini-voice"
+        <Select
+          items={GEMINI_TTS_VOICES.map((v) => ({
+            value: v.name,
+            label: `${v.name} — ${v.description}`,
+          }))}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="mt-1 w-full rounded border bg-background px-3 py-2 text-sm"
+          onValueChange={(next) => onChange(next ?? "")}
         >
-          {GEMINI_TTS_VOICES.map((v) => (
-            <option key={v.name} value={v.name}>{v.name} — {v.description}</option>
-          ))}
-        </select>
+          <SelectTrigger id="character-gemini-voice" className="mt-1 w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {GEMINI_TTS_VOICES.map((v) => (
+                <SelectItem key={v.name} value={v.name}>
+                  {v.name} — {v.description}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
       </div>
     )
   }

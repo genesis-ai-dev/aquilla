@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { expectSelectValue } from "../../helpers/base-ui"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import path from "node:path"
@@ -57,28 +58,30 @@ test("AssignWork form submits and shows success message", async ({ alice }) => {
   await expect(panel).toBeVisible({ timeout: 5_000 })
 
   // Select assignee — alice is in the org so her option should appear.
-  const assigneeSelect = panel.locator('select[aria-label="Assignee"]')
+  const assigneeSelect = panel.getByRole("combobox", { name: "Assignee" })
   await expect(assigneeSelect).toBeVisible({ timeout: 5_000 })
 
   // Wait for org members to load (API call on panel open).
   await alice.waitForTimeout(1_500)
 
   // Select alice as the assignee (she's the project owner, so she's in the org).
-  const assigneeOptions = await assigneeSelect.locator("option").allTextContents()
-  const aliceOption = assigneeOptions.find((t) => t.toLowerCase().includes("alice"))
-  if (aliceOption) {
-    await assigneeSelect.selectOption({ label: aliceOption })
+  await assigneeSelect.click()
+  const assigneeOptions = alice.getByRole("option")
+  await expect(assigneeOptions.first()).toBeVisible({ timeout: 3_000 })
+  const aliceOption = assigneeOptions.filter({ hasText: /alice/i }).first()
+  if ((await aliceOption.count()) > 0) {
+    await aliceOption.click()
   } else {
-    // Fallback: select the first non-empty option.
-    const options = assigneeOptions.filter((t) => !t.includes("Select member"))
-    if (options.length > 0) await assigneeSelect.selectOption({ label: options[0] })
+    // Fallback: select the first non-placeholder option.
+    await assigneeOptions.filter({ hasNotText: /Select member/i }).first().click()
   }
+  await expect(alice.getByRole("listbox")).toBeHidden({ timeout: 3_000 })
 
   // Book dropdown should already have sample.md selected (first file).
-  const bookSelect = panel.locator('select[aria-label="Book"]')
+  const bookSelect = panel.getByRole("combobox", { name: "Book" })
   await expect(bookSelect).toBeVisible({ timeout: 3_000 })
-  // Verify it has at least one file option (sample.md).
-  await expect(bookSelect.locator("option").first()).toBeVisible({ timeout: 5_000 })
+  // The closed trigger renders the selected file's label (sample.md).
+  await expectSelectValue(bookSelect, /sample/i)
 
   // Click "Assign" — the submit button.
   const submitBtn = panel.getByRole("button", { name: /^Assign$/i })

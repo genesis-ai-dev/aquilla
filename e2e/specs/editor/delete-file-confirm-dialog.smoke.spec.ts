@@ -49,9 +49,8 @@ test("Delete file confirm dialog requires checkbox before confirming", async ({ 
   await expect(fileActionsBtn).toBeVisible({ timeout: 5_000 })
   await fileActionsBtn.click()
 
-  // Click "Delete" in the context menu.
-  const deleteItem = alice.getByRole("button", { name: /^Delete$/i })
-    .or(alice.getByRole("menuitem", { name: /Delete/i }))
+  // Click "Delete" in the context menu (shadcn DropdownMenu — role="menuitem").
+  const deleteItem = alice.getByRole("menuitem", { name: /^Delete$/i })
   await expect(deleteItem).toBeVisible({ timeout: 5_000 })
   await deleteItem.click()
 
@@ -64,9 +63,9 @@ test("Delete file confirm dialog requires checkbox before confirming", async ({ 
   const confirmBtn = dialog.getByRole("button", { name: /^Delete$/i })
   await expect(confirmBtn).toBeDisabled()
 
-  // Check the confirmation checkbox.
-  const checkbox = dialog.locator('input[type="checkbox"]')
-    .or(dialog.locator('[role="checkbox"]'))
+  // Check the confirmation checkbox (shadcn Checkbox — role="checkbox";
+  // the hidden native input also remains in the DOM, so target the role).
+  const checkbox = dialog.getByRole("checkbox")
   await expect(checkbox).toBeVisible({ timeout: 3_000 })
   await checkbox.click()
 

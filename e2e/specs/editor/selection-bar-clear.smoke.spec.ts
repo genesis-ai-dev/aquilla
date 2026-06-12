@@ -33,7 +33,7 @@ test("SelectionBar Clear selection button dismisses the bar", async ({ alice }) 
   const row = ws.cellRow(0)
   await row.scrollIntoViewIfNeeded()
   await row.hover()
-  const checkbox = row.locator('input[type="checkbox"]').first()
+  const checkbox = row.getByRole("checkbox").first()
   await expect(checkbox).toBeVisible({ timeout: 5_000 })
   await checkbox.check()
 

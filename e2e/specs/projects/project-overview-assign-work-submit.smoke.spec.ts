@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { pickSelectOption } from "../../helpers/base-ui"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import { ensureAuthState } from "../../helpers/auth"
@@ -12,7 +13,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 /**
  * ProjectOverview — Assign work form with seeded member.
  *
- * AssignWork.tsx (role="group" aria-label="Assign work") has selects:
+ * AssignWork.tsx (role="group" aria-label="Assign work") has Base UI selects
+ * (combobox triggers):
  *   - aria-label="Assignee" (org members)
  *   - aria-label="Book" (project files)
  *   - aria-label="Chapter" (optional, auto-populated)
@@ -58,23 +60,18 @@ test("assign work form with seeded member enables Assign button", async ({ alice
   await expect(form).toBeVisible({ timeout: 5_000 })
 
   // Select bob as assignee.
-  const assigneeSelect = form.locator('[aria-label="Assignee"]')
+  const assigneeSelect = form.getByRole("combobox", { name: "Assignee" })
   await expect(assigneeSelect).toBeVisible({ timeout: 3_000 })
-  const bobValue = await assigneeSelect
-    .locator("option", { hasText: /bob/i })
-    .first()
-    .getAttribute("value")
-  await assigneeSelect.selectOption(bobValue)
+  await pickSelectOption(alice, assigneeSelect, /bob/i)
 
-  // Select a book (first option that is not the placeholder).
-  const bookSelect = form.locator('[aria-label="Book"]')
+  // Select a book (first available file).
+  const bookSelect = form.getByRole("combobox", { name: "Book" })
   await expect(bookSelect).toBeVisible({ timeout: 3_000 })
-  const bookOptions = await bookSelect.locator("option").all()
-  // Pick the first non-placeholder option.
-  if (bookOptions.length > 1) {
-    const secondOption = await bookOptions[1].getAttribute("value")
-    if (secondOption) await bookSelect.selectOption(secondOption)
-  }
+  await bookSelect.click()
+  const firstBook = alice.getByRole("option").first()
+  await expect(firstBook).toBeVisible({ timeout: 3_000 })
+  await firstBook.click()
+  await expect(alice.getByRole("listbox")).toBeHidden({ timeout: 3_000 })
 
   // The Assign button becomes enabled.
   const submitBtn = form.getByRole("button", { name: /^Assign$/i })

@@ -6,8 +6,22 @@ import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { listTeams, createTeam, type TeamSummary } from "@/lib/frontier/teams"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 type SortOption = "name" | "members" | "projects"
+
+const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+  { value: "name", label: "Name (A–Z)" },
+  { value: "members", label: "Members (most first)" },
+  { value: "projects", label: "Projects (most first)" },
+]
 
 function sortTeams(teams: TeamSummary[], sort: SortOption): TeamSummary[] {
   return [...teams].sort((a, b) => {
@@ -89,16 +103,22 @@ export function TeamsList() {
                 placeholder="Search teams…"
                 className="min-w-0 flex-1 rounded-md border px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
               />
-              <select
+              <Select
+                items={SORT_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
                 value={sort}
-                onChange={(e) => setSort(e.target.value as SortOption)}
-                className="rounded-md border px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                aria-label="Sort teams by"
+                onValueChange={(v) => setSort((v ?? "name") as SortOption)}
               >
-                <option value="name">Name (A–Z)</option>
-                <option value="members">Members (most first)</option>
-                <option value="projects">Projects (most first)</option>
-              </select>
+                <SelectTrigger aria-label="Sort teams by">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {SORT_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </div>
           )}
 

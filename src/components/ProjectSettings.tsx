@@ -1,10 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { ArrowLeft, CheckCircle, XCircle, ChevronDown, Loader2, Sparkles, Save } from "lucide-react"
+import { ArrowLeft, CheckCircle, XCircle, ChevronDown, Sparkles, Save } from "lucide-react"
 import { Menu } from "@base-ui/react/menu"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Spinner } from "@/components/ui/spinner"
+import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
@@ -629,7 +641,7 @@ export function ProjectSettings() {
               className="rounded-r-none"
             >
               {saving ? (
-                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                <Spinner className="mr-1" />
               ) : (
                 <Save className="mr-1 h-4 w-4" />
               )}
@@ -772,13 +784,13 @@ export function ProjectSettings() {
             </CardHeader>
             <CardContent className="space-y-3">
               <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
-                <textarea
+                <Textarea
                   id="sp"
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
                   rows={6}
                   disabled={!canEditShared}
-                  className="w-full rounded border bg-background px-3 py-2 font-mono text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                  className="font-mono"
                   placeholder={DEFAULT_SYSTEM_PROMPT}
                 />
               </DisabledFieldTooltip>
@@ -806,16 +818,26 @@ export function ProjectSettings() {
 
                 <div className="space-y-1">
                   <Label htmlFor="context-size">Context window</Label>
-                  <select
-                    id="context-size"
+                  <Select
+                    items={{
+                      small: "Small — tight window",
+                      medium: "Medium — paragraph (default)",
+                      large: "Large — chapter",
+                    }}
                     value={contextSize}
-                    onChange={(e) => setContextSize(e.target.value as ContextSize)}
-                    className="w-full rounded border bg-background px-3 py-2 text-sm"
+                    onValueChange={(value) => setContextSize(value as ContextSize)}
                   >
-                    <option value="small">Small — tight window</option>
-                    <option value="medium">Medium — paragraph (default)</option>
-                    <option value="large">Large — chapter</option>
-                  </select>
+                    <SelectTrigger id="context-size" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectItem value="small">Small — tight window</SelectItem>
+                        <SelectItem value="medium">Medium — paragraph (default)</SelectItem>
+                        <SelectItem value="large">Large — chapter</SelectItem>
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
                   <p className="text-xs text-muted-foreground">
                     Controls how much surrounding passage context is included.
                   </p>
@@ -835,12 +857,11 @@ export function ProjectSettings() {
                 </div>
 
                 <div className="flex items-start gap-3 pt-1">
-                  <input
+                  <Checkbox
                     id="validated-only"
-                    type="checkbox"
                     className="mt-1"
                     checked={useOnlyValidatedExamples}
-                    onChange={(e) => setUseOnlyValidatedExamples(e.target.checked)}
+                    onCheckedChange={(checked) => setUseOnlyValidatedExamples(checked)}
                   />
                   <div>
                     <Label htmlFor="validated-only">Validated examples only</Label>
@@ -852,15 +873,24 @@ export function ProjectSettings() {
 
                 <div className="space-y-1">
                   <Label htmlFor="few-shot-example-format">Reference example format</Label>
-                  <select
-                    id="few-shot-example-format"
+                  <Select
+                    items={{
+                      "source-and-target": "Source + target (default)",
+                      "target-only": "Target only",
+                    }}
                     value={fewShotExampleFormat}
-                    onChange={(e) => setFewShotExampleFormat(e.target.value as "source-and-target" | "target-only")}
-                    className="w-full rounded border bg-background px-3 py-2 text-sm"
+                    onValueChange={(value) => setFewShotExampleFormat(value as "source-and-target" | "target-only")}
                   >
-                    <option value="source-and-target">Source + target (default)</option>
-                    <option value="target-only">Target only</option>
-                  </select>
+                    <SelectTrigger id="few-shot-example-format" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectItem value="source-and-target">Source + target (default)</SelectItem>
+                        <SelectItem value="target-only">Target only</SelectItem>
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
                   <p className="text-xs text-muted-foreground">
                     "Target only" shows only the target text of each example, useful when source alignment is unavailable or undesirable. The model is told these are reference translations to imitate.
                   </p>
@@ -883,50 +913,49 @@ export function ProjectSettings() {
             <div className="space-y-4 border-t px-6 py-4">
               <div className="space-y-2">
                 <Label>Provider</Label>
-                <div className="flex flex-col gap-2">
+                <RadioGroup
+                  name="provider"
+                  value={provider}
+                  onValueChange={(value) => setProvider(value as CompletionProvider)}
+                  className="flex flex-col gap-2"
+                >
                   <label className="flex items-start gap-2 text-sm">
-                    <input
-                      type="radio"
-                      name="provider"
-                      className="mt-1"
-                      checked={provider === "frontier"}
-                      onChange={() => setProvider("frontier")}
-                    />
+                    <RadioGroupItem value="frontier" className="mt-1" />
                     <span>
                       <strong>Frontier</strong> (recommended) — calls <code className="rounded bg-muted px-1">api.frontierrnd.com</code>{" "}
                       using your Frontier login. Works out of the box.
                     </span>
                   </label>
                   <label className="flex items-start gap-2 text-sm">
-                    <input
-                      type="radio"
-                      name="provider"
-                      className="mt-1"
-                      checked={provider === "custom"}
-                      onChange={() => setProvider("custom")}
-                    />
+                    <RadioGroupItem value="custom" className="mt-1" />
                     <span>
                       <strong>Custom endpoint</strong> — localhost, self-hosted, or a third-party OpenAI-compatible
                       API (OpenRouter, OpenAI, Groq, Together, ...). Bring your own key.
                     </span>
                   </label>
-                </div>
+                </RadioGroup>
               </div>
 
               {provider === "custom" && (
                 <>
                   <div>
                     <Label htmlFor="preset">Provider preset</Label>
-                    <select
-                      id="preset"
+                    <Select
+                      items={CUSTOM_PRESETS.map((p) => ({ value: p.id, label: p.label }))}
                       value={presetId}
-                      onChange={(e) => handlePresetChange(e.target.value)}
-                      className="w-full rounded border bg-background px-3 py-2 text-sm"
+                      onValueChange={(value) => handlePresetChange(value ?? "")}
                     >
-                      {CUSTOM_PRESETS.map((p) => (
-                        <option key={p.id} value={p.id}>{p.label}</option>
-                      ))}
-                    </select>
+                      <SelectTrigger id="preset" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {CUSTOM_PRESETS.map((p) => (
+                            <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div>
                     <Label htmlFor="ep">Endpoint URL</Label>
@@ -939,7 +968,7 @@ export function ProjectSettings() {
                         className="flex-1"
                       />
                       <Button size="sm" onClick={handleConnect} disabled={connecting || !endpoint.trim()}>
-                        {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Connect"}
+                        {connecting ? <Spinner /> : "Connect"}
                       </Button>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
@@ -964,9 +993,16 @@ export function ProjectSettings() {
                   {models.length > 0 && (
                     <div>
                       <Label htmlFor="mdl">Model</Label>
-                      <select id="mdl" value={model} onChange={(e) => setModel(e.target.value)} className="w-full rounded border bg-background px-3 py-2 text-sm">
-                        {models.map((m) => <option key={m} value={m}>{m}</option>)}
-                      </select>
+                      <Select value={model} onValueChange={(value) => setModel(value ?? "")}>
+                        <SelectTrigger id="mdl" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            {models.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
                     </div>
                   )}
                   {models.length === 0 && (
@@ -1097,16 +1133,25 @@ export function ProjectSettings() {
               <div className="space-y-2">
                 <Label htmlFor="harmonize-min-role">Minimum role to run a harmonization sweep</Label>
                 <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
-                  <select
-                    id="harmonize-min-role"
+                  <Select
+                    items={{
+                      project_lead: "Project Lead (default)",
+                      maintainer: "Maintainer",
+                    }}
                     disabled={!canEditShared}
                     value={harmonizeMinRole}
-                    onChange={(e) => setHarmonizeMinRole(e.target.value as "project_lead" | "maintainer")}
-                    className="flex h-9 w-48 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    onValueChange={(value) => setHarmonizeMinRole(value as "project_lead" | "maintainer")}
                   >
-                    <option value="project_lead">Project Lead (default)</option>
-                    <option value="maintainer">Maintainer</option>
-                  </select>
+                    <SelectTrigger id="harmonize-min-role" className="w-48">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectItem value="project_lead">Project Lead (default)</SelectItem>
+                        <SelectItem value="maintainer">Maintainer</SelectItem>
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
                 </DisabledFieldTooltip>
                 <p className="text-xs text-muted-foreground">
                   Only users with at least this role can open a harmonization sweep on this project.
@@ -1134,11 +1179,10 @@ export function ProjectSettings() {
                 Origin: <span className="font-mono">{project.origin.cloneUrl}</span> (branch: <span className="font-mono">{project.origin.branch}</span>)
               </p>
               <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
+                <Checkbox
                   id="auto-sync"
                   checked={autoSyncEnabled}
-                  onChange={(e) => setAutoSyncEnabled(e.target.checked)}
+                  onCheckedChange={(checked) => setAutoSyncEnabled(checked)}
                 />
                 <Label htmlFor="auto-sync" className="text-sm">Auto-sync every</Label>
                 <Input

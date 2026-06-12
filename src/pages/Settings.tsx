@@ -6,6 +6,14 @@ import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useOrgMembers } from "@/hooks/useOrg"
@@ -190,19 +198,25 @@ export function Settings() {
                   </p>
                   <div className="mt-3 space-y-2">
                     <Label htmlFor="export-min-role" className="text-xs">Who can export</Label>
-                    <select
-                      id="export-min-role"
-                      value={displayedExportMinRole}
-                      onChange={(e) => { void handleExportRoleChange(Number(e.target.value)) }}
+                    <Select
+                      items={exportRoleOptions.map((opt) => ({ value: String(opt.level), label: opt.label }))}
+                      value={String(displayedExportMinRole)}
+                      onValueChange={(v) => { if (v) void handleExportRoleChange(Number(v)) }}
                       disabled={!canEditExportFloor || exportRoleBusy}
-                      className="block w-full max-w-xs rounded-md border border-input bg-background px-3 py-1.5 text-sm disabled:opacity-50"
                     >
-                      {exportRoleOptions.map((opt) => (
-                        <option key={opt.level} value={opt.level}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger id="export-min-role" className="w-full max-w-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {exportRoleOptions.map((opt) => (
+                            <SelectItem key={opt.level} value={String(opt.level)}>
+                              {opt.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
                     {!canEditExportFloor && (
                       <p className="text-xs text-muted-foreground">Only org owners can change the export permission policy.</p>
                     )}

@@ -2,11 +2,11 @@
 // and renders a single dialog whenever any AI feature (TTS, ASR) is about to
 // kick off its first model download for this browser.
 
-import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog"
+import { Spinner } from "@/components/ui/spinner"
 import { storeAllFeaturesConsent, usePendingAiConsent } from "@/lib/audio/ai-consent"
 import { prefetchAiModels } from "@/lib/audio/prefetch"
 import { DEFAULT_MMS_LANGUAGE } from "@/lib/audio/tts-providers"
@@ -50,7 +50,7 @@ export function AiModelConsentDialog() {
         </DialogHeader>
         <div className="space-y-2 py-2 text-sm text-muted-foreground">
           <p className="flex items-center gap-2">
-            <Loader2 className="h-3.5 w-3.5 animate-spin opacity-60" />
+            <Spinner className="size-3.5 opacity-60" />
             <span>
               While the model downloads, you'll see a progress percentage on
               the cell. The page won't reload.

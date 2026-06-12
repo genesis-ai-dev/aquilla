@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react"
-import { ChevronDown, ChevronRight, Loader2 } from "lucide-react"
+import { ChevronDown, ChevronRight } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { getMemberAccess, type MemberEffectiveAccess, type ProjectAccessBreakdown } from "@/lib/frontier/orgs"
 import { removeProjectMember } from "@/lib/frontier/members"
 import { roleName } from "@/lib/frontier/roles"
@@ -88,7 +89,7 @@ export function MemberAccessRow({
         <div className="ml-4 mt-1 space-y-2">
           {loading && (
             <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-              <Loader2 className="h-3 w-3 animate-spin" />
+              <Spinner className="size-3" />
               Loading…
             </span>
           )}

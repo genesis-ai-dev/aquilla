@@ -62,8 +62,12 @@ test("comments page Show resolved checkbox reveals resolved threads", async ({ a
   // The resolved comment should be hidden by default.
   await expect(alice.getByText(commentText)).not.toBeVisible({ timeout: 5_000 })
 
-  // Check "Show resolved" — label wraps the checkbox and a <span>Show resolved</span>.
-  const showResolvedCheckbox = alice.locator('label').filter({ hasText: /Show resolved/i }).locator('input[type="checkbox"]')
+  // The "Show resolved" toggle lives inside the collapsed "Filters" panel.
+  await alice.getByRole("button", { name: /Filters/i }).click()
+
+  // Check "Show resolved" — label wraps the shadcn Checkbox (role="checkbox")
+  // and a <span>Show resolved</span>.
+  const showResolvedCheckbox = alice.locator('label').filter({ hasText: /Show resolved/i }).getByRole("checkbox")
   await expect(showResolvedCheckbox).toBeVisible({ timeout: 5_000 })
   await showResolvedCheckbox.check()
 

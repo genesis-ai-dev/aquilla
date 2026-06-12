@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { pickSelectOption } from "../../helpers/base-ui"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
@@ -48,9 +49,9 @@ test("team detach project removes project from team", async ({ alice }) => {
   await attachLink.click()
 
   // Select the project from the dropdown.
-  const projectSelect = alice.locator("select").first()
+  const projectSelect = alice.getByRole("combobox", { name: "Project to attach" })
   await expect(projectSelect).toBeVisible({ timeout: 3_000 })
-  await projectSelect.selectOption({ label: projName })
+  await pickSelectOption(alice, projectSelect, projName)
 
   // Click "Attach".
   const attachBtn = alice.getByRole("button", { name: /^Attach$/i })

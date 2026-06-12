@@ -6,8 +6,9 @@
  * RuleImportReview screen with per-draft evidence strings.
  */
 import { useState } from "react"
-import { Sparkles, Loader2 } from "lucide-react"
+import { Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Dialog,
   DialogContent,
@@ -229,7 +230,7 @@ export function RuleSuggestFromEditsDialog({
 
         {stage === "loading" && (
           <div className="flex flex-col items-center gap-2 py-6">
-            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            <Spinner className="size-6 text-primary" />
             <p className="text-sm text-muted-foreground">Mining edit patterns…</p>
           </div>
         )}

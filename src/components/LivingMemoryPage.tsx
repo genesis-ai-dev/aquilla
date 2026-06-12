@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Dialog,
   DialogContent,
@@ -226,11 +227,11 @@ function EntryForm({ initialText = "", onSave, onCancel }: EntryFormProps) {
   const [text, setText] = useState(initialText)
   return (
     <div className="flex flex-col gap-2">
-      <textarea
+      <Textarea
         value={text}
         onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setText(e.target.value)}
         placeholder="Enter text…"
-        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[72px] resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="min-h-[72px] resize-none"
         autoFocus
       />
       <div className="flex gap-2 justify-end">

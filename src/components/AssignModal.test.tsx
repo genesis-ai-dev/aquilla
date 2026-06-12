@@ -64,13 +64,30 @@ describe("role gate", () => {
   })
 })
 
+// Base UI Select renders a combobox trigger; options live in a portaled
+// popup. Under happy-dom, clicks on options don't commit a selection when the
+// select sits inside a modal Dialog — but hover-highlighting the option and
+// pressing Enter does (the keyboard path Base UI supports natively).
+async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
+  const trigger = screen.getByRole("combobox", { name: triggerName })
+  fireEvent.click(trigger)
+  const option = await screen.findByRole("option", { name: optionName })
+  fireEvent.pointerMove(option)
+  fireEvent.mouseMove(option)
+  fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
+  // Selection committed when the trigger renders the chosen label.
+  await waitFor(() => {
+    expect(trigger.textContent).toMatch(optionName)
+  })
+}
+
 // ── Scope: verses (all verses in file) ──────────────────────────────────────
 describe("verses scope", () => {
   it("calls createAssignment with books scope covering the active file", async () => {
     render(<AssignModal {...BASE_PROPS} />)
     // Default scope = verses since selectedCellIds is empty
     // Pick a member
-    fireEvent.change(screen.getByDisplayValue("Select member…"), { target: { value: "42" } })
+    await pickSelectOption(/assign to/i, /anna/)
     // Submit
     fireEvent.click(screen.getByRole("button", { name: /assign/i }))
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
@@ -90,10 +107,10 @@ describe("selection scope", () => {
   it("is enabled and pre-selected when selectedCellIds is non-empty", async () => {
     const selectedCellIds = new Set(["cell-a", "cell-b", "cell-c"])
     render(<AssignModal {...BASE_PROPS} selectedCellIds={selectedCellIds} />)
-    const scopeSelect = screen.getByDisplayValue(/current selection/i)
-    expect(scopeSelect).toBeTruthy()
+    const scopeTrigger = screen.getByRole("combobox", { name: /scope/i })
+    expect(scopeTrigger.textContent).toMatch(/current selection/i)
     // Assign
-    fireEvent.change(screen.getByDisplayValue("Select member…"), { target: { value: "99" } })
+    await pickSelectOption(/assign to/i, /bob/)
     fireEvent.click(screen.getByRole("button", { name: /assign/i }))
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
     const args = mockCreate.mock.calls[0][0]
@@ -103,24 +120,21 @@ describe("selection scope", () => {
   })
 })
 
-// Helper to get the scope <select> (first select in the form)
-function getScopeSelect(): HTMLSelectElement {
-  const selects = document.querySelectorAll("select")
-  return selects[0] as HTMLSelectElement
-}
-
 // ── Scope: books ─────────────────────────────────────────────────────────────
 describe("books scope", () => {
   it("calls createAssignment with all selected file ids", async () => {
     render(<AssignModal {...BASE_PROPS} />)
     // Switch to books scope
-    fireEvent.change(getScopeSelect(), { target: { value: "books" } })
-    // Select both files via checkboxes
+    await pickSelectOption(/scope/i, /books \(files\)/i)
+    // Select both files via their labeled checkboxes (clicking the label
+    // toggles the Base UI checkbox through its hidden labelable input)
+    fireEvent.click(screen.getByText("Genesis"))
+    fireEvent.click(screen.getByText("Exodus"))
     const checkboxes = screen.getAllByRole("checkbox")
-    fireEvent.click(checkboxes[0]) // Genesis
-    fireEvent.click(checkboxes[1]) // Exodus
+    expect(checkboxes[0].getAttribute("aria-checked")).toBe("true") // Genesis
+    expect(checkboxes[1].getAttribute("aria-checked")).toBe("true") // Exodus
     // Pick member
-    fireEvent.change(screen.getByDisplayValue("Select member…"), { target: { value: "42" } })
+    await pickSelectOption(/assign to/i, /anna/)
     fireEvent.click(screen.getByRole("button", { name: /assign/i }))
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
     const args = mockCreate.mock.calls[0][0]
@@ -134,8 +148,8 @@ describe("books scope", () => {
 
   it("shows an error when no files are selected", async () => {
     render(<AssignModal {...BASE_PROPS} />)
-    fireEvent.change(getScopeSelect(), { target: { value: "books" } })
-    fireEvent.change(screen.getByDisplayValue("Select member…"), { target: { value: "42" } })
+    await pickSelectOption(/scope/i, /books \(files\)/i)
+    await pickSelectOption(/assign to/i, /anna/)
     fireEvent.click(screen.getByRole("button", { name: /assign/i }))
     await waitFor(() => expect(screen.getByText(/select at least one/i)).toBeTruthy())
     expect(mockCreate).not.toHaveBeenCalled()
@@ -146,15 +160,17 @@ describe("books scope", () => {
 describe("chapters scope", () => {
   it("calls createAssignment with chapters scope for selected chapters", async () => {
     render(<AssignModal {...BASE_PROPS} />)
-    fireEvent.change(getScopeSelect(), { target: { value: "chapters" } })
+    await pickSelectOption(/scope/i, /chapters/i)
     // Wait for chapters to load
     await waitFor(() => expect(mockChapters).toHaveBeenCalledWith("test-jwt", "proj-1", "file-1"))
     await waitFor(() => screen.getByText("GEN 1"))
-    // Check GEN 1 and GEN 2
+    // Check GEN 1 and GEN 2 via their labeled checkboxes
+    fireEvent.click(screen.getByText("GEN 1"))
+    fireEvent.click(screen.getByText("GEN 2"))
     const chCheckboxes = screen.getAllByRole("checkbox")
-    fireEvent.click(chCheckboxes[0]) // GEN 1
-    fireEvent.click(chCheckboxes[1]) // GEN 2
-    fireEvent.change(screen.getByDisplayValue("Select member…"), { target: { value: "42" } })
+    expect(chCheckboxes[0].getAttribute("aria-checked")).toBe("true") // GEN 1
+    expect(chCheckboxes[1].getAttribute("aria-checked")).toBe("true") // GEN 2
+    await pickSelectOption(/assign to/i, /anna/)
     fireEvent.click(screen.getByRole("button", { name: /assign/i }))
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
     const args = mockCreate.mock.calls[0][0]
@@ -180,7 +196,7 @@ describe("validation", () => {
     const onAssigned = vi.fn()
     const onOpenChange = vi.fn()
     render(<AssignModal {...BASE_PROPS} onAssigned={onAssigned} onOpenChange={onOpenChange} />)
-    fireEvent.change(screen.getByDisplayValue("Select member…"), { target: { value: "42" } })
+    await pickSelectOption(/assign to/i, /anna/)
     fireEvent.click(screen.getByRole("button", { name: /assign/i }))
     await waitFor(() => expect(onAssigned).toHaveBeenCalledTimes(1))
     expect(onOpenChange).toHaveBeenCalledWith(false)

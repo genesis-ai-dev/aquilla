@@ -266,9 +266,10 @@ describe("RulesPage rule delete confirm (FRO-291)", () => {
     const confirmBtn = screen.getByRole("button", { name: /^Delete rule$/i })
     expect(confirmBtn).toBeDisabled()
 
-    // Check the checkbox
+    // Check the checkbox (click via its label: jsdom double-fires clicks
+    // dispatched directly on a labelable control inside a <label>)
     const checkbox = screen.getByRole("checkbox")
-    fireEvent.click(checkbox)
+    fireEvent.click(checkbox.closest("label")!)
     expect(confirmBtn).not.toBeDisabled()
 
     // Now confirm

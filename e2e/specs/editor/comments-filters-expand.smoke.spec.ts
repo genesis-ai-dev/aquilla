@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { pickSelectOption, expectSelectValue } from "../../helpers/base-ui"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import path from "node:path"
@@ -57,22 +58,25 @@ test("comments Filters button expands filter panel and sort picker works", async
   const filtersBtn = alice.getByRole("button", { name: /Filters/i })
   await expect(filtersBtn).toBeVisible({ timeout: 10_000 })
 
-  // The sort select should NOT be visible yet (collapsed).
-  const sortSelect = alice.locator("select").filter({ hasText: /Unresolved|Recent|Newest/i }).first()
-  await expect(sortSelect).not.toBeVisible()
+  // The sort select (Base UI combobox trigger) should NOT be visible yet (collapsed).
+  const sortTrigger = alice
+    .locator("label")
+    .filter({ has: alice.locator("span", { hasText: /^Sort$/ }) })
+    .getByRole("combobox")
+  await expect(sortTrigger).not.toBeVisible()
 
   // Click "Filters" to expand.
   await filtersBtn.click()
 
-  // Sort select appears.
-  await expect(sortSelect).toBeVisible({ timeout: 3_000 })
-  await expect(sortSelect).toHaveValue("unresolved-first")
+  // Sort select appears with the default "Unresolved first" label.
+  await expect(sortTrigger).toBeVisible({ timeout: 3_000 })
+  await expectSelectValue(sortTrigger, "Unresolved first")
 
   // Change sort to "Newest first".
-  await sortSelect.selectOption("creation")
-  await expect(sortSelect).toHaveValue("creation")
+  await pickSelectOption(alice, sortTrigger, "Newest first")
+  await expectSelectValue(sortTrigger, "Newest first")
 
   // Click "Filters" again to collapse.
   await filtersBtn.click()
-  await expect(sortSelect).not.toBeVisible({ timeout: 2_000 })
+  await expect(sortTrigger).not.toBeVisible({ timeout: 2_000 })
 })

@@ -7,8 +7,10 @@
  */
 
 import { useState, useRef, useCallback } from "react"
-import { Upload, Loader2 } from "lucide-react"
+import { Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Dialog,
   DialogContent,
@@ -319,8 +321,8 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
             {/* Paste zone */}
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">Or paste document text:</p>
-              <textarea
-                className="w-full min-h-[80px] rounded border bg-background p-2 text-xs font-mono resize-y focus:outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
+              <Textarea
+                className="min-h-[80px] font-mono resize-y"
                 placeholder="Paste text here and it will be processed automatically…"
                 onPaste={handlePaste}
                 readOnly={false}
@@ -339,7 +341,7 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
 
         {stage === "extracting" && (
           <div className="flex flex-col items-center gap-3 py-8">
-            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            <Spinner className="size-6 text-primary" />
             <p className="text-sm text-muted-foreground">{progressLabel()}</p>
             {progress && progress.phase === "structuring" && progress.candidateCount > 0 && (
               <p className="text-xs text-muted-foreground">

@@ -30,12 +30,13 @@ test("alice enables 'Extra whitespace' rule and sees a violation surfaced in edi
   const projectId = alice.url().split("/project/")[1]?.split("/")[0]
   expect(projectId).toBeTruthy()
 
-  // Enable the built-in rule on the rules page.
+  // Enable the built-in rule on the rules page (shadcn Switch, role="switch").
   await alice.goto(`/project/${projectId}/rules`)
-  const toggle = alice.getByRole("checkbox", { name: /Extra whitespace enabled/i })
+  const toggle = alice.getByRole("switch", { name: /Extra whitespace enabled/i })
   await expect(toggle).toBeVisible({ timeout: 10_000 })
-  if (!(await toggle.isChecked())) {
-    await toggle.check()
+  if ((await toggle.getAttribute("aria-checked")) !== "true") {
+    await toggle.click()
+    await expect(toggle).toHaveAttribute("aria-checked", "true", { timeout: 3_000 })
   }
 
   // Back to workspace, import, type a violation.

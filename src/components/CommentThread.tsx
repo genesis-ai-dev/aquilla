@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { Check, Undo2, Send, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 import type { CommentThread as ThreadData } from "@/lib/parsers/types"
 import { renderCommentHtml } from "@/lib/comments/comment-helpers"
 import DOMPurify from "dompurify"
@@ -125,13 +126,13 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
         (canReply || canResolve) && (
           <div className="mt-2 space-y-1.5">
             {canReply && (
-              <textarea
+              <Textarea
                 value={replyText}
                 onChange={(e) => setReplyText(e.target.value)}
                 onKeyDown={handleReplyKeyDown}
                 placeholder="Reply..."
                 rows={2}
-                className="neu-inset w-full resize-none rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                className="resize-none"
               />
             )}
             <div className="flex flex-wrap gap-1">

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { Loader2, AlertCircle, Users } from "lucide-react"
+import { AlertCircle, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   acceptServerInvite,
@@ -240,7 +241,7 @@ export function JoinPage() {
                 </div>
               ) : previewLoading ? (
                 <div className="flex items-center gap-2 py-1">
-                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  <Spinner className="text-muted-foreground" />
                   <p className="text-xs text-muted-foreground">
                     Loading invitation details…
                   </p>
@@ -292,7 +293,7 @@ export function JoinPage() {
             </div>
           ) : phase === "redeeming" ? (
             <div className="flex flex-col items-center gap-2 py-4">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <Spinner className="size-8 text-primary" />
               <p className="text-sm text-muted-foreground">Joining project…</p>
             </div>
           ) : phase === "error" ? (

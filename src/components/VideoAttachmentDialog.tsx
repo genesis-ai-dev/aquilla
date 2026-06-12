@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react"
-import { Film, Upload, Link as LinkIcon, Trash2, Loader2 } from "lucide-react"
+import { Film, Upload, Link as LinkIcon, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -236,7 +237,7 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
             >
               {uploading ? (
                 <>
-                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                  <Spinner className="size-6 text-primary" />
                   <p className="mt-2 text-sm text-muted-foreground">Storing video locally...</p>
                 </>
               ) : (

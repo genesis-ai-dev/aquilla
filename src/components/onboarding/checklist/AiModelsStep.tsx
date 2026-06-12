@@ -4,10 +4,13 @@
 // The user can come back and add features later from project settings.
 
 import { useEffect, useMemo, useState } from "react"
-import { CheckCircle2, Download, AlertCircle, Loader2, ChevronDown, Wifi } from "lucide-react"
+import { CheckCircle2, Download, AlertCircle, ChevronDown, Wifi } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Spinner } from "@/components/ui/spinner"
 import { prefetchAiModels, useModelStatus } from "@/lib/audio/prefetch"
 import { storeAllFeaturesConsent } from "@/lib/audio/ai-consent"
 import { patchProject } from "@/lib/store/project-index"
@@ -175,54 +178,56 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
             <legend className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Voice generation
             </legend>
-            <RadioRow
-              checked={voiceChoice === "none"}
-              onChange={() => setVoiceChoice("none")}
-              label="None — set up later"
-              hint="Skip voice generation entirely. You can come back from project settings."
-            />
-            <RadioRow
-              checked={voiceChoice === "gemini"}
-              onChange={() => setVoiceChoice("gemini")}
-              label="Gemini (cloud, BYOK)"
-              hint="Highest quality, promptable voices. Needs a Google AI Studio API key. No local download."
-            />
-            {voiceChoice === "gemini" && (
-              <div className="ml-6 space-y-1 rounded-md bg-muted/30 p-2">
-                <Label htmlFor="setup-gemini-tts-key" className="text-xs">
-                  Gemini API key
-                </Label>
-                <Input
-                  id="setup-gemini-tts-key"
-                  type="password"
-                  value={geminiKey}
-                  onChange={(e) => setGeminiKey(e.target.value)}
-                  onBlur={() =>
-                    void saveTtsSettings({ provider: "gemini", apiKey: geminiKey.trim() || undefined })
-                  }
-                  placeholder="AIza..."
-                  autoComplete="off"
-                  spellCheck={false}
-                  className="font-mono text-sm"
-                />
-                <p className="text-[10px] text-muted-foreground">
-                  Get a key at aistudio.google.com/apikey. Stored locally and sent
-                  directly to Google.
-                </p>
-              </div>
-            )}
-            <ModelRadioRow
-              checked={voiceChoice === "kokoro"}
-              onChange={() => setVoiceChoice("kokoro")}
-              meta={KOKORO_MODEL}
-              status={kokoro}
-            />
-            <ModelRadioRow
-              checked={voiceChoice === "mms"}
-              onChange={() => setVoiceChoice("mms")}
-              meta={MMS_MODEL}
-              status={mms}
-            />
+            <RadioGroup
+              value={voiceChoice}
+              onValueChange={(value) => setVoiceChoice(value as VoiceChoice)}
+              className="gap-1.5"
+            >
+              <RadioRow
+                value="none"
+                label="None — set up later"
+                hint="Skip voice generation entirely. You can come back from project settings."
+              />
+              <RadioRow
+                value="gemini"
+                label="Gemini (cloud, BYOK)"
+                hint="Highest quality, promptable voices. Needs a Google AI Studio API key. No local download."
+              />
+              {voiceChoice === "gemini" && (
+                <div className="ml-6 space-y-1 rounded-md bg-muted/30 p-2">
+                  <Label htmlFor="setup-gemini-tts-key" className="text-xs">
+                    Gemini API key
+                  </Label>
+                  <Input
+                    id="setup-gemini-tts-key"
+                    type="password"
+                    value={geminiKey}
+                    onChange={(e) => setGeminiKey(e.target.value)}
+                    onBlur={() =>
+                      void saveTtsSettings({ provider: "gemini", apiKey: geminiKey.trim() || undefined })
+                    }
+                    placeholder="AIza..."
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="font-mono text-sm"
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Get a key at aistudio.google.com/apikey. Stored locally and sent
+                    directly to Google.
+                  </p>
+                </div>
+              )}
+              <ModelRadioRow
+                value="kokoro"
+                meta={KOKORO_MODEL}
+                status={kokoro}
+              />
+              <ModelRadioRow
+                value="mms"
+                meta={MMS_MODEL}
+                status={mms}
+              />
+            </RadioGroup>
           </fieldset>
 
           {totalSizeMb > 0 && (
@@ -290,11 +295,10 @@ function ModelCheckRow({ checked, onChange, meta, status }: ModelCheckRowProps) 
         "flex cursor-pointer items-start gap-2 rounded-md px-1 py-1 hover:bg-accent/40",
       )}
     >
-      <input
-        type="checkbox"
+      <Checkbox
         checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="mt-1 h-3.5 w-3.5"
+        onCheckedChange={(value) => onChange(value === true)}
+        className="mt-1"
       />
       <div className="flex-1">
         <div className="flex items-center gap-2 text-sm">
@@ -312,22 +316,15 @@ function ModelCheckRow({ checked, onChange, meta, status }: ModelCheckRowProps) 
 }
 
 interface RadioRowProps {
-  checked: boolean
-  onChange: () => void
+  value: VoiceChoice
   label: string
   hint: string
 }
 
-function RadioRow({ checked, onChange, label, hint }: RadioRowProps) {
+function RadioRow({ value, label, hint }: RadioRowProps) {
   return (
     <label className="flex cursor-pointer items-start gap-2 rounded-md px-1 py-1 hover:bg-accent/40">
-      <input
-        type="radio"
-        checked={checked}
-        onChange={onChange}
-        name="voice-choice"
-        className="mt-1 h-3.5 w-3.5"
-      />
+      <RadioGroupItem value={value} className="mt-1" />
       <div className="flex-1">
         <div className="text-sm font-medium">{label}</div>
         <p className="text-xs text-muted-foreground">{hint}</p>
@@ -337,22 +334,15 @@ function RadioRow({ checked, onChange, label, hint }: RadioRowProps) {
 }
 
 interface ModelRadioRowProps {
-  checked: boolean
-  onChange: () => void
+  value: VoiceChoice
   meta: ModelMeta
   status: ReturnType<typeof useModelStatus>
 }
 
-function ModelRadioRow({ checked, onChange, meta, status }: ModelRadioRowProps) {
+function ModelRadioRow({ value, meta, status }: ModelRadioRowProps) {
   return (
     <label className="flex cursor-pointer items-start gap-2 rounded-md px-1 py-1 hover:bg-accent/40">
-      <input
-        type="radio"
-        checked={checked}
-        onChange={onChange}
-        name="voice-choice"
-        className="mt-1 h-3.5 w-3.5"
-      />
+      <RadioGroupItem value={value} className="mt-1" />
       <div className="flex-1">
         <div className="flex items-center gap-2 text-sm">
           <span className="font-medium">{meta.label}</span>
@@ -390,7 +380,7 @@ function SizeOrStatus({
   if (status.kind === "downloading") {
     return (
       <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
-        <Loader2 className="h-3 w-3 animate-spin" />
+        <Spinner className="h-3 w-3" />
         downloading
       </span>
     )

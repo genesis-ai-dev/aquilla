@@ -105,6 +105,9 @@ export async function injectSession(page: Page, session: PersistedSession): Prom
 
     // Mark onboarding complete so the app routes straight to dashboard.
     localStorage.setItem("codex:onboardingComplete", "true")
+    // Suppress the first-run product tour (FRO-243) — its modal welcome
+    // dialog makes the workspace inert and blocks every role-based locator.
+    localStorage.setItem("codex:productTourDone", "1")
     // Set the auth-hint cookie (aq_hint=1) that App.tsx checks via
     // hasAuthHintCookie() — without it the IDB envelope write bypasses
     // writeEnvelope() which is where setAuthHint() is normally called.

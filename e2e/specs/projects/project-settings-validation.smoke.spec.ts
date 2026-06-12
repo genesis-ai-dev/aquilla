@@ -1,11 +1,13 @@
 import { test, expect } from "../../helpers/multi-user"
+import { expectSelectValue, pickSelectOption } from "../../helpers/base-ui"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
  * ProjectSettings — Validation settings section.
  *
  * ValidationSettingsSection renders:
- *   - A native <select> for "minimum role that can validate" (Reviewer / Project Lead / Maintainer)
+ *   - A Base UI Select (trigger id="validation-role-floor") for "minimum role
+ *     that can validate" (Reviewer (default) / Project Lead / Maintainer)
  *   - A Switch id="allow-self-validation" for the allow self-validation toggle
  *
  * These controls are visible without saving; the parent ProjectSettings
@@ -32,12 +34,12 @@ test("project settings validation section: changing options makes form dirty", a
   await expect(selfValidationSwitch).toBeVisible({ timeout: 10_000 })
 
   // The role floor select renders with "Reviewer" as default.
-  const roleSelect = alice.locator("select").first()
+  const roleSelect = alice.locator("#validation-role-floor")
   await expect(roleSelect).toBeVisible({ timeout: 5_000 })
-  await expect(roleSelect).toHaveValue("reviewer")
+  await expectSelectValue(roleSelect, /Reviewer/)
 
-  // Change role to "project_lead" — makes the form dirty.
-  await roleSelect.selectOption("project_lead")
+  // Change role to "Project Lead" — makes the form dirty.
+  await pickSelectOption(alice, roleSelect, "Project Lead")
 
   // "Save changes" button appears when form is dirty.
   const saveBtn = alice.getByRole("button", { name: /Save changes/i })

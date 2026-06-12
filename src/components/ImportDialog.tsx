@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -1260,10 +1261,9 @@ function ParatextChoice({
               return (
                 <li key={key}>
                   <div className="flex items-center gap-2 px-3 py-1.5">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={included}
-                      onChange={() => toggleBook(b.book.bookId)}
+                      onCheckedChange={() => toggleBook(b.book.bookId)}
                       aria-label={`Include ${b.book.displayName}`}
                     />
                     <button

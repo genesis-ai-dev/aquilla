@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, CommentThread as CommentThreadType } from "@/lib/parsers/types"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
@@ -108,13 +109,13 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
       {permissions.canEditComments ? (
         <div className="border-t p-3 space-y-1.5">
           <p className="text-xs font-medium">New thread</p>
-          <textarea
+          <Textarea
             value={newThreadText}
             onChange={(e) => setNewThreadText(e.target.value)}
             onKeyDown={handleNewThreadKeyDown}
             placeholder="Start a new comment thread..."
             rows={2}
-            className="neu-inset w-full resize-none rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+            className="resize-none"
           />
           <Button size="sm" onClick={handleCreate} disabled={!newThreadText.trim()} className="w-full">
             Post

@@ -48,8 +48,8 @@ test("confirm action dialog confirm button enabled only after checking checkbox"
   const confirmBtn = dialog.getByRole("button", { name: /Move to Trash/i })
   await expect(confirmBtn).toBeDisabled({ timeout: 3_000 })
 
-  // Check the "I understand" checkbox.
-  const checkbox = dialog.locator('input[type="checkbox"]')
+  // Check the "I understand" checkbox (Base UI: role=checkbox, not a native input).
+  const checkbox = dialog.getByRole("checkbox")
   await expect(checkbox).toBeVisible({ timeout: 3_000 })
   await checkbox.check()
 

@@ -1,8 +1,9 @@
 import { useState } from "react"
-import { Loader2, Trash2, GitMerge } from "lucide-react"
+import { Trash2, GitMerge } from "lucide-react"
 import type { SecondarySrc } from "@/lib/frontier/members"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Tooltip,
   TooltipContent,
@@ -291,7 +292,7 @@ function RolePickerBody({
       </div>
       {status === "submitting" && (
         <div className="flex items-center gap-1 px-1 pt-1 text-[10px] text-muted-foreground">
-          <Loader2 className="h-3 w-3 animate-spin" />
+          <Spinner className="size-3" />
           Saving…
         </div>
       )}
@@ -418,7 +419,7 @@ function ImmutableBody({
       </div>
       {status === "submitting" && (
         <div className="flex items-center gap-1 px-1 text-[10px] text-muted-foreground">
-          <Loader2 className="h-3 w-3 animate-spin" /> Saving…
+          <Spinner className="size-3" /> Saving…
         </div>
       )}
       {status === "error" && errorMsg && (

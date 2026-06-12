@@ -16,6 +16,23 @@ vi.mock("@/lib/frontier/teams", () => ({
   createTeam: (...a: unknown[]) => createTeam(...a),
 }))
 
+// Drive the shadcn (Base UI) Select: open the trigger, hover-highlight the
+// option, commit with Enter fired on the option itself. Under happy-dom
+// clicking an option does not reliably commit a selection, but the keyboard
+// path does (recipe adapted from AssignModal.test.tsx; Enter targets the
+// option because outside a Dialog focus may never enter the popup).
+// Waits for the trigger to render the chosen option's label.
+async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
+  const trigger = screen.getByRole("combobox", { name: triggerName })
+  fireEvent.click(trigger)
+  const option = await screen.findByRole("option", { name: optionName })
+  const label = option.textContent ?? ""
+  fireEvent.pointerMove(option)
+  fireEvent.mouseMove(option)
+  fireEvent.keyDown(option, { key: "Enter" })
+  await waitFor(() => expect(trigger.textContent).toContain(label))
+}
+
 const makeTeam = (overrides: Partial<{ id: number; name: string; memberCount: number; projectCount: number; viewerIsMember: boolean; isInternal: boolean }> = {}) => ({
   id: 10,
   name: "West Africa",
@@ -128,7 +145,7 @@ describe("TeamsList — FRO-166: search + sort", () => {
     listTeams.mockResolvedValue(teams)
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByRole("combobox", { name: /sort teams by/i })).toBeInTheDocument())
-    fireEvent.change(screen.getByRole("combobox", { name: /sort teams by/i }), { target: { value: "members" } })
+    await pickSelectOption(/sort teams by/i, /members \(most first\)/i)
     const cards = screen.getAllByRole("button").filter((b) => ["Alpha", "beta", "Gamma"].includes(b.querySelector("span")?.textContent ?? ""))
     expect(cards[0].querySelector("span")?.textContent).toBe("beta")   // 10
     expect(cards[1].querySelector("span")?.textContent).toBe("Alpha")  // 5
@@ -139,7 +156,7 @@ describe("TeamsList — FRO-166: search + sort", () => {
     listTeams.mockResolvedValue(teams)
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByRole("combobox", { name: /sort teams by/i })).toBeInTheDocument())
-    fireEvent.change(screen.getByRole("combobox", { name: /sort teams by/i }), { target: { value: "projects" } })
+    await pickSelectOption(/sort teams by/i, /projects \(most first\)/i)
     const cards = screen.getAllByRole("button").filter((b) => ["Alpha", "beta", "Gamma"].includes(b.querySelector("span")?.textContent ?? ""))
     expect(cards[0].querySelector("span")?.textContent).toBe("Gamma")  // 8
     expect(cards[1].querySelector("span")?.textContent).toBe("Alpha")  // 2

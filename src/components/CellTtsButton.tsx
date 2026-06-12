@@ -7,7 +7,8 @@
 // the attached audio).
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { AlertCircle, Loader2, Pause, Volume2 } from "lucide-react"
+import { AlertCircle, Pause, Volume2 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { synthesizeForCell, setTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
@@ -301,7 +302,7 @@ export function CellTtsButton({
       )}
     >
       {isError ? <AlertCircle className="h-3 w-3" /> :
-       isLoadingModel || isSynthesizing ? <Loader2 className="h-3 w-3 animate-spin" /> :
+       isLoadingModel || isSynthesizing ? <Spinner className="size-3" /> :
        isPlaying ? <Pause className="h-3 w-3" /> :
        <Volume2 className="h-3 w-3" />}
       {isLoadingModel && pct != null && (

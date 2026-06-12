@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 import {
   DEFAULT_SYSTEM_PROMPT,
   useSaveCompletionSettings,
@@ -45,11 +46,11 @@ export function AiInstructionsStep({ project, onUpdated }: AiInstructionsStepPro
         as placeholders.
       </p>
 
-      <textarea
+      <Textarea
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         rows={6}
-        className="neu-inset w-full resize-none rounded-md px-3 py-2 text-sm font-mono leading-relaxed focus:outline-none focus:ring-1 focus:ring-ring"
+        className="resize-none font-mono leading-relaxed"
         spellCheck={false}
       />
       <div className="flex items-center justify-between text-[10px] text-muted-foreground">

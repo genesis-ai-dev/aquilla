@@ -12,12 +12,13 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 /**
  * SharePanel (Members tab) — change a member's project role.
  *
- * MembersPanel.tsx renders a <select> (role picker) next to each
- * non-locked, non-self member. Changing the value calls onChangeRole.
+ * MembersPanel.tsx renders a Base UI Select (trigger aria-label="Change
+ * role") next to each non-locked, non-self member. Changing the value
+ * calls onChangeRole.
  *
  * This spec: seeds bob in alice's org → creates a project → opens
  * SharePanel → adds bob → changes his role via the select →
- * verifies the select now shows the new role.
+ * verifies the trigger now shows the new role.
  */
 test("share panel members tab role select changes member's role", async ({ alice }) => {
   const aliceSession = await ensureAuthState("alice")
@@ -60,21 +61,25 @@ test("share panel members tab role select changes member's role", async ({ alice
 
   // Change bob's role via the select next to his name.
   const bobRow = dialog.locator("li").filter({ hasText: "bob" })
-  const roleSelect = bobRow.locator("select").first()
+  const roleSelect = bobRow.getByRole("combobox", { name: "Change role" })
   await expect(roleSelect).toBeVisible({ timeout: 5_000 })
 
-  // Read current value and switch to a different role.
-  const currentRole = await roleSelect.inputValue()
-  const allOptions = await roleSelect.locator("option").allInnerTexts()
-  const otherRole = allOptions.find((o) => o !== currentRole)
-  if (!otherRole) {
+  // Read the current role label and switch to a different one.
+  const currentRole = (await roleSelect.textContent())?.trim() ?? ""
+  await roleSelect.click()
+  const listbox = alice.getByRole("listbox")
+  await expect(listbox).toBeVisible({ timeout: 3_000 })
+  const otherOption = alice.getByRole("option").filter({ hasNotText: currentRole }).first()
+  if (!(await otherOption.isVisible({ timeout: 1_000 }).catch(() => false))) {
     // If there's only one grantable role, just verify the select exists.
+    await alice.keyboard.press("Escape")
     await expect(roleSelect).toBeVisible()
     return
   }
-
-  await roleSelect.selectOption({ label: otherRole })
-  await expect(roleSelect).not.toHaveValue(currentRole, { timeout: 3_000 })
+  const newRole = (await otherOption.textContent())?.trim() ?? ""
+  await otherOption.click()
+  await expect(listbox).toBeHidden({ timeout: 3_000 })
+  await expect(roleSelect).toContainText(newRole, { timeout: 3_000 })
 
   // Dismiss.
   await alice.keyboard.press("Escape")

@@ -4,8 +4,9 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw, BookOpen,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity, Loader2,
+  ArrowRight, Activity,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
@@ -2929,7 +2930,7 @@ function EditorRow({
                        any existing target text peeking through the dimmed
                        editor underneath. */
                     <div className="m-auto flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-muted-foreground shadow-neu-sm">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                      <Spinner className="size-3.5" aria-hidden />
                       <span>
                         {loadingPhase === "searching"
                           ? "Looking up similar examples…"

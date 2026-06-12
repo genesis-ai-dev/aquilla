@@ -1,13 +1,13 @@
 import { useState } from "react"
 import {
   Clock,
-  Loader2,
   Mail,
   Users,
   UsersRound,
   X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
@@ -50,7 +50,7 @@ export function MembersPage() {
     return (
       <PageShell>
         <div className="flex items-center justify-center py-16 text-muted-foreground">
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          <Spinner className="mr-2" />
           <span className="text-sm">Loading…</span>
         </div>
       </PageShell>
@@ -181,7 +181,7 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
 
       {membersLoading && members.length === 0 ? (
         <div className="flex items-center justify-center py-12 text-muted-foreground">
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          <Spinner className="mr-2" />
           <span className="text-sm">Loading members…</span>
         </div>
       ) : (
@@ -325,7 +325,7 @@ function PendingInvitesSection({ orgId }: { orgId: number }) {
         <p className="text-xs font-medium text-muted-foreground">
           Pending invitations
         </p>
-        {isLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+        {isLoading && <Spinner className="size-3 text-muted-foreground" />}
       </div>
 
       {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
@@ -404,7 +404,7 @@ function PendingInviteRow({
           }
         }}
       >
-        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+        {busy ? <Spinner className="size-3.5" /> : <X className="h-3.5 w-3.5" />}
       </Button>
     </li>
   )

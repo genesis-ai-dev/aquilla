@@ -4,7 +4,8 @@
 // audio URLs to playable blobs and emits cell.audio.select / cell.audio.remove.
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Check, Loader2, Pause, Play, Trash2 } from "lucide-react"
+import { Check, Pause, Play, Trash2 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -143,7 +144,7 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
                 title={isPlaying ? "Stop" : "Play take"}
                 className="flex h-6 w-6 items-center justify-center rounded-full hover:bg-background"
               >
-                {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                {isLoading ? <Spinner className="size-3.5" />
                   : isPlaying ? <Pause className="h-3.5 w-3.5" />
                   : <Play className="h-3.5 w-3.5" />}
               </button>
@@ -163,7 +164,7 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
                   isCircled ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground/60 hover:bg-background hover:text-foreground",
                 )}
               >
-                {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                {isBusy ? <Spinner className="size-3.5" /> : <Check className="h-3.5 w-3.5" />}
               </button>
               <button
                 type="button"

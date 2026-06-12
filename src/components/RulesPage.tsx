@@ -4,6 +4,7 @@ import { ArrowLeft, AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, Chev
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Switch } from "@/components/ui/switch"
 import { getProject } from "@/lib/store/project-index"
 import { useRules } from "@/hooks/useRules"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
@@ -233,8 +234,8 @@ export function RulesPage() {
                           {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                         </Button>
                         <label className="flex items-center gap-1 text-xs">
-                          <input type="checkbox" checked={rule.enabled}
-                            onChange={(e) => updateRule(rule.id, { enabled: e.target.checked })} />
+                          <Switch size="sm" checked={rule.enabled}
+                            onCheckedChange={(checked) => updateRule(rule.id, { enabled: checked })} />
                           <span className="text-muted-foreground">Enabled</span>
                         </label>
                         <Button variant="ghost" size="sm" aria-label={`Delete rule ${rule.name}`} onClick={() => setPendingDeleteRuleId(rule.id)}>

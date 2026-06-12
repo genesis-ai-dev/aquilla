@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 import { BuiltinChecksList } from "./BuiltinChecksList"
 import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
 
@@ -30,7 +30,7 @@ describe("BuiltinChecksList", () => {
     )
     // The "Abbreviation pass-through" row's toggle starts disabled (default).
     const row = screen.getByText("Abbreviation pass-through").closest("[data-testid='builtin-row']")!
-    const toggle = row.querySelector("input[type='checkbox']")!
+    const toggle = within(row as HTMLElement).getByRole("switch")
     fireEvent.click(toggle)
     expect(spy).toHaveBeenCalledWith(
       "abbreviation-mismatch",

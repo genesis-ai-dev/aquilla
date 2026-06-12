@@ -5,8 +5,9 @@
 // in `referenceAudioId`. Removing the reference reverts the voice to plain TTS.
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Loader2, Mic, Pause, Play, Sparkles, Square, Trash2, Upload } from "lucide-react"
+import { Mic, Pause, Play, Sparkles, Square, Trash2, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import type { Voice } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -199,7 +200,7 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
           </Button>
           {status.kind === "uploading" && (
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Uploading…
+              <Spinner className="size-3.5" /> Uploading…
             </span>
           )}
         </div>
@@ -279,7 +280,7 @@ export function ReferencePreview({ projectId, fileId, referenceAudioId, session 
       title="Preview reference clip"
     >
       {state === "loading" ? (
-        <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+        <Spinner className="mr-1 size-3.5" />
       ) : state === "playing" ? (
         <Pause className="mr-1 h-3.5 w-3.5" />
       ) : (

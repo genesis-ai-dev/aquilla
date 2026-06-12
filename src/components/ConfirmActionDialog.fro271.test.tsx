@@ -57,13 +57,18 @@ describe("ConfirmActionDialog — FRO-271 file-delete copy", () => {
     expect(confirmBtn).toBeDisabled()
 
     const checkbox = screen.getByRole("checkbox")
-    fireEvent.click(checkbox)
+    expect(checkbox).toHaveAttribute("aria-checked", "false")
+    // Click the label text: happy-dom re-dispatches label-wrapped clicks back
+    // onto the control, so clicking the checkbox itself double-toggles there
+    // (browsers don't). Clicking the label is the same user intent.
+    fireEvent.click(screen.getByText(CHECKBOX_LABEL))
+    expect(checkbox).toHaveAttribute("aria-checked", "true")
     expect(confirmBtn).not.toBeDisabled()
   })
 
   it("calls onConfirm after checkbox is checked and confirm button is clicked", () => {
     const { onConfirm } = renderDialog()
-    fireEvent.click(screen.getByRole("checkbox"))
+    fireEvent.click(screen.getByText(CHECKBOX_LABEL))
     fireEvent.click(screen.getByRole("button", { name: /delete/i }))
     expect(onConfirm).toHaveBeenCalledOnce()
   })

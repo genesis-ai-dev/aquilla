@@ -39,7 +39,7 @@ test("SelectionBar Remove my validations button removes validation", async ({ al
 
   // Select the first cell's checkbox.
   await row.hover()
-  const checkbox = row.locator('input[type="checkbox"]').first()
+  const checkbox = row.getByRole("checkbox").first()
   await expect(checkbox).toBeVisible({ timeout: 5_000 })
   await checkbox.check()
 

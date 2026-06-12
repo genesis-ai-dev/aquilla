@@ -1,7 +1,14 @@
 import type { ComponentType } from "react"
-import { Menu } from "@base-ui/react/menu"
 import { MoreHorizontal } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { ThemeToggle } from "@/branding/ThemeMode"
 import { ColorThemePicker } from "@/branding/ColorTheme"
 
@@ -20,76 +27,56 @@ interface Props {
   includeTheme?: boolean
 }
 
-const ITEM_CLASS =
-  "flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent"
-
 /**
  * Shared "..." overflow menu rendered in app chrome. Header-level UI affordances
  * (Members, Settings, Close Project, etc.) collapse here so the top bar stops
  * scaling sideways with every new feature.
- *
- * SWARM-TODO(voice-a8): Pressing Escape does NOT close this dropdown. Standard
- * keyboard behavior (Escape closes a popup) is broken for the global More menu.
- * Root cause: @base-ui/react/menu's Menu.Root should close on Escape natively,
- * but something prevents it — possibly a conflicting keydown handler upstream
- * (e.g. EditorTable's Escape handler, or the outer ProseMirror editor capturing
- * the event before Base UI sees it).
- * Fix options:
- *   1. Check the Base UI version used. Newer versions handle Escape correctly.
- *      Try upgrading @base-ui/react.
- *   2. Add an explicit `onKeyDown` on Menu.Root or Menu.Popup that calls
- *      event.stopPropagation() for Escape so the upstream handler doesn't steal it.
- *   3. If Base UI exposes an `open` + `onOpenChange` pair, make the menu
- *      controlled and add a global Escape listener that calls setOpen(false).
- * See: src/components/OverflowMenu.tsx (this file)
  */
 export function OverflowMenu({ items, includeTheme = true }: Props) {
   return (
-    <Menu.Root>
-      <Menu.Trigger
+    <DropdownMenu>
+      <DropdownMenuTrigger
         render={
           <Button variant="ghost" size="icon" aria-label="More" title="More">
             <MoreHorizontal className="h-4 w-4" />
           </Button>
         }
       />
-      <Menu.Portal>
-        {/* z-40 on Positioner, not Popup — see ui/tooltip.tsx for rationale. */}
-        <Menu.Positioner sideOffset={4} align="end" className="z-40">
-          <Menu.Popup className="min-w-48 rounded-xl border bg-popover p-1 text-popover-foreground shadow-soft-lg">
-            {items.map((item) =>
-              item.type === "separator" ? (
-                <div key={item.id} className="my-1 h-px bg-border" role="separator" />
-              ) : (
-                <Menu.Item
-                  key={item.id}
-                  disabled={item.disabled}
-                  onClick={item.onClick}
-                  className={ITEM_CLASS}
-                >
-                  {item.icon && <item.icon className="h-4 w-4" />}
-                  <span>{item.label}</span>
-                </Menu.Item>
-              ),
+      <DropdownMenuContent align="end" className="min-w-48">
+        <DropdownMenuGroup>
+          {items.map((item) =>
+            item.type === "separator" ? (
+              <DropdownMenuSeparator key={item.id} />
+            ) : (
+              <DropdownMenuItem
+                key={item.id}
+                disabled={item.disabled}
+                onClick={item.onClick}
+              >
+                {item.icon && <item.icon className="h-4 w-4" />}
+                <span>{item.label}</span>
+              </DropdownMenuItem>
+            ),
+          )}
+        </DropdownMenuGroup>
+        {includeTheme && (
+          <>
+            {items.some((item) => item.type !== "separator") && (
+              <DropdownMenuSeparator />
             )}
-            {includeTheme && (
-              <>
-                {items.some((item) => item.type !== "separator") && (
-                  <div className="my-1 h-px bg-border" role="separator" />
-                )}
-                <div className="flex items-center justify-between gap-2 px-2 py-1 text-sm">
-                  <span className="text-muted-foreground">Theme</span>
-                  <ThemeToggle />
-                </div>
-                <div className="flex items-center justify-between gap-2 px-2 py-1 text-sm">
-                  <span className="text-muted-foreground">Color</span>
-                  <ColorThemePicker />
-                </div>
-              </>
-            )}
-          </Menu.Popup>
-        </Menu.Positioner>
-      </Menu.Portal>
-    </Menu.Root>
+            {/* Theme rows host interactive controls that shouldn't close the
+                menu on click, so they stay plain rows rather than menu items. */}
+            <div className="flex items-center justify-between gap-2 px-2 py-1 text-sm">
+              <span className="text-muted-foreground">Theme</span>
+              <ThemeToggle />
+            </div>
+            <div className="flex items-center justify-between gap-2 px-2 py-1 text-sm">
+              <span className="text-muted-foreground">Color</span>
+              <ColorThemePicker />
+            </div>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

@@ -9,10 +9,13 @@ import { useMemo, useState, useRef, useEffect } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import {
   ArrowLeft, MessageCircle, CheckCircle, ChevronDown, ChevronRight,
-  Loader2, AlertCircle, Search, SlidersHorizontal, ArrowUpRight,
+  AlertCircle, Search, SlidersHorizontal, ArrowUpRight,
   MoreHorizontal, Pencil, Trash2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Spinner } from "@/components/ui/spinner"
+import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -39,10 +42,24 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
 export type SortOrder = "recent-activity" | "creation" | "unresolved-first"
+
+const SORT_ITEMS: { value: SortOrder; label: string }[] = [
+  { value: "unresolved-first", label: "Unresolved first" },
+  { value: "recent-activity", label: "Most recent activity" },
+  { value: "creation", label: "Newest first" },
+]
 
 export interface FilterState {
   fileId: string    // "" = all
@@ -230,17 +247,14 @@ function MentionTextarea({
 
   return (
     <div ref={containerRef} className="relative">
-      <textarea
+      <Textarea
         ref={textareaRef}
         value={value}
         onChange={handleChange}
         onKeyDown={onKeyDown}
         placeholder={placeholder}
         rows={rows}
-        className={cn(
-          "neu-inset w-full resize-none rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring",
-          className
-        )}
+        className={cn("resize-none", className)}
       />
       {mentionOpen && (
         <div className="absolute left-0 right-0 top-full mt-0.5 z-50 max-h-48 overflow-y-auto rounded-md border bg-popover shadow-md">
@@ -249,7 +263,7 @@ function MentionTextarea({
           )}
           {!needsMorePrefix && isLoading && (
             <p className="flex items-center gap-1.5 px-3 py-2 text-[11px] text-muted-foreground">
-              <Loader2 className="h-3 w-3 animate-spin" /> Searching…
+              <Spinner className="size-3" /> Searching…
             </p>
           )}
           {!needsMorePrefix && !isLoading && results.length === 0 && mentionQuery.length >= 2 && (
@@ -543,7 +557,7 @@ function CommentThreadCard({
                           onClick={saveEdit}
                           disabled={isSavingEdit || !editBody.trim()}
                         >
-                          {isSavingEdit ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
+                          {isSavingEdit ? <Spinner className="size-3" /> : "Save"}
                         </Button>
                         <Button
                           size="sm"
@@ -629,24 +643,30 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
           {/* Sort picker */}
           <label className="flex items-center gap-1.5">
             <span className="text-muted-foreground whitespace-nowrap">Sort</span>
-            <select
-              className="rounded border bg-background px-1.5 py-0.5 text-xs"
+            <Select
+              items={SORT_ITEMS}
               value={filter.sort}
-              onChange={(e) => onChange({ ...filter, sort: e.target.value as SortOrder })}
+              onValueChange={(v) => onChange({ ...filter, sort: v as SortOrder })}
             >
-              <option value="unresolved-first">Unresolved first</option>
-              <option value="recent-activity">Most recent activity</option>
-              <option value="creation">Newest first</option>
-            </select>
+              <SelectTrigger size="sm" className="text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {SORT_ITEMS.map((it) => (
+                    <SelectItem key={it.value} value={it.value}>{it.label}</SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
           </label>
 
           {/* Show resolved toggle */}
           <label className="flex items-center gap-1.5 cursor-pointer select-none">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={filter.showResolved}
-              onChange={(e) => onChange({ ...filter, showResolved: e.target.checked })}
-              className="h-3.5 w-3.5"
+              onCheckedChange={(checked) => onChange({ ...filter, showResolved: checked })}
+              className="size-3.5"
             />
             <span>Show resolved</span>
           </label>
@@ -655,16 +675,26 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
           {fileOptions.length > 0 && (
             <label className="flex items-center gap-1.5">
               <span className="text-muted-foreground whitespace-nowrap">File</span>
-              <select
-                className="max-w-[180px] truncate rounded border bg-background px-1.5 py-0.5 text-xs"
+              <Select
+                items={[
+                  { value: "", label: "All files" },
+                  ...fileOptions.map((f) => ({ value: f.id, label: f.name })),
+                ]}
                 value={filter.fileId}
-                onChange={(e) => onChange({ ...filter, fileId: e.target.value })}
+                onValueChange={(v) => onChange({ ...filter, fileId: v ?? "" })}
               >
-                <option value="">All files</option>
-                {fileOptions.map((f) => (
-                  <option key={f.id} value={f.id}>{f.name}</option>
-                ))}
-              </select>
+                <SelectTrigger size="sm" className="max-w-[180px] text-xs">
+                  <SelectValue className="truncate" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="">All files</SelectItem>
+                    {fileOptions.map((f) => (
+                      <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </label>
           )}
 
@@ -672,16 +702,26 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
           {authorOptions.length > 0 && (
             <label className="flex items-center gap-1.5">
               <span className="text-muted-foreground whitespace-nowrap">Author</span>
-              <select
-                className="rounded border bg-background px-1.5 py-0.5 text-xs"
+              <Select
+                items={[
+                  { value: "", label: "Anyone" },
+                  ...authorOptions.map((a) => ({ value: a.id, label: a.label })),
+                ]}
                 value={filter.authorId}
-                onChange={(e) => onChange({ ...filter, authorId: e.target.value })}
+                onValueChange={(v) => onChange({ ...filter, authorId: v ?? "" })}
               >
-                <option value="">Anyone</option>
-                {authorOptions.map((a) => (
-                  <option key={a.id} value={a.id}>{a.label}</option>
-                ))}
-              </select>
+                <SelectTrigger size="sm" className="text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="">Anyone</SelectItem>
+                    {authorOptions.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>{a.label}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </label>
           )}
 
@@ -689,16 +729,26 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
           {authorOptions.length > 0 && (
             <label className="flex items-center gap-1.5">
               <span className="text-muted-foreground whitespace-nowrap">Participant</span>
-              <select
-                className="rounded border bg-background px-1.5 py-0.5 text-xs"
+              <Select
+                items={[
+                  { value: "", label: "Anyone" },
+                  ...authorOptions.map((a) => ({ value: a.id, label: a.label })),
+                ]}
                 value={filter.participant}
-                onChange={(e) => onChange({ ...filter, participant: e.target.value })}
+                onValueChange={(v) => onChange({ ...filter, participant: v ?? "" })}
               >
-                <option value="">Anyone</option>
-                {authorOptions.map((a) => (
-                  <option key={a.id} value={a.id}>{a.label}</option>
-                ))}
-              </select>
+                <SelectTrigger size="sm" className="text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="">Anyone</SelectItem>
+                    {authorOptions.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>{a.label}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </label>
           )}
 
@@ -824,7 +874,7 @@ export function CommentsPage() {
           <ArrowLeft className="mr-2 h-4 w-4" /> Back to project
         </Button>
         <Button variant="outline" size="sm" onClick={refresh} disabled={isLoading}>
-          {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Refresh"}
+          {isLoading ? <Spinner className="size-3.5" /> : "Refresh"}
         </Button>
       </div>
 
@@ -861,7 +911,7 @@ export function CommentsPage() {
 
       {isLoading && roots.length === 0 && (
         <div className="flex justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          <Spinner className="size-8 text-muted-foreground" />
         </div>
       )}
 

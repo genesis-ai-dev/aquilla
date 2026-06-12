@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import type { FixProposal } from "@/lib/rules/autofix"
 import type { TranslationRule } from "@/lib/parsers/types"
@@ -83,7 +84,7 @@ export function FixReviewPanel({ open, rule, proposal, onClose, onApply, onAmend
               {previews.map((p) => (
                 <li key={p.cellId} className="rounded border p-2 text-xs">
                   <label className="flex items-start gap-2">
-                    <input type="checkbox" checked={selected.has(p.cellId)} onChange={() => toggle(p.cellId)} />
+                    <Checkbox checked={selected.has(p.cellId)} onCheckedChange={() => toggle(p.cellId)} />
                     <div className="min-w-0 flex-1">
                       <div className="text-[10px] text-muted-foreground">Cell {p.cellId}</div>
                       <div className="truncate line-through text-red-600 dark:text-red-400">{p.before}</div>

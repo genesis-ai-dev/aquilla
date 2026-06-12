@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
@@ -183,10 +184,9 @@ function DiffPreviewRow({
         selected ? "bg-accent/30" : "",
       )}
     >
-      <input
-        type="checkbox"
+      <Checkbox
         checked={selected}
-        onChange={() => onToggle(diff.cellId)}
+        onCheckedChange={() => onToggle(diff.cellId)}
         className="mt-0.5 shrink-0"
         aria-label={`Include cell ${diff.cellId} in replace`}
       />

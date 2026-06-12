@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { pickSelectOption, expectSelectValue } from "../../helpers/base-ui"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import path from "node:path"
@@ -64,20 +65,25 @@ test("comments page sort select changes sort order", async ({ alice }) => {
   await alice.goto(`/project/${projectId}/comments`)
   await alice.waitForLoadState("networkidle")
 
+  // The Sort control lives inside the collapsed "Filters" panel — expand it.
+  const filtersBtn = alice.getByRole("button", { name: /Filters/i })
+  await expect(filtersBtn).toBeVisible({ timeout: 10_000 })
+  await filtersBtn.click()
+
   // Find the "Sort" select — it's in a label with text "Sort".
-  // The select is a sibling of the "Sort" text span.
+  // The Base UI combobox trigger is a sibling of the "Sort" text span.
   const sortLabel = alice.locator('label').filter({ has: alice.locator('span', { hasText: /^Sort$/ }) })
   await expect(sortLabel).toBeVisible({ timeout: 10_000 })
 
-  const sortSelect = sortLabel.locator('select')
-  await expect(sortSelect).toBeVisible({ timeout: 3_000 })
-  await expect(sortSelect).toHaveValue("unresolved-first")
+  const sortTrigger = sortLabel.getByRole("combobox")
+  await expect(sortTrigger).toBeVisible({ timeout: 3_000 })
+  await expectSelectValue(sortTrigger, "Unresolved first")
 
   // Change to "Most recent activity".
-  await sortSelect.selectOption("recent-activity")
-  await expect(sortSelect).toHaveValue("recent-activity")
+  await pickSelectOption(alice, sortTrigger, "Most recent activity")
+  await expectSelectValue(sortTrigger, "Most recent activity")
 
   // Change to "Newest first".
-  await sortSelect.selectOption("creation")
-  await expect(sortSelect).toHaveValue("creation")
+  await pickSelectOption(alice, sortTrigger, "Newest first")
+  await expectSelectValue(sortTrigger, "Newest first")
 })

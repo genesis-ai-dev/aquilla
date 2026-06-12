@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
   Tooltip,
   TooltipContent,
@@ -186,46 +187,32 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
             <summary className="cursor-pointer text-xs font-medium text-muted-foreground select-none">
               Advanced: project shape
             </summary>
-            <fieldset className="space-y-3 pt-1">
+            <RadioGroup
+              value={shape}
+              onValueChange={(value) => pickShape(value as ProjectShape)}
+              className="gap-3 pt-1"
+            >
               <label className="flex items-start gap-2.5 text-sm">
-                <input
-                  type="radio"
-                  name="shape"
-                  className="mt-0.5"
-                  checked={shape === "self-contained"}
-                  onChange={() => pickShape("self-contained")}
-                />
+                <RadioGroupItem value="self-contained" className="mt-0.5" />
                 <span>
                   <strong>Self-contained</strong> — owns its source and target.
                 </span>
               </label>
               <label className="flex items-start gap-2.5 text-sm">
-                <input
-                  type="radio"
-                  name="shape"
-                  className="mt-0.5"
-                  checked={shape === "source-only"}
-                  onChange={() => pickShape("source-only")}
-                />
+                <RadioGroupItem value="source-only" className="mt-0.5" />
                 <span>
                   <strong>Source-only</strong> — a canonical source others link
                   against. No target.
                 </span>
               </label>
               <label className="flex items-start gap-2.5 text-sm">
-                <input
-                  type="radio"
-                  name="shape"
-                  className="mt-0.5"
-                  checked={shape === "linked-target"}
-                  onChange={() => pickShape("linked-target")}
-                />
+                <RadioGroupItem value="linked-target" className="mt-0.5" />
                 <span>
                   <strong>Linked target</strong> — reads source from another
                   project; owns only its target.
                 </span>
               </label>
-            </fieldset>
+            </RadioGroup>
           </details>
 
           {error && (

@@ -1,6 +1,14 @@
 import { useState, useEffect } from "react"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 /**
  * Manager affordance (project_lead+) on the project overview: assign a book or
@@ -102,41 +110,65 @@ export function AssignWork({ projectId, files, orgId, jwt, author, onAssigned }:
   return (
     <div role="group" aria-label="Assign work" className="mt-3 w-full rounded-md border p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <select
-          aria-label="Assignee"
+        <Select
+          items={[
+            { value: "", label: "Select member…" },
+            ...members.map((m) => ({ value: String(m.userId), label: m.username })),
+          ]}
           value={assigneeId === "" ? "" : String(assigneeId)}
-          onChange={(e) => setAssigneeId(e.target.value === "" ? "" : Number(e.target.value))}
+          onValueChange={(v) => setAssigneeId(v == null || v === "" ? "" : Number(v))}
           disabled={busy}
-          className="rounded-md border bg-background px-2 py-1 text-sm"
         >
-          <option value="">Select member…</option>
-          {members.map((m) => (
-            <option key={m.userId} value={m.userId}>{m.username}</option>
-          ))}
-        </select>
-        <select
-          aria-label="Book"
+          <SelectTrigger aria-label="Assignee">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem value="">Select member…</SelectItem>
+              {members.map((m) => (
+                <SelectItem key={m.userId} value={String(m.userId)}>{m.username}</SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+        <Select
+          items={files.map((f) => ({ value: f.id, label: f.name }))}
           value={fileId}
-          onChange={(e) => setFileId(e.target.value)}
+          onValueChange={(v) => setFileId(v ?? "")}
           disabled={busy}
-          className="rounded-md border bg-background px-2 py-1 text-sm"
         >
-          {files.map((f) => (
-            <option key={f.id} value={f.id}>{f.name}</option>
-          ))}
-        </select>
-        <select
-          aria-label="Chapter"
+          <SelectTrigger aria-label="Book">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {files.map((f) => (
+                <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+        <Select
+          items={[
+            { value: "", label: "Whole book" },
+            ...chapters.map((ch) => ({ value: ch, label: ch })),
+          ]}
           value={chapter}
-          onChange={(e) => setChapter(e.target.value)}
+          onValueChange={(v) => setChapter(v ?? "")}
           disabled={busy}
-          className="rounded-md border bg-background px-2 py-1 text-sm"
         >
-          <option value="">Whole book</option>
-          {chapters.map((ch) => (
-            <option key={ch} value={ch}>{ch}</option>
-          ))}
-        </select>
+          <SelectTrigger aria-label="Chapter">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem value="">Whole book</SelectItem>
+              {chapters.map((ch) => (
+                <SelectItem key={ch} value={ch}>{ch}</SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
         <input
           type="date"
           aria-label="Deadline (optional)"

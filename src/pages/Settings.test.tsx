@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { Settings } from "./Settings"
@@ -42,6 +42,23 @@ vi.mock("@/hooks/useOrgSettings", () => ({
 beforeEach(() => localStorage.clear())
 afterEach(() => vi.clearAllMocks())
 
+// Drive the shadcn (Base UI) Select: open the trigger, hover-highlight the
+// option, commit with Enter. Under happy-dom clicking an option does not
+// reliably commit a selection, but the keyboard path does (same recipe as
+// AssignModal.test.tsx). No trigger-text assertion here: the export floor is
+// controlled by the mocked useOrgSettings hook, so the displayed value does
+// not change after a pick — callers assert on the patch result instead.
+async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
+  const trigger = screen.getByRole("combobox", { name: triggerName })
+  fireEvent.click(trigger)
+  const option = await screen.findByRole("option", { name: optionName })
+  fireEvent.pointerMove(option)
+  fireEvent.mouseMove(option)
+  // Enter targets the option itself: outside a Dialog, focus may never enter
+  // the popup under happy-dom, so document.activeElement can stay on <body>.
+  fireEvent.keyDown(option, { key: "Enter" })
+}
+
 function renderSettings() {
   return render(<MemoryRouter><OrgProvider><Settings /></OrgProvider></MemoryRouter>)
 }
@@ -78,10 +95,7 @@ describe("Export policy saved acknowledgment", () => {
     // Wait for the export permissions section to appear.
     await waitFor(() => expect(screen.getByLabelText(/who can export/i)).toBeDefined())
 
-    const select = screen.getByLabelText(/who can export/i) as HTMLSelectElement
-    await act(async () => {
-      fireEvent.change(select, { target: { value: "400" } })
-    })
+    await pickSelectOption(/who can export/i, /contributor \(400\)/i)
 
     await waitFor(() => expect(screen.getByTestId("export-role-saved")).toBeDefined())
     expect(screen.getByTestId("export-role-saved").textContent).toContain("Saved")
@@ -92,12 +106,10 @@ describe("Export policy saved acknowledgment", () => {
     renderSettings()
     await waitFor(() => expect(screen.getByLabelText(/who can export/i)).toBeDefined())
 
-    const select = screen.getByLabelText(/who can export/i) as HTMLSelectElement
-    await act(async () => {
-      fireEvent.change(select, { target: { value: "400" } })
-    })
+    await pickSelectOption(/who can export/i, /contributor \(400\)/i)
 
-    await waitFor(() => expect(screen.queryByTestId("export-role-saved")).toBeNull())
-    expect(screen.getByText(/server error/i)).toBeDefined()
+    // The server error must surface, and the Saved acknowledgment must not.
+    expect(await screen.findByText(/server error/i)).toBeDefined()
+    expect(screen.queryByTestId("export-role-saved")).toBeNull()
   })
 })

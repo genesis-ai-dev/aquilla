@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { pickSelectOption } from "../../helpers/base-ui"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { ensureAuthState } from "../../helpers/auth"
 import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
@@ -47,9 +48,9 @@ test("team remove member button removes the member from the team", async ({ alic
   await expect(addMemberBtn).toBeVisible({ timeout: 5_000 })
   await addMemberBtn.click()
 
-  const memberSelect = alice.locator("select").first()
+  const memberSelect = alice.getByRole("combobox", { name: "Member to add" })
   await expect(memberSelect).toBeVisible({ timeout: 3_000 })
-  await memberSelect.selectOption({ label: "bob" })
+  await pickSelectOption(alice, memberSelect, "bob")
   const confirmAdd = alice.getByRole("button", { name: /^Add$/i })
   await expect(confirmAdd).toBeEnabled({ timeout: 3_000 })
   await confirmAdd.click()

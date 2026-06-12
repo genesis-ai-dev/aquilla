@@ -3,6 +3,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { removeProjectMember } from "@/lib/frontier/members";
 import { useFrontierSession } from "@/hooks/useFrontierSession";
 import type { OrgMemberProject } from "@/lib/frontier/orgs";
@@ -103,11 +104,10 @@ export function RemoveOrgMemberDialog({
             <ul className="space-y-1 rounded border p-2">
               {projects.map((p) => (
                 <li key={p.id} className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     id={`rm-${p.id}`}
                     checked={checked.has(p.id)}
-                    onChange={() => toggle(p.id)}
+                    onCheckedChange={() => toggle(p.id)}
                     disabled={submitting}
                   />
                   <label htmlFor={`rm-${p.id}`} className="flex-1 cursor-pointer">

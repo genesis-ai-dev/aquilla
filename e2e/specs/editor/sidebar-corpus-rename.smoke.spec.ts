@@ -44,7 +44,8 @@ test("sidebar corpus group can be renamed inline", async ({ alice }) => {
   const firstFileRow = alice.locator("aside").getByText(/sample/i).first()
   await firstFileRow.click({ button: "right" })
 
-  const moveBtn = alice.getByRole("button", { name: /^Move$/i })
+  // "Move to corpus…" in the context menu (shadcn DropdownMenu — role="menuitem").
+  const moveBtn = alice.getByRole("menuitem", { name: /Move to corpus/i })
   await expect(moveBtn).toBeVisible({ timeout: 3_000 })
   await moveBtn.click()
 

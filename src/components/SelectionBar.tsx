@@ -11,7 +11,8 @@
 // disabled until the audio-attachment + validate-via-events grammars land.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Languages, Loader2, Sparkles, Wand2, X } from "lucide-react"
+import { Languages, Sparkles, Wand2, X } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -236,7 +237,7 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
           }
         >
           {running.kind === "voice" ? (
-            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+            <Spinner className="mr-1 size-3.5" />
           ) : (
             <Sparkles className="mr-1 h-3.5 w-3.5" />
           )}
@@ -263,7 +264,7 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
         }
       >
         {running.kind === "translate" ? (
-          <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+          <Spinner className="mr-1 size-3.5" />
         ) : (
           <Languages className="mr-1 h-3.5 w-3.5" />
         )}
@@ -287,7 +288,7 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
         }
       >
         {running.kind === "validate" ? (
-          <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+          <Spinner className="mr-1 size-3.5" />
         ) : null}
         Validate
         {validatableCount > 0 && (

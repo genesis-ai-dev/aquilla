@@ -1,17 +1,18 @@
 import { test, expect } from "../../helpers/multi-user"
+import { expectSelectValue, pickSelectOption } from "../../helpers/base-ui"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
  * SharePanel InviteLinkTab — "Role" select changes the link's granted role.
  *
- * SharePanel.tsx > InviteLinkTab renders a <select> labeled "Role" with
- * LINK_ROLE_OPTIONS: Viewer (100), Commenter (200), Reviewer (300),
- * Contributor (400). The description paragraph below it updates when the
- * selection changes.
+ * SharePanel.tsx > InviteLinkTab renders a Base UI Select whose trigger has
+ * aria-label="Role", with LINK_ROLE_OPTIONS labels: "viewer" (100),
+ * "commenter" (200), "reviewer" (300), "contributor" (400). The description
+ * paragraph below it updates when the selection changes.
  *
  * This spec: open the share dialog → switch to Invite link tab → verify
- * the Role select is present → change to Viewer → verify value is "100" →
- * change to Contributor → verify value is "400".
+ * the Role select is present → change to viewer → verify the trigger shows
+ * "viewer" → change to contributor → verify it shows "contributor".
  */
 test("share invite role select changes the link role", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -36,20 +37,18 @@ test("share invite role select changes the link role", async ({ alice }) => {
   await expect(inviteTab).toBeVisible({ timeout: 5_000 })
   await inviteTab.click()
 
-  // "Role" label and select are visible.
+  // "Role" label and select trigger are visible.
   const roleLabel = alice.getByText("Role", { exact: true })
   await expect(roleLabel).toBeVisible({ timeout: 3_000 })
 
-  // Find the Role select — it's above the expiry select, so it's the first <select>.
-  // (The expiry select is labeled "Link expires" and is second.)
-  const roleSelect = alice.locator('select').first()
+  const roleSelect = alice.getByRole("combobox", { name: "Role", exact: true })
   await expect(roleSelect).toBeVisible({ timeout: 3_000 })
 
-  // Change to Viewer (100).
-  await roleSelect.selectOption("100")
-  await expect(roleSelect).toHaveValue("100")
+  // Change to viewer (100).
+  await pickSelectOption(alice, roleSelect, /^viewer$/i)
+  await expectSelectValue(roleSelect, /viewer/i)
 
-  // Change to Contributor (400).
-  await roleSelect.selectOption("400")
-  await expect(roleSelect).toHaveValue("400")
+  // Change to contributor (400).
+  await pickSelectOption(alice, roleSelect, /^contributor$/i)
+  await expectSelectValue(roleSelect, /contributor/i)
 })

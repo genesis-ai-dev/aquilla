@@ -9,6 +9,21 @@ export class Workspace {
   }
 
   async importFile(filePath: string): Promise<void> {
+    // FRO-244 auto-opens the "Project setup" checklist sheet once per fresh
+    // project, and the modal sheet intercepts workspace clicks. Pre-mark it
+    // as already-shown for this project, then dismiss it if it beat us to it.
+    const projectId = this.page.url().match(/\/project\/([^/?#]+)/)?.[1]
+    if (projectId) {
+      await this.page.evaluate(
+        (key) => localStorage.setItem(key, "1"),
+        `codex.setupAutoShown.${decodeURIComponent(projectId)}`,
+      )
+    }
+    const skipChecklist = this.page.getByRole("button", { name: /Skip for now/i })
+    if (await skipChecklist.isVisible({ timeout: 1_500 }).catch(() => false)) {
+      await skipChecklist.click()
+      await expect(skipChecklist).toBeHidden({ timeout: 5_000 })
+    }
     // Open the ImportDialog — lands on the "landing" screen (card grid).
     await this.page.getByRole("button", { name: /^Import$/i }).click()
     // Navigate to the Upload Files panel by clicking its card.

@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { expectSelectValue, pickSelectOption } from "../../helpers/base-ui"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
@@ -6,12 +7,12 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *
  * ProjectSettings Validation card has:
  *   - Input id="validation-count" (type=number, min=1, max=15)
- *   - Select id="validation-role-floor" with options:
- *     "reviewer" (default), "project_lead", "maintainer"
+ *   - Base UI Select (trigger id="validation-role-floor") with options:
+ *     "Reviewer (default)", "Project Lead", "Maintainer"
  *
  * This spec: navigate to project settings → scroll to Validation section →
  * change the validation count from 1 to 3 → verify the input shows 3 →
- * change the role floor to "project_lead" → verify the select shows "project_lead".
+ * change the role floor to "Project Lead" → verify the trigger shows "Project Lead".
  */
 test("project settings validation count and role floor can be changed", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -37,9 +38,9 @@ test("project settings validation count and role floor can be changed", async ({
   await countInput.fill("3")
   await expect(countInput).toHaveValue("3")
 
-  // Change the role floor select to "project_lead".
+  // Change the role floor select to "Project Lead".
   const roleSelect = alice.locator("#validation-role-floor")
   await expect(roleSelect).toBeVisible({ timeout: 3_000 })
-  await roleSelect.selectOption("project_lead")
-  await expect(roleSelect).toHaveValue("project_lead")
+  await pickSelectOption(alice, roleSelect, "Project Lead")
+  await expectSelectValue(roleSelect, "Project Lead")
 })

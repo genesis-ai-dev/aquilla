@@ -1,7 +1,11 @@
 import { useMemo, useState } from "react"
-import { Check, Loader2, X } from "lucide-react"
+import { Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import {
+  Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog"
@@ -225,20 +229,34 @@ export function MultiProjectInviteDialog({
                             <Check className="h-3 w-3" /> added
                           </span>
                         ) : isSelected ? (
-                          <select
-                            className="shrink-0 max-w-[8.5rem] rounded border bg-background px-2 py-1 text-xs"
-                            value={selections[p.id]}
-                            onChange={(e) =>
-                              setProjectRole(p.id, Number(e.target.value) as RoleLevel)
+                          <Select
+                            items={roleChoices.map((r) => ({
+                              value: String(r.level),
+                              label: r.name,
+                            }))}
+                            value={String(selections[p.id])}
+                            onValueChange={(v) =>
+                              setProjectRole(p.id, Number(v ?? "") as RoleLevel)
                             }
                             disabled={busy}
                           >
-                            {roleChoices.map((r) => (
-                              <option key={r.level} value={r.level}>
-                                {r.name}
-                              </option>
-                            ))}
-                          </select>
+                            <SelectTrigger
+                              size="sm"
+                              className="shrink-0 max-w-[8.5rem]"
+                              aria-label={`Role for ${p.name}`}
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectGroup>
+                                {roleChoices.map((r) => (
+                                  <SelectItem key={r.level} value={String(r.level)}>
+                                    {r.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
                         ) : (
                           <span aria-hidden className="w-0" />
                         )}
@@ -313,7 +331,7 @@ export function MultiProjectInviteDialog({
               <Button onClick={handleInvite} disabled={!canSubmit}>
                 {busy ? (
                   <>
-                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                    <Spinner className="mr-1" />
                     Adding…
                   </>
                 ) : (

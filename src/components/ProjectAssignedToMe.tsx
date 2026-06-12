@@ -9,7 +9,8 @@
 // project_lead+ can additionally assign work via AssignModal.
 
 import { useEffect, useState, useCallback } from "react"
-import { ChevronDown, ChevronRight, Loader2, ClipboardList } from "lucide-react"
+import { ChevronDown, ChevronRight, ClipboardList } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { getMyAssignments, type MyAssignment } from "@/lib/sync/assignments"
 import { cn } from "@/lib/utils"
 
@@ -76,7 +77,7 @@ export function ProjectAssignedToMe({
         <div className="mt-1 space-y-0.5">
           {loading ? (
             <div className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground">
-              <Loader2 className="h-3 w-3 animate-spin" />
+              <Spinner className="size-3" />
               Loading…
             </div>
           ) : error ? (

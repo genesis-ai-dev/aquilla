@@ -19,6 +19,14 @@ import {
 } from "@/lib/frontier/teams"
 import { listOrgMembers, addOrgMember, type OrgMember } from "@/lib/frontier/orgs"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 const ROLE_OPTIONS = [
   { level: 100, name: "viewer" },
@@ -303,15 +311,21 @@ export function TeamDetail() {
 
                 {isAdmin && addingMember && (
                   <div className="flex items-center gap-2 mb-3">
-                    <select
-                      className="border rounded px-2 py-1 text-sm"
+                    <Select
                       value={selectedUsername}
-                      onChange={(e) => setSelectedUsername(e.target.value)}
+                      onValueChange={(v) => setSelectedUsername(v ?? "")}
                     >
-                      {availableOrgMembers.map((m) => (
-                        <option key={m.userId} value={m.username}>{m.username}</option>
-                      ))}
-                    </select>
+                      <SelectTrigger aria-label="Member to add">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {availableOrgMembers.map((m) => (
+                            <SelectItem key={m.userId} value={m.username}>{m.username}</SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
                     <button
                       type="button"
                       className="text-sm px-3 py-1 rounded bg-primary text-primary-foreground"
@@ -339,19 +353,29 @@ export function TeamDetail() {
                         <div className="flex items-center gap-2">
                           {isOwner ? (
                             /* Owners can change the member's org-level role via the upsert endpoint */
-                            <select
-                              className="border rounded px-2 py-1 text-xs"
+                            <Select
+                              items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: r.name }))}
                               value={m.roleLevel != null ? String(m.roleLevel) : ""}
-                              aria-label={`Role for ${m.username}`}
-                              title={m.roleLevel != null ? ROLE_DESCRIPTIONS[m.roleLevel] : "Unknown role"}
-                              onChange={(e) => handleChangeMemberRole(m.username, Number(e.target.value))}
+                              onValueChange={(v) => { if (v) void handleChangeMemberRole(m.username, Number(v)) }}
                             >
-                              {ROLE_OPTIONS.map((r) => (
-                                <option key={r.level} value={String(r.level)} title={ROLE_DESCRIPTIONS[r.level]}>
-                                  {r.name}
-                                </option>
-                              ))}
-                            </select>
+                              <SelectTrigger
+                                size="sm"
+                                className="text-xs"
+                                aria-label={`Role for ${m.username}`}
+                                title={m.roleLevel != null ? ROLE_DESCRIPTIONS[m.roleLevel] : "Unknown role"}
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectGroup>
+                                  {ROLE_OPTIONS.map((r) => (
+                                    <SelectItem key={r.level} value={String(r.level)} title={ROLE_DESCRIPTIONS[r.level]}>
+                                      {r.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectGroup>
+                              </SelectContent>
+                            </Select>
                           ) : (
                             /* Non-owners see a read-only label with a tooltip explaining the role */
                             <span
@@ -414,26 +438,42 @@ export function TeamDetail() {
 
               {isAdmin && attachingProject && (
                 <div className="flex items-center gap-2 mb-3">
-                  <select
-                    className="border rounded px-2 py-1 text-sm"
-                    value={selectedProjectId}
-                    onChange={(e) => setSelectedProjectId(e.target.value)}
-                  >
-                    {orgProjects
+                  <Select
+                    items={orgProjects
                       .filter((op) => !(team?.projects ?? []).some((tp) => tp.id === op.id))
-                      .map((op) => (
-                        <option key={op.id} value={op.id}>{op.name}</option>
-                      ))}
-                  </select>
-                  <select
-                    className="border rounded px-2 py-1 text-sm"
-                    value={selectedRole}
-                    onChange={(e) => setSelectedRole(e.target.value)}
+                      .map((op) => ({ value: op.id, label: op.name }))}
+                    value={selectedProjectId}
+                    onValueChange={(v) => setSelectedProjectId(v ?? "")}
                   >
-                    {ROLE_OPTIONS.map((r) => (
-                      <option key={r.level} value={String(r.level)}>{r.name}</option>
-                    ))}
-                  </select>
+                    <SelectTrigger aria-label="Project to attach">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {orgProjects
+                          .filter((op) => !(team?.projects ?? []).some((tp) => tp.id === op.id))
+                          .map((op) => (
+                            <SelectItem key={op.id} value={op.id}>{op.name}</SelectItem>
+                          ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: r.name }))}
+                    value={selectedRole}
+                    onValueChange={(v) => setSelectedRole(v ?? "")}
+                  >
+                    <SelectTrigger aria-label="Granted role">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {ROLE_OPTIONS.map((r) => (
+                          <SelectItem key={r.level} value={String(r.level)}>{r.name}</SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
                   <button
                     type="button"
                     className="text-sm px-3 py-1 rounded bg-primary text-primary-foreground"
@@ -467,15 +507,22 @@ export function TeamDetail() {
                       <div className="flex items-center gap-2">
                         {isAdmin ? (
                           <>
-                            <select
-                              className="border rounded px-2 py-1 text-xs"
+                            <Select
+                              items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: r.name }))}
                               value={String(p.grantedRoleLevel)}
-                              onChange={(e) => handleChangeProjectRole(p.id, Number(e.target.value))}
+                              onValueChange={(v) => { if (v) void handleChangeProjectRole(p.id, Number(v)) }}
                             >
-                              {ROLE_OPTIONS.map((r) => (
-                                <option key={r.level} value={String(r.level)}>{r.name}</option>
-                              ))}
-                            </select>
+                              <SelectTrigger size="sm" className="text-xs" aria-label={`Role for ${p.name}`}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectGroup>
+                                  {ROLE_OPTIONS.map((r) => (
+                                    <SelectItem key={r.level} value={String(r.level)}>{r.name}</SelectItem>
+                                  ))}
+                                </SelectGroup>
+                              </SelectContent>
+                            </Select>
                             <button
                               type="button"
                               className="text-xs text-destructive underline"

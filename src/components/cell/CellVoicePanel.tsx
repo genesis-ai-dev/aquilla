@@ -18,8 +18,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  Loader2, MoreHorizontal, Pause, Play, RefreshCw, Sparkles, UserPlus, Volume2, VolumeX,
+  MoreHorizontal, Pause, Play, RefreshCw, Sparkles, UserPlus, Volume2, VolumeX,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { SpeakerChip } from "./SpeakerChip"
 import { CropButton } from "./CropEditor"
 import { cn } from "@/lib/utils"
@@ -366,7 +367,7 @@ export function CellVoicePanel({
         )}
       >
         {loading ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
+          <Spinner />
         ) : !hasTake ? (
           <Sparkles className="h-4 w-4" />
         ) : isPlaying ? (

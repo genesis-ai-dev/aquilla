@@ -31,6 +31,14 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import type { Concept, TermRendering, RenderingStatus } from "@/lib/terminology/types"
 import { addConcept, updateConcept, deleteConcept, mergeConcepts, approveConcept, rejectConcept } from "@/lib/terminology/store"
 import { importConceptsCsv, exportConceptsCsv } from "@/lib/terminology/csv"
@@ -61,6 +69,12 @@ const statusLabel: Record<RenderingStatus, string> = {
   forbidden: "forbidden",
 }
 
+const RENDERING_STATUS_OPTIONS: { value: RenderingStatus; label: string }[] = [
+  { value: "preferred", label: "required" },
+  { value: "admitted", label: "alternate" },
+  { value: "forbidden", label: "forbidden" },
+]
+
 function RenderingChip({ rendering }: { rendering: TermRendering }) {
   const chipClass = cn(
     "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium",
@@ -88,6 +102,12 @@ const conceptStatusLabel: Record<Concept["status"], string> = {
   draft: "suggested",
   deprecated: "old",
 }
+
+const CONCEPT_STATUS_OPTIONS: { value: Concept["status"]; label: string }[] = [
+  { value: "draft", label: "suggested" },
+  { value: "active", label: "approved" },
+  { value: "deprecated", label: "old" },
+]
 
 function ConceptStatusBadge({ status }: { status: Concept["status"] }) {
   const variant =
@@ -126,21 +146,32 @@ function RenderingRow({ rendering, index, onChange, onRemove }: RenderingRowProp
           onChange(index, { ...rendering, rendering: e.target.value })
         }
       />
-      <select
+      <Select
+        items={RENDERING_STATUS_OPTIONS}
         value={rendering.status}
-        aria-label={`Rendering ${index + 1} status`}
-        className="h-8 rounded-lg border bg-background px-2 text-xs focus-visible:ring-2 focus-visible:ring-ring"
-        onChange={(e) =>
+        onValueChange={(v) =>
           onChange(index, {
             ...rendering,
-            status: e.target.value as RenderingStatus,
+            status: (v ?? rendering.status) as RenderingStatus,
           })
         }
       >
-        <option value="preferred">required</option>
-        <option value="admitted">alternate</option>
-        <option value="forbidden">forbidden</option>
-      </select>
+        <SelectTrigger
+          aria-label={`Rendering ${index + 1} status`}
+          className="text-xs"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            {RENDERING_STATUS_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
       <Button
         variant="ghost"
         size="icon-sm"
@@ -292,16 +323,26 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
           {/* Status */}
           <div className="space-y-1.5">
             <Label htmlFor="concept-status">Status</Label>
-            <select
-              id="concept-status"
+            <Select
+              items={CONCEPT_STATUS_OPTIONS}
               value={status}
-              className="h-8 w-full rounded-lg border bg-background px-2 text-sm focus-visible:ring-2 focus-visible:ring-ring"
-              onChange={(e) => setStatus(e.target.value as Concept["status"])}
+              onValueChange={(v) =>
+                setStatus((v ?? "draft") as Concept["status"])
+              }
             >
-              <option value="draft">suggested</option>
-              <option value="active">approved</option>
-              <option value="deprecated">old</option>
-            </select>
+              <SelectTrigger id="concept-status" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {CONCEPT_STATUS_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 

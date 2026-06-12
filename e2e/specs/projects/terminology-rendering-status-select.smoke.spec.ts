@@ -1,18 +1,19 @@
 import { test, expect } from "../../helpers/multi-user"
+import { expectSelectValue, pickSelectOption } from "../../helpers/base-ui"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
  * Terminology concept dialog — RenderingRow status select.
  *
  * Each rendering row in the concept dialog (TerminologyPage.tsx) has a
- * <select aria-label="Rendering N status"> with options:
+ * Base UI Select (trigger aria-label="Rendering N status") with options:
  *   - "required" → value "preferred"
  *   - "alternate" → value "admitted" (default for new rows)
  *   - "forbidden" → value "forbidden"
  *
  * This spec: open the Add concept dialog → verify rendering 1 status defaults
- * to "admitted" → change to "preferred" → verify value is "preferred" →
- * change to "forbidden" → verify value is "forbidden".
+ * to "alternate" → change to "required" → verify the trigger shows "required" →
+ * change to "forbidden" → verify it shows "forbidden".
  */
 test("terminology rendering row status select changes rendering status", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -35,18 +36,18 @@ test("terminology rendering row status select changes rendering status", async (
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
 
-  // Rendering 1 status select defaults to "admitted" (Alternate).
-  const statusSelect = dialog.locator('[aria-label="Rendering 1 status"]')
+  // Rendering 1 status select defaults to "alternate" (value "admitted").
+  const statusSelect = dialog.getByRole("combobox", { name: "Rendering 1 status" })
   await expect(statusSelect).toBeVisible({ timeout: 3_000 })
-  await expect(statusSelect).toHaveValue("admitted")
+  await expectSelectValue(statusSelect, "alternate")
 
-  // Change to "preferred" (Required).
-  await statusSelect.selectOption("preferred")
-  await expect(statusSelect).toHaveValue("preferred")
+  // Change to "required" (value "preferred").
+  await pickSelectOption(alice, statusSelect, "required")
+  await expectSelectValue(statusSelect, "required")
 
   // Change to "forbidden".
-  await statusSelect.selectOption("forbidden")
-  await expect(statusSelect).toHaveValue("forbidden")
+  await pickSelectOption(alice, statusSelect, "forbidden")
+  await expectSelectValue(statusSelect, "forbidden")
 
   // Close dialog.
   await alice.keyboard.press("Escape")

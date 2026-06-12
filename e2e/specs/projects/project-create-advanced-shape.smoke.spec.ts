@@ -4,7 +4,8 @@ import { test, expect } from "../../helpers/multi-user"
  * ProjectCreateDialog — "Advanced: project shape" details section.
  *
  * ProjectCreateDialog.tsx renders a <details> element labeled
- * "Advanced: project shape" with three radio inputs:
+ * "Advanced: project shape" with a Base UI RadioGroup (role="radio" items,
+ * not native inputs):
  *   - Self-contained (default)
  *   - Source-only
  *   - Linked target
@@ -13,7 +14,7 @@ import { test, expect } from "../../helpers/multi-user"
  * revealing the radio buttons. Selecting "Source-only" checks that radio.
  *
  * This spec: open the "+ New Project" dialog → expand "Advanced: project
- * shape" details → verify three radio inputs visible → select "Source-only"
+ * shape" details → verify three radio items visible → select "Source-only"
  * → verify it is checked → select "Self-contained" → verify it is checked.
  */
 test("project create dialog advanced shape section toggles radio buttons", async ({ alice }) => {
@@ -33,12 +34,12 @@ test("project create dialog advanced shape section toggles radio buttons", async
   await expect(advancedSummary).toBeVisible({ timeout: 3_000 })
   await advancedSummary.click()
 
-  // Three radio inputs should now be visible.
-  const radios = dialog.locator('input[type="radio"][name="shape"]')
+  // Three radio items (Base UI role="radio") should now be visible.
+  const radios = dialog.getByRole("radio")
   await expect(radios).toHaveCount(3, { timeout: 3_000 })
 
   // Self-contained is checked by default.
-  const selfContainedRadio = dialog.locator('input[type="radio"][name="shape"]').nth(0)
+  const selfContainedRadio = radios.nth(0)
   await expect(selfContainedRadio).toBeChecked()
 
   // Click "Source-only" label.
@@ -46,7 +47,7 @@ test("project create dialog advanced shape section toggles radio buttons", async
   await expect(sourceOnlyLabel).toBeVisible({ timeout: 2_000 })
   await sourceOnlyLabel.click()
 
-  const sourceOnlyRadio = dialog.locator('input[type="radio"][name="shape"]').nth(1)
+  const sourceOnlyRadio = radios.nth(1)
   await expect(sourceOnlyRadio).toBeChecked()
   await expect(selfContainedRadio).not.toBeChecked()
 

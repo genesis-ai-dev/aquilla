@@ -140,9 +140,15 @@ describe("CharacterModal delete confirm (FRO-291)", () => {
     const confirmBtn = screen.getByRole("button", { name: /^Delete character$/i })
     expect(confirmBtn).toBeDisabled()
 
-    // Check the checkbox
+    // Check the checkbox via its label text: happy-dom re-dispatches
+    // label-wrapped clicks back onto the control, so clicking the checkbox
+    // itself double-toggles there (browsers don't).
     const checkbox = screen.getByRole("checkbox")
-    fireEvent.click(checkbox)
+    expect(checkbox).toHaveAttribute("aria-checked", "false")
+    fireEvent.click(
+      screen.getByText(/deletes the voice character for everyone/i),
+    )
+    expect(checkbox).toHaveAttribute("aria-checked", "true")
     expect(confirmBtn).not.toBeDisabled()
 
     // Confirm

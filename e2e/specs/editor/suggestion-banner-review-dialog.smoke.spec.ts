@@ -48,7 +48,8 @@ test("suggestion banner Review opens dialog with file suggestions; Cancel closes
   await expect(dialog.getByText(/Review suggested names/i)).toBeVisible()
 
   // Both file suggestions are listed with checkboxes (pre-checked).
-  const checkboxes = dialog.locator('input[type="checkbox"]')
+  // shadcn Checkbox — role="checkbox" spans (native inputs are hidden).
+  const checkboxes = dialog.getByRole("checkbox")
   await expect(checkboxes).toHaveCount(2, { timeout: 3_000 })
 
   // "Apply N changes" button is enabled (2 suggestions pre-checked).

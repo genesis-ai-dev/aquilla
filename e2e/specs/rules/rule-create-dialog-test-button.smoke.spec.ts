@@ -1,5 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { pickSelectOption } from "../../helpers/base-ui"
 
 /**
  * RuleCreateDialog — "Test your rule" area validates the pattern inline.
@@ -49,9 +50,10 @@ test("rule create dialog test button shows pass/fail for target-forbids rule", a
   // Fill in a rule name (required).
   await dialog.locator("#rname").fill("No articles in target")
 
-  // Change Rule Type to "Target forbids".
-  const ruleTypeSelect = dialog.locator("select").nth(1)
-  await ruleTypeSelect.selectOption("target-forbids")
+  // Change Rule Type to "Target forbids". The dialog has two Base UI
+  // Selects (combobox triggers): Severity first, then Rule Type.
+  const ruleTypeSelect = dialog.getByRole("combobox").nth(1)
+  await pickSelectOption(alice, ruleTypeSelect, "Target forbids")
 
   // The forbidden pattern input appears: placeholder="\\b(the|a|an)\\b".
   const patInput = dialog.locator("#tpat")

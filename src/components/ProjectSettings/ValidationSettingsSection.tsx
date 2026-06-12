@@ -2,6 +2,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -131,22 +139,29 @@ export function ValidationSettingsSection({
         <div className="space-y-2">
           <Label htmlFor="validation-role-floor">Minimum validator role</Label>
           <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
-            {/* Native select — no Radix Select component in this project's ui/ */}
-            <select
-              id="validation-role-floor"
+            <Select
+              items={ROLE_OPTIONS}
               disabled={disabled}
               value={validationRoleFloor}
-              onChange={(e) =>
-                onChange({ validationRoleFloor: e.target.value as ValidationRoleFloor })
+              onValueChange={(v) =>
+                onChange({
+                  validationRoleFloor: (v ?? validationRoleFloor) as ValidationRoleFloor,
+                })
               }
-              className="flex h-9 w-48 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {ROLE_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger id="validation-role-floor" className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {ROLE_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
           </DisabledFieldTooltip>
           <p className="text-xs text-muted-foreground">
             Only users with at least this role can cast a validation vote.

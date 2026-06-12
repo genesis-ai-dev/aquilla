@@ -283,8 +283,9 @@ describe("TerminologyPage", () => {
     const confirmBtn = screen.getByRole("button", { name: /^Delete concept$/i })
     expect(confirmBtn).toBeDisabled()
 
-    // Check the checkbox and confirm
-    fireEvent.click(screen.getByRole("checkbox"))
+    // Check the checkbox (click the wrapping label: happy-dom double-fires
+    // clicks dispatched directly on a labelable control inside a <label>)
+    fireEvent.click(screen.getByRole("checkbox").closest("label")!)
     expect(confirmBtn).not.toBeDisabled()
     fireEvent.click(confirmBtn)
 

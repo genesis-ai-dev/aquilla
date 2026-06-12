@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog"
@@ -32,9 +33,9 @@ export function ConfirmActionDialog({
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <label className="flex items-start gap-2 py-2 text-sm">
-          <input
-            type="checkbox" checked={checked}
-            onChange={(e) => setChecked(e.target.checked)}
+          <Checkbox
+            checked={checked}
+            onCheckedChange={(value) => setChecked(value === true)}
             className="mt-0.5"
           />
           <span>{checkboxLabel}</span>

@@ -6,8 +6,9 @@
 // flow always creates a NEW time-ordered file and can't populate this one.
 
 import { useState } from "react"
-import { FileAudio, Loader2 } from "lucide-react"
+import { FileAudio } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
@@ -78,7 +79,7 @@ export function TimelineAddMedia({ onAttachFile, onAttachUrl }: TimelineAddMedia
       >
         {busy === "file" ? (
           <p className="flex items-center gap-2 text-sm font-medium">
-            <Loader2 className="h-4 w-4 animate-spin" /> Adding media to this file…
+            <Spinner /> Adding media to this file…
           </p>
         ) : (
           <>
@@ -123,7 +124,7 @@ export function TimelineAddMedia({ onAttachFile, onAttachUrl }: TimelineAddMedia
             className="h-8 text-sm"
           />
           <Button size="sm" variant="outline" onClick={() => void attachUrl()} disabled={busy != null || !url.trim()}>
-            {busy === "url" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Attach"}
+            {busy === "url" ? <Spinner /> : "Attach"}
           </Button>
         </div>
         <p className="mt-1.5 text-xs text-muted-foreground">

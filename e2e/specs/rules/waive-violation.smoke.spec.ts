@@ -29,12 +29,13 @@ test("waive and unwaive a rule violation via violation popover", async ({ alice 
   const projectId = alice.url().split("/project/")[1]?.split("/")[0]
   expect(projectId).toBeTruthy()
 
-  // Enable Extra whitespace rule.
+  // Enable Extra whitespace rule (shadcn Switch, role="switch").
   await alice.goto(`/project/${projectId}/rules`)
-  const toggle = alice.getByRole("checkbox", { name: /Extra whitespace enabled/i })
+  const toggle = alice.getByRole("switch", { name: /Extra whitespace enabled/i })
   await expect(toggle).toBeVisible({ timeout: 10_000 })
-  if (!(await toggle.isChecked())) {
-    await toggle.check()
+  if ((await toggle.getAttribute("aria-checked")) !== "true") {
+    await toggle.click()
+    await expect(toggle).toHaveAttribute("aria-checked", "true", { timeout: 3_000 })
   }
 
   // Import file and create a violation.

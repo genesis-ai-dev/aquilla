@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import { formatRelativeTime, isStale } from "@/lib/time/relative";
 import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead";
 
@@ -99,15 +102,30 @@ export function MembersPanel({
               <LastActiveChip lastActiveAt={m.lastActiveAt} />
               <div className="ml-auto flex items-center gap-2">
                 {onChangeRole && !m.isLocked && !isSelf && (
-                  <select
-                    className="rounded border bg-background px-2 py-1 text-xs"
-                    value={m.roleLevel}
-                    onChange={(e) => onChangeRole(m.username, parseInt(e.target.value, 10))}
+                  <Select
+                    items={[
+                      // Current role may sit above the caller's grantable cap
+                      // (e.g. owner 700); include it so the closed trigger
+                      // renders the role name instead of the raw level.
+                      ...(grantableRoles.some((r) => r.level === m.roleLevel)
+                        ? []
+                        : [{ value: String(m.roleLevel), label: m.roleName }]),
+                      ...grantableRoles.map((r) => ({ value: String(r.level), label: r.name })),
+                    ]}
+                    value={String(m.roleLevel)}
+                    onValueChange={(v) => onChangeRole(m.username, parseInt(v ?? "", 10))}
                   >
-                    {grantableRoles.map((r) => (
-                      <option key={r.level} value={r.level}>{r.name}</option>
-                    ))}
-                  </select>
+                    <SelectTrigger size="sm" aria-label="Change role">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {grantableRoles.map((r) => (
+                          <SelectItem key={r.level} value={String(r.level)}>{r.name}</SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
                 )}
                 {!m.isLocked && !isSelf ? (
                   <Button
@@ -140,16 +158,23 @@ export function MembersPanel({
               placeholder={{ username: "Aquilla username" }}
             />
           </div>
-          <select
-            className="rounded border bg-background px-2 text-sm"
-            value={role}
-            onChange={(e) => setRole(parseInt(e.target.value, 10))}
+          <Select
+            items={grantableRoles.map((r) => ({ value: String(r.level), label: r.name }))}
+            value={String(role)}
+            onValueChange={(v) => setRole(parseInt(v ?? "", 10))}
             disabled={adding}
           >
-            {grantableRoles.map((r) => (
-              <option key={r.level} value={r.level}>{r.name}</option>
-            ))}
-          </select>
+            <SelectTrigger aria-label="Role">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {grantableRoles.map((r) => (
+                  <SelectItem key={r.level} value={String(r.level)}>{r.name}</SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
           <Button onClick={handleAdd} disabled={adding || !recipient.raw.trim()}>
             Add
           </Button>

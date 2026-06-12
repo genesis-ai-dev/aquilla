@@ -6,7 +6,8 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *
  * ProjectSettings.tsx renders a <details> element with id="section-advanced-llm"
  * and summary text "Advanced LLM settings". Clicking the summary expands the
- * section to show provider radio buttons: "Frontier" and "Custom endpoint".
+ * section to show the provider Base UI RadioGroup (role="radio" items, not
+ * native inputs): "Frontier" and "Custom endpoint".
  *
  * This spec: navigate to project settings → click the "Advanced LLM settings"
  * summary → verify the "Frontier" radio is visible → click "Custom endpoint"
@@ -31,8 +32,11 @@ test("project settings Advanced LLM section expands and Custom endpoint radio to
   await summary.scrollIntoViewIfNeeded()
   await summary.click()
 
-  // After expanding, "Frontier" radio is visible.
-  const frontierRadio = alice.locator('input[type="radio"][name="provider"][value="frontier"], input[type="radio"][name="provider"]').first()
+  // After expanding, the provider radios (Base UI role="radio") are visible;
+  // "Frontier" is first.
+  const section = alice.locator("#section-advanced-llm")
+  const radios = section.getByRole("radio")
+  const frontierRadio = radios.first()
   await expect(frontierRadio).toBeVisible({ timeout: 3_000 })
 
   // The "Custom endpoint" label text is visible.
@@ -43,6 +47,6 @@ test("project settings Advanced LLM section expands and Custom endpoint radio to
   await customLabel.click()
 
   // The custom endpoint radio is now checked.
-  const customRadio = alice.locator('input[type="radio"][name="provider"]').nth(1)
+  const customRadio = radios.nth(1)
   await expect(customRadio).toBeChecked({ timeout: 3_000 })
 })

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
@@ -40,10 +41,9 @@ export function RenameSuggestionsDialog({ open, onOpenChange, suggestions, onApp
           <ul className="space-y-1 py-2">
             {suggestions.map((s) => (
               <li key={s.fileId} className="flex items-start gap-2 rounded px-2 py-1.5 hover:bg-accent">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={checked.has(s.fileId)}
-                  onChange={() => toggle(s.fileId)}
+                  onCheckedChange={() => toggle(s.fileId)}
                   className="mt-1"
                 />
                 <div className="flex-1 text-sm">

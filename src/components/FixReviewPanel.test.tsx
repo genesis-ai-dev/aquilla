@@ -28,7 +28,7 @@ describe("FixReviewPanel", () => {
     expect(screen.getByText(/2 previews ready/i)).toBeInTheDocument()
     const checkboxes = screen.getAllByRole("checkbox")
     expect(checkboxes.length).toBeGreaterThanOrEqual(2)
-    for (const cb of checkboxes) expect((cb as HTMLInputElement).checked).toBe(true)
+    for (const cb of checkboxes) expect(cb).toHaveAttribute("aria-checked", "true")
     expect(screen.getByRole("button", { name: /apply 2 selected/i })).toBeInTheDocument()
   })
 
@@ -36,7 +36,9 @@ describe("FixReviewPanel", () => {
     render(<FixReviewPanel open={true} rule={rule} proposal={proposalWithTwo()}
       onClose={() => {}} onApply={vi.fn()} onAmendRule={() => {}} />)
     const checkboxes = screen.getAllByRole("checkbox")
-    fireEvent.click(checkboxes[0])
+    // Click the wrapping label: jsdom double-fires clicks dispatched directly
+    // on a labelable control inside a <label> (real browsers fire once).
+    fireEvent.click(checkboxes[0].closest("label")!)
     expect(screen.getByRole("button", { name: /apply 1 selected/i })).toBeInTheDocument()
   })
 

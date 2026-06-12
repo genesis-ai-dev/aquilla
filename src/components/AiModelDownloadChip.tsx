@@ -3,8 +3,9 @@
 // every previously-downloading model finishes, briefly displays a "Ready"
 // confirmation so the user knows the work completed before the chip hides.
 
-import { AlertCircle, CheckCircle2, Loader2, RotateCw, X } from "lucide-react"
+import { AlertCircle, CheckCircle2, RotateCw, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { Spinner } from "@/components/ui/spinner"
 import { prefetchAiModels, useModelStatus, type ModelId } from "@/lib/audio/prefetch"
 import { cn } from "@/lib/utils"
 
@@ -106,7 +107,7 @@ export function AiModelDownloadChip() {
         ) : allReady ? (
           <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
         ) : (
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+          <Spinner className="size-3.5 text-primary" />
         )}
         <span className="font-medium">
           {hasErrors

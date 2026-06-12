@@ -13,7 +13,16 @@
 
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import type { ColumnMapping, SpreadsheetSheet } from "@/lib/parsers/spreadsheet"
 
 export interface ColumnMappingPanelProps {
@@ -41,27 +50,35 @@ function ColSelect({
   onChange: (v: number | null) => void
   required?: boolean
 }) {
+  // items on the root so the closed trigger renders the label, not the value.
+  const items = [
+    { value: "", label: "— ignore —" },
+    ...headers.map((h, i) => ({ value: String(i), label: h || `Column ${i + 1}` })),
+  ]
   return (
     <div className="flex items-center gap-3">
       <span className="w-40 shrink-0 text-xs font-medium text-foreground/80">
         {label}
         {required && <span className="ml-0.5 text-destructive">*</span>}
       </span>
-      <select
-        className="flex-1 rounded-md border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
-        value={value ?? ""}
-        onChange={(e) => {
-          const v = e.target.value
-          onChange(v === "" ? null : parseInt(v, 10))
-        }}
+      <Select
+        items={items}
+        value={value === null ? "" : String(value)}
+        onValueChange={(v) => onChange(v === "" || v == null ? null : parseInt(v, 10))}
       >
-        <option value="">— ignore —</option>
-        {headers.map((h, i) => (
-          <option key={i} value={i}>
-            {h || `Column ${i + 1}`}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger size="sm" className="flex-1 text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            {items.map((it) => (
+              <SelectItem key={it.value} value={it.value}>
+                {it.label}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
     </div>
   )
 }
@@ -113,11 +130,9 @@ export function ColumnMappingPanel({ sheet, onConfirm, onCancel }: ColumnMapping
 
       {/* Header toggle */}
       <label className="flex items-center gap-2 text-xs">
-        <input
-          type="checkbox"
-          className="rounded"
+        <Checkbox
           checked={hasHeader}
-          onChange={(e) => setHasHeader(e.target.checked)}
+          onCheckedChange={(checked) => setHasHeader(checked === true)}
         />
         First row is a header
       </label>

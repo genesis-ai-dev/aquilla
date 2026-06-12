@@ -3,7 +3,8 @@
 // so the button and the waveform stay in lock-step on play / pause / seek.
 // FRO-238: aria-label mirrors title so screen-readers and test selectors work.
 
-import { AlertCircle, CloudDownload, CloudOff, FileQuestion, Loader2, Pause, Play, Trash2 } from "lucide-react"
+import { AlertCircle, CloudDownload, CloudOff, FileQuestion, Pause, Play, Trash2 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import type { UseCellAudioResult } from "@/hooks/useCellAudio"
 
@@ -50,7 +51,7 @@ export function CellAudioButton({ controller, hidden }: Props) {
               : "text-muted-foreground/50 hover:text-foreground",
       )}
     >
-      {state === "loading" && <Loader2 className="h-3 w-3 animate-spin" />}
+      {state === "loading" && <Spinner className="size-3" />}
       {state === "error" && errorIcon(error?.kind)}
       {state === "cloud" && <CloudDownload className="h-3 w-3" />}
       {state !== "loading" && state !== "error" && state !== "cloud" && (isPlaying

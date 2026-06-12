@@ -1,5 +1,5 @@
 import { memo, useState } from "react"
-import { Loader2, AlertTriangle, HelpCircle } from "lucide-react"
+import { AlertTriangle, HelpCircle } from "lucide-react"
 import { useProjectsMembersMatrix } from "@/hooks/useProjectsMembersMatrix"
 import { useOrg } from "@/hooks/useOrg"
 import { ROLE } from "@/lib/frontier/roles"
@@ -12,6 +12,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { Spinner } from "@/components/ui/spinner"
 import type { MatrixMember, MatrixCell } from "@/hooks/useProjectsMembersMatrix"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
@@ -57,7 +58,7 @@ export function MembersMatrixView() {
   if (isLoading && !matrix) {
     return (
       <div className="flex items-center justify-center py-12 text-muted-foreground">
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        <Spinner className="mr-2" />
         <span className="text-sm">Building portfolio matrix…</span>
       </div>
     )

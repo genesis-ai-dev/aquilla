@@ -17,6 +17,7 @@
 import { audioObjectKey, r2KeyPrefix } from "./audio"
 import { verifyTokenForFile } from "./auth"
 import { runTtsGuard, recordTtsUsage } from "./tts-budget"
+import { recordCredit } from "./credits"
 
 export interface TtsEnv {
   SNAPSHOTS: R2Bucket
@@ -32,6 +33,17 @@ export interface TtsEnv {
   TTS_BUDGET_ENFORCE?: string
   /** Postgres (Neon) handle — required for metering. */
   AQUILLA_PG?: AquillaDb
+  /**
+   * Flat per-call TTS cost estimate in cents (amortised GPU cold-start, etc.).
+   * Default: 2 (i.e. 2¢ per synthesis call).
+   * Spec: docs/superpowers/specs/2026-06-13-org-credits-cost-model.md § Config
+   */
+  TTS_COST_CENTS_PER_CALL?: string
+  /**
+   * Additional cost per audio-second in cents.
+   * Default: 0 (per-call estimate is the primary signal until we have GPU billing).
+   */
+  TTS_COST_PER_AUDIO_SEC_CENTS?: string
 }
 
 const TTS_PATH = "/api/v1/voice/tts"
@@ -189,6 +201,17 @@ export async function handleTtsRequest(
   // Post-record actual seconds. Mirrors ai-budget.ts: counter failure never
   // blocks a successful synthesis — recordTtsUsage degrades gracefully.
   await recordTtsUsage(db, userId, orgId, durationSeconds)
+
+  // Record TTS raw compute cost into the cross-rail credit ledger.
+  // Formula: flat per-call cost + optional per-second cost (both configurable).
+  // Spec: docs/superpowers/specs/2026-06-13-org-credits-cost-model.md § WS-SYNC-CREDITS
+  // recordCredit degrades gracefully — a ledger failure never blocks the caller.
+  const costPerCall = Number(env.TTS_COST_CENTS_PER_CALL ?? 2)
+  const costPerSec = Number(env.TTS_COST_PER_AUDIO_SEC_CENTS ?? 0)
+  const rawCostCents =
+    (Number.isFinite(costPerCall) ? Math.max(0, costPerCall) : 2) +
+    durationSeconds * (Number.isFinite(costPerSec) ? Math.max(0, costPerSec) : 0)
+  await recordCredit(db, orgId, userId, "tts", rawCostCents, Math.round(durationSeconds))
 
   return Response.json({
     audioId,

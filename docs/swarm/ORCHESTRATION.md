@@ -2,6 +2,49 @@
 
 ---
 
+# 🆕🆕🆕🆕🆕 CURRENT GOAL (2026-06-13) — OmniVoice TTS on Modal + org-attributed usage metering
+
+> **This block is the active goal.** Everything below is reference-only from prior swarms.
+> Spec (read first): `docs/superpowers/specs/2026-06-13-omnivoice-tts-design.md`.
+> Driver: user approved the design, then `/loop 5m` + `/swarm-orchestration`.
+> Note: this work plausibly unblocks the parked TTS-demo items (FRO-173 cell_audio empty, FRO-246 TTS demo asset).
+
+## §0 STOP checklist
+- [ ] `infra/modal/omnivoice.py` authored (FastAPI `/synthesize` + `/health`, `X-Auth-Token`, `X-Audio-Duration-Seconds` header; mirrors `seed_vc.py`)
+- [ ] Migration `0041_tts_usage_daily.sql` + `db/postgres/schema.sql` updated
+- [ ] `sync-worker`: `tts-budget.ts` + `tts.ts` (`POST /api/v1/voice/tts`) wired into `index.ts` + tests
+- [ ] `auth-worker`: `GET /api/v1/usage/me` + `GET /api/v1/usage/org/:orgId` (maintainer-gated) + tests
+- [ ] Frontend: client libs + `<UsageSection/>` (Preferences) + `<UsageRollup/>` (OrgHome) + editor "Generate audio" trigger + tests
+- [ ] Gate: root tsc 0 · vitest green · sync-worker tsc+test · auth-worker tsc+test · `npm run build` PASS
+- [ ] Adversarial review panel passed on integration diff (races / regressions / contracts)
+- [ ] UI-QA walkthrough: Preferences Usage + Org overview rollup + cell TTS trigger (post-merge)
+- [ ] every known gap has a SWARM-TODO trace in `docs/swarm/TRACES.md`
+
+## §1 Operating model (this goal)
+- main = sacred (tip at dispatch: `610c4be9e`, clean). Never touch another actor's uncommitted work.
+- Integration: `swarm/integration` (worktree `.worktrees/swarm-integration`, off `610c4be9e`; node_modules ×3 symlinked: root + sync-worker + auth-worker).
+- Each agent → **manual** worktree off integration tip (NOT isolation:worktree — stale-base trap, see 2026-05-31 lesson). sonnet, run_in_background. Commits its branch; **NEVER pushes/promotes/deploys**.
+- Merge: branch → integration → verify (tsc + vitest, + worker tests if touched) → log §M. Keep-both-sides on conflicts.
+- Promote integration → main only when green AND main `git status` clean (D==0, no MERGE_HEAD).
+- Enforcement default LOG-ONLY (`TTS_BUDGET_ENFORCE` off) — mirrors the LLM guard while sizing.
+- Loop: /loop 5m dynamic; background agents auto-notify on completion (primary driver). Drop to watcher / STOP on convergence — do NOT manufacture work.
+- ⚠️ Do NOT run `modal deploy` unattended — author the Python only; deploy is a human step (needs Modal secret creation).
+
+## §3 Workstream registry (this goal)
+Status: `in-flight | review | merged-integration | merged-main | blocked`
+| ID | Title | Branch | Owns (files) | Status | Agent |
+|----|-------|--------|--------------|--------|-------|
+| ws-modal | OmniVoice Modal endpoint | `swarm/ws-modal` | `infra/modal/omnivoice.py` | dispatched | — |
+| ws-sync | TTS route + metering | `swarm/ws-sync` | `db/postgres/migrations/0041_tts_usage_daily.sql`, `db/postgres/schema.sql`, `sync-worker/src/tts-budget.ts`, `sync-worker/src/tts.ts`, `sync-worker/src/index.ts`, `sync-worker/src/__tests__/tts*.test.ts` | dispatched | — |
+| ws-auth | Usage read endpoints | `swarm/ws-auth` | `auth-worker/src/routes/usage.ts`, `auth-worker/src/index.ts` (mount), `auth-worker/src/__tests__/usage*.test.ts` | dispatched | — |
+| ws-frontend | Usage UI + cell trigger | `swarm/ws-frontend` | `src/lib/sync/tts.ts`, `src/lib/sync/usage.ts`, `src/components/settings/UsageSection.tsx`, `src/components/org/UsageRollup.tsx`, `src/pages/Preferences.tsx` (insert), `src/components/org/OrgHome.tsx` (insert), editor trigger, tests | dispatched | — |
+| ws-qa | UI-QA walkthrough (wave 2) | — | post-merge | queued | — |
+
+## §M Merge log (this goal)
+- 2026-06-13 · integration `swarm/integration` created off main `610c4be9e` (spec commit). Wave 1 (4 agents, manual worktrees) dispatched: ws-modal, ws-sync, ws-auth, ws-frontend.
+
+---
+
 # 🆕🆕🆕🆕 CURRENT GOAL (2026-06-10 PD7) — Drain Prototype Debugging Todo/Backlog dev queue
 
 > **This block is the active goal.** Everything below is reference-only from prior swarms.

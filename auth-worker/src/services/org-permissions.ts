@@ -224,6 +224,8 @@ export interface PendingOrgInvite {
   createdByUsername: string
   createdAt: string
   expiresAt: string | null
+  /** Recipient email for targeted invites; null for open links. */
+  email: string | null
 }
 
 /** Unredeemed, unexpired project_invites for projects in this org. */
@@ -239,7 +241,8 @@ export async function listPendingInvitesInOrg(
             pi.created_by AS created_by_user_id,
             cu.username AS created_by_username,
             pi.created_at AS created_at,
-            pi.expires_at AS expires_at
+            pi.expires_at AS expires_at,
+            pi.email AS email
        FROM project_invites pi
        INNER JOIN projects p ON p.id = pi.project_id
        INNER JOIN users cu ON cu.id = pi.created_by
@@ -258,6 +261,7 @@ export async function listPendingInvitesInOrg(
       created_by_username: string
       created_at: string
       expires_at: string | null
+      email: string | null
     }>()
 
   return (result.results ?? []).map((r) => ({
@@ -269,6 +273,7 @@ export async function listPendingInvitesInOrg(
     createdByUsername: r.created_by_username,
     createdAt: r.created_at,
     expiresAt: r.expires_at,
+    email: r.email,
   }))
 }
 

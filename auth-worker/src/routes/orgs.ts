@@ -470,6 +470,7 @@ orgs.get("/:orgId/invites", async (c) => {
       createdBy: { userId: inv.createdByUserId, username: inv.createdByUsername },
       createdAt: inv.createdAt,
       expiresAt: inv.expiresAt,
+      email: inv.email,
     })),
   })
 })

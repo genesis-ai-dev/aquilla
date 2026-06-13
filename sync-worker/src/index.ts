@@ -107,6 +107,16 @@ declare global {
       EMAIL_FROM?: string
       /** Optional — Base URL for deep links in notification emails (e.g. https://aquilla.app). */
       BASE_URL?: string
+      /**
+       * Flat per-call TTS cost estimate in cents (amortised GPU cold-start etc.).
+       * Default: 2 (2¢ per synthesis call). Spec § Config.
+       */
+      TTS_COST_CENTS_PER_CALL?: string
+      /**
+       * Additional per-audio-second cost in cents. Default: 0.
+       * Tune once actual GPU billing is available.
+       */
+      TTS_COST_PER_AUDIO_SEC_CENTS?: string
     }
   }
 }

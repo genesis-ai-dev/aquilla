@@ -2351,9 +2351,10 @@ function EditorRow({
   const hasAnyIssue = infractionCount > 0 || cellNeedsAttention
   const numberLabel = showLineNumber ? String(rowIndex + 1) : null
   const numberPill = !showLineNumber ? null : (
-    <span title={`Line ${numberLabel}`}>
+    <span title={`Line ${numberLabel}`} className="flex h-6 items-center">
       <CellNumberPill
         number={numberLabel}
+        plain
         tint={hasMajorInfraction ? "major" : hasAnyIssue ? "issue" : "none"}
       />
     </span>
@@ -2622,12 +2623,12 @@ function EditorRow({
         onClick={handleRowClick}
         onKeyDown={handleGridRowKeyDown}
       >
-        {/* Left gutter — the number pill pins to the top-left and the
-            validation circle to the bottom-left of the card. The number pill is
-            the single issue surface (tint + hover list); no stripe/dot/warning.
-            Selection lives on the source/target divider so range selection
-            follows the text. */}
-        <div className="flex h-full flex-col items-center gap-1 py-0.5">
+        {/* Left gutter — a subtle line number sits to the LEFT of the
+            validation circle, both anchored to the top of the card. The number
+            is the single issue surface (severity tint + title); no
+            stripe/dot/warning. Selection lives on the source/target divider so
+            range selection follows the text. */}
+        <div className="flex h-full items-start justify-center gap-1 py-0.5">
           {numberPill}
           {/* Validation circle — single bare icon until validated, with a
               health ring appearing around it once there's a substantive score. */}

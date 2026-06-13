@@ -11,6 +11,7 @@ import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
 import { WorkloadRollup } from "./WorkloadRollup"
 import { UsageRollup } from "./UsageRollup"
+import { CreditsPanel } from "./CreditsPanel"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 
@@ -356,6 +357,13 @@ export function OrgHome() {
 
               {jwt && activeOrgId != null && <WorkloadRollup jwt={jwt} orgId={activeOrgId} />}
               {jwt && activeOrgId != null && <UsageRollup jwt={jwt} orgId={activeOrgId} />}
+              {jwt && activeOrgId != null && (
+                <CreditsPanel
+                  jwt={jwt}
+                  orgId={activeOrgId}
+                  orgRoleLevel={activeOrg?.role.level ?? 0}
+                />
+              )}
             </>
           )}
         </div>

@@ -3,13 +3,14 @@
 // every project on this device — downloading once here speeds up the first
 // transcribe / synth everywhere. Lets the user see what's downloaded, pull a
 // fresh copy, retry a failed download, or reclaim disk by clearing one.
+//
+// Lives on the personal Preferences page (device-scoped, like the model cache
+// itself). Project Settings links here rather than duplicating the controls.
 
 import { useEffect, useState } from "react"
-import { CheckCircle2, AlertCircle, Download, RotateCw, Trash2, HardDriveDownload } from "lucide-react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { CheckCircle2, AlertCircle, Download, RotateCw, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
 import {
   clearPrefetchStatus,
@@ -57,26 +58,21 @@ export function LocalModelsSection() {
   }, [])
 
   return (
-    <Card id="section-local-models">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <HardDriveDownload className="h-4 w-4 text-primary" /> Local AI models
-        </CardTitle>
-        <CardDescription>
-          These models run entirely in your browser — audio and text never leave
-          your device. They're stored once and shared across all your projects on
-          this device.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="p-0">
-        {MODELS.map((meta, i) => (
-          <div key={meta.id}>
-            {i > 0 && <Separator />}
-            <ModelRow meta={meta} />
-          </div>
+    <section id="local-models" className="mt-8 space-y-3">
+      <div>
+        <h2 className="text-base font-semibold">Local AI models</h2>
+        <p className="text-xs text-muted-foreground">
+          Whisper transcription and Kokoro / MMS voices run entirely in your
+          browser — audio and text never leave your device. They're stored once
+          and shared across all your projects on this device.
+        </p>
+      </div>
+      <div className="divide-y rounded-lg border bg-card">
+        {MODELS.map((meta) => (
+          <ModelRow key={meta.id} meta={meta} />
         ))}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   )
 }
 
@@ -110,7 +106,7 @@ function ModelRow({ meta }: { meta: ModelMeta }) {
   }
 
   return (
-    <div className="flex items-start justify-between gap-4 px-6 py-4">
+    <div className="flex items-start justify-between gap-4 px-4 py-3">
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">{meta.label}</span>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { ArrowLeft, CheckCircle, XCircle, ChevronDown, Sparkles, Save } from "lucide-react"
+import { ArrowLeft, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDriveDownload } from "lucide-react"
 import { Menu } from "@base-ui/react/menu"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -43,7 +43,6 @@ import type {
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
-import { LocalModelsSection } from "./ProjectSettings/LocalModelsSection"
 import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
 import { useOrg } from "@/hooks/useOrg"
@@ -1095,7 +1094,29 @@ export function ProjectSettings() {
         )}
 
         {visibleSections.some((s) => s.id === "section-local-models") && (
-          <LocalModelsSection />
+          <Card id="section-local-models">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <HardDriveDownload className="h-4 w-4 text-primary" /> Local AI models
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between gap-4">
+                <p className="text-sm text-muted-foreground">
+                  Whisper transcription and the local voices run in your browser and
+                  are shared across every project on this device. Manage downloads in
+                  your personal preferences.
+                </p>
+                <Button
+                  variant="outline"
+                  onClick={() => requestNavigate("/preferences")}
+                  className="shrink-0"
+                >
+                  Manage models
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         {visibleSections.some((s) => s.id === "section-decay") && (

@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label"
 import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
 import { PersonalProviderSection } from "@/components/settings/PersonalProviderSection"
+import { LocalModelsSection } from "@/components/ProjectSettings/LocalModelsSection"
 import { UsageSection } from "@/components/settings/UsageSection"
 import { cn } from "@/lib/utils"
 import type { DockRailPosition } from "@/lib/dock-rail-position"
@@ -119,6 +120,8 @@ export function Preferences() {
             <div className="mt-8">
               <PersonalProviderSection />
             </div>
+
+            <LocalModelsSection />
           </div>
         </div>
       }

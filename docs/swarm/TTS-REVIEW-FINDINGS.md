@@ -16,5 +16,11 @@ Fixes applied by orchestrator before promotion. Status: `OPEN` / `FIXED`.
 ## Lens B — Contracts / permissions (agent a57938803350892d1, PENDING)
 <!-- await -->
 
-## Lens C — Races / regressions / EditorTable (agent af508408b0a48cba9, PENDING)
-<!-- await -->
+## Lens C — Races / regressions / EditorTable (agent af508408b0a48cba9, DONE)
+
+- [OPEN] **C-BLOCKER-1** `src/components/EditorTable.tsx:2280-2289` + `src/lib/sync/tts.ts:26-31` — client attaches `url: frontier-audio://${result.audioId}` but `audioId` has NO extension; server returns `objectName` (`...wav`) + `url` (`frontier-audio://...wav`) which the `SynthesizeCellTtsResult` interface OMITS. `parseFrontierAudioUrl` (upload.ts:42) needs a dotted ext → returns null → `pointer-invalid` → "Audio format unrecognized". Every TTS clip unplayable. **Fix:** add `objectName` + `url` to `SynthesizeCellTtsResult`; in handleOmniTts use `audioId: result.objectName, url: result.url`.
+- [OPEN] **C-MAJOR-1** `src/components/EditorTable.tsx:2280-2289` — `result.durationSeconds` not forwarded as `durationMs` to `emitCellAudioAttach` → `cell_audio.duration_ms = NULL`, breaks duration-dependent UI. **Fix:** `durationMs: Math.round(result.durationSeconds * 1000)`.
+- [OPEN] **C-MINOR-1** `src/components/EditorTable.tsx:2255-2259` — the `SWARM-TODO(tts-cell-attach)` comment is FACTUALLY WRONG: server projection (event-projection.ts:755-811) already `SET selected=0` on siblings + new clip `selected=1`. Auto-select already happens. **Fix:** DELETE the comment (do NOT add emitCellAudioSelect — would be redundant).
+- [OK] C-MINOR-2 unmount guard absent in handleOmniTts — matches existing handleTranscribe pattern, React 18 tolerant, not a regression. Skip.
+- [OK] **EditorTable regression: CLEAR** — only additive (imports + RailButton + handler + state); no existing logic/deps/JSX altered; user's transcribe work untouched.
+- [OK] UsageRollup/UsageSection: CLEAR — cancelled-flag cleanup, 403→hide, orgId in deps.

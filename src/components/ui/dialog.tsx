@@ -51,7 +51,12 @@ function DialogContent({
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-3xl bg-popover p-5 text-sm text-popover-foreground shadow-soft-lg duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          // Robust default skeleton: a column-flex box that never exceeds the
+          // viewport (max-h-[85dvh]) and clips its own overflow. The header,
+          // footer, and close button stay fixed; long bodies opt into a
+          // <DialogBody> scroll region. Short dialogs never overflow, so the
+          // clip is invisible to them. Width follows the shadcn default (lg).
+          "fixed top-1/2 left-1/2 z-50 flex max-h-[85dvh] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 overflow-hidden rounded-3xl bg-popover p-5 text-sm text-popover-foreground shadow-soft-lg duration-100 outline-none sm:max-w-lg data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
         {...props}
@@ -82,7 +87,23 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2", className)}
+      className={cn("flex shrink-0 flex-col gap-2", className)}
+      {...props}
+    />
+  )
+}
+
+/**
+ * Scrollable body region for dialogs whose content can exceed the viewport.
+ * Place it between DialogHeader and DialogFooter so those stay fixed while the
+ * body scrolls. Bleeds to the dialog's horizontal edges (so the scrollbar sits
+ * at the edge) while keeping content padding.
+ */
+function DialogBody({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="dialog-body"
+      className={cn("-mx-5 min-h-0 flex-1 overflow-y-auto px-5", className)}
       {...props}
     />
   )
@@ -100,7 +121,7 @@ function DialogFooter({
     <div
       data-slot="dialog-footer"
       className={cn(
-        "-mx-5 -mb-5 mt-1 flex flex-col-reverse gap-2 rounded-b-3xl bg-muted/40 p-5 sm:flex-row sm:justify-end",
+        "-mx-5 -mb-5 mt-1 flex shrink-0 flex-col-reverse gap-2 rounded-b-3xl bg-muted/40 p-5 sm:flex-row sm:justify-end",
         className
       )}
       {...props}
@@ -146,6 +167,7 @@ function DialogDescription({
 
 export {
   Dialog,
+  DialogBody,
   DialogClose,
   DialogContent,
   DialogDescription,

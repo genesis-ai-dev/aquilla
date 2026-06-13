@@ -52,11 +52,13 @@ export function FileTargetImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Import translations</DialogTitle>
         </DialogHeader>
-        <div className="min-h-0 overflow-y-auto">
+        {/* The panel owns its own header / scroll / footer layout; give it the
+            full remaining height so its review step can pin the footer. */}
+        <div className="flex min-h-0 flex-1 flex-col">
           <FileTargetImportPanel
             key={panelKey}
             projectId={projectId}

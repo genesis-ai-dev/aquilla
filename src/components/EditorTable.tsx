@@ -3601,6 +3601,7 @@ function EditorRow({
                           }
                           editable={editable}
                           onRetranscribe={handleTranscribe}
+                          onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
                         />
                       )}
                       <div className="flex flex-wrap gap-1.5">
@@ -3650,6 +3651,7 @@ function EditorRow({
                             tokenizeWords(cell.translated).length === generatedVoiceTimings.length
                           }
                           editable={editable}
+                          onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
                         />
                       )}
                       <div className="flex flex-wrap items-center gap-1.5">

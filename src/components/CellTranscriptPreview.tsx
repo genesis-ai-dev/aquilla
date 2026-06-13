@@ -1,10 +1,13 @@
-// Shows what Whisper heard for the cell's selected recording, plus a
-// one-click action to use it as the cell's text when the transcript differs
-// from what the user typed. Renders under the waveform when timings exist;
-// gives the otherwise-invisible transcription work an obvious payoff.
+// Shows what Whisper heard for the cell's selected recording, plus one-click
+// actions to re-run transcription or adopt the transcript as the cell's text
+// when it differs from what the user typed. Renders under the waveform when
+// timings exist; gives the otherwise-invisible transcription work an obvious
+// payoff.
 
 import { forwardRef, useMemo } from "react"
-import { Sparkles, AlertTriangle, RefreshCw } from "lucide-react"
+import { Sparkles, AlertTriangle, RefreshCw, CornerDownLeft } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { WordTiming } from "@/lib/codex-editor/types"
 
@@ -18,6 +21,9 @@ interface Props {
   alignedToCellText: boolean
   editable: boolean
   onRetranscribe?: () => void
+  /** Commit the transcript as the cell's target text. Receives the plain
+   *  transcript string. Surfaced when the transcript differs from the cell. */
+  onUseAsCellText?: (transcript: string) => void
 }
 
 function transcriptOf(timings: WordTiming[]): string {
@@ -30,7 +36,7 @@ function looselyEquals(a: string, b: string): boolean {
 }
 
 export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function CellTranscriptPreview({
-  timings, cellText, cellId: _cellId, alignedToCellText, editable: _editable, onRetranscribe,
+  timings, cellText, cellId: _cellId, alignedToCellText, editable, onRetranscribe, onUseAsCellText,
 }: Props, ref) {
   const transcript = useMemo(() => (timings ? transcriptOf(timings) : ""), [timings])
   if (!timings || timings.length === 0) return null
@@ -43,17 +49,13 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
   const lastTiming = timings[timings.length - 1]
   const isStale = alignedToCellText && lastTiming.end > cellText.length
 
-  // Phase 2c-gamma: "Use as cell text" wrote into the per-file Y.Doc.
-  // The button still renders but is disabled until the cell-text-from-
-  // transcript writeback returns via the target.cell.commit grammar.
+  const wordCount = `${timings.length} word${timings.length === 1 ? "" : "s"}`
 
-  const tone = isStale
-    ? "ring-1 ring-amber-500/40 ring-inset"
+  const tone = isStale || (!matches && !alignedToCellText)
+    ? "border-amber-500/40"
     : matches
-      ? "ring-1 ring-emerald-500/30 ring-inset"
-      : alignedToCellText
-        ? ""
-        : "ring-1 ring-amber-500/40 ring-inset"
+      ? "border-emerald-500/30"
+      : "border-border"
 
   const Icon = isStale ? AlertTriangle : Sparkles
   const iconTone = isStale || !matches
@@ -61,53 +63,70 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
     : "text-emerald-600 dark:text-emerald-400"
 
   const headline = isStale
-    ? `Cell text was edited — word timings are out of date`
+    ? "Cell text was edited — word timings are out of date"
     : matches
-      ? `Whisper heard the cell exactly · ${timings.length} word${timings.length === 1 ? "" : "s"}`
+      ? "Whisper heard the cell exactly"
       : alignedToCellText
-        ? `Whisper transcript · ${timings.length} word${timings.length === 1 ? "" : "s"}`
-        : `Transcript doesn't match cell text · ${timings.length} word${timings.length === 1 ? "" : "s"}`
+        ? "Whisper transcript"
+        : "Transcript doesn't match cell text"
 
   return (
     <div
       ref={ref}
       tabIndex={-1}
       className={cn(
-        "neu-inset mt-1.5 rounded-xl px-2.5 py-1.5 text-xs scroll-mt-16 outline-none",
-        "focus:ring-2 focus:ring-primary/40 focus:ring-inset",
+        "mt-1.5 rounded-lg border bg-card px-3 py-2 text-xs scroll-mt-16 outline-none",
+        "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
         tone,
       )}
     >
-      <div className="flex items-start gap-1.5 leading-snug">
-        <Icon className={cn("mt-0.5 h-3 w-3 shrink-0", iconTone)} />
-        <div className="min-w-0 flex-1">
-          <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80">
-            {headline}
+      <div className="flex items-start gap-2 leading-snug">
+        <Icon className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", iconTone)} />
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-medium text-foreground">{headline}</span>
+            <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal">
+              {wordCount}
+            </Badge>
           </div>
-          <div className="mt-0.5 italic text-foreground/80 break-words">
-            "{transcript}"
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-1">
-            {isStale && _editable && onRetranscribe && (
-              <button
-                type="button"
-                onClick={onRetranscribe}
-                className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/20"
-                title="Run Whisper again with the current cell text"
-              >
-                <RefreshCw className="h-2.5 w-2.5" />
-                Re-transcribe
-              </button>
-            )}
-            {!matches && !isStale && _editable && cellHasText && (
-              <span
-                className="text-[10px] text-muted-foreground"
-                title="Replacing cell text from a transcript is disabled in this build"
-              >
-                Transcript-to-cell write disabled in this build
-              </span>
-            )}
-          </div>
+          <p className="break-words italic text-muted-foreground">"{transcript}"</p>
+          {editable && (
+            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+              {isStale && onRetranscribe && (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={onRetranscribe}
+                  title="Run Whisper again with the current cell text"
+                >
+                  <RefreshCw /> Re-transcribe
+                </Button>
+              )}
+              {!matches && !isStale && onUseAsCellText && (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => onUseAsCellText(transcript)}
+                  title={cellHasText
+                    ? "Replace this cell's text with the transcript"
+                    : "Set this cell's text from the transcript"}
+                >
+                  <CornerDownLeft /> {cellHasText ? "Use as cell text" : "Fill cell from transcript"}
+                </Button>
+              )}
+              {!matches && !isStale && onRetranscribe && (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={onRetranscribe}
+                  title="Run Whisper again"
+                  className="text-muted-foreground"
+                >
+                  <RefreshCw /> Re-transcribe
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

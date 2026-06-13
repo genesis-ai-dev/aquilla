@@ -7,6 +7,7 @@
 
 import { requestAiModelConsent, WHISPER_MODEL, AiModelConsentDeniedError } from "./ai-consent"
 import { alignChunks } from "./timings"
+import { noteModelDownloading, noteModelDownloadSettled } from "./prefetch"
 import { setTranscribeStatus } from "./transcribe-status"
 import { fetchCellAudio, parseFrontierAudioUrl } from "./upload"
 import { makeAudioSyncTokenFetcher } from "./sync-token-fetcher"
@@ -101,36 +102,53 @@ export async function transcribeAudio(
   const worker = await getWorker()
   const requestId = `t-${++workerSeq}`
 
-  const result = await new Promise<ResultMessage>((resolve, reject) => {
-    const onMessage = (event: MessageEvent<ResultMessage | ErrorMessage | ProgressMessage>) => {
-      const msg = event.data
-      if (msg.requestId !== requestId) return
-      if (msg.type === "progress") {
-        opts.onProgress?.({
-          status: msg.status,
-          file: msg.file,
-          loaded: msg.loaded,
-          total: msg.total,
-        })
-        return
-      }
-      worker.removeEventListener("message", onMessage)
-      if (msg.type === "result") resolve(msg)
-      else reject(new Error((msg as ErrorMessage).message))
-    }
-    worker.addEventListener("message", onMessage)
-    const req: TranscribeRequest = {
-      type: "transcribe",
-      requestId,
-      pcm,
-      sampleRate: WHISPER_SAMPLE_RATE,
-      language: opts.language,
-      model: opts.model,
-    }
-    worker.postMessage(req)
-  })
+  // The first transcribe on a cold cache downloads the Whisper weights inside
+  // this worker. Feed that progress into the shared model-status store so the
+  // bottom-left AiModelDownloadChip lights up — same surface the onboarding
+  // prefetch uses — instead of the download being invisible outside this cell.
+  let sawDownload = false
+  let settled = false
 
-  return { text: result.text, chunks: result.chunks }
+  try {
+    const result = await new Promise<ResultMessage>((resolve, reject) => {
+      const onMessage = (event: MessageEvent<ResultMessage | ErrorMessage | ProgressMessage>) => {
+        const msg = event.data
+        if (msg.requestId !== requestId) return
+        if (msg.type === "progress") {
+          opts.onProgress?.({
+            status: msg.status,
+            file: msg.file,
+            loaded: msg.loaded,
+            total: msg.total,
+          })
+          if (msg.total > 0) {
+            sawDownload = true
+            noteModelDownloading("whisper", { loaded: msg.loaded, total: msg.total, file: msg.file })
+          }
+          return
+        }
+        worker.removeEventListener("message", onMessage)
+        if (msg.type === "result") resolve(msg)
+        else reject(new Error((msg as ErrorMessage).message))
+      }
+      worker.addEventListener("message", onMessage)
+      const req: TranscribeRequest = {
+        type: "transcribe",
+        requestId,
+        pcm,
+        sampleRate: WHISPER_SAMPLE_RATE,
+        language: opts.language,
+        model: opts.model,
+      }
+      worker.postMessage(req)
+    })
+
+    if (sawDownload) { noteModelDownloadSettled("whisper", true); settled = true }
+    return { text: result.text, chunks: result.chunks }
+  } catch (e) {
+    if (sawDownload && !settled) noteModelDownloadSettled("whisper", false)
+    throw e
+  }
 }
 
 export interface TranscribeCellArgs {

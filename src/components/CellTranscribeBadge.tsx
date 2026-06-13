@@ -5,8 +5,9 @@
 // click-to-expand: full message + actions (retry, dismiss).
 
 import { useEffect, useRef, useState } from "react"
-import { CheckCircle2, Sparkles } from "lucide-react"
+import { CheckCircle2, Sparkles, Download } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import { Badge, badgeVariants } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import {
   clearTranscribeStatus,
@@ -27,15 +28,18 @@ interface Props {
 
 const SUCCESS_FLASH_MS = 5000
 
-export function CellTranscribeBadge({ audioId, hasTimings, onJumpToTranscript, onRetry }: Props) {
+// Shared compact sizing so every state reads as one consistent gutter pill.
+const PILL = "h-5 gap-1 px-1.5 py-0 text-[10px]"
+
+export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpToTranscript, onRetry }: Props) {
   const status = useTranscribeStatus(audioId)
   const [flashedDone, setFlashedDone] = useState<TranscribeStatus & { kind: "done" } | null>(null)
   const lastSeenKindRef = useRef<TranscribeStatus["kind"]>("idle")
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Flash a "✓ N words" success pill for a few seconds when transcription
-  // completes — the timings land in Y.Doc and the badge would otherwise
-  // vanish silently.
+  // completes — the timings land durably and the badge would otherwise vanish
+  // silently.
   useEffect(() => {
     const wasActive = lastSeenKindRef.current === "loading" || lastSeenKindRef.current === "transcribing"
     if (status.kind === "done" && wasActive) {
@@ -51,18 +55,18 @@ export function CellTranscribeBadge({ audioId, hasTimings, onJumpToTranscript, o
   if (!audioId) return null
 
   if (flashedDone) {
-    const tooltip = onJumpToTranscript
-      ? `Transcribed ${flashedDone.wordCount} word${flashedDone.wordCount === 1 ? "" : "s"} in ${(flashedDone.durationMs / 1000).toFixed(1)}s — click to view`
-      : `Transcribed ${flashedDone.wordCount} word${flashedDone.wordCount === 1 ? "" : "s"} in ${(flashedDone.durationMs / 1000).toFixed(1)}s`
+    const secs = (flashedDone.durationMs / 1000).toFixed(1)
+    const words = `${flashedDone.wordCount} word${flashedDone.wordCount === 1 ? "" : "s"}`
     return (
       <button
         type="button"
         onClick={onJumpToTranscript}
-        title={tooltip}
+        title={`Transcribed ${words} in ${secs}s${onJumpToTranscript ? " — click to view" : ""}`}
         className={cn(
-          "flex h-5 items-center gap-1 rounded px-1 text-[10px] font-medium transition-colors",
-          "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-          onJumpToTranscript && "cursor-pointer hover:bg-emerald-500/25",
+          badgeVariants({ variant: "secondary" }),
+          PILL,
+          "text-emerald-700 dark:text-emerald-400",
+          onJumpToTranscript && "cursor-pointer",
         )}
       >
         <CheckCircle2 className="h-2.5 w-2.5" />
@@ -71,43 +75,28 @@ export function CellTranscribeBadge({ audioId, hasTimings, onJumpToTranscript, o
     )
   }
 
-  if (status.kind === "idle" || status.kind === "done") {
-    if (hasTimings) return null
-    if (status.kind === "done") return null
-    return null
-  }
+  if (status.kind === "idle" || status.kind === "done") return null
 
   if (status.kind === "loading") {
     const pct = status.total > 0 ? Math.round((status.loaded / status.total) * 100) : null
     return (
-      <button
-        type="button"
-        title={pct != null
-          ? `Downloading transcription model (${pct}%)…`
-          : "Loading transcription model…"}
-        className={cn(
-          "flex h-5 items-center gap-1 rounded px-1 text-[10px] font-medium",
-          "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
-        )}
+      <Badge
+        variant="secondary"
+        className={cn(PILL, "text-amber-700 dark:text-amber-300")}
+        title={pct != null ? `Downloading transcription model (${pct}%)…` : "Loading transcription model…"}
       >
-        <Spinner className="size-2.5" />
+        {pct != null ? <Download className="h-2.5 w-2.5" /> : <Spinner className="size-2.5" />}
         {pct != null ? <span className="tabular-nums">{pct}%</span> : <span>load</span>}
-      </button>
+      </Badge>
     )
   }
 
   if (status.kind === "transcribing") {
     return (
-      <span
-        title="Transcribing audio…"
-        className={cn(
-          "flex h-5 items-center gap-1 rounded px-1 text-[10px] font-medium",
-          "bg-primary/10 text-primary",
-        )}
-      >
+      <Badge variant="secondary" className={cn(PILL, "text-primary")} title="Transcribing audio…">
         <Sparkles className="h-2.5 w-2.5 animate-pulse" />
         <span>asr</span>
-      </span>
+      </Badge>
     )
   }
 
@@ -126,9 +115,9 @@ export function CellTranscribeBadge({ audioId, hasTimings, onJumpToTranscript, o
         trigger={
           <button
             type="button"
-            className="flex h-5 cursor-pointer items-center gap-1 rounded bg-destructive/10 px-1 text-[10px] font-medium text-destructive hover:bg-destructive/20"
+            className={cn(badgeVariants({ variant: "destructive" }), PILL, "cursor-pointer")}
           >
-            <span>asr · failed</span>
+            asr · failed
           </button>
         }
       />

@@ -6,6 +6,7 @@
 import { AlertCircle, CheckCircle2, RotateCw, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { Spinner } from "@/components/ui/spinner"
+import { Button } from "@/components/ui/button"
 import { prefetchAiModels, useModelStatus, type ModelId } from "@/lib/audio/prefetch"
 import { cn } from "@/lib/utils"
 
@@ -98,7 +99,7 @@ export function AiModelDownloadChip() {
       className={cn(
         // Anchored bottom-left so we don't collide with the workspace's
         // bottom-right "Synced" pill.
-        "fixed bottom-4 left-4 z-30 w-72 rounded-lg border bg-popover p-3 text-xs shadow-lg",
+        "fixed bottom-4 left-4 z-30 w-72 rounded-xl border bg-popover p-3 text-xs text-popover-foreground shadow-lg",
       )}
     >
       <div className="mb-2 flex items-center gap-2">
@@ -114,14 +115,16 @@ export function AiModelDownloadChip() {
             ? errors.length === 1 ? `${errors[0].label} download failed` : "AI model downloads failed"
             : allReady ? "AI models ready" : "Downloading AI models"}
         </span>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon"
           onClick={() => setDismissed(true)}
           aria-label="Hide"
-          className="ml-auto flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-muted/60 hover:text-foreground"
+          className="ml-auto size-5 text-muted-foreground/60 hover:text-foreground"
         >
           <X className="h-3 w-3" />
-        </button>
+        </Button>
       </div>
 
       {downloads.length > 0 && (
@@ -166,14 +169,15 @@ export function AiModelDownloadChip() {
                 <span className="font-medium">{err.label}:</span>{" "}
                 {err.message}
               </p>
-              <button
+              <Button
                 type="button"
+                size="xs"
+                variant="outline"
                 onClick={() => handleRetry(err.id)}
-                className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-900/40"
               >
-                <RotateCw className="h-3 w-3" />
+                <RotateCw />
                 Retry
-              </button>
+              </Button>
             </li>
           ))}
         </ul>

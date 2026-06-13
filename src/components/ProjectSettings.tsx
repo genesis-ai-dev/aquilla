@@ -43,6 +43,7 @@ import type {
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
+import { LocalModelsSection } from "./ProjectSettings/LocalModelsSection"
 import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
 import { useOrg } from "@/hooks/useOrg"
@@ -601,6 +602,7 @@ export function ProjectSettings() {
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["system prompt", "ai", "llm", "instructions"] },
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
     { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
+    { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "kokoro", "mms", "transcription", "model", "download", "offline", "local ai"] },
     { id: "section-decay", label: "Decay", keywords: ["decay", "decay threshold", "half life"] },
     { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
@@ -1090,6 +1092,10 @@ export function ProjectSettings() {
               </div>
             </CardContent>
           </Card>
+        )}
+
+        {visibleSections.some((s) => s.id === "section-local-models") && (
+          <LocalModelsSection />
         )}
 
         {visibleSections.some((s) => s.id === "section-decay") && (

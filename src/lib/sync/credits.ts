@@ -51,23 +51,18 @@ export interface OrgCredits {
   remaining: CreditsRemaining
 }
 
-/** One org row in the platform-admin credits list. */
+/** One org row in the platform-admin credits list. Matches the auth-worker
+ * `GET /api/v2/admin/credits/orgs` element shape (caps + enforce + showToOrg are
+ * nested under `config`, same as the org-facing /credits endpoint). */
 export interface AdminOrgCredits {
   orgId: number
   orgName: string | null
+  config: OrgCreditConfig & { showToOrg: boolean }
   day: CreditsWindowBreakdown
   week: CreditsWindowBreakdown
-  caps: {
-    dailyCap: number
-    weeklyCap: number
-    agentDailyCap: number
-    agentWeeklyCap: number
-  }
-  enforce: boolean
-  showToOrg: boolean
 }
 
-/** Partial config for PATCH /api/v1/admin/credits/org/:orgId */
+/** Partial config for PATCH /api/v2/admin/credits/org/:orgId */
 export interface CreditConfigPatch {
   markup?: number
   agentMarkup?: number
@@ -105,7 +100,7 @@ export async function getOrgCredits(jwt: string, orgId: number): Promise<OrgCred
  */
 export async function listOrgCredits(jwt: string): Promise<AdminOrgCredits[] | null> {
   const res = await fetchWithTimeout(
-    `${FRONTIER_BASE}/api/v1/admin/credits/orgs`,
+    `${FRONTIER_BASE}/api/v2/admin/credits/orgs`,
     { headers: { Authorization: `Bearer ${jwt}` } },
   )
   if (res.status === 403) return null
@@ -113,7 +108,8 @@ export async function listOrgCredits(jwt: string): Promise<AdminOrgCredits[] | n
     const body = await res.text().catch(() => "")
     throw new Error(`admin/credits/orgs failed: HTTP ${res.status} — ${body.slice(0, 200)}`)
   }
-  return (await res.json()) as AdminOrgCredits[]
+  // Server wraps the array as { orgs: [...] }.
+  return ((await res.json()) as { orgs: AdminOrgCredits[] }).orgs
 }
 
 /**
@@ -127,7 +123,7 @@ export async function setOrgCreditConfig(
   patch: CreditConfigPatch,
 ): Promise<void> {
   const res = await fetchWithTimeout(
-    `${FRONTIER_BASE}/api/v1/admin/credits/org/${encodeURIComponent(orgId)}`,
+    `${FRONTIER_BASE}/api/v2/admin/credits/org/${encodeURIComponent(orgId)}`,
     {
       method: "PATCH",
       headers: {

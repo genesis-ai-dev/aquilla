@@ -109,10 +109,10 @@ function AdminCreditsRow({
   row: AdminOrgCredits
   onPatch: (orgId: number, patch: CreditConfigPatch) => Promise<void>
 }) {
-  const dayPct = capUsagePct(row.day.totalCredits, row.caps.dailyCap)
-  const weekPct = capUsagePct(row.week.totalCredits, row.caps.weeklyCap)
-  const agentDayPct = capUsagePct(row.day.agentCredits, row.caps.agentDailyCap)
-  const agentWeekPct = capUsagePct(row.week.agentCredits, row.caps.agentWeeklyCap)
+  const dayPct = capUsagePct(row.day.totalCredits, row.config.dailyCap)
+  const weekPct = capUsagePct(row.week.totalCredits, row.config.weeklyCap)
+  const agentDayPct = capUsagePct(row.day.agentCredits, row.config.agentDailyCap)
+  const agentWeekPct = capUsagePct(row.week.agentCredits, row.config.agentWeeklyCap)
 
   return (
     <tr className="border-t align-top">
@@ -142,7 +142,7 @@ function AdminCreditsRow({
       {/* Editable daily cap */}
       <td className="px-3 py-2">
         <CapInput
-          value={row.caps.dailyCap}
+          value={row.config.dailyCap}
           onCommit={(v) => onPatch(row.orgId, { dailyCap: v })}
           label="daily cap"
         />
@@ -151,7 +151,7 @@ function AdminCreditsRow({
       {/* Editable weekly cap */}
       <td className="px-3 py-2">
         <CapInput
-          value={row.caps.weeklyCap}
+          value={row.config.weeklyCap}
           onCommit={(v) => onPatch(row.orgId, { weeklyCap: v })}
           label="weekly cap"
         />
@@ -160,7 +160,7 @@ function AdminCreditsRow({
       {/* Enforce toggle */}
       <td className="px-3 py-2">
         <Toggle
-          checked={row.enforce}
+          checked={row.config.enforce}
           onChange={(v) => onPatch(row.orgId, { enforce: v })}
           label="enforce caps"
           testId={`enforce-toggle-${row.orgId}`}
@@ -170,7 +170,7 @@ function AdminCreditsRow({
       {/* showToOrg toggle */}
       <td className="px-3 py-2">
         <Toggle
-          checked={row.showToOrg}
+          checked={row.config.showToOrg}
           onChange={(v) => onPatch(row.orgId, { showToOrg: v })}
           label="show to org maintainers"
           testId={`show-org-toggle-${row.orgId}`}

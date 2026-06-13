@@ -121,9 +121,9 @@ export interface OrgSpend {
   weekCredits: number      // total credits, all rails, rolling 7 days
   agentDayCredits: number  // agent-only credits, today
   agentWeekCredits: number // agent-only credits, rolling 7 days
-  /** Raw cost cents by rail, today — for byRail breakdown on the endpoint. */
+  /** CREDITS (markup already applied) by rail, today — for byRail breakdown. */
   byRailDay: Record<string, number>
-  /** Raw cost cents by rail, rolling 7d — for byRail breakdown on the endpoint. */
+  /** CREDITS (markup already applied) by rail, rolling 7d — for byRail breakdown. */
   byRailWeek: Record<string, number>
 }
 
@@ -232,8 +232,8 @@ export async function readSpend(
     weekCredits: 0,
     agentDayCredits: 0,
     agentWeekCredits: 0,
-    byRailDay: {},
-    byRailWeek: {},
+    byRailDay: { llm: 0, agent: 0, tts: 0 },
+    byRailWeek: { llm: 0, agent: 0, tts: 0 },
   }
 
   let rows: Array<{ date_utc: string; rail: string; raw_cost_cents: number }>
@@ -255,7 +255,11 @@ export async function readSpend(
     return zero
   }
 
-  const spend: OrgSpend = { ...zero, byRailDay: {}, byRailWeek: {} }
+  const spend: OrgSpend = {
+    ...zero,
+    byRailDay: { llm: 0, agent: 0, tts: 0 },
+    byRailWeek: { llm: 0, agent: 0, tts: 0 },
+  }
 
   for (const row of rows) {
     const rail = row.rail as CreditRail

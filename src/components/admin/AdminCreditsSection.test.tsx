@@ -38,14 +38,16 @@ const ORG_A: AdminOrgCredits = {
     byRail: { llm: 500, agent: 800, tts: 100 },
     agentCredits: 800,
   },
-  caps: {
+  config: {
+    markup: 4,
+    agentMarkup: 5,
     dailyCap: 1000,
     weeklyCap: 5000,
     agentDailyCap: 600,
     agentWeeklyCap: 3000,
+    enforce: false,
+    showToOrg: false,
   },
-  enforce: false,
-  showToOrg: false,
 }
 
 const ORG_B: AdminOrgCredits = {
@@ -61,14 +63,16 @@ const ORG_B: AdminOrgCredits = {
     byRail: { llm: 0, agent: 0, tts: 0 },
     agentCredits: 0,
   },
-  caps: {
+  config: {
+    markup: 4,
+    agentMarkup: 5,
     dailyCap: 1000,
     weeklyCap: 5000,
     agentDailyCap: 600,
     agentWeeklyCap: 3000,
+    enforce: true,
+    showToOrg: true,
   },
-  enforce: true,
-  showToOrg: true,
 }
 
 describe("AdminCreditsSection — table render", () => {
@@ -118,7 +122,7 @@ describe("AdminCreditsSection — enforce toggle", () => {
     // toggle silently leaves budgets unenforced despite the admin flipping the switch.
     mockList.mockResolvedValue([ORG_A]) // enforce: false
     mockPatch.mockResolvedValue(undefined)
-    mockList.mockResolvedValueOnce([ORG_A]).mockResolvedValue([{ ...ORG_A, enforce: true }])
+    mockList.mockResolvedValueOnce([ORG_A]).mockResolvedValue([{ ...ORG_A, config: { ...ORG_A.config, enforce: true } }])
 
     render(<AdminCreditsSection jwt="admin-jwt" />)
     await waitFor(() => expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument())
@@ -138,7 +142,7 @@ describe("AdminCreditsSection — showToOrg toggle", () => {
     // call the correct patch key — a wrong key silently prevents the reveal.
     mockList.mockResolvedValue([ORG_A]) // showToOrg: false
     mockPatch.mockResolvedValue(undefined)
-    mockList.mockResolvedValueOnce([ORG_A]).mockResolvedValue([{ ...ORG_A, showToOrg: true }])
+    mockList.mockResolvedValueOnce([ORG_A]).mockResolvedValue([{ ...ORG_A, config: { ...ORG_A.config, showToOrg: true } }])
 
     render(<AdminCreditsSection jwt="admin-jwt" />)
     await waitFor(() => expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument())
@@ -156,7 +160,7 @@ describe("AdminCreditsSection — showToOrg toggle", () => {
   it("calls setOrgCreditConfig with { showToOrg: false } when toggled off", async () => {
     mockList.mockResolvedValue([ORG_B]) // showToOrg: true
     mockPatch.mockResolvedValue(undefined)
-    mockList.mockResolvedValueOnce([ORG_B]).mockResolvedValue([{ ...ORG_B, showToOrg: false }])
+    mockList.mockResolvedValueOnce([ORG_B]).mockResolvedValue([{ ...ORG_B, config: { ...ORG_B.config, showToOrg: false } }])
 
     render(<AdminCreditsSection jwt="admin-jwt" />)
     await waitFor(() => expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument())

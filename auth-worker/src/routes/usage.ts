@@ -359,16 +359,18 @@ usage.get("/org/:orgId/credits", async (c) => {
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
 
-  // Resolve credit config (includes org_settings.credits overrides).
-  const cfg = await resolveCreditConfig(c.env, c.env.AQUILLA_PG, orgId)
-
-  // Auth: platform-admin OR (org-maintainer AND showToOrg).
+  // Auth: platform-admin OR (org-maintainer AND showToOrg). Resolve config only
+  // after the membership/role gate, so a non-member never triggers a config read.
   const isAdmin = isPlatformAdmin(c)
-  if (!isAdmin) {
+  let cfg
+  if (isAdmin) {
+    cfg = await resolveCreditConfig(c.env, c.env.AQUILLA_PG, orgId)
+  } else {
     const role = await getEffectiveOrgRole(c.env, orgId, user)
     if (role == null || role < ROLE.MAINTAINER) {
       return c.json({ error: "forbidden" }, 403)
     }
+    cfg = await resolveCreditConfig(c.env, c.env.AQUILLA_PG, orgId)
     if (!cfg.showToOrg) {
       return c.json({ error: "forbidden" }, 403)
     }

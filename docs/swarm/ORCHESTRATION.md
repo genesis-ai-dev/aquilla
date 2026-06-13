@@ -31,11 +31,12 @@
 |----|-------|--------|------|--------|-------|
 | ws-cr-schema | Migration + table | `swarm/ws-cr-schema` | `db/postgres/migrations/0042_org_credit_usage_daily.sql`, `db/postgres/schema.sql` | merged-integration | a92518e |
 | ws-cr-authcredits | auth-worker credits lib + agent/chat record+guard + endpoints | `swarm/ws-cr-authcredits` | `auth-worker/src/lib/credits.ts`, `auth-worker/src/routes/agent.ts`, `chat.ts`, `usage.ts`, `admin.ts` (additive), tests | dispatched | — |
-| ws-cr-synccredits | sync-worker TTS cost record | `swarm/ws-cr-synccredits` | `sync-worker/src/credits.ts`, `sync-worker/src/tts.ts` (additive), tests | dispatched | — |
+| ws-cr-synccredits | sync-worker TTS cost record | `swarm/ws-cr-synccredits` | `sync-worker/src/credits.ts`, `sync-worker/src/tts.ts` (additive), tests | merged-integration | a5a7223 |
 | ws-cr-frontadmin | Admin credits UI + org-flag panel | `swarm/ws-cr-frontadmin` | `src/lib/credits.ts`, `src/lib/sync/credits.ts`, AdminConsole credits section, org overview panel (flag+role gated), tests | dispatched | — |
 
 ## §M Merge log (this goal)
 - 2026-06-13b · integration `swarm/credits-integration` off main `3899fe37b` (spec). Wave 1 (4 agents) dispatched. Loop cron `cd477f4c` (*/5).
+- 2026-06-13b · **ws-cr-synccredits MERGED** → credits-integration (branch 62cacecd1, clean worktree). credits.ts + TTS raw-cost record (rail='tts', no-record-on-failure). **Central verify: sync-worker tsc 0 · vitest 620/620.** In-flight: authcredits, frontadmin.
 - 2026-06-13b · **ws-cr-schema MERGED** → credits-integration (branch a1755eef9, committed clean to its worktree — isolation discipline held). Migration 0042 + schema.sql. Note: used `IF NOT EXISTS` on table+index (matches 0041, safer than spec's literal DDL). In-flight: authcredits, synccredits, frontadmin.
 
 ---

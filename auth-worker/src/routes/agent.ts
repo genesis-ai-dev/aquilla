@@ -21,6 +21,9 @@ import { AliasMap, compressRows } from "../lib/agent/compress"
 import { runGuardedSql, type SqlVarContext } from "../lib/agent/sql-guard"
 import { stageEvents, type AgentProposal, type EmitStageContext } from "../lib/agent/emit-stage"
 import { getCookbook } from "../lib/agent/docs"
+import { parseAquiferOp } from "../lib/agent/aquifer-guard"
+import { aquiferSearch, aquiferReadPage, type AquiferCitation } from "../lib/aquifer/client"
+import { isBibleResourcesEnabled } from "../lib/aquifer/gate"
 import { buildSystemPrompt } from "../lib/agent/schema-card"
 import { insertAgentRun, finishAgentRun } from "../lib/agent/runs"
 import { makePostgres } from "../../../db/shim/postgres"
@@ -47,12 +50,28 @@ const RESULT_SUMMARY_MAX = 2000
 
 // ── SSE frame types (wire contract — keep byte-identical to the plan doc) ──
 
+type CodeKind = "sql" | "emit" | "docs" | "aquifer"
+
+/** A researched Q&A the agent wants to publish back to bibletranslation.org.
+ *  Unlike an event AgentProposal, applying this does NOT go through the
+ *  /events outbox — the client POSTs it to /api/v1/aquifer/answers (no
+ *  credits). Mirrored client-side in src/lib/agent/protocol.ts. */
+export interface AquiferPublishProposal {
+  proposalId: string
+  runId: string
+  question: string
+  answer: string
+  status: "answered" | "undetermined"
+  citations: AquiferCitation[]
+}
+
 type AgentFrame =
   | { type: "run_start"; runId: string }
   | { type: "assistant_delta"; text: string }
-  | { type: "code_start"; step: number; kind: "sql" | "emit" | "docs"; summary: string }
+  | { type: "code_start"; step: number; kind: CodeKind; summary: string }
   | { type: "code_result"; step: number; ok: boolean; summary: string }
   | { type: "proposal"; proposal: AgentProposal }
+  | { type: "aquifer_proposal"; proposal: AquiferPublishProposal }
   | { type: "usage"; promptTokens: number; completionTokens: number; costCents: number }
   | { type: "done"; runId: string; status: "ok" | "capped" | "error" }
   | { type: "error"; message: string }
@@ -63,7 +82,8 @@ const EXECUTE_TOOL = {
   type: "function",
   function: {
     name: "execute",
-    description: "Run read-only SQL, stage events, or fetch docs. Exactly one field per call.",
+    description:
+      "Run read-only SQL, stage events, fetch docs, or consult Bible reference data. Exactly one field per call.",
     parameters: {
       type: "object",
       properties: {
@@ -82,6 +102,22 @@ const EXECUTE_TOOL = {
           type: "string",
           description:
             "Fetch a cookbook: drafting | checking | terminology | validation | history | assignments | files-and-refs",
+        },
+        aquifer: {
+          type: "object",
+          description:
+            "Consult bibletranslation.org scholarly reference data. {op:'search',q,limit?} | {op:'read',path,maxChars?} | {op:'publish',question,answer,status,citations}. search→read by url path; publish STAGES a Q&A for user approval (free).",
+          properties: {
+            op: { type: "string", enum: ["search", "read", "publish"] },
+            q: { type: "string" },
+            limit: { type: "number" },
+            path: { type: "string", description: "Site path from a search result url, e.g. /en/passages/RUT/1/8/" },
+            maxChars: { type: "number" },
+            question: { type: "string" },
+            answer: { type: "string" },
+            status: { type: "string", enum: ["answered", "undetermined"] },
+            citations: { type: "array", items: { type: "object" } },
+          },
         },
       },
     },
@@ -288,6 +324,10 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, signal, 
     /* prompt grounding is best-effort — the run proceeds without it */
   }
 
+  // Feature gate read once per run — gates the L1 aquifer contract (and the
+  // execute.aquifer handler re-checks it before every external call).
+  const bibleResourcesEnabled = await isBibleResourcesEnabled(env, body.projectId)
+
   const convo: ConvoMessage[] = [
     {
       role: "system",
@@ -301,6 +341,7 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, signal, 
         fileKind: focusedFile.kind,
         sourceLanguage: languages.sourceLanguage,
         targetLanguage: languages.targetLanguage,
+        bibleResourcesEnabled,
       }),
     },
     ...body.messages,
@@ -437,7 +478,7 @@ interface ToolCallEnv {
 /** Run one `execute` call; emits code_start/code_result (+ proposal) frames
  *  and returns the tool-result text the model sees. */
 async function executeToolCall(call: ToolCall, t: ToolCallEnv): Promise<string> {
-  let args: { sql?: unknown; emit?: unknown; docs?: unknown }
+  let args: { sql?: unknown; emit?: unknown; docs?: unknown; aquifer?: unknown }
   try {
     args = JSON.parse(call.function.arguments || "{}")
   } catch {
@@ -447,11 +488,11 @@ async function executeToolCall(call: ToolCall, t: ToolCallEnv): Promise<string> 
     return msg
   }
 
-  const fields = (["sql", "emit", "docs"] as const).filter((f) => args[f] !== undefined)
+  const fields = (["sql", "emit", "docs", "aquifer"] as const).filter((f) => args[f] !== undefined)
   if (call.function.name !== "execute" || fields.length !== 1) {
     const kind = fields[0] ?? "sql"
     t.send({ type: "code_start", step: t.step, kind, summary: "(invalid call)" })
-    const msg = "error: call the `execute` tool with exactly one of sql | emit | docs"
+    const msg = "error: call the `execute` tool with exactly one of sql | emit | docs | aquifer"
     t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
     return msg
   }
@@ -493,11 +534,97 @@ async function executeToolCall(call: ToolCall, t: ToolCallEnv): Promise<string> 
     return book.text
   }
 
+  if (fields[0] === "aquifer") {
+    return runAquiferCall(args.aquifer, t)
+  }
+
   const kind = fields[0] as "sql" | "emit" | "docs"
   t.send({ type: "code_start", step: t.step, kind, summary: "(wrong argument type)" })
-  const msg = `error: ${kind} has the wrong type — sql: string, emit: array, docs: string`
+  const msg = `error: ${kind} has the wrong type — sql: string, emit: array, docs: string, aquifer: object`
   t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
   return msg
+}
+
+/** Strip the origin off an Aquifer result URL → a site path the model can read. */
+function urlToPath(url: string): string {
+  try {
+    return new URL(url).pathname
+  } catch {
+    return url
+  }
+}
+
+/** Handle one execute.aquifer call: search | read | publish. Gated per-project;
+ *  publish stages an aquifer_proposal (applied later via /api/v1/aquifer/answers,
+ *  no credits). Returns the tool-result text the model sees. */
+async function runAquiferCall(rawAquifer: unknown, t: ToolCallEnv): Promise<string> {
+  const parsed = parseAquiferOp(rawAquifer)
+  if (!parsed.ok) {
+    t.send({ type: "code_start", step: t.step, kind: "aquifer", summary: "(invalid aquifer call)" })
+    const msg = `error: ${parsed.error}`
+    t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
+    return msg
+  }
+  const op = parsed.value
+
+  // Feature gate — fail closed when the project hasn't enabled Bible resources.
+  if (!(await isBibleResourcesEnabled(t.env, t.sqlVars.projectId))) {
+    t.send({ type: "code_start", step: t.step, kind: "aquifer", summary: `${op.op} (disabled)` })
+    const msg = "error: Bible resources are not enabled for this project (Project Settings → Bible resources)."
+    t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
+    return msg
+  }
+
+  if (op.op === "search") {
+    t.send({ type: "code_start", step: t.step, kind: "aquifer", summary: `search: ${op.q.slice(0, 80)}` })
+    const res = await aquiferSearch(t.env, op.q, { limit: op.limit })
+    if (!res.ok) {
+      const msg = `error: ${res.error}`
+      t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
+      return msg
+    }
+    const lines = res.data.results.map(
+      (r, i) => `${i + 1}. [${r.kind}] ${r.title} — ${urlToPath(r.url)} — ${r.description}`,
+    )
+    const text =
+      res.data.count === 0
+        ? `No Aquifer results for "${op.q}".`
+        : `Aquifer results for "${op.q}" (${res.data.count}):\n${lines.join("\n")}\n` +
+          `Read one with execute({aquifer:{op:"read", path:"<path above>"}}).`
+    t.send({ type: "code_result", step: t.step, ok: true, summary: text.slice(0, RESULT_SUMMARY_MAX) })
+    return text
+  }
+
+  if (op.op === "read") {
+    t.send({ type: "code_start", step: t.step, kind: "aquifer", summary: `read: ${op.path}` })
+    const res = await aquiferReadPage(t.env, op.path, { maxChars: op.maxChars })
+    if (!res.ok) {
+      const msg = `error: ${res.error}`
+      t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
+      return msg
+    }
+    const page = res.data
+    const text = `# ${page.title}\n(${page.url})\n\n${page.text}${page.truncated ? "\n…(truncated)" : ""}`
+    t.send({ type: "code_result", step: t.step, ok: true, summary: `read ${op.path} (${page.text.length} chars)` })
+    return text
+  }
+
+  // publish — stage a proposal; nothing leaves the worker until the user Applies.
+  t.send({ type: "code_start", step: t.step, kind: "aquifer", summary: `publish: ${op.question.slice(0, 80)}` })
+  const proposal: AquiferPublishProposal = {
+    proposalId: crypto.randomUUID(),
+    runId: t.stageCtx.runId,
+    question: op.question,
+    answer: op.answer,
+    status: op.status,
+    citations: op.citations,
+  }
+  t.send({ type: "aquifer_proposal", proposal })
+  const verdict =
+    `STAGED publish proposal (${op.status}) with ${op.citations.length} citation(s). ` +
+    `The user must Apply it to post to the wiki — do not assume it is published.`
+  t.send({ type: "code_result", step: t.step, ok: true, summary: verdict })
+  return verdict
 }
 
 export default agent

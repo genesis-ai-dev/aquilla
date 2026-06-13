@@ -71,6 +71,7 @@ import testResetRoutes from "./routes/test-reset"
 import devSeedRoutes from "./routes/dev-seed"
 import chatRoutes from "./routes/chat"
 import agentRoutes from "./routes/agent"
+import aquiferRoutes from "./routes/aquifer"
 import parseDocumentRoutes from "./routes/parse-document"
 import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
 import usageRoutes from "./routes/usage"
@@ -180,6 +181,9 @@ app.route("/api/v1/chat", chatRoutes)
 // Same auth + AI-guard path as chat; see routes/agent.ts and the 2026-06-12
 // translation-agent design/implementation-plan specs.
 app.route("/api/v1/ai/agent", agentRoutes)
+// Bible Aquifer reference proxy (bibletranslation.org) — read-only search/page
+// + gated publish. See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
+app.route("/api/v1/aquifer", aquiferRoutes)
 app.route("/api/v2/parse-document", parseDocumentRoutes)
 
 // Usage stats (read-only): per-user Preferences page + per-org Overview dashboard.

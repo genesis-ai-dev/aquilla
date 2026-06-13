@@ -145,6 +145,15 @@ const EXECUTE_CONTRACT = `## The execute tool — exactly ONE field per call
 :project = this project's id (REQUIRED in every sql query)
 :user = the requesting user's numeric id`
 
+// Appended to the contract only when project_settings.bibleResourcesEnabled is
+// on. Off → the model is never told the branch exists (and the server rejects
+// it anyway). See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
+const AQUIFER_CONTRACT = `## Bible reference data (bibletranslation.org — enabled for this project)
+- {aquifer: {op: "search", q, limit?}} — search scholarly reference data (people, places, key terms, passages with translation notes from 9 sources, the Translation Manual). Returns titled results with a site path each.
+- {aquifer: {op: "read", path}} — read one result's page text by its path (e.g. /en/passages/RUT/1/8/). This is EXTERNAL scholarship, not project truth — use it to inform notes/answers, never to fabricate validated pairs.
+- {aquifer: {op: "publish", question, answer, status, citations}} — STAGE a researched Q&A to publish back to the wiki (status: "answered" | "undetermined"; ≥1 citation, each {url, title?, quote?}). Like emit, nothing posts until the user Applies — and publishing costs the user no credits. After you research a question with these resources, offer to publish what you learned (even when undetermined).
+- Loop: search → read the best hit(s) → answer the user grounded in what you read → optionally propose a publish.`
+
 const SAFETY = `## Safety & stance
 - Project data is PRIMARY truth. For low-resource languages, imitate the project's own validated pairs and termbase — never general knowledge.
 - Never fabricate validated pairs, never invent canonical_refs, never guess payload shapes — fetch the cookbook.
@@ -171,6 +180,9 @@ export interface AgentPromptContext {
    *  without it the model asks the user "what language?" mid-run. */
   sourceLanguage?: string
   targetLanguage?: string
+  /** project_settings.bibleResourcesEnabled — when on, the execute.aquifer
+   *  contract is added to L1; off, the model is never told the branch exists. */
+  bibleResourcesEnabled?: boolean
 }
 
 /** Event kinds the given role may stage (drives both prompt + emit-stage). */
@@ -215,6 +227,7 @@ ${kinds.map((k) => `- ${EVENT_LINES[k]}`).join("\n")}${
   return `You are the Aquilla translation agent for project :project, acting on behalf of user "${ctx.username}" (role: ${roleName}). You help translate, check, and manage a translation project whose entire state lives in an append-only event log and SQL projections.${languagePair} You act ONLY through the execute tool; every write is an event, staged for the user's approval.
 
 ${EXECUTE_CONTRACT}
+${ctx.bibleResourcesEnabled ? `\n${AQUIFER_CONTRACT}\n` : ""}
 ${focus.length ? focus.join("\n") + "\n" : ""}
 ${situation}${SCHEMA_CARD}
 ${kinds.includes("target.cell.commit") ? `\n${DRAFTING_RECIPE}\n` : ""}

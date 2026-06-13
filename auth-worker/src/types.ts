@@ -89,6 +89,17 @@ export interface Env {
   //   but allowed through. Flip to "true" after sizing thresholds.
   AI_BUDGET_ENFORCE?: string
 
+  // ── Bible Aquifer reference data (bibletranslation.org) ──────────────────
+  // Server-side proxy + agent integration of our scholarly reference API,
+  // gated per-project by project_settings.bibleResourcesEnabled (default off).
+  // See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
+  /** Base origin for the Aquifer API. Default https://bibletranslation.org.
+   *  Overridden in dev/e2e to point at scripts/mock-aquifer.ts. */
+  AQUIFER_BASE_URL?: string
+  /** User-Agent sent to the Aquifer API — the live site 403s generic UAs.
+   *  Default: "Aquilla/1.0 (+https://aquilla.app)". */
+  AQUIFER_USER_AGENT?: string
+
   // ── Org credit accounting (WS-AUTH-CREDITS) ──────────────────────────────
   // Platform-level defaults; per-org overrides live in org_settings.credits.
   // CREDIT_MARKUP: base markup multiplier for llm/tts rails. Default: 4.

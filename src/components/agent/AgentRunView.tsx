@@ -9,7 +9,7 @@
  */
 
 import { useState } from "react"
-import { AlertTriangle, Check, ChevronRight, Database, FileText, Loader2, Send, X } from "lucide-react"
+import { AlertTriangle, Book, Check, ChevronRight, Database, FileText, Loader2, Send, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ChatMarkdown } from "@/components/chat/ChatMarkdown"
 import type { AgentRunUi, AgentStepUi } from "@/lib/agent/run-state"
@@ -18,6 +18,14 @@ const STEP_ICON = {
   sql: Database,
   emit: Send,
   docs: FileText,
+  aquifer: Book,
+} as const
+
+const STEP_LABEL = {
+  sql: "sql",
+  emit: "emit",
+  docs: "docs",
+  aquifer: "Bible reference",
 } as const
 
 function StepRow({ step }: { step: AgentStepUi }) {
@@ -35,7 +43,7 @@ function StepRow({ step }: { step: AgentStepUi }) {
           className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
         />
         <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
-        <span className="font-mono text-muted-foreground">{step.kind}</span>
+        <span className="font-mono text-muted-foreground">{STEP_LABEL[step.kind]}</span>
         <span className="min-w-0 flex-1 truncate font-mono">{step.summary}</span>
         {step.ok === undefined ? (
           <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" aria-label="Step running" />

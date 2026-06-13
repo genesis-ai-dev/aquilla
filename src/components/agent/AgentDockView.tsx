@@ -20,6 +20,7 @@ import type { ApplyContext } from "@/lib/agent/apply"
 import { createRun, failRun, reduceRunFrame, type AgentRunUi } from "@/lib/agent/run-state"
 import { AgentRunView } from "./AgentRunView"
 import { ProposalCard } from "./ProposalCard"
+import { AquiferProposalCard } from "./AquiferProposalCard"
 
 /** ≤10 turns on the wire — the contract says the client truncates. */
 const MAX_WIRE_TURNS = 10
@@ -181,6 +182,14 @@ export function AgentDockView({
                 resolveCell={resolveCell}
                 applyContext={applyContext}
                 onApplied={onApplied}
+              />
+            ))}
+            {(run.aquiferProposals ?? []).map((proposal) => (
+              <AquiferProposalCard
+                key={proposal.proposalId}
+                proposal={proposal}
+                projectId={projectId}
+                jwt={jwt}
               />
             ))}
           </div>

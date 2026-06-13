@@ -55,6 +55,14 @@ export interface ProjectWideSettings {
    * negative = invalidated. Synced additively the same way as `terminology`.
    */
   alignmentSeeds?: import("@/lib/completion/interlinear").AlignmentSeed[]
+  /**
+   * Bible Aquifer reference data (bibletranslation.org). Default off — when
+   * absent/false the Search-dock "Bible resources" mode is hidden and the
+   * agent's execute.aquifer branch is rejected. Read server-side by the agent
+   * and the aquifer routes via project_settings.settings->>'bibleResourcesEnabled'.
+   * See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
+   */
+  bibleResourcesEnabled?: boolean
 }
 
 export interface ProjectSettingsResponse {

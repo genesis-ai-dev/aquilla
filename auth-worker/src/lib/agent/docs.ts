@@ -252,6 +252,29 @@ emit: [{kind:'file.rename', fileId:'#f1', payload:{name:'Mark (draft 2)'}}]
 file.create / file.delete are structural (PROJECT_LEAD+) — propose only
 when the user explicitly asks.`
 
+const AQUIFER = `# Bible reference cookbook — bibletranslation.org scholarly data
+Available only when the project enabled Bible resources. Use it to ground answers
+about people, places, key terms, themes, and verse-level translation notes (from
+9 scholarly sources) — NOT to invent project translations.
+
+The loop:
+1. Search for the entity or passage:
+   execute({aquifer:{op:"search", q:"chesed Ruth 1:8"}})
+   → titled results, each with a [kind] and a site path.
+2. Read the best hit by its path:
+   execute({aquifer:{op:"read", path:"/en/passages/RUT/1/8/"}})
+   → the page's main text (translation notes, study notes, comparisons).
+   Passage paths follow /en/passages/{USFM_BOOK}/{chapter}/{verse}/ — so a cell
+   whose canonical_ref is "RUT 1:8" maps to /en/passages/RUT/1/8/.
+3. Answer the user grounded in what you READ — quote/cite, don't paraphrase from
+   memory. This is external scholarship; never treat it as a validated pair.
+4. Optionally publish what you learned back to the wiki so it compounds:
+   execute({aquifer:{op:"publish", question:"…", answer:"…", status:"answered",
+            citations:[{url:"https://bibletranslation.org/en/terms/chesed/", quote:"…"}]}})
+   Publishing STAGES a proposal (the user Applies it; it costs no credits) and
+   needs ≥1 citation. Publish even when status:"undetermined" — explain why the
+   sources were inconclusive.`
+
 const COOKBOOKS: Record<string, string> = {
   drafting: DRAFTING,
   checking: CHECKING,
@@ -260,6 +283,7 @@ const COOKBOOKS: Record<string, string> = {
   history: HISTORY,
   assignments: ASSIGNMENTS,
   "files-and-refs": FILES_AND_REFS,
+  aquifer: AQUIFER,
 }
 
 export const COOKBOOK_TOPICS = Object.keys(COOKBOOKS)

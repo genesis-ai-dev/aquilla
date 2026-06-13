@@ -13,8 +13,17 @@ Fixes applied by orchestrator before promotion. Status: `OPEN` / `FIXED`.
 - [DEFER] B6 — install-from-HEAD + `device_map="cuda:0"` assumptions (deploy-time risks). SWARM-TODO ok.
 - [OK] org_id=0 fallback for no-org projects (mis-pools but no leak; `/usage/org/0`→403). SQL fully parameterized; PK matches ON CONFLICT; index covers rollup. Modal auth fails-closed on empty token, never echoes secret.
 
-## Lens B — Contracts / permissions (agent a57938803350892d1, PENDING)
-<!-- await -->
+## Lens B — Contracts / permissions (agent a57938803350892d1, DONE)
+
+- [FIXED] **B-BLOCKER-1** = C-BLOCKER-1 (audioId/url missing .wav). Confirmed: server stores R2 at `objectName` key + returns `{audioId, durationSeconds, objectName, url}`; client interface omitted objectName/url.
+- [FIXED] **B-BLOCKER-2** `src/lib/sync/usage.ts:38` — `OrgUsage.total` vs server `orgTotal` (auth-worker `OrgUsageResponse.orgTotal`). Latent bomb (UsageRollup doesn't render total yet). Renamed client → `orgTotal` + test mock.
+- [FIXED] **B-MAJOR-1** — `SynthesizeCellTtsResult` under-specified; added `objectName`+`url`.
+- [OK] B-MINOR-1 `date_utc::text` cast — valid on Neon/PG. No action.
+- [OK] B-MINOR-2 SWARM-TODO comment — superseded by C-MINOR-1 fix (comment deleted).
+- [OK] **CONFIRMED CORRECT:** TTS route mounted before catch-all; usage routes at /api/v1/usage; /identity prefix strip; FRONTIER_BASE→auth-worker, syncWorkerHttpOrigin→sync-worker; TTS sync-token auth; usage JWT auth; maintainer gate ≥600; recordTtsUsage graceful-degrade; orgId from projects.org_id; ref R2 key identical to voice-convert; migration 0041 present.
+
+## Resolution (orchestrator, commit ae70fa510 on swarm/integration)
+All BLOCKERs + MAJORs + actionable MINORs FIXED in one pass. Re-verified: root tsc 0 · root vitest 2843 pass (7 pre-existing Login only) · sync-worker tsc 0 + 604/604 · build PASS. Deferred (acceptable, SWARM-TODO in code): omnivoice.py release-pin, device_map, language kwarg.
 
 ## Lens C — Races / regressions / EditorTable (agent af508408b0a48cba9, DONE)
 

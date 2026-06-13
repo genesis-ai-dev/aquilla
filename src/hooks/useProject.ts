@@ -44,6 +44,7 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   if (settings.validationRoleFloor != null) next.validationRoleFloor = settings.validationRoleFloor
   if (settings.validationNamedUsers != null) next.validationNamedUsers = settings.validationNamedUsers
   if (settings.allowSelfValidation != null) next.allowSelfValidation = settings.allowSelfValidation
+  if (settings.bibleResourcesEnabled != null) next.bibleResourcesEnabled = settings.bibleResourcesEnabled
   if (settings.ttsSettings != null) {
     // Server carries voice profiles (no apiKey); keep any device-local apiKey.
     next.ttsSettings = { ...next.ttsSettings, ...settings.ttsSettings }

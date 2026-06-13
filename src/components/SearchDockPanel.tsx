@@ -15,15 +15,23 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from "react"
-import { Search, Replace, BookOpen, X, Maximize2 } from "lucide-react"
+import { Search, Replace, BookOpen, X, Maximize2, Book, ArrowLeft, ExternalLink } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { MarkedSnippet } from "@/components/search/MarkedSnippet"
+import { ChatMarkdown } from "@/components/chat/ChatMarkdown"
 import type { WorkspaceSearchResult } from "@/hooks/useWorkspaceSearch"
 import type { ReplaceAllPayload } from "./ParallelPassagesPanel"
+import {
+  aquiferSearch,
+  aquiferReadPage,
+  type AquiferSearchResult,
+  type AquiferPageResponse,
+} from "@/lib/aquifer/client"
 
-export type SearchDockMode = "search" | "replace"
+export type SearchDockMode = "search" | "replace" | "bible"
 
 export interface SearchDockPanelProps {
   activeFileId: string | null
@@ -43,6 +51,15 @@ export interface SearchDockPanelProps {
   onOpenFullPanel?: () => void
   /** FRO-309: Called when user wants to expand all results into the main area */
   onExpandResults?: (query: string) => void
+  /** Bible Aquifer reference mode — when true, a "Bible resources" mode is
+   *  offered. Sourced from project settings (`bibleResourcesEnabled`). */
+  bibleResourcesEnabled?: boolean
+  /** Project id for the aquifer routes (required by all three). */
+  projectId?: string | null
+  /** Frontier session JWT accessor — mirrors how other dock panels get auth. */
+  getJwt?: () => string | null
+  /** Canonical ref of the focused cell (e.g. "RUT 1:8"), for quick-lookup. */
+  canonicalRef?: string | null
 }
 
 export function SearchDockPanel({
@@ -56,6 +73,10 @@ export function SearchDockPanel({
   onSelect,
   onOpenFullPanel,
   onExpandResults,
+  bibleResourcesEnabled = false,
+  projectId,
+  getJwt,
+  canonicalRef,
 }: SearchDockPanelProps) {
   const [mode, setMode] = useState<SearchDockMode>("search")
   const [query, setQuery] = useState("")
@@ -129,8 +150,27 @@ export function SearchDockPanel({
         >
           <Replace className="h-3 w-3" />
         </button>
+        {bibleResourcesEnabled && (
+          <button
+            type="button"
+            title="Bible resources"
+            aria-label="Bible resources"
+            aria-pressed={mode === "bible"}
+            onClick={() => setMode("bible")}
+            className={cn(
+              "flex h-6 w-6 items-center justify-center rounded transition-colors",
+              mode === "bible"
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Book className="h-3 w-3" />
+          </button>
+        )}
 
-        {/* Scope toggle */}
+        {/* Scope toggle — only meaningful for project text search */}
+        {mode !== "bible" ? (
+        <>
         <div className="ml-auto flex items-center gap-0.5 rounded-full border px-1 py-0.5 text-[9px] text-muted-foreground">
           <button
             type="button"
@@ -166,8 +206,22 @@ export function SearchDockPanel({
             <BookOpen className="h-3 w-3" />
           </button>
         )}
+        </>
+        ) : (
+          <span className="ml-auto" />
+        )}
       </div>
 
+      {mode === "bible" && (
+        <BibleResourcesPanel
+          projectId={projectId ?? null}
+          getJwt={getJwt}
+          canonicalRef={canonicalRef ?? null}
+        />
+      )}
+
+      {mode !== "bible" && (
+      <>
       {/* Search input */}
       <div className="relative px-2 pt-2">
         <Search className="pointer-events-none absolute left-4 top-3.5 h-3 w-3 text-muted-foreground" />
@@ -263,6 +317,232 @@ export function SearchDockPanel({
           )}
         </div>
       )}
+      </>
+      )}
+    </div>
+  )
+}
+
+// ── Bible resources (Aquifer) mode ─────────────────────────────────────────
+
+/** Heuristic: only switch to ChatMarkdown when the page text already looks
+ *  like markdown. The aquifer `page.text` is plain text today, so this stays
+ *  on the <pre> branch — but when the API starts returning markdown the
+ *  renderer swaps with no other change. */
+function looksLikeMarkdown(text: string): boolean {
+  return /(^|\n)#{1,6}\s/.test(text) || /\*\*/.test(text) || /(^|\n)[-*]\s/.test(text)
+}
+
+/** Map a canonicalRef ("RUT 1:8") to the aquifer passage path
+ *  "/en/passages/RUT/1/8/". Returns null when the ref isn't book ch:vs. */
+function passagePathFromRef(canonicalRef: string): string | null {
+  const m = /^([A-Z0-9]{2,4})\s+(\d+):(\d+)/.exec(canonicalRef.trim())
+  if (!m) return null
+  const [, book, chapter, verse] = m
+  return `/en/passages/${book}/${chapter}/${verse}/`
+}
+
+function KindChip({ kind }: { kind: AquiferSearchResult["kind"] }) {
+  return (
+    <Badge variant="secondary" className="px-1.5 py-0 text-[9px] capitalize">
+      {kind.replace("-", " ")}
+    </Badge>
+  )
+}
+
+function BibleResourcesPanel({
+  projectId,
+  getJwt,
+  canonicalRef,
+}: {
+  projectId: string | null
+  getJwt?: () => string | null
+  canonicalRef: string | null
+}) {
+  const [query, setQuery] = useState("")
+  const [results, setResults] = useState<AquiferSearchResult[]>([])
+  const [searching, setSearching] = useState(false)
+  const [page, setPage] = useState<AquiferPageResponse | null>(null)
+  const [pageLoading, setPageLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => () => abortRef.current?.abort(), [])
+
+  const runSearch = useCallback(
+    async (q: string) => {
+      const jwt = getJwt?.() ?? null
+      if (!q.trim() || !jwt || !projectId) {
+        setResults([])
+        return
+      }
+      abortRef.current?.abort()
+      const controller = new AbortController()
+      abortRef.current = controller
+      setSearching(true)
+      setError(null)
+      try {
+        const res = await aquiferSearch(jwt, projectId, q.trim(), {
+          lang: "en",
+          limit: 5,
+          signal: controller.signal,
+        })
+        setResults(res.results)
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return
+        setError(err instanceof Error ? err.message : String(err))
+        setResults([])
+      } finally {
+        if (abortRef.current === controller) setSearching(false)
+      }
+    },
+    [getJwt, projectId],
+  )
+
+  const openPath = useCallback(
+    async (path: string) => {
+      const jwt = getJwt?.() ?? null
+      if (!jwt || !projectId) return
+      setPageLoading(true)
+      setError(null)
+      try {
+        const res = await aquiferReadPage(jwt, projectId, path, { maxChars: 15000 })
+        setPage(res)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setPageLoading(false)
+      }
+    },
+    [getJwt, projectId],
+  )
+
+  const refPath = canonicalRef ? passagePathFromRef(canonicalRef) : null
+
+  // Reader view — a selected result/page is open.
+  if (page) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex items-center gap-1.5 border-b px-2 py-1.5">
+          <button
+            type="button"
+            onClick={() => setPage(null)}
+            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+            aria-label="Back to results"
+          >
+            <ArrowLeft className="h-3 w-3" />
+          </button>
+          <span className="min-w-0 flex-1 truncate text-xs font-medium">{page.title}</span>
+          <a
+            href={page.url}
+            target="_blank"
+            rel="noreferrer"
+            title="Open on bibletranslation.org"
+            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+          >
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        </div>
+        <div className="flex-1 overflow-y-auto px-2 py-2 text-xs">
+          {looksLikeMarkdown(page.text) ? (
+            <ChatMarkdown content={page.text} />
+          ) : (
+            <pre className="whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-foreground">
+              {page.text}
+            </pre>
+          )}
+          {page.truncated && (
+            <p className="mt-2 text-[10px] italic text-muted-foreground">
+              Truncated — open the full page on bibletranslation.org.
+            </p>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* Quick-lookup for the focused verse */}
+      {refPath && (
+        <div className="border-b px-2 py-1.5">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 w-full justify-start gap-1.5 text-[10px]"
+            onClick={() => void openPath(refPath)}
+            disabled={pageLoading}
+          >
+            <Book className="h-3 w-3" />
+            Notes for {canonicalRef}
+          </Button>
+        </div>
+      )}
+
+      {/* Search input */}
+      <div className="relative px-2 pt-2">
+        <Search className="pointer-events-none absolute left-4 top-3.5 h-3 w-3 text-muted-foreground" />
+        <Input
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value)
+            void runSearch(e.target.value)
+          }}
+          placeholder="Search Bible resources…"
+          className="h-7 pl-7 pr-6 text-xs"
+        />
+        {query && (
+          <button
+            type="button"
+            onClick={() => {
+              setQuery("")
+              setResults([])
+            }}
+            className="absolute right-4 top-3 flex h-4 w-4 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+            aria-label="Clear search"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+
+      {/* Results */}
+      <div className="flex-1 overflow-y-auto px-2 py-1">
+        {error && <p className="py-2 text-center text-[10px] text-destructive">{error}</p>}
+        {(searching || pageLoading) && (
+          <p className="py-2 text-center text-[10px] text-muted-foreground">Loading…</p>
+        )}
+        {!searching && !error && query && results.length === 0 && (
+          <p className="py-2 text-center text-[10px] text-muted-foreground">No resources found</p>
+        )}
+        {!searching && !query && results.length === 0 && (
+          <p className="py-2 text-center text-[10px] text-muted-foreground">
+            Search bibletranslation.org for people, places, terms, and translation notes.
+          </p>
+        )}
+        {results.length > 0 && (
+          <div className="space-y-0.5">
+            {results.map((r) => (
+              <button
+                key={r.url}
+                type="button"
+                onClick={() => void openPath(new URL(r.url).pathname)}
+                className="w-full rounded px-1.5 py-1 text-left hover:bg-accent transition-colors"
+              >
+                <span className="flex items-center gap-1.5">
+                  <span className="min-w-0 flex-1 truncate text-xs font-medium">{r.title}</span>
+                  <KindChip kind={r.kind} />
+                </span>
+                {r.description && (
+                  <span className="mt-0.5 block line-clamp-2 text-[10px] text-muted-foreground">
+                    {r.description}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

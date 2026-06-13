@@ -4,6 +4,7 @@ import { ArrowLeft, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDrive
 import { Menu } from "@base-ui/react/menu"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -124,6 +125,7 @@ interface Baseline {
   validationNamedUsers: string[]
   allowSelfValidation: boolean
   harmonize_min_role: "project_lead" | "maintainer"
+  bibleResourcesEnabled: boolean
   decaySettings: DecaySettings | undefined
   audioMediaStrategy: AudioMediaStrategy
   geminiApiKey: string
@@ -156,6 +158,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     validationNamedUsers: project.validationNamedUsers ?? [],
     allowSelfValidation: project.allowSelfValidation ?? true,
     harmonize_min_role: project.harmonize_min_role ?? "project_lead",
+    bibleResourcesEnabled: project.bibleResourcesEnabled ?? false,
     decaySettings: project.decaySettings,
     audioMediaStrategy: project.audioMediaStrategy ?? "lazy",
     geminiApiKey: project.ttsSettings?.apiKey ?? "",
@@ -262,6 +265,7 @@ export function ProjectSettings() {
   const [allowSelfValidation, setAllowSelfValidation] = useState(true)
   // FRO-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
   const [harmonizeMinRole, setHarmonizeMinRole] = useState<"project_lead" | "maintainer">("project_lead")
+  const [bibleResourcesEnabled, setBibleResourcesEnabled] = useState(false)
   const [decaySettings, setDecaySettings] = useState<DecaySettings | undefined>(undefined)
   const [audioMediaStrategy, setAudioMediaStrategy] = useState<AudioMediaStrategy>("lazy")
 
@@ -308,6 +312,7 @@ export function ProjectSettings() {
     setValidationNamedUsers(b.validationNamedUsers)
     setAllowSelfValidation(b.allowSelfValidation)
     setHarmonizeMinRole(b.harmonize_min_role)
+    setBibleResourcesEnabled(b.bibleResourcesEnabled)
     setDecaySettings(b.decaySettings)
     setAudioMediaStrategy(b.audioMediaStrategy)
     setGeminiApiKey(b.geminiApiKey)
@@ -352,6 +357,7 @@ export function ProjectSettings() {
       JSON.stringify(validationNamedUsers) !== JSON.stringify(baseline.validationNamedUsers) ||
       allowSelfValidation !== baseline.allowSelfValidation ||
       harmonizeMinRole !== baseline.harmonize_min_role ||
+      bibleResourcesEnabled !== baseline.bibleResourcesEnabled ||
       audioMediaStrategy !== baseline.audioMediaStrategy ||
       !decayEqual(decaySettings, baseline.decaySettings) ||
       geminiApiKey !== baseline.geminiApiKey
@@ -362,7 +368,7 @@ export function ProjectSettings() {
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation,
-    harmonizeMinRole, audioMediaStrategy, decaySettings, geminiApiKey,
+    harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
   ])
 
   // Warn before browser-level navigation (back button, tab close, reload).
@@ -492,6 +498,7 @@ export function ProjectSettings() {
       }
       if (allowSelfValidation !== baseline.allowSelfValidation) sharedUpdates.allowSelfValidation = allowSelfValidation
       if (harmonizeMinRole !== baseline.harmonize_min_role) sharedUpdates.harmonize_min_role = harmonizeMinRole
+      if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled
 
       if (Object.keys(sharedUpdates).length > 0) {
         const out = await patchShared(sharedUpdates)
@@ -545,6 +552,7 @@ export function ProjectSettings() {
         validationNamedUsers,
         allowSelfValidation,
         harmonize_min_role: harmonizeMinRole,
+        bibleResourcesEnabled,
         decaySettings,
         audioMediaStrategy,
         geminiApiKey,
@@ -566,7 +574,7 @@ export function ProjectSettings() {
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, harmonizeMinRole,
-    audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline,
+    bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline,
   ])
 
   const handleSaveAndClose = useCallback(async () => {
@@ -609,6 +617,7 @@ export function ProjectSettings() {
     { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts"] },
     { id: "section-termbase-sharing", label: "Term Base Sharing", keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"], visible: SHOW_TERMBASE_SHARING_IN_SETTINGS },
     { id: "section-ai-metrics", label: "AI Metrics", keywords: ["post-edit", "edit distance", "ai metrics", "magnitude", "levenshtein", "ned", "biblica"] },
+    { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
   ]
 
   // ── Search filter ──────────────────────────────────────────────────────────
@@ -1225,6 +1234,33 @@ export function ProjectSettings() {
               <p className="text-xs text-muted-foreground">
                 Interval is floored at 1 minute. Sync will only push when there are local changes.
               </p>
+            </CardContent>
+          </Card>
+        )}
+        {visibleSections.some((s) => s.id === "section-bible-resources") && (
+          <Card id="section-bible-resources">
+            <CardHeader>
+              <CardTitle>Bible resources</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="bible-resources-enabled" className="text-sm">
+                      Enable Bible resources
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Enable scholarly reference data from bibletranslation.org in Search and the agent.
+                    </p>
+                  </div>
+                  <Switch
+                    id="bible-resources-enabled"
+                    checked={bibleResourcesEnabled}
+                    onCheckedChange={(checked) => setBibleResourcesEnabled(checked)}
+                    disabled={!canEditShared}
+                  />
+                </div>
+              </DisabledFieldTooltip>
             </CardContent>
           </Card>
         )}

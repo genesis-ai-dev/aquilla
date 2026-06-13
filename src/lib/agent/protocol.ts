@@ -14,9 +14,10 @@
 export type AgentFrame =
   | { type: 'run_start'; runId: string }
   | { type: 'assistant_delta'; text: string }
-  | { type: 'code_start'; step: number; kind: 'sql' | 'emit' | 'docs'; summary: string } // summary: first 120 chars of sql / "N events" / topic
+  | { type: 'code_start'; step: number; kind: 'sql' | 'emit' | 'docs' | 'aquifer'; summary: string } // summary: first 120 chars of sql / "N events" / topic
   | { type: 'code_result'; step: number; ok: boolean; summary: string }                  // compressed result block (what the model saw), truncated to 2000 chars for UI
   | { type: 'proposal'; proposal: AgentProposal }
+  | { type: 'aquifer_proposal'; proposal: AquiferPublishProposal }
   | { type: 'usage'; promptTokens: number; completionTokens: number; costCents: number }
   | { type: 'done'; runId: string; status: 'ok' | 'capped' | 'error' }
   | { type: 'error'; message: string }
@@ -38,6 +39,22 @@ export interface StagedEvent {
   payload: Record<string, unknown> // server injects ai_suggestion: true and agent_run_id for cell commits
   // display context the client card needs:
   display: { canonicalRef?: string; before?: string; after?: string }
+}
+
+// ── Aquifer publish proposal (Bible-resources answer) ──────────────────────
+
+/**
+ * Streamed when the agent proposes publishing an answer to the Bible Aquifer
+ * wiki (bibletranslation.org). Distinct from `AgentProposal` because Apply
+ * goes through aquiferPublishAnswer (a wiki POST), NOT the events outbox.
+ */
+export interface AquiferPublishProposal {
+  proposalId: string
+  runId: string
+  question: string
+  answer: string
+  status: 'answered' | 'undetermined'
+  citations: { url: string; title?: string; quote?: string }[]
 }
 
 // ── Request body for POST /api/v1/ai/agent/run ─────────────────────────────

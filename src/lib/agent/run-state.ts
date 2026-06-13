@@ -6,11 +6,11 @@
  * frame → state mapping is unit-testable without streaming or React.
  */
 
-import type { AgentFrame, AgentProposal } from "./protocol"
+import type { AgentFrame, AgentProposal, AquiferPublishProposal } from "./protocol"
 
 export interface AgentStepUi {
   step: number
-  kind: "sql" | "emit" | "docs"
+  kind: "sql" | "emit" | "docs" | "aquifer"
   /** code_start summary: first 120 chars of sql / "N events" / docs topic. */
   summary: string
   /** Undefined until the matching code_result frame arrives. */
@@ -31,6 +31,9 @@ export interface AgentRunUi {
   assistantText: string
   steps: AgentStepUi[]
   proposals: AgentProposal[]
+  /** Bible Aquifer publish proposals (aquifer_proposal frames). Optional so
+   *  pre-existing AgentRunUi fixtures (which predate this field) still type. */
+  aquiferProposals?: AquiferPublishProposal[]
   usage?: { promptTokens: number; completionTokens: number; costCents: number }
   status: AgentRunStatus
   errorMessage?: string
@@ -46,6 +49,7 @@ export function createRun(prompt: string): AgentRunUi {
     assistantText: "",
     steps: [],
     proposals: [],
+    aquiferProposals: [],
     status: "running",
   }
 }
@@ -70,6 +74,8 @@ export function reduceRunFrame(run: AgentRunUi, frame: AgentFrame): AgentRunUi {
       }
     case "proposal":
       return { ...run, proposals: [...run.proposals, frame.proposal] }
+    case "aquifer_proposal":
+      return { ...run, aquiferProposals: [...(run.aquiferProposals ?? []), frame.proposal] }
     case "usage":
       return {
         ...run,

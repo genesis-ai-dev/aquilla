@@ -382,6 +382,10 @@ export interface ProjectRecord {
    * pseudo-count seeds so subsequent statistical BT/alignment reflects them.
    */
   alignmentSeeds?: import("@/lib/completion/interlinear").AlignmentSeed[]
+  /** Bible Aquifer reference data (bibletranslation.org). Synced via
+   *  ProjectWideSettings; default off. Gates the Search-dock "Bible resources"
+   *  mode and the agent's aquifer branch. */
+  bibleResourcesEnabled?: boolean
 }
 
 /** A single authored guidance entry in the Living Memory page. */

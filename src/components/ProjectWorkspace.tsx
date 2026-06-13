@@ -3099,6 +3099,10 @@ export function ProjectWorkspace() {
                   setParallelOpen(true)
                 }}
                 onExpandResults={(q) => setSearchExpandedQuery(q)}
+                bibleResourcesEnabled={Boolean(project.bibleResourcesEnabled)}
+                projectId={project.id}
+                getJwt={() => jwtRef.current}
+                canonicalRef={focusedCellCanonicalRef}
               />
             }
           />

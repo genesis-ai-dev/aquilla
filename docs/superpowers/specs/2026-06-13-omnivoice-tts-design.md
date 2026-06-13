@@ -71,7 +71,8 @@ first download). `HF_TOKEN` comes from a Modal secret.
 
 GPU `L40S`, `scaledown_window` ~300s. Deploy:
 `modal secret create omnivoice-auth OMNIVOICE_TOKEN=<random>` then
-`modal deploy infra/modal/omnivoice.py` (using existing `MODAL_TOKEN_ID/SECRET`
+`modal deploy infra/modal/omnivoice_app.py` (file is `omnivoice_app.py`, NOT
+`omnivoice.py` — that name would shadow the installed `omnivoice` package; using existing `MODAL_TOKEN_ID/SECRET`
 + `HF_TOKEN` from gitignored `.env`).
 
 ### 2. Worker route — `sync-worker/src/tts.ts` → `POST /api/v1/voice/tts`

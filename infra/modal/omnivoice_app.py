@@ -28,7 +28,10 @@ Deploy:
     modal secret create omnivoice-auth \\
         OMNIVOICE_TOKEN=<a-long-random-string> \\
         HF_TOKEN=<your-hf-token>
-    modal deploy infra/modal/omnivoice.py             # prints the https endpoint URL
+    modal deploy infra/modal/omnivoice_app.py         # prints the https endpoint URL
+    # NOTE: do NOT rename this file to omnivoice.py — it would shadow the installed
+    # `omnivoice` package on sys.path, making `from omnivoice import OmniVoice`
+    # re-import this script (ImportError: cannot import name 'OmniVoice').
 
 Test from your machine (note the /synthesize route on the printed base URL):
     curl -X POST "<endpoint-base-url>/synthesize" \\
@@ -39,7 +42,7 @@ Test from your machine (note the /synthesize route on the printed base URL):
         --output synthesized.wav
 
 Or exercise the model path directly (no web layer / no auth):
-    modal run infra/modal/omnivoice.py --text "Hello world" --output out.wav
+    modal run infra/modal/omnivoice_app.py --text "Hello world" --output out.wav
 """
 
 import io

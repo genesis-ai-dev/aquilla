@@ -19,6 +19,7 @@ import { Preferences } from "@/pages/Preferences"
 import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
 import { OrgProvider } from "@/context/OrgContext"
 import { OutboxProvider } from "@/context/OutboxContext"
+import { NavHistoryProvider } from "@/context/NavHistoryContext"
 import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
@@ -128,7 +129,9 @@ export default function App() {
               renders into document.body so it is route-agnostic. The context
               value (openTour) is consumed by OrgSidebar's "Take the tour" button. */}
           <ProductTourProvider>
-            <AppRoutes />
+            <NavHistoryProvider>
+              <AppRoutes />
+            </NavHistoryProvider>
           </ProductTourProvider>
         </OutboxProvider>
       </OrgProvider>

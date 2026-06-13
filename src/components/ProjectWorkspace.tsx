@@ -1,6 +1,8 @@
 import { Suspense, lazy, useState, useMemo, useRef, useEffect, useCallback } from "react"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useProject } from "@/hooks/useProject"
+import { useNavHistoryTitle } from "@/context/NavHistoryContext"
+import { deriveNavTitle } from "@/lib/navigation/deriveTitle"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
 import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
 import { WorkspaceSkeleton } from "./WorkspaceSkeleton"
@@ -393,6 +395,22 @@ export function ProjectWorkspace() {
   // converge in one hop. Reads localStorage directly because it only needs
   // to fire on the no-fileId render.
   const location = useLocation()
+
+  // Upgrade this route's back/forward history entry to a human-readable label
+  // (e.g. "Genesis · Editor" or "Genesis · Luke") once the project has loaded.
+  const navHistoryTitle = useMemo(() => {
+    if (!project) return null
+    // Use the URL's file id (not the persisted selection) so a content surface
+    // like /comments is labelled "Comments", not the last-opened file.
+    const fileName = routeFileId
+      ? projectFiles.find((f) => f.id === routeFileId)?.name
+      : undefined
+    if (fileName) return `${project.name} · ${fileName}`
+    const section = deriveNavTitle(location.pathname)
+    return section === "Editor" ? project.name : `${project.name} · ${section}`
+  }, [project, routeFileId, projectFiles, location.pathname])
+  useNavHistoryTitle(navHistoryTitle)
+
   // `navigate(replace)` calls `history.replaceState` synchronously, but the
   // matching `useLocation()` / `useParams()` update only lands on a later
   // commit. During an import the WS reconnect + revalidate + optimistic-file

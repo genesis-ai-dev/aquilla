@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils"
 import { BrandContext } from "@/branding/use-brand"
 import { VersionTag } from "./VersionBadge"
 import { BetaBadge } from "./BetaBadge"
+import { NavHistoryControls } from "./NavHistoryControls"
 // FRO-307: always-available report button (3 lines: import + mount in left rail)
 import { ReportProblemButton } from "./ReportProblemButton/ReportProblemButton"
 
@@ -76,7 +77,11 @@ export function AppShell({ leftDock, sidebar, logoSlot, logoAccessory, header, s
       >
         {(resolvedLogo || logoAccessory) && (
           <div className="flex shrink-0 items-center justify-between">
-            {resolvedLogo}
+            <div className="flex items-center gap-0.5">
+              {resolvedLogo}
+              {/* Browser-style back/forward + history popover, top-left chrome. */}
+              <NavHistoryControls />
+            </div>
             <BetaBadge />
             {logoAccessory && <div className="mr-2 mt-2 shrink-0">{logoAccessory}</div>}
           </div>

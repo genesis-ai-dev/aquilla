@@ -1,7 +1,7 @@
 # Bible Aquifer Integration — Design Spec
 
 **Date:** 2026-06-13
-**Status:** Approved, in implementation
+**Status:** Implemented & UI-verified (branch `feat/aquifer-integration`)
 **Source resource:** `https://bibletranslation.org/llms.txt` (our own site)
 
 ## Problem

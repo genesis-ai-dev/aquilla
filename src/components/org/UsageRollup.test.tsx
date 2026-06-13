@@ -18,7 +18,7 @@ beforeEach(() => vi.clearAllMocks())
 afterEach(() => vi.restoreAllMocks())
 
 const MEMBERS_WITH_USAGE: OrgUsage = {
-  total: { audioSeconds: 245, ttsRequests: 4, llmRequests: 8 },
+  orgTotal: { audioSeconds: 245, ttsRequests: 4, llmRequests: 8 },
   members: [
     { userId: 2, username: "wendi", audioSeconds: 180, ttsRequests: 3, llmRequests: 5 },
     { userId: 3, username: "randall", audioSeconds: 65, ttsRequests: 1, llmRequests: 3 },
@@ -64,7 +64,7 @@ describe("UsageRollup", () => {
     // WHY: an org that hasn't used TTS/AI yet should not see an empty table.
     // Noise-free display keeps the Overview dashboard clean.
     const zeroUsage: OrgUsage = {
-      total: { audioSeconds: 0, ttsRequests: 0, llmRequests: 0 },
+      orgTotal: { audioSeconds: 0, ttsRequests: 0, llmRequests: 0 },
       members: [
         { userId: 2, username: "wendi", audioSeconds: 0, ttsRequests: 0, llmRequests: 0 },
       ],

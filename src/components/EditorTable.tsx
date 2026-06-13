@@ -2249,14 +2249,10 @@ function EditorRow({
 
   /**
    * OmniVoice TTS (use case 1): synthesize the cell's translated text via the
-   * sync-worker /api/v1/voice/tts endpoint, then attach the returned audioId to
-   * this cell's "generatedVoice" slot via cell.audio.attach.
-   *
-   * SWARM-TODO(tts-cell-attach): if the cell already has a generatedVoice
-   * attachment the new clip is attached alongside but not auto-selected. Wire
-   * a cell.audio.select (emitCellAudioSelect) after the attach to make the new
-   * clip immediately active in the slot. The plumbing exists in events-emit.ts
-   * (emitCellAudioSelect); it was left out here to keep this change additive.
+   * sync-worker /api/v1/voice/tts endpoint, then attach the returned clip to
+   * this cell's "generatedVoice" slot via cell.audio.attach. The attach event's
+   * projection auto-selects the new clip (sets selected=0 on siblings), so no
+   * follow-up select is needed.
    */
   const handleOmniTts = useCallback(async () => {
     const text = cell.translated.trim()
@@ -2276,13 +2272,16 @@ function EditorRow({
         },
         getSyncToken,
       )
-      // Attach the returned audioId to the "generatedVoice" slot.
+      // Attach the returned clip to the "generatedVoice" slot. Use objectName
+      // (WITH .wav) as the audioId and the server's canonical url — audioId
+      // alone has no extension and would not resolve (R2 404 / pointer-invalid).
       await emitCellAudioAttach({
         projectId: project.id,
         fileId: cell.fileId,
         cellId: cell.id,
-        audioId: result.audioId,
-        url: `frontier-audio://${result.audioId}`,
+        audioId: result.objectName,
+        url: result.url,
+        durationMs: Math.round(result.durationSeconds * 1000),
         slot: "generatedVoice",
         mimeType: "audio/wav",
         author: username,

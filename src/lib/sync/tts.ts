@@ -24,10 +24,18 @@ export interface SynthesizeCellTtsArgs {
 }
 
 export interface SynthesizeCellTtsResult {
-  /** Frontier audio id — valid cell-audio object in R2 (e.g. "abc123.wav"). */
+  /** Bare audio id, NO extension (e.g. "audio-tts-123-ab12cd34"). For the
+   * cell-audio attach use `objectName`/`url` below — `audioId` alone is not a
+   * resolvable R2 key or frontier-audio:// pointer. */
   audioId: string
   /** Duration of the generated clip in seconds. */
   durationSeconds: number
+  /** R2 object name WITH extension (e.g. "audio-tts-123-ab12cd34.wav"). This is
+   * the value to pass as the cell-audio `audioId` so the /audio route resolves. */
+  objectName: string
+  /** Canonical pointer (e.g. "frontier-audio://audio-tts-123-ab12cd34.wav"). Use
+   * as the cell-audio `url`; `parseFrontierAudioUrl` requires the extension. */
+  url: string
 }
 
 /**

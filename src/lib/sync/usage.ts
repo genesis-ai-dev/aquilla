@@ -33,9 +33,10 @@ export interface OrgMemberUsage {
   llmRequests: number
 }
 
-/** Shape returned by GET /api/v1/usage/org/:orgId (maintainer-gated → 403). */
+/** Shape returned by GET /api/v1/usage/org/:orgId (maintainer-gated → 403).
+ * Field is `orgTotal` to match the auth-worker `OrgUsageResponse`. */
 export interface OrgUsage {
-  total: {
+  orgTotal: {
     audioSeconds: number
     ttsRequests: number
     llmRequests: number

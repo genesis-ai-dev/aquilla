@@ -80,6 +80,15 @@ export async function handleTtsRequest(
   if (!projectId || !fileId || !text) {
     return new Response("missing projectId, fileId, or text", { status: 400 })
   }
+  // Bound text size — an authenticated caller could otherwise exhaust the GPU
+  // request timeout with a multi-MB payload.
+  if (text.length > 10_000) {
+    return new Response("text too long (max 10000 chars)", { status: 400 })
+  }
+  // Sanitize the reference id before it becomes part of an R2 key.
+  if (referenceAudioId !== undefined && !/^[\w.-]+$/.test(referenceAudioId)) {
+    return new Response("invalid referenceAudioId", { status: 400 })
+  }
 
   // Auth: sync-token scoped to (projectId, fileId), same as /audio.
   const header = request.headers.get("Authorization") ?? ""
@@ -152,9 +161,22 @@ export async function handleTtsRequest(
 
   const wavBytes = await modalRes.arrayBuffer()
 
-  // Parse the duration header (the metering unit).
+  // Parse the duration header (the metering unit). Guard against a malformed
+  // or absent value: Number("NaN"/"inf"/junk) or a negative would corrupt the
+  // audio_seconds counter (a NaN SUM permanently defeats the daily cap). Clamp
+  // to a finite, non-negative number.
   const durationHeader = modalRes.headers.get("X-Audio-Duration-Seconds")
-  const durationSeconds = durationHeader ? Number(durationHeader) : 0
+  const parsedDuration = Number(durationHeader)
+  const durationSeconds =
+    durationHeader && Number.isFinite(parsedDuration) ? Math.max(0, parsedDuration) : 0
+  if (!durationHeader || !Number.isFinite(parsedDuration)) {
+    // Our own omnivoice.py always sets this header; a miss means a Modal
+    // contract/version drift. Metering can't account for this clip — surface it
+    // loudly (the spend control silently under-counts otherwise).
+    console.warn(
+      `[tts] missing/invalid X-Audio-Duration-Seconds (got ${JSON.stringify(durationHeader)}) — recording 0s for user ${userId} org ${orgId}`,
+    )
+  }
 
   // Write WAV to R2 as a cell-audio object (same layout as voice-convert).
   const audioId = `audio-tts-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`

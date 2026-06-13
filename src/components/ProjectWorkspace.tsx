@@ -2577,7 +2577,6 @@ export function ProjectWorkspace() {
     runAgentInput: () => {
       console.info("agent-input triggered (placeholder runner)")
     },
-    runImportWip: openImportFlow,
     runImportIntoFile: () => {
       if (!activeFileId) return
       setFileImportOpen(true)

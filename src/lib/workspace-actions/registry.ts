@@ -111,11 +111,6 @@ export const workspaceActions: WorkspaceAction[] = [
     run: (_c, args) => args.runAgentInput(),
   },
   {
-    id: "import-wip", label: "Import work in progress", icon: Upload, group: "secondary",
-    isAvailable: () => true,
-    run: (_c, args) => args.runImportWip(),
-  },
-  {
     id: "import-into-file", label: "Import translations into this file", icon: Upload, group: "secondary",
     isAvailable: (c) => c.activeFileId != null,
     run: (_c, args) => args.runImportIntoFile(),

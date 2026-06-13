@@ -31,7 +31,6 @@ export interface WorkspaceActionRunArgs {
   runExport: () => void
   runBatchValidate: () => void
   runAgentInput: () => void
-  runImportWip: () => void
   /** File-scoped target import — populate the open file's translations. */
   runImportIntoFile: () => void
   runTranscribeAll: () => void

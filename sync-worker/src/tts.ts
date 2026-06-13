@@ -1,0 +1,177 @@
+// OmniVoice TTS proxy: synthesize spoken audio for translated cells.
+//
+// Mirrors voice-convert.ts in auth, R2 layout, and error-handling patterns.
+// The browser never talks to Modal directly — it can't hold the Modal secret.
+// This worker verifies the sync-token, pre-checks the user's daily seconds
+// budget, calls the OmniVoice Modal endpoint, writes the WAV to R2 as a
+// cell-audio object, records the actual seconds consumed, and returns an
+// audioId the client can attach to the cell or pass to /voice/convert as
+// sourceAudioId (use case 3).
+//
+// Auth: sync-token JWT scoped to (projectId, fileId) via verifyTokenForFile,
+//       identical to /audio and /voice/convert.
+//
+// Metering: audio seconds, per-user with org_id attribution, in
+//           tts_usage_daily (see tts-budget.ts + migration 0041).
+
+import { audioObjectKey, r2KeyPrefix } from "./audio"
+import { verifyTokenForFile } from "./auth"
+import { runTtsGuard, recordTtsUsage } from "./tts-budget"
+
+export interface TtsEnv {
+  SNAPSHOTS: R2Bucket
+  SYNC_SECRET_KEY?: string
+  R2_KEY_PREFIX?: string
+  /** OmniVoice Modal endpoint, e.g. https://<acct>--omnivoice-web.modal.run */
+  OMNIVOICE_URL?: string
+  /** Shared secret matching the Modal `omnivoice-auth` secret's OMNIVOICE_TOKEN. */
+  OMNIVOICE_TOKEN?: string
+  /** Per-user daily audio-seconds cap (default 36000 = 10 h while sizing). */
+  TTS_USER_DAILY_SECONDS_LIMIT?: string
+  /** "true" → enforce the cap with 429; anything else → log-only. */
+  TTS_BUDGET_ENFORCE?: string
+  /** Postgres (Neon) handle — required for metering. */
+  AQUILLA_PG?: AquillaDb
+}
+
+const TTS_PATH = "/api/v1/voice/tts"
+
+/**
+ * POST /api/v1/voice/tts
+ *
+ * JSON body:
+ *   { projectId, fileId, cellId?, text, referenceAudioId?, language? }
+ *
+ * Returns { audioId, durationSeconds } on success.
+ * Returns null when the path/method doesn't match (dispatcher falls through).
+ */
+export async function handleTtsRequest(
+  request: Request,
+  env: TtsEnv,
+): Promise<Response | null> {
+  const url = new URL(request.url)
+  if (url.pathname !== TTS_PATH) return null
+  if (request.method !== "POST") {
+    return new Response("method not allowed", { status: 405 })
+  }
+  if (!env.OMNIVOICE_URL || !env.OMNIVOICE_TOKEN) {
+    return new Response("TTS not configured", { status: 503 })
+  }
+  if (!env.AQUILLA_PG) {
+    return new Response("database not available", { status: 503 })
+  }
+
+  // Parse body.
+  let body: {
+    projectId?: string
+    fileId?: string
+    cellId?: string
+    text?: string
+    referenceAudioId?: string
+    language?: string
+  }
+  try {
+    body = await request.json()
+  } catch {
+    return new Response("expected JSON body", { status: 400 })
+  }
+
+  const { projectId, fileId, text, referenceAudioId, language } = body
+  if (!projectId || !fileId || !text) {
+    return new Response("missing projectId, fileId, or text", { status: 400 })
+  }
+
+  // Auth: sync-token scoped to (projectId, fileId), same as /audio.
+  const header = request.headers.get("Authorization") ?? ""
+  const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : null
+  const verified = await verifyTokenForFile(token, fileId, env.SYNC_SECRET_KEY)
+  if (!verified.ok) {
+    return new Response(verified.reason, { status: verified.status })
+  }
+  // verifyTokenForFile checks fileId; also verify the projectId from claims.
+  if (verified.claims.projectId !== projectId) {
+    return new Response("token scoped to different project", { status: 403 })
+  }
+
+  const userId = verified.claims.userId
+
+  // Resolve org_id from the project row. Mirrors export-floor.ts pattern.
+  // (sync-worker/src/events/export-floor.ts line 37)
+  const db = env.AQUILLA_PG
+  const projectRow = await db
+    .prepare(`SELECT org_id FROM projects WHERE id = ?`)
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+
+  const orgId = projectRow?.org_id ?? 0
+
+  // Pre-check the user's daily TTS budget (seconds).
+  const guard = await runTtsGuard(db, userId, env)
+  if (!guard.ok) {
+    return Response.json(guard.body, { status: guard.status })
+  }
+
+  // Optionally resolve a reference clip for voice cloning.
+  let referenceBytes: ArrayBuffer | undefined
+  let referenceType = "audio/wav"
+  if (referenceAudioId) {
+    // Reference clips live project-scoped at the same path voice-convert uses.
+    const refKey = `${r2KeyPrefix(env)}projects/${projectId}/voices/${referenceAudioId}`
+    const refObj = await env.SNAPSHOTS.get(refKey)
+    if (!refObj) return new Response("reference audio not found", { status: 404 })
+    referenceBytes = await refObj.arrayBuffer()
+    referenceType = refObj.httpMetadata?.contentType || referenceType
+  }
+
+  // Call OmniVoice on Modal.
+  const modalBody = new FormData()
+  modalBody.append("text", text)
+  if (language) modalBody.append("language", language)
+  if (referenceBytes) {
+    modalBody.append(
+      "voice_ref",
+      new Blob([referenceBytes], { type: referenceType }),
+      "reference",
+    )
+  }
+
+  let modalRes: Response
+  try {
+    modalRes = await fetch(`${env.OMNIVOICE_URL}/synthesize`, {
+      method: "POST",
+      headers: { "X-Auth-Token": env.OMNIVOICE_TOKEN },
+      body: modalBody,
+    })
+  } catch (err) {
+    return new Response(`TTS upstream unreachable: ${String(err)}`, { status: 502 })
+  }
+  if (!modalRes.ok) {
+    const detail = await modalRes.text().catch(() => "")
+    return new Response(`TTS failed (${modalRes.status}): ${detail}`.trim(), { status: 502 })
+  }
+
+  const wavBytes = await modalRes.arrayBuffer()
+
+  // Parse the duration header (the metering unit).
+  const durationHeader = modalRes.headers.get("X-Audio-Duration-Seconds")
+  const durationSeconds = durationHeader ? Number(durationHeader) : 0
+
+  // Write WAV to R2 as a cell-audio object (same layout as voice-convert).
+  const audioId = `audio-tts-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
+  const ext = "wav"
+  const objectName = `${audioId}.${ext}`
+  await env.SNAPSHOTS.put(audioObjectKey(env, projectId, fileId, objectName), wavBytes, {
+    httpMetadata: { contentType: "audio/wav" },
+  })
+
+  // Post-record actual seconds. Mirrors ai-budget.ts: counter failure never
+  // blocks a successful synthesis — recordTtsUsage degrades gracefully.
+  await recordTtsUsage(db, userId, orgId, durationSeconds)
+
+  return Response.json({
+    audioId,
+    durationSeconds,
+    objectName,
+    url: `frontier-audio://${objectName}`,
+  })
+}

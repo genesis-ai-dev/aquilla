@@ -69,10 +69,18 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 #   SECRET_KEY      — frontier JWT signing key. MUST match prod
 #                     frontier-server so access tokens are interchangeable.
 #   SYNC_SECRET_KEY — signs /sync-token JWTs. MUST match aquilla-sync-worker.
-#   RESEND_API_KEY  — used by /password-reset/request to send email.
 #   OPENROUTER_API_KEY — Bearer key forwarded by /api/v1/chat/completions
 #                        to OpenRouter (folded in from aquilla-chat-worker).
 # Plain vars: see types.ts for the full list.
+#
+# Outbound email (password reset + project invites) goes through Cloudflare
+# Email Service via the [[env.*.send_email]] bindings below — no API key.
+# ONE-TIME SETUP: the sending domain (aquilla.app, see EMAIL_FROM) must be
+# onboarded under Compute > Email Service > Email Sending in the dashboard
+# (Frontier R&D account) or sends fail with E_SENDER_NOT_VERIFIED. The
+# binding is deliberately ABSENT from the top-level and e2e profiles so
+# local `wrangler dev` (pinned wrangler 3.x predates Email Service local
+# simulation) keeps email as a no-op — see src/services/email.ts.
 
 [observability]
 enabled = true
@@ -111,6 +119,9 @@ routes = [
 binding = "HYPERDRIVE"
 id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 
+[[env.production.send_email]]
+name = "EMAIL"
+
 [env.production.vars]
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
@@ -146,6 +157,9 @@ routes = [
 [[env.development.hyperdrive]]
 binding = "HYPERDRIVE"
 id = "53581197ff7a4202a5ed0ef08537d4a6"
+
+[[env.development.send_email]]
+name = "EMAIL"
 
 [env.development.vars]
 ALGORITHM = "HS256"
@@ -184,6 +198,9 @@ routes = [
 [[env.staging.hyperdrive]]
 binding = "HYPERDRIVE"
 id = "822231ade4da4db5b1955702e13d1ac3"
+
+[[env.staging.send_email]]
+name = "EMAIL"
 
 [env.staging.vars]
 ALGORITHM = "HS256"

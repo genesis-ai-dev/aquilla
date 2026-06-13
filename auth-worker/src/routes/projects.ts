@@ -860,7 +860,7 @@ projects.post(
       return c.json({ error: "Failed to create invite" }, 500)
     }
 
-    // Deliver the invite link by email (best-effort; no-op without RESEND_API_KEY).
+    // Deliver the invite link by email (best-effort; no-op without the EMAIL binding).
     if (email) {
       const baseUrl = c.env.BASE_URL || "https://aquilla.app"
       const joinUrl = `${baseUrl}/join/${token}`

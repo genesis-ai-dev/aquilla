@@ -4,6 +4,22 @@
 // identity, orgs, projects, members, invites, plus the file/cell projections
 // the sync worker writes. Schema lives in `db/postgres/schema.sql`.
 
+/**
+ * Minimal surface of the Cloudflare Email Service `send_email` binding
+ * (public beta 2026-04). The pinned @cloudflare/workers-types predates
+ * Email Service — its legacy `SendEmail` type only accepts an
+ * `EmailMessage` — so just the object-form `send()` we call is typed here.
+ */
+export interface EmailService {
+  send(message: {
+    from: string
+    to: string[]
+    subject: string
+    html?: string
+    text?: string
+  }): Promise<{ messageId: string }>
+}
+
 export interface Env {
   /** The Postgres (Neon) handle, served by the shim in db/shim/postgres.ts.
    *  Injected per-request in index.ts from HYPERDRIVE; the sync worker uses the
@@ -27,8 +43,11 @@ export interface Env {
   /** aquilla-sync-worker base URL for archive / file-delete notifications. */
   SYNC_WORKER_URL?: string
 
-  // Email (Resend) for password reset.
-  RESEND_API_KEY?: string
+  /** Cloudflare Email Service `send_email` binding — password reset and
+   *  project invites. Declared only in deployed env blocks (wrangler.toml);
+   *  absent in local/e2e profiles, where invites no-op and password reset
+   *  fails the same way it did without a Resend key. */
+  EMAIL?: EmailService
   EMAIL_FROM?: string
   BASE_URL?: string
 

@@ -65,7 +65,6 @@ the missing pieces. Run these once:
    cd auth-worker
    wrangler secret put SECRET_KEY        --env staging
    wrangler secret put SYNC_SECRET_KEY   --env staging
-   wrangler secret put RESEND_API_KEY    --env staging
    wrangler secret put OPENROUTER_API_KEY --env staging
    cd ../sync-worker
    wrangler secret put SYNC_SECRET_KEY   --env staging

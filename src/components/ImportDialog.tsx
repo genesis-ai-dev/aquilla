@@ -1,5 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import {
+  Upload, Library, Globe, Table2, Languages, ArrowLeftRight, Tags, StickyNote, Database,
+  type LucideIcon,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
@@ -333,7 +339,7 @@ export function ImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="flex max-h-[90dvh] max-w-2xl flex-col">
+      <DialogContent className="flex max-h-[90dvh] sm:max-w-2xl flex-col">
         <DialogHeader>
           <DialogTitle>
             {screen === "landing" ? (
@@ -608,17 +614,112 @@ export function ImportDialog({
 // FRO-310: shown on Macula and Translation Notes importers.
 // ---------------------------------------------------------------------------
 
-function BetaBadge() {
+// ---------------------------------------------------------------------------
+// Import landing — grouped, scannable chooser
+//
+// Mirrors codex-editor's NewSourceUploader: two goal-named tiers (the formats
+// most projects start with, then domain-specific workflows) instead of a flat
+// wall of nine equally-weighted cards. Each option leads with an icon and a
+// single-line purpose so the chooser scans fast. Built from shadcn Card/Badge
+// so it inherits the app theme.
+// ---------------------------------------------------------------------------
+
+type ImportOption = {
+  /** Screen to route to on select. Omitted for not-yet-available options. */
+  id?: Screen
+  title: string
+  /** Short qualifier shown in lighter weight after the title. */
+  hint?: string
+  description: string
+  icon: LucideIcon
+  badge?: "beta" | "soon"
+  disabled?: boolean
+}
+
+const POPULAR_OPTIONS: ImportOption[] = [
+  { id: "upload", title: "Upload files", icon: Upload,
+    description: "USFM, DOCX, TXT, subtitles, spreadsheets, audio/video, or a Paratext project." },
+  { id: "ebible", title: "eBible Corpus", hint: "public library", icon: Library,
+    description: "Openly-licensed Bible translations, imported directly — no download." },
+  { id: "helloao", title: "Bible API", hint: "helloao.org", icon: Globe,
+    description: "1,000+ translations — the whole Bible, one testament, or just the books you pick." },
+  { id: "spreadsheet", title: "Spreadsheet", hint: "CSV / XLSX", icon: Table2, badge: "beta",
+    description: "Map which columns are source, target, label, cast, or timestamp." },
+]
+
+const SPECIALIZED_OPTIONS: ImportOption[] = [
+  { id: "macula", title: "Macula Hebrew + Greek", icon: Languages, badge: "beta",
+    description: "Original-language OT/NT with per-word lemma, morphology, and Strong's." },
+  { id: "paired", title: "Paired translation", icon: ArrowLeftRight, badge: "beta",
+    description: "Source + target pairs from a spreadsheet to fill the target column." },
+  { id: "labels", title: "Cell labels / cast", icon: Tags, badge: "beta",
+    description: "Re-upload a template to label existing cells with cast names." },
+  { id: "tn", title: "Translation Notes", hint: "TSV", icon: StickyNote, badge: "beta",
+    description: "unfoldingWord notes, shown beside the matching verse as you translate." },
+  { title: "Translation Memory", hint: "TMX", icon: Database, badge: "soon", disabled: true,
+    description: "Reuse prior translations from TMX memory files." },
+]
+
+function OptionBadge({ kind }: { kind: "beta" | "soon" }) {
+  if (kind === "soon") {
+    return <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-medium">Soon</Badge>
+  }
   return (
-    <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+    <Badge
+      variant="secondary"
+      className="border border-amber-200 bg-amber-100 px-1.5 py-0 text-[10px] font-medium text-amber-700 dark:border-amber-800 dark:bg-amber-900/40 dark:text-amber-400"
+    >
       Beta
-    </span>
+    </Badge>
   )
 }
 
-// ---------------------------------------------------------------------------
-// Import landing — card grid
-// ---------------------------------------------------------------------------
+function OptionCard({ option, onSelect }: { option: ImportOption; onSelect: (s: Screen) => void }) {
+  const { icon: Icon, disabled } = option
+  const select = () => { if (!disabled && option.id) onSelect(option.id) }
+  return (
+    <Card
+      size="sm"
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled || undefined}
+      title={disabled ? "Coming soon" : undefined}
+      onClick={select}
+      onKeyDown={(e) => {
+        if (!disabled && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); select() }
+      }}
+      className={cn(
+        "gap-0 px-3",
+        disabled
+          ? "cursor-not-allowed opacity-55"
+          : "cursor-pointer transition-shadow hover:shadow-neu-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+          <Icon className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-medium leading-none">{option.title}</span>
+            {option.hint && <span className="text-xs text-muted-foreground">{option.hint}</span>}
+            {option.badge && <span className="ml-auto shrink-0"><OptionBadge kind={option.badge} /></span>}
+          </div>
+          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{option.description}</p>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+function ImportSection({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <h3 className="px-0.5 text-xs font-medium uppercase tracking-wider text-muted-foreground/70">{label}</h3>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{children}</div>
+    </div>
+  )
+}
 
 interface ImportLandingProps {
   onSelect: (screen: Screen) => void
@@ -626,130 +727,18 @@ interface ImportLandingProps {
 
 function ImportLanding({ onSelect }: ImportLandingProps) {
   return (
-    <div className="grid grid-cols-1 gap-3 py-2 sm:grid-cols-2">
-      {/* Upload files — active */}
-      <button
-        type="button"
-        onClick={() => onSelect("upload")}
-        className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <p className="text-sm font-medium">Upload Files</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          USFM, DOCX, TXT, VTT/SRT, XLIFF, TMX, CSV, audio/video — or a Paratext project folder/zip.
-        </p>
-      </button>
-
-      {/* eBible Corpus — active */}
-      <button
-        type="button"
-        onClick={() => onSelect("ebible")}
-        className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <p className="text-sm font-medium">
-          eBible Corpus
-          <span className="ml-1.5 text-xs font-normal text-muted-foreground">(public Bible library)</span>
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          A public library of openly-licensed Bible translations from around the world. Pick any redistributable version and import it directly — no file download needed.
-        </p>
-      </button>
-
-      {/* Hello AO Free Use Bible API — active */}
-      <button
-        type="button"
-        onClick={() => onSelect("helloao")}
-        className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <p className="text-sm font-medium">
-          Bible API
-          <span className="ml-1.5 text-xs font-normal text-muted-foreground">(helloao.org)</span>
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Over 1,000 Bible translations with headings and formatting from the Free Use Bible API.
-          Import the whole bible, one testament, or just the books you pick.
-        </p>
-      </button>
-
-      {/* Macula Hebrew + Greek — beta (FRO-178, FRO-310) */}
-      <button
-        type="button"
-        onClick={() => onSelect("macula")}
-        className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <p className="text-sm font-medium flex items-center gap-1.5">
-          Macula Hebrew + Greek
-          <BetaBadge />
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Upload a Macula TSV file for the Hebrew Old Testament or Greek New Testament —
-          original-language text with per-word lemma, morphology, and Strong's data.
-        </p>
-      </button>
-
-      {/* FRO-316: Spreadsheet importer — beta */}
-      <button
-        type="button"
-        onClick={() => onSelect("spreadsheet")}
-        className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <p className="text-sm font-medium flex items-center gap-1.5">
-          Spreadsheet (CSV / XLSX) <BetaBadge />
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Import any CSV or Excel spreadsheet. Map which column is source, target, cell label, cast name, or timestamp at import time.
-        </p>
-      </button>
-
-      {/* FRO-314: Cell labels / cast import — beta */}
-      <button
-        type="button"
-        onClick={() => onSelect("labels")}
-        className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <p className="text-sm font-medium flex items-center gap-1.5">
-          Cell Labels / Cast <BetaBadge />
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Download a spreadsheet template pre-filled with your project's cell references, fill in cast names, then re-upload to label cells.
-        </p>
-      </button>
-
-      {/* FRO-315: Paired translation import — beta */}
-      <button
-        type="button"
-        onClick={() => onSelect("paired")}
-        className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <p className="text-sm font-medium flex items-center gap-1.5">
-          Paired Translation Import <BetaBadge />
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Import a finished translation (source + target pairs) from a spreadsheet to populate the target column and build translation memory.
-        </p>
-      </button>
-
-      {/* Translation Memory (TMX) — coming soon (FRO-179) */}
-      <div
-        title="Coming soon — Translation Memory import is tracked in FRO-179"
-        className="cursor-not-allowed rounded-lg border border-dashed p-4 text-left opacity-50"
-      >
-        <p className="text-sm font-medium">Translation Memory</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          TMX translation memory files. Coming soon.
-        </p>
-      </div>
-
-      {/* Translation Notes — beta (FRO-179, FRO-310) */}
-      <button
-        type="button"
-        onClick={() => onSelect("tn")}
-        className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <p className="text-sm font-medium flex items-center gap-1.5">Translation Notes (TSV) <BetaBadge /></p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Upload unfoldingWord-style TN files. Notes appear in a sidebar when you focus a translation cell at the matching verse.
-        </p>
-      </button>
+    <div className="space-y-5 py-1">
+      <p className="text-sm text-muted-foreground">Choose the format that matches your files.</p>
+      <ImportSection label="Most popular">
+        {POPULAR_OPTIONS.map((o) => (
+          <OptionCard key={o.title} option={o} onSelect={onSelect} />
+        ))}
+      </ImportSection>
+      <ImportSection label="Specialized">
+        {SPECIALIZED_OPTIONS.map((o) => (
+          <OptionCard key={o.title} option={o} onSelect={onSelect} />
+        ))}
+      </ImportSection>
     </div>
   )
 }

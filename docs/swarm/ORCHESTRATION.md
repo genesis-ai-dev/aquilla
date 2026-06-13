@@ -2,6 +2,43 @@
 
 ---
 
+# 🆕🆕🆕🆕🆕🆕 CURRENT GOAL (2026-06-13b) — Org credits & unified compute-cost model
+
+> **This block is the active goal.** Everything below is reference-only from prior swarms.
+> Spec (read first): `docs/superpowers/specs/2026-06-13-org-credits-cost-model.md`.
+> Driver: user `/loop 5m until all in place`. Builds on the OmniVoice TTS work (now on main).
+
+## §0 STOP checklist
+- [ ] Migration `0042_org_credit_usage_daily.sql` + `schema.sql`
+- [ ] auth-worker: `credits.ts` lib + record/guard wired into `agent.ts` (priority) + `chat.ts`; `/usage/org/:orgId/credits` (admin OR org-flag); platform-admin config endpoints
+- [ ] sync-worker: `credits.ts` + record TTS raw cost in `tts.ts`
+- [ ] frontend: `src/lib/credits.ts` + client lib; AdminConsole Credits section; org panel behind `showToOrg` flag + maintainer role; **never rendered for end-user translators**
+- [ ] Gate: root tsc 0 · vitest · sync-worker tsc+test · auth-worker tsc+test · build PASS
+- [ ] Adversarial review (contracts/races/correctness incl. cap-math + enforce-off-by-default + role-gating)
+- [ ] Enforcement OFF by default verified; agent sub-cap correct
+- [ ] gaps traced
+
+## §1 Operating model (this goal)
+- main = sacred (tip at dispatch: `250640b16`→spec `3899fe37b`, clean). Never touch other actors' uncommitted work.
+- Integration: `swarm/credits-integration` (worktree `.worktrees/credits-integration`, node_modules ×3 symlinked).
+- Each agent → **manual** worktree off integration tip. sonnet, run_in_background. Commits its branch; NEVER pushes/promotes.
+- ⚠️ **Agents must write to their WORKTREE, not main** (last swarm's bug). Brief tells each to `git -C <worktree> status` self-check that its files are in the worktree before committing. Orchestrator re-verifies gates centrally regardless.
+- Credit formula is spec'd ONCE; triplicated in auth/sync/frontend (no cross-package import) — keep identical.
+- Loop: /loop 5m (CronCreate). Background agents also auto-notify. STOP on convergence.
+
+## §3 Workstream registry (this goal)
+| ID | Title | Branch | Owns | Status | Agent |
+|----|-------|--------|------|--------|-------|
+| ws-cr-schema | Migration + table | `swarm/ws-cr-schema` | `db/postgres/migrations/0042_org_credit_usage_daily.sql`, `db/postgres/schema.sql` | dispatched | — |
+| ws-cr-authcredits | auth-worker credits lib + agent/chat record+guard + endpoints | `swarm/ws-cr-authcredits` | `auth-worker/src/lib/credits.ts`, `auth-worker/src/routes/agent.ts`, `chat.ts`, `usage.ts`, `admin.ts` (additive), tests | dispatched | — |
+| ws-cr-synccredits | sync-worker TTS cost record | `swarm/ws-cr-synccredits` | `sync-worker/src/credits.ts`, `sync-worker/src/tts.ts` (additive), tests | dispatched | — |
+| ws-cr-frontadmin | Admin credits UI + org-flag panel | `swarm/ws-cr-frontadmin` | `src/lib/credits.ts`, `src/lib/sync/credits.ts`, AdminConsole credits section, org overview panel (flag+role gated), tests | dispatched | — |
+
+## §M Merge log (this goal)
+- 2026-06-13b · integration `swarm/credits-integration` off main `3899fe37b` (spec). Wave 1 (4 agents) dispatched.
+
+---
+
 # 🆕🆕🆕🆕🆕 CURRENT GOAL (2026-06-13) — OmniVoice TTS on Modal + org-attributed usage metering
 
 > **This block is the active goal.** Everything below is reference-only from prior swarms.

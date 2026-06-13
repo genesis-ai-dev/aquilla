@@ -105,12 +105,6 @@ export function CreditsPanel({
           </div>
         </div>
       </div>
-
-      {!config.enforce && (
-        <p className="mt-3 text-xs text-muted-foreground">
-          Caps are display-only — enforcement is off for this org.
-        </p>
-      )}
     </div>
   )
 }

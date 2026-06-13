@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  alignChunks,
   findActiveTimingIndex,
   tokenizeWords,
   uniformTimings,
@@ -33,6 +34,41 @@ describe("uniformTimings", () => {
   it("returns empty for zero duration or empty text", () => {
     expect(uniformTimings("a b", 0)).toEqual([])
     expect(uniformTimings("", 5)).toEqual([])
+  })
+})
+
+describe("alignChunks", () => {
+  const chunks = [
+    { text: "Hello", start: 0, end: 0.4 },
+    { text: "there", start: 0.4, end: 0.9 },
+  ]
+
+  it("indexes against cell text when word counts match 1:1", () => {
+    // Cell text differs from the transcript — karaoke must paint what the
+    // user typed, so offsets come from the cell text, not Whisper's output.
+    const out = alignChunks(chunks, "Bonjour toi")
+    expect(out).toEqual([
+      { word: "Bonjour", start: 0, end: 7, t0: 0, t1: 0.4 },
+      { word: "toi", start: 8, end: 11, t0: 0.4, t1: 0.9 },
+    ])
+  })
+
+  it("falls back to transcript offsets when word counts differ", () => {
+    const out = alignChunks(chunks, "one two three")
+    // Transcript is "Hello there" — offsets index into that string.
+    expect(out).toEqual([
+      { word: "Hello", start: 0, end: 5, t0: 0, t1: 0.4 },
+      { word: "there", start: 6, end: 11, t0: 0.4, t1: 0.9 },
+    ])
+  })
+
+  it("falls back to transcript offsets when cell text is missing", () => {
+    const out = alignChunks(chunks, undefined)
+    expect(out[0]).toMatchObject({ word: "Hello", start: 0, end: 5 })
+  })
+
+  it("returns empty for no chunks", () => {
+    expect(alignChunks([], "hello")).toEqual([])
   })
 })
 

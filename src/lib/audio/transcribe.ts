@@ -6,6 +6,7 @@
 // memory after the first run.
 
 import { requestAiModelConsent, WHISPER_MODEL, AiModelConsentDeniedError } from "./ai-consent"
+import { alignChunks } from "./timings"
 import { setTranscribeStatus } from "./transcribe-status"
 import { fetchCellAudio, parseFrontierAudioUrl } from "./upload"
 import { makeAudioSyncTokenFetcher } from "./sync-token-fetcher"
@@ -195,17 +196,12 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
     const wordCount = result.chunks.length
 
     // Persist timings durably via D1 event log — re-attach the same audioId
-    // with the word-level timing chunks so the projection writer can store them.
+    // with the word-level timing chunks so the projection writer can store
+    // them. start/end must be char offsets into the cell's plain text — the
+    // karaoke decoration maps them against the TipTap doc, so align against
+    // cell.translated (transcript offsets as fallback when counts mismatch).
     if (result.chunks.length > 0) {
-      const timings = result.chunks.map((c) => ({
-        word: c.text.trim(),
-        t0: c.start,
-        t1: c.end,
-        // start/end are character offsets within the transcript; approximate
-        // from chunk index since we don't have cell text alignment here.
-        start: 0,
-        end: c.text.trim().length,
-      }))
+      const timings = alignChunks(result.chunks, cell.translated)
       void emitCellAudioAttach({
         projectId,
         fileId: cell.fileId,

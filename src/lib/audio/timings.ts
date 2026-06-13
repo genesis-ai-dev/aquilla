@@ -42,6 +42,48 @@ export function uniformTimings(text: string, duration: number): WordTiming[] {
 }
 
 /**
+ * Convert Whisper chunks → WordTiming[]. When `cellText` is provided and the
+ * chunks line up 1:1 with the cell's tokenized words, we emit timings indexed
+ * against the cell text so the karaoke decoration paints the user's typed
+ * words. Otherwise we index against the transcript itself (won't match cell
+ * text, but the user can re-record to fix).
+ */
+export function alignChunks(
+  chunks: Array<{ text: string; start: number; end: number }>,
+  cellText: string | undefined,
+): WordTiming[] {
+  if (chunks.length === 0) return []
+
+  if (cellText) {
+    const cellWords = tokenizeWords(cellText)
+    if (cellWords.length === chunks.length) {
+      return cellWords.map((w, i) => ({
+        word: w.word,
+        start: w.start,
+        end: w.end,
+        t0: chunks[i].start,
+        t1: chunks[i].end,
+      }))
+    }
+  }
+
+  // Fall back to indexing against the transcript text.
+  const transcript = chunks.map((c) => c.text).join(" ")
+  const transcriptWords = tokenizeWords(transcript)
+  const out: WordTiming[] = []
+  for (let i = 0; i < Math.min(transcriptWords.length, chunks.length); i++) {
+    out.push({
+      word: transcriptWords[i].word,
+      start: transcriptWords[i].start,
+      end: transcriptWords[i].end,
+      t0: chunks[i].start,
+      t1: chunks[i].end,
+    })
+  }
+  return out
+}
+
+/**
  * Find the index of the timing whose [t0, t1) contains `t`. Returns -1 if no
  * word is active at that time. O(log n) — assumes timings are sorted by t0
  * and non-overlapping (which both Whisper and forced aligners produce).

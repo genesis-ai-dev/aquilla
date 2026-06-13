@@ -44,7 +44,9 @@ export interface UsfmTextToken {
 }
 export type UsfmToken = UsfmMarkerToken | UsfmTextToken
 
-const MARKER_RE = /\\\+?[a-z]+\d*\*?/g
+// Marker names are mostly lowercase ASCII, but usfm.sty also defines mixed-case
+// (\xtSee, \xtSeeAlso) and hyphenated z-namespace markers (\zpa-xb).
+const MARKER_RE = /\\\+?[a-zA-Z]+(?:-[a-zA-Z]+)*\d*\*?/g
 
 /** Split raw USFM into marker + text tokens that EXACTLY partition the input
  *  (concatenating token substrings reproduces the original). */

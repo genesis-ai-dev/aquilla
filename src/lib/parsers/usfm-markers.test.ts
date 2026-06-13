@@ -117,3 +117,34 @@ describe("isEndMarker / isNestedMarker", () => {
     expect(isNestedMarker("\\xt")).toBe(false)
   })
 })
+
+describe("usfm.sty full coverage (FRO follow-up: footnote/display thoroughness)", () => {
+  it("classifies every marker base present in the official usfm.sty", () => {
+    // Unique bases from github.com/ubsicap/usfm/blob/master/sty/usfm.sty
+    // (numbered variants collapsed: thc1-10→thc, q1-4→q, …).
+    const styBases = `add addpn b bd bdit bk c ca cd cl cls conc cov cp d dc em f
+      fdc fe fig fk fl fm fp fq fqa fr fs ft fv fw glo h ib id ide idx ie iex ili
+      im imi imq imt imte intro io ior iot ip ipi ipq ipr iq iqt is it jmp k lf lh
+      li lik lim lit litl liv m maps mi mr ms mt mte nb nd ndx no ord p pb pc
+      periph ph phi pi pm pmc pmo pmr pn png po pr pref pro ps psi pub pubinfo q
+      qa qac qc qd qm qr qs qt r rb rem restore rq s sc sd sig sls sp spine sr sts
+      sup tc tcc tcr th thc thr tl toc toca tr usfm v va vp w wa wg wh wj wr x xdc
+      xk xnt xo xop xot xq xt xtSee xtSeeAlso xta zpa-d zpa-xb zpa-xc zpa-xv`
+      .split(/\s+/).filter(Boolean)
+    const missing = styBases.filter((m) => classifyMarker(m) === undefined)
+    expect(missing).toEqual([])
+  })
+
+  it("normalizes numbered/mixed-case/hyphenated sty variants", () => {
+    expect(classifyMarker("thc10")?.role).toBe("table-head-centered")
+    expect(classifyMarker("tcc4")?.role).toBe("table-cell-centered")
+    expect(classifyMarker("xtSee*")?.category).toBe("crossref")
+    expect(classifyMarker("zpa-xb")?.category).toBe("extension")
+  })
+
+  it("peripheral and deprecated paragraph markers never terminate a verse (behavior-preserving)", () => {
+    for (const m of ["\\periph", "\\conc", "\\glo", "\\intro", "\\pub", "\\pb", "\\ps", "\\psi", "\\phi", "\\restore"]) {
+      expect(terminatesVerse(m)).toBe(false)
+    }
+  })
+})

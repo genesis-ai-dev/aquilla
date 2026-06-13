@@ -38,6 +38,7 @@ export type MarkerCategory =
   | "milestone"
   | "figure"
   | "extension"
+  | "peripheral"
 
 export interface MarkerSpec {
   category: MarkerCategory
@@ -216,6 +217,47 @@ const MARKERS: Record<string, MarkerSpec> = {
 
   // ── Figures ─────────────────────────────────────────────────────────────
   fig:   { category: "figure", translatable: true,  structural: false, paired: true, role: "figure-caption" },
+
+  // ── Tables (centered variants, usfm.sty thc1-10/tcc1-10) ────────────────
+  thc:  { category: "table", translatable: true,  structural: false, paired: false, role: "table-head-centered" },
+  tcc:  { category: "table", translatable: true,  structural: false, paired: false, role: "table-cell-centered" },
+
+  // ── Notes / crossrefs (usfm.sty extensions) ─────────────────────────────
+  fs:       { category: "note",     translatable: true,  structural: false, paired: true, role: "footnote-summary" },
+  xtSee:    { category: "crossref", translatable: false, structural: false, paired: true, role: "xref-see" },
+  xtSeeAlso:{ category: "crossref", translatable: false, structural: false, paired: true, role: "xref-see-also" },
+
+  // ── Character-level (usfm.sty additions) ────────────────────────────────
+  jmp:  { category: "char", translatable: true,  structural: false, paired: true, role: "link-text" },
+  ndx:  { category: "char", translatable: true,  structural: false, paired: true, role: "index-entry" },
+  wr:   { category: "char", translatable: true,  structural: false, paired: true, role: "wordlist-real" },
+
+  // ── Paragraph-level (deprecated usfm.sty variants) ──────────────────────
+  pb:   { category: "paragraph", translatable: false, structural: true, paired: false, role: "page-break" },
+  phi:  { category: "paragraph", translatable: false, structural: true, paired: false, role: "paragraph-hanging-indent" },
+  ps:   { category: "paragraph", translatable: false, structural: true, paired: false, role: "paragraph-no-chapter-break" },
+  psi:  { category: "paragraph", translatable: false, structural: true, paired: false, role: "paragraph-indented-no-break" },
+
+  // ── Peripheral / publication matter (OccursUnder \id; NOT in the
+  //    verse-terminating set, matching prior unknown-marker behavior) ───────
+  periph:  { category: "peripheral", translatable: true,  structural: true, paired: false, role: "peripheral-division" },
+  conc:    { category: "peripheral", translatable: true,  structural: true, paired: false, role: "concordance" },
+  cov:     { category: "peripheral", translatable: true,  structural: true, paired: false, role: "cover" },
+  glo:     { category: "peripheral", translatable: true,  structural: true, paired: false, role: "glossary" },
+  idx:     { category: "peripheral", translatable: true,  structural: true, paired: false, role: "back-index" },
+  intro:   { category: "peripheral", translatable: true,  structural: true, paired: false, role: "front-intro" },
+  maps:    { category: "peripheral", translatable: true,  structural: true, paired: false, role: "map-index" },
+  pref:    { category: "peripheral", translatable: true,  structural: true, paired: false, role: "preface" },
+  pub:     { category: "peripheral", translatable: true,  structural: true, paired: false, role: "publication-data" },
+  spine:   { category: "peripheral", translatable: true,  structural: true, paired: false, role: "spine" },
+  pubinfo: { category: "peripheral", translatable: false, structural: true, paired: false, role: "publication-info" },
+  restore: { category: "peripheral", translatable: false, structural: true, paired: false, role: "project-restore" },
+
+  // ── Custom z-namespace (Paratext project-defined, zpa-* family) ─────────
+  "zpa-d":  { category: "extension", translatable: false, structural: false, paired: true, role: "z-periph-description" },
+  "zpa-xb": { category: "extension", translatable: false, structural: false, paired: true, role: "z-book-ref" },
+  "zpa-xc": { category: "extension", translatable: false, structural: false, paired: true, role: "z-chapter-ref" },
+  "zpa-xv": { category: "extension", translatable: false, structural: false, paired: true, role: "z-verse-ref" },
 }
 
 /** Normalize a raw marker token to its taxonomy base name.

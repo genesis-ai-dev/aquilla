@@ -19,7 +19,7 @@ import { canPerform } from "@/lib/sync/role-policy"
 import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
-import { needsAttention, needsAttentionFromConfidence, resolveDecayConfig, CELL_NEEDS_ATTENTION_STATUS } from "@/lib/health/decay-engine"
+import { needsAttention, needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
 import { HealthRing } from "./HealthRing"
@@ -71,6 +71,11 @@ import { detectPreAcceptanceWarnings } from "@/lib/terminology/preacceptance"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { AddConceptDialog } from "./AddConceptDialog"
 import { FootnoteInline } from "./footnotes/FootnoteInline"
+import {
+  segmentUsfmForDisplay,
+  clipRangesToSegment,
+  type UsfmNoteSegment,
+} from "@/lib/parsers/usfm-display"
 import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
 import { spliceFootnoteText } from "@/lib/footnotes/splice"
 
@@ -1591,6 +1596,8 @@ interface SourceWithTermLookupProps {
   onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
   concepts: Concept[]
   onTermApply: (rendering: string) => void
+  /** Render as an inline span (used per-segment by UsfmSourceText). */
+  inline?: boolean
 }
 
 function SourceWithTermLookup({
@@ -1601,6 +1608,7 @@ function SourceWithTermLookup({
   onRangeClick,
   concepts,
   onTermApply,
+  inline = false,
 }: SourceWithTermLookupProps) {
   // All hooks must run unconditionally before any early return.
   const activeConcepts = useMemo(
@@ -1631,8 +1639,9 @@ function SourceWithTermLookup({
   // Font size inherits from the source column wrapper (per-file pref) — no
   // fixed text-* class here.
   if (activeConcepts.length === 0) {
+    const Wrapper = inline ? "span" : "div"
     return (
-      <div>
+      <Wrapper>
         <HighlightedText
           text={text}
           highlights={highlights}
@@ -1640,7 +1649,7 @@ function SourceWithTermLookup({
           showEvidence={showEvidence}
           onRangeClick={onRangeClick}
         />
-      </div>
+      </Wrapper>
     )
   }
 
@@ -1680,11 +1689,91 @@ function SourceWithTermLookup({
     parts.push(<React.Fragment key="ws-tail">{text.slice(cursor)}</React.Fragment>)
   }
 
+  const Wrapper = inline ? "span" : "div"
   return (
-    <div>
+    <Wrapper>
       {parts}
-    </div>
+    </Wrapper>
   )
+}
+
+// ---------------------------------------------------------------------------
+// USFM display rendering (FRO-317 follow-up)
+// ---------------------------------------------------------------------------
+// Cell text stores intra-verse USFM markers verbatim (lossless round-trip),
+// but the editor must never show raw `\f + \fr 2:1 \ft …\f*` / `\w …\w*` to a
+// translator. UsfmSourceText segments the raw text for display: character
+// markers are unwrapped, structural markers become line breaks, and notes
+// (footnotes/endnotes/crossrefs) collapse into superscript chips that open a
+// popover. The stored value is untouched — violation ranges are clipped from
+// raw-text offsets into each segment via clipRangesToSegment.
+
+function UsfmNoteChip({ note, ordinal }: { note: UsfmNoteSegment; ordinal: number }) {
+  const label =
+    note.noteKind === "xref" ? "†" : note.caller && note.caller !== "+" && note.caller !== "-" ? note.caller : String(ordinal)
+  const kindLabel = note.noteKind === "xref" ? "Cross reference" : note.noteKind === "endnote" ? "Endnote" : "Footnote"
+  return (
+    <Popover>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            className="mx-0.5 inline-flex h-3.5 min-w-3.5 cursor-pointer items-center justify-center rounded-full bg-muted px-0.5 align-super text-[9px] font-bold leading-none text-muted-foreground hover:bg-primary/15 hover:text-primary"
+            aria-label={`${kindLabel}${note.ref ? ` ${note.ref}` : ""}`}
+          >
+            {label}
+          </button>
+        }
+      />
+      <PopoverContent className="max-w-72 p-2 text-xs" side="bottom" align="start">
+        <div className="mb-0.5 flex items-center gap-1.5">
+          <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">{kindLabel}</span>
+          {note.ref && <span className="font-mono text-[10px] text-muted-foreground">{note.ref}</span>}
+        </div>
+        <div>{note.text || <span className="italic text-muted-foreground">(empty)</span>}</div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function UsfmSourceText(props: SourceWithTermLookupProps) {
+  const segments = useMemo(() => segmentUsfmForDisplay(props.text), [props.text])
+
+  // Fast path: no USFM markers in this cell — render exactly as before.
+  if (segments === null) return <SourceWithTermLookup {...props} />
+
+  let ordinal = 0
+  const parts: React.ReactNode[] = []
+  segments.forEach((seg, i) => {
+    if (seg.kind === "break") {
+      // Suppress a break before any visible content (e.g. text starting "\p ").
+      if (parts.length === 0) return
+      parts.push(<br key={`br-${i}`} />)
+      if (seg.blank) parts.push(<br key={`br2-${i}`} />)
+      if (seg.indent > 0) {
+        parts.push(
+          <span key={`in-${i}`} aria-hidden className="inline-block" style={{ width: `${seg.indent}em` }} />,
+        )
+      }
+      return
+    }
+    if (seg.kind === "note") {
+      ordinal += 1
+      parts.push(<UsfmNoteChip key={`note-${i}`} note={seg} ordinal={ordinal} />)
+      return
+    }
+    parts.push(
+      <SourceWithTermLookup
+        key={`t-${i}`}
+        {...props}
+        inline
+        text={seg.text}
+        ranges={clipRangesToSegment(props.ranges, seg)}
+      />,
+    )
+  })
+
+  return <div>{parts}</div>
 }
 
 function EditorRow({
@@ -1983,6 +2072,11 @@ function EditorRow({
   // in the mousedown-click sequence; clearing here would make onClick see null.
   useEffect(() => {
     if (!sourceSelection) return
+    // While the AddConceptDialog is open it owns the captured term — its
+    // auto-focus collapses the browser selection, and clearing sourceSelection
+    // here would wipe the dialog's pre-fill (the dialog re-syncs its input
+    // from the prop while open).
+    if (showAddConceptDialog) return
     const handleSelectionChange = () => {
       // Suppress if the user is mid-click on the SelectionTermActions toolbar.
       if (toolbarMouseDownRef.current) return
@@ -1993,7 +2087,7 @@ function EditorRow({
     }
     document.addEventListener("selectionchange", handleSelectionChange)
     return () => document.removeEventListener("selectionchange", handleSelectionChange)
-  }, [sourceSelection])
+  }, [sourceSelection, showAddConceptDialog])
 
   // Slice 4: advisory pre-acceptance terminology warnings for the AI copilot.
   // Computed against the completion text (the streaming preview while loading,
@@ -2249,79 +2343,20 @@ function EditorRow({
   const labelText = castName ?? cell.cellLabel ?? null
   const showCellLabel = cellLabelsEnabled && labelText
 
-  // The cell number IS the issue surface: a single pill (top-left of the card)
-  // that tints by worst severity and reveals the concrete issue list on hover.
-  // Replaces the old severity stripe, gutter warning triangle, and dot — there
-  // is now exactly one place that color-codes problems.
+  // The cell number tints by worst severity. That's the whole signal — the
+  // concrete issue list lives in the expansion's Issues tab, not in a hover
+  // popover here. (Replaced the old severity stripe / warning triangle / dot;
+  // the cast label moved to the target column header lane so it isn't squished
+  // into this 44px gutter.)
   const hasAnyIssue = infractionCount > 0 || cellNeedsAttention
   const numberLabel = showLineNumber ? String(rowIndex + 1) : null
-  const numberPillInner = (
-    <CellNumberPill
-      number={numberLabel}
-      label={showCellLabel ? labelText : null}
-      tint={hasMajorInfraction ? "major" : hasAnyIssue ? "issue" : "none"}
-    />
-  )
-  const numberPill = !(showLineNumber || showCellLabel) ? null : hasAnyIssue ? (
-    <Popover>
-      <PopoverTrigger
-        openOnHover
-        delay={250}
-        closeDelay={100}
-        render={
-          <button
-            type="button"
-            className="cursor-help"
-            aria-label={
-              infractionCount > 0
-                ? `${infractionCount} issue${infractionCount !== 1 ? "s" : ""}`
-                : "needs attention"
-            }
-          >
-            {numberPillInner}
-          </button>
-        }
+  const numberPill = !showLineNumber ? null : (
+    <span title={`Line ${numberLabel}`}>
+      <CellNumberPill
+        number={numberLabel}
+        tint={hasMajorInfraction ? "major" : hasAnyIssue ? "issue" : "none"}
       />
-      <PopoverContent side="right" align="start" className="w-64 rounded-xl p-2 shadow-neu-lg">
-        <p className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-          {infractionCount > 0
-            ? `${infractionCount} issue${infractionCount !== 1 ? "s" : ""}`
-            : "Needs attention"}
-        </p>
-        <ul className="space-y-0.5">
-          {cellInfractions.map((inf) => {
-            const major = ruleMap.get(inf.ruleId)?.severity === "major"
-            return (
-              <li key={inf.ruleId} className="flex items-start gap-1.5 px-1 py-1 text-xs">
-                <span
-                  aria-hidden
-                  className={cn(
-                    "mt-1 h-1.5 w-1.5 shrink-0 rounded-full",
-                    major ? "bg-red-500" : "bg-amber-500",
-                  )}
-                />
-                <span className="flex-1">
-                  <span className="font-medium text-foreground">
-                    {ruleMap.get(inf.ruleId)?.name ?? inf.ruleId}
-                  </span>
-                  {inf.message && <span className="ml-1 text-muted-foreground">— {inf.message}</span>}
-                </span>
-              </li>
-            )
-          })}
-          {cellNeedsAttention && (
-            <li className="flex items-start gap-1.5 px-1 py-1 text-xs">
-              <span aria-hidden className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
-              <span className="flex-1 text-muted-foreground">
-                {CELL_NEEDS_ATTENTION_STATUS}
-              </span>
-            </li>
-          )}
-        </ul>
-      </PopoverContent>
-    </Popover>
-  ) : (
-    <span title={numberLabel ? `Line ${numberLabel}` : "Cell label"}>{numberPillInner}</span>
+    </span>
   )
 
   // ── Hover / focus / tap state for the floating action rail ───────────────
@@ -2782,7 +2817,7 @@ function EditorRow({
                 dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(cell.originalHtml) }}
               />
             ) : (
-              <SourceWithTermLookup
+              <UsfmSourceText
                 text={cell.original}
                 highlights={highlights}
                 ranges={sourceRanges}
@@ -2851,6 +2886,18 @@ function EditorRow({
               <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
             )}
           </button>
+          {/* Header lane — mirrors the source column's context line so the
+              target's first text line aligns with the source text, and gives
+              the floating action rail a lane of its own instead of letting it
+              cover the first line of target text. The cast/character label
+              lives here (left side), not squished into the line-number pill. */}
+          <div className="mb-1 flex h-4 items-center text-xs text-muted-foreground" dir="ltr">
+            {showCellLabel && (
+              <span className="max-w-[60%] truncate" title={labelText ?? undefined}>
+                {labelText}
+              </span>
+            )}
+          </div>
           <div className="flex flex-1 flex-col">
             {/* Editable target is flat at rest (symmetric with the source) and
                 only lifts into a muted well on hover/focus. Empty cells keep a
@@ -3002,13 +3049,14 @@ function EditorRow({
           </div>
         </div>
 
-        {/* Floating action rail — anchored to the row's right edge. z-20 so
-            it sits above the sticky column header (z-10). Without this, when
-            a row is positioned at the very top of the scroll container, the
-            sticky header's stacking context wins (rows are position:relative
-            with auto z-index, so the row's local z-10 doesn't escape the
-            sticky header's z-10 context). */}
-        <div className="pointer-events-none absolute right-2 top-1.5 z-20 flex">
+        {/* Floating action rail — anchored to the row's right edge, aligned
+            with the target column's header lane so it never covers the target
+            text. z-20 so it sits above the sticky column header (z-10).
+            Without this, when a row is positioned at the very top of the
+            scroll container, the sticky header's stacking context wins (rows
+            are position:relative with auto z-index, so the row's local z-10
+            doesn't escape the sticky header's z-10 context). */}
+        <div className="pointer-events-none absolute right-2 top-0.5 z-20 flex">
           <div className="pointer-events-auto">
             <CellActionRail
               revealed={railRevealed}

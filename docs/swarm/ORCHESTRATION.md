@@ -34,7 +34,7 @@
 Status: `in-flight | review | merged-integration | merged-main | blocked`
 | ID | Title | Branch | Owns (files) | Status | Agent |
 |----|-------|--------|--------------|--------|-------|
-| ws-modal | OmniVoice Modal endpoint | `swarm/ws-modal` | `infra/modal/omnivoice.py` | dispatched | — |
+| ws-modal | OmniVoice Modal endpoint | `swarm/ws-modal` | `infra/modal/omnivoice.py` | merged-integration | a3da581 |
 | ws-sync | TTS route + metering | `swarm/ws-sync` | `db/postgres/migrations/0041_tts_usage_daily.sql`, `db/postgres/schema.sql`, `sync-worker/src/tts-budget.ts`, `sync-worker/src/tts.ts`, `sync-worker/src/index.ts`, `sync-worker/src/__tests__/tts*.test.ts` | dispatched | — |
 | ws-auth | Usage read endpoints | `swarm/ws-auth` | `auth-worker/src/routes/usage.ts`, `auth-worker/src/index.ts` (mount), `auth-worker/src/__tests__/usage*.test.ts` | dispatched | — |
 | ws-frontend | Usage UI + cell trigger | `swarm/ws-frontend` | `src/lib/sync/tts.ts`, `src/lib/sync/usage.ts`, `src/components/settings/UsageSection.tsx`, `src/components/org/UsageRollup.tsx`, `src/pages/Preferences.tsx` (insert), `src/components/org/OrgHome.tsx` (insert), editor trigger, tests | dispatched | — |
@@ -42,6 +42,7 @@ Status: `in-flight | review | merged-integration | merged-main | blocked`
 
 ## §M Merge log (this goal)
 - 2026-06-13 · integration `swarm/integration` created off main `610c4be9e` (spec commit). Wave 1 (4 agents, manual worktrees) dispatched: ws-modal, ws-sync, ws-auth, ws-frontend.
+- 2026-06-13 · **ws-modal MERGED** → integration `37b4b9a82` (FF). `infra/modal/omnivoice.py` (259 lines, mirrors seed_vc). py_compile OK. Uses `OmniVoice.from_pretrained("k2-fsa/OmniVoice")` + `model.generate(...)`, 24kHz output, duration = len/24000. 3 SWARM-TODOs: (1) pin install once upstream tags a release (installs from HEAD), (2) confirm `device_map="cuda:0"` on L40S, (3) `language` accepted at HTTP layer but not forwarded to `generate()` (upstream undocumented kwarg). ws-sync/ws-auth/ws-frontend still in-flight.
 
 ---
 

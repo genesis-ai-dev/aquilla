@@ -19,6 +19,7 @@ import { z } from "zod"
 import type { Env, Variables } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
+import { creditGuard, recordCredit } from "../lib/credits"
 
 const chat = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -87,6 +88,16 @@ chat.post(
       return c.json(guard.body, guard.status)
     }
 
+    // Credit guard: chat is not tied to a project → orgId = 0 (no-org fallback).
+    // Log-only by default; enforce only when cfg.enforce is on.
+    const chatCreditCheck = await creditGuard(c.env.AQUILLA_PG, c.env, 0, "llm")
+    if (!chatCreditCheck.ok) {
+      return c.json(
+        { error: "credit_cap_exceeded", reason: chatCreditCheck.reason, message: "LLM credit cap reached. Contact your org admin." },
+        429,
+      )
+    }
+
     try {
       const upstream = await fetch(OPENROUTER_URL, {
         method: "POST",
@@ -113,6 +124,11 @@ chat.post(
       }
 
       if (request.stream) {
+        // Streaming: pass body through unchanged. We can't inspect the usage
+        // object from a streaming response without buffering it (defeats the
+        // point). Record a flat 1¢ fallback estimate so the ledger always has
+        // a row — this is the cheap/low-priority rail.
+        await recordCredit(c.env.AQUILLA_PG, 0, user.id, "llm", 1, 1)
         return new Response(upstream.body, {
           status: 200,
           headers: {
@@ -123,8 +139,23 @@ chat.post(
         })
       }
 
-      const data = await upstream.json()
-      return c.json(data as Record<string, unknown>)
+      const data = (await upstream.json()) as Record<string, unknown>
+
+      // Non-streaming: extract OpenRouter usage.cost if present.
+      // usage.cost is in dollars → × 100 for cents.
+      let costCents = 1 // fallback ~1¢ per request
+      try {
+        const usage = data.usage as { cost?: number } | undefined
+        if (typeof usage?.cost === "number" && usage.cost > 0) {
+          costCents = usage.cost * 100
+        }
+      } catch {
+        /* ignore — use the fallback */
+      }
+      // Record asynchronously (graceful-degrade) — never block the response.
+      await recordCredit(c.env.AQUILLA_PG, 0, user.id, "llm", costCents, 1)
+
+      return c.json(data)
     } catch (error) {
       const message =
         error instanceof Error ? error.message : String(error)

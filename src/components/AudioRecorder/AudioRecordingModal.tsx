@@ -28,6 +28,7 @@ import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
 import { setTranscribeStatus } from "@/lib/audio/transcribe-status"
+import { transcribeCell } from "@/lib/audio/transcribe"
 import { probeMicPermission } from "./probeMicPermission"
 
 interface Props {
@@ -147,6 +148,9 @@ export function AudioRecordingModal({
       // "granted" or "prompt" (system will ask, or already asked successfully).
       // Safe to run the countdown and hand off to the recorder.
       setPhase("counting")
+      // Pre-warm the mic NOW so macOS/Chrome AGC has the 3-second countdown
+      // to stabilise gain before we actually start capturing bytes.
+      void recorder.prewarm()
       countdown.start({
         beep: beepEnabled,
         from: 3,
@@ -235,6 +239,19 @@ export function AudioRecordingModal({
       })
       notifyAudioAttachmentsChanged(activeCell.fileId)
       setPhase("saved")
+      // Fire Whisper transcription in the background — user gets karaoke as
+      // soon as the model is ready; doesn't block the auto-advance.
+      const fullAudioId = `${result.audioId}.${result.ext}`
+      void transcribeCell({
+        cell: {
+          ...activeCell,
+          selectedAudioId: fullAudioId,
+          attachments: { ...activeCell.attachments, [fullAudioId]: { url: result.url, type: "audio" } },
+        },
+        session,
+        projectId: project.id,
+        language: project.targetLanguage,
+      })
       // Auto-advance: settle on the new cell after a brief success indication.
       setTimeout(() => {
         const nextIdx = activeIndex + 1

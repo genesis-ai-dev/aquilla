@@ -23,6 +23,11 @@ export interface UseAudioRecorder {
   /** Live MediaStream, populated while state.kind === 'recording'. Consumers
    *  (like a live AnalyserNode waveform) can observe state and read this. */
   stream: MediaStream | null
+  /** Open the mic without starting recording. Call during a pre-recording
+   *  countdown so macOS/Chrome AGC has time to stabilise before bytes are
+   *  captured — prevents the "quiet first few seconds then suddenly loud"
+   *  ramp-up artefact. Safe to call more than once; idempotent. */
+  prewarm: () => Promise<void>
   start: () => Promise<void>
   stop: () => void
   reset: () => void
@@ -73,19 +78,33 @@ export function useAudioRecorder(): UseAudioRecorder {
 
   useEffect(() => () => cleanup(), [cleanup])
 
+  const MIC_CONSTRAINTS = {
+    channelCount: 1,
+    sampleRate: 48000,
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false,
+  }
+
+  const prewarm = useCallback(async () => {
+    if (streamRef.current) return
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ audio: MIC_CONSTRAINTS })
+      streamRef.current = s
+      setStream(s)
+    } catch {
+      // Ignore — permission errors surface again when start() is called.
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const start = useCallback(async () => {
     if (state.kind === "requesting" || state.kind === "recording") return
     setState({ kind: "requesting" })
     setElapsedMs(0)
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          sampleRate: 48000,
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-        },
+      const stream = streamRef.current ?? await navigator.mediaDevices.getUserMedia({
+        audio: MIC_CONSTRAINTS,
       })
       streamRef.current = stream
       setStream(stream)
@@ -144,5 +163,5 @@ export function useAudioRecorder(): UseAudioRecorder {
     setState({ kind: "idle" })
   }, [cleanup])
 
-  return { state, elapsedMs, isNearLimit, stream, start, stop, reset }
+  return { state, elapsedMs, isNearLimit, stream, prewarm, start, stop, reset }
 }

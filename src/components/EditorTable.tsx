@@ -34,7 +34,9 @@ import { CellExpansion } from "./CellExpansion"
 import { tokenizeWords } from "@/lib/audio/timings"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { useCellEditHistory } from "@/hooks/useCellEditHistory"
-import { setTranscribeStatus, useTranscribeStatus } from "@/lib/audio/transcribe-status"
+import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
+import { transcribeCell } from "@/lib/audio/transcribe"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
   MAX_SELECTED,
   clearSelection,
@@ -2232,15 +2234,12 @@ function EditorRow({
   const transcribeStatus = useTranscribeStatus(cell.selectedAudioId)
   const isTranscribing = transcribeStatus.kind === "loading" || transcribeStatus.kind === "transcribing"
   const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
+  const { session: rowSession } = useFrontierSession()
 
   const handleTranscribe = useCallback(async () => {
-    // Phase 2c-gamma: transcribeAndStoreTimings wrote per-word timings into
-    // the per-file Y.Doc. The grammar that brings forced-alignment writebacks
-    // to the event log lands in v1.x; this gesture is a no-op for now.
-    const audioId = cell.selectedAudioId
-    if (!audioId) return
-    setTranscribeStatus(audioId, { kind: "idle" })
-  }, [cell.selectedAudioId])
+    if (!cell.selectedAudioId) return
+    void transcribeCell({ cell, session: rowSession, projectId: project.id, language: project.targetLanguage })
+  }, [cell, rowSession, project.id, project.targetLanguage])
 
   // Build tooltip detail. Prefer the live examples surfaced in the popover
   // (cellExamples) over the history snapshot — history's `examples` only gets

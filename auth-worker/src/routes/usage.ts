@@ -1,19 +1,22 @@
 // Usage read endpoints — per-user and per-org rollups of AI + TTS usage.
 //
 // Spec: docs/superpowers/specs/2026-06-13-omnivoice-tts-design.md §4 "Read endpoints".
+// Credits spec: docs/superpowers/specs/2026-06-13-org-credits-cost-model.md.
 //
 // Routes (mounted at /api/v1/usage in index.ts):
-//   GET /me          — caller's own rollup: today + 7-day history. JWT-authed.
-//   GET /org/:orgId  — per-member rollup for the org. Maintainer-gated (≥ 600).
+//   GET /me              — caller's own rollup: today + 7-day history. JWT-authed.
+//   GET /org/:orgId      — per-member rollup for the org. Maintainer-gated (≥ 600).
+//   GET /org/:orgId/credits — org credit spend + caps. Platform-admin OR (org-maintainer + showToOrg).
 //
-// Defensive: if tts_usage_daily doesn't exist yet (migration not yet applied),
-// degrade to zeros — wrap that query and treat a missing-table error as empty.
-// The migration lands separately (sync-worker agent); never block the UI on it.
+// Defensive: if tts_usage_daily / org_credit_usage_daily don't exist yet
+// (migrations not yet applied), degrade to zeros. Never block the UI.
 
 import { Hono } from "hono"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { getEffectiveOrgRole } from "../services/org-permissions"
+import { isPlatformAdmin } from "../middleware/platform-admin"
 import { ROLE } from "../types"
+import { resolveCreditConfig, readSpend } from "../lib/credits"
 
 const usage = new Hono<AuthHonoEnv>()
 
@@ -329,6 +332,81 @@ usage.get("/org/:orgId", async (c) => {
   }
 
   return c.json({ members, orgTotal } satisfies OrgUsageResponse)
+})
+
+// ── GET /org/:orgId/credits ───────────────────────────────────────────────────
+
+/**
+ * GET /api/v1/usage/org/:orgId/credits
+ *
+ * Returns credit spend + caps for the org. Two auth paths:
+ *   1. Platform admin — always allowed (cross-tenant oversight).
+ *   2. Org maintainer (≥ 600) AND cfg.showToOrg === true — org-admin self-service.
+ *   3. Everyone else → 403.
+ *
+ * Response shape:
+ *   {
+ *     config: { markup, agentMarkup, dailyCap, weeklyCap, agentDailyCap, agentWeeklyCap, enforce, showToOrg },
+ *     day: { totalCredits, byRail, agentCredits },
+ *     week: { totalCredits, byRail, agentCredits },
+ *     remaining: { daily, weekly, agentDaily, agentWeekly }
+ *   }
+ *
+ * Defensive: org_credit_usage_daily missing → all zeros (graceful degrade).
+ */
+usage.get("/org/:orgId/credits", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+
+  // Auth: platform-admin OR (org-maintainer AND showToOrg). Resolve config only
+  // after the membership/role gate, so a non-member never triggers a config read.
+  const isAdmin = isPlatformAdmin(c)
+  let cfg
+  if (isAdmin) {
+    cfg = await resolveCreditConfig(c.env, c.env.AQUILLA_PG, orgId)
+  } else {
+    const role = await getEffectiveOrgRole(c.env, orgId, user)
+    if (role == null || role < ROLE.MAINTAINER) {
+      return c.json({ error: "forbidden" }, 403)
+    }
+    cfg = await resolveCreditConfig(c.env, c.env.AQUILLA_PG, orgId)
+    if (!cfg.showToOrg) {
+      return c.json({ error: "forbidden" }, 403)
+    }
+  }
+
+  // Read current spend.
+  const spend = await readSpend(c.env.AQUILLA_PG, orgId, cfg)
+
+  return c.json({
+    config: {
+      markup: cfg.markup,
+      agentMarkup: cfg.agentMarkup,
+      dailyCap: cfg.dailyCap,
+      weeklyCap: cfg.weeklyCap,
+      agentDailyCap: cfg.agentDailyCap,
+      agentWeeklyCap: cfg.agentWeeklyCap,
+      enforce: cfg.enforce,
+      showToOrg: cfg.showToOrg,
+    },
+    day: {
+      totalCredits: spend.dayCredits,
+      byRail: spend.byRailDay,
+      agentCredits: spend.agentDayCredits,
+    },
+    week: {
+      totalCredits: spend.weekCredits,
+      byRail: spend.byRailWeek,
+      agentCredits: spend.agentWeekCredits,
+    },
+    remaining: {
+      daily: Math.max(0, cfg.dailyCap - spend.dayCredits),
+      weekly: Math.max(0, cfg.weeklyCap - spend.weekCredits),
+      agentDaily: Math.max(0, cfg.agentDailyCap - spend.agentDayCredits),
+      agentWeekly: Math.max(0, cfg.agentWeeklyCap - spend.agentWeekCredits),
+    },
+  })
 })
 
 export default usage

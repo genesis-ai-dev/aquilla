@@ -518,6 +518,20 @@ CREATE TABLE IF NOT EXISTS tts_usage_daily (
 );
 CREATE INDEX IF NOT EXISTS idx_tts_usage_org_date ON tts_usage_daily (org_id, date_utc);
 
+-- Org credits & unified compute-cost model (0042_org_credit_usage_daily.sql).
+-- Cross-rail cost rollup; rail = 'llm' | 'agent' | 'tts'. raw_cost_cents = actual
+-- infra cost; credits derived on read. Existing usage tables unchanged.
+CREATE TABLE IF NOT EXISTS org_credit_usage_daily (
+  org_id         INTEGER          NOT NULL,
+  user_id        INTEGER          NOT NULL,
+  date_utc       DATE             NOT NULL,
+  rail           TEXT             NOT NULL,
+  raw_cost_cents DOUBLE PRECISION NOT NULL DEFAULT 0,
+  units          INTEGER          NOT NULL DEFAULT 0,
+  PRIMARY KEY (org_id, user_id, date_utc, rail)
+);
+CREATE INDEX IF NOT EXISTS idx_org_credit_org_date ON org_credit_usage_daily (org_id, date_utc);
+
 -- Translation agent run ledger (0040_agent_runs.sql). One row per
 -- POST /api/v1/ai/agent/run; staged commits carry payload.agent_run_id →
 -- run_id for attribution / undo-run / cost rollups.

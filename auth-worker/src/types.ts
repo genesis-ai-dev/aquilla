@@ -70,6 +70,23 @@ export interface Env {
   //   but allowed through. Flip to "true" after sizing thresholds.
   AI_BUDGET_ENFORCE?: string
 
+  // ── Org credit accounting (WS-AUTH-CREDITS) ──────────────────────────────
+  // Platform-level defaults; per-org overrides live in org_settings.credits.
+  // CREDIT_MARKUP: base markup multiplier for llm/tts rails. Default: 4.
+  CREDIT_MARKUP?: string
+  // CREDIT_AGENT_MARKUP: markup multiplier for the agent rail. Default: 5.
+  CREDIT_AGENT_MARKUP?: string
+  // CREDIT_DAILY_CAP: org daily cap in credits (all rails). Default: 1000.
+  CREDIT_DAILY_CAP?: string
+  // CREDIT_WEEKLY_CAP: org rolling-7-day cap in credits (all rails). Default: 5000.
+  CREDIT_WEEKLY_CAP?: string
+  // CREDIT_AGENT_DAILY_CAP: agent-rail daily sub-cap in credits. Default: 600.
+  CREDIT_AGENT_DAILY_CAP?: string
+  // CREDIT_AGENT_WEEKLY_CAP: agent-rail rolling-7-day sub-cap. Default: 3000.
+  CREDIT_AGENT_WEEKLY_CAP?: string
+  // CREDIT_ENFORCE: set to "true" to enforce caps with 429s. Default: false.
+  CREDIT_ENFORCE?: string
+
   /**
    * When set to "1", exposes `/__test__/reset` and skips authentication on
    * sensitive routes that the E2E harness needs to seed. NEVER set in

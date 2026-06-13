@@ -4,21 +4,25 @@
 // entire router is mounted behind `requirePlatformAdmin` (which itself runs
 // after `authMiddleware`). These are deliberately read-only: listing orgs,
 // users, projects, a top-line rollup, and the cross-tenant activity feed.
-// Mutating / break-glass actions are intentionally out of scope for v1 and
-// will land as individually-audited endpoints.
+// Credit config endpoints (read + write) are also gated here.
 //
 // Routes (mounted at /api/v2/admin):
-//   GET /me        — { isPlatformAdmin: true } (only reachable past the gate)
-//   GET /admins    — the PLATFORM_ADMINS allowlist joined to user accounts
-//   GET /overview  — top-line counts (orgs, users, projects, active-7d)
-//   GET /orgs      — every org + owner + member/project counts
-//   GET /users     — every user
-//   GET /projects  — every project + org/creator + cell/word rollup
-//   GET /activity  — cross-tenant activity_logs feed (?limit, ?since)
+//   GET /me                    — { isPlatformAdmin: true } (only reachable past the gate)
+//   GET /admins                — the PLATFORM_ADMINS allowlist joined to user accounts
+//   GET /overview              — top-line counts (orgs, users, projects, active-7d)
+//   GET /orgs                  — every org + owner + member/project counts
+//   GET /users                 — every user
+//   GET /projects              — every project + org/creator + cell/word rollup
+//   GET /activity              — cross-tenant activity_logs feed (?limit, ?since)
+//   GET /credits/orgs          — all orgs with day/week credit spend + caps
+//   PATCH /credits/org/:orgId  — update per-org credit config (org_settings.credits)
 
 import { Hono } from "hono"
+import { zValidator } from "@hono/zod-validator"
+import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { parsePlatformAdmins, requirePlatformAdmin } from "../middleware/platform-admin"
+import { resolveCreditConfig, readSpend } from "../lib/credits"
 
 const admin = new Hono<AuthHonoEnv>()
 
@@ -293,5 +297,153 @@ admin.get("/activity", async (c) => {
     })),
   })
 })
+
+// ── Credit config endpoints ───────────────────────────────────────────────────
+// All gated by the requirePlatformAdmin middleware above — no per-route re-check
+// is needed.
+
+/**
+ * GET /api/v2/admin/credits/orgs
+ *
+ * List all orgs with their current day + week credit spend, caps, enforce flag,
+ * and showToOrg flag. Ordered by total week spend descending (most active first).
+ *
+ * Graceful-degrade: if org_credit_usage_daily doesn't exist yet, all spend
+ * fields are 0. Config is always returned from org_settings.
+ */
+admin.get("/credits/orgs", async (c) => {
+  const db = c.env.AQUILLA_PG
+
+  // Fetch all orgs.
+  const { results: orgs } = await db
+    .prepare("SELECT id, name FROM organizations ORDER BY id")
+    .all<{ id: number; name: string | null }>()
+
+  const rows = await Promise.all(
+    (orgs ?? []).map(async (org) => {
+      const cfg = await resolveCreditConfig(c.env, db, org.id)
+      const spend = await readSpend(db, org.id, cfg)
+      return {
+        orgId: org.id,
+        orgName: org.name,
+        config: {
+          markup: cfg.markup,
+          agentMarkup: cfg.agentMarkup,
+          dailyCap: cfg.dailyCap,
+          weeklyCap: cfg.weeklyCap,
+          agentDailyCap: cfg.agentDailyCap,
+          agentWeeklyCap: cfg.agentWeeklyCap,
+          enforce: cfg.enforce,
+          showToOrg: cfg.showToOrg,
+        },
+        day: {
+          totalCredits: spend.dayCredits,
+          agentCredits: spend.agentDayCredits,
+          byRail: spend.byRailDay,
+        },
+        week: {
+          totalCredits: spend.weekCredits,
+          agentCredits: spend.agentWeekCredits,
+          byRail: spend.byRailWeek,
+        },
+      }
+    }),
+  )
+
+  // Sort: most week spend first.
+  rows.sort((a, b) => b.week.totalCredits - a.week.totalCredits)
+
+  return c.json({ orgs: rows })
+})
+
+const creditConfigPatchSchema = z.object({
+  markup:         z.number().positive().optional(),
+  agentMarkup:    z.number().positive().optional(),
+  dailyCap:       z.number().nonnegative().optional(),
+  weeklyCap:      z.number().nonnegative().optional(),
+  agentDailyCap:  z.number().nonnegative().optional(),
+  agentWeeklyCap: z.number().nonnegative().optional(),
+  enforce:        z.boolean().optional(),
+  showToOrg:      z.boolean().optional(),
+})
+
+/**
+ * PATCH /api/v2/admin/credits/org/:orgId
+ *
+ * Partially update per-org credit config stored in org_settings.credits.
+ * Missing fields are left unchanged (deep-merge with current credits blob).
+ * Upserts the org_settings row if it doesn't exist (version = 0).
+ *
+ * Body: Partial<CreditConfig> (any subset of the fields above).
+ * Response: { orgId, credits } — the updated credits config.
+ */
+admin.patch(
+  "/credits/org/:orgId",
+  zValidator("json", creditConfigPatchSchema),
+  async (c) => {
+    const orgId = parseInt(c.req.param("orgId"), 10)
+    if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+
+    const patch = c.req.valid("json")
+    const db = c.env.AQUILLA_PG
+    const user = c.get("user")
+
+    // Load existing org_settings (may not exist).
+    const existing = await db
+      .prepare("SELECT settings, version FROM org_settings WHERE org_id = ?")
+      .bind(orgId)
+      .first<{ settings: string; version: number }>()
+
+    let settings: Record<string, unknown> = {}
+    let version = 0
+    if (existing) {
+      try { settings = JSON.parse(existing.settings) as Record<string, unknown> } catch { /* ignore */ }
+      version = existing.version
+    }
+
+    // Deep-merge patch into settings.credits.
+    const currentCredits = (settings.credits as Record<string, unknown> | undefined) ?? {}
+    const nextCredits: Record<string, unknown> = { ...currentCredits }
+    if (patch.markup !== undefined)         nextCredits.markup = patch.markup
+    if (patch.agentMarkup !== undefined)    nextCredits.agentMarkup = patch.agentMarkup
+    if (patch.dailyCap !== undefined)       nextCredits.dailyCap = patch.dailyCap
+    if (patch.weeklyCap !== undefined)      nextCredits.weeklyCap = patch.weeklyCap
+    if (patch.agentDailyCap !== undefined)  nextCredits.agentDailyCap = patch.agentDailyCap
+    if (patch.agentWeeklyCap !== undefined) nextCredits.agentWeeklyCap = patch.agentWeeklyCap
+    if (patch.enforce !== undefined)        nextCredits.enforce = patch.enforce
+    if (patch.showToOrg !== undefined)      nextCredits.showToOrg = patch.showToOrg
+
+    settings.credits = nextCredits
+    const settingsJson = JSON.stringify(settings)
+
+    // Look up the admin user id (for updated_by).
+    const adminRow = await db
+      .prepare("SELECT id FROM users WHERE username = ?")
+      .bind(user.username)
+      .first<{ id: number }>()
+    const adminId = adminRow?.id ?? 0
+
+    if (existing) {
+      await db
+        .prepare(
+          `UPDATE org_settings
+              SET settings = ?, version = ?, updated_at = now(), updated_by = ?
+            WHERE org_id = ?`,
+        )
+        .bind(settingsJson, version + 1, adminId, orgId)
+        .run()
+    } else {
+      await db
+        .prepare(
+          `INSERT INTO org_settings (org_id, settings, version, updated_by)
+           VALUES (?, ?, 1, ?)`,
+        )
+        .bind(orgId, settingsJson, adminId)
+        .run()
+    }
+
+    return c.json({ orgId, credits: nextCredits })
+  },
+)
 
 export default admin

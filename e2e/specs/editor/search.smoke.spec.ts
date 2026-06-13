@@ -11,7 +11,10 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * Search panel (ParallelPassagesPanel in "search" mode).
  *
  * Tests:
- *  1. The panel opens when the toolbar Search & replace button is clicked.
+ *  1. The panel opens via the dock rail Search tab → "Open full search panel".
+ *     (FRO-308 replaced the old toolbar "Search & replace" button with a
+ *     Search tab in the left dock; the full ParallelPassagesPanel dialog now
+ *     opens from the dock panel's "Open full search panel" button or ⌘F.)
  *  2. The search input accepts text and returns "No results" for a garbage query.
  *  3. The panel can be dismissed with Escape.
  *
@@ -30,10 +33,11 @@ test("search panel opens, accepts a query, and shows no-results for unmatched te
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // 1. Open the search panel via the toolbar button.
-  const searchBtn = alice.locator('button[aria-label="Search & replace"]')
-  await expect(searchBtn).toBeVisible({ timeout: 5_000 })
-  await searchBtn.click()
+  // 1. Open the dock Search tab, then the full search panel dialog.
+  await alice.getByRole("button", { name: "Search", exact: true }).click()
+  const openFullBtn = alice.getByRole("button", { name: "Open full search panel" })
+  await expect(openFullBtn).toBeVisible({ timeout: 5_000 })
+  await openFullBtn.click()
 
   // The panel is rendered as a Dialog.
   const panel = alice.getByRole("dialog")

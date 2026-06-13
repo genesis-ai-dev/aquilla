@@ -5,15 +5,18 @@ import { pickSelectOption, expectSelectValue } from "../../helpers/base-ui"
 /**
  * BuiltinChecksList — change a built-in rule's severity.
  *
- * RulesPage renders BuiltinChecksList. Each built-in rule row has a
+ * The RulesSurface renders BuiltinChecksList. Each built-in rule row has a
  * Base UI Select (role="combobox" trigger) with
  * aria-label="<rule name> severity" and options "Major" / "Minor".
  *
+ * "Extra whitespace" (double-space) has defaultSeverity "minor" in
+ * src/lib/lqa/builtin-registry.ts.
+ *
  * This spec: navigates to the rules page → finds "Extra whitespace severity"
- * select → changes it from "Major" to "Minor" → verifies the trigger label
- * updated → changes it back to "Major".
+ * select → verifies the default is "Minor" → changes it to "Major" →
+ * verifies the trigger label updated → changes it back to "Minor".
  */
-test("builtin rule severity select changes from major to minor", async ({ alice }) => {
+test("builtin rule severity select changes from minor to major", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `Severity ${Date.now()}`
@@ -30,14 +33,14 @@ test("builtin rule severity select changes from major to minor", async ({ alice 
   const severitySelect = alice.getByRole("combobox", { name: "Extra whitespace severity" })
   await expect(severitySelect).toBeVisible({ timeout: 10_000 })
 
-  // Default value should be "Major".
-  await expectSelectValue(severitySelect, "Major")
-
-  // Change to "Minor".
-  await pickSelectOption(alice, severitySelect, "Minor")
+  // Default value should be "Minor" (registry defaultSeverity).
   await expectSelectValue(severitySelect, "Minor")
 
-  // Restore to "Major".
+  // Change to "Major".
   await pickSelectOption(alice, severitySelect, "Major")
   await expectSelectValue(severitySelect, "Major")
+
+  // Restore to "Minor".
+  await pickSelectOption(alice, severitySelect, "Minor")
+  await expectSelectValue(severitySelect, "Minor")
 })

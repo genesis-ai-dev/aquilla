@@ -44,10 +44,12 @@ test("validated cell stays validated after navigating away and back", async ({ a
   // Validate cell 0 — waits for "— validated" title attribute.
   await ws.validateCell(0)
 
-  // Navigate away.
+  // Navigate away. The /projects list has no "Projects" heading (the
+  // OrgBreadcrumb renders plain spans) — assert arrival via the New Project
+  // button instead.
   await alice.goto("/projects")
   await alice.waitForLoadState("networkidle")
-  await expect(alice.getByRole("heading", { name: /projects/i }).first()).toBeVisible({
+  await expect(alice.getByRole("button", { name: /new project/i })).toBeVisible({
     timeout: 5_000,
   })
 

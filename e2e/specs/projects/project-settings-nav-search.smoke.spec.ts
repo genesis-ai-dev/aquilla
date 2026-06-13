@@ -25,21 +25,23 @@ test("project settings nav search filters and clears sections", async ({ alice }
   await alice.goto(`/project/${projectId}/settings`)
   await alice.waitForLoadState("networkidle")
 
-  // The SettingsNav search input.
-  const searchInput = alice.locator('input[aria-label="Search settings"]')
-  await expect(searchInput).toBeVisible({ timeout: 10_000 })
+  // The SettingsNav renders twice (desktop rail in <aside> + a lg:hidden
+  // mobile copy) — scope to the rail to keep locators strict-mode safe.
+  const nav = alice.locator('aside nav[aria-label="Settings sections"]')
+  await expect(nav).toBeVisible({ timeout: 10_000 })
+  const searchInput = nav.locator('input[aria-label="Search settings"]')
+  await expect(searchInput).toBeVisible({ timeout: 5_000 })
 
   // Type a non-matching query.
   await searchInput.fill("xyzzy-no-match-gibberish")
 
   // Nav collapses to "No matching sections".
-  await expect(alice.getByText(/No matching sections/i)).toBeVisible({ timeout: 3_000 })
+  await expect(nav.getByText(/No matching sections/i)).toBeVisible({ timeout: 3_000 })
 
   // Clear the input — sections return.
   await searchInput.fill("")
-  await expect(alice.getByText(/No matching sections/i)).not.toBeVisible({ timeout: 3_000 })
+  await expect(nav.getByText(/No matching sections/i)).not.toBeVisible({ timeout: 3_000 })
 
-  // At least one section link should be visible again (e.g. "General").
-  const nav = alice.locator('[aria-label="Settings sections"]')
-  await expect(nav.getByRole("button", { name: /General/i })).toBeVisible({ timeout: 3_000 })
+  // At least one section link should be visible again.
+  await expect(nav.getByRole("button", { name: /Project Info/i })).toBeVisible({ timeout: 3_000 })
 })

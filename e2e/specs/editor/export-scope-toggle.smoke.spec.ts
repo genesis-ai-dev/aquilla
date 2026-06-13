@@ -11,10 +11,12 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * ExportDialog — scope toggle (file vs project).
  *
  * ExportDialog has a radiogroup (aria-label="Export scope") with two
- * options: "file" (default) and "project". Each is a radio input.
+ * options rendered as Base UI radios (role=radio) inside labels reading
+ * "Current file" (default) and "Whole project". The radio element itself
+ * is sr-only — interaction goes through the label text.
  *
- * This spec: open the export dialog → verify "file" radio is checked →
- * click the "project" label → verify "project" radio becomes checked.
+ * This spec: open the export dialog → verify "Current file" is checked →
+ * click the "Whole project" label → verify it becomes checked.
  */
 test("export dialog scope toggle switches between file and project", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -34,16 +36,16 @@ test("export dialog scope toggle switches between file and project", async ({ al
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
 
-  // "file" radio is checked by default.
-  const fileRadio = dialog.locator('input[type="radio"][name="export-scope"][value="file"]')
+  // "Current file" radio is checked by default (Base UI: role=radio, sr-only).
+  const fileRadio = dialog.getByRole("radio", { name: "Current file" })
   await expect(fileRadio).toBeChecked({ timeout: 3_000 })
 
-  // Click the "project" label to switch scope.
-  const projectRadio = dialog.locator('input[type="radio"][name="export-scope"][value="project"]')
-  await expect(projectRadio).toBeVisible({ timeout: 3_000 })
-  await projectRadio.check({ force: true })
+  // Click the "Whole project" label to switch scope (the radio is sr-only,
+  // so the visible label is the click target).
+  const projectRadio = dialog.getByRole("radio", { name: "Whole project" })
+  await dialog.getByText("Whole project").click()
 
-  // "project" radio is now checked.
+  // "Whole project" radio is now checked.
   await expect(projectRadio).toBeChecked({ timeout: 2_000 })
   await expect(fileRadio).not.toBeChecked()
 

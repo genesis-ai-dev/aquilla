@@ -16,11 +16,12 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   workers: 1,
   reporter: process.env.CI ? "github" : "list",
-  // Tighter than Playwright's 30s default. Most legitimate operations finish
-  // in 1-3s; a 60s ceiling × 9 specs × workers=1 means a fully-failing run
-  // wastes 9 minutes before reporting. Specs that genuinely need more time
-  // can override locally with `test.setTimeout(...)`.
-  timeout: 15_000,
+  // Playwright's default (30s). The previous 15s budget predates the fresh-
+  // project flow getting heavier (org Overview hop + setup checklist + import
+  // projection round-trip) — a typical create→open→import→edit spec now needs
+  // ~20s legitimately. Specs that need more can override locally with
+  // `test.setTimeout(...)`.
+  timeout: 30_000,
 
   use: {
     baseURL: "http://127.0.0.1:5173",

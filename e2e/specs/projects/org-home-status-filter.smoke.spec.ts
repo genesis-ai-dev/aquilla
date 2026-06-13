@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
  * OrgHome — project status filter pills.
@@ -8,12 +9,20 @@ import { test, expect } from "../../helpers/multi-user"
  * The "All" filter is selected by default (aria-pressed="true").
  * Clicking a filter pill sets aria-pressed="true" on it.
  *
- * This spec: navigates to the org home → verifies "All" is pressed →
- * clicks "Active" → verifies "Active" becomes pressed and "All" un-pressed
- * → clicks "All" to restore.
+ * OrgHome renders at "/" (org Overview) — /projects is the ProjectsList,
+ * which has no status pills — and the pills only render once the org has
+ * at least one project, so this spec creates one first.
+ *
+ * This spec: creates a project → navigates to the org home ("/") →
+ * verifies "All" is pressed → clicks "Active" → verifies "Active" becomes
+ * pressed and "All" un-pressed → clicks "All" to restore.
  */
 test("org home status filter pills toggle active state", async ({ alice }) => {
-  await alice.goto("/projects")
+  const dash = new Dashboard(alice)
+  await dash.goto()
+  await dash.createProject({ name: `StatusFilter ${Date.now()}` })
+
+  await alice.goto("/")
   await alice.waitForLoadState("networkidle")
 
   // "All" filter is pressed by default.

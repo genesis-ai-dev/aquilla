@@ -25,9 +25,17 @@ export class Workspace {
       await expect(skipChecklist).toBeHidden({ timeout: 5_000 })
     }
     // Open the ImportDialog — lands on the "landing" screen (card grid).
-    await this.page.getByRole("button", { name: /^Import$/i }).click()
+    // Retry once: right after a previous import, header re-renders can
+    // swallow the click (the button is replaced mid-press), leaving no
+    // dialog open and the next locator hanging for the full test budget.
+    const importBtn = this.page.getByRole("button", { name: /^Import$/i })
+    const uploadCard = this.page.getByText("Upload Files")
+    await importBtn.click()
+    if (!(await uploadCard.isVisible({ timeout: 3_000 }).catch(() => false))) {
+      await importBtn.click()
+    }
     // Navigate to the Upload Files panel by clicking its card.
-    await this.page.getByText("Upload Files").click()
+    await uploadCard.click()
     // UploadPanel is now visible with a "Choose Files" button.
     await expect(this.page.getByRole("button", { name: /Choose Files/i })).toBeVisible({
       timeout: 5_000,
@@ -37,12 +45,21 @@ export class Workspace {
     await this.page
       .locator('input[type="file"]:not([webkitdirectory])')
       .setInputFiles(filePath)
-    // Selecting a non-Paratext file starts the import immediately (no confirm step).
-    // Wait for the dialog to finish: "Choose Files" disappears when the import panel
-    // transitions to the "importing" state or the dialog closes on success.
+    // FRO-310: selecting a file now lands on a Preview panel (parsed cells +
+    // counts) instead of starting the upload immediately. Confirm it to kick
+    // off the actual bulk upload.
+    const confirmBtn = this.page.getByRole("button", { name: /Confirm import/i })
+    await expect(confirmBtn).toBeVisible({ timeout: 10_000 })
+    await confirmBtn.click()
+    // The upload runs ("Uploading…"), then the dialog closes on success.
+    await expect(confirmBtn).not.toBeVisible({ timeout: 15_000 })
+    // The dialog closing only means the upload was handed off — the sidebar
+    // file list renders from the server projection, which lags the import by
+    // a sync round-trip. Wait for an actual file row so callers can click it
+    // immediately (every openFileBySubstring caller depends on this).
     await expect(
-      this.page.getByRole("button", { name: /Choose Files/i }),
-    ).not.toBeVisible({ timeout: 15_000 })
+      this.page.locator("aside").locator('button[aria-label="File actions"]').first(),
+    ).toBeVisible({ timeout: 15_000 })
   }
 
   /** Click a file row in the sidebar, identified by a substring of its name. */

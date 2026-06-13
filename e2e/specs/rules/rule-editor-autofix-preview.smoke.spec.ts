@@ -5,9 +5,11 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * RuleEditor — autofix "Preview on sample text" input shows before/after.
  *
  * When the autofix section is expanded in RuleEditor.tsx:
- *   - A "Find pattern" input (data-autofix-field="pattern")
- *   - A "Replace with" input (data-autofix-field="replacement")
+ *   - A "Find pattern" input (placeholder="pattern")
+ *   - A "Replace with" input (placeholder="replacement")
  *   - A "Preview on sample text" input (placeholder="Type sample text to see before/after…")
+ * (data-autofix-field attributes belong to the rule-row AutofixEditor in
+ * RulesSurface.tsx, not to RuleEditor.)
  *
  * Typing in the sample input shows:
  *   <original text (line-through)> → <replaced text (green)>
@@ -39,7 +41,7 @@ test("rule editor autofix preview shows before/after transform", async ({ alice 
   await expect(nameInput).toBeVisible({ timeout: 3_000 })
   await nameInput.fill(`Preview Rule ${Date.now()}`)
 
-  const patInput = alice.locator('#re-pat').or(alice.locator('input[placeholder*="pattern" i]').first())
+  const patInput = alice.locator("#re-pat")
   await expect(patInput).toBeVisible({ timeout: 3_000 })
   await patInput.fill("hello")
 
@@ -48,12 +50,13 @@ test("rule editor autofix preview shows before/after transform", async ({ alice 
   await expect(toggleAutofix).toBeVisible({ timeout: 3_000 })
   await toggleAutofix.click()
 
-  // Fill the autofix find pattern and replacement.
-  const afPatInput = alice.locator('[data-autofix-field="pattern"]')
+  // Fill the autofix find pattern and replacement (RuleEditor's autofix
+  // inputs are identified by their literal placeholders).
+  const afPatInput = alice.locator('input[placeholder="pattern"]')
   await expect(afPatInput).toBeVisible({ timeout: 5_000 })
   await afPatInput.fill("hello")
 
-  const afReplInput = alice.locator('[data-autofix-field="replacement"]')
+  const afReplInput = alice.locator('input[placeholder="replacement"]')
   await expect(afReplInput).toBeVisible({ timeout: 3_000 })
   await afReplInput.fill("world")
 

@@ -24,10 +24,11 @@ test("project create dialog language tooltip shows hint text", async ({ alice })
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
 
-  // Click the "What can I enter here?" tooltip trigger button.
+  // Hover the "What can I enter here?" tooltip trigger button.
+  // (Base UI tooltips open on hover/focus; a click dismisses them.)
   const tooltipTrigger = dialog.locator('button[aria-label="What can I enter here?"]').first()
   await expect(tooltipTrigger).toBeVisible({ timeout: 3_000 })
-  await tooltipTrigger.click()
+  await tooltipTrigger.hover()
 
   // Tooltip content appears — "Any label works" is the first sentence.
   await expect(alice.getByText(/Any label works/i).first()).toBeVisible({ timeout: 3_000 })

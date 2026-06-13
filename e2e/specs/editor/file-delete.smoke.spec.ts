@@ -8,14 +8,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * File delete via context menu — ConfirmActionDialog.
+ * File delete via context menu — ConfirmActionDialog (FRO-272 soft delete).
  *
  * FileRow right-click → FileActionMenu "Delete" → ConfirmActionDialog opens
  * with:
- *   - Description: 'Remove "<filename>" from this project?'
- *   - Checkbox: "I understand this removes the file from the project."
+ *   - Title: "Move file to Recently deleted"
+ *   - Description: 'Move "<filename>" to Recently deleted? ...'
+ *   - Checkbox: "I understand this action." (ConfirmActionDialog default)
  *   - Cancel button (closes without deleting)
- *   - "Delete" button (disabled until checkbox checked)
+ *   - "Move to Recently deleted" button (disabled until checkbox checked)
  *
  * This spec verifies the dialog appears and Cancel dismisses without deleting.
  */
@@ -45,20 +46,19 @@ test("file delete dialog opens with acknowledgement checkbox", async ({ alice })
 
   // Description contains the filename.
   await expect(
-    dialog.getByText(/Remove ".*" from this project/i)
+    dialog.getByText(/Move ".*" to Recently deleted\?/i)
   ).toBeVisible({ timeout: 3_000 })
 
   // Checkbox with acknowledgement label (shadcn Checkbox — role="checkbox";
-  // the native input is hidden and no longer actionable).
-  const checkbox = dialog.getByRole("checkbox")
+  // the native input is hidden and no longer actionable, so target the
+  // named role).
+  const checkbox = dialog.getByRole("checkbox", { name: /I understand this action/i })
   await expect(checkbox).toBeVisible()
   await expect(checkbox).not.toBeChecked()
-  await expect(
-    dialog.getByText(/I understand this removes the file from the project/i)
-  ).toBeVisible()
+  await expect(dialog.getByText(/I understand this action/i)).toBeVisible()
 
-  // "Delete" confirm button is disabled until checkbox is checked.
-  const confirmBtn = dialog.getByRole("button", { name: /^Delete$/i })
+  // "Move to Recently deleted" confirm button is disabled until checkbox is checked.
+  const confirmBtn = dialog.getByRole("button", { name: /^Move to Recently deleted$/i })
   await expect(confirmBtn).toBeDisabled()
 
   // Cancel closes without deleting.

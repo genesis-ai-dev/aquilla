@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+const CHAPTER_1_MD = path.resolve(__dirname, "../../fixtures/chapter-1.md")
 
 /**
  * ExpandableFileList — corpus group collapse/expand.
@@ -17,7 +18,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * Setup to create two groups:
  *   1. Import two files (both land in "Ungrouped").
  *   2. Move one file to a named corpus "TestCorpus" via the context-menu
- *      Move dialog (select "Other…" → type name → click Move).
+ *      Move dialog (select "Other…" → type name → click Save).
  *   3. Now two corpus groups exist.
  *
  * The Collapse button only appears on the group header for non-Ungrouped
@@ -32,10 +33,11 @@ test("sidebar corpus group collapses and expands", async ({ alice }) => {
   await dash.openProject(name)
 
   const ws = new Workspace(alice)
-  // Import first file.
+  // Import two distinctly-named files. Re-importing the same name now hits
+  // the FRO-287 collision screen (defaults to "skip"), so a second copy of
+  // sample.md would never land — use a different fixture instead.
   await ws.importFile(SAMPLE_MD)
-  // Import a second copy with a different name by importing the same fixture again.
-  await ws.importFile(SAMPLE_MD)
+  await ws.importFile(CHAPTER_1_MD)
 
   // Wait for at least two files visible in the sidebar.
   await expect(alice.locator("aside").getByText(/sample/i).first()).toBeVisible({
@@ -63,8 +65,8 @@ test("sidebar corpus group collapses and expands", async ({ alice }) => {
   await expect(corpusNameInput).toBeVisible({ timeout: 3_000 })
   await corpusNameInput.fill("TestCorpus")
 
-  // Confirm the move.
-  const moveConfirmBtn = dialog.getByRole("button", { name: /^Move$/i })
+  // Confirm the move — MoveToCorpusDialog's confirm button is labelled "Save".
+  const moveConfirmBtn = dialog.getByRole("button", { name: /^Save$/i })
   await expect(moveConfirmBtn).toBeEnabled({ timeout: 2_000 })
   await moveConfirmBtn.click()
   await expect(dialog).not.toBeVisible({ timeout: 5_000 })

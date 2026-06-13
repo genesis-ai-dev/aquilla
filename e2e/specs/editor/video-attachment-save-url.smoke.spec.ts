@@ -35,25 +35,33 @@ test("video attachment dialog Save URL enables after entering a URL", async ({ a
   await expect(moreBtn).toBeVisible({ timeout: 10_000 })
   await moreBtn.click()
 
+  // No .or() text fallback: when the menu is open BOTH branches match (the
+  // menuitem and its inner label span), which is a strict-mode violation.
   const attachVideoItem = alice.getByRole("menuitem", { name: /Attach video/i })
-    .or(alice.getByText(/Attach video/i).first())
   await expect(attachVideoItem).toBeVisible({ timeout: 3_000 })
   await attachVideoItem.click()
 
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
 
-  // Episode title input.
+  // With no attachment saved, the dialog defaults to the "Upload file" tab
+  // (tab = current.videoUrl ? "url" : "upload") — switch to "From URL" to
+  // reach the URL + display-name inputs. Retry the click: a dialog remount
+  // right after open can swallow the first tab switch (observed: button
+  // focused but the upload panel still rendered).
   const titleInput = dialog.locator('input[placeholder="Episode 1"]')
-  await expect(titleInput).toBeVisible({ timeout: 3_000 })
+  await expect(async () => {
+    await dialog.getByRole("button", { name: /From URL/i }).click()
+    await expect(titleInput).toBeVisible({ timeout: 1_000 })
+  }).toPass({ timeout: 10_000 })
   await titleInput.fill("Test Episode")
 
   // URL input starts empty; "Save URL" button should be disabled.
   const saveUrlBtn = dialog.getByRole("button", { name: /Save URL/i })
   await expect(saveUrlBtn).toBeDisabled()
 
-  // Fill a URL.
-  const urlInput = dialog.locator('input[type="url"]')
+  // Fill a URL — the input is #vurl (it carries no type="url" attribute).
+  const urlInput = dialog.locator("#vurl")
   await expect(urlInput).toBeVisible({ timeout: 3_000 })
   await urlInput.fill("https://example.com/video.mp4")
 

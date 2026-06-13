@@ -41,11 +41,14 @@ test("delete a custom rule removes it from the rules list", async ({ alice }) =>
   await expect(nameInput).toBeVisible({ timeout: 5_000 })
   await nameInput.fill(ruleName)
 
-  const patternInput = alice.locator('input[placeholder*="pattern"]').first()
+  // Pattern input is #re-pat (its placeholder is the regex hint "\d+", so
+  // placeholder-based locators don't match it).
+  const patternInput = alice.locator("#re-pat")
   await expect(patternInput).toBeVisible({ timeout: 3_000 })
   await patternInput.fill("foo")
 
-  const saveBtn = alice.getByRole("button", { name: /^Save rule$/i })
+  const saveBtn = alice.getByRole("button", { name: /^Create rule$/ })
+  await expect(saveBtn).toBeEnabled({ timeout: 3_000 })
   await saveBtn.click()
 
   // Rule should appear in the list.

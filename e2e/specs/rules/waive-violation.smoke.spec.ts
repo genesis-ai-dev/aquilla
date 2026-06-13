@@ -10,14 +10,24 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 /**
  * ViolationPopover — waive and unwaive a violation.
  *
- * The ViolationPopover (opened by clicking the infraction badge) has:
+ * The ViolationPopover now opens from the cell expansion's "Issues" tab
+ * (EditorTable.tsx: each infraction row button calls setOpenRuleId) or by
+ * clicking an inline rule blot — the old standalone infraction badge is
+ * gone (the number pill's hover popover is informational only). The
+ * popover has:
  *   - "Waive" button → shows reason input + "Confirm" and "Cancel" buttons
- *   - After confirming waive → popover shows "Unwaive" button
- *   - Clicking "Unwaive" → popover shows "Waive" button again
+ *   - Confirming the waive CLOSES the popover (EditorTable.handleWaive calls
+ *     setOpenRuleId(null)) and the infraction moves to the Issues tab's
+ *     "Waived" subsection.
+ *   - Reopening the popover from the waived row shows the waiver details and
+ *     an "Unwaive" button; clicking it closes the popover again and moves
+ *     the infraction back to the active list.
  *
- * This spec: enable Extra whitespace rule → create violation → click badge →
- * click Waive → fill optional reason → Confirm → Unwaive button appears →
- * click Unwaive → Waive button returns.
+ * This spec: enable Extra whitespace rule → create violation → open the
+ * cell expansion → Issues tab → click the infraction → Waive → reason →
+ * Confirm → infraction shows under "Waived" → reopen popover → Unwaive →
+ * waived section empties and the active infraction's popover offers Waive
+ * again.
  */
 test("waive and unwaive a rule violation via violation popover", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -53,10 +63,20 @@ test("waive and unwaive a rule violation via violation popover", async ({ alice 
   await alice.keyboard.insertText("double  space  text")
   await alice.locator("aside").click()
 
-  // Wait for infraction badge.
-  const badge = ws.cellRow(0).locator('[aria-label*="issue"]').first()
-  await expect(badge).toBeVisible({ timeout: 10_000 })
-  await badge.click()
+  // Open the cell expansion (chevron rail button, aria-label from tooltip).
+  await row.hover()
+  const expandBtn = row.getByRole("button", { name: "Open cell details" })
+  await expect(expandBtn).toBeVisible({ timeout: 10_000 })
+  await expandBtn.click()
+
+  // Switch to the Issues tab and click the Extra whitespace infraction —
+  // this anchors and opens the ViolationPopover.
+  const issuesTab = row.getByRole("tab", { name: /Issues/i })
+  await expect(issuesTab).toBeEnabled({ timeout: 10_000 })
+  await issuesTab.click()
+  const infractionBtn = row.getByRole("button", { name: /Extra whitespace/i }).first()
+  await expect(infractionBtn).toBeVisible({ timeout: 10_000 })
+  await infractionBtn.click()
 
   // ViolationPopover is open — "Waive" button visible.
   const waiveBtn = alice.getByRole("button", { name: /^Waive$/i }).first()
@@ -72,11 +92,27 @@ test("waive and unwaive a rule violation via violation popover", async ({ alice 
   await expect(confirmBtn).toBeVisible({ timeout: 3_000 })
   await confirmBtn.click()
 
-  // After waiving — "Unwaive" button appears.
+  // Confirming closes the popover and the infraction visibly moves to the
+  // Issues tab's "Waived" subsection (pending-outbox overlay reflects the
+  // cell.waive event immediately).
+  const waivedHeader = row.getByText("Waived", { exact: true })
+  await expect(waivedHeader).toBeVisible({ timeout: 10_000 })
+  const waivedRow = row.getByRole("button", { name: /^Extra whitespace$/i })
+  await expect(waivedRow).toBeVisible({ timeout: 5_000 })
+
+  // Reopen the popover from the waived row — it now shows the waiver details
+  // (including our reason) and the "Unwaive" button.
+  await waivedRow.click()
+  await expect(alice.getByText("intentional for testing")).toBeVisible({ timeout: 5_000 })
   const unwaiveBtn = alice.getByRole("button", { name: /^Unwaive$/i })
   await expect(unwaiveBtn).toBeVisible({ timeout: 5_000 })
 
-  // Unwaive — "Waive" returns.
+  // Unwaive — popover closes, the "Waived" subsection empties, and the
+  // infraction is active again: reopening its popover offers "Waive".
   await unwaiveBtn.click()
-  await expect(waiveBtn).toBeVisible({ timeout: 5_000 })
+  await expect(waivedHeader).toBeHidden({ timeout: 10_000 })
+  const activeInfraction = row.getByRole("button", { name: /Extra whitespace/i }).first()
+  await expect(activeInfraction).toBeVisible({ timeout: 5_000 })
+  await activeInfraction.click()
+  await expect(alice.getByRole("button", { name: /^Waive$/i }).first()).toBeVisible({ timeout: 5_000 })
 })

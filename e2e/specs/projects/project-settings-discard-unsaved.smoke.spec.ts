@@ -41,10 +41,8 @@ test("project settings discard dialog: Keep editing stays on settings page", asy
   await alice.waitForLoadState("networkidle")
 
   // Edit the project name to make isDirty=true.
-  const nameInput = alice.locator('input[name="name"]')
-    .or(alice.locator('input[placeholder*="project name" i]'))
-    .or(alice.locator('input[id="project-name"]'))
-    .first()
+  // Project name field is #pname in the Project Info card.
+  const nameInput = alice.locator("#pname")
   await expect(nameInput).toBeVisible({ timeout: 10_000 })
   await nameInput.fill(name + " edited")
 
@@ -91,10 +89,8 @@ test("project settings discard dialog: Discard navigates away from settings", as
   await alice.waitForLoadState("networkidle")
 
   // Edit name → make dirty.
-  const nameInput = alice.locator('input[name="name"]')
-    .or(alice.locator('input[placeholder*="project name" i]'))
-    .or(alice.locator('input[id="project-name"]'))
-    .first()
+  // Project name field is #pname in the Project Info card.
+  const nameInput = alice.locator("#pname")
   await expect(nameInput).toBeVisible({ timeout: 10_000 })
   await nameInput.fill(name + " edited again")
   await expect(alice.getByText(/Unsaved changes/i)).toBeVisible({ timeout: 5_000 })

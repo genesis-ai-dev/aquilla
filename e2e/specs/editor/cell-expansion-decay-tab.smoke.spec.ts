@@ -8,9 +8,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * CellExpansion — "Decay" tab shows endorsement count and health %.
+ * CellExpansion — "Staleness" tab shows endorsement count and health %.
  *
- * EditorTable.tsx's cell expansion panel has a "Decay" tab (value="health").
+ * EditorTable.tsx's cell expansion panel has a "Staleness" tab (value="health";
+ * renamed from "Decay" in the AD-14 derived-confidence rework).
  * Switching to it reveals:
  *   - "<N> endorsements · health <N>%"
  *   - "Needs attention" or "No attention needed" message
@@ -39,12 +40,16 @@ test("cell expansion Decay tab shows endorsement count and health", async ({ ali
   await expect(expandBtn).toBeVisible({ timeout: 5_000 })
   await expandBtn.click()
 
-  // The expansion panel opens.
-  const panel = alice.locator('[role="tablist"]').first()
+  // The expansion panel opens. Don't grab the page's first tablist — the
+  // "Open files" editor tab strip is also a tablist and renders before the
+  // expansion. Identify the expansion's tablist by its Staleness tab.
+  const panel = alice
+    .getByRole("tablist")
+    .filter({ has: alice.getByRole("tab", { name: /Staleness/i }) })
   await expect(panel).toBeVisible({ timeout: 5_000 })
 
-  // Click the "Decay" tab.
-  const decayTab = panel.getByRole("tab", { name: /Decay/i })
+  // Click the "Staleness" tab.
+  const decayTab = panel.getByRole("tab", { name: /Staleness/i })
   await expect(decayTab).toBeVisible({ timeout: 3_000 })
   await decayTab.click()
 

@@ -1,86 +1,80 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { pickSelectOption } from "../../helpers/base-ui"
+import { Workspace } from "../../helpers/page-objects/Workspace"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * RuleCreateDialog — "Test your rule" area validates the pattern inline.
+ * RuleEditor — live preview evaluates the draft rule against real cells.
  *
- * RuleCreateDialog.tsx has a "Test your rule" section at the bottom of the
- * create form. It shows:
- *   - An input with placeholder "Source text..."
- *   - An input with placeholder "Target text..."
- *   - A "Test" button (type="button")
- *   - A result span prefixed with "✓" (pass) or "✗" (fail)
+ * The old RuleCreateDialog "Test your rule" area was retired with the rules
+ * surface refactor (RulesPage/RuleCreateDialog are no longer routed). Its
+ * replacement is the inline RuleEditor's "Live preview — current file"
+ * section (RuleEditor.tsx): while drafting a rule, the editor runs the
+ * draft check against the currently-open file's cells and reports either
+ * "N cell(s) would be flagged" (fail/match) or "No matches in the current
+ * file." (pass/no match).
  *
- * For checkType "target-forbids": handleTest() builds a regex from
- * targetPattern and tests testTarget. If the regex matches testTarget,
- * the result is "✗ Target contains forbidden pattern".
+ * The preview uses the ACTIVE file's cells, so the spec must navigate to
+ * the rules surface client-side (sidebar nav) — a hard goto would reload
+ * the shell and drop the active file.
  *
- * This spec: open Rules page → click "+ Add Rule" → set type to
- * "Target forbids" → enter a forbidden pattern → enter matching target text →
- * click Test → verify "Target contains forbidden pattern" failure message.
- * Then clear the target text and re-test → verify pass message.
+ * This spec: import a file → put a forbidden word in cell 0's target →
+ * open the rules surface via the sidebar → "+ Add Rule" → default mode is
+ * Forbidden/Target → enter the forbidden pattern → live preview flags the
+ * cell. Then switch to a non-matching pattern → preview reports no matches.
  */
-test("rule create dialog test button shows pass/fail for target-forbids rule", async ({
+test("rule editor live preview shows pass/fail for target-forbids rule", async ({
   alice,
 }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `RuleTest ${Date.now()}`
   await dash.createProject({ name, source: "en", target: "fr" })
+  await dash.openProject(name)
 
-  // Navigate to the Rules page for the new project.
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
+  const ws = new Workspace(alice)
+  await ws.importFile(SAMPLE_MD)
+  await ws.openFileBySubstring("sample")
+  await ws.waitForEditor()
 
-  await alice.goto(`/project/${projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
+  // Put the forbidden word into cell 0's target text.
+  await ws.editCell(0, "this is forbidden text")
 
-  // Open the "Create Translation Rule" dialog.
+  // Navigate to the rules surface WITHOUT a full page load so the active
+  // file's cells stay available to the live preview. The "Rules" nav row
+  // lives in the sidebar's "More" popover (unpinned project nav items).
+  await alice.getByRole("button", { name: "More project options" }).click()
+  await alice.getByRole("button", { name: "Rules", exact: true }).click()
+
+  // Open the inline RuleEditor. Default mode is Forbidden + Target, which
+  // maps to a target-forbids check.
   const addBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
   await expect(addBtn).toBeVisible({ timeout: 10_000 })
   await addBtn.click()
 
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog.getByRole("heading", { name: /Create Translation Rule/i })).toBeVisible({
-    timeout: 5_000,
-  })
+  await alice.locator("#re-name").fill("No articles in target")
 
-  // Fill in a rule name (required).
-  await dialog.locator("#rname").fill("No articles in target")
-
-  // Change Rule Type to "Target forbids". The dialog has two Base UI
-  // Selects (combobox triggers): Severity first, then Rule Type.
-  const ruleTypeSelect = dialog.getByRole("combobox").nth(1)
-  await pickSelectOption(alice, ruleTypeSelect, "Target forbids")
-
-  // The forbidden pattern input appears: placeholder="\\b(the|a|an)\\b".
-  const patInput = dialog.locator("#tpat")
+  // Enter a pattern that matches cell 0's target → live preview flags it.
+  const patInput = alice.locator("#re-pat")
   await expect(patInput).toBeVisible({ timeout: 3_000 })
   await patInput.fill("forbidden")
 
-  // Fill the test target with text containing the forbidden word.
-  const targetInput = dialog.locator('input[placeholder="Target text..."]')
-  await expect(targetInput).toBeVisible({ timeout: 3_000 })
-  await targetInput.fill("this is forbidden text")
+  // "1 cell would be flagged" and the preview section appear (debounced
+  // ~300ms after typing).
+  await expect(alice.getByText(/1 cell would be flagged/i)).toBeVisible({ timeout: 5_000 })
+  await expect(alice.getByText(/Live preview — current file/i)).toBeVisible()
 
-  // Click Test.
-  const testBtn = dialog.getByRole("button", { name: /^Test$/i })
-  await expect(testBtn).toBeVisible({ timeout: 2_000 })
-  await testBtn.click()
-
-  // Result should be a failure: "✗ Target contains forbidden pattern".
-  await expect(dialog.getByText(/Target contains forbidden pattern/i)).toBeVisible({
-    timeout: 3_000,
+  // Switch to a pattern that matches nothing → preview reports a pass.
+  await patInput.fill("zzz_never_matches_zzz")
+  await expect(alice.getByText(/No matches in the current file/i)).toBeVisible({
+    timeout: 5_000,
   })
 
-  // Clear the target input and re-test → should pass.
-  await targetInput.fill("this is clean text")
-  await testBtn.click()
-
-  await expect(dialog.getByText(/✓/)).toBeVisible({ timeout: 3_000 })
-
-  // Close without saving.
-  await alice.keyboard.press("Escape")
+  // Close the editor without saving.
+  await alice.getByRole("button", { name: /^Cancel$/ }).last().click()
+  await expect(alice.locator("#re-pat")).not.toBeVisible({ timeout: 3_000 })
 })

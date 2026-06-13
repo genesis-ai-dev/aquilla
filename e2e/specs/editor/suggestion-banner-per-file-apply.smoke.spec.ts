@@ -28,6 +28,9 @@ const CHAPTER_2 = path.resolve(__dirname, "../../fixtures/chapter-2.md")
  * sparkle on that file is gone (suggestion applied).
  */
 test("per-file Apply rename suggestion sparkle renames one file and shows undo toast", async ({ alice }) => {
+  // Two sequential FRO-310 import flows (preview → confirm → projection wait)
+  // plus project creation routinely exceed the 30s harness budget under load.
+  test.slow()
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `PerFileSuggest ${Date.now()}`

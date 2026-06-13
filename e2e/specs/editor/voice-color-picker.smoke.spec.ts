@@ -54,8 +54,11 @@ test("voice character color picker opens palette and picks a color", async ({ al
   const colorSwatches = alice.locator('[aria-label^="Pick color"]')
   await expect(colorSwatches.first()).toBeVisible({ timeout: 3_000 })
 
-  // Click the first swatch.
-  await colorSwatches.first().click()
+  // Click the first swatch. The palette popover animates in, so Playwright's
+  // stability check can spin until the test budget dies — wait for the
+  // entrance transition to settle, then force past the residual animation.
+  await alice.waitForTimeout(350)
+  await colorSwatches.first().click({ force: true })
 
   // Palette closes (first swatch no longer visible).
   await expect(colorSwatches.first()).not.toBeVisible({ timeout: 2_000 })

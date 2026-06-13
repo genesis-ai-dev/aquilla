@@ -17,7 +17,13 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * This spec: edit a cell → type text → select it → click Italic →
  * verify the italic button has "bg-accent" class (is active) →
  * click it again to toggle off → verify class is gone.
+ *
+ * The button's BASE class always contains "hover:bg-accent", so a bare
+ * /bg-accent/ regex matches even when inactive — anchor the token to
+ * whitespace/string boundaries to test only the standalone active class.
  */
+const ACTIVE_CLASS = /(?:^|\s)bg-accent(?:\s|$)/
+
 test("formatting bubble menu Italic button toggles on and off", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
@@ -47,9 +53,9 @@ test("formatting bubble menu Italic button toggles on and off", async ({ alice }
 
   // Toggle italic on.
   await italicBtn.click()
-  await expect(italicBtn).toHaveClass(/bg-accent/, { timeout: 2_000 })
+  await expect(italicBtn).toHaveClass(ACTIVE_CLASS, { timeout: 2_000 })
 
   // Toggle italic off.
   await italicBtn.click()
-  await expect(italicBtn).not.toHaveClass(/bg-accent/, { timeout: 2_000 })
+  await expect(italicBtn).not.toHaveClass(ACTIVE_CLASS, { timeout: 2_000 })
 })

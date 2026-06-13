@@ -56,7 +56,7 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
   // pointer-events:none and Playwright teleports the cursor), leaving the
   // children container at opacity:0 + pointer-events:none and the chip
   // parent intercepting. Hover the cell row explicitly first.
-  const sparkle = alice.locator("button[title*='Generate translation']").first()
+  const sparkle = alice.locator("button[title*='Translate with AI']").first()
   await sparkle.scrollIntoViewIfNeeded()
   await alice.locator("[data-cell-id]").first().hover()
   await alice.waitForTimeout(250) // let the 180ms opacity fade settle

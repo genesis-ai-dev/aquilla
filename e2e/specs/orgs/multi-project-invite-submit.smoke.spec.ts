@@ -4,17 +4,21 @@ import { ensureAuthState } from "../../helpers/auth"
 import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
 
 /**
- * MultiProjectInviteDialog — fill recipient + select project + Invite.
+ * MultiProjectInviteDialog — fill recipient + select project + submit.
  *
- * The dialog (opened from /members) has:
- *   - UsernameTypeahead input (id="invite-username")
- *   - Project list with "Select <name>" buttons (aria-label="Select <name>")
- *   - Role select per project
- *   - "Invite" submit button (disabled until a user + project are chosen)
+ * FRO-322 renamed the flow to "Add to projects". The dialog (opened from
+ * /members via the "Add to projects" button) has:
+ *   - UsernameTypeahead input (id="invite-recipient"); suggestions are
+ *     plain buttons labelled with the username
+ *   - Project rows with role=checkbox toggles (aria-label="Select <name>")
+ *   - Role select per selected project
+ *   - "Add to projects" submit button (disabled until a user + project chosen)
+ *   - On success the dialog STAYS OPEN, shows an "added" chip per project,
+ *     and the Cancel button becomes "Close".
  *
  * This spec: seeds bob in alice's org → creates a project → opens the
- * dialog → types bob's username → selects the project → clicks Invite →
- * dialog closes (or shows confirmation).
+ * dialog → types bob's username → selects the project → submits → verifies
+ * the per-project "added" confirmation → closes the dialog.
  */
 test("multi-project invite submits and closes the dialog", async ({ alice }) => {
   const aliceSession = await ensureAuthState("alice")
@@ -31,36 +35,42 @@ test("multi-project invite submits and closes the dialog", async ({ alice }) => 
   await alice.waitForLoadState("networkidle")
 
   // Open MultiProjectInviteDialog.
-  const inviteBtn = alice.getByRole("button", { name: /Invite to projects/i })
-  await expect(inviteBtn).toBeVisible({ timeout: 10_000 })
+  const inviteBtn = alice.getByRole("button", { name: /Add to projects/i })
+  await expect(inviteBtn).toBeEnabled({ timeout: 10_000 })
   await inviteBtn.click()
 
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
 
   // Fill the UsernameTypeahead with "bob".
-  const usernameInput = dialog.locator("#invite-username")
+  const usernameInput = dialog.locator("#invite-recipient")
   await expect(usernameInput).toBeVisible({ timeout: 5_000 })
   await usernameInput.fill("bob")
-  await alice.waitForTimeout(600) // allow typeahead to resolve
 
-  // Select "bob" from typeahead suggestion.
-  const suggestion = alice.getByRole("option", { name: /bob/i })
-    .or(alice.locator('[role="listbox"] [role="option"]').filter({ hasText: "bob" }))
-    .or(alice.getByText("bob").first())
-  await expect(suggestion).toBeVisible({ timeout: 3_000 })
+  // Pick "bob" from the typeahead suggestions (plain buttons, no listbox role).
+  const suggestion = dialog.getByRole("button", { name: /^bob$/ })
+  await expect(suggestion).toBeVisible({ timeout: 5_000 })
   await suggestion.click()
 
-  // Select the project by clicking the "Select <projName>" button.
-  const selectProjectBtn = dialog.getByRole("button", { name: new RegExp(`Select ${projName}`) })
-  await expect(selectProjectBtn).toBeVisible({ timeout: 5_000 })
-  await selectProjectBtn.click()
+  // Select the project — row toggles are role=checkbox ("Select <name>").
+  const selectProjectToggle = dialog.getByRole("checkbox", { name: `Select ${projName}` })
+  await expect(selectProjectToggle).toBeVisible({ timeout: 5_000 })
+  await selectProjectToggle.click()
 
-  // Invite button becomes enabled.
-  const inviteSubmitBtn = dialog.getByRole("button", { name: /^Invite$/i })
-  await expect(inviteSubmitBtn).toBeEnabled({ timeout: 3_000 })
-  await inviteSubmitBtn.click()
+  // Submit button ("Add to projects") becomes enabled.
+  const submitBtn = dialog.getByRole("button", { name: /^Add to projects$/i })
+  await expect(submitBtn).toBeEnabled({ timeout: 3_000 })
+  await submitBtn.click()
 
-  // Dialog closes after successful invite.
-  await expect(dialog).not.toBeVisible({ timeout: 8_000 })
+  // Success: the dialog stays open and shows a per-project "added" chip.
+  await expect(dialog.getByText("added")).toBeVisible({ timeout: 8_000 })
+
+  // Cancel becomes Close after a successful add; close the dialog. The
+  // dialog chrome's X button is also named "Close" (sr-only), so exclude it
+  // via its data-slot to keep strict mode happy.
+  const footerClose = dialog
+    .getByRole("button", { name: /^Close$/ })
+    .and(alice.locator(':not([data-slot="dialog-close"])'))
+  await footerClose.click()
+  await expect(dialog).not.toBeVisible({ timeout: 3_000 })
 })

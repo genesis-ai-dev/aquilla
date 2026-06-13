@@ -6,11 +6,17 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *
  * SharePanel.tsx InviteLinkTab has an optional recipient email input
  * (id="invite-email"). When a non-empty, syntactically invalid email is
- * entered and the user clicks "Create link", handleCreate() sets emailError:
+ * entered and the user clicks "Create invite link", handleCreate() sets
+ * emailError:
  *   "Enter a valid email address, or leave blank for an open link."
  *
- * This spec: open share dialog → switch to Invite link tab → type an
- * invalid email → click Create link → verify the error message appears.
+ * Share now opens from the workspace sidebar's "More project options"
+ * popover (SidebarProjectSection) — project cards no longer have a Share
+ * button.
+ *
+ * This spec: open project workspace → More project options → Share →
+ * Invite link tab → type an invalid email → click "Create invite link" →
+ * verify the error message appears.
  */
 test("share invite link email validation error shown for invalid email", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -18,17 +24,14 @@ test("share invite link email validation error shown for invalid email", async (
   const name = `ShareEmailVal ${Date.now()}`
   await dash.createProject({ name, source: "en", target: "fr" })
 
-  // Open the share dialog from the project card.
-  await dash.goto()
-  const card = alice.locator("[class*='card'], article, [class*='Card']")
-    .filter({ hasText: name })
-    .first()
-  await expect(card).toBeVisible({ timeout: 10_000 })
+  // Enter the workspace (openProject also dismisses the setup checklist).
+  await dash.openProject(name)
 
-  const shareBtn = card.getByRole("button", { name: /Share/i })
-    .or(card.locator('[aria-label*="Share"]'))
-  await expect(shareBtn.first()).toBeVisible({ timeout: 5_000 })
-  await shareBtn.first().click()
+  // Open the share dialog from the sidebar "More" menu.
+  await alice.getByRole("button", { name: /More project options/i }).click()
+  const shareBtn = alice.getByRole("button", { name: /^Share$/i })
+  await expect(shareBtn).toBeVisible({ timeout: 5_000 })
+  await shareBtn.click()
 
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
@@ -45,8 +48,8 @@ test("share invite link email validation error shown for invalid email", async (
   // Type an invalid email.
   await emailInput.fill("not-an-email")
 
-  // Click "Create link".
-  const createLinkBtn = dialog.getByRole("button", { name: /Create link/i })
+  // Click "Create invite link".
+  const createLinkBtn = dialog.getByRole("button", { name: /Create invite link/i })
   await expect(createLinkBtn).toBeVisible({ timeout: 2_000 })
   await createLinkBtn.click()
 

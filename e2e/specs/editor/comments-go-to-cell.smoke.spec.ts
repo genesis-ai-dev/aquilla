@@ -68,8 +68,13 @@ test("comments page Go to cell navigates to the cell in editor", async ({ alice 
     timeout: 10_000,
   })
 
-  // The comment thread should be visible.
-  await expect(alice.getByText(commentText).first()).toBeVisible({ timeout: 10_000 })
+  // The comment thread should be visible. The page fetches the server
+  // projection once on mount, and the drawer write flushes via the client
+  // outbox which may land after page load — poll via the Refresh button.
+  await expect(async () => {
+    await alice.getByRole("button", { name: /^Refresh$/i }).click()
+    await expect(alice.getByText(commentText).first()).toBeVisible({ timeout: 1_000 })
+  }).toPass({ timeout: 15_000 })
 
   // Click "Go to cell" button on the thread.
   const goToCellBtn = alice.locator('button[title="Go to cell in editor"]')

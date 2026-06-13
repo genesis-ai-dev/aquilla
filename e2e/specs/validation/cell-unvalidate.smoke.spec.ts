@@ -54,6 +54,8 @@ test("cell Remove your validation button removes the validation", async ({ alice
   // Click to remove the validation.
   await removeBtn.click()
 
-  // Health button title should no longer contain "validated".
-  await expect(healthBtn).not.toHaveAttribute("title", /validated/, { timeout: 10_000 })
+  // Health button title should no longer contain "validated". Like
+  // Workspace.validateCell, allow 15s for the sync round-trip (IDB →
+  // sync-worker → D1 → push back) under load.
+  await expect(healthBtn).not.toHaveAttribute("title", /validated/, { timeout: 15_000 })
 })

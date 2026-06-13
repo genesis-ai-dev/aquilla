@@ -10,15 +10,16 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 /**
  * ParallelPassagesPanel — scope and side toggle pills.
  *
- * The Search & replace panel (ParallelPassagesPanel) has three PillToggle
- * groups in the "Panel controls" row:
+ * The search panel (ParallelPassagesPanel) has three PillToggle groups in
+ * the "Panel controls" row:
  *   - "Search scope" (Project, File)
- *   - "Search mode" (Search, Passages, Replace[disabled])
+ *   - "Search mode" (Search, Passages, Replace)
  *   - "Content side" (Both, Source, Target)
  *
  * Each pill has aria-pressed reflecting the current value.
  *
- * This spec: opens the panel → verifies "Project" is pressed →
+ * This spec: opens the panel via Cmd/Ctrl+K (project-wide search shortcut —
+ * FRO-308 removed the toolbar button) → verifies "Project" is pressed →
  * clicks "Both" content side → verifies it's pressed → clicks "Source" →
  * "Source" becomes pressed.
  */
@@ -34,15 +35,15 @@ test("search panel content side toggle changes aria-pressed", async ({ alice }) 
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Open search panel.
-  const searchBtn = alice.locator('button[aria-label="Search & replace"]')
-  await expect(searchBtn).toBeVisible({ timeout: 5_000 })
-  await searchBtn.click()
+  // Open the search panel. FRO-308 removed the toolbar "Search & replace"
+  // button; Cmd/Ctrl+K is the documented project-wide search shortcut
+  // (ProjectWorkspace keydown handler: mode "search", scope "project").
+  await alice.keyboard.press("ControlOrMeta+k")
 
   const panel = alice.getByRole("dialog")
   await expect(panel).toBeVisible({ timeout: 5_000 })
 
-  // "Project" scope pill is pressed by default.
+  // "Project" scope pill is pressed (Cmd+K contract: project-wide search).
   const projectPill = panel.getByRole("button", { name: /^Project$/i })
   await expect(projectPill).toBeVisible({ timeout: 3_000 })
   await expect(projectPill).toHaveAttribute("aria-pressed", "true")

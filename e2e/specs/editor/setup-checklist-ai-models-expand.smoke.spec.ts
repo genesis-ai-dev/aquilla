@@ -65,6 +65,10 @@ test("setup checklist AI models step expand reveals transcription fieldset", asy
   // Now the "Transcription" legend is visible.
   await expect(alice.getByText(/^Transcription$/i)).toBeVisible({ timeout: 3_000 })
 
-  // The Whisper model name is shown.
-  await expect(alice.getByText(/Whisper transcription/i)).toBeVisible({ timeout: 2_000 })
+  // The Whisper model name is shown. Exact match: the checklist item's
+  // description ("…Whisper transcription runs locally.") also contains the
+  // phrase, so a substring regex hits two elements (strict-mode violation).
+  await expect(alice.getByText("Whisper transcription", { exact: true })).toBeVisible({
+    timeout: 2_000,
+  })
 })

@@ -13,7 +13,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * The workspace footer always renders an OutboxSyncIndicator chip. In a fresh
  * project with no pending events the chip reads "Synced". Clicking it opens
  * the OutboxInspectorPopover which has:
- *   - aria-label="Outbox inspector" on the PopoverContent
+ *   - aria-label="Pending changes" on the PopoverContent
  *   - <h3>Outbox</h3> heading
  *   - "All synced" text when the outbox is empty
  *
@@ -37,8 +37,8 @@ test("outbox sync indicator opens inspector popover showing All synced", async (
   await expect(syncedChip).toBeVisible({ timeout: 10_000 })
   await syncedChip.click()
 
-  // OutboxInspectorPopover opens.
-  const inspector = alice.locator('[aria-label="Outbox inspector"]')
+  // OutboxInspectorPopover opens (PopoverContent aria-label="Pending changes").
+  const inspector = alice.locator('[aria-label="Pending changes"]')
   await expect(inspector).toBeVisible({ timeout: 3_000 })
 
   // Heading "Outbox" is present.

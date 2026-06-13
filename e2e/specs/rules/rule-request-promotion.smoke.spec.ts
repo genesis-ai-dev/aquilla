@@ -54,17 +54,16 @@ test("Request promotion button shows Requested state after click", async ({ alic
   await addRuleBtn.click()
 
   const ruleName = `BobRule ${Date.now()}`
-  const nameInput = bob.locator('input[placeholder*="name"], input[type="text"]').first()
+  const nameInput = bob.locator("#re-name")
   await expect(nameInput).toBeVisible({ timeout: 5_000 })
   await nameInput.fill(ruleName)
 
-  const patInput = bob.locator('#re-pat')
-    .or(bob.locator('input[placeholder*="pattern"], input[placeholder*="regex"]').first())
-  if (await patInput.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await patInput.fill("test-pattern")
-  }
+  // Pattern is required — "Create rule" stays disabled without it.
+  const patInput = bob.locator("#re-pat")
+  await expect(patInput).toBeVisible({ timeout: 3_000 })
+  await patInput.fill("test-pattern")
 
-  await bob.getByRole("button", { name: /Create rule|Save/i }).first().click()
+  await bob.getByRole("button", { name: /^Create rule$/ }).click()
   await expect(bob.getByText(ruleName)).toBeVisible({ timeout: 8_000 })
 
   // Bob should see "Request promotion" (not "Promote to org") since he's PROJECT_LEAD, not maintainer.

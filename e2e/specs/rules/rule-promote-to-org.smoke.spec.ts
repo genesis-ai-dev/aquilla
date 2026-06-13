@@ -32,18 +32,17 @@ test("Promote to org button opens confirmation dialog", async ({ alice }) => {
   await addRuleBtn.click()
 
   const ruleName = `PromoteRule ${Date.now()}`
-  const nameInput = alice.locator('input[placeholder*="name"], input[type="text"]').first()
+  const nameInput = alice.locator("#re-name")
   await expect(nameInput).toBeVisible({ timeout: 5_000 })
   await nameInput.fill(ruleName)
 
   // Fill the regex pattern field (required).
-  const patInput = alice.locator('#re-pat')
-    .or(alice.locator('input[placeholder*="pattern"], input[placeholder*="regex"]').first())
+  const patInput = alice.locator("#re-pat")
   await expect(patInput).toBeVisible({ timeout: 3_000 })
   await patInput.fill("test-pattern")
 
   // Submit the rule.
-  await alice.getByRole("button", { name: /Create rule|Save/i }).first().click()
+  await alice.getByRole("button", { name: /^Create rule$/ }).click()
   await expect(alice.getByText(ruleName)).toBeVisible({ timeout: 8_000 })
 
   // Click "Promote to org" on the newly created rule row.

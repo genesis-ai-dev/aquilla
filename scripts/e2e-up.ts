@@ -103,7 +103,9 @@ function dumpLogs(tailLines = 80): void {
   for (const [label, file] of Object.entries(logFiles)) {
     if (!existsSync(file)) continue
     const lines = readFileSync(file, "utf-8").trimEnd().split("\n")
-    const tail = lines.slice(-tailLines)
+    // Cap line length — the build log contains minified asset content with
+    // multi-megabyte single lines that would otherwise flood the terminal.
+    const tail = lines.slice(-tailLines).map((l) => (l.length > 500 ? l.slice(0, 500) + " …[truncated]" : l))
     process.stderr.write(`\n──── ${label} (last ${tail.length} lines of ${file}) ────\n`)
     process.stderr.write(tail.join("\n") + "\n")
   }
@@ -180,17 +182,25 @@ async function main(): Promise<void> {
   //    and sync queries, so we apply db/postgres/schema.sql here instead of
   //    wrangler d1 migrations apply.
   console.log("[boot 2/8] resetting aquilla_e2e postgres schema…")
-  spawnSync(
+  // ON_ERROR_STOP makes psql exit non-zero on the first error — without it
+  // a failed DROP (held connections) or a partial schema apply returns 0 and
+  // the suite runs against a stale schema (manifests as 500s like
+  // "column p.is_active does not exist").
+  const dropResult = spawnSync(
     "docker",
-    ["exec", "aquilla-dev-pg", "psql", "-U", "aquilla", "-d", "postgres",
-      "-c", "DROP DATABASE IF EXISTS aquilla_e2e WITH (FORCE); CREATE DATABASE aquilla_e2e;"],
-    { stdio: "inherit" },
+    ["exec", "aquilla-dev-pg", "psql", "-v", "ON_ERROR_STOP=1", "-U", "aquilla", "-d", "postgres",
+      "-c", "DROP DATABASE IF EXISTS aquilla_e2e WITH (FORCE)", "-c", "CREATE DATABASE aquilla_e2e"],
+    { stdio: ["ignore", "inherit", "inherit"] },
   )
+  if (dropResult.status !== 0) {
+    console.error(`[e2e-up] aquilla_e2e drop/recreate failed (psql exit ${dropResult.status}) — refusing to run against a stale schema.`)
+    process.exit(1)
+  }
   // Pipe schema.sql into psql via stdin — no shell interpolation needed.
   const schemaSql = readFileSync(path.join(REPO_ROOT, "db/postgres/schema.sql"))
   const psqlResult = spawnSync(
     "docker",
-    ["exec", "-i", "aquilla-dev-pg", "psql", "-U", "aquilla", "-d", "aquilla_e2e"],
+    ["exec", "-i", "aquilla-dev-pg", "psql", "-v", "ON_ERROR_STOP=1", "-U", "aquilla", "-d", "aquilla_e2e"],
     { input: schemaSql, stdio: ["pipe", "pipe", "pipe"] },
   )
   if (psqlResult.status !== 0) {
@@ -213,7 +223,10 @@ async function main(): Promise<void> {
       SYNC_WORKER_URL: `http://127.0.0.1:${SYNC_WORKER_PORT}`,
       ENVIRONMENT: "development",
     },
-    extraArgs: ["--persist-to", PERSIST_DIR, "--var", "WRANGLER_LOCAL:1"],
+    // PLATFORM_ADMINS: wrangler.toml's default list doesn't include the seed
+    // users, so /admin would Navigate away — the admin-console specs need
+    // alice to be a platform admin.
+    extraArgs: ["--persist-to", PERSIST_DIR, "--var", "WRANGLER_LOCAL:1", "--var", "PLATFORM_ADMINS:alice"],
     logFile: openLogFile(logFiles.identity),
     streamToParent: VERBOSE,
   })

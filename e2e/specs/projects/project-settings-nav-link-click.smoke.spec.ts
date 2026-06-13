@@ -25,8 +25,9 @@ test("settings nav section button scrolls to the target section", async ({ alice
   await alice.goto(`/project/${projectId}/settings`)
   await alice.waitForLoadState("networkidle")
 
-  // The SettingsNav should be visible.
-  const nav = alice.locator('nav[aria-label="Settings sections"]')
+  // The SettingsNav renders twice (desktop rail in <aside> + a lg:hidden
+  // mobile copy) — scope to the rail to keep locators strict-mode safe.
+  const nav = alice.locator('aside nav[aria-label="Settings sections"]')
   await expect(nav).toBeVisible({ timeout: 10_000 })
 
   // Click the "Validation" section link in the nav.

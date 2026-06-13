@@ -13,7 +13,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * ParallelPassagesPanel has a "Search mode" PillToggle with options:
  *   - "Search" (default, aria-pressed="true")
  *   - "Passages" (aria-pressed="false")
- *   - "Replace" (disabled)
+ *   - "Replace"
  *
  * Clicking "Passages" makes it the active mode.
  *
@@ -32,10 +32,13 @@ test("search panel Passages mode toggle changes active mode", async ({ alice }) 
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Open search panel.
-  const searchBtn = alice.locator('button[aria-label="Search & replace"]')
-  await expect(searchBtn).toBeVisible({ timeout: 5_000 })
-  await searchBtn.click()
+  // Open the search panel. FRO-308: the toolbar "Search & replace" button was
+  // replaced by the dock rail Search tab; the full ParallelPassagesPanel
+  // dialog opens from the dock panel's "Open full search panel" button.
+  await alice.getByRole("button", { name: "Search", exact: true }).click()
+  const openFullBtn = alice.getByRole("button", { name: "Open full search panel" })
+  await expect(openFullBtn).toBeVisible({ timeout: 5_000 })
+  await openFullBtn.click()
 
   const panel = alice.getByRole("dialog")
   await expect(panel).toBeVisible({ timeout: 5_000 })

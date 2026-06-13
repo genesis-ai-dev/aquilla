@@ -16,8 +16,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *   Home       → focus first tab
  *   End        → focus last tab
  *
- * CellExpansion has tabs: Decay · Issues · History · BT (backtranslation).
- * (Exact tabs depend on project config; at minimum Decay and Issues appear.)
+ * CellExpansion has tabs: Staleness · BT · Recording · Issues · History.
+ * (Exact tabs depend on project config; at minimum two appear.)
  *
  * This spec:
  *   1. Opens sample.md, expands the first cell (opens CellExpansion).
@@ -47,8 +47,12 @@ test("CellExpansion tabs respond to ArrowRight / Home / End keyboard nav", async
   await expect(expandBtn).toBeVisible({ timeout: 5_000 })
   await expandBtn.click()
 
-  // CellExpansion panel appears with a tab list.
-  const tabList = alice.locator('[role="tablist"]').first()
+  // CellExpansion panel appears with a tab list. Don't grab the page's first
+  // tablist — the "Open files" editor tab strip is also a tablist and renders
+  // before the expansion. Identify the expansion's by its Staleness tab.
+  const tabList = alice
+    .getByRole("tablist")
+    .filter({ has: alice.getByRole("tab", { name: /Staleness/i }) })
   await expect(tabList).toBeVisible({ timeout: 5_000 })
 
   // Get all tab triggers.

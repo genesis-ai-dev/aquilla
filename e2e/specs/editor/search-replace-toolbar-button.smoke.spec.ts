@@ -8,25 +8,24 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * Workspace toolbar — Search & replace button opens the parallel panel.
+ * Search affordance — dock Search tab opens the parallel panel.
  *
- * ProjectWorkspace.tsx toolbar renders a button with:
- *   aria-label="Search & replace"
- *   title="Search & replace (⌘F)"
- *
- * Clicking it calls:
+ * FRO-308 replaced the old workspace-toolbar "Search & replace" button with
+ * a Search tab in the left dock rail (LeftDock.tsx). The dock hosts
+ * SearchDockPanel (quick inline search); its "Open full search panel" button
+ * opens the full ParallelPassagesPanel dialog:
  *   setParallelMode("search")
  *   setParallelScope("file" | "project")
  *   setParallelOpen(true)
  *
- * ParallelPassagesPanel renders with a search input.
- *
  * This spec:
  *   1. Imports sample.md, opens editor.
- *   2. Clicks the Search & replace toolbar button.
- *   3. ParallelPassagesPanel becomes visible with a search/query input.
+ *   2. Clicks the dock rail Search tab — the inline SearchDockPanel appears
+ *      with its own search input.
+ *   3. Clicks "Open full search panel" — the ParallelPassagesPanel dialog
+ *      becomes visible with a search/query input.
  */
-test("Search & replace toolbar button opens the parallel panel", async ({ alice }) => {
+test("dock Search tab and Open full search panel open the parallel panel", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `SearchBtn ${Date.now()}`
@@ -38,12 +37,21 @@ test("Search & replace toolbar button opens the parallel panel", async ({ alice 
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Click the Search & replace toolbar button.
-  const searchBtn = alice.locator('button[aria-label="Search & replace"]').first()
-  await expect(searchBtn).toBeVisible({ timeout: 5_000 })
-  await searchBtn.click()
+  // Click the dock rail Search tab.
+  await alice.getByRole("button", { name: "Search", exact: true }).click()
 
-  // ParallelPassagesPanel should open — it contains a search input or heading.
-  const searchInput = alice.locator('input[placeholder*="Search" i], input[aria-label*="Search" i], input[placeholder*="search" i]').first()
+  // The inline dock panel has a search input.
+  const dockInput = alice.locator('input[placeholder*="Search" i]').first()
+  await expect(dockInput).toBeVisible({ timeout: 5_000 })
+
+  // Open the full ParallelPassagesPanel dialog.
+  const openFullBtn = alice.getByRole("button", { name: "Open full search panel" })
+  await expect(openFullBtn).toBeVisible({ timeout: 5_000 })
+  await openFullBtn.click()
+
+  // The dialog contains its own search/query input.
+  const panel = alice.getByRole("dialog")
+  await expect(panel).toBeVisible({ timeout: 5_000 })
+  const searchInput = panel.locator('input[placeholder*="Search" i], input[aria-label*="Search" i]').first()
   await expect(searchInput).toBeVisible({ timeout: 5_000 })
 })

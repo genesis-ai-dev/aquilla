@@ -27,6 +27,10 @@ test("admin console Teams tab renders Team column header", async ({ alice }) => 
   await expect(teamsTab).toBeVisible({ timeout: 5_000 })
   await teamsTab.click()
 
-  // The Teams table shows "Team" as the first column header.
-  await expect(alice.getByText(/^Team$/)).toBeVisible({ timeout: 5_000 })
+  // The Teams table shows "Team" as a column header. Role-scoped + .first():
+  // the table renders one header row per org section, so a bare getByText
+  // trips strict mode.
+  await expect(
+    alice.getByRole("columnheader", { name: "Team" }).first(),
+  ).toBeVisible({ timeout: 5_000 })
 })

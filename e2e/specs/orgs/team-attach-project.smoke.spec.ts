@@ -58,6 +58,11 @@ test("team attach project adds project to team project list", async ({ alice }) 
   await expect(attachBtn).toBeVisible({ timeout: 3_000 })
   await attachBtn.click()
 
-  // Project appears in the team's projects section.
-  await expect(alice.getByText(projName)).toBeVisible({ timeout: 8_000 })
+  // Project appears in the team's projects section. Don't use a bare
+  // getByText — the (still-mounted) select trigger also shows the chosen
+  // name, tripping strict mode. The attached row uniquely carries the
+  // "Detach <name>" action.
+  await expect(
+    alice.getByRole("button", { name: `Detach ${projName}` }),
+  ).toBeVisible({ timeout: 8_000 })
 })

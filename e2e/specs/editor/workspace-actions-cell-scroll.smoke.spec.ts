@@ -16,9 +16,9 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *
  * This spec: import a file → validate cell 0 to mark it finished →
  * click the Next Unfinished button → assert the editor is still visible
- * (scroll completed without error). Since we only have one cell in the
- * sample fixture, clicking Next Unfinished with no remaining empty cells
- * shows a status toast ("All done") or no-ops — verify either outcome.
+ * (scroll completed without error). sample.md yields multiple cells, so
+ * the jump scrolls to the next empty cell; if everything were finished,
+ * handleJumpNextUnfinished simply no-ops (there is no toast).
  */
 test("next unfinished button advances past validated cell or shows all-done state", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -39,11 +39,9 @@ test("next unfinished button advances past validated cell or shows all-done stat
   // Next unfinished lives in the header overflow menu (FRO-331).
   await ws.jumpNextUnfinished()
 
-  // Either all cells are done (toast) or we scrolled to the next cell.
-  // The editor table should still be visible in either case.
-  const editorTable = alice.locator("table, [data-testid='editor-table'], .editor-table").first()
-  // Check the page hasn't crashed by verifying the editor or an expected message.
-  await expect(
-    editorTable.or(alice.getByText(/All done|No more unfinished/i).first())
-  ).toBeVisible({ timeout: 5_000 })
+  // Either we scrolled to the next cell or (all finished) the click no-oped.
+  // The editor renders cell rows as [data-cell-id] divs — there is no <table>
+  // and no "All done" toast — so in both outcomes the rows must still be
+  // visible, proving the jump completed without crashing the editor.
+  await expect(alice.locator("[data-cell-id]").first()).toBeVisible({ timeout: 5_000 })
 })

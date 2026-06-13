@@ -2,55 +2,45 @@ import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
- * Project trash (soft-delete) — ProjectCard "Move to Trash" action.
+ * Project soft-delete — "Archive" removes the project from the active list.
  *
- * Dashboard renders ProjectCard for each project. Each card has an
- * aria-label="Project actions" button (MoreVertical) that opens a Popover
- * with a "Move to Trash" button (text, Trash2 icon). Clicking it soft-deletes
- * the project and removes it from the active list (or shows it in the Trash
- * section).
+ * The old Dashboard ProjectCard "Move to Trash" flow is gone:
+ * src/components/Dashboard.tsx is no longer routed. Project soft-delete now
+ * lives on the project Overview page (/projects/:id): the header's overflow
+ * menu (aria-label="More actions", src/components/org/ProjectOverview.tsx)
+ * has an owner-only "Archive" item. Archiving navigates back to /projects,
+ * where the archived project no longer appears (it moves to
+ * /projects/archived).
  *
- * This spec: creates two projects → clicks "Project actions" on the first →
- * clicks "Move to Trash" → verifies that project card no longer appears in
- * the active projects grid.
+ * This spec: creates two projects → archives the second from its Overview →
+ * verifies it disappears from the /projects list while the first remains.
  */
-test("Move to Trash removes project from active list", async ({ alice }) => {
+test("Archive removes project from active projects list", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
 
   const keepName = `Keep ${Date.now()}`
-  const trashName = `Trash ${Date.now()}`
+  const archiveName = `Archive ${Date.now()}`
 
-  // Create two projects so the dashboard is not empty after trashing one.
+  // Create two projects so the projects list is not empty after archiving one.
   await dash.createProject({ name: keepName })
   await dash.goto()
-  await dash.createProject({ name: trashName })
-  await dash.goto()
+  await dash.createProject({ name: archiveName })
 
-  // Find the card for the project to trash.
-  const trashCard = alice
-    .locator("article, [data-testid='project-card']")
-    .filter({ hasText: trashName })
-    .first()
+  // Project creation lands on the project Overview (/projects/:id).
+  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
+  await expect(alice.getByRole("heading", { name: archiveName })).toBeVisible({ timeout: 10_000 })
 
-  // Fall back to any container element with the project name.
-  const card = trashCard.or(alice.locator(".card, [class*='card']").filter({ hasText: trashName }).first())
-  await expect(card).toBeVisible({ timeout: 10_000 })
+  // Open the header overflow menu and click "Archive".
+  await alice.getByRole("button", { name: /More actions/i }).click()
+  const archiveItem = alice.getByRole("button", { name: /^Archive$/ })
+  await expect(archiveItem).toBeVisible({ timeout: 3_000 })
+  await archiveItem.click()
 
-  // Open the "Project actions" popover (MoreVertical button inside the card).
-  const actionsBtn = card.getByRole("button", { name: /Project actions/i })
-  await expect(actionsBtn).toBeVisible({ timeout: 5_000 })
-  await actionsBtn.click()
+  // Archiving navigates back to the projects list.
+  await alice.waitForURL(/\/projects$/, { timeout: 10_000 })
 
-  // Click "Move to Trash" in the popover.
-  const moveToTrash = alice.getByRole("button", { name: /Move to Trash/i })
-  await expect(moveToTrash).toBeVisible({ timeout: 3_000 })
-  await moveToTrash.click()
-
-  // Wait for the card to disappear from the active grid.
-  // Either the card is gone or moved to a "Trash" section.
-  await expect(
-    alice.locator(".card, [class*='card'], article").filter({ hasText: trashName })
-      .and(alice.locator(":not([class*='trash']):not([class*='deleted'])"))
-  ).not.toBeVisible({ timeout: 8_000 })
+  // The archived project is gone from the active list; the other remains.
+  await expect(alice.getByText(keepName)).toBeVisible({ timeout: 10_000 })
+  await expect(alice.getByText(archiveName)).not.toBeVisible({ timeout: 8_000 })
 })

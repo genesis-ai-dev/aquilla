@@ -40,7 +40,7 @@ test("assign-work panel opens and shows Assignee and Book selects", async ({ ali
   const projectId = alice.url().match(/\/project\/([^/]+)\//)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/projects/${projectId}`)
   await alice.waitForLoadState("networkidle")
 
   // The "Assign…" button should be visible for the project owner.

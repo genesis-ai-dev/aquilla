@@ -29,20 +29,21 @@ test("'Try to fix all' button navigates to editor with ?openRule= param", async 
   await alice.goto(`/project/${projectId}/rules`)
   await alice.waitForLoadState("networkidle")
 
-  // Create a rule.
-  const addRuleBtn = alice.getByRole("button", { name: /add rule|new rule|\+ rule/i }).first()
+  // Create a rule via the inline RuleEditor ("+ Add Rule" in the header).
+  const addRuleBtn = alice.getByRole("button", { name: /\+ Add Rule/i }).first()
   await expect(addRuleBtn).toBeVisible({ timeout: 8_000 })
   await addRuleBtn.click()
 
-  // Fill in rule name in the dialog.
-  const ruleNameInput = alice.locator('input[placeholder*="rule name" i], input[aria-label*="rule name" i], input[name="name"]').first()
+  // Fill in rule name + pattern (both required for "Create rule" to enable).
+  const ruleNameInput = alice.locator("#re-name")
   await expect(ruleNameInput).toBeVisible({ timeout: 5_000 })
   await ruleNameInput.fill("test-rule")
+  await alice.locator("#re-pat").fill("fix-all-pattern")
 
   // Save the rule.
-  const saveBtn = alice.getByRole("button", { name: /save|create|add/i }).first()
+  const saveBtn = alice.getByRole("button", { name: /^Create rule$/ })
+  await expect(saveBtn).toBeEnabled({ timeout: 3_000 })
   await saveBtn.click()
-  await alice.waitForTimeout(500)
 
   // "Try to fix all" button should appear for the new rule.
   const tryFixBtn = alice.getByRole("button", { name: /Try to fix all/i }).first()

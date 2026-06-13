@@ -45,9 +45,10 @@ test("project settings More save options shows Close without saving", async ({ a
   await expect(closeWithoutSaving).toBeVisible({ timeout: 3_000 })
   await closeWithoutSaving.click()
 
-  // A discard confirmation dialog appears.
+  // A discard confirmation dialog appears. (Don't union with getByText —
+  // the header's "Unsaved changes" span also matches, which makes the
+  // union resolve to several elements and trip strict mode.)
   const dialog = alice.getByRole("dialog")
-    .or(alice.getByText(/discard\b/i).first())
-    .or(alice.getByText(/unsaved changes/i).first())
   await expect(dialog).toBeVisible({ timeout: 5_000 })
+  await expect(dialog.getByText(/Discard changes\?/i)).toBeVisible()
 })

@@ -25,13 +25,18 @@ test("project settings audio loading strategy selection marks form dirty", async
   // "Audio loading" card title is visible.
   await expect(alice.getByText(/Audio loading/i).first()).toBeVisible({ timeout: 10_000 })
 
+  // Scope to the Audio Media section; each strategy button's accessible
+  // name is "<name> <description>" (both spans are inside the button), so
+  // anchor only the start of the name.
+  const section = alice.locator("#section-audio-media")
+
   // "Lazy (default)" button is initially aria-pressed="true".
-  const lazyBtn = alice.getByRole("button", { name: /Lazy \(default\)/i })
+  const lazyBtn = section.getByRole("button", { name: /^Lazy \(default\)/i })
   await expect(lazyBtn).toBeVisible({ timeout: 5_000 })
   await expect(lazyBtn).toHaveAttribute("aria-pressed", "true")
 
   // Click "Eager" — marks form dirty.
-  const eagerBtn = alice.getByRole("button", { name: /^Eager$/i })
+  const eagerBtn = section.getByRole("button", { name: /^Eager\b/i })
   await expect(eagerBtn).toBeVisible({ timeout: 5_000 })
   await eagerBtn.click()
   await expect(eagerBtn).toHaveAttribute("aria-pressed", "true")

@@ -22,20 +22,18 @@ test("share invite expiry select changes value", async ({ alice }) => {
   const name = `ShareExp ${Date.now()}`
   await dash.createProject({ name, source: "en", target: "fr" })
 
-  // The dashboard should show the project card.
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  await alice.goto("/")
-  await alice.waitForLoadState("networkidle")
+  // Enter the workspace — the sidebar "More project options" menu (which
+  // hosts Share) only exists there, not on the org home.
+  await dash.openProject(name)
 
-  // Open the share dialog from the project card.
-  // Share lives in the sidebar "More" menu (sidebar cleanup).
+  // Open the share dialog from the sidebar "More" menu.
   await alice.getByRole("button", { name: /More project options/i }).click()
   const shareBtn = alice.getByRole("button", { name: /^Share$/i }).first()
   await expect(shareBtn).toBeVisible({ timeout: 10_000 })
   await shareBtn.click()
 
-  // Switch to Invite link tab.
-  const inviteTab = alice.getByRole("tab", { name: /Invite link/i })
+  // Switch to Invite link tab (plain buttons, not role=tab).
+  const inviteTab = alice.getByRole("dialog").getByRole("button", { name: /Invite link/i })
   await expect(inviteTab).toBeVisible({ timeout: 5_000 })
   await inviteTab.click()
 

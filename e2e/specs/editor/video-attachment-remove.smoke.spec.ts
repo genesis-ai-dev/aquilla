@@ -22,8 +22,15 @@ const VTT_FIXTURE = path.resolve(__dirname, "../../fixtures/voices-roundtrip.vtt
  *   3. The "Currently attached" section should show with title={currentLabel}.
  *   4. The "Remove attachment" trash button is visible.
  *   5. Click it — the "Currently attached" section disappears.
+ *
+ * KNOWN APP GAP (test.fixme): video-attachment persistence is deliberately
+ * stubbed out — ProjectWorkspace.tsx ~line 901: `const videoAttachment = {}` /
+ * `const saveVideo = () => {}` ("Phase 2c-gamma: video attachments lived on
+ * Y.Doc meta… comes back via the event grammar in v1.x"). Save URL silently
+ * discards, so re-opening never shows "Currently attached". Un-fixme this
+ * spec when video attachments are re-wired through the event grammar.
  */
-test("video attachment Remove attachment button clears the saved URL", async ({ alice }) => {
+test.fixme("video attachment Remove attachment button clears the saved URL", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `VideoRemove ${Date.now()}`

@@ -17,8 +17,11 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *   - "% of cells need attention" text
  *   - "No cells need attention." OR a list of dragging cells
  *
- * The HealthRing lives in the editor footer. This spec: imports a file,
- * hovers the health ring, asserts the decay popover appears.
+ * The HealthRing lives in the editor footer (StatusBar.tsx). NOTE: at
+ * health 0 (a fresh project with nothing validated) HealthRing renders NO
+ * <svg> — `showRing = health > 0` — only the numeric value inside the
+ * trigger. So we hover the DecayBreakdown trigger (the footer's only
+ * button, exposed by Base UI's PopoverTrigger) rather than an svg.
  */
 test("hovering health ring in status bar opens DecayBreakdown popover", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -36,9 +39,11 @@ test("hovering health ring in status bar opens DecayBreakdown popover", async ({
   const footer = alice.locator("footer").last()
   await expect(footer).toBeVisible({ timeout: 5_000 })
 
-  // Hover the health ring to trigger the popover (openOnHover delay=300ms).
-  const healthRing = footer.locator("svg, [role='img']").first()
-  await healthRing.scrollIntoViewIfNeeded()
+  // Hover the DecayBreakdown trigger to open the popover (openOnHover
+  // delay=300ms). At health 0 there is no svg ring — target the trigger
+  // button that wraps the HealthRing value.
+  const healthRing = footer.getByRole("button").first()
+  await expect(healthRing).toBeVisible({ timeout: 5_000 })
   await healthRing.hover()
   // Allow the 300ms hover delay to fire.
   await alice.waitForTimeout(500)

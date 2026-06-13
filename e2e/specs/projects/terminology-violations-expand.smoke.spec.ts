@@ -11,11 +11,13 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 /**
  * TerminologyViolationsInbox — expand a concept row and see violation cells.
  *
- * sample.md source cells contain the word "sample" (first cell text starts
+ * sample.md source cells contain the word "sample" (one cell's text starts
  * with "This is a **sample** markdown file…"). When:
  *   - A concept with sourceTerm="sample" and status="active" (approved) exists
  *   - The project has cells (from import) whose source contains "sample"
- *   - Cells have no translations (fresh import)
+ *   - That cell is TRANSLATED but its target lacks an approved rendering
+ *     (the rule engine short-circuits on empty targets — checkRulesForCell
+ *     step 2 — so untranslated cells produce no violations)
  *
  * The violations inbox produces a "missing-approved" group for the concept
  * (source contains the term, target has no approved rendering). The row
@@ -23,10 +25,11 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *
  * This spec:
  *   1. Creates a project and imports sample.md.
- *   2. Adds a concept: sourceTerm="sample", status=active, rendering="muestra".
- *   3. Navigates to /terminology → "Violations" tab.
- *   4. Verifies the "sample" concept row appears with a violation count.
- *   5. Expands the row → cell violation items become visible.
+ *   2. Translates the "sample" cell with text that lacks the rendering.
+ *   3. Adds a concept: sourceTerm="sample", status=active, rendering="muestra".
+ *   4. Navigates to /terminology → "Violations" tab.
+ *   5. Verifies the "sample" concept row appears with a violation count.
+ *   6. Expands the row → cell violation items become visible.
  */
 test("terminology violations inbox expands concept row to show cell violations", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -40,7 +43,24 @@ test("terminology violations inbox expands concept row to show cell violations",
   await ws.importFile(SAMPLE_MD)
   await ws.waitForEditor()
 
-  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
+  // The rule engine skips untranslated cells, so give the cell whose source
+  // contains "sample" a translation that LACKS the approved rendering.
+  const rows = alice.locator("[data-cell-id]")
+  const rowCount = await rows.count()
+  let sampleIdx = -1
+  for (let i = 0; i < rowCount; i++) {
+    const text = (await rows.nth(i).textContent()) ?? ""
+    if (/sample/i.test(text)) {
+      sampleIdx = i
+      break
+    }
+  }
+  expect(sampleIdx).toBeGreaterThanOrEqual(0)
+  await ws.editCell(sampleIdx, "Ceci est un fichier de test.")
+
+  // No trailing $ — after import/open the URL can carry a file segment or
+  // query params beyond the project id.
+  const projectId = alice.url().match(/\/project\/([^/?#]+)/)?.[1]
   expect(projectId).toBeTruthy()
 
   // Navigate to terminology page and add a concept.
@@ -78,18 +98,23 @@ test("terminology violations inbox expands concept row to show cell violations",
   await expect(violationsTab).toBeVisible({ timeout: 10_000 })
   await violationsTab.click()
 
-  // The violations inbox scans cells. "sample" appears in source but has no
-  // translation → at least 1 "missing-approved" violation.
-  // The concept row for "sample" should appear with a count badge.
-  const conceptRow = alice.getByText("sample").first()
-  await expect(conceptRow).toBeVisible({ timeout: 15_000 })
-
-  // Find the expand button (aria-expanded="false") and click it.
-  const expandBtn = alice.locator('button[aria-expanded="false"]').first()
-  await expect(expandBtn).toBeVisible({ timeout: 5_000 })
+  // The violations inbox scans cells. The "sample" cell is translated without
+  // the approved rendering → at least 1 "missing-approved" violation.
+  // The concept group row for "sample" should appear with a count badge.
+  // Scope the expand toggle to the row bearing the term — other shell
+  // buttons (select triggers, menus) also carry aria-expanded.
+  const expandBtn = alice
+    .locator("button[aria-expanded]")
+    .filter({ hasText: /sample/i })
+    .first()
+  await expect(expandBtn).toBeVisible({ timeout: 15_000 })
+  await expect(expandBtn).toHaveAttribute("aria-expanded", "false")
   await expandBtn.click()
+  await expect(expandBtn).toHaveAttribute("aria-expanded", "true", { timeout: 3_000 })
 
-  // After expanding, the cell violation items should appear.
-  // Each item has "missing" badge text.
-  await expect(alice.getByText("missing").first()).toBeVisible({ timeout: 5_000 })
+  // After expanding, the cell violation items should appear — each infraction
+  // li carries a "missing" badge.
+  const infraction = alice.locator("ul.mt-2 li").first()
+  await expect(infraction).toBeVisible({ timeout: 5_000 })
+  await expect(infraction.getByText("missing").first()).toBeVisible({ timeout: 3_000 })
 })

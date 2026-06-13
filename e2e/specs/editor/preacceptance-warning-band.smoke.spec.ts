@@ -20,11 +20,14 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *   "Forbidden rendering «<term>» used for <sourceTerm>."
  *
  * Setup:
- *   1. Create a concept: sourceTerm="sample", rendering="verboten" (forbidden).
- *      "sample" appears in the first content cell of sample.md ("This is a
- *      **sample** markdown file for e2e import testing.").
+ *   1. Create a concept: sourceTerm="sample", rendering="verboten" (forbidden),
+ *      concept status "approved" (= `active` — detectPreAcceptanceWarnings
+ *      skips draft/deprecated concepts, and new concepts default to draft).
+ *      "sample" appears in cell 1 of sample.md ("This is a **sample** markdown
+ *      file for e2e import testing." — cell 0 is the "# Heading" heading cell).
  *   2. Import sample.md.
- *   3. Edit the first content cell — type "verboten".
+ *   3. Edit cell 1 — type "verboten" and blur (the band recomputes from the
+ *      committed cell.translated, so the edit must commit).
  *   4. Verify "Terminology advisory" warning band appears.
  *   5. Verify the forbidden rendering message is present.
  */
@@ -56,6 +59,11 @@ test("pre-acceptance warning band appears when forbidden rendering is typed", as
   const statusSelect = dialog.locator('[aria-label="Rendering 1 status"]')
   await expect(statusSelect).toBeVisible({ timeout: 3_000 })
   await pickSelectOption(alice, statusSelect, "forbidden")
+  // New concepts default to "suggested" (draft) and detectPreAcceptanceWarnings
+  // only considers active concepts — set the concept status to "approved".
+  const conceptStatus = dialog.locator("#concept-status")
+  await expect(conceptStatus).toBeVisible({ timeout: 3_000 })
+  await pickSelectOption(alice, conceptStatus, "approved")
   await dialog.getByRole("button", { name: /Add concept/i }).click()
   await expect(dialog).not.toBeVisible({ timeout: 5_000 })
 
@@ -68,14 +76,10 @@ test("pre-acceptance warning band appears when forbidden rendering is typed", as
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // The first content cell source contains "sample".
-  // Type the forbidden rendering "verboten" in the translated cell.
-  const row = ws.cellRow(0)
-  await row.scrollIntoViewIfNeeded()
-  const editable = row.locator('[contenteditable="true"]').first()
-  await expect(editable).toBeVisible({ timeout: 10_000 })
-  await editable.click()
-  await editable.fill("verboten")
+  // Cell 1's source contains "sample" (cell 0 is the "# Heading" cell).
+  // Type the forbidden rendering "verboten" and blur so the edit commits —
+  // the band recomputes from the committed cell.translated, not live input.
+  await ws.editCell(1, "verboten")
 
   // The warning band should appear.
   const band = alice.locator('[role="status"]').filter({ hasText: /Terminology advisory/i })

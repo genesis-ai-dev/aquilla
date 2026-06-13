@@ -40,9 +40,10 @@ test("import VTT with <v Name> tags → cast created → WebVTT export round-tri
   // The fixture has four cues → four cells.
   await expect(alice.locator("[data-cell-id]")).toHaveCount(4, { timeout: 10_000 })
 
-  // 3. Export as WebVTT and capture the downloaded file.
+  // 3. Export as WebVTT and capture the downloaded file. FRO-331 moved
+  // "Export file" into the header ⋯ overflow menu — use the helper.
   const downloadPromise = alice.waitForEvent("download", { timeout: 15_000 })
-  await alice.getByRole("button", { name: "Export file" }).click()
+  await ws.openExportDialog()
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
   await dialog.getByText("WebVTT (subtitles)").click()

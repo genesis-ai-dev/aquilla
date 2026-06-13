@@ -70,7 +70,19 @@ test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice,
   await expect(btTab.first()).toBeVisible({ timeout: 5_000 })
   await btTab.first().click()
 
-  // The locked Edit span should appear — Reviewer cannot edit BT.
+  // The Edit affordance (enabled button OR locked span) only renders once the
+  // cell HAS a back-translation (EditorTable.tsx: `cell.backtranslation` gate).
+  // Alice's auto-BT on first edit may not persist server-side, so generate one
+  // as bob — the statistical glosser is client-side and the Generate button is
+  // role-independent; only *editing* the BT is Contributor+.
+  const btPanel = bob.getByRole("tabpanel", { name: "BT" })
+  const generateBtn = btPanel.getByRole("button", { name: /^(Generate|Generating…)$/ })
   const lockedSpan = bob.locator('[title="Contributor+ required to edit back-translations"]')
+  await expect(generateBtn.or(lockedSpan).first()).toBeVisible({ timeout: 8_000 })
+  if (await generateBtn.isVisible().catch(() => false)) {
+    await generateBtn.click()
+  }
+
+  // The locked Edit span should appear — Reviewer cannot edit BT.
   await expect(lockedSpan).toBeVisible({ timeout: 8_000 })
 })

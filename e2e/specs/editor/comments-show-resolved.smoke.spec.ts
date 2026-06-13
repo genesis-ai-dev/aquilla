@@ -59,18 +59,40 @@ test("comments page Show resolved checkbox reveals resolved threads", async ({ a
   await alice.goto(`/project/${projectId}/comments`)
   await alice.waitForLoadState("networkidle")
 
-  // The resolved comment should be hidden by default.
-  await expect(alice.getByText(commentText)).not.toBeVisible({ timeout: 5_000 })
-
   // The "Show resolved" toggle lives inside the collapsed "Filters" panel.
   await alice.getByRole("button", { name: /Filters/i }).click()
 
-  // Check "Show resolved" — label wraps the shadcn Checkbox (role="checkbox")
-  // and a <span>Show resolved</span>.
+  // "Show resolved" — label wraps the shadcn Checkbox (role="checkbox")
+  // and a <span>Show resolved</span>. Unchecked by default: resolved
+  // threads are hidden.
   const showResolvedCheckbox = alice.locator('label').filter({ hasText: /Show resolved/i }).getByRole("checkbox")
   await expect(showResolvedCheckbox).toBeVisible({ timeout: 5_000 })
-  await showResolvedCheckbox.check()
+  await expect(showResolvedCheckbox).not.toBeChecked()
 
-  // The resolved comment is now visible.
+  // Reveal resolved threads, then poll via the Refresh button: the page
+  // fetches the server projection once on mount, and the drawer write
+  // flushes via the client outbox which may land after page load.
+  //
+  // A resolved thread renders as a COLLAPSED card (CommentsPage CommentThread:
+  // useState(!root.resolved)) — the body text sits inside the closed
+  // Collapsible, so the card is detected via its header (Reopen button).
+  const reopenBtn = alice.getByRole("button", { name: /^Reopen$/i }).first()
+  await showResolvedCheckbox.check()
+  await expect(async () => {
+    await alice.getByRole("button", { name: /^Refresh$/i }).click()
+    await expect(reopenBtn).toBeVisible({ timeout: 1_000 })
+  }).toPass({ timeout: 15_000 })
+
+  // Expand the collapsed thread (the chevron CollapsibleTrigger is the icon
+  // button right after Reopen in the card header) — the body becomes visible.
+  await reopenBtn.locator("..").getByRole("button").last().click()
   await expect(alice.getByText(commentText)).toBeVisible({ timeout: 5_000 })
+
+  // Uncheck — the resolved thread is hidden again (the default state).
+  await showResolvedCheckbox.uncheck()
+  await expect(reopenBtn).not.toBeVisible({ timeout: 5_000 })
+
+  // Re-check — the resolved thread is revealed.
+  await showResolvedCheckbox.check()
+  await expect(reopenBtn).toBeVisible({ timeout: 5_000 })
 })

@@ -39,9 +39,12 @@ test("view settings Show cell labels toggle persists state across open/close", a
   const cellLabelsText = alice.getByText(/Show cell labels/i).first()
   await expect(cellLabelsText).toBeVisible({ timeout: 3_000 })
 
-  // Pill sibling span should say "On" or "Off".
-  // The item row wraps both the label span and the Pill span.
-  const initialPill = await alice.locator("span").filter({ hasText: /^(On|Off)$/ }).first().textContent()
+  // The On/Off pill must be read from the "Show cell labels" MENU ITEM —
+  // "Show line numbers" renders first in the menu with its own pill, so an
+  // unscoped `span:has-text(On|Off)` first() reads the wrong toggle.
+  const cellLabelsItem = alice.getByRole("menuitem", { name: /Show cell labels/i })
+  const cellLabelsPill = cellLabelsItem.locator("span").filter({ hasText: /^(On|Off)$/ })
+  const initialPill = await cellLabelsPill.textContent()
 
   // Click the item to toggle (dismisses menu).
   await cellLabelsText.click()
@@ -51,7 +54,7 @@ test("view settings Show cell labels toggle persists state across open/close", a
   await ws.openViewSettingsMenu()
   await expect(cellLabelsText).toBeVisible({ timeout: 3_000 })
 
-  const toggledPill = await alice.locator("span").filter({ hasText: /^(On|Off)$/ }).first().textContent()
+  const toggledPill = await cellLabelsPill.textContent()
   expect(toggledPill).not.toEqual(initialPill)
 
   // Toggle back.
@@ -59,6 +62,6 @@ test("view settings Show cell labels toggle persists state across open/close", a
   await ws.openViewSettingsMenu()
   await expect(cellLabelsText).toBeVisible({ timeout: 3_000 })
 
-  const revertedPill = await alice.locator("span").filter({ hasText: /^(On|Off)$/ }).first().textContent()
+  const revertedPill = await cellLabelsPill.textContent()
   expect(revertedPill).toEqual(initialPill)
 })

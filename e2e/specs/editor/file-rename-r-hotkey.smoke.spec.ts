@@ -38,14 +38,18 @@ test('"r" key on focused file row opens inline rename input', async ({ alice }) 
   // Click to select the file (which also focuses the row element).
   await fileRow.click()
 
-  // The FileRow li has tabIndex=0 — press "r" while it's focused.
-  // We focus via keyboard tab from the row if needed.
-  const rowLi = sidebar.locator("li").filter({ has: alice.getByText("sample") }).first()
-  await rowLi.focus()
-  await rowLi.press("r")
+  // The FileRow root is a div with tabIndex=0 — focus it and press "r".
+  const rowDiv = sidebar
+    .locator('div[tabindex="0"]')
+    .filter({ hasText: "sample" })
+    .first()
+  await rowDiv.focus()
+  await rowDiv.press("r")
 
-  // Inline rename input should appear.
-  const inlineInput = sidebar.locator('input[type="text"]').first()
+  // Inline rename input should appear. The sidebar's filter input is a
+  // role=searchbox (and also input[type=text]), so role=textbox uniquely
+  // matches the rename input.
+  const inlineInput = sidebar.getByRole("textbox")
   await expect(inlineInput).toBeVisible({ timeout: 3_000 })
 
   // The input should have the current filename pre-filled.

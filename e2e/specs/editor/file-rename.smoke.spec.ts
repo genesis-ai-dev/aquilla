@@ -10,7 +10,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 /**
  * File rename via the FileActionMenu (context menu).
  *
- * FileRow right-click → FileActionMenu with "Rename" button →
+ * FileRow right-click → FileActionMenu with "Rename" menu item →
  * FileRow switches to an inline input → Enter commits the new name →
  * the sidebar shows the updated name.
  *
@@ -33,13 +33,14 @@ test("file rename via context menu updates sidebar name", async ({ alice }) => {
   await expect(fileRow).toBeVisible({ timeout: 10_000 })
   await fileRow.click({ button: "right" })
 
-  // FileActionMenu appears — click "Rename".
-  const renameBtn = alice.getByRole("button", { name: /^Rename$/i })
-  await expect(renameBtn).toBeVisible({ timeout: 3_000 })
-  await renameBtn.click()
+  // FileActionMenu appears (shadcn DropdownMenu) — click "Rename".
+  const renameItem = alice.getByRole("menuitem", { name: /^Rename$/i })
+  await expect(renameItem).toBeVisible({ timeout: 3_000 })
+  await renameItem.click()
 
-  // FileRow switches to inline input. Fill new name and press Enter.
-  const renameInput = alice.locator("aside input").first()
+  // FileRow switches to inline input. The sidebar's filter input is a
+  // role=searchbox, so role=textbox uniquely matches the rename input.
+  const renameInput = alice.locator("aside").getByRole("textbox")
   await expect(renameInput).toBeVisible({ timeout: 3_000 })
   const newFileName = "renamed-sample"
   await renameInput.fill(newFileName)

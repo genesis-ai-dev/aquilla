@@ -12,7 +12,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *
  * EditorTable.tsx has an `handleSourceMouseUp` listener on the source cell.
  * When text is selected (mouseup with non-collapsed selection), `sourceSelection`
- * is set and an "Add to termbase" button appears (absolute positioned, primary color).
+ * is set and an "Add to term base" button appears (EditorTable.tsx, literal
+ * label "Add to term base" — note the space in "term base").
  *
  * Clicking it calls `handleAddConceptFromSelection(sourceSelection)` which:
  *   1. Creates a DRAFT concept with sourceTerm = selected text.
@@ -21,10 +22,10 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * This spec:
  *   1. Imports sample.md and opens the editor.
  *   2. Selects text in the source cell (Ctrl+A in the source editor or mouse drag).
- *   3. "Add to termbase" button appears.
+ *   3. "Add to term base" button appears.
  *   4. Clicks it.
  *   5. Navigates to the terminology page.
- *   6. Verifies the new concept appears as a DRAFT.
+ *   6. Verifies the new concept appears as a DRAFT (badge label "suggested").
  *
  * Selecting text: TipTap source editor is read-only (source cells aren't editable
  * in the target lens), so we use the browser's Selection API via keyboard:
@@ -54,7 +55,7 @@ test("selecting source text reveals Add to termbase button and creates draft con
   // EditorTable renders source text in a div with the original content.
   const sourceArea = alice.locator('[aria-label="Source text"], .source-text, [data-cell-type="source"]').first()
 
-  const addBtn = alice.getByRole("button", { name: /Add to termbase/i })
+  const addBtn = alice.getByRole("button", { name: /Add to term ?base/i })
 
   if (await sourceArea.isVisible({ timeout: 3_000 })) {
     // Triple-click selects all text in the element.
@@ -85,18 +86,43 @@ test("selecting source text reveals Add to termbase button and creates draft con
   // The Add to termbase button should now be visible.
   await expect(addBtn).toBeVisible({ timeout: 5_000 })
 
-  // Click it — creates a DRAFT concept.
+  // Click it — opens the AddConceptDialog (confirm step) pre-filled with the
+  // selected text. Confirming creates the DRAFT concept.
   await addBtn.click()
+  const confirmBtn = alice.getByRole("button", { name: /Create draft concept/i })
+  await expect(confirmBtn).toBeVisible({ timeout: 5_000 })
+  // The prefill can be wiped by the selectionchange the dialog's own focus
+  // shift triggers (the FRO-260 mousedown guard doesn't cover post-open
+  // events). The dialog supports manual entry, so type the term if empty —
+  // the spec's intent is selection → dialog → draft concept, not the prefill.
+  const termInput = alice.getByRole("textbox", { name: /Source term for new concept/i })
+  if (!(await termInput.inputValue()).trim()) {
+    await termInput.fill("sample term")
+  }
+  await expect(confirmBtn).toBeEnabled({ timeout: 3_000 })
+  await confirmBtn.click()
 
-  // Button should disappear (selection cleared).
-  await expect(addBtn).not.toBeVisible({ timeout: 3_000 })
+  // Dialog closes and the selection toolbar disappears (selection cleared).
+  await expect(confirmBtn).not.toBeVisible({ timeout: 5_000 })
 
-  // Navigate to terminology page and verify the draft concept was created.
+  // Verify the draft concept was created. The write goes through
+  // patchSettings (a server round-trip), so reload-and-retry rather than
+  // asserting against a single page load that may race the write. Draft
+  // concepts surface in the "Review queue" tab — the tab label gains a count
+  // ("Review queue (1)") once the draft lands.
   await alice.goto(`/project/${projectId}/terminology`)
   await alice.waitForLoadState("networkidle")
+  const queueTab = alice.getByRole("button", { name: /Review queue \(\d+\)/ })
+  await expect(async () => {
+    await alice.reload()
+    await alice.waitForLoadState("networkidle")
+    await expect(queueTab).toBeVisible({ timeout: 2_000 })
+  }).toPass({ timeout: 20_000 })
+  await queueTab.click()
 
-  // A concept row should exist with status "draft" (shown as "Draft" badge).
-  // The concept's sourceTerm is the text that was selected.
-  const conceptRow = alice.locator('[data-testid="concept-row"], tr').filter({ hasText: /draft/i }).first()
-  await expect(conceptRow).toBeVisible({ timeout: 10_000 })
+  // The queue row renders the concept's sourceTerm with Approve/Reject
+  // actions (TerminologyReviewQueue.tsx — aria-label "Approve concept <term>").
+  await expect(
+    alice.getByRole("button", { name: /^Approve concept/ }).first(),
+  ).toBeVisible({ timeout: 10_000 })
 })

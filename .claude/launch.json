@@ -8,6 +8,15 @@
       "port": 5180
     },
     {
+      "name": "stack-header-declutter",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/ryderwishart/prototypes/codex-web-app-worktrees/header-declutter && DEV_STACK_IDENTITY_PORT=8821 DEV_STACK_SYNC_PORT=8822 npm run dev -- --vite-port=5221"
+      ],
+      "port": 5221
+    },
+    {
       "name": "stack-qa",
       "runtimeExecutable": "env",
       "runtimeArgs": [

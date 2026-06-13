@@ -17,6 +17,10 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * and visible to all project members.
  */
 test("alice posts comment; bob sees it on the comments page", async ({ alice, bob }) => {
+  // Alice's create→import→comment flow (~20s typical) plus bob's up-to-15s
+  // projection poll can exceed the 30s default budget.
+  test.setTimeout(45_000)
+
   // Seed bob in alice's org and give him access to the project.
   const aliceSession = await ensureAuthState("alice")
   const acme = await getMyOrg(aliceSession.jwt)
@@ -62,6 +66,14 @@ test("alice posts comment; bob sees it on the comments page", async ({ alice, bo
   await bob.goto(`/project/${projectId}/comments`)
   await bob.waitForLoadState("networkidle")
 
-  // Bob sees alice's comment.
-  await expect(bob.getByText(commentText).first()).toBeVisible({ timeout: 10_000 })
+  // Bob sees alice's comment. The comments page fetches once on mount with no
+  // live subscription (useComments loads on mount only), while alice's
+  // comment.create drains via the 5s outbox interval — so bob's first fetch can
+  // legitimately race the projection write. Poll through the page's own
+  // Refresh button rather than weakening the cross-user assertion.
+  const refreshBtn = bob.getByRole("button", { name: "Refresh" })
+  await expect(async () => {
+    await refreshBtn.click()
+    await expect(bob.getByText(commentText).first()).toBeVisible({ timeout: 1_500 })
+  }).toPass({ timeout: 15_000 })
 })

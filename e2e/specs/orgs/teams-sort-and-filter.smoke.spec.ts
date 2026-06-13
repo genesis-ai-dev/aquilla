@@ -28,6 +28,12 @@ test("teams list filter and sort controls work", async ({ alice }) => {
   await nameInput.fill(teamName)
   await alice.getByRole("button", { name: /Create|Save/i }).first().click()
 
+  // Creating a team navigates straight to its detail page (/teams/:id);
+  // return to the list where the search/sort controls live.
+  await alice.waitForURL(/\/teams\/\d+/, { timeout: 10_000 })
+  await alice.goto("/teams")
+  await alice.waitForLoadState("networkidle")
+
   // Team appears in the list.
   await expect(alice.getByText(teamName)).toBeVisible({ timeout: 8_000 })
 

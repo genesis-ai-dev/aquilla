@@ -18,7 +18,13 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *
  * This spec: edit a cell → select text → verify both buttons appear →
  * toggle Underline on and off → toggle Strikethrough on and off.
+ *
+ * The buttons' BASE class always contains "hover:bg-accent", so a bare
+ * /bg-accent/ regex matches even when inactive — anchor the token to
+ * whitespace/string boundaries to test only the standalone active class.
  */
+const ACTIVE_CLASS = /(?:^|\s)bg-accent(?:\s|$)/
+
 test("formatting bubble menu Underline and Strikethrough toggle on and off", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
@@ -48,22 +54,22 @@ test("formatting bubble menu Underline and Strikethrough toggle on and off", asy
   // --- Underline ---
   const underlineBtn = alice.locator('button[title="Underline (Cmd+U)"]')
   await expect(underlineBtn).toBeVisible({ timeout: 5_000 })
-  await expect(underlineBtn).not.toHaveClass(/bg-accent/, { timeout: 2_000 })
+  await expect(underlineBtn).not.toHaveClass(ACTIVE_CLASS, { timeout: 2_000 })
 
   await underlineBtn.click()
-  await expect(underlineBtn).toHaveClass(/bg-accent/, { timeout: 3_000 })
+  await expect(underlineBtn).toHaveClass(ACTIVE_CLASS, { timeout: 3_000 })
 
   await underlineBtn.click()
-  await expect(underlineBtn).not.toHaveClass(/bg-accent/, { timeout: 3_000 })
+  await expect(underlineBtn).not.toHaveClass(ACTIVE_CLASS, { timeout: 3_000 })
 
   // --- Strikethrough ---
   const strikeBtn = alice.locator('button[title="Strikethrough"]')
   await expect(strikeBtn).toBeVisible({ timeout: 5_000 })
-  await expect(strikeBtn).not.toHaveClass(/bg-accent/, { timeout: 2_000 })
+  await expect(strikeBtn).not.toHaveClass(ACTIVE_CLASS, { timeout: 2_000 })
 
   await strikeBtn.click()
-  await expect(strikeBtn).toHaveClass(/bg-accent/, { timeout: 3_000 })
+  await expect(strikeBtn).toHaveClass(ACTIVE_CLASS, { timeout: 3_000 })
 
   await strikeBtn.click()
-  await expect(strikeBtn).not.toHaveClass(/bg-accent/, { timeout: 3_000 })
+  await expect(strikeBtn).not.toHaveClass(ACTIVE_CLASS, { timeout: 3_000 })
 })

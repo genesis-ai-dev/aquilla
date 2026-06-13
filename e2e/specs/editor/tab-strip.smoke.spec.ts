@@ -44,6 +44,8 @@ test("TabStrip shows file tab and close button removes it", async ({ alice }) =>
   await expect(closeBtn).toBeVisible({ timeout: 3_000 })
   await closeBtn.click()
 
-  // TabStrip disappears (no more open tabs).
-  await expect(tabList).not.toBeVisible({ timeout: 5_000 })
+  // The tab itself is removed. The strip CONTAINER stays mounted — closing
+  // the last tab is allowed now (commit 2af182924) and the empty strip
+  // remains — so assert on the tabs, not the tablist.
+  await expect(tabs).toHaveCount(0, { timeout: 5_000 })
 })

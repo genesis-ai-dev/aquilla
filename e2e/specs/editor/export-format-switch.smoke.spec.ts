@@ -11,7 +11,9 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * ExportDialog — switching export format.
  *
  * ExportDialog renders a radiogroup (aria-label="Export format") with
- * individual radio buttons (aria-label="<Format label> (<ext>)").
+ * Base UI radio items (role=radio, aria-label="<Format label> (<ext>)").
+ * The native input[type=radio] is hidden/aria-hidden and covered by the
+ * dialog overlay — drive the role=radio elements instead.
  * Selecting a different format updates the active radio.
  *
  * This spec: opens export dialog → verifies TSV is pre-selected →
@@ -34,14 +36,14 @@ test("export format switch to CSV triggers a CSV download", async ({ alice }) =>
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
 
-  // TSV is pre-selected.
-  const tsvRadio = dialog.locator('input[type="radio"][value="tsv"]')
+  // TSV is pre-selected (Base UI radio: role=radio, aria-label="Bilingual TSV (.tsv)").
+  const tsvRadio = dialog.getByRole("radio", { name: /^Bilingual TSV/ })
   await expect(tsvRadio).toBeChecked({ timeout: 3_000 })
 
   // Switch to CSV.
-  const csvRadio = dialog.locator('input[type="radio"][value="csv"]')
+  const csvRadio = dialog.getByRole("radio", { name: /^Bilingual CSV/ })
   await expect(csvRadio).toBeVisible({ timeout: 3_000 })
-  await csvRadio.click()
+  await csvRadio.check()
   await expect(csvRadio).toBeChecked({ timeout: 3_000 })
 
   // Export → download should be a .csv file.

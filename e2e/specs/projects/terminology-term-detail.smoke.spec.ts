@@ -41,8 +41,10 @@ test("terminology drill-down opens term detail and Close returns to list", async
   await dialog.getByRole("button", { name: /Add concept/i }).click()
   await expect(dialog).not.toBeVisible({ timeout: 5_000 })
 
-  // Click the source term button to drill into detail.
-  const termBtn = alice.getByRole("button", { name: sourceTerm })
+  // Click the source term button to drill into detail. exact:true — the
+  // row's "Edit concept <term>" / "Delete concept <term>" buttons also
+  // contain the term (strict-mode violation otherwise).
+  const termBtn = alice.getByRole("button", { name: sourceTerm, exact: true })
   await expect(termBtn).toBeVisible({ timeout: 5_000 })
   await termBtn.click()
 

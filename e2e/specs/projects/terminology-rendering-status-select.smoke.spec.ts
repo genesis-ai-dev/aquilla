@@ -7,12 +7,12 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *
  * Each rendering row in the concept dialog (TerminologyPage.tsx) has a
  * Base UI Select (trigger aria-label="Rendering N status") with options:
- *   - "required" → value "preferred"
- *   - "alternate" → value "admitted" (default for new rows)
+ *   - "required" → value "preferred" (default for the pre-populated first row)
+ *   - "alternate" → value "admitted" (default for rows added via "Add rendering")
  *   - "forbidden" → value "forbidden"
  *
  * This spec: open the Add concept dialog → verify rendering 1 status defaults
- * to "alternate" → change to "required" → verify the trigger shows "required" →
+ * to "required" → change to "alternate" → verify the trigger shows "alternate" →
  * change to "forbidden" → verify it shows "forbidden".
  */
 test("terminology rendering row status select changes rendering status", async ({ alice }) => {
@@ -36,14 +36,15 @@ test("terminology rendering row status select changes rendering status", async (
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
 
-  // Rendering 1 status select defaults to "alternate" (value "admitted").
+  // Rendering 1 status select defaults to "required" (value "preferred" —
+  // ConceptDialog seeds the first row with { status: "preferred" }).
   const statusSelect = dialog.getByRole("combobox", { name: "Rendering 1 status" })
   await expect(statusSelect).toBeVisible({ timeout: 3_000 })
-  await expectSelectValue(statusSelect, "alternate")
-
-  // Change to "required" (value "preferred").
-  await pickSelectOption(alice, statusSelect, "required")
   await expectSelectValue(statusSelect, "required")
+
+  // Change to "alternate" (value "admitted").
+  await pickSelectOption(alice, statusSelect, "alternate")
+  await expectSelectValue(statusSelect, "alternate")
 
   // Change to "forbidden".
   await pickSelectOption(alice, statusSelect, "forbidden")

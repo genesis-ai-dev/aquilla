@@ -55,14 +55,15 @@ test("team remove member button removes the member from the team", async ({ alic
   await expect(confirmAdd).toBeEnabled({ timeout: 3_000 })
   await confirmAdd.click()
 
-  // Wait for bob to appear in the team members list.
-  await expect(alice.getByText("bob")).toBeVisible({ timeout: 8_000 })
+  // Wait for bob's member row. Don't use a bare getByText("bob") — the
+  // (still-mounted) "Member to add" select trigger also shows "bob", tripping
+  // strict mode. The member row uniquely carries the "Remove bob" action.
+  const removeBtn = alice.getByRole("button", { name: /Remove bob/i })
+  await expect(removeBtn).toBeVisible({ timeout: 8_000 })
 
   // Remove bob.
-  const removeBtn = alice.getByRole("button", { name: /Remove bob/i })
-  await expect(removeBtn).toBeVisible({ timeout: 5_000 })
   await removeBtn.click()
 
-  // Bob is no longer in the team.
-  await expect(alice.getByText("bob")).not.toBeVisible({ timeout: 5_000 })
+  // Bob's row is gone (the remove action disappears with it).
+  await expect(removeBtn).not.toBeVisible({ timeout: 5_000 })
 })

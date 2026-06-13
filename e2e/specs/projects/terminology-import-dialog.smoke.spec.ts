@@ -4,8 +4,8 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 /**
  * Terminology Import dialog (TermbaseImportDialog).
  *
- * The terminology page has an "Import" button that opens TermbaseImportDialog with:
- *   - DialogTitle "Import termbase"
+ * The terminology page header has an "Import" button that opens TermbaseImportDialog with:
+ *   - DialogTitle "Import term base"
  *   - Format tab strip: "csv" and "tbx" buttons
  *   - Drop zone for file upload
  *
@@ -25,19 +25,23 @@ test("terminology import dialog opens with CSV and TBX format tabs", async ({ al
   await alice.goto(`/project/${projectId}/terminology`)
   await alice.waitForLoadState("networkidle")
 
-  // "Import" button opens the dialog.
-  const importBtn = alice.getByRole("button", { name: /^Import$/i })
+  // The termbase "Import" button lives in the terminology page BODY (main),
+  // next to "Add concept". The workspace shell's banner has its own file
+  // "Import" button which opens the file ImportDialog — scoping to banner
+  // opens the wrong dialog.
+  const importBtn = alice.getByRole("main").getByRole("button", { name: /^Import$/i })
   await expect(importBtn).toBeVisible({ timeout: 10_000 })
   await importBtn.click()
 
-  // TermbaseImportDialog opens.
+  // TermbaseImportDialog opens — DialogTitle is "Import term base".
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
-  await expect(dialog.getByRole("heading", { name: /Import termbase/i })).toBeVisible()
+  await expect(dialog.getByRole("heading", { name: /Import term ?base/i })).toBeVisible()
 
-  // Both format tabs are present.
-  const csvTab = dialog.getByRole("button", { name: /csv/i })
-  const tbxTab = dialog.getByRole("button", { name: /tbx/i })
+  // Both format tabs are present. Anchored names: the drop zone also has a
+  // "Choose CSV file" / "Choose TBX file" button that would otherwise match.
+  const csvTab = dialog.getByRole("button", { name: /^csv$/i })
+  const tbxTab = dialog.getByRole("button", { name: /^tbx$/i })
   await expect(csvTab).toBeVisible({ timeout: 3_000 })
   await expect(tbxTab).toBeVisible({ timeout: 3_000 })
 

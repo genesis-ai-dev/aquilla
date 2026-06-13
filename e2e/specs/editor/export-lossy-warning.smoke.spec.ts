@@ -52,13 +52,16 @@ test("export dialog shows lossy warning for lossy formats and hides it for non-l
   await expect(warning).toBeVisible({ timeout: 3_000 })
 
   // Switch to "Audio by character" (lossy: false) — warning should disappear.
-  const audioByChar = dialog.locator('input[type="radio"][aria-label*="Audio by character"]')
+  // Base UI radio: role=radio with aria-label "Audio by character (.zip)";
+  // the native input[type=radio] is hidden and not actionable.
+  const audioByChar = dialog.getByRole("radio", { name: /^Audio by character/ })
   await expect(audioByChar).toBeVisible({ timeout: 3_000 })
   await audioByChar.check()
   await expect(warning).not.toBeVisible({ timeout: 2_000 })
 
   // Switch to "Plain text" (lossy: true) — warning reappears.
-  const plainText = dialog.locator('input[type="radio"][aria-label*="Plain text"]')
+  // (^Plain text avoids the Advanced-only "Plain-text dump" option.)
+  const plainText = dialog.getByRole("radio", { name: /^Plain text \(\.txt\)/ })
   await expect(plainText).toBeVisible({ timeout: 2_000 })
   await plainText.check()
   await expect(warning).toBeVisible({ timeout: 2_000 })

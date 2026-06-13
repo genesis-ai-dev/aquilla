@@ -23,7 +23,11 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 test("share panel members tab role select changes member's role", async ({ alice }) => {
   const aliceSession = await ensureAuthState("alice")
   const acme = await getMyOrg(aliceSession.jwt)
-  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
+  // Seed bob at VIEWER so the direct CONTRIBUTOR grant added below is
+  // STRICTLY higher than his org role. With an equal-level org role the
+  // effective-access list keeps source=org and the row renders locked
+  // ("Remove from org to revoke") with no "Change role" select.
+  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.VIEWER)
 
   const dash = new Dashboard(alice)
   await dash.goto()
@@ -49,15 +53,21 @@ test("share panel members tab role select changes member's role", async ({ alice
   const usernameInput = dialog.locator('input[placeholder*="username"], input[placeholder*="Aquilla"]').first()
   await expect(usernameInput).toBeVisible({ timeout: 5_000 })
   await usernameInput.fill("bob")
-  await alice.waitForTimeout(500) // allow typeahead to resolve
+
+  // Pick the "bob" suggestion — this closes the typeahead dropdown (which
+  // would otherwise overlay the controls below it).
+  const suggestion = dialog.getByRole("button", { name: "bob", exact: true })
+  await expect(suggestion).toBeVisible({ timeout: 8_000 })
+  await suggestion.click()
 
   const addBtn = dialog.getByRole("button", { name: /^Add$/i })
     .or(dialog.getByRole("button", { name: /Add member/i }))
   await expect(addBtn.first()).toBeVisible({ timeout: 5_000 })
   await addBtn.first().click()
 
-  // Wait for bob to appear in the members list.
-  await expect(dialog.getByText("bob")).toBeVisible({ timeout: 8_000 })
+  // Wait for bob's row to reflect the direct grant (contributor beats his
+  // viewer org role, so the row is unlocked and gets the "Change role" select).
+  await expect(dialog.getByText("bob").first()).toBeVisible({ timeout: 8_000 })
 
   // Change bob's role via the select next to his name.
   const bobRow = dialog.locator("li").filter({ hasText: "bob" })

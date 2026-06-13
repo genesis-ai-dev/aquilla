@@ -49,6 +49,8 @@ test("terminology term detail occurrence row opens inline editor on click", asyn
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
   await dialog.locator("#concept-source-term").fill("sample")
+  // At least one rendering is required to save — fill the pre-populated row.
+  await dialog.locator('input[aria-label="Rendering 1 text"]').fill("échantillon")
   await dialog.getByRole("button", { name: /Add concept/i }).click()
   await expect(dialog).not.toBeVisible({ timeout: 5_000 })
 
@@ -64,8 +66,13 @@ test("terminology term detail occurrence row opens inline editor on click", asyn
   await alice.goto(`/project/${projectId}/terminology`)
   await alice.waitForLoadState("networkidle")
 
-  // Wait for the concept to be visible.
-  const conceptBtn = alice.getByRole("button", { name: /sample/i }).first()
+  // Wait for the concept to be visible. Scope to the concept row — the
+  // sidebar file row ("sample.md") and the row's Edit/Delete buttons also
+  // match /sample/i.
+  const conceptBtn = alice
+    .locator('[data-testid="concept-row"]')
+    .getByRole("button", { name: "sample", exact: true })
+    .first()
   await expect(conceptBtn).toBeVisible({ timeout: 10_000 })
   await conceptBtn.click()
 
@@ -83,11 +90,15 @@ test("terminology term detail occurrence row opens inline editor on click", asyn
   await expect(editableRow).toBeVisible({ timeout: 5_000 })
   await editableRow.click()
 
-  // TranslatedEditor appears — a contenteditable or textarea.
+  // TranslatedEditor appears — a ProseMirror contenteditable (or textarea
+  // fallback).
   const editor = alice.locator('[contenteditable="true"], textarea').first()
   await expect(editor).toBeVisible({ timeout: 5_000 })
 
-  // Type something — editor accepts input.
-  await editor.fill("Traduction test")
-  await expect(editor).toHaveValue(/Traduction test/i)
+  // Type something — editor accepts input. (toHaveValue only works on
+  // input/textarea/select, so assert on the rendered text instead — the
+  // editor here is a ProseMirror contenteditable.)
+  await editor.click()
+  await alice.keyboard.type("Traduction test")
+  await expect(editor).toContainText("Traduction test")
 })

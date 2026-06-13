@@ -10,15 +10,16 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 /**
  * Workspace "Settings" action navigates to project settings.
  *
- * The workspace header's "More actions" dropdown (PrimaryActionButton)
- * contains a "Settings" item. Clicking it calls:
+ * "Settings" lives in the sidebar project-nav overflow (SidebarProjectSection):
+ * unpinned nav items collapse into a popover behind the button labelled
+ * "More project options". Clicking the Settings row calls:
  *   window.location.assign(buildProjectSettingsHandoffUrl({...}))
  * which navigates to `/project/:id/settings?return=...`.
  *
- * This spec: import a file → open the dropdown → click "Settings" →
- * verify the URL changes to /project/:id/settings.
+ * This spec: import a file → open the sidebar "More project options" popover →
+ * click "Settings" → verify the URL changes to /project/:id/settings.
  */
-test("workspace More actions Settings item navigates to project settings", async ({ alice }) => {
+test("sidebar More project options Settings item navigates to project settings", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `WsSettings ${Date.now()}`
@@ -34,14 +35,13 @@ test("workspace More actions Settings item navigates to project settings", async
   const projectId = alice.url().match(/\/project\/([^/?]+)/)?.[1]
   expect(projectId).toBeTruthy()
 
-  // Open the "More actions" dropdown.
-  const moreBtn = alice.getByRole("button", { name: /More actions/i })
+  // Open the sidebar project-nav overflow popover.
+  const moreBtn = alice.getByRole("button", { name: /^More project options$/i })
   await expect(moreBtn).toBeVisible({ timeout: 10_000 })
   await moreBtn.click()
 
-  // Click "Settings" in the dropdown.
-  const settingsItem = alice.getByRole("menuitem", { name: /^Settings$/i })
-    .or(alice.getByText(/^Settings$/).first())
+  // Click the "Settings" row (plain button inside the portaled popover).
+  const settingsItem = alice.getByRole("button", { name: /^Settings$/i })
   await expect(settingsItem).toBeVisible({ timeout: 3_000 })
   await settingsItem.click()
 

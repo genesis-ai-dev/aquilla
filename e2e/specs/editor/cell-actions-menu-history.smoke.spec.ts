@@ -8,28 +8,21 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * CellActionsMenu — "More actions" → "History (N)" opens the history drawer.
+ * SKIPPED — UI path removed. CellActionsMenu (per-cell "More actions" ⋯
+ * popover) is no longer mounted anywhere: commit 64a2d2f62 ("feat: add
+ * CellActionRail and CellExpansion components with tabs") replaced it with
+ * the CellActionRail + CellExpansion panel. The component file
+ * (src/components/CellActionsMenu.tsx) still exists but has zero call sites
+ * — dead code.
  *
- * CellActionsMenu.tsx renders a Popover triggered by a button
- *   aria-label="More actions" (title="More actions")
- * visible on each cell row when there are visible items.
- *
- * The "History (N)" item appears when `historyCount > 0` — i.e. the cell
- * has been edited at least once. Clicking it calls `onOpenHistory(cellId)`.
- *
- * This spec is distinct from cell-history-drawer.smoke.spec.ts, which opens
- * history via the CellExpansion panel's History tab. This spec exercises the
- * CellActionsMenu "More actions" → "History" path.
- *
- * Steps:
- *   1. Import sample.md.
- *   2. Edit the first cell (creates ≥1 history entry).
- *   3. Hover the first cell row to reveal the "More actions" button.
- *   4. Click "More actions" to open the popover.
- *   5. Click "History (1)" menu item.
- *   6. Verify the HistoryDrawer heading "Edit history" appears.
+ * The history-drawer journey this spec covered now lives at:
+ *   cell row → "Open cell details" chevron → History tab → "Open full history"
+ * which is exactly what cell-history-drawer.smoke.spec.ts already exercises.
+ * Keeping this spec would duplicate that coverage against a UI that no
+ * longer exists, so it is skipped pending deletion (and CellActionsMenu.tsx
+ * cleanup).
  */
-test("More actions menu History item opens the history drawer", async ({ alice }) => {
+test.skip("More actions menu History item opens the history drawer", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `CellActHist ${Date.now()}`

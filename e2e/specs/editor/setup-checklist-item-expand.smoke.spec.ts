@@ -38,8 +38,14 @@ test("setup checklist item expands and collapses on click", async ({ alice }) =>
     timeout: 5_000,
   })
 
-  // Find the first checklist item button (aria-expanded).
-  const itemBtn = alice.locator('button[aria-expanded]').first()
+  // Find the first checklist item button (aria-expanded) INSIDE the drawer.
+  // Scope to the sheet dialog: the sidebar's "More project options" popover
+  // trigger also carries aria-expanded and sits behind the sheet overlay,
+  // so an unscoped .first() grabs it and the click is intercepted forever.
+  // The first item is "Import files" — complete after importFile() above, so
+  // it starts collapsed (ChecklistItem opens incomplete items by default).
+  const drawer = alice.getByRole("dialog", { name: /Project setup/i })
+  const itemBtn = drawer.locator('button[aria-expanded]').first()
   await expect(itemBtn).toBeVisible({ timeout: 5_000 })
   await expect(itemBtn).toHaveAttribute("aria-expanded", "false")
 

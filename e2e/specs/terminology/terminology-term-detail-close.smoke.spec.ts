@@ -32,20 +32,27 @@ test("TerminologyTermDetail Close button dismisses the detail panel", async ({ a
   await expect(newConceptBtn).toBeVisible({ timeout: 8_000 })
   await newConceptBtn.click()
 
-  const sourceInput = alice.locator('input[aria-label*="source" i], input[placeholder*="source" i]').first()
+  const dialog = alice.getByRole("dialog")
+  await expect(dialog).toBeVisible({ timeout: 5_000 })
+
+  // Source term input is #concept-source-term (label-named "Source term" —
+  // it has no aria-label/placeholder containing "source").
+  const sourceInput = dialog.locator("#concept-source-term")
   await expect(sourceInput).toBeVisible({ timeout: 5_000 })
   await sourceInput.fill("hello")
-  await sourceInput.press("Enter")
 
-  // Save the concept (close edit form).
-  const saveBtn = alice.getByRole("button", { name: /save|done|confirm/i }).first()
-  if (await saveBtn.isVisible({ timeout: 1_500 }).catch(() => false)) await saveBtn.click()
-  await alice.waitForTimeout(500)
+  // At least one rendering is required to save — fill the pre-populated row.
+  await dialog.locator('input[aria-label="Rendering 1 text"]').fill("bonjour")
 
-  // Click the concept row to open the term detail drawer.
+  // Save — the footer button is labelled "Add concept" for new concepts.
+  await dialog.getByRole("button", { name: /^Add concept$/i }).click()
+  await expect(dialog).not.toBeVisible({ timeout: 5_000 })
+
+  // Drill into the detail view by clicking the source-term button in the row
+  // (the <li> itself is not clickable — only the term button drills down).
   const conceptRow = alice.locator('[data-testid="concept-row"]').first()
   await expect(conceptRow).toBeVisible({ timeout: 8_000 })
-  await conceptRow.click()
+  await conceptRow.getByRole("button", { name: "hello", exact: true }).click()
 
   // TerminologyTermDetail panel should open.
   const closeBtn = alice.locator('button[aria-label="Close detail"]')

@@ -39,24 +39,25 @@ test("cell expansion Issues tab shows rule infractions", async ({ alice }) => {
   await alice.goto(`/project/${projectId}/rules`)
   await alice.waitForLoadState("networkidle")
 
-  // Open "Add rule" dialog.
+  // Open the rule editor. It renders INLINE on the rules surface now (the
+  // dialog flow is gone; rule actions live in the workspace header).
   const addRuleBtn = alice.getByRole("button", { name: /Add rule|New rule/i }).first()
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })
   await addRuleBtn.click()
 
-  const dialog = alice.getByRole("dialog").first()
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
-
-  // Fill rule pattern with "PROHIBITED_WORD" — something we'll type into the target cell.
+  // Fill rule name + pattern — both are required for "Create rule" to enable.
+  const nameInput = alice.locator("#re-name")
+  await expect(nameInput).toBeVisible({ timeout: 5_000 })
+  await nameInput.fill("No prohibited word")
   const patInput = alice.locator("#re-pat")
   await expect(patInput).toBeVisible({ timeout: 5_000 })
   await patInput.fill("PROHIBITED_WORD")
 
-  // Save the rule.
-  const saveBtn = dialog.getByRole("button", { name: /Save|Create|Add/i }).first()
+  // Save the rule — the inline editor closes on success.
+  const saveBtn = alice.getByRole("button", { name: /Create rule/i }).first()
   await expect(saveBtn).toBeEnabled({ timeout: 3_000 })
   await saveBtn.click()
-  await expect(dialog).not.toBeVisible({ timeout: 5_000 })
+  await expect(patInput).not.toBeVisible({ timeout: 5_000 })
 
   // Import file and open editor.
   await alice.goto(`/project/${projectId}`)

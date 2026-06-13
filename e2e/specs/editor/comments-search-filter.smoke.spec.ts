@@ -52,16 +52,25 @@ test("comments page search box filters threads and clear filters resets", async 
   await commentInput.first().fill(uniqueText)
   await alice.keyboard.press("Control+Enter")
 
-  // Navigate to /comments page.
-  await alice.waitForURL(/\/project\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
+  // Confirm the comment was posted before leaving the editor.
+  const drawer = alice.locator("[data-testid='comments-drawer']").first()
+  await expect(drawer).toContainText(uniqueText, { timeout: 8_000 })
+
+  // Navigate to /comments page. With a file open the URL is
+  // /project/:id/file/:fileId, so extract the project id directly.
+  const projectId = alice.url().match(/\/project\/([^/?#]+)/)?.[1]
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/comments`)
   await alice.waitForLoadState("networkidle")
 
-  // The posted comment should be visible.
-  await expect(alice.getByText(uniqueText)).toBeVisible({ timeout: 10_000 })
+  // The posted comment should be visible. The page fetches the server
+  // projection once on mount, and the drawer write flushes via the client
+  // outbox which may land after page load — poll via the Refresh button.
+  await expect(async () => {
+    await alice.getByRole("button", { name: /^Refresh$/i }).click()
+    await expect(alice.getByText(uniqueText)).toBeVisible({ timeout: 1_000 })
+  }).toPass({ timeout: 15_000 })
 
   // Search for matching text.
   const searchInput = alice.locator('input[placeholder="Search comments…"]')

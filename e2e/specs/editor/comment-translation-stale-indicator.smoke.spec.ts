@@ -59,14 +59,11 @@ test("comment stale indicator appears when translation changes after thread was 
   await drawer.getByRole("button", { name: /post|submit|send/i }).first().click()
   await expect(drawer).toContainText(commentText, { timeout: 8_000 })
 
-  // Step 2: Close the drawer.
-  const closeBtn = drawer.getByRole("button", { name: /close/i }).first()
-    .or(alice.locator('button[aria-label="Close"]').first())
-  if (await closeBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await closeBtn.click()
-  } else {
-    await alice.keyboard.press("Escape")
-  }
+  // Step 2: Close the drawer. The header close button is icon-only (no
+  // accessible name), and /close/i would match the thread's disabled
+  // "Close with reply" button instead — so target the first button in the
+  // drawer, which is the header X.
+  await drawer.getByRole("button").first().click()
   await expect(drawer).not.toBeVisible({ timeout: 3_000 })
 
   // Step 3: Edit cell 0 to add a translation (now currentTranslated ≠ "").

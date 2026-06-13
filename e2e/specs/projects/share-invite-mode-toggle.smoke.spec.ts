@@ -2,17 +2,20 @@ import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
- * SharePanel — UsernameTypeahead mode toggle (@user vs email).
+ * UsernameTypeahead mode toggle (@user vs email).
  *
- * UsernameTypeahead.tsx has two mode-selector buttons in the members tab:
+ * UsernameTypeahead.tsx has two mode-selector buttons:
  *   - "@user" (title="Invite an existing Aquilla user") — username mode (default)
  *   - "email" (title="Invite by email — they'll be prompted to sign up if needed")
  *
- * Switching to email mode shows an email input instead of the username
- * typeahead. The active mode has a shadow-sm background style.
+ * The SharePanel Members tab now renders the typeahead with
+ * showModeToggle={false} (direct grants need a real user id), so the toggle
+ * lives on the org Members page's "Add to projects" dialog
+ * (MultiProjectInviteDialog, showModeToggle={true}). The button is disabled
+ * until at least one project exists, so this spec creates one first.
  *
- * This spec: opens Share → Members tab → switches to "email" mode →
- * verifies an email-type input appears → switches back to "@user" mode.
+ * Switching to email mode swaps the recipient input to type="email";
+ * switching back restores the username typeahead (type="text").
  */
 test("share panel invite mode toggles between @user and email", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -20,51 +23,37 @@ test("share panel invite mode toggles between @user and email", async ({ alice }
   const name = `InviteMode ${Date.now()}`
   await dash.createProject({ name, source: "en", target: "fr" })
 
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}`)
+  // The mode toggle lives in the Members page "Add to projects" dialog.
+  await alice.goto("/members")
   await alice.waitForLoadState("networkidle")
 
-  // Open Share panel.
-  // Share lives in the sidebar "More" menu (sidebar cleanup).
-  await alice.getByRole("button", { name: /More project options/i }).click()
-  const shareBtn = alice.getByRole("button", { name: /^Share$/i })
-  await expect(shareBtn).toBeVisible({ timeout: 10_000 })
-  await shareBtn.click()
+  const addToProjectsBtn = alice.getByRole("button", { name: /Add to projects/i })
+  await expect(addToProjectsBtn).toBeVisible({ timeout: 10_000 })
+  await expect(addToProjectsBtn).toBeEnabled({ timeout: 10_000 })
+  await addToProjectsBtn.click()
 
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
 
-  // Ensure we're on the Members tab (default).
-  const membersTab = dialog.getByRole("button", { name: /^Members$/i })
-  if (await membersTab.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await membersTab.click()
-  }
-
   // "@user" button is visible (title="Invite an existing Aquilla user").
   const userModeBtn = dialog.locator('button[title="Invite an existing Aquilla user"]')
-  await expect(userModeBtn).toBeVisible({ timeout: 10_000 })
+  await expect(userModeBtn).toBeVisible({ timeout: 5_000 })
 
   // "email" button is visible.
-  const emailModeBtn = dialog.locator('button[title="Invite by email — they\'ll be prompted to sign up if needed"]')
-    .or(dialog.getByText(/^email$/).first())
+  const emailModeBtn = dialog.locator(
+    'button[title="Invite by email — they\'ll be prompted to sign up if needed"]'
+  )
   await expect(emailModeBtn).toBeVisible({ timeout: 3_000 })
 
-  // Switch to email mode.
+  // Switch to email mode — recipient input becomes type="email".
   await emailModeBtn.click()
-
-  // An email input field should appear.
-  const emailInput = dialog.locator('input[type="email"]')
-    .or(dialog.locator('input[placeholder*="email" i]').first())
+  const emailInput = dialog.locator('input[type="email"]#invite-recipient')
   await expect(emailInput).toBeVisible({ timeout: 5_000 })
 
-  // Switch back to @user mode.
+  // Switch back to @user mode — email input is replaced by the typeahead.
   await userModeBtn.click()
-
-  // Email input should be gone; username typeahead should appear.
   await expect(emailInput).not.toBeVisible({ timeout: 3_000 })
+  await expect(dialog.locator('input[type="text"]#invite-recipient')).toBeVisible({ timeout: 3_000 })
 
   // Dismiss.
   await alice.keyboard.press("Escape")

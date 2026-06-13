@@ -8,18 +8,30 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * AI Setup dialog — per-cell sparkle button when AI is not configured.
+ * Cell sparkle button — Frontier AI is the zero-setup default.
  *
- * The CellActionRail has a sparkle (Sparkles icon) button. When the project
- * has no completionSettings configured, its aria-label is "Set up AI to enable"
- * and clicking it opens AiSetupDialog with:
- *   - DialogTitle "Set up AI"
- *   - Description "Choose a provider to enable translation suggestions."
+ * Since 06b494104 ("Frontier default + collapse advanced LLM settings"),
+ * a project with NO completionSettings falls back to the Frontier provider,
+ * and useCompletion treats a signed-in user as configured
+ * (isConfigured = Boolean(session?.jwt)). The old "Set up AI to enable"
+ * rail state — which opened AiSetupDialog — is therefore unreachable for
+ * signed-in users; it only appears for a custom provider missing its
+ * endpoint/model.
  *
- * This spec verifies the dialog opens from the rail button.
- * It does NOT configure a real AI provider.
+ * The CellActionRail sparkle button (EditorTable.tsx RailButton) renders the
+ * state as both title= and aria-label=:
+ *   "Sign in for AI translations" | "Read-only (imported from git)" |
+ *   "Set up AI to enable" | "AI service unavailable — try again shortly" |
+ *   "Generating…" | "Translate with AI"
+ *
+ * This spec verifies the new default: a signed-in user on a fresh project
+ * (no completionSettings) gets a ready-to-use, ENABLED "Translate with AI"
+ * sparkle — no setup dialog gate. We deliberately do NOT click it (that
+ * would fire a real completion request).
+ *
+ * Note: rail children are opacity:0 until the row is hovered — hover first.
  */
-test("cell sparkle button opens AI setup dialog when AI not configured", async ({ alice }) => {
+test("cell sparkle button is ready (Translate with AI) without setup for signed-in users", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `AiSetup ${Date.now()}`
@@ -36,20 +48,12 @@ test("cell sparkle button opens AI setup dialog when AI not configured", async (
   await row.scrollIntoViewIfNeeded()
   await row.hover()
 
-  // The sparkle button: aria-label is "Set up AI to enable" (no completionSettings).
-  const sparkleBtn = row.locator('[aria-label="Set up AI to enable"]')
+  // Frontier default: the sparkle reads "Translate with AI" — NOT the old
+  // "Set up AI to enable" gate — and is enabled (signed-in ⇒ configured).
+  const sparkleBtn = row.locator('[aria-label="Translate with AI"]')
   await expect(sparkleBtn).toBeVisible({ timeout: 5_000 })
-  await sparkleBtn.click()
+  await expect(sparkleBtn).toBeEnabled()
 
-  // AiSetupDialog opens.
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
-  await expect(dialog.getByRole("heading", { name: /Set up AI/i })).toBeVisible()
-  await expect(
-    dialog.getByText(/Choose a provider to enable translation suggestions/i)
-  ).toBeVisible()
-
-  // Dismiss.
-  await alice.keyboard.press("Escape")
-  await expect(dialog).not.toBeVisible({ timeout: 3_000 })
+  // The unconfigured gate must not be present anywhere on the row.
+  await expect(row.locator('[aria-label="Set up AI to enable"]')).toHaveCount(0)
 })

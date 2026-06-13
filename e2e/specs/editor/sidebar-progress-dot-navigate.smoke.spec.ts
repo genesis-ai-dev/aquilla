@@ -5,28 +5,30 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+const SAMPLE_USFM = path.resolve(__dirname, "../../fixtures/sample.usfm")
 
 /**
- * ProgressDot — clicking a section dot navigates into the editor.
+ * FileSectionGrid — clicking a section row navigates into the editor.
  *
- * sample.md has two sections: "## Section One" and "## Section Two".
- * FileSectionGrid renders one ProgressDot per section below the file
- * row when the row is expanded (or when there are ≥2 sections).
+ * The old ProgressDot grid was replaced by FileSectionGrid
+ * (src/components/sidebar/FileSectionGrid.tsx): one clickable row per
+ * section, each a <button> whose accessible name is the section label and
+ * whose title is "<label> — N% translated, M% validated". Clicking a row
+ * calls onSectionClick → onSelectFile (opens the file at /project/:id/file/
+ * :fileId) + requestScrollToSection.
  *
- * Each ProgressDot button:
- *   - aria-label="${sectionLabel}: ${progressTitle}"
- *   - title="${sectionLabel}\n${progressTitle}"
- *   - onClick → navigates to that section (opens the file in the editor).
+ * Sections exist only for scripture file types (fileTypeHasSections is
+ * usfm/ebible-only), so this spec imports sample.usfm — two chapters become
+ * sections "GEN 1" and "GEN 2".
  *
  * This spec:
- *   1. Imports sample.md (has sections "Section One", "Section Two").
- *   2. Expands the file row in the sidebar (if collapsed).
- *   3. Clicks the first dot (aria-label starts with "Section").
- *   4. Verifies the editor is open (contenteditable visible).
- *   5. Verifies the URL now contains the file path (file is loaded).
+ *   1. Imports sample.usfm.
+ *   2. Expands the file row in the sidebar (aria-label "Expand" chevron).
+ *   3. Clicks the first section row ("GEN 1").
+ *   4. Verifies the editor is open (cells visible).
+ *   5. Verifies the URL now contains the /file/ segment (file is loaded).
  */
-test("clicking a sidebar section progress dot opens the editor", async ({ alice }) => {
+test("clicking a sidebar section row opens the editor", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `ProgDot ${Date.now()}`
@@ -34,36 +36,30 @@ test("clicking a sidebar section progress dot opens the editor", async ({ alice 
   await dash.openProject(name)
 
   const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
+  await ws.importFile(SAMPLE_USFM)
 
   const sidebar = alice.locator("aside")
 
   // Wait for the file row to appear.
   await expect(sidebar.getByText("sample").first()).toBeVisible({ timeout: 10_000 })
 
-  // Expand the file row — click the chevron expand button on the row.
-  const fileRowLi = sidebar.locator("li").filter({ has: sidebar.getByText("sample") }).first()
-  const chevron = fileRowLi.locator("button").first()
-  if (await chevron.isVisible({ timeout: 1_500 }).catch(() => false)) {
-    await chevron.click()
-    await alice.waitForTimeout(300)
-  }
+  // Expand the file row — the chevron has aria-label "Expand" (FileRow.tsx;
+  // the row root is a div[tabindex="0"], not an li).
+  const chevron = sidebar.locator('[aria-label="Expand"]').first()
+  await expect(chevron).toBeVisible({ timeout: 5_000 })
+  await chevron.click()
 
-  // ProgressDots have aria-label containing ": " (pattern "<section>: <status>").
-  // sample.md sections are "Section One" and "Section Two".
-  const sectionDot = sidebar.locator('button[aria-label^="Section"]').first()
-  await expect(sectionDot).toBeVisible({ timeout: 5_000 })
+  // Section rows render in the FileSectionGrid with the section label as
+  // their accessible name and a "% translated, % validated" title.
+  const sectionRow = sidebar.getByRole("button", { name: /^GEN 1$/ })
+  await expect(sectionRow).toBeVisible({ timeout: 10_000 })
+  await expect(sectionRow).toHaveAttribute("title", /translated.*validated/)
 
-  // The dot's aria-label tells us which section it navigates to.
-  const dotLabel = await sectionDot.getAttribute("aria-label") ?? ""
-  expect(dotLabel).toContain("Section")
-
-  // Click the dot.
-  await sectionDot.click()
-  await alice.waitForTimeout(500)
+  // Click the section row.
+  await sectionRow.click()
 
   // After navigation the editor should be open.
-  await expect(alice.locator('[contenteditable="true"]').first()).toBeVisible({ timeout: 8_000 })
+  await expect(alice.locator("[data-cell-id]").first()).toBeVisible({ timeout: 8_000 })
 
   // URL should now reference the file (contains /file/ segment).
   await expect(alice).toHaveURL(/\/file\//, { timeout: 5_000 })

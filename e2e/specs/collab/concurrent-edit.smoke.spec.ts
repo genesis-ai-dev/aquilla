@@ -40,6 +40,14 @@ test("alice edits cell 0; bob sees the new text in his open editor within 15s", 
   await alice.goto(`/project/${projectId}`)
   await alice.waitForLoadState("networkidle")
 
+  // Server-side-created projects have no source/target language, so the import
+  // flow opens a blocking "Set translation direction" screen after the preview
+  // step (ImportDialog.tsx `needsDirection`). Pre-seed the per-project skip key
+  // (skipStorageKey) so importFile() completes unprompted.
+  await alice.evaluate((id) => {
+    localStorage.setItem(`codex.importDirectionSkipped.${id}`, "true")
+  }, projectId)
+
   const aliceWs = new Workspace(alice)
   await aliceWs.importFile(SAMPLE_MD)
   await aliceWs.openFileBySubstring("sample")

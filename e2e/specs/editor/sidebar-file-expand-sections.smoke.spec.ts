@@ -5,23 +5,24 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+const SAMPLE_USFM = path.resolve(__dirname, "../../fixtures/sample.usfm")
 
 /**
  * ExpandableFileList — expand a file row to reveal FileSectionGrid.
  *
  * FileRow.tsx has an expand toggle button (aria-label="Expand" / "Collapse").
- * When expanded, FileSectionGrid renders sub-rows for each section derived
- * from the cell data. sample.md has two sections:
- *   - "Section One" (from "## Section One")
- *   - "Section Two" (from "## Section Two")
+ * The chevron only renders for section-bearing file types: fileTypeHasSections
+ * (src/lib/parsers/types.ts) is scripture-only (usfm/ebible), so markdown
+ * files no longer expand — this spec imports sample.usfm instead, which has
+ * two chapters that become sections "GEN 1" and "GEN 2" (section labels come
+ * from the canonical reference, e.g. "GEN 1:1" → "GEN 1").
  *
  * This spec:
- *   1. Imports sample.md.
+ *   1. Imports sample.usfm.
  *   2. Waits for the file to appear in the sidebar.
  *   3. Clicks the "Expand" button on the file row.
- *   4. Verifies the section rows (Section One, Section Two) become visible.
- *   5. Clicks "Section Two" — verifies no error (scroll request fires).
+ *   4. Verifies the section rows (GEN 1, GEN 2) become visible.
+ *   5. Clicks "GEN 2" — verifies no error (scroll request fires).
  *   6. Clicks "Collapse" — section rows disappear.
  */
 test("expanding a file row reveals section rows in the sidebar", async ({ alice }) => {
@@ -32,7 +33,7 @@ test("expanding a file row reveals section rows in the sidebar", async ({ alice 
   await dash.openProject(name)
 
   const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
+  await ws.importFile(SAMPLE_USFM)
 
   // Wait for the file to appear in the sidebar.
   const sidebar = alice.locator("aside")
@@ -45,17 +46,17 @@ test("expanding a file row reveals section rows in the sidebar", async ({ alice 
   await expect(expandBtn).toBeVisible({ timeout: 5_000 })
   await expandBtn.click()
 
-  // FileSectionGrid loads sections. sample.md has ## Section One and ## Section Two.
-  // Allow up to 10s for section progress to load from the sync-worker.
+  // FileSectionGrid loads section progress from the sync-worker.
+  // sample.usfm has chapters 1 and 2 → sections "GEN 1" and "GEN 2".
   await expect(
-    sidebar.getByText(/Section One/i).first()
+    sidebar.getByText(/^GEN 1$/).first()
   ).toBeVisible({ timeout: 10_000 })
   await expect(
-    sidebar.getByText(/Section Two/i).first()
+    sidebar.getByText(/^GEN 2$/).first()
   ).toBeVisible({ timeout: 3_000 })
 
-  // Click "Section Two" — requestScrollToSection fires (no error expected).
-  await sidebar.getByText(/Section Two/i).first().click()
+  // Click "GEN 2" — requestScrollToSection fires (no error expected).
+  await sidebar.getByText(/^GEN 2$/).first().click()
   // Editor should still be visible (no crash).
   await ws.waitForEditor()
 
@@ -64,6 +65,6 @@ test("expanding a file row reveals section rows in the sidebar", async ({ alice 
   await expect(collapseBtn).toBeVisible({ timeout: 3_000 })
   await collapseBtn.click()
   await expect(
-    sidebar.getByText(/Section One/i).first()
+    sidebar.getByText(/^GEN 1$/).first()
   ).not.toBeVisible({ timeout: 3_000 })
 })

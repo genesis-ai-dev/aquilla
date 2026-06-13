@@ -27,21 +27,15 @@ test("rule editor Enabled switch toggles", async ({ alice }) => {
   await alice.goto(`/project/${projectId}/rules`)
   await alice.waitForLoadState("networkidle")
 
-  // Create a rule if none exist.
-  const createBtn = alice.getByRole("button", { name: /New rule|Add rule|Create rule/i })
+  // Open the inline RuleEditor via the header "+ Add Rule" button.
+  const createBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
   await expect(createBtn).toBeVisible({ timeout: 10_000 })
   await createBtn.click()
 
-  // Fill the rule name.
-  const nameInput = alice.locator("#rname")
+  // Fill the rule name (inline RuleEditor input is #re-name).
+  const nameInput = alice.locator("#re-name")
   await expect(nameInput).toBeVisible({ timeout: 5_000 })
   await nameInput.fill("enabled-toggle-test-rule")
-
-  // Open the inline editor (title="Edit rule").
-  const editBtn = alice.locator('button[title="Edit rule"]').first()
-  if (await editBtn.isVisible()) {
-    await editBtn.click()
-  }
 
   // The "Enabled" switch is present and on by default.
   // Find the switch near the "Enabled" label specifically.

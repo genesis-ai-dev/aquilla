@@ -114,6 +114,22 @@ export async function injectSession(page: Page, session: PersistedSession): Prom
     document.cookie = "aq_hint=1; Path=/; Max-Age=31536000; SameSite=Lax"
   }, session)
 
+  // FRO-244: the "Project setup" checklist auto-opens as a modal sheet on the
+  // first workspace visit to any incomplete project, making the page inert.
+  // Its localStorage key is per-project (codex.setupAutoShown.<id>) so it
+  // can't be pre-seeded for projects the test creates later. Patch getItem at
+  // the context level (applies to every subsequent document) so every project
+  // reads as already-shown. This does NOT hide the checklist feature — the
+  // setup chip still renders and setup-checklist-skip.smoke.spec.ts opens the
+  // drawer explicitly through it; only the first-visit auto-open is silenced.
+  await page.context().addInitScript(() => {
+    const orig = Storage.prototype.getItem
+    Storage.prototype.getItem = function (key: string) {
+      if (typeof key === "string" && key.startsWith("codex.setupAutoShown.")) return "1"
+      return orig.call(this, key)
+    }
+  })
+
   // Reload so the app picks up the seeded session.
   await page.reload()
   await page.waitForLoadState("networkidle")

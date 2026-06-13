@@ -35,7 +35,11 @@ test("Dashboard breadcrumb in workspace header navigates back to home", async ({
   await expect(dashboardBtn).toBeVisible({ timeout: 5_000 })
   await dashboardBtn.click()
 
-  // Should navigate back to the root / or /projects.
-  await alice.waitForURL(/^\/(projects)?$/, { timeout: 5_000 })
-  expect(alice.url()).toMatch(/\/(projects)?$/)
+  // Should navigate back to the root / or /projects. waitForURL regexes
+  // match the FULL url (origin included), so test the pathname instead.
+  await alice.waitForURL(
+    (url) => url.pathname === "/" || url.pathname === "/projects",
+    { timeout: 5_000 },
+  )
+  expect(new URL(alice.url()).pathname).toMatch(/^\/(projects)?$/)
 })

@@ -21,6 +21,11 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *   → D1 comments projection → CommentsDrawer re-renders with reply.
  */
 test("bob can reply to alice's comment in a shared project", async ({ alice, bob }) => {
+  // Two full UI flows (alice posts; bob polls the comments page, then replies
+  // from the editor drawer) plus the up-to-15s projection poll — needs more
+  // than the 30s default budget.
+  test.setTimeout(60_000)
+
   // Setup: seed bob in alice's org as contributor.
   const aliceSession = await ensureAuthState("alice")
   const acme = await getMyOrg(aliceSession.jwt)
@@ -74,18 +79,45 @@ test("bob can reply to alice's comment in a shared project", async ({ alice, bob
   await bob.goto(`/project/${projectId}/comments`)
   await bob.waitForLoadState("networkidle")
 
-  // Bob sees alice's comment.
+  // Bob sees alice's comment. The comments page fetches once on mount with no
+  // live subscription (useComments loads on mount only), while alice's
+  // comment.create drains via the 5s outbox interval — so bob's first fetch can
+  // legitimately race the projection write. Poll through the page's own
+  // Refresh button rather than weakening the cross-user assertion.
+  const refreshBtn = bob.getByRole("button", { name: "Refresh" })
   const bobComment = bob.getByText("Alice's initial comment").first()
-  await expect(bobComment).toBeVisible({ timeout: 15_000 })
+  await expect(async () => {
+    await refreshBtn.click()
+    await expect(bobComment).toBeVisible({ timeout: 1_500 })
+  }).toPass({ timeout: 15_000 })
 
-  // Bob replies to the comment.
-  const replyInput = bob.locator('textarea[placeholder*="Reply" i]').first()
+  // Replies are intentionally NOT wired from the comments page (CommentsPage's
+  // composer says "Replies from this view are not yet wired — open the cell in
+  // the editor to reply"), so bob replies from the cell's comments drawer.
+  await bob.goto(`/project/${projectId}`)
+  await bob.waitForLoadState("networkidle")
+  const bobWs = new Workspace(bob)
+  await bobWs.openFileBySubstring("sample")
+  await bobWs.waitForEditor()
+
+  const bobRow = bobWs.cellRow(0)
+  await bobRow.scrollIntoViewIfNeeded()
+  await bobRow.hover()
+  await bobRow.locator('button[aria-label="Add comment"]').first().click()
+
+  const bobDrawer = bob.locator('[data-testid="comments-drawer"]')
+  await expect(bobDrawer).toBeVisible({ timeout: 5_000 })
+  // The drawer fetches the thread fresh on open — alice's root comment is the
+  // thread bob replies to (cross-user visibility in the editor view).
+  await expect(bobDrawer.getByText("Alice's initial comment").first()).toBeVisible({ timeout: 8_000 })
+
+  // Bob replies to the comment. CommentThread renders a "Reply..." textarea
+  // and a "Reply" button per thread ("Close with reply" is excluded by ^$).
+  const replyInput = bobDrawer.locator('textarea[placeholder*="Reply" i]').first()
   await expect(replyInput).toBeVisible({ timeout: 5_000 })
   await replyInput.fill("Bob's reply")
-
-  const replyBtn = bob.getByRole("button", { name: /reply|send/i }).first()
-  await replyBtn.click()
+  await bobDrawer.getByRole("button", { name: /^Reply$/ }).first().click()
 
   // Bob sees his reply in the thread.
-  await expect(bob.getByText("Bob's reply").first()).toBeVisible({ timeout: 8_000 })
+  await expect(bobDrawer.getByText("Bob's reply").first()).toBeVisible({ timeout: 8_000 })
 })

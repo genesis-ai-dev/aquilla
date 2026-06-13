@@ -35,8 +35,9 @@ test("attach video dialog opens from overflow menu for VTT file", async ({ alice
   await moreBtn.click()
 
   // "Attach video" item is visible in the dropdown (only for subtitle files).
+  // No .or() text fallback: when the menu is open BOTH branches match (the
+  // menuitem and its inner label span), which is a strict-mode violation.
   const attachVideoItem = alice.getByRole("menuitem", { name: /Attach video/i })
-    .or(alice.getByText(/Attach video/i).first())
   await expect(attachVideoItem).toBeVisible({ timeout: 3_000 })
   await attachVideoItem.click()
 

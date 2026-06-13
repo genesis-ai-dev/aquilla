@@ -39,7 +39,11 @@ test("overflow menu Close project navigates back to home", async ({ alice }) => 
   await expect(closeItem).toBeVisible({ timeout: 3_000 })
   await closeItem.click()
 
-  // URL returns to / or /projects.
-  await alice.waitForURL(/^\/(projects)?$/, { timeout: 5_000 })
-  expect(alice.url()).toMatch(/\/(projects)?$/)
+  // URL returns to / or /projects. waitForURL regexes match the FULL url
+  // (origin included), so test the pathname instead.
+  await alice.waitForURL(
+    (url) => url.pathname === "/" || url.pathname === "/projects",
+    { timeout: 5_000 },
+  )
+  expect(new URL(alice.url()).pathname).toMatch(/^\/(projects)?$/)
 })

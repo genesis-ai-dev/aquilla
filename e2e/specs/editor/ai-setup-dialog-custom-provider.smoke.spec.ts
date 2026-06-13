@@ -1,64 +1,61 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * AiSetupDialog → AiProviderStep — "Custom" provider option reveals inputs.
+ * Custom AI provider — selecting "Custom endpoint" reveals endpoint + model inputs.
  *
- * AiProviderStep.tsx has two provider toggle buttons: "Frontier" and "Custom".
- * Clicking "Custom" sets selected="custom" and reveals two inputs:
- *   - Endpoint URL: placeholder="http://localhost:8000"
- *   - Model name:   placeholder="gpt-4"
+ * Originally this spec drove AiSetupDialog → AiProviderStep from the cell
+ * sparkle button's "Set up AI to enable" state. Since 06b494104 ("Frontier
+ * default"), signed-in users are always configured (Frontier fallback), so
+ * that dialog is unreachable through the UI. The custom-provider form now
+ * lives in Project Settings → "Advanced LLM settings" (ProjectSettings.tsx):
+ *   - Provider radio group: "Frontier" / "Custom endpoint"
+ *   - Choosing Custom reveals:
+ *       Endpoint URL input (#ep, placeholder "http://localhost:8000") with a
+ *       "Connect" button (disabled until the endpoint is non-empty), and a
+ *       manual model input (#mdl-manual) when no models were discovered.
  *
- * This spec: open the AI setup dialog → click "Custom" → verify both
- * inputs appear → fill them in → verify the Save button is enabled.
+ * This spec: open project settings → expand Advanced LLM settings → select
+ * "Custom endpoint" → verify both inputs appear → fill them → verify the
+ * Connect button becomes enabled. (We don't click Connect/Save — no real
+ * endpoint exists in the harness.)
  */
-test("AI setup dialog custom provider reveals endpoint and model inputs", async ({ alice }) => {
+test("project settings custom provider reveals endpoint and model inputs", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `AiCustom ${Date.now()}`
   await dash.createProject({ name, source: "en", target: "fr" })
   await dash.openProject(name)
 
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  // Workspace URL is /project/:id — derive the id and go to settings.
+  const projectId = alice.url().match(/\/project\/([^/?]+)/)?.[1]
+  expect(projectId).toBeTruthy()
+  await alice.goto(`/project/${projectId}/settings`)
 
-  // Click the sparkle button in the cell action rail — aria-label is "Set up AI to enable"
-  // when no AI provider is configured (same as ai-setup-dialog.smoke.spec.ts).
-  const sparkleBtn = alice.locator('[aria-label="Set up AI to enable"]').first()
-  await expect(sparkleBtn).toBeVisible({ timeout: 10_000 })
-  await sparkleBtn.click()
+  // Expand the collapsed "Advanced LLM settings" <details> section.
+  const advancedSummary = alice.getByText("Advanced LLM settings").first()
+  await expect(advancedSummary).toBeVisible({ timeout: 10_000 })
+  await advancedSummary.click()
 
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
-
-  // Click the "Custom" provider button.
-  const customBtn = dialog.getByRole("button", { name: /Custom/i })
-  await expect(customBtn).toBeVisible({ timeout: 3_000 })
-  await customBtn.click()
+  // Select the "Custom endpoint" provider radio.
+  const customRadio = alice.getByRole("radio", { name: /Custom endpoint/i })
+  await expect(customRadio).toBeVisible({ timeout: 3_000 })
+  await customRadio.click()
 
   // Endpoint and model inputs appear.
-  const endpointInput = dialog.locator('input[placeholder="http://localhost:8000"]')
-  const modelInput = dialog.locator('input[placeholder="gpt-4"]')
+  const endpointInput = alice.locator('input[placeholder="http://localhost:8000"]')
+  const modelInput = alice.locator("input#mdl-manual")
   await expect(endpointInput).toBeVisible({ timeout: 3_000 })
   await expect(modelInput).toBeVisible({ timeout: 2_000 })
+
+  // Connect is gated on a non-empty endpoint.
+  const connectBtn = alice.getByRole("button", { name: /^Connect$/i })
+  await expect(connectBtn).toBeDisabled({ timeout: 2_000 })
 
   // Fill in the endpoint and model.
   await endpointInput.fill("http://localhost:11434")
   await modelInput.fill("llama3")
 
-  // The Save/Connect button should now be enabled (trimmed endpoint is non-empty).
-  const saveBtn = dialog.getByRole("button", { name: /Save|Connect|Apply/i }).first()
-  await expect(saveBtn).toBeEnabled({ timeout: 2_000 })
-
-  // Dismiss without saving.
-  await alice.keyboard.press("Escape")
-  await expect(dialog).not.toBeVisible({ timeout: 3_000 })
+  // The Connect button is now enabled (trimmed endpoint is non-empty).
+  await expect(connectBtn).toBeEnabled({ timeout: 2_000 })
 })

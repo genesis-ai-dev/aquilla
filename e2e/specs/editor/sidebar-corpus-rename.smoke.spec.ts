@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+const CHAPTER_1_MD = path.resolve(__dirname, "../../fixtures/chapter-1.md")
 
 /**
  * ExpandableFileList — rename corpus group inline.
@@ -32,8 +33,11 @@ test("sidebar corpus group can be renamed inline", async ({ alice }) => {
   await dash.openProject(projName)
 
   const ws = new Workspace(alice)
+  // Import two distinctly-named files. Re-importing the same name now hits
+  // the FRO-287 collision screen (defaults to "skip"), so a second copy of
+  // sample.md would never land — use a different fixture instead.
   await ws.importFile(SAMPLE_MD)
-  await ws.importFile(SAMPLE_MD)
+  await ws.importFile(CHAPTER_1_MD)
 
   // Wait for files in sidebar.
   await expect(alice.locator("aside").getByText(/sample/i).first()).toBeVisible({
@@ -60,7 +64,8 @@ test("sidebar corpus group can be renamed inline", async ({ alice }) => {
   await expect(corpusNameInput).toBeVisible({ timeout: 3_000 })
   await corpusNameInput.fill("OldName")
 
-  const moveConfirmBtn = dialog.getByRole("button", { name: /^Move$/i })
+  // MoveToCorpusDialog's confirm button is labelled "Save".
+  const moveConfirmBtn = dialog.getByRole("button", { name: /^Save$/i })
   await expect(moveConfirmBtn).toBeEnabled({ timeout: 2_000 })
   await moveConfirmBtn.click()
   await expect(dialog).not.toBeVisible({ timeout: 5_000 })
@@ -78,7 +83,10 @@ test("sidebar corpus group can be renamed inline", async ({ alice }) => {
   await renameBtn.click()
 
   // The inline input is autoFocused. Clear + type new name + press Enter.
-  const inlineInput = alice.locator("aside").locator("input").first()
+  // NOTE: the sidebar's filter input has role="searchbox", so the inline
+  // rename input is the only role="textbox" inside the aside — `aside input`
+  // would match the filter first.
+  const inlineInput = alice.locator("aside").getByRole("textbox")
   await expect(inlineInput).toBeVisible({ timeout: 3_000 })
   await inlineInput.selectText()
   await inlineInput.fill("NewName")

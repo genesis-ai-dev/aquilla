@@ -49,9 +49,13 @@ test("Escape key closes the cell expansion panel", async ({ alice }) => {
   const closeBtn = alice.getByRole("button", { name: /Close cell details/i })
   await expect(closeBtn).toBeVisible({ timeout: 5_000 })
 
-  // Press Escape while the panel has focus — it should close.
-  // Focus the panel wrapper first by clicking inside it.
-  await closeBtn.focus()
+  // Press Escape while focus is INSIDE the panel — the keydown listener lives
+  // on the expansion wrapper, and the "Close cell details" chevron is owned by
+  // the action rail (outside the wrapper), so focusing it would not work.
+  // Focus one of the expansion's tabs instead.
+  const panelTab = alice.getByRole("tab", { name: /Staleness/i }).first()
+  await expect(panelTab).toBeVisible({ timeout: 5_000 })
+  await panelTab.focus()
   await alice.keyboard.press("Escape")
 
   // The close button should disappear (panel closed).

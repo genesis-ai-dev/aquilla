@@ -4,15 +4,22 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 /**
  * RuleSuggestDialog — "Suggest from edits" button is disabled when LLM is not configured.
  *
- * RulesPage.tsx renders a RuleSuggestDialog with a "Suggest from edits" button
- * (DialogTrigger). When LLM is not configured:
+ * The workspace header renders RuleSuggestFromEditsDialog's "Suggest from
+ * edits" button when the rules surface is open. When LLM is not configured:
  *   - The button is disabled
  *   - Its title attribute is "Configure LLM in settings first"
  *
- * This spec: navigate to /project/:id/rules → verify "Suggest from edits"
- * button is visible, disabled, and has the correct title tooltip.
+ * For the default "frontier" provider, isConfigured = session.jwt AND the
+ * /api/v2/health probe succeeding. The e2e identity worker answers that
+ * probe, so we block the health endpoint to exercise the gate.
+ *
+ * This spec: block /api/v2/health → navigate to /project/:id/rules → verify
+ * "Suggest from edits" button is visible, disabled, and has the title tooltip.
  */
 test("rule suggest button is disabled when LLM is not configured", async ({ alice }) => {
+  // Make the frontier LLM provider unavailable (health probe fails).
+  await alice.route("**/api/v2/health*", (route) => route.abort())
+
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `RuleSuggest ${Date.now()}`

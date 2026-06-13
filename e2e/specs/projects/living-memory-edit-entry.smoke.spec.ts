@@ -37,12 +37,12 @@ test("living memory edit entry updates the text in place", async ({ alice }) => 
   await instructionsSection.getByRole("button", { name: /^Save$/i }).click()
   await expect(instructionsSection.getByText(original)).toBeVisible({ timeout: 5_000 })
 
-  // Hover over the entry row to reveal the Edit button.
-  const entryRow = instructionsSection.locator("li").filter({ hasText: original })
-  await entryRow.hover()
+  // Entries render as Cards (divs), not <li> rows. With a single entry in the
+  // section, scope the Edit button to the section itself.
+  await instructionsSection.getByText(original).hover()
 
-  // Click "Edit entry".
-  const editBtn = entryRow.getByRole("button", { name: /Edit entry/i })
+  // Click "Edit entry" (aria-label, always rendered for editors).
+  const editBtn = instructionsSection.getByRole("button", { name: /Edit entry/i })
   await expect(editBtn).toBeVisible({ timeout: 3_000 })
   await editBtn.click()
 

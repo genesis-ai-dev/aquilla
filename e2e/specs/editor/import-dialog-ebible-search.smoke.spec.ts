@@ -4,8 +4,8 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 /**
  * ImportDialog — eBible Corpus search input filters results.
  *
- * The eBible screen (ImportDialog.tsx, mode="ebible") shows:
- *   - A search Input placeholder="Search translations (language, name, code)…"
+ * The eBible screen (ImportDialog.tsx, screen="ebible") shows:
+ *   - A search Input placeholder="Search by language, title, or id (e.g. 'eng', 'KJV')"
  *   - A list of translation entries filtered by the query
  *
  * Typing in the search input filters the list. Typing a common language
@@ -37,11 +37,14 @@ test("eBible corpus search input filters translation list", async ({ alice }) =>
   await dialog.getByText("eBible Corpus").click()
   await expect(dialog.getByRole("heading", { name: /eBible Corpus/i })).toBeVisible({ timeout: 3_000 })
 
-  // Search input is visible.
-  const searchInput = dialog.locator('input[placeholder*="Search translations"]')
+  // Search input is visible. (Placeholder is "Search by language, title, or
+  // id (e.g. 'eng', 'KJV')" — EBiblePanel's shared translation picker.)
+  const searchInput = dialog.locator('input[placeholder*="Search by language"]')
   await expect(searchInput).toBeVisible({ timeout: 5_000 })
 
-  // Type "English" — expect results to appear.
+  // Type "English" — expect results to appear. The input stays disabled until
+  // the translations list (network fetch) loads, and fill() waits for enabled.
+  await expect(searchInput).toBeEnabled({ timeout: 15_000 })
   await searchInput.fill("English")
   // At least one result (button or list item) appears within 3s.
   await expect(dialog.locator('button').filter({ hasText: /English/i }).first()).toBeVisible({ timeout: 5_000 })

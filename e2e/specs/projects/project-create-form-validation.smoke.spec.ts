@@ -26,8 +26,8 @@ test("project create dialog Create button requires name and source language", as
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
 
-  // "Create" button is initially disabled (empty name + source).
-  const createBtn = alice.getByRole("button", { name: /^Create$/i })
+  // "Create Project" button is initially disabled (empty name + source).
+  const createBtn = alice.getByRole("button", { name: /^Create Project$/i })
   await expect(createBtn).toBeDisabled({ timeout: 3_000 })
 
   // Fill project name only — still disabled (source is empty by default).
@@ -38,8 +38,14 @@ test("project create dialog Create button requires name and source language", as
   await sourceInput.fill("")
   await expect(createBtn).toBeDisabled({ timeout: 2_000 })
 
-  // Fill source language — Create becomes enabled.
+  // Fill source language — still disabled: the default (bilingual) project
+  // shape also requires a target language (canSubmit in
+  // ProjectCreateDialog.tsx; only the "source-only" shape waives it).
   await sourceInput.fill("en")
+  await expect(createBtn).toBeDisabled({ timeout: 2_000 })
+
+  // Fill target language — Create becomes enabled.
+  await dialog.locator("#target").fill("fr")
   await expect(createBtn).toBeEnabled({ timeout: 2_000 })
 
   // Close dialog without submitting.

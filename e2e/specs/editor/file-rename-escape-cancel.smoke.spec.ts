@@ -40,13 +40,14 @@ test("Escape in file rename input cancels without changing the filename", async 
   await expect(fileRow).toBeVisible({ timeout: 10_000 })
   await fileRow.click({ button: "right" })
 
-  // Click "Rename".
-  const renameBtn = alice.getByRole("button", { name: /^Rename$/i })
-  await expect(renameBtn).toBeVisible({ timeout: 3_000 })
-  await renameBtn.click()
+  // Click "Rename" (shadcn DropdownMenu — role="menuitem").
+  const renameItem = alice.getByRole("menuitem", { name: /^Rename$/i })
+  await expect(renameItem).toBeVisible({ timeout: 3_000 })
+  await renameItem.click()
 
-  // Inline input appears — type a draft name.
-  const inlineInput = sidebar.locator('input[type="text"]').first()
+  // Inline input appears — type a draft name. The sidebar's filter input
+  // is a role=searchbox, so role=textbox uniquely matches the rename input.
+  const inlineInput = sidebar.getByRole("textbox")
   await expect(inlineInput).toBeVisible({ timeout: 3_000 })
   await inlineInput.selectText()
   await inlineInput.fill("should-not-be-saved")

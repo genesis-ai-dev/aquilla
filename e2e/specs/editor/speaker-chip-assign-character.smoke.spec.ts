@@ -37,6 +37,11 @@ test("SpeakerChip assigns a character to a cell line in audio mode", async ({ al
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
+  // Translate the first cell — untranslated cells render the "Translate to
+  // voice this line" placeholder in audio mode (CellVoicePanel) and never
+  // show a SpeakerChip.
+  await ws.editCell(0, "Bonjour le monde")
+
   // Switch to Audio mode.
   const audioBtn = alice.getByRole("button", { name: /^Audio$/i })
   await expect(audioBtn).toBeVisible({ timeout: 5_000 })
@@ -62,8 +67,14 @@ test("SpeakerChip assigns a character to a cell line in audio mode", async ({ al
   await expect(chip).toContainText("Unassigned")
   await chip.click()
 
-  // Popover opens with the voice list.
-  const heroOption = alice.getByRole("button", { name: voiceName }).first()
+  // Popover opens with the voice list. Scope to the popover content — the
+  // VoiceLibraryPanel cast-roster row is ALSO a button named "Hero" and
+  // precedes the portaled popover in DOM order, so an unscoped .first()
+  // would click the library row (opening CharacterModal) instead.
+  const heroOption = alice
+    .locator('[data-slot="popover-content"]')
+    .getByRole("button", { name: voiceName })
+    .first()
   await expect(heroOption).toBeVisible({ timeout: 5_000 })
   await heroOption.click()
 

@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { pickSelectOption } from "../../helpers/base-ui"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import path from "node:path"
@@ -17,13 +18,20 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * The same matcher drives enforcement chips, occurrence matching in
  * TerminologyTermDetail, and the pre-acceptance warning.
  *
+ * Where chips render (ground truth): terminology-chip-plugin is wired into
+ * the TARGET editor only (TranslatedEditor via the terminologyConcepts prop,
+ * EditorTable.tsx) and scans the target doc for ACTIVE concept sourceTerm
+ * matches. The source column's term affordance (SourceWithTermLookup) is
+ * exact-word only — wildcards never decorate the source side.
+ *
  * This spec:
- *   1. Imports sample.md (contains the word "sample" in cell originals).
- *   2. Navigates to the Terminology page.
- *   3. Creates a concept with sourceTerm "samp*" (wildcard matching "sample").
- *   4. Navigates back to the editor.
- *   5. Verifies that the source original for the first cell shows a terminology
- *      chip (span[data-term] or the chip span rendered by terminology-chip-plugin).
+ *   1. Imports sample.md.
+ *   2. Creates an APPROVED concept with sourceTerm "samp*" (wildcard
+ *      matching "sample") — only active concepts produce chips.
+ *   3. Back in the editor, types target text containing "sample" into the
+ *      first cell.
+ *   4. Verifies the wildcard match renders a terminology chip in that row
+ *      (span.term-chip / span[data-source-term]).
  */
 test("wildcard source term creates chip matches in the editor", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -41,33 +49,45 @@ test("wildcard source term creates chip matches in the editor", async ({ alice }
   await alice.goto(`/project/${projectId}/terminology`)
   await alice.waitForLoadState("networkidle")
 
-  // Create a new concept with a wildcard source term "samp*".
+  // Create a new APPROVED concept with a wildcard source term "samp*".
   const newConceptBtn = alice.getByRole("button", { name: /new concept|add concept|\+ concept/i }).first()
   await expect(newConceptBtn).toBeVisible({ timeout: 8_000 })
   await newConceptBtn.click()
 
-  // Fill the source term field with a wildcard pattern.
-  const sourceTermInput = alice.locator('input[placeholder*="source" i], input[aria-label*="source" i]').first()
+  const dialog = alice.getByRole("dialog")
+  await expect(dialog).toBeVisible({ timeout: 5_000 })
+
+  // Fill the source term field (#concept-source-term) with a wildcard pattern.
+  const sourceTermInput = dialog.locator("#concept-source-term")
   await expect(sourceTermInput).toBeVisible({ timeout: 5_000 })
   await sourceTermInput.fill("samp*")
-  await sourceTermInput.press("Enter")
 
-  // Allow terminology to compile.
-  await alice.waitForTimeout(1_000)
+  // A rendering is required to save; fill the pre-populated row.
+  await dialog.locator('input[aria-label="Rendering 1 text"]').fill("échantillon")
+
+  // Chips only render for ACTIVE concepts — set status to approved.
+  await pickSelectOption(alice, dialog.locator("#concept-status"), "approved")
+
+  // Save — footer button is "Add concept" for new concepts.
+  await dialog.getByRole("button", { name: /^Add concept$/i }).click()
+  await expect(dialog).not.toBeVisible({ timeout: 5_000 })
 
   // Navigate back to the editor / file.
+  await alice.goto(`/project/${projectId}`)
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // The source text for the first cell should contain a terminology chip
-  // because "sample" matches the wildcard "samp*".
-  // terminology-chip-plugin renders chips as <span> with a special class or data-term.
+  // Type target text containing "sample" — the chip plugin scans the TARGET
+  // editor doc and "sample" matches the wildcard "samp*".
+  await ws.editCell(0, "Voici le sample")
+
   const firstRow = ws.cellRow(0)
   await expect(firstRow).toBeVisible({ timeout: 5_000 })
 
   // Look for a terminology chip inside the first row.
   // terminology-chip-plugin renders: span.term-chip with data-source-term and
-  // aria-label="Managed term: samp*"
+  // aria-label="Managed term: samp*" (plus a term-chip-host wrapper span that
+  // also carries data-source-term).
   const chip = firstRow.locator("span.term-chip, span[data-source-term]").first()
   await expect(chip).toBeVisible({ timeout: 5_000 })
 })

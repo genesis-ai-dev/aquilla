@@ -8,27 +8,27 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * ProjectWorkspace — "Delete file" ConfirmActionDialog.
+ * ProjectWorkspace — soft-delete ConfirmActionDialog (FRO-272).
  *
- * ProjectWorkspace.tsx line 2536-2547:
+ * ProjectWorkspace.tsx (~line 3622):
  *   <ConfirmActionDialog
  *     open={pendingDeleteId !== null}
- *     title="Delete file"
- *     description={`Remove "${f.name}" from this project? ...`}
- *     confirmLabel="Delete"
- *     checkboxLabel="I understand this removes the file from the project."
+ *     title="Move file to Recently deleted"
+ *     description={`Move "${f.name}" to Recently deleted? ...`}
+ *     confirmLabel="Move to Recently deleted"
  *     onConfirm={...}
  *   />
  *
- * This dialog opens when the user selects "Delete" from the file action menu.
- * The confirm button is disabled until the checkbox is checked.
+ * The checkbox uses ConfirmActionDialog's default label
+ * "I understand this action." and the confirm button is disabled until
+ * the checkbox is checked.
  *
  * Flow:
  *   1. Import a file → hover file row → click "File actions" → click "Delete".
- *   2. ConfirmActionDialog opens with title "Delete file".
- *   3. The confirm "Delete" button is initially disabled.
+ *   2. ConfirmActionDialog opens with title "Move file to Recently deleted".
+ *   3. The confirm "Move to Recently deleted" button is initially disabled.
  *   4. Check the confirmation checkbox → confirm button enables.
- *   5. Click confirm → file is removed from the sidebar.
+ *   5. Click confirm → file is removed from the sidebar (soft-deleted).
  */
 test("Delete file confirm dialog requires checkbox before confirming", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -54,20 +54,22 @@ test("Delete file confirm dialog requires checkbox before confirming", async ({ 
   await expect(deleteItem).toBeVisible({ timeout: 5_000 })
   await deleteItem.click()
 
-  // ConfirmActionDialog should open with title "Delete file".
+  // ConfirmActionDialog should open with title "Move file to Recently deleted".
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
-  await expect(dialog.getByText(/Delete file/i)).toBeVisible({ timeout: 3_000 })
+  await expect(
+    dialog.getByRole("heading", { name: /Move file to Recently deleted/i })
+  ).toBeVisible({ timeout: 3_000 })
 
-  // The confirm "Delete" button is initially disabled (checkbox not checked).
-  const confirmBtn = dialog.getByRole("button", { name: /^Delete$/i })
+  // The confirm button is initially disabled (checkbox not checked).
+  const confirmBtn = dialog.getByRole("button", { name: /^Move to Recently deleted$/i })
   await expect(confirmBtn).toBeDisabled()
 
   // Check the confirmation checkbox (shadcn Checkbox — role="checkbox";
-  // the hidden native input also remains in the DOM, so target the role).
-  const checkbox = dialog.getByRole("checkbox")
+  // the hidden native input also remains in the DOM, so target the named role).
+  const checkbox = dialog.getByRole("checkbox", { name: /I understand this action/i })
   await expect(checkbox).toBeVisible({ timeout: 3_000 })
-  await checkbox.click()
+  await checkbox.check()
 
   // Confirm button should now be enabled.
   await expect(confirmBtn).toBeEnabled({ timeout: 3_000 })

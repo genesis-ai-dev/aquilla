@@ -4,15 +4,16 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 /**
  * ImportDialog — "Coming soon" import types are rendered but disabled.
  *
- * ImportDialog.tsx shows a first-level "import type" selector screen.
- * Some options (Macula, Translation Memory, Translation Notes) are
- * rendered as disabled divs with:
- *   title="Coming soon — Macula import is tracked in FRO-178"
+ * ImportDialog.tsx shows a first-level "import type" selector screen
+ * (ImportLanding). Macula and Translation Notes graduated to enabled Beta
+ * importers (FRO-178/FRO-179/FRO-310); the only remaining coming-soon item
+ * is Translation Memory, rendered as a disabled div with:
  *   title="Coming soon — Translation Memory import is tracked in FRO-179"
  *   class "cursor-not-allowed ... opacity-50"
  *
- * This spec: opens the import dialog and verifies the Coming soon
- * items are visible and have the "Coming soon" tooltip text.
+ * This spec: opens the import dialog, verifies the Translation Memory item
+ * is visible-but-disabled with its "Coming soon" tooltip, and verifies the
+ * graduated Macula / Translation Notes options are now enabled buttons.
  */
 test("import dialog shows Coming soon items as disabled", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -29,20 +30,21 @@ test("import dialog shows Coming soon items as disabled", async ({ alice }) => {
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 8_000 })
 
-  // Macula coming-soon div should be visible with its tooltip.
-  const maculaDiv = dialog.locator('[title*="Macula import"]')
-  await expect(maculaDiv).toBeVisible({ timeout: 5_000 })
-  await expect(maculaDiv).toHaveClass(/cursor-not-allowed|opacity/)
-
-  // Translation Memory coming-soon div.
+  // Translation Memory is the remaining coming-soon item: a non-interactive
+  // div carrying the "Coming soon" tooltip and disabled styling.
   const tmDiv = dialog.locator('[title*="Translation Memory import"]')
-  await expect(tmDiv).toBeVisible({ timeout: 3_000 })
+  await expect(tmDiv).toBeVisible({ timeout: 5_000 })
   await expect(tmDiv).toHaveClass(/cursor-not-allowed|opacity/)
 
-  // Translation Notes coming-soon div (FRO-179).
-  const notesDiv = dialog.locator('[title*="Translation Notes import"]')
-  await expect(notesDiv).toBeVisible({ timeout: 3_000 })
-  await expect(notesDiv).toHaveClass(/cursor-not-allowed|opacity/)
+  // Macula graduated to an enabled Beta importer (FRO-178/FRO-310).
+  const maculaBtn = dialog.getByRole("button", { name: /Macula Hebrew \+ Greek/i })
+  await expect(maculaBtn).toBeVisible({ timeout: 3_000 })
+  await expect(maculaBtn).toBeEnabled()
+
+  // Translation Notes graduated to an enabled Beta importer (FRO-179/FRO-310).
+  const notesBtn = dialog.getByRole("button", { name: /Translation Notes \(TSV\)/i })
+  await expect(notesBtn).toBeVisible({ timeout: 3_000 })
+  await expect(notesBtn).toBeEnabled()
 
   // Dismiss.
   await alice.keyboard.press("Escape")

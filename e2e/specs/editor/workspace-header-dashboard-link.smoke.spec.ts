@@ -35,6 +35,10 @@ test("workspace header Dashboard breadcrumb navigates to projects list", async (
   await expect(dashboardLink).toBeVisible({ timeout: 5_000 })
   await dashboardLink.click()
 
-  // URL changes to / or /projects.
-  await alice.waitForURL(/^\/(projects)?$/, { timeout: 5_000 })
+  // URL changes to / or /projects. waitForURL regexes match the FULL url
+  // (origin included), so test the pathname instead.
+  await alice.waitForURL(
+    (url) => url.pathname === "/" || url.pathname === "/projects",
+    { timeout: 5_000 },
+  )
 })

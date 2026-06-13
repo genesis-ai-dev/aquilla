@@ -1,28 +1,36 @@
 import { test, expect } from "../../helpers/multi-user"
+import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
- * MultiProjectInviteDialog — "Invite to projects…" on the Members page.
+ * MultiProjectInviteDialog — "Add to projects" on the Members page.
  *
- * MembersPage.tsx has an "Invite to projects…" button (org owner/admin only).
- * Clicking it opens MultiProjectInviteDialog with:
- *   - DialogTitle "Invite to projects"
+ * FRO-322 renamed the affordance from "Invite to projects…" to
+ * "Add to projects". MembersPage.tsx renders the button (org owner/admin
+ * only) and disables it until the org has at least one accessible project.
+ * Clicking it opens MultiProjectInviteDialog with DialogTitle "Add to projects".
  *
  * Alice is the org owner of "Acme" so the button should be visible for her.
- * This spec verifies the dialog opens and Cancel closes it.
+ * This spec verifies the dialog opens and Escape closes it.
  */
 test("invite to projects dialog opens from members page", async ({ alice }) => {
+  // The button is disabled while the org has zero accessible projects,
+  // so create one first.
+  const dash = new Dashboard(alice)
+  await dash.goto()
+  await dash.createProject({ name: `InviteOpenProj ${Date.now()}` })
+
   await alice.goto("/members")
   await alice.waitForLoadState("networkidle")
 
-  // "Invite to projects…" button — only visible to org owners/admins.
-  const inviteBtn = alice.getByRole("button", { name: /Invite to projects/i })
-  await expect(inviteBtn).toBeVisible({ timeout: 10_000 })
+  // "Add to projects" button — only visible to org owners/admins.
+  const inviteBtn = alice.getByRole("button", { name: /Add to projects/i })
+  await expect(inviteBtn).toBeEnabled({ timeout: 10_000 })
   await inviteBtn.click()
 
   // MultiProjectInviteDialog opens.
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
-  await expect(dialog.getByRole("heading", { name: /Invite to projects/i })).toBeVisible()
+  await expect(dialog.getByRole("heading", { name: /Add to projects/i })).toBeVisible()
 
   // Dismiss.
   await alice.keyboard.press("Escape")

@@ -17,7 +17,13 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * This spec: edit a cell → type text → select it → bubble menu appears →
  * click "Inline code" → verify the button gets "bg-accent" class (active) →
  * click again → verify class is removed (toggled off).
+ *
+ * The button's BASE class always contains "hover:bg-accent", so a bare
+ * /bg-accent/ regex matches even when inactive — anchor the token to
+ * whitespace/string boundaries to test only the standalone active class.
  */
+const ACTIVE_CLASS = /(?:^|\s)bg-accent(?:\s|$)/
+
 test("formatting bubble menu Inline code button toggles on and off", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
@@ -49,17 +55,17 @@ test("formatting bubble menu Inline code button toggles on and off", async ({ al
   await expect(codeBtn).toBeVisible({ timeout: 5_000 })
 
   // The button should NOT have "bg-accent" initially.
-  await expect(codeBtn).not.toHaveClass(/bg-accent/, { timeout: 2_000 })
+  await expect(codeBtn).not.toHaveClass(ACTIVE_CLASS, { timeout: 2_000 })
 
   // Click to activate inline code.
   await codeBtn.click()
 
   // The button should now have "bg-accent" (active state).
-  await expect(codeBtn).toHaveClass(/bg-accent/, { timeout: 3_000 })
+  await expect(codeBtn).toHaveClass(ACTIVE_CLASS, { timeout: 3_000 })
 
   // Click again to deactivate.
   await codeBtn.click()
 
   // "bg-accent" should be removed.
-  await expect(codeBtn).not.toHaveClass(/bg-accent/, { timeout: 3_000 })
+  await expect(codeBtn).not.toHaveClass(ACTIVE_CLASS, { timeout: 3_000 })
 })

@@ -16,7 +16,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *
  * This spec:
  *   1. Select a cell → SelectionBar appears.
- *   2. Click outside any editable (body or the editor container — not a cell).
+ *   2. Verify no editable element has focus (the selection affordance never
+ *      takes focus — its pointerdown calls preventDefault()).
  *   3. Press Escape → SelectionBar disappears.
  *
  * This covers the keyboard dismiss path, distinct from the "Clear selection"
@@ -48,9 +49,22 @@ test("Escape key clears selection when no editable is focused", async ({ alice }
   const bar = alice.locator('[aria-label="Selection actions"]')
   await expect(bar).toBeVisible({ timeout: 3_000 })
 
-  // Click something neutral (not an editable) so no editable is focused.
-  // The page heading "h1" is a safe focus-neutral target.
-  await alice.locator("h1").first().click()
+  // No editable has focus at this point: the workspace has no h1 to click,
+  // and the selection affordance's pointerdown calls preventDefault(), so
+  // clicking it never focuses an INPUT/TEXTAREA/contenteditable. Verify the
+  // precondition explicitly so the Escape press exercises the intended
+  // "no editable focused" branch of SelectionBar's keydown handler.
+  await expect
+    .poll(async () =>
+      alice.evaluate(() => {
+        const ae = document.activeElement
+        return (
+          ae instanceof HTMLElement &&
+          (ae.isContentEditable || ae.tagName === "INPUT" || ae.tagName === "TEXTAREA")
+        )
+      }),
+    )
+    .toBe(false)
 
   // Press Escape — SelectionBar should disappear.
   await alice.keyboard.press("Escape")

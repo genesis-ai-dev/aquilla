@@ -22,8 +22,9 @@ import {
   type AdminActivity,
   type AdminAdmin,
 } from "@/lib/frontier/admin"
+import { AdminCreditsSection } from "@/components/admin/AdminCreditsSection"
 
-type Tab = "overview" | "orgs" | "teams" | "users" | "projects" | "activity" | "admins"
+type Tab = "overview" | "orgs" | "teams" | "users" | "projects" | "activity" | "admins" | "credits"
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "overview", label: "Overview" },
   { key: "orgs", label: "Orgs" },
@@ -32,6 +33,7 @@ const TABS: Array<{ key: Tab; label: string }> = [
   { key: "projects", label: "Projects" },
   { key: "activity", label: "Activity" },
   { key: "admins", label: "Admins" },
+  { key: "credits", label: "Compute / Credits" },
 ]
 
 const fmtDate = (iso: string | null): string => {
@@ -320,6 +322,11 @@ export function AdminConsole() {
               </Table>
             </div>
           )}
+
+          {/* Compute / Credits tab — platform-admin only; AdminConsole already
+              gates the whole route via usePlatformAdmin + Navigate redirect.
+              Each API call is also server-enforced against PLATFORM_ADMINS. */}
+          {tab === "credits" && jwt && <AdminCreditsSection jwt={jwt} />}
         </div>
       </>
     )

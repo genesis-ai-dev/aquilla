@@ -115,7 +115,7 @@ binding = "HYPERDRIVE"
 id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 
 # Cloudflare Email Service binding for comment notification emails. The sending
-# domain (EMAIL_FROM, default noreply@aquilla.app) must be onboarded under
+# domain (EMAIL_FROM, default noreply@support.aquilla.app) must be onboarded under
 # Compute > Email Service > Email Sending (Frontier R&D account). Absent from
 # the e2e env so local/e2e keep email a no-op.
 [[env.production.send_email]]

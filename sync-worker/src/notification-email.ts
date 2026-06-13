@@ -108,7 +108,7 @@ export async function sendNotificationEmail(
   payload: NotificationEmailPayload,
 ): Promise<void> {
   if (!env.EMAIL) return
-  const from = env.EMAIL_FROM ?? 'noreply@aquilla.app'
+  const from = env.EMAIL_FROM ?? 'noreply@support.aquilla.app'
   const subject =
     payload.kind === 'mention'
       ? `${payload.authorDisplayName} mentioned you in ${payload.projectName}`

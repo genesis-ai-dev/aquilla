@@ -105,7 +105,7 @@ declare global {
        *  email (comment notifications). Declared only in deployed env blocks
        *  (wrangler.toml); absent locally/e2e where notifications no-op. */
       EMAIL?: import("./notification-email").EmailService
-      /** Optional — From address for transactional email. Defaults to noreply@aquilla.app. */
+      /** Optional — From address for transactional email. Defaults to noreply@support.aquilla.app. */
       EMAIL_FROM?: string
       /** Optional — Base URL for deep links in notification emails (e.g. https://aquilla.app). */
       BASE_URL?: string

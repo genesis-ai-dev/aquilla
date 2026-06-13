@@ -141,7 +141,7 @@ describe('sendNotificationEmail', () => {
     expect(msg.subject).toContain('TestProject')
   })
 
-  it('defaults the From address to noreply@aquilla.app', async () => {
+  it('defaults the From address to noreply@support.aquilla.app', async () => {
     const email = makeEmailBinding()
     await sendNotificationEmail({ EMAIL: email }, 'recipient@example.com', {
       authorDisplayName: 'Alice',
@@ -150,7 +150,7 @@ describe('sendNotificationEmail', () => {
       excerpt: 'Hello @bob',
       commentsUrl: 'https://aquilla.app/project/p1/comments',
     })
-    expect(email.send.mock.calls[0][0].from).toBe('noreply@aquilla.app')
+    expect(email.send.mock.calls[0][0].from).toBe('noreply@support.aquilla.app')
   })
 
   it('throws when the provider send() rejects', async () => {

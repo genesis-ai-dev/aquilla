@@ -22,7 +22,7 @@ GITLAB_ADMIN_TOKEN=""
 # Email goes through the Cloudflare Email Service `send_email` binding, which
 # is only declared in deployed env blocks (wrangler.toml) — locally there is
 # no binding, so invite emails no-op and password reset returns an error.
-EMAIL_FROM="noreply@aquilla.app"
+EMAIL_FROM="noreply@support.aquilla.app"
 BASE_URL="http://127.0.0.1:5173"
 
 # Optional. Marks the runtime so routes can dial back error verbosity.

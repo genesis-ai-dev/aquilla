@@ -73,7 +73,7 @@ export async function sendProjectInviteEmail(
   projectName: string,
 ): Promise<void> {
   if (!env.EMAIL) return
-  const from = env.EMAIL_FROM || "noreply@aquilla.app"
+  const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
   const html = buildProjectInviteHtml(joinUrl, projectName)
   const text = `You've been invited to ${projectName}. Accept: ${joinUrl}`
   try {
@@ -98,7 +98,7 @@ export async function sendPasswordResetEmail(
   if (!env.EMAIL) {
     throw new Error("EMAIL binding is not configured")
   }
-  const from = env.EMAIL_FROM || "noreply@aquilla.app"
+  const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
   const html = buildPasswordResetHtml(resetUrl)
   const text = `Reset your password: ${resetUrl}`
   try {

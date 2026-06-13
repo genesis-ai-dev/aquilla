@@ -46,7 +46,7 @@ export const env = {
   ALGORITHM: "HS256",
   ACCESS_TOKEN_EXPIRE_MINUTES: "43200",
   PLATFORM_ADMINS: "root",
-  EMAIL_FROM: "noreply@aquilla.app",
+  EMAIL_FROM: "noreply@support.aquilla.app",
   BASE_URL: "https://aquilla.app",
   SYNC_WORKER_URL: "https://api.aquilla.app/sync",
   DEFAULT_LLM_MODEL: "anthropic/claude-sonnet-4.5",

@@ -103,9 +103,38 @@ function script(messages: ChatMessage[]) {
   const wantsDraft = /draft|translate/i.test(userText)
   const wantsComment = /check|comment|review/i.test(userText)
   const wantsValidate = /validate/i.test(userText)
+  const wantsAquifer = /aquifer|bible resource|look up|reference data|abraham|chesed/i.test(userText)
   const toolResults = messages.filter((m) => m.role === "tool")
   const lastTool = toolResults[toolResults.length - 1]
   const lastToolContent = typeof lastTool?.content === "string" ? lastTool.content : ""
+
+  // Bible-resources flow: search → read the top hit → stage a publish proposal.
+  // Exercises the execute.aquifer branch + the aquifer_publish proposal card.
+  if (wantsAquifer) {
+    if (toolResults.length === 0) {
+      return respond("Searching the Bible reference data.", [toolCall({ aquifer: { op: "search", q: "abraham" } })])
+    }
+    if (toolResults.length === 1) {
+      const m = lastToolContent.match(/—\s*(\/\S+)\s*—/)
+      const path = m ? m[1] : "/en/people/abraham/"
+      return respond("Reading the top result.", [toolCall({ aquifer: { op: "read", path } })])
+    }
+    if (toolResults.length === 2) {
+      return respond("Publishing what I found.", [
+        toolCall({
+          aquifer: {
+            op: "publish",
+            question: "Who was Abraham in the biblical narrative?",
+            answer:
+              "Abraham (originally Abram) is the first patriarch of Israel, husband of Sarah, and father of Isaac and Ishmael.",
+            status: "answered",
+            citations: [{ url: "https://bibletranslation.org/en/people/abraham/", quote: "first patriarch of Israel" }],
+          },
+        }),
+      ])
+    }
+    return respond("I staged a Q&A to publish — review the card and click Apply to post it to the wiki.")
+  }
 
   // Reviewer flows: stage a comment finding, or validate translated cells.
   if (wantsComment || wantsValidate) {

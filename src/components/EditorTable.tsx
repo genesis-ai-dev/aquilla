@@ -4,7 +4,7 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw, BookOpen,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity,
+  ArrowRight, Activity, AudioLines,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
@@ -16,7 +16,7 @@ import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsS
 import { sortByLens, hasTiming } from "@/lib/timeline/derive"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform } from "@/lib/sync/role-policy"
-import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive, emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { needsAttention, needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
@@ -62,6 +62,9 @@ import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { looksLikeUuid } from "@/lib/uuid"
 import { isPerfLogEnabled } from "@/lib/perf-log"
+import { synthesizeCellTts } from "@/lib/sync/tts"
+import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
+import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { ViolationPopover } from "./ViolationPopover"
 import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
@@ -1845,6 +1848,9 @@ function EditorRow({
   // cell. True = dialog is open; clicking Confirm calls onCompleteSingle,
   // clicking Cancel discards the pending action (nothing committed).
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false)
+  // OmniVoice TTS generation state for the "Generate audio" rail button.
+  const [omniTtsLoading, setOmniTtsLoading] = useState(false)
+  const [omniTtsError, setOmniTtsError] = useState<string | null>(null)
 
   useEffect(() => {
     if (cell.targetEventId) pendingTargetEventIdRef.current = cell.targetEventId
@@ -2240,6 +2246,55 @@ function EditorRow({
     if (!cell.selectedAudioId) return
     void transcribeCell({ cell, session: rowSession, projectId: project.id, language: project.targetLanguage })
   }, [cell, rowSession, project.id, project.targetLanguage])
+
+  /**
+   * OmniVoice TTS (use case 1): synthesize the cell's translated text via the
+   * sync-worker /api/v1/voice/tts endpoint, then attach the returned clip to
+   * this cell's "generatedVoice" slot via cell.audio.attach. The attach event's
+   * projection auto-selects the new clip (sets selected=0 on siblings), so no
+   * follow-up select is needed.
+   */
+  const handleOmniTts = useCallback(async () => {
+    const text = cell.translated.trim()
+    if (!text || !project.id || !cell.fileId) return
+    if (!rowSession?.jwt) return
+    setOmniTtsLoading(true)
+    setOmniTtsError(null)
+    const getSyncToken = audioSyncTokenFetcherForSession(rowSession)
+    try {
+      const result = await synthesizeCellTts(
+        {
+          projectId: project.id,
+          fileId: cell.fileId,
+          cellId: cell.id,
+          text,
+          ...(project.targetLanguage ? { language: project.targetLanguage } : {}),
+        },
+        getSyncToken,
+      )
+      // Attach the returned clip to the "generatedVoice" slot. Use objectName
+      // (WITH .wav) as the audioId and the server's canonical url — audioId
+      // alone has no extension and would not resolve (R2 404 / pointer-invalid).
+      await emitCellAudioAttach({
+        projectId: project.id,
+        fileId: cell.fileId,
+        cellId: cell.id,
+        audioId: result.objectName,
+        url: result.url,
+        durationMs: Math.round(result.durationSeconds * 1000),
+        slot: "generatedVoice",
+        mimeType: "audio/wav",
+        author: username,
+      })
+      notifyAudioAttachmentsChanged(cell.fileId)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setOmniTtsError(msg)
+      console.error("[omni-tts]", err)
+    } finally {
+      setOmniTtsLoading(false)
+    }
+  }, [cell.translated, cell.fileId, cell.id, project.id, project.targetLanguage, rowSession, username])
 
   // Build tooltip detail. Prefer the live examples surfaced in the popover
   // (cellExamples) over the history snapshot — history's `examples` only gets
@@ -3218,6 +3273,39 @@ function EditorRow({
                   fileId={cell.fileId}
                   disabled={!editable}
                   playOnly
+                />
+              )}
+
+              {/* OmniVoice TTS: generate server-side audio for the translated cell
+                  and attach it to the generatedVoice slot. Only shown when the cell
+                  has translated text, the project ID + file ID are known, and the
+                  caller has a session (sync token can be minted). Hidden in play-only
+                  surfaces — audio production belongs to Voice Studio. */}
+              {editable && cell.translated.trim().length > 0 && project.id && cell.fileId && rowSession?.jwt && (
+                <RailButton
+                  icon={
+                    omniTtsLoading
+                      ? <Spinner className="size-3" />
+                      : omniTtsError
+                        ? <AlertCircle className="h-3.5 w-3.5" />
+                        : <AudioLines className="h-3.5 w-3.5" />
+                  }
+                  tooltip={
+                    omniTtsLoading
+                      ? "Generating audio…"
+                      : omniTtsError
+                        ? `Audio generation failed — ${omniTtsError}`
+                        : "Generate audio (OmniVoice)"
+                  }
+                  onClick={() => { void handleOmniTts() }}
+                  disabled={omniTtsLoading}
+                  toneClass={
+                    omniTtsError
+                      ? "text-destructive hover:text-destructive/80"
+                      : omniTtsLoading
+                        ? "text-amber-600 dark:text-amber-400"
+                        : undefined
+                  }
                 />
               )}
 

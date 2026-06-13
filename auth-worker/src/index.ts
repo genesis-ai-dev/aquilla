@@ -73,6 +73,7 @@ import chatRoutes from "./routes/chat"
 import agentRoutes from "./routes/agent"
 import parseDocumentRoutes from "./routes/parse-document"
 import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
+import usageRoutes from "./routes/usage"
 
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
@@ -180,6 +181,11 @@ app.route("/api/v1/chat", chatRoutes)
 // translation-agent design/implementation-plan specs.
 app.route("/api/v1/ai/agent", agentRoutes)
 app.route("/api/v2/parse-document", parseDocumentRoutes)
+
+// Usage stats (read-only): per-user Preferences page + per-org Overview dashboard.
+// Spec: docs/superpowers/specs/2026-06-13-omnivoice-tts-design.md §4.
+// /api/v1/usage/me (JWT-authed), /api/v1/usage/org/:orgId (maintainer-gated).
+app.route("/api/v1/usage", usageRoutes)
 
 // Test-only reset endpoint (WRANGLER_LOCAL only — see routes/test-reset.ts).
 app.route("/__test__", testResetRoutes)

@@ -10,6 +10,7 @@
 import { handleAdminRequest } from "./admin"
 import { handleAudioRequest } from "./audio"
 import { handleVoiceConvertRequest, handleVoiceReferenceRequest } from "./voice-convert"
+import { handleTtsRequest } from "./tts"
 import { handleDiarizationRequest } from "./diarization"
 import { notifyProjectDo } from "./archive-broadcast"
 import { handleCorsPreflight, withCors } from "./cors"
@@ -81,6 +82,14 @@ declare global {
       SEED_VC_URL?: string
       /** Shared secret for the Seed-VC endpoint (matches its SEED_VC_TOKEN). */
       SEED_VC_TOKEN?: string
+      /** OmniVoice TTS Modal endpoint (infra/modal/omnivoice.py). */
+      OMNIVOICE_URL?: string
+      /** Shared secret for the OmniVoice endpoint (matches its OMNIVOICE_TOKEN). */
+      OMNIVOICE_TOKEN?: string
+      /** Per-user daily TTS audio-seconds cap (default 36000 = 10 h while sizing). */
+      TTS_USER_DAILY_SECONDS_LIMIT?: string
+      /** "true" → enforce TTS cap with 429; anything else → log-only. */
+      TTS_BUDGET_ENFORCE?: string
       /** Optional KV namespace for AD-13 branching-search result cache.
        *  When absent, the route runs the algorithm fresh on every request.
        *  Provision: `wrangler kv:namespace create BRANCHING_SEARCH_KV`. */
@@ -176,6 +185,8 @@ export default {
     if (voiceConvertResponse) return withCors(voiceConvertResponse, request)
     const voiceReferenceResponse = await handleVoiceReferenceRequest(request, env)
     if (voiceReferenceResponse) return withCors(voiceReferenceResponse, request)
+    const ttsResponse = await handleTtsRequest(request, env)
+    if (ttsResponse) return withCors(ttsResponse, request)
     const diarizationResponse = await handleDiarizationRequest(request, env)
     if (diarizationResponse) return withCors(diarizationResponse, request)
     const eventsReadResponse = await handleEventsReadRequest(request, env)

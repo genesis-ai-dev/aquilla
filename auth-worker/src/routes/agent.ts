@@ -15,6 +15,7 @@ import { z } from "zod"
 import type { Env, Variables } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
+import { creditGuard, recordCredit } from "../lib/credits"
 import { resolveProjectRole } from "../services/project-permissions"
 import { AliasMap, compressRows } from "../lib/agent/compress"
 import { runGuardedSql, type SqlVarContext } from "../lib/agent/sql-guard"
@@ -144,6 +145,26 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
     return c.json(guard.body, guard.status)
   }
 
+  // Credit guard: resolve org from project, pre-check agent sub-cap.
+  // This is the DANGEROUS rail — block early (before the SSE stream starts).
+  let orgId = 0
+  try {
+    const projectRow = await c.env.AQUILLA_PG
+      .prepare("SELECT org_id FROM projects WHERE id = ?")
+      .bind(body.projectId)
+      .first<{ org_id: number | null }>()
+    orgId = projectRow?.org_id ?? 0
+  } catch {
+    /* best-effort — degrade to org 0 (no-org) so we still record */
+  }
+  const creditCheck = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "agent")
+  if (!creditCheck.ok) {
+    return c.json(
+      { error: "credit_cap_exceeded", reason: creditCheck.reason, message: "Agent credit cap reached. Contact your org admin." },
+      429,
+    )
+  }
+
   // The request-scoped AQUILLA_PG shim is closed when this Response returns
   // (index.ts finally) — before the SSE body finishes. The run owns its own
   // connection for the loop's lifetime; tests (no PG_CONNECTION_STRING)
@@ -169,7 +190,7 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
       const send = (frame: AgentFrame) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`))
       }
-      runAgentLoop({ env, body, user: { id: user.id, username: user.username }, roleLevel: role.level, runId, signal, send })
+      runAgentLoop({ env, body, user: { id: user.id, username: user.username }, roleLevel: role.level, runId, orgId, signal, send })
         .catch((err) => {
           // Last-resort: surface, then settle the ledger as error.
           try {
@@ -212,11 +233,12 @@ interface LoopArgs {
   user: { id: number; username: string }
   roleLevel: number
   runId: string
+  orgId: number
   signal: AbortSignal
   send: (frame: AgentFrame) => void
 }
 
-async function runAgentLoop({ env, body, user, roleLevel, runId, signal, send }: LoopArgs): Promise<void> {
+async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, signal, send }: LoopArgs): Promise<void> {
   const aliases = new AliasMap()
   const sqlVars: SqlVarContext = {
     projectId: body.projectId,
@@ -397,6 +419,10 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, signal, send }:
   } catch (err) {
     console.error("[agent] failed to finalise agent_runs row:", err)
   }
+
+  // Record agent cost in org credit ledger (graceful-degrade — never throws).
+  // costCents is the sum of OpenRouter usage.cost×100 across all iterations.
+  await recordCredit(env.AQUILLA_PG, orgId, user.id, "agent", costCents, 1)
 }
 
 interface ToolCallEnv {

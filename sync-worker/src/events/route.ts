@@ -40,7 +40,7 @@ import {
 import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
 import { ROLE } from './role-policy'
-import { sendCommentNotifications } from '../notification-email'
+import { sendCommentNotifications, type EmailService } from '../notification-email'
 
 // Max statements per batch() transaction — a conservative self-imposed cap (Postgres has no hard limit; keeps any single transaction bounded).
 const BATCH_LIMIT = 100
@@ -53,8 +53,9 @@ export interface EventsRouteEnv {
   /** Optional — when present, successful DB commits fan-out event.applied frames
    * to connected WebSocket clients via the per-project ProjectSync DO. */
   ProjectSync?: DurableObjectNamespace
-  /** Optional — when present, outbound notification emails are sent on comment.create. */
-  RESEND_API_KEY?: string
+  /** Optional — when present (deployed envs), outbound notification emails are
+   * sent on comment.create via the Cloudflare Email Service `send_email` binding. */
+  EMAIL?: EmailService
   EMAIL_FROM?: string
   /** Base URL for deep links in notification emails (e.g. https://aquilla.app). */
   BASE_URL?: string

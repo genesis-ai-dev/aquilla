@@ -101,9 +101,11 @@ declare global {
       /** Public base URL of THIS worker (incl. /sync prefix in prod) so Modal
        *  can reach the diarization audio + callback routes. */
       DIARIZATION_PUBLIC_BASE?: string
-      /** Optional — Resend API key for outbound transactional email (notifications). */
-      RESEND_API_KEY?: string
-      /** Optional — From address for transactional email. Defaults to noreply@frontierrnd.com. */
+      /** Cloudflare Email Service `send_email` binding for outbound transactional
+       *  email (comment notifications). Declared only in deployed env blocks
+       *  (wrangler.toml); absent locally/e2e where notifications no-op. */
+      EMAIL?: import("./notification-email").EmailService
+      /** Optional — From address for transactional email. Defaults to noreply@aquilla.app. */
       EMAIL_FROM?: string
       /** Optional — Base URL for deep links in notification emails (e.g. https://aquilla.app). */
       BASE_URL?: string

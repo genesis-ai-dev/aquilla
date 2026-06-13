@@ -13,8 +13,11 @@ import {
   deriveRecipientUsernames,
   sendCommentNotifications,
   sendNotificationEmail,
+  type EmailService,
 } from '../notification-email'
 import { makeTestDb } from './helpers/pg-test-db'
+
+type SendArg = Parameters<EmailService['send']>[0]
 
 // ── extractMentions ──────────────────────────────────────────────────────
 
@@ -92,13 +95,19 @@ describe('deriveRecipientUsernames', () => {
   })
 })
 
-// ── sendNotificationEmail — missing API key is a no-op ───────────────────
+// ── sendNotificationEmail — missing EMAIL binding is a no-op ─────────────
+
+/** A fake Cloudflare Email Service binding whose send() is a spy. */
+function makeEmailBinding(impl?: (msg: SendArg) => Promise<{ messageId: string }>) {
+  const send = vi.fn(impl ?? (async (_msg: SendArg) => ({ messageId: 'test-id' })))
+  return { send }
+}
 
 describe('sendNotificationEmail', () => {
-  it('returns without calling fetch when RESEND_API_KEY is absent', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+  it('returns without sending when the EMAIL binding is absent', async () => {
+    const email = makeEmailBinding()
     await sendNotificationEmail(
-      { RESEND_API_KEY: undefined },
+      { EMAIL: undefined },
       'user@example.com',
       {
         authorDisplayName: 'Alice',
@@ -108,16 +117,13 @@ describe('sendNotificationEmail', () => {
         commentsUrl: 'https://aquilla.app/project/p1/comments',
       },
     )
-    expect(fetchSpy).not.toHaveBeenCalled()
-    fetchSpy.mockRestore()
+    expect(email.send).not.toHaveBeenCalled()
   })
 
-  it('calls fetch with correct payload when RESEND_API_KEY is present', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('{}', { status: 200 }),
-    )
+  it('calls EMAIL.send with correct payload when the binding is present', async () => {
+    const email = makeEmailBinding()
     await sendNotificationEmail(
-      { RESEND_API_KEY: 'test-key', EMAIL_FROM: 'test@example.com' },
+      { EMAIL: email, EMAIL_FROM: 'test@example.com' },
       'recipient@example.com',
       {
         authorDisplayName: 'Alice',
@@ -127,24 +133,33 @@ describe('sendNotificationEmail', () => {
         commentsUrl: 'https://aquilla.app/project/p1/comments',
       },
     )
-    expect(fetchSpy).toHaveBeenCalledOnce()
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://api.resend.com/emails')
-    const body = JSON.parse(init.body as string)
-    expect(body.to).toEqual(['recipient@example.com'])
-    expect(body.from).toBe('test@example.com')
-    expect(body.subject).toContain('Alice')
-    expect(body.subject).toContain('TestProject')
-    fetchSpy.mockRestore()
+    expect(email.send).toHaveBeenCalledOnce()
+    const msg = email.send.mock.calls[0][0]
+    expect(msg.to).toEqual(['recipient@example.com'])
+    expect(msg.from).toBe('test@example.com')
+    expect(msg.subject).toContain('Alice')
+    expect(msg.subject).toContain('TestProject')
   })
 
-  it('throws when the provider returns an error status', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ message: 'invalid api key' }), { status: 422 }),
-    )
+  it('defaults the From address to noreply@aquilla.app', async () => {
+    const email = makeEmailBinding()
+    await sendNotificationEmail({ EMAIL: email }, 'recipient@example.com', {
+      authorDisplayName: 'Alice',
+      kind: 'mention',
+      projectName: 'TestProject',
+      excerpt: 'Hello @bob',
+      commentsUrl: 'https://aquilla.app/project/p1/comments',
+    })
+    expect(email.send.mock.calls[0][0].from).toBe('noreply@aquilla.app')
+  })
+
+  it('throws when the provider send() rejects', async () => {
+    const email = makeEmailBinding(async () => {
+      throw new Error('E_SENDER_NOT_VERIFIED')
+    })
     await expect(
       sendNotificationEmail(
-        { RESEND_API_KEY: 'bad-key' },
+        { EMAIL: email },
         'user@example.com',
         {
           authorDisplayName: 'Alice',
@@ -154,19 +169,18 @@ describe('sendNotificationEmail', () => {
           commentsUrl: 'https://aquilla.app/project/p1/comments',
         },
       ),
-    ).rejects.toThrow('invalid api key')
-    fetchSpy.mockRestore()
+    ).rejects.toThrow('E_SENDER_NOT_VERIFIED')
   })
 })
 
 // ── sendCommentNotifications — send failure never propagates ─────────────
 
 describe('sendCommentNotifications', () => {
-  it('does not throw when RESEND_API_KEY is absent (no-op)', async () => {
+  it('does not throw when the EMAIL binding is absent (no-op)', async () => {
     const { db } = await makeTestDb()
     await expect(
       sendCommentNotifications({
-        env: { RESEND_API_KEY: undefined },
+        env: { EMAIL: undefined },
         db,
         baseUrl: 'https://aquilla.app',
         projectId: 'proj-1',
@@ -184,13 +198,13 @@ describe('sendCommentNotifications', () => {
       .prepare("INSERT INTO users (id, username, email, password_hash) VALUES (1, 'bob', 'bob@example.com', '')")
       .run()
 
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('{}', { status: 500 }),
-    )
-    // Should not throw despite HTTP 500
+    const email = makeEmailBinding(async () => {
+      throw new Error('provider down')
+    })
+    // Should not throw despite the provider rejecting
     await expect(
       sendCommentNotifications({
-        env: { RESEND_API_KEY: 'test-key' },
+        env: { EMAIL: email },
         db,
         baseUrl: 'https://aquilla.app',
         projectId: 'proj-1',
@@ -199,7 +213,6 @@ describe('sendCommentNotifications', () => {
         parentCommentId: null,
       }),
     ).resolves.toBeUndefined()
-    fetchSpy.mockRestore()
   })
 
   it('sends mention email to mentioned user', async () => {
@@ -211,11 +224,9 @@ describe('sendCommentNotifications', () => {
       .prepare("INSERT INTO projects (id, name, created_by) VALUES ('proj-1', 'MyProject', 1)")
       .run()
 
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('{}', { status: 200 }),
-    )
+    const email = makeEmailBinding()
     await sendCommentNotifications({
-      env: { RESEND_API_KEY: 'test-key' },
+      env: { EMAIL: email },
       db,
       baseUrl: 'https://aquilla.app',
       projectId: 'proj-1',
@@ -224,13 +235,11 @@ describe('sendCommentNotifications', () => {
       parentCommentId: null,
     })
 
-    expect(fetchSpy).toHaveBeenCalledOnce()
-    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
-    const body = JSON.parse(init.body as string)
-    expect(body.to).toEqual(['bob@example.com'])
-    expect(body.subject).toContain('alice')
-    expect(body.subject).toContain('MyProject')
-    fetchSpy.mockRestore()
+    expect(email.send).toHaveBeenCalledOnce()
+    const msg = email.send.mock.calls[0][0]
+    expect(msg.to).toEqual(['bob@example.com'])
+    expect(msg.subject).toContain('alice')
+    expect(msg.subject).toContain('MyProject')
   })
 
   it('does not send to the comment author even if self-mentioned', async () => {
@@ -239,11 +248,9 @@ describe('sendCommentNotifications', () => {
       .prepare("INSERT INTO users (id, username, email, password_hash) VALUES (1, 'alice', 'alice@example.com', '')")
       .run()
 
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('{}', { status: 200 }),
-    )
+    const email = makeEmailBinding()
     await sendCommentNotifications({
-      env: { RESEND_API_KEY: 'test-key' },
+      env: { EMAIL: email },
       db,
       baseUrl: 'https://aquilla.app',
       projectId: 'proj-1',
@@ -252,8 +259,7 @@ describe('sendCommentNotifications', () => {
       parentCommentId: null,
     })
 
-    // fetch should NOT have been called — alice is both author and only recipient
-    expect(fetchSpy).not.toHaveBeenCalled()
-    fetchSpy.mockRestore()
+    // send should NOT have been called — alice is both author and only recipient
+    expect(email.send).not.toHaveBeenCalled()
   })
 })

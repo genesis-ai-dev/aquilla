@@ -114,6 +114,13 @@ bucket_name = "aquilla-snapshots"
 binding = "HYPERDRIVE"
 id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 
+# Cloudflare Email Service binding for comment notification emails. The sending
+# domain (EMAIL_FROM, default noreply@aquilla.app) must be onboarded under
+# Compute > Email Service > Email Sending (Frontier R&D account). Absent from
+# the e2e env so local/e2e keep email a no-op.
+[[env.production.send_email]]
+name = "EMAIL"
+
 # ---------------------------------------------------------------------------
 # Development environment — for the dev branch, deployed to api.dev.aquilla.app
 # Physically separate R2, DO namespace. Auth model unchanged: same SYNC_SECRET_KEY
@@ -158,6 +165,9 @@ bucket_name = "aquilla-snapshots-dev"
 binding = "HYPERDRIVE"
 id = "53581197ff7a4202a5ed0ef08537d4a6"
 
+[[env.development.send_email]]
+name = "EMAIL"
+
 # ---------------------------------------------------------------------------
 # Staging environment — for the staging branch, deployed to api.staging.aquilla.app
 # Pre-production QA environment. Physically separate R2, DO namespace. Auth model
@@ -196,6 +206,9 @@ bucket_name = "aquilla-snapshots-staging"
 [[env.staging.hyperdrive]]
 binding = "HYPERDRIVE"
 id = "822231ade4da4db5b1955702e13d1ac3"
+
+[[env.staging.send_email]]
+name = "EMAIL"
 
 # ---------------------------------------------------------------------------
 # e2e test environment. Local e2e (scripts/e2e-up.ts) runs `wrangler dev` on

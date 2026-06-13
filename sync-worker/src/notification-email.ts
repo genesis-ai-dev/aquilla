@@ -6,9 +6,12 @@
 // cannot share source modules at runtime; the two files must stay in sync
 // on the NotificationEmailPayload shape.
 //
-// Provider-agnostic: reads RESEND_API_KEY from env. When the
-// Resend→CF Email Service swap lands (followup/remove-resend-cloudflare-email),
-// this function is the only sync-worker callsite that needs updating.
+// Outbound mail goes through the Cloudflare Email Service `send_email` binding
+// (env.EMAIL.send(), public beta 2026-04) — same provider as auth-worker. The
+// binding is declared only in deployed env blocks (wrangler.toml); locally and
+// in e2e it is absent, so sends no-op. The sending domain (EMAIL_FROM) must be
+// onboarded under Compute > Email Service > Email Sending or sends fail with
+// E_SENDER_NOT_VERIFIED.
 //
 // extractMentions is inlined here (duplicated from src/lib/comments/comment-helpers.ts)
 // to avoid a cross-package import that violates the SPA↔worker boundary.
@@ -41,13 +44,25 @@ export interface NotificationEmailPayload {
   commentsUrl: string
 }
 
-export interface NotificationEnv {
-  RESEND_API_KEY?: string
-  EMAIL_FROM?: string
+/**
+ * Minimal surface of the Cloudflare Email Service `send_email` binding
+ * (public beta 2026-04) — the object-form `send()` we call. Hand-typed
+ * because the pinned @cloudflare/workers-types predates Email Service.
+ * Mirrors auth-worker/src/types.ts EmailService.
+ */
+export interface EmailService {
+  send(message: {
+    from: string
+    to: string[]
+    subject: string
+    html?: string
+    text?: string
+  }): Promise<{ messageId: string }>
 }
 
-interface ResendErrorResponse {
-  message?: string
+export interface NotificationEnv {
+  EMAIL?: EmailService
+  EMAIL_FROM?: string
 }
 
 function buildNotificationHtml(p: NotificationEmailPayload): string {
@@ -83,17 +98,17 @@ function buildNotificationHtml(p: NotificationEmailPayload): string {
 
 /**
  * Send one notification email (fire-and-forget safe — caller uses waitUntil).
- * No-ops when RESEND_API_KEY is absent so dev/test never require email config.
- * Throws on provider error so the caller can log failures without blocking the
- * comment write.
+ * No-ops when the EMAIL binding is absent (local/e2e) so dev/test never require
+ * email config. Throws on provider error so the caller can log failures without
+ * blocking the comment write.
  */
 export async function sendNotificationEmail(
   env: NotificationEnv,
   toEmail: string,
   payload: NotificationEmailPayload,
 ): Promise<void> {
-  if (!env.RESEND_API_KEY) return
-  const from = env.EMAIL_FROM ?? 'noreply@frontierrnd.com'
+  if (!env.EMAIL) return
+  const from = env.EMAIL_FROM ?? 'noreply@aquilla.app'
   const subject =
     payload.kind === 'mention'
       ? `${payload.authorDisplayName} mentioned you in ${payload.projectName}`
@@ -104,24 +119,11 @@ export async function sendNotificationEmail(
       ? `${payload.authorDisplayName} mentioned you in ${payload.projectName}.\n\n${payload.excerpt}\n\nView: ${payload.commentsUrl}`
       : `${payload.authorDisplayName} replied in ${payload.projectName}.\n\n${payload.excerpt}\n\nView: ${payload.commentsUrl}`
 
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.RESEND_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ from, to: [toEmail], subject, html, text }),
-  })
-
-  if (!response.ok) {
-    let errorMessage = `Failed to send notification email: ${response.status}`
-    try {
-      const errorBody = (await response.json()) as ResendErrorResponse
-      if (errorBody?.message) errorMessage = `Failed to send notification email: ${errorBody.message}`
-    } catch {
-      // ignore JSON parse errors
-    }
-    throw new Error(errorMessage)
+  try {
+    await env.EMAIL.send({ from, to: [toEmail], subject, html, text })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    throw new Error(`Failed to send notification email: ${message}`)
   }
 }
 

@@ -16,6 +16,9 @@ interface Props {
   files: readonly FileMeta[]
   onActivate: (tabId: string) => void
   onClose: (tabId: string) => void
+  /** Non-file center surface (e.g. Rules) shown as a closable tab while its
+   *  route is active, so the user has an obvious way back to the editor. */
+  surfaceTab?: { label: string; onClose: () => void } | null
   /** Right-aligned slot for per-file view controls (e.g. the Text/Audio lens
    *  toggle) — they belong on the content row, not in the global header. */
   trailing?: ReactNode
@@ -33,12 +36,12 @@ export function fileNameFor(files: readonly FileMeta[], fileId: string): string 
   return "Untitled file"
 }
 
-export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, trailing }: Props) {
+export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfaceTab, trailing }: Props) {
   const visibleTabs = tabs.flatMap((tab) => {
     const name = fileNameFor(files, tab.fileId)
     return name ? [{ tab, name }] : []
   })
-  if (visibleTabs.length === 0 && !trailing) return null
+  if (visibleTabs.length === 0 && !surfaceTab && !trailing) return null
   return (
     <div
       role="tablist"
@@ -88,6 +91,23 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, traili
           </div>
         )
       })}
+      {surfaceTab && (
+        <div
+          role="tab"
+          aria-selected
+          className="group/tab relative flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-xs text-foreground transition-colors"
+        >
+          <span className="truncate font-medium">{surfaceTab.label}</span>
+          <button
+            type="button"
+            onClick={surfaceTab.onClose}
+            aria-label={`Close ${surfaceTab.label}`}
+            className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-muted-foreground/60 transition-all hover:text-foreground hover:shadow-neu-xs"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
       {trailing && (
         <div className="ml-auto flex shrink-0 items-center pl-2">{trailing}</div>
       )}

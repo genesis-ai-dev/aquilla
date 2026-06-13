@@ -9,7 +9,7 @@ export function isAnalyticsEnabled(): boolean {
 
 /**
  * True once the user has made an explicit analytics choice (the key exists in
- * localStorage). Distinct from isAnalyticsEnabled(), which returns false (the
+ * localStorage). Distinct from isAnalyticsEnabled(), which returns true (the
  * default) when no choice has been recorded yet. Used to skip the onboarding
  * privacy step on subsequent runs.
  */

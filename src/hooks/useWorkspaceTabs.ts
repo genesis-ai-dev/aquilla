@@ -142,13 +142,13 @@ export function useWorkspaceTabs({
 
   const activateTab = useCallback(
     (tabId: string) => {
-      setTabs((prev) => {
-        const target = prev.find((t) => t.id === tabId)
-        if (target) setActiveFileId(target.fileId)
-        return prev
-      })
+      // Don't call setActiveFileId inside a setTabs updater — updaters can run
+      // during render, and setActiveFileId navigates (a BrowserRouter state
+      // update), which React flags as setState-during-render.
+      const target = tabs.find((t) => t.id === tabId)
+      if (target) setActiveFileId(target.fileId)
     },
-    [setActiveFileId],
+    [tabs, setActiveFileId],
   )
 
   const closeTab = useCallback(

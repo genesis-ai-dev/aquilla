@@ -126,7 +126,11 @@ export function createTerminologyChipExtension(getConcepts: () => Concept[]) {
               if (tr.getMeta(terminologyChipPluginKey) === "rebuild") {
                 return buildTerminologyChipDecorationSet(newState.doc, getConcepts())
               }
-              if (tr.docChanged) return old.map(tr.mapping, tr.doc)
+              // Chip matches are derived from the doc text itself (unlike the
+              // violation/karaoke decorations, whose inputs are external props
+              // rebuilt via meta). Mapping the old set through a doc change can
+              // never ADD a chip for newly typed term matches, so rebuild.
+              if (tr.docChanged) return buildTerminologyChipDecorationSet(tr.doc, getConcepts())
               return old
             },
           },

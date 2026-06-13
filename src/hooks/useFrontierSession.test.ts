@@ -103,8 +103,9 @@ describe("useFrontierSession — distinct id hashing", () => {
     expect(distinctId).not.toContain(email)
   })
 
-  it("register without consent: email not passed as person property", async () => {
-    // No consent set → isAnalyticsEnabled() returns false
+  it("register with analytics opted out: email not passed as person property", async () => {
+    // Analytics defaults to ON, so withholding email requires an explicit opt-out
+    localStorage.setItem("codex:analyticsEnabled", "false")
     const username = "bob"
     const email = "bob@example.com"
     vi.mocked(mockRegister).mockResolvedValue({ username, jwt: "tok", createdAt: "x" } as never)

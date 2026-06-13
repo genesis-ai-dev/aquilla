@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { ChevronRight, MoreHorizontal, Sparkles, AudioWaveform, ListOrdered } from "lucide-react"
+import { ChevronRight, MoreHorizontal, Sparkles, AudioWaveform } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileTypeHasSections, fileOrderedBy } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
@@ -44,14 +44,16 @@ export function FileRow(props: FileRowProps) {
     ? Math.round((progress.validated / progress.total) * 100) : 0
   const canExpand = fileTypeHasSections(file.type)
   // Timeline-segment-model: a file is either time-true (timeline spine) or
-  // sequence-true (intrinsic order). Surface it at a glance.
-  const orderedBy = fileOrderedBy(file)
+  // sequence-true (intrinsic order). Sequence is the default, so only the
+  // exceptional timeline files carry a marker — repeating an icon on every
+  // row says nothing.
+  const isTimeOrdered = fileOrderedBy(file) === "time"
 
   return (
     <div
       className={cn(
-        "group relative flex items-center gap-1 rounded-xl px-2 py-1.5 text-sm cursor-pointer transition-shadow",
-        active ? "shadow-neu-inset" : "bg-card hover:shadow-neu-xs",
+        "group relative flex h-7 items-center gap-1 rounded-lg px-2 text-[13px] cursor-pointer transition-colors",
+        active ? "bg-accent text-foreground" : "hover:bg-accent",
       )}
       onClick={() => { if (!editing) onSelect() }}
       onContextMenu={(e) => { e.preventDefault(); onOpenMenu(e.clientX, e.clientY) }}
@@ -65,7 +67,7 @@ export function FileRow(props: FileRowProps) {
     >
       {canExpand ? (
         <button
-          className="p-0.5 rounded-full text-muted-foreground transition-shadow hover:shadow-neu-xs"
+          className="p-0.5 rounded-full text-muted-foreground transition-colors hover:text-foreground"
           onClick={(e) => { e.stopPropagation(); onToggleExpand() }}
           aria-label={expanded ? "Collapse" : "Expand"}
         >
@@ -74,17 +76,15 @@ export function FileRow(props: FileRowProps) {
       ) : (
         <span className="w-[18px] shrink-0" aria-hidden="true" />
       )}
-      <span
-        className="shrink-0 text-muted-foreground/70"
-        title={orderedBy === "time" ? "Timeline-ordered (timecodes are the spine)" : "Sequence-ordered (intrinsic order)"}
-        aria-label={orderedBy === "time" ? "Timeline-ordered file" : "Sequence-ordered file"}
-      >
-        {orderedBy === "time" ? (
+      {isTimeOrdered && (
+        <span
+          className="shrink-0 text-muted-foreground/70"
+          title="Timeline-ordered (timecodes are the spine)"
+          aria-label="Timeline-ordered file"
+        >
           <AudioWaveform className="h-3.5 w-3.5" />
-        ) : (
-          <ListOrdered className="h-3.5 w-3.5" />
-        )}
-      </span>
+        </span>
+      )}
       <div className="flex-1 min-w-0">
         {editing ? (
           <input
@@ -100,14 +100,12 @@ export function FileRow(props: FileRowProps) {
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <>
-            <div className="truncate">{file.name}</div>
-            {file.originalName && (
-              <div className="truncate text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
-                {file.originalName}
-              </div>
-            )}
-          </>
+          <div
+            className="truncate"
+            title={file.originalName ? `Imported as ${file.originalName}` : undefined}
+          >
+            {file.name}
+          </div>
         )}
       </div>
       {progress && progress.total > 0 && !editing && (
@@ -122,7 +120,7 @@ export function FileRow(props: FileRowProps) {
       )}
       {!editing && (
         <button
-          className="p-1 rounded-full text-muted-foreground opacity-0 transition-shadow hover:shadow-neu-xs group-hover:opacity-100"
+          className="p-1 rounded-full text-muted-foreground opacity-0 transition-colors hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
           onClick={(e) => { e.stopPropagation(); onOpenMenu(e.clientX, e.clientY) }}
           aria-label="File actions"
         >
@@ -131,7 +129,7 @@ export function FileRow(props: FileRowProps) {
       )}
       {hasSuggestion && !editing && (
         <button
-          className="p-1 rounded-full shrink-0 transition-shadow hover:shadow-neu-xs"
+          className="p-1 rounded-full shrink-0 transition-colors hover:text-foreground"
           onClick={(e) => { e.stopPropagation(); onApplySuggestion?.() }}
           aria-label="Apply rename suggestion"
           title="A cleaner name was detected for this file. Click to apply, or use the Apply button at the top of the sidebar."

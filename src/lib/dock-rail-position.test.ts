@@ -10,14 +10,14 @@ beforeEach(() => {
 })
 
 describe("dock-rail-position", () => {
-  it("defaults to left when unset", () => {
-    expect(getDockRailPosition()).toBe("left")
+  it("defaults to top when unset", () => {
+    expect(getDockRailPosition()).toBe("top")
   })
 
-  it("persists top position", () => {
-    setDockRailPosition("top")
-    expect(getDockRailPosition()).toBe("top")
-    expect(localStorage.getItem("codex:dockRailPosition")).toBe("top")
+  it("persists left position", () => {
+    setDockRailPosition("left")
+    expect(getDockRailPosition()).toBe("left")
+    expect(localStorage.getItem("codex:dockRailPosition")).toBe("left")
   })
 
   it("notifies listeners on change", () => {

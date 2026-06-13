@@ -226,6 +226,9 @@ export function TeamDetail() {
                     </>
                   )}
                 </div>
+                {!editing && team.description && (
+                  <p className="mb-3 text-sm text-muted-foreground">{team.description}</p>
+                )}
 
                 {isAdmin && editing && (
                   <div className="space-y-2">

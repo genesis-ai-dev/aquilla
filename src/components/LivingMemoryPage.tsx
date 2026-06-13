@@ -449,7 +449,7 @@ export function LivingMemoryPage() {
   // Role-aware edit gate: mirrors the FRO-255 pattern — get roleLevel from
   // syncRole, pass to useProjectSettings which enforces MAINTAINER (600) floor.
   const roleLevel = project?.syncRole?.level ?? null
-  const { canEdit, reasonCannotEdit, patch: patchSettings } = useProjectSettings(
+  const { settings, canEdit, reasonCannotEdit, patch: patchSettings } = useProjectSettings(
     projectId ?? null,
     roleLevel,
   )
@@ -459,7 +459,13 @@ export function LivingMemoryPage() {
   // While the project hasn't loaded yet, canEdit is false (roleLevel is null).
   // This correctly shows read-only affordances before the role is known.
   const entriesReady = !projectLoading && project != null
-  const entries = project?.livingMemoryEntries ?? []
+  // Render from THIS hook instance's settings — it carries the optimistic
+  // overlay for patches made here. useProject reads through its own separate
+  // useProjectSettings instance, which never learns of our patch until a
+  // refetch, so a just-saved entry wouldn't render (same class as the
+  // file-rename overlay fix). Fall back to the project record before the
+  // settings GET resolves.
+  const entries = settings.livingMemoryEntries ?? project?.livingMemoryEntries ?? []
 
   const author = session?.username ?? "unknown"
 

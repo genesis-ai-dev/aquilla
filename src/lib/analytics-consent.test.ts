@@ -12,10 +12,11 @@ afterEach(() => {
 })
 
 describe("isAnalyticsEnabled", () => {
-  it("returns false when no choice has been recorded (default-off)", () => {
-    // No key in storage — must be OFF until explicit opt-in
+  it("returns true when no choice has been recorded (default-on)", () => {
+    // No key in storage — ON by default; consent is presented during
+    // onboarding and the user can opt out there or in settings.
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
-    expect(isAnalyticsEnabled()).toBe(false)
+    expect(isAnalyticsEnabled()).toBe(true)
   })
 
   it("returns true when a stored 'yes' is present", () => {

@@ -253,6 +253,12 @@ export function ProjectWorkspace() {
   // Optimistic file-label renames (fileId → new name), applied locally before
   // the file.rename event round-trips so the new label shows instantly.
   const [optimisticRenames, setOptimisticRenames] = useState<Map<string, string>>(new Map())
+  // FRO-272: soft-deleted file ids hidden from the sidebar until the server
+  // read reflects the file.delete event. Same class as optimistic renames —
+  // patchProject(IDB) writes are invisible (useProject reads server), so
+  // without this overlay a deleted file lingers until the outbox flushes and
+  // a later refetch happens to run.
+  const [optimisticDeletes, setOptimisticDeletes] = useState<Set<string>>(new Set())
   // Session-local dismissal of the rename-suggestion banner. (Persisting this
   // across reloads would need server backing; the in-session state is what the
   // X button and "apply" flows actually need.)
@@ -270,6 +276,7 @@ export function ProjectWorkspace() {
     optimisticFileIdsRef.current = new Set()
     setOptimisticFiles([])
     setOptimisticRenames(new Map())
+    setOptimisticDeletes(new Set())
     setSuggestionsDismissed(false)
     setClientProject(null)
   }, [projectId])
@@ -279,18 +286,25 @@ export function ProjectWorkspace() {
     // Overlay optimistic renames so the new label shows instantly and
     // detectSuggestions drops the applied file from the banner. Reconciled away
     // by the effect below once the server read reflects the new name.
-    const base = optimisticRenames.size === 0
+    let base = optimisticRenames.size === 0
       ? serverFiles
       : serverFiles.map((file) => {
           const renamed = optimisticRenames.get(file.id)
           return renamed !== undefined && renamed !== file.name ? { ...file, name: renamed } : file
         })
+    // Hide optimistically soft-deleted files until the server read drops them.
+    if (optimisticDeletes.size > 0) {
+      const filtered = base.filter((file) => !optimisticDeletes.has(file.id))
+      if (filtered.length !== base.length) base = filtered
+    }
     if (optimisticFiles.length === 0) return base
 
     const seen = new Set(base.map((file) => file.id))
-    const pending = optimisticFiles.filter((file) => !seen.has(file.id))
+    const pending = optimisticFiles.filter(
+      (file) => !seen.has(file.id) && !optimisticDeletes.has(file.id),
+    )
     return pending.length > 0 ? [...base, ...pending] : base
-  }, [hydratedProject?.files, optimisticFiles, optimisticRenames])
+  }, [hydratedProject?.files, optimisticFiles, optimisticRenames, optimisticDeletes])
 
   const project = useMemo<ProjectRecord | null>(() => {
     if (!hydratedProject) return null
@@ -307,6 +321,23 @@ export function ProjectWorkspace() {
       return next
     })
   }, [hydratedProject, optimisticFiles.length])
+
+  // Drop an optimistic delete once the server read no longer returns the file.
+  useEffect(() => {
+    if (!hydratedProject || optimisticDeletes.size === 0) return
+    const serverIds = new Set(hydratedProject.files.map((file) => file.id))
+    setOptimisticDeletes((current) => {
+      let changed = false
+      const next = new Set(current)
+      for (const id of current) {
+        if (!serverIds.has(id)) {
+          next.delete(id)
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+  }, [hydratedProject, optimisticDeletes.size])
 
   // Drop an optimistic rename once the server read carries the new name.
   useEffect(() => {
@@ -2259,6 +2290,14 @@ export function ProjectWorkspace() {
       // Do not remove from local IDB if the event failed to enqueue.
       return
     }
+    // Hide the row immediately — the server read won't reflect file.delete
+    // until the outbox flushes, and refresh() below would otherwise re-fetch
+    // the file straight back into the sidebar.
+    setOptimisticDeletes((current) => {
+      const next = new Set(current)
+      next.add(fileId)
+      return next
+    })
     refresh()
     if (activeFileId === fileId) setActiveFileId(null)
     if (trashOpen) void refreshDeletedFiles()
@@ -2277,6 +2316,14 @@ export function ProjectWorkspace() {
       console.error("[restore] file.restore emit failed", e)
       return
     }
+    // Un-hide the row if it was soft-deleted this session — the optimistic
+    // delete overlay would otherwise keep masking the restored file.
+    setOptimisticDeletes((current) => {
+      if (!current.has(fileId)) return current
+      const next = new Set(current)
+      next.delete(fileId)
+      return next
+    })
     refresh()
     void refreshDeletedFiles()
   }, [project, currentUsername, refresh, refreshDeletedFiles])
@@ -3107,10 +3154,23 @@ export function ProjectWorkspace() {
           <>
             <TabStrip
               tabs={workspaceTabs.tabs}
-              activeTabId={workspaceTabs.activeTabId}
+              // While a non-editor surface (Rules) is showing, no file tab is
+              // "active" even though selectedFileId still remembers the last
+              // file — the surface tab is the active one.
+              activeTabId={centerSurface === "editor" ? workspaceTabs.activeTabId : null}
               files={projectFiles}
               onActivate={workspaceTabs.activateTab}
               onClose={handleCloseTab}
+              surfaceTab={
+                centerSurface === "rules" && projectId
+                  ? {
+                      label: "Rules",
+                      // Navigating to the bare project route lets the
+                      // restore-location effect re-open the last active file.
+                      onClose: () => navigate(`/project/${projectId}`),
+                    }
+                  : null
+              }
               trailing={
                 // Per-file view-mode control — lives with the content it
                 // affects, not in the global header (which holds actions).

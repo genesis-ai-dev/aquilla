@@ -67,6 +67,9 @@ vi.mock("../steps/ReadyStep", () => ({
 
 vi.mock("@/lib/analytics-consent", () => ({
   hasAnalyticsConsentBeenSet: () => true, // skip privacy step to simplify
+  // posthog.ts calls these at import time
+  isAnalyticsEnabled: () => false,
+  onAnalyticsConsentChange: () => () => {},
 }))
 
 const mockRefreshOrgs = vi.fn()

@@ -66,7 +66,11 @@ function renderDetail() {
 beforeEach(() => {
   localStorage.clear()
   listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
-  listOrgMembers.mockResolvedValue([{ userId: 2, username: "anna", role: { level: 100, name: "viewer" } }])
+  listOrgMembers.mockResolvedValue([
+    { userId: 4, username: "zara", role: { level: 100, name: "viewer" } },
+    { userId: 2, username: "anna", role: { level: 100, name: "viewer" } },
+    { userId: 3, username: "Ben", role: { level: 100, name: "viewer" } },
+  ])
   getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [] })
   addTeamMember.mockResolvedValue({ userId: 2, username: "anna" })
   removeTeamMember.mockResolvedValue(undefined)
@@ -108,10 +112,18 @@ describe("TeamDetail admin management", () => {
     renderDetail()
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
     await act(async () => { (await screen.findByRole("button", { name: /add member/i })).click() })
-    // After clicking "Add member", the username picker appears (aria-label "Member to add").
-    await pickSelectOption(/member to add/i, /^anna$/)
+    const picker = screen.getByRole("combobox", { name: /member to add/i })
+    expect(picker).toHaveTextContent("Select member…")
+    fireEvent.click(picker)
+    expect(screen.queryByRole("option", { name: /^anna$/ })).toBeNull()
+    const options = await screen.findAllByRole("option")
+    expect(options.map((option) => option.textContent)).toEqual(["Select member…", "Ben", "zara"])
+    const benOption = screen.getByRole("option", { name: /^Ben$/ })
+    fireEvent.pointerMove(benOption)
+    fireEvent.mouseMove(benOption)
+    fireEvent.keyDown(benOption, { key: "Enter" })
     await act(async () => { screen.getByRole("button", { name: /^add$/i }).click() })
-    await waitFor(() => expect(addTeamMember).toHaveBeenCalledWith("jwt", 1, 10, "anna"))
+    await waitFor(() => expect(addTeamMember).toHaveBeenCalledWith("jwt", 1, 10, "Ben"))
   })
 
   it("removes a member", async () => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
@@ -118,8 +118,21 @@ export function TeamDetail() {
     fetchAccessibleProjects(jwt, activeOrgId).then(setOrgProjects).catch(() => {})
   }, [isAdmin, jwt, activeOrgId])
 
-  // All org members available to add (server handles duplicate-membership rejection)
-  const availableOrgMembers = orgMembers
+  // Only offer org members who are not already in this team, sorted for scanning.
+  const availableOrgMembers = useMemo(
+    () =>
+      orgMembers
+        .filter((member) => !team?.members.some((teamMember) => teamMember.userId === member.userId))
+        .sort((a, b) => a.username.localeCompare(b.username, undefined, { sensitivity: "base" })),
+    [orgMembers, team?.members],
+  )
+
+  useEffect(() => {
+    if (!selectedUsername) return
+    if (!availableOrgMembers.some((member) => member.username === selectedUsername)) {
+      setSelectedUsername("")
+    }
+  }, [availableOrgMembers, selectedUsername])
 
   async function handleSave() {
     if (!jwt || activeOrgId == null || groupIdNum == null) return
@@ -307,7 +320,7 @@ export function TeamDetail() {
                     <button
                       type="button"
                       className="text-xs underline text-muted-foreground"
-                      onClick={() => { setAddingMember(true); setSelectedUsername(availableOrgMembers[0]?.username ?? "") }}
+                      onClick={() => { setAddingMember(true); setSelectedUsername("") }}
                     >
                       Add member
                     </button>
@@ -315,16 +328,22 @@ export function TeamDetail() {
                 </div>
 
                 {isAdmin && addingMember && (
-                  <div className="flex items-center gap-2 mb-3">
+                  <div className="flex flex-wrap items-center gap-2 mb-3">
                     <Select
+                      items={[
+                        { value: "", label: "Select member…" },
+                        ...availableOrgMembers.map((m) => ({ value: m.username, label: m.username })),
+                      ]}
                       value={selectedUsername}
                       onValueChange={(v) => setSelectedUsername(v ?? "")}
+                      disabled={availableOrgMembers.length === 0}
                     >
                       <SelectTrigger aria-label="Member to add">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectGroup>
+                          <SelectItem value="">Select member…</SelectItem>
                           {availableOrgMembers.map((m) => (
                             <SelectItem key={m.userId} value={m.username}>{m.username}</SelectItem>
                           ))}
@@ -333,8 +352,9 @@ export function TeamDetail() {
                     </Select>
                     <button
                       type="button"
-                      className="text-sm px-3 py-1 rounded bg-primary text-primary-foreground"
+                      className="text-sm px-3 py-1 rounded bg-primary text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
                       onClick={handleAddMember}
+                      disabled={!selectedUsername || availableOrgMembers.length === 0}
                     >
                       Add
                     </button>
@@ -345,6 +365,11 @@ export function TeamDetail() {
                     >
                       Cancel
                     </button>
+                    {availableOrgMembers.length === 0 && (
+                      <p className="basis-full text-xs text-muted-foreground">
+                        All org members are already in this team.
+                      </p>
+                    )}
                   </div>
                 )}
 

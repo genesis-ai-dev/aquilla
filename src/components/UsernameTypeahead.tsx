@@ -31,6 +31,8 @@ interface Props {
   showModeToggle?: boolean
   placeholder?: { username?: string; email?: string }
   excludedUserIds?: readonly number[]
+  /** Scope search to related users. Disable for org membership, where any Aquilla user can be added. */
+  scopedSearch?: boolean
 }
 
 /**
@@ -62,6 +64,7 @@ export function UsernameTypeahead({
   showModeToggle = true,
   placeholder,
   excludedUserIds = [],
+  scopedSearch = true,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [dropdownPosition, setDropdownPosition] = useState<{
@@ -72,7 +75,10 @@ export function UsernameTypeahead({
   const containerRef = useRef<HTMLDivElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const { query, results, isLoading, lastFetchOk } = useUserSearch(
-    value.mode === "username" ? value.raw : ""
+    value.mode === "username" ? value.raw : "",
+    undefined,
+    undefined,
+    scopedSearch
   )
   const trimmedRaw = value.raw.trim()
   const searchMatchesInput = query.trim() === trimmedRaw

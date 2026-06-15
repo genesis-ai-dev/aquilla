@@ -41,6 +41,8 @@ interface MembersPanelProps {
   callerUserId: number | null;
   /** Highest role the caller can grant (caps the role dropdown). */
   callerMaxRole: number;
+  /** Disable for org membership, where search should find any Aquilla user. */
+  scopedUserSearch?: boolean;
 }
 
 export function MembersPanel({
@@ -52,6 +54,7 @@ export function MembersPanel({
   onChangeRole,
   callerUserId,
   callerMaxRole,
+  scopedUserSearch = true,
 }: MembersPanelProps) {
   // Typeahead-mode-only here. Email-mode is for project-link invites
   // (handled in MultiProjectInviteDialog / SharePanel), not direct
@@ -161,6 +164,7 @@ export function MembersPanel({
               showModeToggle={false}
               placeholder={{ username: "Aquilla username" }}
               excludedUserIds={existingUserIds}
+              scopedSearch={scopedUserSearch}
             />
           </div>
           <Select

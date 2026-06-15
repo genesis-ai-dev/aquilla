@@ -276,6 +276,7 @@ function RosterWithProjectChips({
         defaultRole={ROLE.MAINTAINER}
         callerUserId={callerUserId}
         callerMaxRole={ROLE.MAINTAINER}
+        scopedUserSearch={false}
         onAdd={async (username, role) => {
           const result = await add(username, role)
           return result

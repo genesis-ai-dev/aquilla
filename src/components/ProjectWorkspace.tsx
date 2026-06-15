@@ -68,6 +68,7 @@ import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll } from "@/lib/audio/batch-audio"
 import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { useOutbox } from "@/context/OutboxContext"
+import { useReconcileOnDrain } from "@/hooks/useReconcileOnDrain"
 import {
   setCqrsOutboxBridge,
   buildFileScopedTokenFetcher,
@@ -909,6 +910,18 @@ export function ProjectWorkspace() {
   }, [activeFileId, cellStore, cellStoreVersion, localFileProgress, project?.id])
   const getActiveCells = useCallback(() => cellStore.getAllCellViews(), [cellStore])
   const getActiveCell = useCallback((cellId: string) => cellStore.getCellView(cellId), [cellStore])
+
+  // FRO-IMPORT-OPT: when the active file's queued target commits finish draining
+  // to the server, do ONE soft refetch to reconcile the read model and clear the
+  // optimistic shadows an import left behind (no per-cell fan-out).
+  const activeFilePendingCommits = useMemo(
+    () =>
+      outboxRecords.filter(
+        (r) => r.event.fileId === activeFileId && r.event.kind === "target.cell.commit",
+      ).length,
+    [outboxRecords, activeFileId],
+  )
+  useReconcileOnDrain(activeFilePendingCommits, revalidateCells)
 
   // QA-BUG-1: zero-file self-heal for live-linked projects. The lazy-pull
   // trigger in useStaleSourceCells only fires once a FILE is open — a

@@ -6,8 +6,7 @@ interface ChecklistItemProps {
   /** Short, human-friendly explanation of WHY the user does this step. */
   description?: string
   complete: boolean
-  /** When true, the item starts expanded regardless of `complete`. Useful
-   *  for the first incomplete step in a freshly-opened drawer. */
+  /** When true, the item starts expanded on first mount. */
   defaultOpen?: boolean
   children: React.ReactNode
 }
@@ -28,7 +27,7 @@ export function ChecklistItem({
   defaultOpen,
   children,
 }: ChecklistItemProps) {
-  const [open, setOpen] = useState(defaultOpen ?? !complete)
+  const [open, setOpen] = useState(defaultOpen ?? false)
   const prevComplete = useRef(complete)
 
   useEffect(() => {

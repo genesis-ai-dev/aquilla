@@ -2140,18 +2140,22 @@ export function ProjectWorkspace() {
   const perms = useProjectPermissions(project)
   const isReadOnly = !perms.canEditContent
 
-  const { state: checklistState, dismissed: checklistDismissed, dismiss: dismissChecklist, refreshShares: refreshChecklistShares, shouldAutoOpen: checklistShouldAutoOpen, markAutoShown: markChecklistAutoShown } = useSetupChecklist(project ?? null)
+  const { state: checklistState, dismissed: checklistDismissed, dismiss: dismissChecklist, refreshShares: refreshChecklistShares } = useSetupChecklist(project ?? null)
   const [checklistOpen, setChecklistOpen] = useState(false)
   const [showChipTooltip, setShowChipTooltip] = useState(false)
 
-  // FRO-244: Auto-open the setup checklist once per project when the checklist
-  // is incomplete and has never been shown. markChecklistAutoShown() records the
-  // shown-once flag so subsequent visits / project switches don't re-nag.
+  // Open setup once only when onboarding explicitly lands in the new project.
+  // Ordinary project visits, refreshes, and collaborators opening the same
+  // project should not auto-open the drawer.
   useEffect(() => {
-    if (!checklistShouldAutoOpen) return
+    const routeState = location.state as { openSetupChecklist?: boolean } | null
+    if (!routeState?.openSetupChecklist) return
     setChecklistOpen(true)
-    markChecklistAutoShown()
-  }, [checklistShouldAutoOpen, markChecklistAutoShown])
+    navigate(`${location.pathname}${location.search}${location.hash}`, {
+      replace: true,
+      state: null,
+    })
+  }, [location.hash, location.pathname, location.search, location.state, navigate])
 
   const handleChecklistOpenChange = useCallback((next: boolean) => {
     setChecklistOpen(next)

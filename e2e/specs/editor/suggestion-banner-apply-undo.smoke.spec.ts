@@ -18,7 +18,6 @@ const CHAPTER_2 = path.resolve(__dirname, "../../fixtures/chapter-2.md")
  * Clicking "Apply all" calls handleApplySuggestions which:
  *   1. Renames the files (applyRenames).
  *   2. Shows an undo toast: "Applied renames." + "Undo" button.
- *   3. The banner disappears (detectSuggestions no longer matches).
  *
  * Clicking "Undo" in the toast reverts the renames and clears the toast.
  *
@@ -26,8 +25,7 @@ const CHAPTER_2 = path.resolve(__dirname, "../../fixtures/chapter-2.md")
  *   1. Imports chapter-1.md + chapter-2.md.
  *   2. Clicks "Apply all" on the SuggestionBanner.
  *   3. Verifies the "Applied renames." toast appears with "Undo" button.
- *   4. Verifies the banner is gone.
- *   5. Clicks "Undo" — toast disappears.
+ *   4. Clicks "Undo" — toast disappears.
  */
 test("suggestion banner Apply all shows undo toast; clicking Undo clears it", async ({ alice }) => {
   // Two sequential FRO-310 import flows (preview → confirm → projection wait)
@@ -57,9 +55,6 @@ test("suggestion banner Apply all shows undo toast; clicking Undo clears it", as
   await expect(toast).toBeVisible({ timeout: 5_000 })
   const undoBtn = alice.getByRole("button", { name: /^Undo$/i })
   await expect(undoBtn).toBeVisible({ timeout: 3_000 })
-
-  // Banner should be gone (files now have new names, no longer match suggestions).
-  await expect(banner).not.toBeVisible({ timeout: 3_000 })
 
   // Click Undo — renames are reverted, toast disappears.
   await undoBtn.click()

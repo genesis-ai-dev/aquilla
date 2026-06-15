@@ -28,11 +28,10 @@ export class Workspace {
     // Retry once: right after a previous import, header re-renders can
     // swallow the click (the button is replaced mid-press), leaving no
     // dialog open and the next locator hanging for the full test budget.
-    const importBtn = this.page.getByRole("button", { name: /^Import$/i })
     const uploadCard = this.page.getByText("Upload Files")
-    await importBtn.click()
+    await this.openImportDialog()
     if (!(await uploadCard.isVisible({ timeout: 3_000 }).catch(() => false))) {
-      await importBtn.click()
+      await this.openImportDialog()
     }
     // Navigate to the Upload Files panel by clicking its card.
     await uploadCard.click()
@@ -60,6 +59,22 @@ export class Workspace {
     await expect(
       this.page.locator("aside").locator('button[aria-label="File actions"]').first(),
     ).toBeVisible({ timeout: 15_000 })
+  }
+
+  private async openImportDialog(): Promise<void> {
+    const banner = this.page.getByRole("banner")
+    const moreActionsBtn = banner.getByRole("button", { name: /More actions/i })
+    if (await moreActionsBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      await moreActionsBtn.click()
+      const importBtn = this.page.getByRole("button", { name: /^Import$/i }).filter({ visible: true }).last()
+      await expect(importBtn).toBeVisible({ timeout: 5_000 })
+      await importBtn.click()
+      return
+    }
+
+    const directImportBtn = this.page.getByRole("button", { name: /^Import$/i }).filter({ visible: true }).first()
+    await expect(directImportBtn).toBeVisible({ timeout: 10_000 })
+    await directImportBtn.click()
   }
 
   /** Click a file row in the sidebar, identified by a substring of its name. */
@@ -131,18 +146,26 @@ export class Workspace {
     // opacity: 0 when not hovered/focused, which makes them invisible to
     // Playwright's toBeVisible() check).
     await row.hover()
-    const validationButton = row.locator("button[title*='Health']").first()
+    const validationButton = row.getByRole("button", { name: /Validate|Validated/i }).first()
     await expect(validationButton).toBeVisible({ timeout: 10_000 })
-    // Focus then Space to avoid hover-triggered popover competing with the press.
-    await validationButton.focus()
-    await this.page.keyboard.press("Space")
-    // After validation, the button title changes to "— validated". This is a
-    // server-round-trip (IDB → sync-worker → D1 → push back). Check the title
-    // instead of the CSS class because: (a) the CellActionRail might have
-    // opacity:0 if focus moved away, and (b) title is visible even when the
-    // rail is collapsed (it still passes toBeVisible since the button is in DOM).
-    // Wait longer to accommodate the sync round-trip under load.
-    await expect(validationButton).toHaveAttribute("title", /validated/, { timeout: 15_000 })
+    // After validation, the validation button reports the current user's
+    // validation through aria-pressed. This is a server-round-trip
+    // (IDB → sync-worker → D1 → push back). Check ARIA state instead of CSS
+    // because the CellActionRail might have opacity:0 if focus moved away.
+    // Retry the keyboard press under full-suite load; occasionally the first
+    // focus/Space pair races with the hover-triggered popover and is ignored.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if ((await validationButton.getAttribute("aria-pressed")) === "true") return
+      await row.hover()
+      await validationButton.focus()
+      await this.page.keyboard.press("Space")
+      try {
+        await expect(validationButton).toHaveAttribute("aria-pressed", "true", { timeout: 5_000 })
+        return
+      } catch (err) {
+        if (attempt === 2) throw err
+      }
+    }
   }
 
   /** Open the workspace header ⋯ overflow menu (OverflowMenu). */
@@ -158,10 +181,13 @@ export class Workspace {
     await this.page.getByRole("menuitem", { name: /View settings/i }).click()
   }
 
-  /** FRO-331: export file action lives in the header overflow menu. */
+  /** Export lives in the primary action dropdown. */
   async openExportDialog(): Promise<void> {
-    await this.openHeaderOverflowMenu()
-    await this.page.getByRole("menuitem", { name: /Export file/i }).click()
+    const banner = this.page.getByRole("banner")
+    const moreActionsBtn = banner.getByRole("button", { name: /More actions/i })
+    await expect(moreActionsBtn).toBeVisible({ timeout: 10_000 })
+    await moreActionsBtn.click()
+    await this.page.getByRole("button", { name: /^Export$/i }).click()
   }
 
   /** FRO-331: next unfinished lives in the header overflow menu. */

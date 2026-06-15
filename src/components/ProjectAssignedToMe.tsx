@@ -11,6 +11,7 @@
 import { useEffect, useState, useCallback } from "react"
 import { ChevronDown, ChevronRight, ClipboardList } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { getMyAssignments, type MyAssignment } from "@/lib/sync/assignments"
 import { cn } from "@/lib/utils"
 
@@ -86,29 +87,29 @@ export function ProjectAssignedToMe({
             assignments.map((a) => {
               const pct = a.cellsTotal > 0 ? Math.round((a.cellsDone / a.cellsTotal) * 100) : 0
               return (
-                <button
-                  key={a.assignmentId}
-                  type="button"
-                  onClick={() => handleRowClick(a)}
-                  className={cn(
-                    "group w-full rounded px-2 py-1.5 text-left transition-colors hover:bg-muted/60",
-                    !onJumpToScopeLabel && "cursor-default",
-                  )}
-                  title={`Jump to ${a.scopeLabel}${a.note ? ` — ${a.note}` : ""}`}
-                >
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="truncate text-xs font-medium leading-tight">{a.scopeLabel}</span>
-                    <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">{pct}%</span>
-                  </div>
-                  {/* Progress bar */}
-                  <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted">
-                    <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${pct}%` }} />
-                  </div>
-                  <p className="mt-0.5 text-[10px] text-muted-foreground">
-                    {a.cellsDone}/{a.cellsTotal} cells
-                    {a.deadline ? ` · Due ${a.deadline}` : ""}
-                  </p>
-                </button>
+                <AppTooltip key={a.assignmentId} content={`Jump to ${a.scopeLabel}${a.note ? `: ${a.note}` : ""}`}>
+                  <button
+                    type="button"
+                    onClick={() => handleRowClick(a)}
+                    className={cn(
+                      "group w-full rounded px-2 py-1.5 text-left transition-colors hover:bg-muted/60",
+                      !onJumpToScopeLabel && "cursor-default",
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="truncate text-xs font-medium leading-tight">{a.scopeLabel}</span>
+                      <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">{pct}%</span>
+                    </div>
+                    {/* Progress bar */}
+                    <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted">
+                      <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${pct}%` }} />
+                    </div>
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">
+                      {a.cellsDone}/{a.cellsTotal} cells
+                      {a.deadline ? ` · Due ${a.deadline}` : ""}
+                    </p>
+                  </button>
+                </AppTooltip>
               )
             })
           )}

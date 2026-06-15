@@ -43,7 +43,7 @@ test.skip("More actions menu History item opens the history drawer", async ({ al
   await row.hover()
 
   // Click the "More actions" button (CellActionsMenu trigger).
-  const moreBtn = row.locator('button[aria-label="More actions"], button[title="More actions"]').first()
+  const moreBtn = row.locator('button[aria-label="More actions"]').first()
   await expect(moreBtn).toBeVisible({ timeout: 8_000 })
   await moreBtn.click()
 

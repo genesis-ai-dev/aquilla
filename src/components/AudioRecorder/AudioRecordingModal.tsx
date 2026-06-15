@@ -12,6 +12,7 @@ import { ChevronLeft, ChevronRight, Mic, Play, Square, X, Volume2, VolumeX, Refr
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useAudioRecorder } from "@/hooks/useAudioRecorder"
@@ -363,22 +364,26 @@ export function AudioRecordingModal({
             </div>
           </div>
           <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => setBeepEnabled((v) => !v)}
-              title={beepEnabled ? "Mute countdown beep" : "Enable countdown beep"}
-              className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground/60 hover:bg-muted hover:text-foreground"
-            >
-              {beepEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              title="Close (Esc)"
-              className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground/60 hover:bg-muted hover:text-foreground"
-            >
-              <X className="h-4 w-4" />
-            </button>
+            <AppTooltip content={beepEnabled ? "Mute countdown beep" : "Enable countdown beep"}>
+              <button
+                type="button"
+                onClick={() => setBeepEnabled((v) => !v)}
+                aria-label={beepEnabled ? "Mute countdown beep" : "Enable countdown beep"}
+                className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+              >
+                {beepEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+              </button>
+            </AppTooltip>
+            <AppTooltip content="Close (Esc)">
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close"
+                className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </AppTooltip>
           </div>
         </div>
 

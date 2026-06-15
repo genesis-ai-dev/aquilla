@@ -55,7 +55,7 @@ test("bob can reply to alice's comment in a shared project", async ({ alice, bob
   await row.hover()
 
   // Open cell action menu to find Add Comment.
-  const commentBtn = row.locator("button[aria-label*='comment' i], button[title*='comment' i]").first()
+  const commentBtn = row.locator("button[aria-label*='comment' i]").first()
   if (await commentBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
     await commentBtn.click()
   } else {

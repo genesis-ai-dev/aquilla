@@ -2,6 +2,7 @@ import { GitBranch, MoreVertical, PauseCircle, Trash2, Undo2 } from "lucide-reac
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { MembershipAvatars } from "./MembershipAvatars"
 import { HealthRing } from "./HealthRing"
@@ -112,22 +113,22 @@ export function ProjectCard({
               </HealthRing>
             )}
             {!isTrashed && isInactive && (
-              <span
-                className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 px-2 py-0.5 text-[10px] font-medium"
-                title="This project is inactive and cannot be edited until reactivated"
-                data-testid="inactive-badge"
-              >
-                <PauseCircle className="h-3 w-3" aria-hidden />
-                Inactive
-              </span>
+              <AppTooltip content="This project is inactive and cannot be edited until reactivated">
+                <span
+                  className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 px-2 py-0.5 text-[10px] font-medium"
+                  data-testid="inactive-badge"
+                >
+                  <PauseCircle className="h-3 w-3" aria-hidden />
+                  Inactive
+                </span>
+              </AppTooltip>
             )}
             {!isTrashed && myRoleLabel && (
-              <span
-                className="inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-medium capitalize"
-                title="Your role on this project"
-              >
-                {myRoleLabel.replace(/_/g, " ")}
-              </span>
+              <AppTooltip content="Your role on this project">
+                <span className="inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-medium capitalize">
+                  {myRoleLabel.replace(/_/g, " ")}
+                </span>
+              </AppTooltip>
             )}
             {isGit && (
               <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-neu-inset">

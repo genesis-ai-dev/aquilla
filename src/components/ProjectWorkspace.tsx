@@ -126,7 +126,7 @@ import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
 import { CompletionBulkProgressBanner } from "./CompletionBulkProgressBanner"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { AppTooltip, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
 import { AiSetupDialog } from "./AiSetupDialog"
 import {
@@ -2947,15 +2947,16 @@ export function ProjectWorkspace() {
       <AppShell
         logoAccessory={
           dockTab !== null ? (
-            <button
-              type="button"
-              title="Collapse sidebar"
-              aria-label="Collapse sidebar"
-              onClick={() => setDockTab(null)}
-              className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
-            >
-              <PanelLeftClose className="h-3.5 w-3.5" />
-            </button>
+            <AppTooltip content="Collapse sidebar" side="right">
+              <button
+                type="button"
+                aria-label="Collapse sidebar"
+                onClick={() => setDockTab(null)}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+              >
+                <PanelLeftClose className="h-3.5 w-3.5" />
+              </button>
+            </AppTooltip>
           ) : null
         }
         leftDock={
@@ -3031,7 +3032,6 @@ export function ProjectWorkspace() {
                             <button
                               onClick={() => { setShowChipTooltip(false); setChecklistOpen(true) }}
                               className="mb-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-                              title="Open setup checklist"
                             />
                           }
                         >
@@ -3822,22 +3822,24 @@ export function ProjectWorkspace() {
             {deletedFiles.map((f) => (
               <div key={f.fileId} className="flex items-center gap-2 rounded px-1 py-1 text-sm hover:bg-accent">
                 <span className="flex-1 truncate text-muted-foreground">{f.name}</span>
-                <button
-                  type="button"
-                  className="shrink-0 rounded px-1.5 py-0.5 text-xs hover:bg-muted"
-                  title="Restore file — cells and audio come back intact"
-                  onClick={() => void handleRestoreFile(f.fileId)}
-                >
-                  Restore
-                </button>
-                <button
-                  type="button"
-                  className="shrink-0 rounded px-1.5 py-0.5 text-xs text-destructive hover:bg-destructive/10"
-                  title="Delete forever — permanently wipes R2 media"
-                  onClick={() => void handlePurgeFile(f.fileId)}
-                >
-                  Delete forever
-                </button>
+                <AppTooltip content="Cells and audio come back intact">
+                  <button
+                    type="button"
+                    className="shrink-0 rounded px-1.5 py-0.5 text-xs hover:bg-muted"
+                    onClick={() => void handleRestoreFile(f.fileId)}
+                  >
+                    Restore
+                  </button>
+                </AppTooltip>
+                <AppTooltip content="Permanently wipes R2 media" className="max-w-xs">
+                  <button
+                    type="button"
+                    className="shrink-0 rounded px-1.5 py-0.5 text-xs text-destructive hover:bg-destructive/10"
+                    onClick={() => void handlePurgeFile(f.fileId)}
+                  >
+                    Delete forever
+                  </button>
+                </AppTooltip>
               </div>
             ))}
             <p className="px-1 pt-2 text-xs leading-snug text-muted-foreground">

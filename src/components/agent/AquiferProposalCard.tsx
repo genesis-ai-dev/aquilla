@@ -9,6 +9,7 @@
 
 import { useState } from "react"
 import { Book, Check, ExternalLink, Loader2 } from "lucide-react"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -92,17 +93,17 @@ export function AquiferProposalCard({ proposal, projectId, jwt }: AquiferProposa
       {proposal.citations.length > 0 && (
         <div className="space-y-0.5">
           {proposal.citations.map((c, i) => (
-            <a
-              key={`${proposal.proposalId}-cite-${i}`}
-              href={c.url}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-1 truncate text-[10px] text-muted-foreground hover:text-foreground"
-              title={c.url}
-            >
-              <ExternalLink className="h-2.5 w-2.5 shrink-0" />
-              <span className="truncate">{c.title || c.url}</span>
-            </a>
+            <AppTooltip key={`${proposal.proposalId}-cite-${i}`} content={c.url}>
+              <a
+                href={c.url}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1 truncate text-[10px] text-muted-foreground hover:text-foreground"
+              >
+                <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+                <span className="truncate">{c.title || c.url}</span>
+              </a>
+            </AppTooltip>
           ))}
         </div>
       )}
@@ -117,16 +118,17 @@ export function AquiferProposalCard({ proposal, projectId, jwt }: AquiferProposa
             <Check className="h-3 w-3" /> Published
           </div>
           {publishedUrl && (
-            <a
-              href={publishedUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-1 truncate font-normal text-muted-foreground hover:text-foreground"
-              title={publishedUrl}
-            >
-              <ExternalLink className="h-2.5 w-2.5 shrink-0" />
-              <span className="truncate">{publishedUrl}</span>
-            </a>
+            <AppTooltip content={publishedUrl}>
+              <a
+                href={publishedUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1 truncate font-normal text-muted-foreground hover:text-foreground"
+              >
+                <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+                <span className="truncate">{publishedUrl}</span>
+              </a>
+            </AppTooltip>
           )}
         </div>
       ) : (

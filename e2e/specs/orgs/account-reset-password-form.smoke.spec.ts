@@ -19,7 +19,7 @@ test("forgot password form enables send button on valid email input", async ({ a
   await alice.waitForLoadState("networkidle")
 
   // Open account switcher and trigger "Add another account".
-  const accountBtn = alice.getByRole("button", { name: /alice/i }).first()
+  const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
   await expect(accountBtn).toBeVisible({ timeout: 10_000 })
   await accountBtn.click()
 

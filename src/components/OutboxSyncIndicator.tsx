@@ -74,7 +74,7 @@ const ChipButton = forwardRef<HTMLButtonElement, ChipProps>(function ChipButton(
     <button
       ref={ref}
       type="button"
-      title={title}
+      aria-label={title}
       className={cn(
         "rounded-full px-2 py-0.5 text-xs tabular-nums transition-all",
         "hover:bg-card hover:shadow-neu-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",

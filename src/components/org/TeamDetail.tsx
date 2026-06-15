@@ -4,6 +4,7 @@ import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
@@ -292,14 +293,15 @@ export function TeamDetail() {
                   <div className="flex items-center gap-1.5">
                     <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Members</h2>
                     {/* "?" tooltip summarising all access levels — hover or focus to read */}
-                    <span
-                      className="inline-flex items-center justify-center rounded-full border w-4 h-4 text-[10px] leading-none text-muted-foreground cursor-help"
-                      title={Object.values(ROLE_DESCRIPTIONS).join("\n")}
-                      aria-label="Access level definitions"
-                      tabIndex={0}
-                    >
-                      ?
-                    </span>
+                    <AppTooltip content={Object.values(ROLE_DESCRIPTIONS).join("\n")} className="max-w-xs">
+                      <span
+                        className="inline-flex items-center justify-center rounded-full border w-4 h-4 text-[10px] leading-none text-muted-foreground cursor-help"
+                        aria-label="Access level definitions"
+                        tabIndex={0}
+                      >
+                        ?
+                      </span>
+                    </AppTooltip>
                   </div>
                   {isAdmin && !addingMember && (
                     <button
@@ -381,17 +383,18 @@ export function TeamDetail() {
                             </Select>
                           ) : (
                             /* Non-owners see a read-only label with a tooltip explaining the role */
-                            <span
-                              className="text-xs text-muted-foreground cursor-help"
-                              title={m.roleLevel != null ? ROLE_DESCRIPTIONS[m.roleLevel] : "Unknown role"}
-                              aria-label={m.roleLevel != null ? `Role: ${ROLE_OPTIONS.find((r) => r.level === m.roleLevel)?.name ?? `level ${m.roleLevel}`}` : "Role unknown"}
-                            >
-                              {m.roleLevel != null
-                                ? (ROLE_OPTIONS.find((r) => r.level === m.roleLevel)?.name ?? `Level ${m.roleLevel}`)
-                                : "—"}
-                              {" "}
-                              <span className="inline-flex items-center justify-center rounded-full border w-3.5 h-3.5 text-[10px] leading-none text-muted-foreground" aria-hidden="true">?</span>
-                            </span>
+                            <AppTooltip content={m.roleLevel != null ? ROLE_DESCRIPTIONS[m.roleLevel] : "Unknown role"} className="max-w-xs">
+                              <span
+                                className="text-xs text-muted-foreground cursor-help"
+                                aria-label={m.roleLevel != null ? `Role: ${ROLE_OPTIONS.find((r) => r.level === m.roleLevel)?.name ?? `level ${m.roleLevel}`}` : "Role unknown"}
+                              >
+                                {m.roleLevel != null
+                                  ? (ROLE_OPTIONS.find((r) => r.level === m.roleLevel)?.name ?? `Level ${m.roleLevel}`)
+                                  : "—"}
+                                {" "}
+                                <span className="inline-flex items-center justify-center rounded-full border w-3.5 h-3.5 text-[10px] leading-none text-muted-foreground" aria-hidden="true">?</span>
+                              </span>
+                            </AppTooltip>
                           )}
                           {isAdmin && (
                             <button

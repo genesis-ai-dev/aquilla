@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { AppTooltip } from "@/components/ui/tooltip";
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -137,9 +138,11 @@ export function MembersPanel({
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 ) : (
-                  <span className="text-[10px] text-muted-foreground" title={m.lockedHint}>
-                    {m.lockedHint ?? ""}
-                  </span>
+                  <AppTooltip content={m.lockedHint}>
+                    <span className="text-[10px] text-muted-foreground">
+                      {m.lockedHint ?? ""}
+                    </span>
+                  </AppTooltip>
                 )}
               </div>
             </li>
@@ -197,20 +200,23 @@ function LastActiveChip({ lastActiveAt }: { lastActiveAt: string | null | undefi
   if (!label) return null;
   const stale = isStale(lastActiveAt);
   return (
-    <span
-      className={`rounded px-1.5 py-0.5 text-[10px] ${
+    <AppTooltip
+      content={
         stale
-          ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-          : "bg-muted text-muted-foreground"
-      }`}
-      title={
-        stale
-          ? "No recent activity — consider whether this membership is still needed"
+          ? "No recent activity; consider whether this membership is still needed"
           : "Last project-context activity in this org"
       }
     >
-      {stale ? "stale · " : ""}
-      {label}
-    </span>
+      <span
+        className={`rounded px-1.5 py-0.5 text-[10px] ${
+          stale
+            ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+            : "bg-muted text-muted-foreground"
+        }`}
+      >
+        {stale ? "stale · " : ""}
+        {label}
+      </span>
+    </AppTooltip>
   );
 }

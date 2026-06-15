@@ -1,5 +1,6 @@
 import { Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 export function SparkleButton({ disabled, loading, onComplete, onDragStart, onDragEnter, tooltip, onSetupNeeded }: {
   disabled?: boolean; loading?: boolean; onComplete: () => void
@@ -10,7 +11,7 @@ export function SparkleButton({ disabled, loading, onComplete, onDragStart, onDr
   // If a setup handler is provided, the button intercepts disabled clicks — don't use native disabled.
   const nativeDisabled = disabled && !onSetupNeeded
 
-  return (
+  const button = (
     <button
       className={cn(
         "flex h-5 w-5 items-center justify-center rounded transition-colors",
@@ -22,7 +23,6 @@ export function SparkleButton({ disabled, loading, onComplete, onDragStart, onDr
         loading && "animate-pulse text-primary"
       )}
       disabled={nativeDisabled}
-      title={tooltip}
       onClick={(e) => {
         e.stopPropagation()
         if (loading) return
@@ -34,5 +34,15 @@ export function SparkleButton({ disabled, loading, onComplete, onDragStart, onDr
     >
       <Sparkles className="h-3 w-3" />
     </button>
+  )
+
+  if (!tooltip) return button
+
+  return (
+    <AppTooltip content={tooltip}>
+      <span className="inline-flex">
+        {button}
+      </span>
+    </AppTooltip>
   )
 }

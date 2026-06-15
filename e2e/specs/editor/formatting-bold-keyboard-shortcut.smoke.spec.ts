@@ -1,6 +1,7 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
+import { editorShortcut, selectEditorContents } from "../../helpers/editor-selection"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -40,14 +41,14 @@ test("formatting bold keyboard shortcut (Ctrl+B) toggles bold mark", async ({ al
   await alice.keyboard.insertText("keyboard bold test")
 
   // Select all text in this editor.
-  await alice.keyboard.press("Control+A")
+  await selectEditorContents(translationArea)
 
   // The bubble menu should appear. Wait for Bold button.
-  const boldBtn = alice.locator('button[title="Bold (Cmd+B)"]')
+  const boldBtn = alice.getByRole("button", { name: "Bold" })
   await expect(boldBtn).toBeVisible({ timeout: 5_000 })
 
   // Press Ctrl+B (keyboard shortcut — distinct from clicking the button).
-  await alice.keyboard.press("Control+B")
+  await alice.keyboard.press(editorShortcut("B"))
 
   // The Bold button should now show active state.
   await expect(boldBtn).toHaveClass(/bg-accent/, { timeout: 3_000 })

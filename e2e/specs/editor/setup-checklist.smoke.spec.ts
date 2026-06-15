@@ -29,7 +29,7 @@ test("setup checklist chip opens drawer with Project setup title", async ({ alic
   await ws.waitForEditor()
 
   // The "Setup: 0/N" chip appears in the workspace header.
-  const chip = alice.locator('[title="Open setup checklist"]')
+  const chip = alice.getByRole("button", { name: /Setup:/i })
   await expect(chip).toBeVisible({ timeout: 10_000 })
   await chip.click()
 

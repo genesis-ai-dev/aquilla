@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import { X } from "lucide-react"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { looksLikeUuid } from "@/lib/uuid"
 import type { WorkspaceTab } from "@/hooks/useWorkspaceTabs"
@@ -66,17 +67,18 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
                 : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
             )}
           >
-            <button
-              type="button"
-              onClick={() => onActivate(tab.id)}
-              className="flex max-w-[200px] items-center gap-1.5 truncate text-left"
-              title={sectionLabel ? `${name} · ${sectionLabel}` : name}
-            >
-              <span className="truncate font-medium">{name}</span>
-              {sectionLabel && (
-                <span className="truncate text-muted-foreground/80">· {sectionLabel}</span>
-              )}
-            </button>
+            <AppTooltip content={sectionLabel ? `${name} · ${sectionLabel}` : name}>
+              <button
+                type="button"
+                onClick={() => onActivate(tab.id)}
+                className="flex max-w-[200px] items-center gap-1.5 truncate text-left"
+              >
+                <span className="truncate font-medium">{name}</span>
+                {sectionLabel && (
+                  <span className="truncate text-muted-foreground/80">· {sectionLabel}</span>
+                )}
+              </button>
+            </AppTooltip>
             <button
               type="button"
               onClick={(e) => {

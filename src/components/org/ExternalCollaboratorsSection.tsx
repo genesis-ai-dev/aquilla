@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { ShieldOff, UserX } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchOrgMembersMatrix, removeProjectMember } from "@/lib/frontier/members"
 import { fetchAccessibleProjects } from "@/lib/sync/cloud-projects"
@@ -114,16 +115,18 @@ export function ExternalCollaboratorsSection({
                       <ShieldOff className="h-3 w-3" />
                     </Button>
                   ) : (
-                    <span
-                      className="text-[10px] text-muted-foreground"
-                      title={
+                    <AppTooltip
+                      content={
                         g.source === "group"
-                          ? "Access via a team — detach the team or remove them from it to revoke"
+                          ? "Access via a team: detach the team or remove them from it to revoke"
                           : "Project creator"
                       }
+                      className="max-w-xs"
                     >
-                      via {g.source}
-                    </span>
+                      <span className="text-[10px] text-muted-foreground">
+                        via {g.source}
+                      </span>
+                    </AppTooltip>
                   )}
                 </span>
               ))}

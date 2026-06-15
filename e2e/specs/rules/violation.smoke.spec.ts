@@ -13,8 +13,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * The "double-space" check has display name "Extra whitespace" (per
  * src/lib/lqa/builtin-registry.ts). The rules page uses an `aria-label`
  * of `${def.name} enabled` for each toggle. A cell with violations
- * renders an indicator dot with `aria-label` matching `/\d+ issue/`
- * (per EditorTable.tsx).
+ * tints the cell number pill amber/red as the single issue surface.
  */
 // Fixed: use keyboard.insertText() instead of keyboard.type() for the
 // double-space cell text — insertText dispatches a single input event
@@ -54,10 +53,9 @@ test("alice enables 'Extra whitespace' rule and sees a violation surfaced in edi
   await editable.click()
   await alice.keyboard.insertText("this  has  double  spaces") // intentional doubles
   await alice.locator("aside").click() // blur
+  await alice.waitForTimeout(2_000)
 
-  // The cell should surface an issue indicator (the small colored dot
-  // with aria-label "N issue(s) (severity)").
-  await expect(
-    ws.cellRow(0).locator('[aria-label*="issue"]').first(),
-  ).toBeVisible({ timeout: 10_000 })
+  // The cell number is the issue surface and tints amber for minor infractions.
+  const linePill = ws.cellRow(0).locator('[aria-label="Line 1"] span').first()
+  await expect(linePill).toHaveClass(/text-amber-600/, { timeout: 10_000 })
 })

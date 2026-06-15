@@ -177,6 +177,7 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
           !isHeader && "w-full",
           isHeader && "h-9",
         )}
+        aria-label={`Account menu: ${active.username}`}
         onClick={() => setOpen((v) => !v)}
       >
         <div

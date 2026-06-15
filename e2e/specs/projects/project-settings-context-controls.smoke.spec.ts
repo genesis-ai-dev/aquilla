@@ -9,7 +9,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * (Base UI select triggers + checkbox):
  *   - #context-size select: Small | Medium (default) | Large
  *   - #few-shot-example-format select: "Source + target (default)" | "Target only"
- *   - #validated-only checkbox (unchecked by default)
+ *   - "Validated examples only" checkbox (unchecked by default)
  *
  * Each change marks the form dirty ("Save changes" button appears).
  *
@@ -48,8 +48,8 @@ test("project settings AI context controls mark form dirty", async ({ alice }) =
   await pickSelectOption(alice, fewShotSelect, "Target only")
   await expectSelectValue(fewShotSelect, "Target only")
 
-  // #validated-only checkbox — toggle it on.
-  const validatedOnlyChk = alice.locator("#validated-only")
+  // "Validated examples only" checkbox — toggle it on.
+  const validatedOnlyChk = alice.getByRole("checkbox", { name: "Validated examples only" })
   await expect(validatedOnlyChk).toBeVisible({ timeout: 3_000 })
   const wasChecked = await validatedOnlyChk.isChecked()
   await validatedOnlyChk.setChecked(!wasChecked)

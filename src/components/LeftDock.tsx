@@ -33,6 +33,7 @@ import { cn } from "@/lib/utils"
 import { ReportProblemButton } from "@/components/ReportProblemButton/ReportProblemButton"
 import { VersionTag } from "@/components/VersionBadge"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -97,11 +98,10 @@ function TabRail({ activeTab, chatBadge, onTabClick, orientation }: TabRailProps
     >
       {TAB_META.map(({ id, icon: Icon, label }) => {
         const isActive = activeTab === id
-        return (
+        const button = (
           <button
             key={id}
             type="button"
-            title={label}
             aria-label={label}
             aria-pressed={isActive}
             onClick={() => onTabClick(id)}
@@ -138,6 +138,13 @@ function TabRail({ activeTab, chatBadge, onTabClick, orientation }: TabRailProps
               </span>
             )}
           </button>
+        )
+        return isTop ? (
+          button
+        ) : (
+          <AppTooltip key={id} content={label} side="right">
+            {button}
+          </AppTooltip>
         )
       })}
     </div>
@@ -250,27 +257,29 @@ export function LeftDock({
   // AppShell's logoAccessory slot. The dock only renders the EXPAND affordance
   // on the collapsed 40px icon strip.
   const expandButton = (
-    <button
-      type="button"
-      title="Expand sidebar"
-      aria-label="Expand sidebar"
-      onClick={() => setActiveTab("files")}
-      className="mt-1 flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
-    >
-      <PanelLeftOpen className="h-3.5 w-3.5" />
-    </button>
+    <AppTooltip content="Expand sidebar" side="right">
+      <button
+        type="button"
+        aria-label="Expand sidebar"
+        onClick={() => setActiveTab("files")}
+        className="mt-1 flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+      >
+        <PanelLeftOpen className="h-3.5 w-3.5" />
+      </button>
+    </AppTooltip>
   )
 
   const resizeHandle = (
-    <div
-      onMouseDown={handleDragStart}
-      className={cn(
-        "absolute right-0 top-0 h-full w-1 cursor-col-resize",
-        "z-10 transition-colors hover:bg-primary/30 active:bg-primary/50",
-      )}
-      aria-hidden
-      title="Drag to resize"
-    />
+    <AppTooltip content="Drag to resize" side="right">
+      <div
+        onMouseDown={handleDragStart}
+        className={cn(
+          "absolute right-0 top-0 h-full w-1 cursor-col-resize",
+          "z-10 transition-colors hover:bg-primary/30 active:bg-primary/50",
+        )}
+        aria-hidden
+      />
+    </AppTooltip>
   )
 
   return (

@@ -1,6 +1,7 @@
 import { useCallback } from "react"
 import { NavLink } from "react-router-dom"
 import { Map } from "lucide-react"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { useActiveOrg } from "@/context/OrgContext"
 import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
 import { OrgSwitcher } from "./OrgSwitcher"
@@ -46,15 +47,16 @@ export function OrgSidebar() {
       </nav>
       <div className="mt-auto pt-2 border-t flex flex-col gap-1">
         {/* FRO-243: Re-launch product tour */}
-        <button
-          type="button"
-          onClick={handleTour}
-          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground transition-colors"
-          title="Take the product tour"
-        >
-          <Map className="h-3.5 w-3.5" aria-hidden />
-          Take the tour
-        </button>
+        <AppTooltip content="Take the product tour">
+          <button
+            type="button"
+            onClick={handleTour}
+            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground transition-colors"
+          >
+            <Map className="h-3.5 w-3.5" aria-hidden />
+            Take the tour
+          </button>
+        </AppTooltip>
         <div data-tour="account-switcher">
           <AccountSwitcher variant="sidebar" />
         </div>

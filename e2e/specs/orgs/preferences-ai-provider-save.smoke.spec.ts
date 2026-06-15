@@ -21,7 +21,7 @@ test("preferences AI provider Save override button enables when endpoint is fill
   await alice.waitForLoadState("networkidle")
 
   // Expand the personal provider section.
-  const toggleBtn = alice.locator('[aria-expanded]').first()
+  const toggleBtn = alice.locator("button[aria-expanded]").filter({ hasText: /AI provider/i })
   await expect(toggleBtn).toBeVisible({ timeout: 10_000 })
   if ((await toggleBtn.getAttribute("aria-expanded")) !== "true") {
     await toggleBtn.click()

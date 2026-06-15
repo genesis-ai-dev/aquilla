@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { Check, AtSign } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
 
 export type RecipientMode = "username" | "email"
@@ -105,32 +106,38 @@ export function UsernameTypeahead({
       <div className="flex items-center gap-1.5">
         {showModeToggle && (
           <div className="inline-flex shrink-0 rounded-md border bg-muted/20 p-0.5 text-[10px]">
-            <button
-              type="button"
-              onClick={() => handleSwitchMode("username")}
-              disabled={disabled}
-              className={`rounded px-1.5 py-0.5 ${
-                value.mode === "username"
-                  ? "bg-background shadow-sm text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-              title="Invite an existing Aquilla user"
-            >
-              @user
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSwitchMode("email")}
-              disabled={disabled}
-              className={`rounded px-1.5 py-0.5 ${
-                value.mode === "email"
-                  ? "bg-background shadow-sm text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-              title="Invite by email — they'll be prompted to sign up if needed"
-            >
-              email
-            </button>
+            <AppTooltip content="Invite an existing Aquilla user">
+              <span className="inline-flex">
+                <button
+                  type="button"
+                  onClick={() => handleSwitchMode("username")}
+                  disabled={disabled}
+                  className={`rounded px-1.5 py-0.5 ${
+                    value.mode === "username"
+                      ? "bg-background shadow-sm text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  @user
+                </button>
+              </span>
+            </AppTooltip>
+            <AppTooltip content="Invite by email; they'll be prompted to sign up if needed" className="max-w-xs">
+              <span className="inline-flex">
+                <button
+                  type="button"
+                  onClick={() => handleSwitchMode("email")}
+                  disabled={disabled}
+                  className={`rounded px-1.5 py-0.5 ${
+                    value.mode === "email"
+                      ? "bg-background shadow-sm text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  email
+                </button>
+              </span>
+            </AppTooltip>
           </div>
         )}
 
@@ -152,12 +159,11 @@ export function UsernameTypeahead({
             }
           />
           {value.mode === "username" && value.resolved && (
-            <span
-              className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 text-[10px]"
-              title="Verified Aquilla user"
-            >
-              <Check className="h-3 w-3" /> verified
-            </span>
+            <AppTooltip content="Verified Aquilla user">
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 text-[10px]">
+                <Check className="h-3 w-3" /> verified
+              </span>
+            </AppTooltip>
           )}
         </div>
       </div>

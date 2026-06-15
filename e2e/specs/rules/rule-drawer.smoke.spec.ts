@@ -42,7 +42,7 @@ test("RuleDrawer opens from rules page button showing rule name", async ({ alice
   await expect(alice.getByText(ruleName).first()).toBeVisible({ timeout: 5_000 })
 
   // Click the "Opens the editor with this rule's drawer" button.
-  const openEditorBtn = alice.locator(`[title="Opens the editor with this rule's drawer"]`).first()
+  const openEditorBtn = alice.locator(`[data-tooltip="Opens the editor with this rule's drawer"]`).first()
   await expect(openEditorBtn).toBeVisible({ timeout: 5_000 })
   await openEditorBtn.click()
 
@@ -51,9 +51,10 @@ test("RuleDrawer opens from rules page button showing rule name", async ({ alice
   const drawer = alice.locator("h3").filter({ hasText: ruleName })
   await expect(drawer).toBeVisible({ timeout: 8_000 })
 
-  // The "Try to fix all" button is disabled with title="Autofix is unavailable in this build".
-  const autofixBtn = alice.locator('[title="Autofix is unavailable in this build"]').first()
-  await expect(autofixBtn).toBeVisible({ timeout: 3_000 })
+  // The disabled "Try to fix all" button sits inside the tooltip trigger wrapper.
+  const autofixTooltip = alice.locator('[data-tooltip="Autofix is unavailable in this build"]').first()
+  await expect(autofixTooltip).toBeVisible({ timeout: 3_000 })
+  const autofixBtn = autofixTooltip.getByRole("button", { name: /Try to fix all/i })
   await expect(autofixBtn).toBeDisabled()
 
   // The "Amend rule" button navigates to /rules?ruleId=...&focus=autofix.

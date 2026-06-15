@@ -1,4 +1,4 @@
-import { test } from "../../helpers/multi-user"
+import { expect, test } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import path from "node:path"
@@ -19,6 +19,17 @@ test("alice validates a cell and the indicator turns emerald", async ({ alice })
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
   await ws.editCell(0, "Test translation")
+
+  const row = ws.cellRow(0)
+  const unvalidatedButton = row.getByRole("button", { name: /Validate/i }).first()
+  await expect(unvalidatedButton).toHaveAttribute("data-slot", "tooltip-trigger")
+  await expect(unvalidatedButton).toHaveAttribute("data-tooltip", /Not validated/)
+  await expect(unvalidatedButton).not.toHaveAttribute("title", /.+/)
+  await unvalidatedButton.hover()
+  await expect(alice.locator('[data-slot="tooltip-content"]').filter({ hasText: /Not validated/ })).toBeVisible()
+
   // validateCell asserts the emerald indicator appears.
   await ws.validateCell(0)
+  const validatedButton = row.getByRole("button", { name: /Validated/i }).first()
+  await expect(validatedButton).not.toHaveAttribute("title", /.+/)
 })

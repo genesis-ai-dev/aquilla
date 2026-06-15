@@ -1,4 +1,5 @@
 import { useSectionProgress } from "@/hooks/useSectionProgress"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 interface Props {
@@ -30,32 +31,32 @@ export function FileSectionGrid({ projectId, fileId, validationCount, getTokenFo
         const completed = section.textCompleted
         const validated = section.textValidated
         return (
-          <button
-            key={section.label}
-            type="button"
-            className={cn(
-              "flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1 text-left text-[11px] transition-shadow",
-              "text-muted-foreground hover:text-foreground hover:shadow-neu-xs",
-            )}
-            onClick={() => onSectionClick(section.label)}
-            title={`${section.label} — ${completed}% translated, ${validated}% validated`}
-          >
-            <span className="flex-1 min-w-0 truncate">{section.label}</span>
-            <span className="flex items-center gap-0.5 shrink-0">
-              <span className="h-1.5 w-5 rounded-full bg-muted overflow-hidden shadow-neu-inset">
-                <span
-                  className="block h-full bg-amber-500 transition-all"
-                  style={{ width: `${completed}%` }}
-                />
+          <AppTooltip key={section.label} content={`${section.label}: ${completed}% translated, ${validated}% validated`}>
+            <button
+              type="button"
+              className={cn(
+                "flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1 text-left text-[11px] transition-shadow",
+                "text-muted-foreground hover:text-foreground hover:shadow-neu-xs",
+              )}
+              onClick={() => onSectionClick(section.label)}
+            >
+              <span className="flex-1 min-w-0 truncate">{section.label}</span>
+              <span className="flex items-center gap-0.5 shrink-0">
+                <span className="h-1.5 w-5 rounded-full bg-muted overflow-hidden shadow-neu-inset">
+                  <span
+                    className="block h-full bg-amber-500 transition-all"
+                    style={{ width: `${completed}%` }}
+                  />
+                </span>
+                <span className="h-1.5 w-5 rounded-full bg-muted overflow-hidden shadow-neu-inset">
+                  <span
+                    className="block h-full bg-emerald-500 transition-all"
+                    style={{ width: `${validated}%` }}
+                  />
+                </span>
               </span>
-              <span className="h-1.5 w-5 rounded-full bg-muted overflow-hidden shadow-neu-inset">
-                <span
-                  className="block h-full bg-emerald-500 transition-all"
-                  style={{ width: `${validated}%` }}
-                />
-              </span>
-            </span>
-          </button>
+            </button>
+          </AppTooltip>
         )
       })}
     </div>

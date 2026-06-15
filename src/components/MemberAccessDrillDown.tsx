@@ -9,6 +9,7 @@
  */
 import { X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { useMemberAccess } from "@/hooks/useMemberAccess"
 import type { ProjectAccessBreakdown } from "@/lib/frontier/orgs"
 import { roleName } from "@/lib/frontier/roles"
@@ -99,22 +100,22 @@ function ProjectRow({ breakdown }: { breakdown: ProjectAccessBreakdown }) {
   return (
     <div className="rounded-md border px-3 py-2 space-y-1">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-sm font-medium truncate" title={breakdown.projectName}>
-          {breakdown.projectName}
-        </span>
+        <AppTooltip content={breakdown.projectName}>
+          <span className="text-sm font-medium truncate">
+            {breakdown.projectName}
+          </span>
+        </AppTooltip>
         <span className="shrink-0 text-xs rounded bg-primary/10 text-primary px-1.5 py-0.5 capitalize font-medium">
           {resolvedRole}
         </span>
       </div>
       <div className="flex flex-wrap gap-1">
         {paths.map((p, i) => (
-          <span
-            key={i}
-            title={p.detail}
-            className="text-[10px] rounded bg-muted px-1.5 py-0.5 text-muted-foreground"
-          >
-            {p.label}
-          </span>
+          <AppTooltip key={i} content={p.detail}>
+            <span className="text-[10px] rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
+              {p.label}
+            </span>
+          </AppTooltip>
         ))}
       </div>
     </div>

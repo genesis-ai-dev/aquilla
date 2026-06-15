@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { useBrand } from "@/branding/use-brand"
 import { hasAuthHintCookie } from "@/lib/frontier/session-store"
 import { HealthRing } from "@/components/HealthRing"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { MultimodalWorkspace } from "./MultimodalWorkspace"
 import { LanguageBlitz, LanguageMarquee } from "./LanguageBlitz"
 import "./homepage.css"
@@ -116,15 +117,16 @@ export function Homepage() {
             <a className="aq-nav-link" href="#pricing">Pricing</a>
           </div>
           <div className="aq-nav-cta">
-            <button
-              type="button"
-              className="aq-theme-toggle"
-              onClick={toggleTheme}
-              aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-              title={theme === "dark" ? "Light mode" : "Dark mode"}
-            >
-              {theme === "dark" ? <IconSun /> : <IconMoon />}
-            </button>
+            <AppTooltip content={theme === "dark" ? "Light mode" : "Dark mode"}>
+              <button
+                type="button"
+                className="aq-theme-toggle"
+                onClick={toggleTheme}
+                aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              >
+                {theme === "dark" ? <IconSun /> : <IconMoon />}
+              </button>
+            </AppTooltip>
             <a href={appHref} className="aq-btn aq-btn-ghost aq-btn-sm">Open app</a>
             <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-sm">Start free</a>
           </div>
@@ -195,9 +197,17 @@ export function Homepage() {
               { i: <IconPic2 />, t: "Images", soon: true },
               { i: <IconBook2 />, t: "Oral stories", soon: true },
             ].map((m) => (
-              <span className="aq-modal-tag" key={m.t} title={m.soon ? "Coming soon" : undefined} style={m.soon ? { opacity: 0.55 } : undefined}>
-                {m.i}{m.t}{m.soon ? <span style={{ fontSize: "10px", marginLeft: 4, opacity: 0.7, verticalAlign: "super" }}>soon</span> : null}
-              </span>
+              m.soon ? (
+                <AppTooltip key={m.t} content="Coming soon">
+                  <span className="aq-modal-tag" style={{ opacity: 0.55 }}>
+                    {m.i}{m.t}<span style={{ fontSize: "10px", marginLeft: 4, opacity: 0.7, verticalAlign: "super" }}>soon</span>
+                  </span>
+                </AppTooltip>
+              ) : (
+                <span className="aq-modal-tag" key={m.t}>
+                  {m.i}{m.t}
+                </span>
+              )
             ))}
           </div>
         </section>
@@ -251,7 +261,9 @@ export function Homepage() {
               <div style={{ fontSize: 12.5, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--aq-faint)", marginBottom: 14 }}>Luke 15:13 · draft</div>
               <p style={{ fontSize: 17, lineHeight: 1.6, color: "var(--aq-text)" }}>
                 …y allí desperdició sus{" "}
-                <span className="violation-blot violation-blot-minor" title="Living Memory: this project renders 'goods' as 'bienes'">bienestar</span>{" "}
+                <AppTooltip content="Living Memory: this project renders 'goods' as 'bienes'">
+                  <span className="violation-blot violation-blot-minor">bienestar</span>
+                </AppTooltip>{" "}
                 viviendo perdidamente.
               </p>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 18, flexWrap: "wrap" }}>

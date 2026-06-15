@@ -1,6 +1,7 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
+import { selectEditorContents } from "../../helpers/editor-selection"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -41,14 +42,13 @@ test("formatting bubble menu Italic button toggles on and off", async ({ alice }
   const targetCell = row.locator('[contenteditable="true"], .ProseMirror').first()
   await expect(targetCell).toBeVisible({ timeout: 5_000 })
   await targetCell.click()
-  await alice.keyboard.press("Control+A")
   await targetCell.type("Hello world")
 
   // Select all the text.
-  await alice.keyboard.press("Control+A")
+  await selectEditorContents(targetCell)
 
   // The bubble menu should appear.
-  const italicBtn = alice.locator('button[title="Italic (Cmd+I)"]')
+  const italicBtn = alice.getByRole("button", { name: "Italic" })
   await expect(italicBtn).toBeVisible({ timeout: 5_000 })
 
   // Toggle italic on.

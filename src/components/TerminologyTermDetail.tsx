@@ -199,7 +199,6 @@ function OccurrenceRow({
               !translated.trim() && "text-muted-foreground italic",
             )}
             onClick={() => canEdit && setEditing(true)}
-            title={canEdit ? "Click to edit" : undefined}
           >
             {translated.trim() || "(empty)"}
           </button>

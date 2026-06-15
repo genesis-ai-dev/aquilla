@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 import { Check } from "lucide-react"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 export type ColorTheme = "blue" | "warm" | "sage" | "rose"
 
@@ -64,18 +65,18 @@ export function ColorThemePicker() {
       {COLOR_THEMES.map((t) => {
         const active = t.id === theme
         return (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTheme(t.id)}
-            aria-label={`Color theme: ${t.label}`}
-            aria-pressed={active}
-            title={t.label}
-            className="relative grid h-6 w-6 place-items-center rounded-full transition-transform hover:scale-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            style={{ backgroundColor: t.swatch }}
-          >
-            {active && <Check className="h-3.5 w-3.5 text-white drop-shadow" />}
-          </button>
+          <AppTooltip key={t.id} content={t.label}>
+            <button
+              type="button"
+              onClick={() => setTheme(t.id)}
+              aria-label={`Color theme: ${t.label}`}
+              aria-pressed={active}
+              className="relative grid h-6 w-6 place-items-center rounded-full transition-transform hover:scale-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              style={{ backgroundColor: t.swatch }}
+            >
+              {active && <Check className="h-3.5 w-3.5 text-white drop-shadow" />}
+            </button>
+          </AppTooltip>
         )
       })}
     </div>

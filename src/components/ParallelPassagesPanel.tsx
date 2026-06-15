@@ -14,6 +14,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { WorkspaceSearchResult, SearchOptions } from "@/lib/search/workspace-index"
 import { computeReplaceDiffs, type CellReplaceDiff } from "@/lib/search/replace-action"
@@ -141,24 +142,26 @@ function PillToggle<T extends string>({
       aria-label={label}
     >
       {options.map((opt) => (
-        <button
-          key={opt.value}
-          type="button"
-          disabled={disabled || opt.disabled}
-          onClick={() => onChange(opt.value)}
-          aria-pressed={value === opt.value}
-          title={opt.disabled ? "Coming soon" : undefined}
-          className={cn(
-            "inline-flex h-6 items-center rounded-full px-2.5 text-[11px] font-medium tracking-tight transition-colors",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-            "disabled:cursor-not-allowed disabled:opacity-40",
-            value === opt.value
-              ? "bg-background text-foreground shadow-sm ring-1 ring-foreground/8"
-              : "text-muted-foreground hover:text-foreground hover:bg-background/50",
-          )}
-        >
-          {opt.label}
-        </button>
+        <AppTooltip key={opt.value} content={opt.disabled ? "Coming soon" : ""}>
+          <span className="inline-flex">
+            <button
+              type="button"
+              disabled={disabled || opt.disabled}
+              onClick={() => onChange(opt.value)}
+              aria-pressed={value === opt.value}
+              className={cn(
+                "inline-flex h-6 items-center rounded-full px-2.5 text-[11px] font-medium tracking-tight transition-colors",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                "disabled:cursor-not-allowed disabled:opacity-40",
+                value === opt.value
+                  ? "bg-background text-foreground shadow-sm ring-1 ring-foreground/8"
+                  : "text-muted-foreground hover:text-foreground hover:bg-background/50",
+              )}
+            >
+              {opt.label}
+            </button>
+          </span>
+        </AppTooltip>
       ))}
     </div>
   )
@@ -411,26 +414,32 @@ function ReplaceSection({ query, results, isReadOnly, onAfterReplace }: ReplaceS
       )}
 
       {/* Apply button */}
-      <button
-        type="button"
-        disabled={!selectedDiffs.length || applying || isReadOnly || !onAfterReplace}
-        onClick={handleApply}
-        title={
+      <AppTooltip
+        content={
           isReadOnly
             ? "Replace requires contributor access on these files"
             : !onAfterReplace
-            ? "Replace is not yet wired — see SWARM-TODO in ParallelPassagesPanel.tsx"
-            : undefined
+              ? "Replace is not yet wired"
+              : ""
         }
-        className={cn(
-          "inline-flex h-8 items-center justify-center rounded-lg px-4 text-xs font-medium transition-colors",
-          "bg-primary text-primary-foreground hover:bg-primary/90",
-          "disabled:pointer-events-none disabled:opacity-50",
-        )}
-        aria-busy={applying}
+        className="max-w-xs"
       >
-        {applying ? "Applying…" : `Replace ${selectedDiffs.length > 0 ? selectedDiffs.length : "All"}`}
-      </button>
+        <span className="inline-flex">
+          <button
+            type="button"
+            disabled={!selectedDiffs.length || applying || isReadOnly || !onAfterReplace}
+            onClick={handleApply}
+            className={cn(
+              "inline-flex h-8 items-center justify-center rounded-lg px-4 text-xs font-medium transition-colors",
+              "bg-primary text-primary-foreground hover:bg-primary/90",
+              "disabled:pointer-events-none disabled:opacity-50",
+            )}
+            aria-busy={applying}
+          >
+            {applying ? "Applying…" : `Replace ${selectedDiffs.length > 0 ? selectedDiffs.length : "All"}`}
+          </button>
+        </span>
+      </AppTooltip>
     </div>
   )
 }

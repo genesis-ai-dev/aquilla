@@ -15,12 +15,13 @@
  * FRO-241: When `hasSufficientData` is false the panel shows an "insufficient
  * data" empty state instead of spurious low-confidence suggestions.
  *
- * FRO-240: ✓/✕ buttons carry descriptive aria-labels + title attributes that
+ * FRO-240: confirm/reject buttons carry descriptive aria-labels and app tooltips that
  * explain how the action feeds the interlinear training loop.
  */
 
 import { useMemo } from "react"
 import { Check, X, HelpCircle } from "lucide-react"
+import { AppTooltip } from "@/components/ui/tooltip"
 import {
   alignCell,
   confirmAlignment,
@@ -87,66 +88,77 @@ function AlignmentRow({
       )}
     >
       {/* Source token */}
-      <span
-        className={cn(
-          "min-w-0 flex-1 truncate font-mono",
-          band === "high" ? "font-semibold" : "italic",
-        )}
-        title={link.srcToken}
-      >
-        {link.srcToken}
-      </span>
+      <AppTooltip content={link.srcToken}>
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate font-mono",
+            band === "high" ? "font-semibold" : "italic",
+          )}
+        >
+          {link.srcToken}
+        </span>
+      </AppTooltip>
 
       {/* Arrow + confidence badge */}
       <span className="shrink-0 text-muted-foreground">→</span>
 
       {/* Target token */}
-      <span
-        className={cn(
-          "min-w-0 flex-1 truncate font-mono",
-          band === "high" ? "font-semibold" : "italic",
-        )}
-        title={link.tgtToken}
-      >
-        {link.tgtToken}
-      </span>
+      <AppTooltip content={link.tgtToken}>
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate font-mono",
+            band === "high" ? "font-semibold" : "italic",
+          )}
+        >
+          {link.tgtToken}
+        </span>
+      </AppTooltip>
 
       {/* Confidence pill */}
-      <span
-        className={cn(
-          "shrink-0 rounded-full px-1.5 py-px text-[9px] font-medium",
-          band === "high"
-            ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-            : "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-        )}
-        title={`${pct}% confidence`}
-      >
-        {pct}%
-      </span>
+      <AppTooltip content={`${pct}% confidence`}>
+        <span
+          className={cn(
+            "shrink-0 rounded-full px-1.5 py-px text-[9px] font-medium",
+            band === "high"
+              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+              : "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+          )}
+        >
+          {pct}%
+        </span>
+      </AppTooltip>
 
       {/* Action buttons — only when not already decided */}
       {!confirmed && !invalidated && (
         <>
-          {/* FRO-240: title/aria-label explains that confirming teaches the glosser */}
-          <button
-            type="button"
-            onClick={onConfirm}
-            className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-emerald-500/20 hover:text-emerald-700 dark:hover:text-emerald-300"
-            title={`Confirm: mark "${link.srcToken} → ${link.tgtToken}" as a correct word-level alignment. Confirmed pairs teach the statistical glosser and improve future back-translations.`}
-            aria-label={`Confirm alignment: ${link.srcToken} translates as ${link.tgtToken}. This teaches the glosser.`}
+          {/* FRO-240: tooltip/aria-label explains that confirming teaches the glosser */}
+          <AppTooltip
+            content={`Confirm: mark "${link.srcToken} -> ${link.tgtToken}" as a correct word-level alignment. Confirmed pairs teach the statistical glosser and improve future back-translations.`}
+            className="max-w-xs"
           >
-            <Check className="h-3 w-3" />
-          </button>
-          {/* FRO-240: title/aria-label explains that invalidating penalizes incorrect suggestions */}
-          <button
-            type="button"
-            onClick={onInvalidate}
-            className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-destructive/20 hover:text-destructive"
-            title={`Reject: mark "${link.srcToken} → ${link.tgtToken}" as an incorrect alignment. Rejected pairs are penalized so this suggestion won't appear again.`}
-            aria-label={`Reject alignment: ${link.srcToken} does not translate as ${link.tgtToken}. This penalizes the glosser suggestion.`}
+            <button
+              type="button"
+              onClick={onConfirm}
+              className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-emerald-500/20 hover:text-emerald-700 dark:hover:text-emerald-300"
+              aria-label={`Confirm alignment: ${link.srcToken} translates as ${link.tgtToken}. This teaches the glosser.`}
+            >
+              <Check className="h-3 w-3" />
+            </button>
+          </AppTooltip>
+          {/* FRO-240: tooltip/aria-label explains that invalidating penalizes incorrect suggestions */}
+          <AppTooltip
+            content={`Reject: mark "${link.srcToken} -> ${link.tgtToken}" as an incorrect alignment. Rejected pairs are penalized so this suggestion won't appear again.`}
+            className="max-w-xs"
           >
-            <X className="h-3 w-3" />
-          </button>
+            <button
+              type="button"
+              onClick={onInvalidate}
+              className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-destructive/20 hover:text-destructive"
+              aria-label={`Reject alignment: ${link.srcToken} does not translate as ${link.tgtToken}. This penalizes the glosser suggestion.`}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </AppTooltip>
         </>
       )}
       {confirmed && (
@@ -237,12 +249,14 @@ export function InterlinearAlignmentPanel({
           <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
             Alignment
           </span>
-          <span
-            title="Word-level alignment links source and target tokens using a statistical model built from your translated cells. Confirm (✓) correct alignments to improve future back-translations; reject (✕) incorrect ones to penalize bad suggestions."
-            className="cursor-help text-muted-foreground/60 hover:text-muted-foreground"
+          <AppTooltip
+            content="Word-level alignment links source and target tokens using a statistical model built from your translated cells. Confirm correct alignments to improve future back-translations; reject incorrect ones to penalize bad suggestions."
+            className="max-w-xs"
           >
-            <HelpCircle className="h-3 w-3" />
-          </span>
+            <span className="cursor-help text-muted-foreground/60 hover:text-muted-foreground">
+              <HelpCircle className="h-3 w-3" />
+            </span>
+          </AppTooltip>
         </div>
         <p className="rounded-lg bg-muted/50 px-3 py-2.5 text-xs text-muted-foreground">
           Keep translating — word-level alignments become meaningful once more sentences are validated.
@@ -261,12 +275,14 @@ export function InterlinearAlignmentPanel({
         <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           Alignment
         </span>
-        <span
-          title="Word-level alignment: the statistical model links source and target tokens based on your translated cells. Confirm (✓) correct pairs to teach the glosser; reject (✕) wrong ones to penalize them. Both actions improve future back-translations. Only high-confidence (≥60%) suggestions are shown."
-          className="cursor-help text-muted-foreground/60 hover:text-muted-foreground"
+        <AppTooltip
+          content="Word-level alignment: the statistical model links source and target tokens based on your translated cells. Confirm correct pairs to teach the glosser; reject wrong ones to penalize them. Both actions improve future back-translations. Only high-confidence suggestions are shown."
+          className="max-w-xs"
         >
-          <HelpCircle className="h-3 w-3" />
-        </span>
+          <span className="cursor-help text-muted-foreground/60 hover:text-muted-foreground">
+            <HelpCircle className="h-3 w-3" />
+          </span>
+        </AppTooltip>
       </div>
 
       {links.length > 0 && (

@@ -56,7 +56,7 @@ test("audio recording modal opens in idle state from rail mic button", async ({ 
   ).toBeVisible({ timeout: 5_000 })
 
   // Close button.
-  const closeBtn = alice.locator('[title="Close (Esc)"]')
+  const closeBtn = alice.getByRole("button", { name: "Close" })
   await expect(closeBtn).toBeVisible({ timeout: 3_000 })
   await closeBtn.click()
   await expect(dialog).not.toBeVisible({ timeout: 3_000 })

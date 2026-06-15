@@ -20,6 +20,7 @@ import {
 } from "@/lib/parsers/helloao"
 import { cn } from "@/lib/utils"
 import { BookMarked, Plus, X } from "lucide-react"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Input } from "@/components/ui/input"
 
 const VERSIONS_STORAGE_KEY = "codex:parallel-bibles:versions"
@@ -220,21 +221,22 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
   // Closed: slim edge tab so the helps are one click away while reading.
   if (!open) {
     return (
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-label="Show parallel bibles"
-        title="Parallel bibles — see this verse in other versions"
-        className={cn(
-          "flex h-full w-7 shrink-0 flex-col items-center gap-1.5 border-l bg-background pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-          className,
-        )}
-      >
-        <BookMarked className="h-4 w-4" />
-        <span className="text-[10px] font-medium uppercase tracking-wider [writing-mode:vertical-rl]">
-          Bibles
-        </span>
-      </button>
+      <AppTooltip content="Parallel bibles: see this verse in other versions" side="left">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label="Show parallel bibles"
+          className={cn(
+            "flex h-full w-7 shrink-0 flex-col items-center gap-1.5 border-l bg-background pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+            className,
+          )}
+        >
+          <BookMarked className="h-4 w-4" />
+          <span className="text-[10px] font-medium uppercase tracking-wider [writing-mode:vertical-rl]">
+            Bibles
+          </span>
+        </button>
+      </AppTooltip>
     )
   }
 

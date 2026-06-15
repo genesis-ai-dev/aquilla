@@ -7,14 +7,14 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * The workspace header renders RuleSuggestFromEditsDialog's "Suggest from
  * edits" button when the rules surface is open. When LLM is not configured:
  *   - The button is disabled
- *   - Its title attribute is "Configure LLM in settings first"
+ *   - Its tooltip is "Configure LLM in settings first"
  *
  * For the default "frontier" provider, isConfigured = session.jwt AND the
  * /api/v2/health probe succeeding. The e2e identity worker answers that
  * probe, so we block the health endpoint to exercise the gate.
  *
  * This spec: block /api/v2/health → navigate to /project/:id/rules → verify
- * "Suggest from edits" button is visible, disabled, and has the title tooltip.
+ * "Suggest from edits" button is visible, disabled, and has the app tooltip.
  */
 test("rule suggest button is disabled when LLM is not configured", async ({ alice }) => {
   // Make the frontier LLM provider unavailable (health probe fails).
@@ -36,6 +36,9 @@ test("rule suggest button is disabled when LLM is not configured", async ({ alic
   await expect(suggestBtn).toBeVisible({ timeout: 10_000 })
   await expect(suggestBtn).toBeDisabled({ timeout: 3_000 })
 
-  // The tooltip title says "Configure LLM in settings first".
-  await expect(suggestBtn).toHaveAttribute("title", /Configure LLM/i)
+  // The tooltip trigger wrapper says "Configure LLM in settings first".
+  const suggestTooltip = alice
+    .locator('[data-tooltip*="Configure LLM"]')
+    .filter({ has: alice.getByRole("button", { name: /Suggest from edits/i }) })
+  await expect(suggestTooltip).toBeVisible({ timeout: 3_000 })
 })

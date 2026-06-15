@@ -11,6 +11,7 @@ import { AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, Penc
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
@@ -209,7 +210,9 @@ export function RulesSurface({
         )}
 
         {usageSummary && (
-          <p className="text-xs text-muted-foreground" title="LLM usage on this project">{usageSummary}</p>
+          <AppTooltip content="LLM usage on this project">
+            <p className="text-xs text-muted-foreground">{usageSummary}</p>
+          </AppTooltip>
         )}
 
         <BuiltinChecksList

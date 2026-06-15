@@ -884,6 +884,7 @@ export function ProjectWorkspace() {
     revalidate: revalidateCells,
     revalidateCell,
     applyOptimisticTargetEdit,
+    applyOptimisticTargetEdits,
     isLoading: cellsLoading,
   } = useActiveCellStore({
     projectId: project?.id ?? null,
@@ -4656,7 +4657,8 @@ export function ProjectWorkspace() {
             fileName={activeFile?.name ?? "this file"}
             cells={fileTargetCells}
             getToken={getTokenForFile}
-            onImported={() => revalidateCells()}
+            applyOptimisticTargetEdits={applyOptimisticTargetEdits}
+            onImported={() => { /* reconciliation handled by drain-complete effect (next task) */ }}
           />
         </Suspense>
       )}

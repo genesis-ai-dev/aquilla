@@ -42,6 +42,9 @@ export interface FileTargetImportPanelProps {
   getToken: (fileId: string) => Promise<string | null>
   onImported: (committedCount: number) => void
   onCancel: () => void
+  /** Optimistically patch many cells at once so the editor reflects the
+   *  imported translations before the outbox finishes flushing. */
+  applyOptimisticTargetEdits: (patches: { cellId: string; value: string }[]) => void
 }
 
 type PanelStep = "file" | "sheet" | "mapping" | "review" | "importing"
@@ -57,6 +60,7 @@ export function FileTargetImportPanel({
   getToken,
   onImported,
   onCancel,
+  applyOptimisticTargetEdits,
 }: FileTargetImportPanelProps) {
   const [step, setStep] = useState<PanelStep>("file")
   const [error, setError] = useState<string | null>(null)
@@ -129,18 +133,21 @@ export function FileTargetImportPanel({
 
   async function handleApply() {
     if (!matchResult) return
-    setStep("importing")
     setError(null)
+    const selected = matchResult.matched.filter((m) => selectedCellIds.has(m.cellId))
+    // Optimistic: show imported translations in the open editor immediately.
+    applyOptimisticTargetEdits(selected.map((m) => ({ cellId: m.cellId, value: m.incomingText })))
     try {
+      // Enqueue to the outbox (fast, local). The flusher drains in the background;
+      // the sync badge + inspector surface progress / retry.
       const { committedCount } = await applyEBibleTargetImport(
         matchResult,
         selectedCellIds,
         { projectId, author: username, getToken },
       )
-      onImported(committedCount)
+      onImported(committedCount) // closes the dialog — content is already visible + queued
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed")
-      setStep("review")
     }
   }
 

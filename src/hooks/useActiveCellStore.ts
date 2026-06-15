@@ -735,6 +735,56 @@ export class CellStore {
     this.emit([cellId])
   }
 
+  /** Bulk version of applyOptimisticTargetEdit. Stamps optimistic shadows for
+   *  every cell in the batch and rebuilds derived indexes + emits ONCE at the
+   *  end, instead of once per cell (O(N) not O(N²)). Used by the bulk-import
+   *  path so imported cells don't flicker on flush-before-refetch. */
+  applyOptimisticTargetEdits(patches: { cellId: string; value: string; valueHtml?: string }[]): void {
+    if (patches.length === 0) return
+    const changedIds = new Set<string>()
+    let orderChanged = false
+    for (const patch of patches) {
+      const seq = ++this.writeSeq
+      this.optimisticEdits.set(patch.cellId, { value: patch.value, valueHtml: patch.valueHtml, seq })
+      this.freshnessFloors.set(patch.cellId, seq)
+
+      const existing = this.targetById.get(patch.cellId)
+      if (existing) {
+        this.targetById.set(patch.cellId, { ...existing, value: patch.value, valueHtml: patch.valueHtml ?? null })
+      } else {
+        const source = this.sourceById.get(patch.cellId)
+        if (!source) {
+          changedIds.add(patch.cellId)
+          continue
+        }
+        this.targetById.set(patch.cellId, {
+          ...source,
+          side: "target",
+          value: patch.value,
+          valueHtml: patch.valueHtml ?? null,
+          eventId: "",
+          sourceEventId: source.eventId,
+          lastEditor: this.ctx.username,
+          lastEditAt: Date.now(),
+          validated: false,
+          wordCount: patch.value.trim() ? patch.value.trim().split(/\s+/).length : 0,
+        })
+        if (!this.targetOrder.includes(patch.cellId)) this.targetOrder.push(patch.cellId)
+        if (!this.indexById.has(patch.cellId)) {
+          this.indexById.set(patch.cellId, this.order.length)
+          this.order.push(patch.cellId)
+          orderChanged = true
+        }
+      }
+      changedIds.add(patch.cellId)
+    }
+    if (orderChanged) this.listVersion++
+    this.rebuildDerivedIndexes()
+    this.bumpCells(changedIds)
+    this.fileVersion++
+    this.emit(changedIds)
+  }
+
   markCellFresh(cellId: string): void {
     this.freshnessFloors.set(cellId, ++this.writeSeq)
   }
@@ -985,6 +1035,8 @@ export interface UseActiveCellStoreResult {
   revalidate: () => void
   revalidateCell: (cellId: string) => void
   applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => void
+  /** Bulk version of applyOptimisticTargetEdit — see CellStore.applyOptimisticTargetEdits. */
+  applyOptimisticTargetEdits: (patches: { cellId: string; value: string; valueHtml?: string }[]) => void
   isLoading: boolean
   isError: boolean
 }
@@ -1313,6 +1365,10 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     store.applyOptimisticTargetEdit(cellId, patch)
   }, [store])
 
+  const applyOptimisticTargetEdits = useCallback((patches: { cellId: string; value: string; valueHtml?: string }[]) => {
+    store.applyOptimisticTargetEdits(patches)
+  }, [store])
+
   useEffect(() => {
     if (typeof window === "undefined") return
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1352,7 +1408,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     }
   }, [store])
 
-  return { store, revalidate, revalidateCell, applyOptimisticTargetEdit, isLoading, isError }
+  return { store, revalidate, revalidateCell, applyOptimisticTargetEdit, applyOptimisticTargetEdits, isLoading, isError }
 }
 
 /**

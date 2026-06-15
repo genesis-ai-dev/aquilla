@@ -22,7 +22,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *   5. Verify "Craft character" heading and character name input.
  *   6. Dismiss via Escape.
  */
-test("new voice dialog opens in audio mode with Craft character heading", async ({ alice }) => {
+test("new voice dialog opens in audio mode with New voice heading", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `Voice ${Date.now()}`
@@ -44,15 +44,15 @@ test("new voice dialog opens in audio mode with Craft character heading", async 
   await expect(newVoiceBtn).toBeVisible({ timeout: 10_000 })
   await newVoiceBtn.click()
 
-  // CharacterModal opens as a Dialog.
+  // VoiceCreator opens as a Dialog.
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
 
-  // h2 "Craft character"
-  await expect(dialog.locator("h2").filter({ hasText: /Craft character/i })).toBeVisible()
+  // h2 "New voice"
+  await expect(dialog.locator("h2").filter({ hasText: /New voice/i })).toBeVisible()
 
-  // Character name input
-  await expect(dialog.locator('input[aria-label="Character name"]')).toBeVisible()
+  // Voice name input
+  await expect(dialog.locator('input[aria-label="Voice name"]')).toBeVisible()
 
   // Dismiss.
   await alice.keyboard.press("Escape")

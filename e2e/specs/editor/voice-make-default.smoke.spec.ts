@@ -50,26 +50,21 @@ test("CharacterModal Make narrator sets the voice as narrator/default", async ({
   await expect(dialog).toBeVisible({ timeout: 5_000 })
 
   const voiceName = `DefaultVoice ${Date.now()}`
-  await dialog.locator('input[aria-label="Character name"]').fill(voiceName)
-  await dialog.getByRole("button", { name: /^Save$/i }).click()
+  await dialog.locator('input[aria-label="Voice name"]').fill(voiceName)
+  await dialog.getByRole("button", { name: /^Create$/i }).click()
 
-  // Dialog closes, voice appears in library.
+  // Dialog closes, voice appears in the selector list as a row.
   await expect(dialog).not.toBeVisible({ timeout: 5_000 })
-  const voiceRow = alice.getByTitle("Click to craft · drag onto a line to assign").filter({ hasText: voiceName })
+  const voiceRow = alice.locator('div[role="button"]').filter({ hasText: voiceName })
   await expect(voiceRow).toBeVisible({ timeout: 5_000 })
 
-  // Click the row to open CharacterModal in edit mode.
-  await voiceRow.click()
+  // A fresh voice is not the narrator yet.
+  await expect(voiceRow.getByTitle(/lines without an explicit speaker/i)).toHaveCount(0)
 
-  const editDialog = alice.getByRole("dialog")
-  await expect(editDialog).toBeVisible({ timeout: 5_000 })
+  // Open the row's ⋯ menu and set it as narrator.
+  await voiceRow.getByRole("button", { name: /More voice actions/i }).click({ force: true })
+  await alice.getByRole("button", { name: /Set as narrator/i }).click()
 
-  // "Make narrator" button is in the footer (renamed from "Make default").
-  const makeNarratorBtn = editDialog.getByRole("button", { name: /Make narrator/i })
-  await expect(makeNarratorBtn).toBeVisible({ timeout: 3_000 })
-  await makeNarratorBtn.click()
-
-  // After clicking, the button becomes "Narrator (default)" badge (renamed from "Default character").
-  await expect(editDialog.getByText(/Narrator \(default\)/i)).toBeVisible({ timeout: 3_000 })
-  await expect(makeNarratorBtn).not.toBeVisible()
+  // The row now carries the narrator badge.
+  await expect(voiceRow.getByTitle(/lines without an explicit speaker/i)).toBeVisible({ timeout: 3_000 })
 })

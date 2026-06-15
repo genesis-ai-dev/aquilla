@@ -37,16 +37,16 @@ test("voice character color picker opens palette and picks a color", async ({ al
   await audioBtn.click()
   await expect(audioBtn).toHaveAttribute("aria-pressed", "true", { timeout: 3_000 })
 
-  // Click "+ New voice" to open CharacterModal.
+  // Click "+ New voice" to open the VoiceCreator.
   const newVoiceBtn = alice.getByRole("button", { name: /New voice/i })
   await expect(newVoiceBtn).toBeVisible({ timeout: 10_000 })
   await newVoiceBtn.click()
 
-  // CharacterModal opens — verify "Character name" input is visible.
-  await expect(alice.locator('[aria-label="Character name"]')).toBeVisible({ timeout: 5_000 })
+  // VoiceCreator opens — verify "Voice name" input is visible.
+  await expect(alice.locator('[aria-label="Voice name"]')).toBeVisible({ timeout: 5_000 })
 
-  // Click the "Character color" button to open the palette.
-  const colorBtn = alice.locator('[aria-label="Character color"]')
+  // Click the "Voice color" button to open the palette.
+  const colorBtn = alice.locator('[aria-label="Voice color"]')
   await expect(colorBtn).toBeVisible({ timeout: 3_000 })
   await colorBtn.click()
 

@@ -55,16 +55,16 @@ test("SpeakerChip assigns a character to a cell line in audio mode", async ({ al
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
   const voiceName = "Hero"
-  await dialog.locator('input[aria-label="Character name"]').fill(voiceName)
-  await dialog.getByRole("button", { name: /^Save$/i }).click()
+  await dialog.locator('input[aria-label="Voice name"]').fill(voiceName)
+  await dialog.getByRole("button", { name: /^Create$/i }).click()
   await expect(dialog).not.toBeVisible({ timeout: 5_000 })
   await expect(alice.getByText(voiceName)).toBeVisible({ timeout: 5_000 })
 
   // Find the first SpeakerChip in the editor cells.
-  const chip = alice.locator('[title="Assign a character to this line"]').first()
+  const chip = alice.locator('[title="Assign a voice to this line"]').first()
   await expect(chip).toBeVisible({ timeout: 8_000 })
-  // Chip should say "Unassigned" before assignment.
-  await expect(chip).toContainText("Unassigned")
+  // An unassigned line resolves to the narrator, so it doesn't show "Hero" yet.
+  await expect(chip).not.toContainText(voiceName)
   await chip.click()
 
   // Popover opens with the voice list. Scope to the popover content — the

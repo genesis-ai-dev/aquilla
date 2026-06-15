@@ -569,9 +569,10 @@ export function ProjectWorkspace() {
   // "make a character" dialog) and replaces each cell's SOURCE column with that
   // line's voice controls (CellVoicePanel); all other audio chrome lives there.
   const [lens, setLens] = useEditorLensPreference(projectId ?? "")
-  // ISSUE-3 fix: /project/:id/voice deep-link activates audio lens on mount.
+  // ISSUE-3 fix: /project/:id/voice deep-link activates audio lens on mount,
+  // and surfaces the Voices dock tab (where the voice controls now live).
   useEffect(() => {
-    if (location.pathname.endsWith("/voice")) setLens("audio")
+    if (location.pathname.endsWith("/voice")) { setLens("audio"); setDockTab("voices") }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname])
   // A2: "Open audio setup" CTA from the cell error popover must navigate to a
@@ -3214,7 +3215,11 @@ export function ProjectWorkspace() {
                 project && centerSurface === "editor" && activeFileId ? (
                   <EditorModeToggle
                     lens={lens}
-                    onChange={(l) => setLens(l)}
+                    onChange={(l) => {
+                      setLens(l)
+                      // Surface the Voices tab when entering the Audio lens.
+                      if (l === "audio") setDockTab("voices")
+                    }}
                     timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
                   />
                 ) : undefined

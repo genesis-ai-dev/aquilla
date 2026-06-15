@@ -880,6 +880,55 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     expect(result.current.cells[0].translated).toBe("Hola")
     expect(result.current.cells[0].original).toBe("Hello")
   })
+
+  it("applyOptimisticTargetEdits patches all cells in the batch and leaves untouched cells unchanged (FRO-IMPORT-OPT)", async () => {
+    // Three cells: c1, c2, c3. We patch c1 and c2; c3 must remain untouched.
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "Source 1" }),
+      makeRow({ cellId: "c1", side: "target", value: "" }),
+      makeRow({ cellId: "c2", side: "source", value: "Source 2" }),
+      makeRow({ cellId: "c2", side: "target", value: "" }),
+      makeRow({ cellId: "c3", side: "source", value: "Source 3" }),
+      makeRow({ cellId: "c3", side: "target", value: "existing" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({
+        projectId: "proj-a",
+        fileId: "file-x",
+        username: "alice",
+        getToken,
+        enabled: true,
+      }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(3))
+    expect(result.current.cells.find((c) => c.id === "c1")?.translated).toBe("")
+    expect(result.current.cells.find((c) => c.id === "c2")?.translated).toBe("")
+    expect(result.current.cells.find((c) => c.id === "c3")?.translated).toBe("existing")
+
+    // Apply the bulk patch in a SINGLE act — the whole batch produces one rebuild.
+    act(() => {
+      result.current.applyOptimisticTargetEdits([
+        { cellId: "c1", value: "a" },
+        { cellId: "c2", value: "b" },
+      ])
+    })
+
+    // c1 and c2 carry the imported translations and are marked pending.
+    const c1 = result.current.cells.find((c) => c.id === "c1")
+    const c2 = result.current.cells.find((c) => c.id === "c2")
+    const c3 = result.current.cells.find((c) => c.id === "c3")
+
+    expect(c1?.translated).toBe("a")
+    expect(c1?.hasPendingEdit).toBe(true)
+    expect(c2?.translated).toBe("b")
+    expect(c2?.hasPendingEdit).toBe(true)
+
+    // c3 is completely untouched — proves the batch is surgical.
+    expect(c3?.translated).toBe("existing")
+
+    // No extra refetch fired.
+    expect(fetchAllMock).toHaveBeenCalledTimes(1)
+  })
 })
 
 // ── M2-1 conditional refetch (?since= delta) ────────────────────────────────

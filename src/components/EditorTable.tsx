@@ -3363,14 +3363,14 @@ function EditorRow({
             {
               value: "backtranslation",
               icon: <FileText className="h-3 w-3" />,
-              label: "BT",
+              label: "Back Translation",
               attentionDot: isBtStale ? "amber" : undefined,
               content: (
                 <div className="flex flex-col gap-2">
                   {/* ── Action row ─────────────────────────────────────────── */}
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">BT</span>
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Back Translation</span>
                       {cell.backtranslation && cell.backtranslationForText === cell.translated && (
                         <AppTooltip content={btPolishOn ? "LLM-polished back-translation" : "Deterministic statistical back-translation"}>
                           <span

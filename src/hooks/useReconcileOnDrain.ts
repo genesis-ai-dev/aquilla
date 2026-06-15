@@ -13,7 +13,12 @@ import { useEffect, useRef } from "react"
 export function useReconcileOnDrain(pendingCount: number, onDrained: () => void): void {
   const prevRef = useRef(pendingCount)
   const onDrainedRef = useRef(onDrained)
-  onDrainedRef.current = onDrained
+  // Keep the latest callback without making it an effect dependency. Updated in
+  // an effect (not during render) so the transition effect below always sees
+  // the current callback — effects run in declaration order on each commit.
+  useEffect(() => {
+    onDrainedRef.current = onDrained
+  }, [onDrained])
   useEffect(() => {
     const prev = prevRef.current
     prevRef.current = pendingCount

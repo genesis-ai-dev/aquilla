@@ -39,6 +39,7 @@ import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
 import { EditorTable, type AudioLensContext } from "./EditorTable"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
+import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue } from "@/lib/audio/play-queue"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
@@ -2484,7 +2485,13 @@ export function ProjectWorkspace() {
       //             while in Audio lens = open voice settings modal.
       // See: src/components/ProjectWorkspace.tsx (this file), src/App.tsx (routes)
       { id: "voice-studio", label: "Voice", icon: Mic2,
-        onClick: () => setLens(lens === "audio" ? "text" : "audio") },
+        onClick: () => {
+          const next = lens === "audio" ? "text" : "audio"
+          setLens(next)
+          // The Voices panel now lives in its own dock tab — surface it when
+          // entering the Audio lens; fall back to Files when leaving.
+          setDockTab(next === "audio" ? "voices" : "files")
+        } },
       { id: "share", label: "Share", icon: Share2,
         onClick: () => setShareOpen(true) },
       { id: "settings", label: "Settings", icon: SettingsIcon,
@@ -2503,7 +2510,7 @@ export function ProjectWorkspace() {
         : []),
     ]
     return items
-  }, [projectId, activeFileId, navigate, openCommentCount, lens, setLens, currentRoleLevel])
+  }, [projectId, activeFileId, navigate, openCommentCount, lens, setLens, setDockTab, currentRoleLevel])
 
   // Phase 2c-gamma: countTranscribeTargets/countSynthTargets lived in bulk-audio
   // (Y.Doc-coupled). They're zeroed until the audio-attachment event grammar
@@ -2962,7 +2969,34 @@ export function ProjectWorkspace() {
           <LeftDock
             storageKey={projectId}
             activeTab={dockTab}
-            onActiveTabChange={setDockTab}
+            onActiveTabChange={(t) => {
+              setDockTab(t)
+              // Opening the Voices tab puts the editor into the Audio lens so
+              // the per-line voice controls show alongside the panel.
+              if (t === "voices" && lens !== "audio") setLens("audio")
+            }}
+            voicesPanel={
+              project ? (
+                <div className="flex h-full min-h-0 flex-col overflow-hidden p-2">
+                  <VoiceSidebar
+                    cells={cells}
+                    project={audioProject ?? project}
+                    projectId={project.id}
+                    tts={tts}
+                    session={frontierSession ?? null}
+                    username={currentUsername}
+                    targetLanguage={project.targetLanguage}
+                    fileId={activeFileId}
+                    cloneOpen={makeCharacterOpen}
+                    onCloneOpenChange={(open) => {
+                      setMakeCharacterOpen(open)
+                      if (!open) setMakeCharacterSeedCellId(null)
+                    }}
+                    cloneSeedCellId={makeCharacterSeedCellId}
+                  />
+                </div>
+              ) : undefined
+            }
             filesPanel={
               <div className="flex h-full flex-col overflow-y-auto overflow-x-hidden">
                 {lens !== "audio" && (
@@ -2991,24 +3025,6 @@ export function ProjectWorkspace() {
                   onRenameCorpus={handleRenameCorpus}
                   canExportByOrgPolicy={canExportByOrgPolicy}
                 />
-                {lens === "audio" && project && (
-                  <VoiceSidebar
-                    cells={cells}
-                    project={audioProject ?? project}
-                    projectId={project.id}
-                    tts={tts}
-                    session={frontierSession ?? null}
-                    username={currentUsername}
-                    targetLanguage={project.targetLanguage}
-                    fileId={activeFileId}
-                    cloneOpen={makeCharacterOpen}
-                    onCloneOpenChange={(open) => {
-                      setMakeCharacterOpen(open)
-                      if (!open) setMakeCharacterSeedCellId(null)
-                    }}
-                    cloneSeedCellId={makeCharacterSeedCellId}
-                  />
-                )}
                 <SidebarProjectSection items={projectNavItems} />
                 {/* FRO-192: member's per-project assignment pickup panel. */}
                 {project?.id && jwt && (
@@ -3595,6 +3611,15 @@ export function ProjectWorkspace() {
         }
         statusBar={
           <>
+            {lens === "audio" && project && (
+              <VoicePlaybackBar
+                cells={cells}
+                projectId={project.id}
+                session={frontierSession ?? null}
+                settings={tts.settings}
+                onActiveCell={jumpToCellId}
+              />
+            )}
             <WorkspaceStatusBar
               left={
                 <div className="flex items-center gap-3">

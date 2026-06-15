@@ -352,7 +352,10 @@ export function CellVoicePanel({
         : "Play this line"
 
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-border/20 bg-muted/20 px-2 py-1.5" dir="ltr">
+    <div
+      className="group/voice flex items-center gap-2 rounded-lg px-1.5 py-1 transition-colors hover:bg-muted/40"
+      dir="ltr"
+    >
       {/* Primary: magic-generate when empty, play/pause once there's a take. */}
       <button
         type="button"
@@ -360,7 +363,7 @@ export function CellVoicePanel({
         title={primaryTitle}
         aria-label={primaryTitle}
         className={cn(
-          "grid h-9 w-9 shrink-0 place-items-center rounded-full transition-colors",
+          "grid h-8 w-8 shrink-0 place-items-center rounded-full transition-colors",
           hasTake
             ? "bg-foreground text-background hover:opacity-90"
             : "bg-primary text-primary-foreground hover:bg-primary/90",
@@ -377,36 +380,39 @@ export function CellVoicePanel({
         )}
       </button>
 
-      {/* Character + scrubber stack. */}
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <div className="flex items-center gap-1.5">
-          <SpeakerChip voice={resolvedVoice} voices={voices} onAssign={onAssign} />
-          <span className="ml-auto pr-0.5 text-[10px] tabular-nums text-muted-foreground">
-            {isVoicing
-              ? "Voicing…"
-              : hasTake
-                ? `${fmtTime(effCurrent)} / ${effDur > 0 ? fmtTime(effDur) : "–:––"}`
-                : "Tap ✦ to voice"}
-          </span>
-        </div>
+      {/* Who speaks this line. */}
+      <SpeakerChip voice={resolvedVoice} voices={voices} onAssign={onAssign} />
+
+      {/* Scrubber fills the row; subtle placeholder until there's a take. */}
+      <div className="min-w-0 flex-1">
         {hasTake ? (
           <Scrubber fraction={fraction} onSeek={(f) => seek(effStart + f * effDur)} />
         ) : (
-          <div className="h-1.5 rounded-full bg-muted/40" />
+          <div className="h-1 rounded-full bg-muted/30" />
         )}
       </div>
 
-      {/* Crop + volume — only meaningful with audio to play. */}
-      {hasTake && <CropButton controller={audio} trim={{ start: trimStart, end: trimEnd }} onChange={changeTrim} />}
-      {hasTake && <VolumeButton volume={volume} onChange={changeVolume} />}
+      {/* Running time, or a "voicing" pulse. */}
+      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+        {isVoicing
+          ? "Voicing…"
+          : hasTake
+            ? `${fmtTime(effCurrent)} / ${effDur > 0 ? fmtTime(effDur) : "–:––"}`
+            : ""}
+      </span>
 
-      <OverflowMenu
-        hasTake={hasTake}
-        canGenerate={canGenerate}
-        busy={isVoicing}
-        onRegenerate={() => void generate(false)}
-        onMakeCharacter={onMakeCharacter}
-      />
+      {/* Secondary controls stay out of the way until the row is hovered. */}
+      <div className="flex shrink-0 items-center transition-opacity focus-within:opacity-100 group-hover/voice:opacity-100 sm:opacity-0">
+        {hasTake && <CropButton controller={audio} trim={{ start: trimStart, end: trimEnd }} onChange={changeTrim} />}
+        {hasTake && <VolumeButton volume={volume} onChange={changeVolume} />}
+        <OverflowMenu
+          hasTake={hasTake}
+          canGenerate={canGenerate}
+          busy={isVoicing}
+          onRegenerate={() => void generate(false)}
+          onMakeCharacter={onMakeCharacter}
+        />
+      </div>
     </div>
   )
 }

@@ -1,0 +1,250 @@
+// The Audio lens' global playback bar, pinned at the bottom of the workspace.
+// One transport for the whole file: play-all walks every line in order (via the
+// shared play-queue), with prev/next, a scrubbable progress line, speed, and
+// volume. It mirrors ElevenLabs' bottom player — the per-line buttons stay for
+// voicing a single line, but listening to the take in sequence happens here.
+
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
+import {
+  Pause, Play, SkipBack, SkipForward, Volume2, VolumeX,
+} from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
+import { cn } from "@/lib/utils"
+import {
+  hasAnyPlayableAudio, pauseQueue, resumeQueue, seekQueue, setQueueRate, setQueueVolume,
+  skipBack, skipForward, startQueue, updateQueueCells, useQueueProgress, useQueueState,
+} from "@/lib/audio/play-queue"
+import { resolveCastVoice } from "@/lib/audio/voices"
+import type { CellData } from "@/hooks/useCells"
+import type { ProjectTtsSettings } from "@/lib/parsers/types"
+import type { FrontierSession } from "@/lib/frontier/types"
+
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const
+
+interface Props {
+  cells: CellData[]
+  projectId: string
+  session: FrontierSession | null
+  settings: ProjectTtsSettings | undefined
+  /** Scroll a line into view when the queue advances to it. */
+  onActiveCell?: (cellId: string) => void
+}
+
+function fmtTime(s: number): string {
+  if (!Number.isFinite(s) || s <= 0) return "0:00"
+  const m = Math.floor(s / 60)
+  const sec = Math.floor(s % 60)
+  return `${m}:${sec.toString().padStart(2, "0")}`
+}
+
+export function VoicePlaybackBar({ cells, projectId, session, settings, onActiveCell }: Props) {
+  const queue = useQueueState()
+  const { currentTime, duration, rate, volume } = useQueueProgress()
+
+  const canPlay = useMemo(() => hasAnyPlayableAudio(cells), [cells])
+  const activeIndex =
+    queue.kind === "playing" || queue.kind === "paused" || queue.kind === "loading"
+      ? queue.cellIndex
+      : -1
+  const activeCell = activeIndex >= 0 ? cells[activeIndex] : undefined
+  const activeVoice = activeCell ? resolveCastVoice(settings, activeCell.id) : undefined
+
+  // Keep the running queue's snapshot fresh so a mid-playback generate is heard
+  // on the next advance.
+  useEffect(() => {
+    if (queue.kind !== "idle") updateQueueCells(cells)
+  }, [cells, queue.kind])
+
+  const isPlaying = queue.kind === "playing"
+  const isLoading = queue.kind === "loading"
+
+  const startAt = useCallback((from: number) => {
+    if (!session?.jwt) return
+    startQueue({ cells, projectId, session, onCellChange: (_, cellId) => onActiveCell?.(cellId) }, from)
+  }, [cells, projectId, session, onActiveCell])
+
+  const onPlayPause = useCallback(() => {
+    if (isPlaying) { pauseQueue(); return }
+    if (queue.kind === "paused") { void resumeQueue(); return }
+    startAt(0)
+  }, [isPlaying, queue.kind, startAt])
+
+  const progressFraction = duration > 0 ? Math.min(1, currentTime / duration) : 0
+
+  return (
+    <div className="border-t bg-background">
+      {/* Full-width progress line doubling as a scrubber. */}
+      <BarScrubber
+        fraction={progressFraction}
+        disabled={activeIndex < 0 || duration <= 0}
+        onSeek={(f) => seekQueue(f * duration)}
+      />
+
+      <div className="flex items-center gap-3 px-4 py-1.5">
+        {/* Now playing */}
+        <div className="flex min-w-0 flex-[1.2] items-center gap-2">
+          {activeVoice && <VoiceAvatar voice={activeVoice} size={26} />}
+          <div className="min-w-0">
+            <div className="truncate text-xs font-medium leading-tight">
+              {activeCell ? (activeCell.cellLabel || "Line") : "Nothing playing"}
+            </div>
+            <div className="truncate text-[10px] leading-tight text-muted-foreground">
+              {queue.kind === "error"
+                ? queue.message
+                : activeVoice
+                  ? activeVoice.name
+                  : canPlay ? "Press play to listen" : "No voiced lines yet"}
+            </div>
+          </div>
+        </div>
+
+        {/* Transport */}
+        <div className="flex shrink-0 items-center gap-1">
+          <SpeedButton rate={rate} onChange={setQueueRate} />
+          <IconButton title="Previous line" disabled={!canPlay} onClick={skipBack}>
+            <SkipBack className="h-4 w-4" />
+          </IconButton>
+          <button
+            type="button"
+            onClick={onPlayPause}
+            disabled={!canPlay}
+            title={isPlaying ? "Pause" : "Play all"}
+            aria-label={isPlaying ? "Pause" : "Play all"}
+            className="grid h-9 w-9 place-items-center rounded-full bg-foreground text-background transition-opacity hover:opacity-90 disabled:opacity-40"
+          >
+            {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-[1px]" />}
+          </button>
+          <IconButton title="Next line" disabled={!canPlay} onClick={skipForward}>
+            <SkipForward className="h-4 w-4" />
+          </IconButton>
+          <span className="ml-1 shrink-0 text-[11px] tabular-nums text-muted-foreground">
+            {fmtTime(currentTime)} / {fmtTime(duration)}
+          </span>
+        </div>
+
+        {/* Volume */}
+        <div className="flex min-w-0 flex-1 items-center justify-end">
+          <VolumeControl volume={volume} onChange={setQueueVolume} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function IconButton({
+  children, title, onClick, disabled,
+}: {
+  children: ReactNode
+  title: string
+  onClick: () => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      disabled={disabled}
+      className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:opacity-40"
+    >
+      {children}
+    </button>
+  )
+}
+
+/** Thin full-width progress line that's draggable to seek. */
+function BarScrubber({ fraction, onSeek, disabled }: {
+  fraction: number
+  onSeek: (f: number) => void
+  disabled: boolean
+}) {
+  const fracFromEvent = (e: React.PointerEvent<HTMLDivElement>): number => {
+    const r = e.currentTarget.getBoundingClientRect()
+    return Math.max(0, Math.min(1, (e.clientX - r.left) / Math.max(1, r.width)))
+  }
+  return (
+    <div
+      role="slider"
+      aria-label="Seek"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(fraction * 100)}
+      onPointerDown={(e) => {
+        if (disabled) return
+        e.currentTarget.setPointerCapture?.(e.pointerId)
+        onSeek(fracFromEvent(e))
+      }}
+      onPointerMove={(e) => { if (!disabled && e.buttons === 1) onSeek(fracFromEvent(e)) }}
+      className={cn(
+        "group/bar relative h-1 w-full touch-none bg-muted",
+        disabled ? "cursor-default" : "cursor-pointer",
+      )}
+    >
+      <div className="absolute inset-y-0 left-0 bg-primary" style={{ width: `${fraction * 100}%` }} />
+    </div>
+  )
+}
+
+function SpeedButton({ rate, onChange }: { rate: number; onChange: (r: number) => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            title="Playback speed"
+            className="grid h-8 min-w-9 place-items-center rounded-md px-1.5 text-xs font-medium tabular-nums text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+          >
+            {rate}x
+          </button>
+        }
+      />
+      <PopoverContent align="center" side="top" className="w-24 p-1">
+        {SPEEDS.map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => { onChange(s); setOpen(false) }}
+            className={cn(
+              "flex w-full items-center justify-center rounded px-2 py-1 text-sm tabular-nums hover:bg-accent/50",
+              s === rate && "bg-primary/10 font-medium",
+            )}
+          >
+            {s}x
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function VolumeControl({ volume, onChange }: { volume: number; onChange: (v: number) => void }) {
+  const muted = volume === 0
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        title={muted ? "Unmute" : "Mute"}
+        aria-label={muted ? "Unmute" : "Mute"}
+        onClick={() => onChange(muted ? 1 : 0)}
+        className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+      >
+        {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+      </button>
+      <input
+        type="range"
+        min={0}
+        max={1}
+        step={0.01}
+        value={volume}
+        onChange={(e) => onChange(Number(e.target.value))}
+        aria-label="Volume"
+        className="hidden h-1 w-24 accent-primary sm:block"
+      />
+    </div>
+  )
+}

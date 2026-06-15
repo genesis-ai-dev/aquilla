@@ -976,10 +976,19 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       if (overlayChanged) pendingOverlayRef.current = next
       if (overlayChanged || shadowChanged) rebuildFromCache()
     }
-    void refresh()
-    const unsub = subscribeToOutbox(refresh)
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null
+    const scheduleRefresh = () => {
+      if (refreshTimer !== null) return
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null
+        void refresh()
+      }, 50) // coalesce a drain burst into one read+rebuild
+    }
+    void refresh() // immediate first paint on mount / file change
+    const unsub = subscribeToOutbox(scheduleRefresh)
     return () => {
       cancelled = true
+      if (refreshTimer !== null) clearTimeout(refreshTimer)
       unsub()
     }
   }, [enabled, fileId, rebuildFromCache])

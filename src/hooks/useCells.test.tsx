@@ -142,6 +142,20 @@ vi.mock("@/lib/video/vtt-generator", async (importOriginal) => {
   }
 })
 
+// Spy on peekOutboxBatch so the debounce test can count calls without
+// intercepting real IDB behaviour (all other outbox functions remain real).
+let peekOutboxBatchCallCount = 0
+vi.mock("@/lib/sync/outbox", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/sync/outbox")>()
+  return {
+    ...actual,
+    peekOutboxBatch: async (...args: Parameters<typeof actual.peekOutboxBatch>) => {
+      peekOutboxBatchCallCount++
+      return actual.peekOutboxBatch(...args)
+    },
+  }
+})
+
 import { useCells } from "./useCells"
 import type { CellAuditStats } from "./useCellsAuditStats"
 
@@ -177,6 +191,7 @@ beforeEach(() => {
   delete streamMeta.maxServerSeq
   delete streamMeta.perPage
   vtt.calls = 0
+  peekOutboxBatchCallCount = 0
 })
 
 describe("useCells (Phase 2a, D1-backed)", () => {
@@ -1427,5 +1442,76 @@ describe("FRO-274: quarantined outbox filtering and shadow clear", () => {
     const c2After = result.current.cells.find((c) => c.id === "c2")
     expect(c2After?.translated).toBe("c2-optimistic")
     expect(c2After?.hasPendingEdit).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// FRO-IMPORT-OPT: pending-overlay refresh is debounced to coalesce drain bursts
+// ---------------------------------------------------------------------------
+describe("FRO-IMPORT-OPT: outbox subscription debounce", () => {
+  let enqueue: typeof import("@/lib/sync/outbox").enqueueOutboxEvent
+  let resetConn: typeof import("@/lib/sync/outbox").resetOutboxConnectionForTests
+
+  beforeEach(async () => {
+    const outboxMod = await import("@/lib/sync/outbox")
+    enqueue = outboxMod.enqueueOutboxEvent
+    resetConn = outboxMod.resetOutboxConnectionForTests
+    await resetConn()
+    await new Promise<void>((resolve) => {
+      const d = indexedDB.deleteDatabase("aquilla-cqrs-outbox")
+      d.onsuccess = () => resolve()
+      d.onerror = () => resolve()
+      d.onblocked = () => resolve()
+    })
+    fetchAllMock.mockReset()
+    fetchByIdsMock.mockReset()
+    fetchByIdsMock.mockResolvedValue([])
+    sideCache = null
+    peekOutboxBatchCallCount = 0
+  })
+
+  it("coalesces a burst of 20 outbox notifications into a single peekOutboxBatch call", async () => {
+    const { CQRS_SCHEMA_VERSION } = await import("@/lib/sync/outbox-types")
+
+    fetchAllMock.mockResolvedValue([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "tgt" }),
+    ])
+
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
+    )
+
+    // Wait for initial mount refresh to complete.
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+
+    // Reset the counter AFTER mount so we only count subscription-driven calls.
+    peekOutboxBatchCallCount = 0
+
+    // Fire 20 outbox notifications in a tight burst by enqueuing distinct events.
+    // Each enqueueOutboxEvent calls notifyOutboxChanged() synchronously after the
+    // IDB write, which fires the subscription callback immediately.
+    await act(async () => {
+      for (let i = 0; i < 20; i++) {
+        await enqueue({
+          id: `burst-ev-${i}`,
+          schemaVersion: CQRS_SCHEMA_VERSION,
+          kind: "target.cell.commit",
+          projectId: "proj-a",
+          fileId: "file-x",
+          cellId: "c1",
+          author: "alice",
+          payload: { value: `burst-${i}` },
+          clientTs: Date.now(),
+        })
+      }
+    })
+
+    // Wait past the 50ms debounce window for the coalesced refresh to fire.
+    await new Promise<void>((resolve) => setTimeout(resolve, 60))
+
+    // The entire burst of 20 notifications must have triggered exactly ONE
+    // peekOutboxBatch call (not 20).
+    expect(peekOutboxBatchCallCount).toBe(1)
   })
 })

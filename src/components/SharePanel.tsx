@@ -47,7 +47,7 @@ export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: S
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[85vh] w-full max-w-xl flex-col overflow-hidden sm:max-w-xl">
+      <DialogContent className="flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Share Project</DialogTitle>
         </DialogHeader>

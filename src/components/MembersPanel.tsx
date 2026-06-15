@@ -151,8 +151,8 @@ export function MembersPanel({
       </ul>
 
       <div className="space-y-2">
-        <div className="flex gap-2">
-          <div className="flex-1">
+        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_max-content_max-content] sm:items-start">
+          <div className="min-w-0">
             <UsernameTypeahead
               value={recipient}
               onChange={setRecipient}
@@ -178,7 +178,11 @@ export function MembersPanel({
               </SelectGroup>
             </SelectContent>
           </Select>
-          <Button onClick={handleAdd} disabled={adding || !recipient.raw.trim()}>
+          <Button
+            className="sm:whitespace-nowrap"
+            onClick={handleAdd}
+            disabled={adding || !recipient.raw.trim()}
+          >
             Add
           </Button>
         </div>

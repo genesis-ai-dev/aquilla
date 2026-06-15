@@ -62,9 +62,21 @@ export function UsernameTypeahead({
 }: Props) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
-  const { results, isLoading, needsMorePrefix, lastFetchOk } = useUserSearch(
+  const { query, results, isLoading, lastFetchOk } = useUserSearch(
     value.mode === "username" ? value.raw : ""
   )
+  const trimmedRaw = value.raw.trim()
+  const searchMatchesInput = query.trim() === trimmedRaw
+  const needsMorePrefix = trimmedRaw.length > 0 && trimmedRaw.length < 2
+  const visibleResults = searchMatchesInput ? results : []
+  const searchPendingForInput =
+    !needsMorePrefix && trimmedRaw.length >= 2 && (!searchMatchesInput || isLoading)
+  const canShowSettledEmptyState =
+    !needsMorePrefix &&
+    searchMatchesInput &&
+    !isLoading &&
+    visibleResults.length === 0 &&
+    trimmedRaw.length >= 2
 
   // Close the dropdown on outside click — typeahead UX expects this.
   useEffect(() => {
@@ -99,7 +111,7 @@ export function UsernameTypeahead({
   }
 
   const showSuggestions =
-    value.mode === "username" && open && value.raw.trim().length > 0
+    value.mode === "username" && open && trimmedRaw.length > 0
 
   return (
     <div ref={containerRef} className="relative space-y-1">
@@ -170,14 +182,14 @@ export function UsernameTypeahead({
 
       {/* Username suggestions dropdown */}
       {showSuggestions && (
-        <div className="absolute left-0 right-0 top-full mt-0.5 z-40 max-h-56 overflow-y-auto rounded-md border bg-popover shadow-md">
+        <div className="mt-1 max-h-56 overflow-y-auto rounded-md border bg-popover shadow-md">
           {needsMorePrefix && (
             <p className="px-3 py-2 text-[11px] text-muted-foreground">
               Type at least 2 characters to search.
             </p>
           )}
 
-          {!needsMorePrefix && isLoading && results.length === 0 && (
+          {searchPendingForInput && visibleResults.length === 0 && (
             <p className="flex items-center gap-1.5 px-3 py-2 text-[11px] text-muted-foreground">
               <Spinner className="size-3" /> Searching…
             </p>
@@ -188,10 +200,10 @@ export function UsernameTypeahead({
               deployed yet (404) or the network errored, we'd otherwise
               be lying about the user's existence — suppress the
               false-negative and render a softer fallback hint. */}
-          {!needsMorePrefix && !isLoading && results.length === 0 && value.raw.trim().length >= 2 && lastFetchOk && (
+          {canShowSettledEmptyState && lastFetchOk && (
             <div className="px-3 py-2">
               <p className="text-[11px] text-muted-foreground">
-                No Aquilla user named "{value.raw.trim()}".
+                No Aquilla user named "{trimmedRaw}".
               </p>
               {showModeToggle && (
                 <button
@@ -206,15 +218,15 @@ export function UsernameTypeahead({
             </div>
           )}
 
-          {!needsMorePrefix && !isLoading && results.length === 0 && value.raw.trim().length >= 2 && !lastFetchOk && (
+          {canShowSettledEmptyState && !lastFetchOk && (
             <p className="px-3 py-2 text-[11px] text-muted-foreground">
               Couldn't search right now — we'll verify the username when you submit.
             </p>
           )}
 
-          {results.length > 0 && (
+          {visibleResults.length > 0 && (
             <ul className="py-0.5">
-              {results.map((u) => {
+              {visibleResults.map((u) => {
                 const isSelected =
                   value.resolved?.id === u.id && value.resolved?.username === u.username
                 return (

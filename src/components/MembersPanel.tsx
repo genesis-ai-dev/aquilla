@@ -81,6 +81,7 @@ export function MembersPanel({
   }
 
   const grantableRoles = roleOptions.filter((r) => r.level <= callerMaxRole);
+  const existingUserIds = members.map((m) => m.userId);
 
   return (
     <div className="flex flex-col gap-4">
@@ -159,6 +160,7 @@ export function MembersPanel({
               disabled={adding}
               showModeToggle={false}
               placeholder={{ username: "Aquilla username" }}
+              excludedUserIds={existingUserIds}
             />
           </div>
           <Select

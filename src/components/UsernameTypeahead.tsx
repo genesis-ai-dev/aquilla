@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { Check, AtSign } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
@@ -29,6 +30,7 @@ interface Props {
    * support email invites yet. */
   showModeToggle?: boolean
   placeholder?: { username?: string; email?: string }
+  excludedUserIds?: readonly number[]
 }
 
 /**
@@ -59,35 +61,84 @@ export function UsernameTypeahead({
   inputId,
   showModeToggle = true,
   placeholder,
+  excludedUserIds = [],
 }: Props) {
   const [open, setOpen] = useState(false)
+  const [dropdownPosition, setDropdownPosition] = useState<{
+    left: number
+    top: number
+    width: number
+  } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
   const { query, results, isLoading, lastFetchOk } = useUserSearch(
     value.mode === "username" ? value.raw : ""
   )
   const trimmedRaw = value.raw.trim()
   const searchMatchesInput = query.trim() === trimmedRaw
   const needsMorePrefix = trimmedRaw.length > 0 && trimmedRaw.length < 2
-  const visibleResults = searchMatchesInput ? results : []
+  const excludedUserIdSet = new Set(excludedUserIds)
+  const visibleResults = searchMatchesInput
+    ? results
+        .filter((u) => !excludedUserIdSet.has(u.id))
+        .sort((a, b) =>
+          a.username.localeCompare(b.username, undefined, { sensitivity: "base" })
+        )
+    : []
+  const allMatchesAlreadyAdded =
+    !needsMorePrefix &&
+    searchMatchesInput &&
+    !isLoading &&
+    results.length > 0 &&
+    visibleResults.length === 0
   const searchPendingForInput =
     !needsMorePrefix && trimmedRaw.length >= 2 && (!searchMatchesInput || isLoading)
   const canShowSettledEmptyState =
     !needsMorePrefix &&
     searchMatchesInput &&
     !isLoading &&
-    visibleResults.length === 0 &&
+    results.length === 0 &&
     trimmedRaw.length >= 2
+  const showSuggestions =
+    value.mode === "username" && open && trimmedRaw.length > 0
 
   // Close the dropdown on outside click — typeahead UX expects this.
   useEffect(() => {
     if (!open) return
     function onDocClick(e: MouseEvent) {
-      if (!containerRef.current) return
-      if (!containerRef.current.contains(e.target as Node)) setOpen(false)
+      const target = e.target as Node
+      if (containerRef.current?.contains(target)) return
+      if (dropdownRef.current?.contains(target)) return
+      setOpen(false)
     }
     document.addEventListener("mousedown", onDocClick)
     return () => document.removeEventListener("mousedown", onDocClick)
   }, [open])
+
+  useEffect(() => {
+    if (!showSuggestions) {
+      setDropdownPosition(null)
+      return
+    }
+
+    function updateDropdownPosition() {
+      const rect = containerRef.current?.getBoundingClientRect()
+      if (!rect) return
+      setDropdownPosition({
+        left: rect.left,
+        top: rect.bottom + 4,
+        width: rect.width,
+      })
+    }
+
+    updateDropdownPosition()
+    window.addEventListener("resize", updateDropdownPosition)
+    window.addEventListener("scroll", updateDropdownPosition, true)
+    return () => {
+      window.removeEventListener("resize", updateDropdownPosition)
+      window.removeEventListener("scroll", updateDropdownPosition, true)
+    }
+  }, [showSuggestions])
 
   function handleChange(raw: string) {
     onChange({
@@ -109,9 +160,6 @@ export function UsernameTypeahead({
     onChange({ mode: next, raw: "", resolved: undefined })
     setOpen(false)
   }
-
-  const showSuggestions =
-    value.mode === "username" && open && trimmedRaw.length > 0
 
   return (
     <div ref={containerRef} className="relative space-y-1">
@@ -181,8 +229,16 @@ export function UsernameTypeahead({
       </div>
 
       {/* Username suggestions dropdown */}
-      {showSuggestions && (
-        <div className="mt-1 max-h-56 overflow-y-auto rounded-md border bg-popover shadow-md">
+      {showSuggestions && dropdownPosition && typeof document !== "undefined" && createPortal(
+        <div
+          ref={dropdownRef}
+          className="fixed z-[60] max-h-44 overflow-y-auto rounded-md border bg-popover shadow-md"
+          style={{
+            left: dropdownPosition.left,
+            top: dropdownPosition.top,
+            width: dropdownPosition.width,
+          }}
+        >
           {needsMorePrefix && (
             <p className="px-3 py-2 text-[11px] text-muted-foreground">
               Type at least 2 characters to search.
@@ -192,6 +248,12 @@ export function UsernameTypeahead({
           {searchPendingForInput && visibleResults.length === 0 && (
             <p className="flex items-center gap-1.5 px-3 py-2 text-[11px] text-muted-foreground">
               <Spinner className="size-3" /> Searching…
+            </p>
+          )}
+
+          {allMatchesAlreadyAdded && (
+            <p className="px-3 py-2 text-[11px] text-muted-foreground">
+              Matching users are already members.
             </p>
           )}
 
@@ -253,7 +315,8 @@ export function UsernameTypeahead({
               )}
             </ul>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

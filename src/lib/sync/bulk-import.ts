@@ -12,6 +12,7 @@
 // validations); only the initial bulk source load uses this.
 
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
+import { enqueueOutboxEvents } from "./outbox"
 
 /** Cells per HTTP request. The worker turns each chunk into bounded multi-row
  *  Postgres inserts, keeping request bodies manageable while still amortizing
@@ -378,10 +379,6 @@ export async function bulkUploadMorphRows(args: BulkMorphUploadArgs): Promise<vo
   }
 }
 
-/** Commits per chunk for target.cell.commit. Smaller than source CHUNK: the
- *  /events route does per-event AD-2 guards (heavier than /import's fast path). */
-const TARGET_CHUNK = 200
-
 export interface TargetCommit {
   /** Client-minted event id (UUIDv7). */
   id: string
@@ -406,57 +403,34 @@ export interface BulkTargetCommitArgs {
 }
 
 /**
- * Pre-fill target translations for a bilingual import: emit one
- * target.cell.commit per cell through the regular /events route, in chunks.
- * Used after bulkUploadSource has seeded the paired source cells (the source
- * event ids become these commits' parentId). Throws on the first failure.
+ * Pre-fill target translations for a bilingual import by ENQUEUING one
+ * target.cell.commit per cell to the outbox (not a direct POST). Used after
+ * bulkUploadSource has seeded the paired source cells (the source event ids
+ * become these commits' parentId).
+ *
+ * Enqueue is local + instant: the background flusher drains the events
+ * (idempotent by deterministic id), the pending-overlay renders them
+ * immediately, and the sync badge / inspector surface progress + retry +
+ * dead-letter. This is why a large import now feels instant — content shows
+ * before the network settles.
+ *
+ * NOTE: `getToken`, `signal`, and `fetchImpl` remain on the args type for
+ * caller compatibility but are unused now — the flusher owns the network.
  */
-export async function bulkUploadTargetCommits(args: BulkTargetCommitArgs): Promise<void> {
-  const fetchFn = args.fetchImpl ?? fetch
+export async function enqueueTargetCommits(args: BulkTargetCommitArgs): Promise<void> {
   if (args.commits.length === 0) return
-  const token = await args.getToken(args.fileId)
-  if (!token) {
-    throw new Error("Couldn't get an upload token — you may be signed out. Sign in and import again.")
-  }
-  const url = `${syncWorkerHttpOrigin()}/events`
-  const total = args.commits.length
-  let uploaded = 0
-
-  for (let offset = 0; offset < args.commits.length; offset += TARGET_CHUNK) {
-    if (args.signal?.aborted) throw new Error("Import cancelled")
-    const chunk = args.commits.slice(offset, offset + TARGET_CHUNK)
-    const events = chunk.map((c) => ({
-      id: c.id,
-      schemaVersion: 1,
-      kind: "target.cell.commit",
-      projectId: args.projectId,
-      fileId: args.fileId,
-      cellId: c.cellId,
-      parentId: c.parentId,
-      author: args.author,
-      payload: { value: c.value, sourceEventId: c.parentId },
-      clientTs: Date.now(),
-    }))
-
-    let res: Response
-    try {
-      res = await fetchFn(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ events }),
-        signal: args.signal,
-      })
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : "network error"
-      throw new Error(`Target commit failed: ${reason}`)
-    }
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "")
-      throw new Error(
-        `Target commit failed (HTTP ${res.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`,
-      )
-    }
-    uploaded += chunk.length
-    args.onProgress?.(uploaded, total)
-  }
+  const events = args.commits.map((c) => ({
+    id: c.id,
+    schemaVersion: 1 as const,
+    kind: "target.cell.commit" as const,
+    projectId: args.projectId,
+    fileId: args.fileId,
+    cellId: c.cellId,
+    parentId: c.parentId,
+    author: args.author,
+    payload: { value: c.value, sourceEventId: c.parentId },
+    clientTs: Date.now(),
+  }))
+  await enqueueOutboxEvents(events as unknown as Parameters<typeof enqueueOutboxEvents>[0])
+  args.onProgress?.(args.commits.length, args.commits.length)
 }

@@ -1808,6 +1808,8 @@ function EditorRow({
   checkLockHolder,
   showFootnotesInline,
 }: EditorRowProps) {
+  const hasTranslatedText = Boolean(cell.translated?.trim())
+  const showCompletionOverlay = isLoading && !hasTranslatedText
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<HTMLElement | null>(null)
   const [examplesExpanded, setExamplesExpanded] = useState(false)
@@ -2972,7 +2974,7 @@ function EditorRow({
                 onCommit={handleEditorCommit}
                 onFocus={handleEditorFocus}
                 onBlur={handleEditorBlurOuter}
-                className={cn("w-full", isLoading && "opacity-30 transition-opacity")}
+                className={cn("w-full", showCompletionOverlay && "opacity-30 transition-opacity")}
                 editable={editable && !isLoading}
                 heldByLabel={lockHolderLabel}
                 infractions={[...cellInfractions, ...waivedInfractions]}
@@ -3016,15 +3018,10 @@ function EditorRow({
                 )
               })()}
               {/* Streaming preview overlay — visible while the LLM is
-                  running. We show the text as it streams in so the user
-                  sees progress instead of waiting for the commit + outbox
-                  flush to land. Pointer-events-none so it doesn't fight
-                  the underlying TipTap editor (we just dim TipTap to
-                  opacity-30 to keep it as the canonical layer). When
-                  isLoading flips off post-commit, TipTap re-renders with
-                  `cell.translated` and the overlay disappears — no
-                  flicker because the text matches. */}
-              {isLoading && (
+                  running and the target is still empty. Once committed text
+                  is present, the editor becomes the single visible layer even
+                  if completion cleanup is still in flight. */}
+              {showCompletionOverlay && (
                 <div
                   aria-live="polite"
                   aria-busy="true"

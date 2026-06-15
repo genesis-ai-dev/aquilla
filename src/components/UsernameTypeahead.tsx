@@ -213,6 +213,9 @@ export function UsernameTypeahead({
             type={value.mode === "email" ? "email" : "text"}
             inputMode={value.mode === "email" ? "email" : undefined}
             autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="none"
+            spellCheck={false}
             disabled={disabled}
             value={value.raw}
             onChange={(e) => handleChange(e.target.value)}

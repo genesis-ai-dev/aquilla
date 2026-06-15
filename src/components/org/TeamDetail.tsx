@@ -637,6 +637,10 @@ function TeamMemberCombobox({
             placeholder="Search org members..."
             aria-label="Search org members"
             className="pl-8"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="none"
+            spellCheck={false}
             autoFocus
           />
         </div>

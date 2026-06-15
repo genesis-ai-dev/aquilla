@@ -56,6 +56,17 @@ const ROLE_DESCRIPTIONS: Record<number, string> = {
   700: "Owner (700) — full control: add/remove org members, archive/restore projects, and all maintainer actions.",
 }
 
+function roleLabel(roleLevel: number | null | undefined): string {
+  if (roleLevel == null) return "Unknown"
+  return ROLE_OPTIONS.find((role) => role.level === roleLevel)?.name ?? `Level ${roleLevel}`
+}
+
+function lockedOrgRoleTooltip(roleLevel: number | null | undefined): string {
+  const roleDescription = roleLevel != null ? ROLE_DESCRIPTIONS[roleLevel] : null
+  const prefix = roleDescription ?? "This member's org-level role is unknown."
+  return `${prefix} This permission is set at the org level and can only be changed by an org owner.`
+}
+
 export function TeamDetail() {
   const { groupId } = useParams<{ groupId: string }>()
   const groupIdNum = groupId != null ? Number(groupId) : null
@@ -380,14 +391,13 @@ export function TeamDetail() {
                                 size="sm"
                                 className="text-xs"
                                 aria-label={`Role for ${m.username}`}
-                                title={m.roleLevel != null ? ROLE_DESCRIPTIONS[m.roleLevel] : "Unknown role"}
                               >
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectGroup>
                                   {ROLE_OPTIONS.map((r) => (
-                                    <SelectItem key={r.level} value={String(r.level)} title={ROLE_DESCRIPTIONS[r.level]}>
+                                    <SelectItem key={r.level} value={String(r.level)}>
                                       {r.name}
                                     </SelectItem>
                                   ))}
@@ -395,16 +405,14 @@ export function TeamDetail() {
                               </SelectContent>
                             </Select>
                           ) : (
-                            /* Non-owners see a read-only label with a tooltip explaining the role */
-                            <AppTooltip content={m.roleLevel != null ? ROLE_DESCRIPTIONS[m.roleLevel] : "Unknown role"} className="max-w-xs">
+                            /* Non-owners see the org-level role but cannot edit it here. */
+                            <AppTooltip content={lockedOrgRoleTooltip(m.roleLevel)} className="max-w-xs">
                               <span
-                                className="text-xs text-muted-foreground cursor-help"
-                                aria-label={m.roleLevel != null ? `Role: ${ROLE_OPTIONS.find((r) => r.level === m.roleLevel)?.name ?? `level ${m.roleLevel}`}` : "Role unknown"}
+                                tabIndex={0}
+                                className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground cursor-help"
+                                aria-label={`Org-level role: ${roleLabel(m.roleLevel)}`}
                               >
-                                {m.roleLevel != null
-                                  ? (ROLE_OPTIONS.find((r) => r.level === m.roleLevel)?.name ?? `Level ${m.roleLevel}`)
-                                  : "—"}
-                                {" "}
+                                {roleLabel(m.roleLevel)}
                                 <span className="inline-flex items-center justify-center rounded-full border w-3.5 h-3.5 text-[10px] leading-none text-muted-foreground" aria-hidden="true">?</span>
                               </span>
                             </AppTooltip>

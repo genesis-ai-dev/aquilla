@@ -194,8 +194,8 @@ describe("TeamDetail member role editing (FRO-139)", () => {
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
     // No role-change combobox for maintainer
     expect(screen.queryByRole("combobox", { name: /role for anna/i })).toBeNull()
-    // Read-only role label with tooltip (title attr) is present
-    expect(screen.getByLabelText(/role: viewer/i)).toBeInTheDocument()
+    // Read-only org-level role label with shadcn tooltip is present
+    expect(screen.getByLabelText(/org-level role: viewer/i)).toBeInTheDocument()
   })
 
   it("access level definitions tooltip is present on the Members heading", async () => {

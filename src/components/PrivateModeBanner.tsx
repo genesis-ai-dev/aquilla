@@ -5,15 +5,63 @@
 // persistent caching for waveforms and LFS blobs, so each page load re-fetches
 // and re-decodes from the network.
 
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { ShieldAlert, X } from "lucide-react"
 import { useOpfsAvailability } from "@/hooks/useOpfsAvailability"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
+
+const DISMISS_KEY_PREFIX = "aq:private-mode-banner-dismissed:"
+const memoryDismissals = new Set<string>()
+
+function dismissalKey(username: string, createdAt: string): string {
+  return `${DISMISS_KEY_PREFIX}${username}:${createdAt}`
+}
+
+function readDismissed(key: string): boolean {
+  if (memoryDismissals.has(key)) return true
+  try {
+    return window.sessionStorage.getItem(key) === "1"
+  } catch {
+    return false
+  }
+}
+
+function writeDismissed(key: string): void {
+  memoryDismissals.add(key)
+  try {
+    window.sessionStorage.setItem(key, "1")
+  } catch {
+    // Storage may be restricted in exactly the contexts this banner explains.
+  }
+}
 
 export function PrivateModeBanner() {
   const opfsAvailable = useOpfsAvailability()
-  const [dismissed, setDismissed] = useState(false)
+  const { session, loading } = useFrontierSession()
+  // Wait for a resolved login identity before considering display. Lazy route
+  // transitions can briefly remount/re-render while account state settles; using
+  // an anonymous fallback key there causes a one-frame banner flash.
+  const sessionReady = !loading && Boolean(session?.username && session?.createdAt)
+  const key = useMemo(
+    () =>
+      session?.username && session.createdAt
+        ? dismissalKey(session.username, session.createdAt)
+        : null,
+    [session?.username, session?.createdAt],
+  )
+  const [dismissed, setDismissed] = useState(() => (key ? readDismissed(key) : true))
 
-  if (opfsAvailable || dismissed) return null
+  useEffect(() => {
+    setDismissed(key ? readDismissed(key) : true)
+  }, [key])
+
+  if (!sessionReady || !key || opfsAvailable || dismissed) return null
+
+  function handleDismiss() {
+    if (!key) return
+    writeDismissed(key)
+    setDismissed(true)
+  }
 
   return (
     <div className="fixed top-0 left-0 right-0 z-40 flex items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-200">
@@ -24,7 +72,7 @@ export function PrivateModeBanner() {
       </span>
       <button
         type="button"
-        onClick={() => setDismissed(true)}
+        onClick={handleDismiss}
         aria-label="Dismiss"
         className="ml-1 flex h-5 w-5 items-center justify-center rounded text-amber-700/70 transition-colors hover:bg-amber-100 hover:text-amber-900 dark:text-amber-300/70 dark:hover:bg-amber-900/40 dark:hover:text-amber-100"
       >

@@ -4,6 +4,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { renderHook, waitFor } from "@testing-library/react"
 import { useProject } from "./useProject"
+import { getProject } from "@/lib/store/project-index"
 
 const API = "https://api.frontier.example"
 
@@ -26,7 +27,12 @@ vi.mock("@/hooks/useProjectSettings", () => ({
   useProjectSettings: () => ({ settings: {}, version: 0 }),
 }))
 
+vi.mock("@/lib/store/project-index", () => ({
+  getProject: vi.fn(async () => undefined),
+}))
+
 const originalFetch = global.fetch
+const mockedGetProject = vi.mocked(getProject)
 
 afterEach(() => {
   global.fetch = originalFetch
@@ -66,6 +72,53 @@ describe("useProject — thin-client fetch (Phase 2c-β)", () => {
       "f-2",
       "f-3",
     ])
+  })
+
+  it("overlays device-local completion settings onto the server project", async () => {
+    global.fetch = vi.fn<typeof fetch>(async (input) => {
+      const url = typeof input === "string" ? input : (input as Request).url
+      if (url === `${API}/api/v2/projects/p-1`) {
+        return new Response(
+          JSON.stringify({
+            id: "p-1",
+            name: "Alpha",
+            gitlabProjectId: null,
+            archivedAt: null,
+            archivedBy: null,
+            role: { level: 700, name: "owner", source: "creator" },
+            files: [],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as unknown as typeof fetch
+    mockedGetProject.mockResolvedValueOnce({
+      id: "p-1",
+      name: "Alpha",
+      sourceLanguage: "",
+      targetLanguage: "",
+      createdAt: "2026-06-14T00:00:00Z",
+      files: [],
+      members: [],
+      completionSettings: {
+        provider: "custom",
+        endpoint: "https://openrouter.ai/api/v1",
+        model: "google/gemma-4-31b-it:free",
+        maxTokens: 512,
+        temperature: 0.3,
+        systemPrompt: "",
+        llmHealthPenalty: 0.1,
+      },
+    })
+
+    const { result } = renderHook(() => useProject("p-1"))
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+    expect(result.current.project?.completionSettings).toMatchObject({
+      provider: "custom",
+      endpoint: "https://openrouter.ai/api/v1",
+      model: "google/gemma-4-31b-it:free",
+    })
   })
 
   it("falls back to the list endpoint when the single-project endpoint 404s", async () => {

@@ -39,6 +39,10 @@ vi.mock("@/hooks/useProjectSettings", () => ({
   })),
 }))
 
+vi.mock("@/lib/store/project-index", () => ({
+  getProject: vi.fn(async () => undefined),
+}))
+
 // Import after mocks are registered.
 import { useProject } from "./useProject"
 import { resolveCloudProjectResult } from "@/lib/sync/cloud-projects"

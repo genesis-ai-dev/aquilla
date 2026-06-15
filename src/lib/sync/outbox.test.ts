@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import "fake-indexeddb/auto"
 import {
   enqueueOutboxEvent,
+  enqueueOutboxEvents,
   markOutboxAttempt,
   peekOutboxBatch,
   removeOutboxEvents,
@@ -13,6 +14,7 @@ import {
   OUTBOX_MAX_ATTEMPTS,
   requeueTransientlyFailedOutboxEvents,
   stampOutboxError,
+  subscribeToOutbox,
 } from "./outbox"
 import type { CqrsRawEvent } from "./outbox-types"
 import { CQRS_SCHEMA_VERSION } from "./outbox-types"
@@ -252,5 +254,32 @@ describe("cqrs outbox", () => {
 
     // outboxFailedCount reflects the quarantine.
     expect(await outboxFailedCount()).toBe(1)
+  })
+
+  // ── enqueueOutboxEvents (bulk) ─────────────────────────────────────────────
+
+  function ev(id: string, cellId: string): CqrsRawEvent {
+    return {
+      id, schemaVersion: 1, kind: "target.cell.commit",
+      projectId: "p1", fileId: "f1", cellId, parentId: "src1",
+      author: "u1", payload: { value: `v-${cellId}` }, clientTs: 1,
+    } as unknown as CqrsRawEvent
+  }
+
+  it("enqueueOutboxEvents writes all events and fires exactly one change notification", async () => {
+    let notifications = 0
+    const unsub = subscribeToOutbox(() => { notifications++ })
+    await enqueueOutboxEvents([ev("e1", "c1"), ev("e2", "c2"), ev("e3", "c3")])
+    unsub()
+    const rows = await peekOutboxBatch(100)
+    expect(rows.map((r) => r.id).sort()).toEqual(["e1", "e2", "e3"])
+    expect(notifications).toBe(1)
+  })
+
+  it("enqueueOutboxEvents is idempotent on duplicate ids (same-id put overwrites)", async () => {
+    await enqueueOutboxEvents([ev("dup", "c1")])
+    await enqueueOutboxEvents([ev("dup", "c1")])
+    const rows = await peekOutboxBatch(100)
+    expect(rows.filter((r) => r.id === "dup")).toHaveLength(1)
   })
 })

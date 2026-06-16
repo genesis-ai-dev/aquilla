@@ -211,9 +211,13 @@ export function shouldPatchSystemPrompt(
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
+  const { activeOrg, activeOrgId, isAllOrgs } = useActiveOrg()
   const goToProjects = useCallback(() => {
-    navigate("/")
-  }, [navigate])
+    navigate({
+      pathname: "/",
+      search: isAllOrgs ? "?org=all" : activeOrgId != null ? `?org=${activeOrgId}` : "",
+    })
+  }, [activeOrgId, isAllOrgs, navigate])
   const { project: loadedProject, status, refresh, patchSettings } = useProject(projectId!)
   // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt)
   // live in IDB; merge them onto the server-fetched record on load and after
@@ -993,7 +997,6 @@ export function ProjectWorkspace() {
   // on Y.Doc maps and the v1.x event grammar isn't in this build, so these are
   // no-ops and the drawer renders empty.
   // Org-level rules: fetch from org settings and merge with project rules.
-  const { activeOrg } = useActiveOrg()
   const {
     orgRules,
     promotionRequests,

@@ -12,7 +12,7 @@ const link = ({ isActive }: { isActive: boolean }) =>
   `block rounded-md px-2 py-1.5 text-sm ${isActive ? "bg-accent font-medium" : "hover:bg-accent/60"}`
 
 export function OrgSidebar() {
-  const { activeOrg, isAllOrgs } = useActiveOrg()
+  const { activeOrg, activeOrgId, isAllOrgs } = useActiveOrg()
   const isAdmin = !isAllOrgs && (activeOrg?.role.level ?? 0) >= 600
   // Platform-operator (site-wide admin) — separate axis from the org role.
   const { isAdmin: isPlatformAdmin } = usePlatformAdmin()
@@ -30,7 +30,14 @@ export function OrgSidebar() {
       </div>
       <nav className="mt-2 flex flex-1 flex-col gap-0.5">
         {/* FRO-243: data-tour anchors for product tour steps */}
-        <NavLink to="/" end className={link} data-tour="nav-overview">Projects</NavLink>
+        <NavLink
+          to={{ pathname: "/", search: isAllOrgs ? "?org=all" : activeOrgId != null ? `?org=${activeOrgId}` : "" }}
+          end
+          className={link}
+          data-tour="nav-overview"
+        >
+          Projects
+        </NavLink>
         {!isAllOrgs && <>
           <NavLink to="/teams" className={link}>Teams</NavLink>
           <NavLink to="/assigned" className={link} data-tour="nav-assigned">Assigned to me</NavLink>

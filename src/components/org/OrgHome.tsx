@@ -15,17 +15,27 @@ import { UsageRollup } from "./UsageRollup"
 import { CreditsPanel } from "./CreditsPanel"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
+import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
+import type { ProjectRecord } from "@/lib/parsers/types"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 const STALE_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000
 
 type ActivityStatus = "not-started" | "stalled" | "active"
 
-type StatusFilter = "all" | "active" | "stalled" | "overdue"
+type StatusFilter = "all" | "stalled" | "overdue"
 
-type ProjectLens = "recent" | "attention" | "overdue" | "least-translated"
+type ProjectLens = "recent" | "attention" | "least-translated" | "most-progress" | "name"
 
 const PROJECT_LENS_STORAGE_KEY = "org:all-projects:view"
-const PROJECT_LENS_VALUES: ProjectLens[] = ["recent", "attention", "overdue", "least-translated"]
+const PROJECT_LENS_VALUES: ProjectLens[] = ["recent", "attention", "least-translated", "most-progress", "name"]
 
 type PortfolioProjectRow = PortfolioProject & {
   orgId?: number
@@ -44,7 +54,6 @@ type OrgPortfolioSummary = {
 
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "active", label: "Active" },
   { value: "stalled", label: "Stalled" },
   { value: "overdue", label: "Overdue" },
 ]
@@ -63,15 +72,21 @@ const PROJECT_LENSES: { value: ProjectLens; label: string; description: string; 
     empty: "No projects need attention yet.",
   },
   {
-    value: "overdue",
-    label: "Overdue",
-    description: "Projects past their deadline",
-    empty: "No overdue projects.",
-  },
-  {
     value: "least-translated",
     label: "Least translated",
     description: "Projects with the lowest translation progress",
+    empty: "No projects yet.",
+  },
+  {
+    value: "most-progress",
+    label: "Most progress",
+    description: "Projects with the highest translation progress",
+    empty: "No projects yet.",
+  },
+  {
+    value: "name",
+    label: "Name",
+    description: "Projects sorted alphabetically",
     empty: "No projects yet.",
   },
 ]
@@ -91,6 +106,10 @@ function writeProjectLens(lens: ProjectLens) {
   } catch {
     // Ignore local storage restrictions; the in-memory state still updates.
   }
+}
+
+function isProjectLens(value: string | null | undefined): value is ProjectLens {
+  return PROJECT_LENS_VALUES.includes(value as ProjectLens)
 }
 
 /**
@@ -121,6 +140,23 @@ function formatUpdatedAt(value: number | null): string {
   return `Updated ${new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(value))}`
 }
 
+function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, now: number): PortfolioProjectRow[] {
+  return [...projects].sort((a, b) => {
+    switch (lens) {
+      case "recent":
+        return (b.lastEditAt ?? 0) - (a.lastEditAt ?? 0) || a.name.localeCompare(b.name)
+      case "least-translated":
+        return translatedPct(a) - translatedPct(b) || a.name.localeCompare(b.name)
+      case "most-progress":
+        return translatedPct(b) - translatedPct(a) || a.name.localeCompare(b.name)
+      case "name":
+        return a.name.localeCompare(b.name)
+      case "attention":
+        return attentionRank(b, now) - attentionRank(a, now) || a.name.localeCompare(b.name)
+    }
+  })
+}
+
 export function OrgHome() {
   const { activeOrg, activeOrgId, isAllOrgs, orgs, isLoading: orgLoading, setActiveOrg } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
@@ -128,9 +164,9 @@ export function OrgHome() {
   const jwt = session?.jwt ?? null
 
   const [projects, setProjects] = useState<PortfolioProjectRow[]>([])
-  // FRO-335: projects shared from orgs the caller isn't a member of
-  // (invite-link / bulk-add grants) — the org portfolio above can't see them.
-  const [sharedProjects, setSharedProjects] = useState<CloudProjectSummary[]>([])
+  // FRO-335: accessible-project rows supply direct/group/org role attribution
+  // and identify projects shared from orgs the portfolio endpoint can't see.
+  const [accessibleProjects, setAccessibleProjects] = useState<CloudProjectSummary[]>([])
   // FRO-326: unredeemed invites addressed to the caller's email — without
   // this card, an invite whose link never arrived is undiscoverable in-app.
   const [pendingInvites, setPendingInvites] = useState<MyPendingInvite[]>([])
@@ -218,11 +254,11 @@ export function OrgHome() {
     return () => { cancelled = true }
   }, [jwt, activeOrgId, activeOrg?.name, isAllOrgs, orgLoading, orgs])
 
-  // FRO-335: surface cross-org grants on the Overview too — otherwise a user
+  // FRO-335: surface cross-org grants on the Projects page too — otherwise a user
   // whose only project arrived via an invite link sees an empty dashboard.
   useEffect(() => {
     if (!jwt) {
-      setSharedProjects([])
+      setAccessibleProjects([])
       return
     }
     if (orgLoading) return
@@ -230,9 +266,9 @@ export function OrgHome() {
     fetchAccessibleProjects(jwt)
       .then((all) => {
         if (cancelled) return
-        setSharedProjects(partitionSharedProjects(all, orgs, activeOrgId).sharedWithMe)
+        setAccessibleProjects(all)
       })
-      .catch(() => { if (!cancelled) setSharedProjects([]) })
+      .catch(() => { if (!cancelled) setAccessibleProjects([]) })
     return () => { cancelled = true }
   }, [jwt, orgs, activeOrgId, orgLoading])
 
@@ -252,7 +288,7 @@ export function OrgHome() {
     return (
       <AppShell
         sidebar={<OrgSidebar />}
-        header={<OrgBreadcrumb section="Overview" />}
+        header={<OrgBreadcrumb section="Projects" />}
         statusBar={null}
         main={
           <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
@@ -289,6 +325,8 @@ export function OrgHome() {
   const overdueCount = projects.filter((p) => deadlineStatus(p, now) === "overdue").length
   const avgAudioPct =
     projects.length > 0 ? projects.reduce((sum, p) => sum + audioPct(p), 0) / projects.length : 0
+  const accessByProjectId = new Map(accessibleProjects.map((project) => [project.id, project]))
+  const sharedProjects = partitionSharedProjects(accessibleProjects, orgs, activeOrgId).sharedWithMe
 
   const orgSummaries: OrgPortfolioSummary[] = orgs
     .map((org) => {
@@ -320,31 +358,28 @@ export function OrgHome() {
     writeProjectLens(lens)
   }
 
+  function handleProjectLensChange(value: string | null) {
+    if (!isProjectLens(value)) return
+    selectProjectLens(value)
+  }
+
+  function handleCreated(project: ProjectRecord) {
+    navigate(`/projects/${project.id}`)
+  }
+
+  const projectSearchClassName =
+    "h-9 min-w-28 shrink rounded-md border border-border bg-background px-3 text-sm transition-[width,border-color,box-shadow] duration-200 ease-out focus-visible:border-muted-foreground/40 focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-sm w-36 sm:w-44 lg:w-52 group-focus-within:w-full group-focus-within:sm:w-[26rem] group-focus-within:lg:w-[30rem]"
+  const projectControlGroupClassName =
+    "flex shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap transition-[max-width,opacity,transform] duration-200 ease-out max-w-[36rem] opacity-100 group-focus-within:pointer-events-none group-focus-within:max-w-0 group-focus-within:-translate-x-2 group-focus-within:opacity-0"
+
   // Project lists
-  const ranked = [...projects].sort((a, b) => attentionRank(b, now) - attentionRank(a, now))
   const currentProjectLens = PROJECT_LENSES.find((lens) => lens.value === projectLens) ?? PROJECT_LENSES[0]
-  const projectLensPreview = [...projects]
-    .filter((project) => projectLens !== "overdue" || deadlineStatus(project, now) === "overdue")
-    .sort((a, b) => {
-      switch (projectLens) {
-        case "recent":
-          return (b.lastEditAt ?? 0) - (a.lastEditAt ?? 0)
-        case "least-translated":
-          return translatedPct(a) - translatedPct(b)
-        case "attention":
-        case "overdue":
-          return attentionRank(b, now) - attentionRank(a, now)
-      }
-    })
-    .slice(0, 6)
 
   // Filter bar — narrows the listed projects only; the rollup strip above
   // continues to reflect the full portfolio.
-  const visible = ranked.filter((p) => {
+  const filteredProjects = projects.filter((p) => {
     if (projectQuery && !p.name.toLowerCase().includes(projectQuery.toLowerCase())) return false
     switch (statusFilter) {
-      case "active":
-        return activityStatus(p, now) === "active"
       case "stalled":
         return activityStatus(p, now) === "stalled"
       case "overdue":
@@ -353,11 +388,23 @@ export function OrgHome() {
         return true
     }
   })
+  const visible = sortProjectsByLens(filteredProjects, projectLens, now)
 
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section="Overview" />}
+      header={
+        <div className="flex items-center justify-between pr-4">
+          <OrgBreadcrumb section="Projects" />
+          {activeOrgId != null ? (
+            <ProjectCreateDialog orgId={activeOrgId} onCreated={handleCreated} />
+          ) : (
+            <span className="rounded-full border bg-muted/40 px-3 py-1 text-xs text-muted-foreground">
+              Select an organization to create a project
+            </span>
+          )}
+        </div>
+      }
       statusBar={null}
       main={
         <div className="h-full overflow-y-auto p-6 space-y-6">
@@ -492,39 +539,82 @@ export function OrgHome() {
                       <div className="space-y-3 border-b px-4 py-3">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
-                            <h2 className="text-base font-semibold">{currentProjectLens.label}</h2>
+                            <h2 className="text-base font-semibold">Projects</h2>
                             <p className="text-xs text-muted-foreground">{currentProjectLens.description}</p>
                           </div>
-                          <Link to="/projects" className="text-xs font-medium text-primary hover:underline">
-                            View all projects
-                          </Link>
                         </div>
-                        <div className="flex flex-wrap items-center gap-1" aria-label="Project preview view">
-                          {PROJECT_LENSES.map((lens) => (
-                            <button
-                              key={lens.value}
-                              type="button"
-                              onClick={() => selectProjectLens(lens.value)}
-                              aria-pressed={projectLens === lens.value}
-                              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                                projectLens === lens.value
-                                  ? "bg-primary text-primary-foreground"
-                                  : "bg-muted text-muted-foreground hover:bg-muted/70"
-                              }`}
-                            >
-                              {lens.label}
-                            </button>
-                          ))}
+                        <div className="group flex w-full flex-nowrap items-center gap-2 overflow-hidden">
+                          <input
+                            type="search"
+                            value={projectQuery}
+                            onChange={(e) => setProjectQuery(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") e.currentTarget.blur()
+                            }}
+                            placeholder="Filter projects…"
+                            aria-label="Filter projects by name"
+                            className={projectSearchClassName}
+                          />
+                          <div className={projectControlGroupClassName}>
+                            <div className="flex items-center gap-2" aria-label="Project status filter">
+                              <span className="text-xs font-medium text-muted-foreground">Status</span>
+                              <div className="flex items-center gap-1">
+                                {STATUS_FILTERS.map((f) => (
+                                  <button
+                                    key={f.value}
+                                    type="button"
+                                    onClick={() => setStatusFilter(f.value)}
+                                    aria-pressed={statusFilter === f.value}
+                                    className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                                      statusFilter === f.value
+                                        ? "bg-primary text-primary-foreground"
+                                        : "bg-muted text-muted-foreground hover:bg-muted/70"
+                                    }`}
+                                  >
+                                    {f.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2" aria-label="Project sort">
+                              <span className="text-xs font-medium text-muted-foreground">Sort by</span>
+                              <Select
+                                items={PROJECT_LENSES.map((lens) => ({ value: lens.value, label: lens.label }))}
+                                value={projectLens}
+                                onValueChange={handleProjectLensChange}
+                              >
+                                <SelectTrigger aria-label="Sort projects" size="sm" className="min-w-40 bg-background">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectGroup>
+                                    {PROJECT_LENSES.map((lens) => (
+                                      <SelectItem key={lens.value} value={lens.value}>
+                                        {lens.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectGroup>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
                         </div>
                       </div>
 
-                      {projectLensPreview.length === 0 ? (
+                      {projects.length === 0 ? (
                         <div className="px-4 py-10 text-center">
-                          <p className="text-sm text-muted-foreground">{currentProjectLens.empty}</p>
+                          <p className="text-sm text-muted-foreground">No projects yet.</p>
+                        </div>
+                      ) : visible.length === 0 ? (
+                        <div className="px-4 py-10 text-center">
+                          <p className="text-sm text-muted-foreground">
+                            {projectQuery ? "No matching projects." : currentProjectLens.empty}
+                          </p>
                         </div>
                       ) : (
                         <div className="divide-y">
-                          {projectLensPreview.map((p) => {
+                          {visible.map((p) => {
+                            const access = accessByProjectId.get(p.id)
                             const tpct = Math.round(translatedPct(p) * 100)
                             const pct = Math.round(validatedPct(p) * 100)
                             const apct = Math.round(audioPct(p) * 100)
@@ -550,6 +640,11 @@ export function OrgHome() {
                                     {p.orgName && (
                                       <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                                         {p.orgName}
+                                      </span>
+                                    )}
+                                    {access && (
+                                      <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                        {access.role.name}
                                       </span>
                                     )}
                                     {dstatus === "overdue" && (
@@ -622,36 +717,65 @@ export function OrgHome() {
 
                   {/* Filter bar */}
                   {projects.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-3">
+                    <div className="group flex w-full flex-nowrap items-center gap-2 overflow-hidden">
                       <input
-                        type="text"
+                        type="search"
                         value={projectQuery}
                         onChange={(e) => setProjectQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") e.currentTarget.blur()
+                        }}
                         placeholder="Filter projects…"
                         aria-label="Filter projects by name"
-                        className="h-9 w-56 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className={projectSearchClassName}
                       />
-                      <div className="flex items-center gap-1">
-                        {STATUS_FILTERS.map((f) => (
-                          <button
-                            key={f.value}
-                            type="button"
-                            onClick={() => setStatusFilter(f.value)}
-                            aria-pressed={statusFilter === f.value}
-                            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                              statusFilter === f.value
-                                ? "bg-primary text-primary-foreground"
-                                : "bg-muted text-muted-foreground hover:bg-muted/70"
-                            }`}
+                      <div className={projectControlGroupClassName}>
+                        <div className="flex items-center gap-2" aria-label="Project status filter">
+                          <span className="text-xs font-medium text-muted-foreground">Status</span>
+                          <div className="flex items-center gap-1">
+                            {STATUS_FILTERS.map((f) => (
+                              <button
+                                key={f.value}
+                                type="button"
+                                onClick={() => setStatusFilter(f.value)}
+                                aria-pressed={statusFilter === f.value}
+                                className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                                  statusFilter === f.value
+                                    ? "bg-primary text-primary-foreground"
+                                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                                }`}
+                              >
+                                {f.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2" aria-label="Project sort">
+                          <span className="text-xs font-medium text-muted-foreground">Sort by</span>
+                          <Select
+                            items={PROJECT_LENSES.map((lens) => ({ value: lens.value, label: lens.label }))}
+                            value={projectLens}
+                            onValueChange={handleProjectLensChange}
                           >
-                            {f.label}
-                          </button>
-                        ))}
+                            <SelectTrigger aria-label="Sort projects" size="sm" className="min-w-40 bg-background">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectGroup>
+                                {PROJECT_LENSES.map((lens) => (
+                                  <SelectItem key={lens.value} value={lens.value}>
+                                    {lens.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
                     </div>
                   )}
 
-                  {/* Attention-ranked list */}
+                  {/* Project directory */}
                   {projects.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No projects in this org yet.</p>
                   ) : visible.length === 0 ? (
@@ -659,6 +783,7 @@ export function OrgHome() {
                   ) : (
                     <div className="rounded-lg border divide-y">
                       {visible.map((p) => {
+                        const access = accessByProjectId.get(p.id)
                         const tpct = Math.round(translatedPct(p) * 100)
                         const pct = Math.round(validatedPct(p) * 100)
                         const apct = Math.round(audioPct(p) * 100)
@@ -673,6 +798,11 @@ export function OrgHome() {
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
                                 <p className="font-medium truncate">{p.name}</p>
+                                {access && (
+                                  <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                    {access.role.name}
+                                  </span>
+                                )}
                                 {dstatus === "overdue" && (
                                   <span className="shrink-0 rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-medium text-destructive">
                                     Overdue

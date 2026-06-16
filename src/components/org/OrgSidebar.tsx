@@ -30,8 +30,7 @@ export function OrgSidebar() {
       </div>
       <nav className="mt-2 flex flex-1 flex-col gap-0.5">
         {/* FRO-243: data-tour anchors for product tour steps */}
-        <NavLink to="/" end className={link} data-tour="nav-overview">Overview</NavLink>
-        <NavLink to="/projects" className={link} data-tour="nav-projects">Projects</NavLink>
+        <NavLink to="/" end className={link} data-tour="nav-overview">Projects</NavLink>
         {!isAllOrgs && <>
           <NavLink to="/teams" className={link}>Teams</NavLink>
           <NavLink to="/assigned" className={link} data-tour="nav-assigned">Assigned to me</NavLink>

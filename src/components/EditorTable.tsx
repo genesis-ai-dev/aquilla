@@ -26,6 +26,7 @@ import { HealthRing } from "./HealthRing"
 import { TranslatedEditor } from "./TranslatedEditor"
 import { CellWaveform } from "./CellWaveform"
 import { CellAudioButton } from "./CellAudioButton"
+import { DenoiseButton } from "./audio/DenoiseButton"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
@@ -3628,6 +3629,29 @@ function EditorRow({
                           />
                           {isTranscribing ? "Transcribing…" : "Transcribe"}
                         </button>
+                        {cell.selectedAudioId && selectedAudio && (
+                          <DenoiseButton
+                            projectId={project.id}
+                            fileId={cell.fileId}
+                            cellId={cell.id}
+                            selectedAudioId={cell.selectedAudioId}
+                            selectedUrl={selectedAudio.url}
+                            referenceAudioId={selectedAudio.referenceAudioId ?? null}
+                            originalUrl={
+                              selectedAudio.referenceAudioId
+                                ? cell.attachments?.[selectedAudio.referenceAudioId]?.url ?? null
+                                : null
+                            }
+                            originalDurationMs={
+                              selectedAudio.referenceAudioId
+                                ? cell.attachments?.[selectedAudio.referenceAudioId]?.durationMs ?? null
+                                : null
+                            }
+                            author={username}
+                            session={rowSession}
+                            editable={editable}
+                          />
+                        )}
                       </div>
                     </>
                   ) : hasGeneratedVoice ? (

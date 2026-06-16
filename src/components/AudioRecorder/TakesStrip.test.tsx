@@ -143,4 +143,58 @@ describe("TakesStrip", () => {
     )
     expect(notify).toHaveBeenCalledWith("f1")
   })
+
+  // A denoised take carries the `dn-` marker and points at the source it was
+  // cleaned from via referenceAudioId.
+  function cleaned(id: string, durationMs: number, ref: string): AudioAttachmentOut {
+    return { ...take(id, durationMs), referenceAudioId: ref }
+  }
+
+  it("pins cleaned takes above originals and labels them 'Cleaned'", () => {
+    const { container } = render(
+      <TakesStrip
+        {...common}
+        takes={[take("audio-a", 1000), cleaned("dn-audio-c", 1200, "audio-a")]}
+        selectedAudioId="dn-audio-c"
+      />,
+    )
+    const cleanedLabel = screen.getByText("Cleaned")
+    const originalLabel = screen.getByText("Take 1")
+    expect(cleanedLabel).toBeTruthy()
+    expect(originalLabel).toBeTruthy()
+    // Cleaned card renders before the original in DOM order.
+    expect(
+      cleanedLabel.compareDocumentPosition(originalLabel) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    // Originals offer denoise; cleaned takes do not.
+    expect(screen.getAllByTitle(/Remove noise/).length).toBe(1)
+    expect(container).toBeTruthy()
+  })
+
+  it("a cleaned take offers revert that selects the original take", async () => {
+    emitSelect.mockResolvedValue("evt-ok")
+    render(
+      <TakesStrip
+        {...common}
+        takes={[take("audio-a", 1000), cleaned("dn-audio-c", 1200, "audio-a")]}
+        selectedAudioId="dn-audio-c"
+      />,
+    )
+    fireEvent.click(screen.getByTitle("Revert to the original recording"))
+    await waitFor(() => expect(emitSelect).toHaveBeenCalledTimes(1))
+    expect(emitSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ audioId: "audio-a", slot: "recording", cellId: "c1" }),
+    )
+  })
+
+  it("hides revert when the original source take is gone", () => {
+    render(
+      <TakesStrip
+        {...common}
+        takes={[cleaned("dn-audio-c", 1200, "audio-gone")]}
+        selectedAudioId="dn-audio-c"
+      />,
+    )
+    expect(screen.queryByTitle("Revert to the original recording")).toBeNull()
+  })
 })

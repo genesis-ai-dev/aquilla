@@ -350,7 +350,7 @@ export function OrgHome() {
 
   function openOrg(orgId: number) {
     setActiveOrg(orgId)
-    navigate("/")
+    navigate({ pathname: "/", search: `?org=${orgId}` })
   }
 
   function selectProjectLens(lens: ProjectLens) {

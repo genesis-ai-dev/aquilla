@@ -10,7 +10,9 @@ export function OrgBreadcrumb({ section }: { section: string }) {
 
   function handleAllOrgs() {
     setAllOrgs()
-    if (isOrgScopedRoute(location.pathname)) navigate("/")
+    if (isOrgScopedRoute(location.pathname) || location.pathname === "/") {
+      navigate({ pathname: "/", search: "?org=all" })
+    }
   }
 
   return (

@@ -35,7 +35,15 @@ export function OrgSwitcher() {
   function handleAllOrgs() {
     setAllOrgs()
     setOpen(false)
-    if (isOrgScopedRoute(location.pathname)) navigate("/")
+    navigate({ pathname: "/", search: "?org=all" })
+  }
+
+  function handleActiveOrg(orgId: number) {
+    setActiveOrg(orgId)
+    setOpen(false)
+    if (isOrgScopedRoute(location.pathname) || location.pathname === "/") {
+      navigate({ pathname: "/", search: `?org=${orgId}` })
+    }
   }
 
   async function handleCreate() {
@@ -100,7 +108,7 @@ export function OrgSwitcher() {
               <li key={o.id}>
                 <button
                   type="button"
-                  onClick={() => { setActiveOrg(o.id); setOpen(false) }}
+                  onClick={() => handleActiveOrg(o.id)}
                   className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-sm hover:bg-accent"
                 >
                   <span className="min-w-0">

@@ -25,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { X } from "lucide-react"
 
 const STALE_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000
 
@@ -368,9 +369,9 @@ export function OrgHome() {
   }
 
   const projectSearchClassName =
-    "h-9 min-w-28 shrink rounded-md border border-border bg-background px-3 text-sm transition-[width,border-color,box-shadow] duration-200 ease-out focus-visible:border-muted-foreground/40 focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-sm w-36 sm:w-44 lg:w-52 group-focus-within:w-full group-focus-within:sm:w-[26rem] group-focus-within:lg:w-[30rem]"
+    "h-9 w-full rounded-md border border-border bg-background px-3 pr-9 text-sm focus-visible:border-muted-foreground/40 focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-sm"
   const projectControlGroupClassName =
-    "flex shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap transition-[max-width,opacity,transform] duration-200 ease-out max-w-[36rem] opacity-100 group-focus-within:pointer-events-none group-focus-within:max-w-0 group-focus-within:-translate-x-2 group-focus-within:opacity-0"
+    "flex min-w-fit shrink-0 items-center gap-2 whitespace-nowrap"
 
   // Project lists
   const currentProjectLens = PROJECT_LENSES.find((lens) => lens.value === projectLens) ?? PROJECT_LENSES[0]
@@ -543,18 +544,34 @@ export function OrgHome() {
                             <p className="text-xs text-muted-foreground">{currentProjectLens.description}</p>
                           </div>
                         </div>
-                        <div className="group flex w-full flex-nowrap items-center gap-2 overflow-hidden">
-                          <input
-                            type="search"
-                            value={projectQuery}
-                            onChange={(e) => setProjectQuery(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Escape") e.currentTarget.blur()
-                            }}
-                            placeholder="Filter projects…"
-                            aria-label="Filter projects by name"
-                            className={projectSearchClassName}
-                          />
+                        <div className="flex w-full flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden">
+                          <div className="relative min-w-[12rem] flex-[1_1_13rem] max-w-52">
+                            <input
+                              type="text"
+                              value={projectQuery}
+                              onChange={(e) => setProjectQuery(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Escape") e.currentTarget.blur()
+                              }}
+                              placeholder="Filter projects…"
+                              aria-label="Filter projects by name"
+                              autoCorrect="off"
+                              autoCapitalize="none"
+                              spellCheck={false}
+                              className={projectSearchClassName}
+                            />
+                            {projectQuery && (
+                              <button
+                                type="button"
+                                aria-label="Clear project filter"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => setProjectQuery("")}
+                                className="absolute right-2 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                              >
+                                <X className="size-3.5" aria-hidden />
+                              </button>
+                            )}
+                          </div>
                           <div className={projectControlGroupClassName}>
                             <div className="flex items-center gap-2" aria-label="Project status filter">
                               <span className="text-xs font-medium text-muted-foreground">Status</span>
@@ -717,18 +734,34 @@ export function OrgHome() {
 
                   {/* Filter bar */}
                   {projects.length > 0 && (
-                    <div className="group flex w-full flex-nowrap items-center gap-2 overflow-hidden">
-                      <input
-                        type="search"
-                        value={projectQuery}
-                        onChange={(e) => setProjectQuery(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Escape") e.currentTarget.blur()
-                        }}
-                        placeholder="Filter projects…"
-                        aria-label="Filter projects by name"
-                        className={projectSearchClassName}
-                      />
+                    <div className="flex w-full flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden">
+                      <div className="relative min-w-[12rem] flex-[1_1_13rem] max-w-52">
+                        <input
+                          type="text"
+                          value={projectQuery}
+                          onChange={(e) => setProjectQuery(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") e.currentTarget.blur()
+                          }}
+                          placeholder="Filter projects…"
+                          aria-label="Filter projects by name"
+                          autoCorrect="off"
+                          autoCapitalize="none"
+                          spellCheck={false}
+                          className={projectSearchClassName}
+                        />
+                        {projectQuery && (
+                          <button
+                            type="button"
+                            aria-label="Clear project filter"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => setProjectQuery("")}
+                            className="absolute right-2 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                          >
+                            <X className="size-3.5" aria-hidden />
+                          </button>
+                        )}
+                      </div>
                       <div className={projectControlGroupClassName}>
                         <div className="flex items-center gap-2" aria-label="Project status filter">
                           <span className="text-xs font-medium text-muted-foreground">Status</span>

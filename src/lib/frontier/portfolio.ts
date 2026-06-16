@@ -21,12 +21,29 @@ export interface PortfolioProject {
   deadlineAt: string | null
 }
 
+export interface OrgPortfolio {
+  orgId: number
+  projects: PortfolioProject[]
+}
+
 export async function getPortfolio(jwt: string, orgId: number): Promise<PortfolioProject[]> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/portfolio`, {
     headers: { Authorization: `Bearer ${jwt}` },
   })
   if (!res.ok) throw new UserError(res.status, "", "org")
   return ((await res.json()) as { projects: PortfolioProject[] }).projects
+}
+
+export async function getPortfolios(jwt: string, orgIds: number[]): Promise<OrgPortfolio[]> {
+  const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
+  if (uniqueOrgIds.length === 0) return []
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/portfolio`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
+    body: JSON.stringify({ orgIds: uniqueOrgIds }),
+  })
+  if (!res.ok) throw new UserError(res.status, "", "org")
+  return ((await res.json()) as { portfolios: OrgPortfolio[] }).portfolios
 }
 
 /** validated fraction 0..1 (0 when no cells). */

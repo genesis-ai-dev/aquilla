@@ -10,7 +10,7 @@ import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
-import { attentionRank, deadlineStatus, getPortfolio, translatedPct, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { attentionRank, deadlineStatus, getPortfolios, translatedPct, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { UserError } from "@/lib/errors/user-error"
 
 // ── Sort options ─────────────────────────────────────────────────────────────
@@ -239,9 +239,9 @@ export function ProjectsList() {
       return
     }
     let cancelled = false
-    Promise.all(orgs.map((org) => getPortfolio(jwt, org.id)))
-      .then((lists) => {
-        if (!cancelled) setPortfolioProjects(lists.flat())
+    getPortfolios(jwt, orgs.map((org) => org.id))
+      .then((portfolios) => {
+        if (!cancelled) setPortfolioProjects(portfolios.flatMap(({ projects }) => projects))
       })
       .catch((err) => {
         if (!cancelled) {

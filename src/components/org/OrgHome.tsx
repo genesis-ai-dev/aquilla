@@ -6,7 +6,7 @@ import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
 import type { OrgSummary } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { getPortfolio, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
@@ -160,18 +160,18 @@ export function OrgHome() {
       let cancelled = false
       setLoading(true)
       setError(null)
-      Promise.all(
-        orgs.map(async (org) => {
-          const list = await getPortfolio(jwt, org.id)
-          return list.map((project) => ({
-            ...project,
-            orgId: org.id,
-            orgName: org.name ?? "Workspace",
+      const orgById = new Map(orgs.map((org) => [org.id, org]))
+      getPortfolios(jwt, orgs.map((org) => org.id))
+        .then((portfolios) => {
+          if (!cancelled) setProjects(portfolios.flatMap(({ orgId, projects: list }) => {
+            const org = orgById.get(orgId)
+            if (!org) return []
+            return list.map((project) => ({
+              ...project,
+              orgId: org.id,
+              orgName: org.name ?? "Workspace",
+            }))
           }))
-        }),
-      )
-        .then((lists) => {
-          if (!cancelled) setProjects(lists.flat())
         })
         .catch((err) => {
           if (!cancelled) {

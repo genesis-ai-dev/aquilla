@@ -71,7 +71,7 @@ test.fixme("video attachment Remove attachment button clears the saved URL", asy
   const dialog2 = await openAttachVideoDialog()
 
   // Step 3: "Currently attached" section with Remove attachment button.
-  const removeBtn = dialog2.locator('button[title="Remove attachment"]')
+  const removeBtn = dialog2.locator('[data-tooltip="Remove attachment"] button, button[aria-label="Remove attachment"]')
   await expect(removeBtn).toBeVisible({ timeout: 5_000 })
 
   // Also verify the currently-attached label text is shown.

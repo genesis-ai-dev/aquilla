@@ -13,8 +13,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *   1. Creates a project.
  *   2. Navigates directly to /project/:id/voice.
  *   3. Verifies the workspace renders (not a 404).
- *   4. Verifies the audio lens is active — the toolbar should show audio-mode
- *      UI elements (e.g. the "Text" lens button visible, meaning audio is active).
+ *   4. Verifies the voice surface is active even before files are imported.
  */
 test("/project/:id/voice deep-link activates audio lens on load", async ({ alice }) => {
   const dash = new Dashboard(alice)

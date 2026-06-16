@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { AppTooltip } from "@/components/ui/tooltip";
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -40,6 +41,8 @@ interface MembersPanelProps {
   callerUserId: number | null;
   /** Highest role the caller can grant (caps the role dropdown). */
   callerMaxRole: number;
+  /** Disable for org membership, where search should find any Aquilla user. */
+  scopedUserSearch?: boolean;
 }
 
 export function MembersPanel({
@@ -51,6 +54,7 @@ export function MembersPanel({
   onChangeRole,
   callerUserId,
   callerMaxRole,
+  scopedUserSearch = true,
 }: MembersPanelProps) {
   // Typeahead-mode-only here. Email-mode is for project-link invites
   // (handled in MultiProjectInviteDialog / SharePanel), not direct
@@ -80,6 +84,7 @@ export function MembersPanel({
   }
 
   const grantableRoles = roleOptions.filter((r) => r.level <= callerMaxRole);
+  const existingUserIds = members.map((m) => m.userId);
 
   return (
     <div className="flex flex-col gap-4">
@@ -137,9 +142,11 @@ export function MembersPanel({
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 ) : (
-                  <span className="text-[10px] text-muted-foreground" title={m.lockedHint}>
-                    {m.lockedHint ?? ""}
-                  </span>
+                  <AppTooltip content={m.lockedHint}>
+                    <span className="text-[10px] text-muted-foreground">
+                      {m.lockedHint ?? ""}
+                    </span>
+                  </AppTooltip>
                 )}
               </div>
             </li>
@@ -148,14 +155,16 @@ export function MembersPanel({
       </ul>
 
       <div className="space-y-2">
-        <div className="flex gap-2">
-          <div className="flex-1">
+        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_max-content_max-content] sm:items-start">
+          <div className="min-w-0">
             <UsernameTypeahead
               value={recipient}
               onChange={setRecipient}
               disabled={adding}
               showModeToggle={false}
               placeholder={{ username: "Aquilla username" }}
+              excludedUserIds={existingUserIds}
+              scopedSearch={scopedUserSearch}
             />
           </div>
           <Select
@@ -175,7 +184,11 @@ export function MembersPanel({
               </SelectGroup>
             </SelectContent>
           </Select>
-          <Button onClick={handleAdd} disabled={adding || !recipient.raw.trim()}>
+          <Button
+            className="sm:whitespace-nowrap"
+            onClick={handleAdd}
+            disabled={adding || !recipient.raw.trim()}
+          >
             Add
           </Button>
         </div>
@@ -197,20 +210,23 @@ function LastActiveChip({ lastActiveAt }: { lastActiveAt: string | null | undefi
   if (!label) return null;
   const stale = isStale(lastActiveAt);
   return (
-    <span
-      className={`rounded px-1.5 py-0.5 text-[10px] ${
+    <AppTooltip
+      content={
         stale
-          ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-          : "bg-muted text-muted-foreground"
-      }`}
-      title={
-        stale
-          ? "No recent activity — consider whether this membership is still needed"
+          ? "No recent activity; consider whether this membership is still needed"
           : "Last project-context activity in this org"
       }
     >
-      {stale ? "stale · " : ""}
-      {label}
-    </span>
+      <span
+        className={`rounded px-1.5 py-0.5 text-[10px] ${
+          stale
+            ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+            : "bg-muted text-muted-foreground"
+        }`}
+      >
+        {stale ? "stale · " : ""}
+        {label}
+      </span>
+    </AppTooltip>
   );
 }

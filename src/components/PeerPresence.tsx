@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { Users } from "lucide-react"
+import { AppTooltip } from "@/components/ui/tooltip"
 import type { PeerState } from "@/hooks/useFileSync"
 
 interface PeerPresenceProps {
@@ -24,18 +25,17 @@ export function PeerPresence({ peers }: PeerPresenceProps) {
 
   return (
     <div className="relative">
-      <button
-        className="flex items-center gap-0.5"
-        onClick={() => setShowPopover(!showPopover)}
-        title={`${peers.length} collaborator${peers.length !== 1 ? "s" : ""} online`}
-      >
+      <AppTooltip content={`${peers.length} collaborator${peers.length !== 1 ? "s" : ""} online`}>
+        <button
+          className="flex items-center gap-0.5"
+          onClick={() => setShowPopover(!showPopover)}
+        >
         <div className="flex -space-x-1.5">
           {visible.map((peer) => (
             <div
               key={peer.peerId}
               className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-background text-[10px] font-semibold text-white"
               style={{ backgroundColor: peer.color }}
-              title={peer.username}
             >
               {getInitials(peer.username)}
             </div>
@@ -46,7 +46,8 @@ export function PeerPresence({ peers }: PeerPresenceProps) {
             </div>
           )}
         </div>
-      </button>
+        </button>
+      </AppTooltip>
 
       {showPopover && (
         <div className="absolute right-0 bottom-full mb-2 z-40 w-56 rounded border bg-background p-2 shadow-md">

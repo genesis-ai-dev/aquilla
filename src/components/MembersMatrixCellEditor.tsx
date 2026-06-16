@@ -136,7 +136,6 @@ export function MembersMatrixCellEditor({
                 type="button"
                 className="block w-full px-2 py-1.5 text-center text-xs text-muted-foreground hover:bg-muted/50 disabled:cursor-not-allowed"
                 disabled={!session?.jwt}
-                title={session?.jwt ? "Add to this project" : "Sign in to manage access"}
                 aria-label={`Add ${username} to project`}
               />
             }
@@ -165,14 +164,11 @@ export function MembersMatrixCellEditor({
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           render={
-            <button
-              type="button"
-              className="block w-full px-2 py-1.5 text-left text-[11px] hover:bg-muted/30"
-              title={`${cell.role.name}${sourceHint ? ` · ${sourceHint}` : ""}${
-                canEdit ? "" : " (read-only here)"
-              }`}
-              aria-label={`Edit ${username}'s role on this project`}
-            />
+              <button
+                type="button"
+                className="block w-full px-2 py-1.5 text-left text-[11px] hover:bg-muted/30"
+                aria-label={`Edit ${username}'s role on this project`}
+              />
           }
         >
           <div className="flex items-center justify-between gap-1">

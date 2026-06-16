@@ -282,6 +282,7 @@ export function ProjectSettings() {
   const [connecting, setConnecting] = useState(false)
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
+  const lastModelFetchKeyRef = useRef<string | null>(null)
 
   const seededRef = useRef(false)
 
@@ -328,6 +329,32 @@ export function ProjectSettings() {
     applyBaseline(b)
     seededRef.current = true
   }, [project, applyBaseline])
+
+  const effectiveCompletionApiKey = apiKey.trim() || completionUserKey.trim()
+
+  const loadModels = useCallback(async (opts: { force?: boolean } = {}) => {
+    const trimmedEndpoint = endpoint.trim()
+    if (!trimmedEndpoint) return
+    const fetchKey = `${trimmedEndpoint}::${effectiveCompletionApiKey ? "auth" : "no-auth"}`
+    if (!opts.force && lastModelFetchKeyRef.current === fetchKey) return
+    lastModelFetchKeyRef.current = fetchKey
+    setConnecting(true)
+    setConnectionError(null)
+    try {
+      const list = await fetchModels(trimmedEndpoint, effectiveCompletionApiKey || undefined)
+      if (lastModelFetchKeyRef.current !== fetchKey) return
+      setModels(list)
+      setConnected(true)
+      if (list.length > 0 && !model) setModel(list[0])
+    } catch (err) {
+      if (lastModelFetchKeyRef.current !== fetchKey) return
+      setModels([])
+      setConnected(false)
+      setConnectionError(err instanceof Error ? err.message : "Connection failed")
+    } finally {
+      if (lastModelFetchKeyRef.current === fetchKey) setConnecting(false)
+    }
+  }, [effectiveCompletionApiKey, endpoint, model])
 
   const isDirty = useMemo(() => {
     if (!baseline) return false
@@ -401,21 +428,10 @@ export function ProjectSettings() {
     }
   }, [isDirty, navigate])
 
+  const preset = CUSTOM_PRESETS.find((p) => p.id === presetId) ?? CUSTOM_PRESETS[0]
+
   async function handleConnect() {
-    if (!endpoint.trim()) return
-    setConnecting(true)
-    setConnectionError(null)
-    setConnected(false)
-    try {
-      const list = await fetchModels(endpoint.trim(), apiKey.trim() || undefined)
-      setModels(list)
-      setConnected(true)
-      if (list.length > 0 && !model) setModel(list[0])
-    } catch (err) {
-      setConnectionError(err instanceof Error ? err.message : "Connection failed")
-    } finally {
-      setConnecting(false)
-    }
+    await loadModels({ force: true })
   }
 
   function handlePresetChange(nextPresetId: string) {
@@ -427,7 +443,16 @@ export function ProjectSettings() {
     setConnected(false)
     setConnectionError(null)
     setModels([])
+    lastModelFetchKeyRef.current = null
   }
+
+  useEffect(() => {
+    if (provider !== "custom") return
+    if (!endpoint.trim()) return
+    if (preset.requiresKey && !effectiveCompletionApiKey) return
+    const timer = window.setTimeout(() => void loadModels(), 350)
+    return () => window.clearTimeout(timer)
+  }, [effectiveCompletionApiKey, endpoint, loadModels, preset.requiresKey, provider])
 
   // ── Save orchestration ─────────────────────────────────────────────
   // Order matters: local IDB writes first (cheap, can't fail meaningfully),
@@ -472,7 +497,7 @@ export function ProjectSettings() {
       const hasLocalWork =
         Object.keys(localUpdates).length > 0 || Object.keys(completionUpdates).length > 0 || geminiKeyChanged
       if (hasLocalWork) {
-        const latest = await getProject(id)
+        const latest = (await getProject(id)) ?? project ?? undefined
         if (!latest) throw new Error("Project not found")
         const nextCompletion = Object.keys(completionUpdates).length
           ? buildCompletionSettings(latest.completionSettings, completionUpdates)
@@ -574,7 +599,7 @@ export function ProjectSettings() {
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, harmonizeMinRole,
-    bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline,
+    bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
   ])
 
   const handleSaveAndClose = useCallback(async () => {
@@ -636,8 +661,6 @@ export function ProjectSettings() {
   const activeId = useScrollSpy(visibleIds)
 
   if (loading) return <div className="p-8 text-muted-foreground">Loading...</div>
-
-  const preset = CUSTOM_PRESETS.find((p) => p.id === presetId) ?? CUSTOM_PRESETS[0]
 
   return (
     <div className="min-h-screen bg-background">
@@ -973,7 +996,14 @@ export function ProjectSettings() {
                       <Input
                         id="ep"
                         value={endpoint}
-                        onChange={(e) => { setEndpoint(e.target.value); setPresetId(presetIdForEndpoint(e.target.value)) }}
+                        onChange={(e) => {
+                          setEndpoint(e.target.value)
+                          setPresetId(presetIdForEndpoint(e.target.value))
+                          setConnected(false)
+                          setConnectionError(null)
+                          setModels([])
+                          lastModelFetchKeyRef.current = null
+                        }}
                         placeholder="http://localhost:8000"
                         className="flex-1"
                       />

@@ -65,7 +65,7 @@ test("share panel username typeahead shows Verified Aquilla user badge", async (
   await suggestion.click()
 
   // The "Verified Aquilla user" badge appears next to the input.
-  const verifiedBadge = dialog.locator('[title="Verified Aquilla user"]')
+  const verifiedBadge = dialog.locator('[data-tooltip="Verified Aquilla user"]')
   await expect(verifiedBadge).toBeVisible({ timeout: 8_000 })
   await expect(verifiedBadge).toContainText(/verified/i)
 

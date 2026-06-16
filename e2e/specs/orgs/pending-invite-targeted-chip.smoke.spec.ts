@@ -57,7 +57,7 @@ test("targeted invite chip appears on /members when invite has a recipient email
   await alice.waitForLoadState("networkidle")
 
   // The targeted invite chip with the email badge should be visible.
-  const targetedChip = alice.locator('[title="Targeted invite — sign-up form will be prefilled with this email"]')
+  const targetedChip = alice.locator('[data-tooltip="Targeted invite: sign-up form will be prefilled with this email"]')
   await expect(targetedChip).toBeVisible({ timeout: 10_000 })
   await expect(targetedChip).toContainText("targeted@example.com")
 

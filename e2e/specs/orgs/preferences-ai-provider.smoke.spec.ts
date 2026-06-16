@@ -17,7 +17,7 @@ test("preferences AI provider section expands to show endpoint and key inputs", 
   await alice.waitForLoadState("networkidle")
 
   // The toggle button is collapsed by default.
-  const toggleBtn = alice.locator('[aria-expanded]').first()
+  const toggleBtn = alice.locator("button[aria-expanded]").filter({ hasText: /AI provider/i })
   await expect(toggleBtn).toBeVisible({ timeout: 10_000 })
   await expect(toggleBtn).toHaveAttribute("aria-expanded", "false")
 

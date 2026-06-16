@@ -48,6 +48,7 @@ import {
 } from "@/lib/audio/selection"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
@@ -148,29 +149,32 @@ function SynthStatusBadge({
     const pct = !isTranslating && status.total > 0
       ? Math.round((status.loaded / status.total) * 100)
       : null
+    const tooltip = isTranslating
+      ? "Translating before voicing"
+      : pct != null
+        ? `Loading voice model (${pct}%)`
+        : "Loading voice model"
     return (
-      <span
-        className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary"
-        title={isTranslating ? "Translating before voicing" : pct != null ? `Loading voice model (${pct}%)` : "Loading voice model"}
-      >
-        <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
-        {isTranslating
-          ? "Translating"
-          : pct != null
-            ? <>Loading <span className="tabular-nums">{pct}%</span></>
-            : "Loading"}
-      </span>
+      <AppTooltip content={tooltip}>
+        <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+          <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
+          {isTranslating
+            ? "Translating"
+            : pct != null
+              ? <>Loading <span className="tabular-nums">{pct}%</span></>
+              : "Loading"}
+        </span>
+      </AppTooltip>
     )
   }
   if (status.kind === "synthesizing") {
     return (
-      <span
-        className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary"
-        title="Generating audio…"
-      >
-        <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
-        Voicing
-      </span>
+      <AppTooltip content="Generating audio…">
+        <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+          <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
+          Voicing
+        </span>
+      </AppTooltip>
     )
   }
   if (status.kind === "error") {
@@ -204,12 +208,11 @@ function SynthStatusBadge({
     // A4: dismissed — muted badge, no popover. Still communicates "not voiced".
     if (dismissed) {
       return (
-        <span
-          title="Audio generation failed — click Generate to retry"
-          className="inline-flex max-w-[80px] cursor-default items-center gap-1 truncate rounded-full bg-muted/60 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground"
-        >
-          Not voiced
-        </span>
+        <AppTooltip content="Audio generation failed — click Generate to retry">
+          <span className="inline-flex max-w-[80px] cursor-default items-center gap-1 truncate rounded-full bg-muted/60 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
+            Not voiced
+          </span>
+        </AppTooltip>
       )
     }
 
@@ -224,9 +227,6 @@ function SynthStatusBadge({
           <button
             type="button"
             className="inline-flex max-w-[80px] cursor-pointer items-center gap-1 truncate rounded-full bg-destructive/15 px-1.5 py-0.5 text-[9px] font-medium text-destructive hover:bg-destructive/25"
-            title={error.category === "missing-gemini-key"
-              ? "Audio needs an API key — click to open audio settings"
-              : `Audio failed: ${error.title}`}
           >
             Audio failed
           </button>
@@ -1028,7 +1028,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               data-index={virtualRow.index}
               data-untimed={untimedInTimeLens ? "true" : undefined}
               ref={virtualizer.measureElement}
-              title={untimedInTimeLens ? "No specific timing — ordered by sequence" : undefined}
+              aria-label={untimedInTimeLens ? "No specific timing — ordered by sequence" : undefined}
               className={cn(untimedInTimeLens && "border-l-2 border-dashed border-amber-400/70")}
               style={{
                 position: "absolute",
@@ -1560,7 +1560,6 @@ function SelectionTermActions({
             type="button"
             onMouseDown={handleButtonMouseDown}
             className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-background px-2 py-1 text-[11px] font-medium text-primary shadow-neu-sm hover:bg-primary/10"
-            title={`Look up "${sourceSelection}" in the term base`}
           >
             <BookOpen className="h-3 w-3" aria-hidden />
             View term
@@ -1574,7 +1573,6 @@ function SelectionTermActions({
           onMouseDown={handleButtonMouseDown}
           onClick={onAddToTermbase}
           className="inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground shadow-neu-sm hover:bg-primary/90"
-          title={`Add "${sourceSelection}" to the term base as a draft concept`}
         >
           <BookOpen className="h-3 w-3" aria-hidden />
           Add to term base
@@ -1808,6 +1806,8 @@ function EditorRow({
   checkLockHolder,
   showFootnotesInline,
 }: EditorRowProps) {
+  const hasTranslatedText = Boolean(cell.translated?.trim())
+  const showCompletionOverlay = isLoading && !hasTranslatedText
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<HTMLElement | null>(null)
   const [examplesExpanded, setExamplesExpanded] = useState(false)
@@ -2296,22 +2296,6 @@ function EditorRow({
     }
   }, [cell.translated, cell.fileId, cell.id, project.id, project.targetLanguage, rowSession, username])
 
-  // Build tooltip detail. Prefer the live examples surfaced in the popover
-  // (cellExamples) over the history snapshot — history's `examples` only gets
-  // populated on commit, so an in-progress / freshly generated cell would
-  // otherwise read "no examples" while the popover clearly shows several.
-  const lastEntry = cell.history[cell.history.length - 1]
-  const exampleCount = cellExamples.length > 0
-    ? cellExamples.length
-    : (lastEntry?.examples?.length ?? 0)
-  const healthTooltip = cell.status === "empty"
-    ? undefined
-    : cell.status === "validated"
-      ? `Health: ${healthValue}% — validated`
-      : exampleCount === 0
-        ? `Health: ${healthValue}% — no examples`
-        : `Health: ${healthValue}% — ${exampleCount} example${exampleCount !== 1 ? "s" : ""}`
-
   const vs = cell.validationStatus
   const [validationPopoverOpen, setValidationPopoverOpen] = useState(false)
   const isSelfValidated = cell.activeValidators.includes(username)
@@ -2405,7 +2389,7 @@ function EditorRow({
   const hasAnyIssue = infractionCount > 0 || cellNeedsAttention
   const numberLabel = showLineNumber ? String(rowIndex + 1) : null
   const numberPill = !showLineNumber ? null : (
-    <span title={`Line ${numberLabel}`} className="flex h-6 items-center">
+    <span className="flex h-6 items-center" aria-label={`Line ${numberLabel}`}>
       <CellNumberPill
         number={numberLabel}
         plain
@@ -2601,6 +2585,46 @@ function EditorRow({
   const cellRef = cell.context?.trim()
     || cell.globalReferences?.[0]?.trim()
     || `row ${rowIndex + 1}`
+  const validationTooltip = canValidate ? "Click to Validate" : "Validation unavailable"
+  const renderValidationButton = (onClick?: () => void) => (
+    <button
+      type="button"
+      // FRO-297: button role + aria-pressed so screen readers announce the
+      // validated/unvalidated toggle state. aria-label provides full context.
+      aria-pressed={isSelfValidated}
+      aria-label={
+        isSelfValidated
+          ? `Validated — ${cellRef}. Click to remove your validation.`
+          : vs === "full-others" || vs === "others"
+            ? `Validated by others — ${cellRef}. Click to add your validation.`
+            : `Validate ${cellRef}`
+      }
+      onClick={onClick}
+      className={cn(
+        "relative flex h-6 w-6 items-center justify-center rounded-full transition-[transform,color,background-color] duration-150 ease-out",
+        "active:scale-[0.88] disabled:cursor-not-allowed disabled:opacity-30",
+        "hover:bg-muted/80",
+        validationColorClass,
+        vs === "none" && "hover:text-green-500",
+        vs === "others" && "hover:text-green-500",
+        vs === "full-others" && "hover:text-green-500",
+      )}
+      disabled={!canValidate}
+    >
+      <HealthRing
+        health={healthValue}
+        size={22}
+        strokeWidth={2}
+        className="pointer-events-none"
+        style={{ position: "absolute", inset: 0 }}
+      />
+      <ValidationIcon
+        className="relative h-3.5 w-3.5"
+        strokeWidth={2.5}
+        {...(vs === "others" ? { fill: "currentColor" } : {})}
+      />
+    </button>
+  )
   const cellStateLabel =
     cell.status === "validated" ? "validated" :
     cell.status === "empty" ? "empty" :
@@ -2686,53 +2710,13 @@ function EditorRow({
           {numberPill}
           {/* Validation circle — single bare icon until validated, with a
               health ring appearing around it once there's a substantive score. */}
-          {hasContent && (
+          {hasContent && hasValidatorInfo && (
             <Popover open={validationPopoverOpen} onOpenChange={handleOpenChange}>
               <PopoverTrigger
                 openOnHover
                 delay={400}
                 closeDelay={100}
-                render={
-                  <button
-                    type="button"
-                    // FRO-297: button role + aria-pressed so screen readers
-                    // announce the validated/unvalidated toggle state.
-                    // aria-pressed mirrors whether the current user has validated.
-                    // aria-label provides full context ("Validate GEN 1:1").
-                    aria-pressed={isSelfValidated}
-                    aria-label={
-                      isSelfValidated
-                        ? `Validated — ${cellRef}. Click to remove your validation.`
-                        : vs === "full-others" || vs === "others"
-                          ? `Validated by others — ${cellRef}. Click to add your validation.`
-                          : `Validate ${cellRef}`
-                    }
-                    className={cn(
-                      "relative flex h-6 w-6 items-center justify-center rounded-full transition-[transform,color,background-color] duration-150 ease-out",
-                      "active:scale-[0.88] disabled:cursor-not-allowed disabled:opacity-30",
-                      "hover:bg-muted/80",
-                      validationColorClass,
-                      vs === "none" && "hover:text-green-500",
-                      vs === "others" && "hover:text-green-500",
-                      vs === "full-others" && "hover:text-green-500",
-                    )}
-                    title={healthTooltip}
-                    disabled={!canValidate}
-                  >
-                    <HealthRing
-                      health={healthValue}
-                      size={22}
-                      strokeWidth={2}
-                      className="pointer-events-none"
-                      style={{ position: "absolute", inset: 0 }}
-                    />
-                    <ValidationIcon
-                      className="relative h-3.5 w-3.5"
-                      strokeWidth={2.5}
-                      {...(vs === "others" ? { fill: "currentColor" } : {})}
-                    />
-                  </button>
-                }
+                render={renderValidationButton()}
               />
               {vs !== "empty" && (
                 <PopoverContent
@@ -2751,17 +2735,19 @@ function EditorRow({
                         <li key={v} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
                           <span className="truncate">{v}{v === username ? " (you)" : ""}</span>
                           {v === username && canValidate && (
-                            <button
-                              type="button"
-                              className="flex-shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
-                              title="Remove your validation"
-                              onClick={() => {
-                                emitValidationChange(false)
-                                setValidationPopoverOpen(false)
-                              }}
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </button>
+                            <AppTooltip content="Remove your validation">
+                              <button
+                                type="button"
+                                aria-label="Remove your validation"
+                                className="flex-shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                                onClick={() => {
+                                  emitValidationChange(false)
+                                  setValidationPopoverOpen(false)
+                                }}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            </AppTooltip>
                           )}
                         </li>
                       ))
@@ -2773,6 +2759,13 @@ function EditorRow({
                 </PopoverContent>
               )}
             </Popover>
+          )}
+          {hasContent && !hasValidatorInfo && (
+            <AppTooltip content={validationTooltip}>
+              {renderValidationButton(() => {
+                if (canValidate && !isSelfValidated) emitValidationChange(true)
+              })}
+            </AppTooltip>
           )}
           {/* Stale-source indicator alongside validate button */}
           {isStaleSource && hasContent && (
@@ -2787,12 +2780,11 @@ function EditorRow({
           {/* FRO-192: assignee avatar chip — shows initials of the member
               this cell is assigned to. Tooltip = username + scope label. */}
           {assigneeLabel && (
-            <span
-              title={assigneeNote ? `Assigned to ${assigneeLabel} (${assigneeNote})` : `Assigned to ${assigneeLabel}`}
-              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[8px] font-semibold uppercase text-indigo-700 ring-1 ring-indigo-300 dark:bg-indigo-900 dark:text-indigo-300 dark:ring-indigo-700"
-            >
-              {assigneeLabel.slice(0, 2)}
-            </span>
+            <AppTooltip content={assigneeNote ? `Assigned to ${assigneeLabel} (${assigneeNote})` : `Assigned to ${assigneeLabel}`}>
+              <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[8px] font-semibold uppercase text-indigo-700 ring-1 ring-indigo-300 dark:bg-indigo-900 dark:text-indigo-300 dark:ring-indigo-700">
+                {assigneeLabel.slice(0, 2)}
+              </span>
+            </AppTooltip>
           )}
         </div>
 
@@ -2855,13 +2847,12 @@ function EditorRow({
             <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground" dir="ltr">
               <span>{cell.context}</span>
               {showFormattingLossWarning && (
-                <span
-                  title="Source has inline formatting (bold, italic, etc.) that the target doesn't preserve. Formatting will be lost on export."
-                  className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400"
-                >
-                  <AlertTriangle className="h-2.5 w-2.5" />
-                  formatting
-                </span>
+                <AppTooltip content="Source has inline formatting that the target does not preserve. Formatting will be lost on export." className="max-w-xs">
+                  <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+                    <AlertTriangle className="h-2.5 w-2.5" />
+                    formatting
+                  </span>
+                </AppTooltip>
               )}
             </div>
             {cell.originalHtml ? (
@@ -2918,29 +2909,30 @@ function EditorRow({
                    single-cell selection gives immediate visual feedback, then
                    the SelectionBar ("X selected" pill) appears for discoverability.
               See: src/components/SelectionBar.tsx, src/lib/audio/selection.ts */}
-          <button
-            type="button"
-            role="checkbox"
-            aria-checked={isMultiSelected}
-            aria-label={isMultiSelected ? "Selected cell. Drag to extend selection." : "Select cell. Drag to select a range."}
-            onPointerDown={onSelectionPointerDown}
-            onClick={(e) => e.stopPropagation()}
-            className={cn(
-              "absolute left-0 top-1/2 z-20 grid h-5 w-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border",
-              "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color] duration-150 ease-out",
-              "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
-              isMultiSelected
-                ? "border-transparent bg-primary text-primary-foreground opacity-100"
-                : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary group-hover:opacity-100",
-            )}
-            title={isMultiSelected ? "Selected. Drag up or down to extend the range." : "Select cell. Drag up or down to select a range."}
-          >
-            {isMultiSelected ? (
-              <Check className="h-3 w-3" strokeWidth={3} />
-            ) : (
-              <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
-            )}
-          </button>
+          <AppTooltip content={isMultiSelected ? "Selected. Drag up or down to extend the range." : "Select cell. Drag up or down to select a range."} side="right">
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={isMultiSelected}
+              aria-label={isMultiSelected ? "Selected cell. Drag to extend selection." : "Select cell. Drag to select a range."}
+              onPointerDown={onSelectionPointerDown}
+              onClick={(e) => e.stopPropagation()}
+              className={cn(
+                "absolute left-0 top-1/2 z-20 grid h-5 w-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border",
+                "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color] duration-150 ease-out",
+                "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
+                isMultiSelected
+                  ? "border-transparent bg-primary text-primary-foreground opacity-100"
+                  : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary group-hover:opacity-100",
+              )}
+            >
+              {isMultiSelected ? (
+                <Check className="h-3 w-3" strokeWidth={3} />
+              ) : (
+                <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+              )}
+            </button>
+          </AppTooltip>
           {/* Header lane — mirrors the source column's context line so the
               target's first text line aligns with the source text, and gives
               the floating action rail a lane of its own instead of letting it
@@ -2948,9 +2940,11 @@ function EditorRow({
               lives here (left side), not squished into the line-number pill. */}
           <div className="mb-1 flex h-4 items-center text-xs text-muted-foreground" dir="ltr">
             {showCellLabel && (
-              <span className="max-w-[60%] truncate" title={labelText ?? undefined}>
-                {labelText}
-              </span>
+              <AppTooltip content={labelText} disabled={!labelText}>
+                <span className="max-w-[60%] truncate">
+                  {labelText}
+                </span>
+              </AppTooltip>
             )}
           </div>
           <div className="flex flex-1 flex-col">
@@ -2972,7 +2966,7 @@ function EditorRow({
                 onCommit={handleEditorCommit}
                 onFocus={handleEditorFocus}
                 onBlur={handleEditorBlurOuter}
-                className={cn("w-full", isLoading && "opacity-30 transition-opacity")}
+                className={cn("w-full", showCompletionOverlay && "opacity-30 transition-opacity")}
                 editable={editable && !isLoading}
                 heldByLabel={lockHolderLabel}
                 infractions={[...cellInfractions, ...waivedInfractions]}
@@ -3016,15 +3010,10 @@ function EditorRow({
                 )
               })()}
               {/* Streaming preview overlay — visible while the LLM is
-                  running. We show the text as it streams in so the user
-                  sees progress instead of waiting for the commit + outbox
-                  flush to land. Pointer-events-none so it doesn't fight
-                  the underlying TipTap editor (we just dim TipTap to
-                  opacity-30 to keep it as the canonical layer). When
-                  isLoading flips off post-commit, TipTap re-renders with
-                  `cell.translated` and the overlay disappears — no
-                  flicker because the text matches. */}
-              {isLoading && (
+                  running and the target is still empty. Once committed text
+                  is present, the editor becomes the single visible layer even
+                  if completion cleanup is still in flight. */}
+              {showCompletionOverlay && (
                 <div
                   aria-live="polite"
                   aria-busy="true"
@@ -3374,58 +3363,61 @@ function EditorRow({
             {
               value: "backtranslation",
               icon: <FileText className="h-3 w-3" />,
-              label: "BT",
+              label: "Back Translation",
               attentionDot: isBtStale ? "amber" : undefined,
               content: (
                 <div className="flex flex-col gap-2">
                   {/* ── Action row ─────────────────────────────────────────── */}
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">BT</span>
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Back Translation</span>
                       {cell.backtranslation && cell.backtranslationForText === cell.translated && (
-                        <span
-                          className={cn(
-                            "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-medium",
-                            btPolishOn
-                              ? "bg-violet-500/10 text-violet-700 dark:text-violet-300"
-                              : "bg-muted text-muted-foreground",
-                          )}
-                          title={btPolishOn ? "LLM-polished back-translation" : "Deterministic statistical back-translation"}
-                        >
-                          {btPolishOn ? "polished" : "statistical"}
-                        </span>
+                        <AppTooltip content={btPolishOn ? "LLM-polished back-translation" : "Deterministic statistical back-translation"}>
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-medium",
+                              btPolishOn
+                                ? "bg-violet-500/10 text-violet-700 dark:text-violet-300"
+                                : "bg-muted text-muted-foreground",
+                            )}
+                          >
+                            {btPolishOn ? "polished" : "statistical"}
+                          </span>
+                        </AppTooltip>
                       )}
                     </div>
                     <div className="flex items-center gap-1">
                       {/* Polish toggle — only when BT is present and user can edit */}
                       {editable && cell.backtranslation && (
-                        <button
-                          type="button"
-                          onClick={() => setBtPolishOn((v) => !v)}
-                          className={cn(
-                            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors",
-                            btPolishOn
-                              ? "bg-violet-500/15 text-violet-700 dark:text-violet-300 hover:bg-violet-500/25"
-                              : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                          )}
-                          title={btPolishOn ? "Polish on: LLM step will run on next generate" : "Polish off: statistical-only BT"}
-                        >
-                          <Sparkles className="h-3 w-3" />
-                          Polish
-                        </button>
+                        <AppTooltip content={btPolishOn ? "Polish on: LLM step will run on next generate" : "Polish off: statistical-only BT"}>
+                          <button
+                            type="button"
+                            onClick={() => setBtPolishOn((v) => !v)}
+                            className={cn(
+                              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors",
+                              btPolishOn
+                                ? "bg-violet-500/15 text-violet-700 dark:text-violet-300 hover:bg-violet-500/25"
+                                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                            )}
+                          >
+                            <Sparkles className="h-3 w-3" />
+                            Polish
+                          </button>
+                        </AppTooltip>
                       )}
                       {/* Stale: one-click regenerate — does NOT auto-trigger */}
                       {isBtStale && (
-                        <button
-                          type="button"
-                          onClick={() => onBacktranslate?.(cell)}
-                          disabled={isBacktranslating || cell.translated.trim().length === 0}
-                          className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 transition-colors hover:bg-amber-500/20 dark:text-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
-                          title="Translation changed — click to regenerate BT"
-                        >
-                          <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
-                          Regenerate
-                        </button>
+                        <AppTooltip content="Translation changed — click to regenerate BT">
+                          <button
+                            type="button"
+                            onClick={() => onBacktranslate?.(cell)}
+                            disabled={isBacktranslating || cell.translated.trim().length === 0}
+                            className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 transition-colors hover:bg-amber-500/20 dark:text-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
+                            Regenerate
+                          </button>
+                        </AppTooltip>
                       )}
                       {/* No BT yet: generate button */}
                       {!cell.backtranslation && !isBtStale && (
@@ -3450,12 +3442,14 @@ function EditorRow({
                             Edit
                           </button>
                         ) : (
-                          <span
-                            className="inline-flex cursor-not-allowed items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground opacity-50"
-                            title="Contributor+ required to edit back-translations"
-                          >
-                            Edit
-                          </span>
+                          <AppTooltip content="Contributor+ required to edit back-translations">
+                            <span
+                              aria-label="Contributor+ required to edit back-translations"
+                              className="inline-flex cursor-not-allowed items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground opacity-50"
+                            >
+                              Edit
+                            </span>
+                          </AppTooltip>
                         )
                       )}
                     </div>
@@ -3681,7 +3675,6 @@ function EditorRow({
                           onClick={() => onOpenRecording?.(cell.id)}
                           disabled={!editable || !onOpenRecording}
                           className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
-                          title="Record audio"
                         >
                           <Mic className="h-3 w-3" />
                           Record

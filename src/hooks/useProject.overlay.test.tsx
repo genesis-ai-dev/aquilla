@@ -37,6 +37,10 @@ vi.mock("@/hooks/useProjectSettings", () => ({
   }),
 }))
 
+vi.mock("@/lib/store/project-index", () => ({
+  getProject: vi.fn(async () => undefined),
+}))
+
 const originalFetch = global.fetch
 
 afterEach(() => {

@@ -21,6 +21,7 @@ import { useEditor, EditorContent } from "@tiptap/react"
 import { BubbleMenu } from "@tiptap/react/menus"
 import StarterKit from "@tiptap/starter-kit"
 import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code } from "lucide-react"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { useEffect, useRef } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
@@ -384,7 +385,6 @@ export function TranslatedEditor({
         <div
           aria-live="polite"
           className="pointer-events-none absolute right-1 top-1 z-10 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400"
-          title={`${heldByLabel} is editing this cell`}
         >
           {heldByLabel} is editing
         </div>
@@ -407,61 +407,71 @@ export function TranslatedEditor({
         options={{ placement: "top" }}
       >
         <div className="flex gap-0.5 rounded-lg bg-card p-0.5 shadow-neu-sm">
-          <button
-            type="button"
-            onClick={() => editor.chain().focus().toggleBold().run()}
-            className={cn(
-              "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
-              editor.isActive("bold") && "bg-accent"
-            )}
-            title="Bold (Cmd+B)"
-          >
-            <Bold className="h-3 w-3" />
-          </button>
-          <button
-            type="button"
-            onClick={() => editor.chain().focus().toggleItalic().run()}
-            className={cn(
-              "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
-              editor.isActive("italic") && "bg-accent"
-            )}
-            title="Italic (Cmd+I)"
-          >
-            <Italic className="h-3 w-3" />
-          </button>
-          <button
-            type="button"
-            onClick={() => editor.chain().focus().toggleUnderline().run()}
-            className={cn(
-              "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
-              editor.isActive("underline") && "bg-accent"
-            )}
-            title="Underline (Cmd+U)"
-          >
-            <UnderlineIcon className="h-3 w-3" />
-          </button>
-          <button
-            type="button"
-            onClick={() => editor.chain().focus().toggleStrike().run()}
-            className={cn(
-              "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
-              editor.isActive("strike") && "bg-accent"
-            )}
-            title="Strikethrough"
-          >
-            <Strikethrough className="h-3 w-3" />
-          </button>
-          <button
-            type="button"
-            onClick={() => editor.chain().focus().toggleCode().run()}
-            className={cn(
-              "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
-              editor.isActive("code") && "bg-accent"
-            )}
-            title="Inline code"
-          >
-            <Code className="h-3 w-3" />
-          </button>
+          <AppTooltip content="Bold (Cmd+B)">
+            <button
+              type="button"
+              onClick={() => editor.chain().focus().toggleBold().run()}
+              aria-label="Bold"
+              className={cn(
+                "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
+                editor.isActive("bold") && "bg-accent"
+              )}
+            >
+              <Bold className="h-3 w-3" />
+            </button>
+          </AppTooltip>
+          <AppTooltip content="Italic (Cmd+I)">
+            <button
+              type="button"
+              onClick={() => editor.chain().focus().toggleItalic().run()}
+              aria-label="Italic"
+              className={cn(
+                "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
+                editor.isActive("italic") && "bg-accent"
+              )}
+            >
+              <Italic className="h-3 w-3" />
+            </button>
+          </AppTooltip>
+          <AppTooltip content="Underline (Cmd+U)">
+            <button
+              type="button"
+              onClick={() => editor.chain().focus().toggleUnderline().run()}
+              aria-label="Underline"
+              className={cn(
+                "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
+                editor.isActive("underline") && "bg-accent"
+              )}
+            >
+              <UnderlineIcon className="h-3 w-3" />
+            </button>
+          </AppTooltip>
+          <AppTooltip content="Strikethrough">
+            <button
+              type="button"
+              onClick={() => editor.chain().focus().toggleStrike().run()}
+              aria-label="Strikethrough"
+              className={cn(
+                "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
+                editor.isActive("strike") && "bg-accent"
+              )}
+            >
+              <Strikethrough className="h-3 w-3" />
+            </button>
+          </AppTooltip>
+          <AppTooltip content="Inline code">
+            <button
+              type="button"
+              onClick={() => editor.chain().focus().toggleCode().run()}
+              aria-label="Inline code"
+              className={cn(
+                "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
+                editor.isActive("code") && "bg-accent"
+              )}
+            >
+              <Code className="h-3 w-3" />
+            </button>
+          </AppTooltip>
         </div>
       </BubbleMenu>
       <div

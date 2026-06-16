@@ -12,7 +12,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *   class "cursor-not-allowed ... opacity-50"
  *
  * This spec: opens the import dialog, verifies the Translation Memory item
- * is visible-but-disabled with its "Coming soon" tooltip, and verifies the
+ * is visible-but-disabled with app tooltip metadata, and verifies the
  * graduated Macula / Translation Notes options are now enabled buttons.
  */
 test("import dialog shows Coming soon items as disabled", async ({ alice }) => {
@@ -30,10 +30,11 @@ test("import dialog shows Coming soon items as disabled", async ({ alice }) => {
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 8_000 })
 
-  // Translation Memory is the remaining coming-soon item: a non-interactive
-  // div carrying the "Coming soon" tooltip and disabled styling.
-  const tmDiv = dialog.locator('[title*="Translation Memory import"]')
+  // Translation Memory is the remaining coming-soon item: a disabled option
+  // using app tooltip metadata and disabled styling.
+  const tmDiv = dialog.getByRole("button", { name: /Translation Memory TMX/i })
   await expect(tmDiv).toBeVisible({ timeout: 5_000 })
+  await expect(tmDiv).toHaveAttribute("aria-disabled", "true")
   await expect(tmDiv).toHaveClass(/cursor-not-allowed|opacity/)
 
   // Macula graduated to an enabled Beta importer (FRO-178/FRO-310).
@@ -42,7 +43,7 @@ test("import dialog shows Coming soon items as disabled", async ({ alice }) => {
   await expect(maculaBtn).toBeEnabled()
 
   // Translation Notes graduated to an enabled Beta importer (FRO-179/FRO-310).
-  const notesBtn = dialog.getByRole("button", { name: /Translation Notes \(TSV\)/i })
+  const notesBtn = dialog.getByRole("button", { name: /Translation Notes TSV/i })
   await expect(notesBtn).toBeVisible({ timeout: 3_000 })
   await expect(notesBtn).toBeEnabled()
 

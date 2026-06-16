@@ -19,6 +19,7 @@ import { minimalProjectRecord, resolveCloudProjectResult } from "@/lib/sync/clou
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
+import { getProject } from "@/lib/store/project-index"
 
 /**
  * Overlay synced project-wide settings onto the server-returned ProjectRecord.
@@ -50,6 +51,21 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
     next.ttsSettings = { ...next.ttsSettings, ...settings.ttsSettings }
   }
   return next
+}
+
+async function overlayDeviceLocalSettings(record: ProjectRecord): Promise<ProjectRecord> {
+  let local: ProjectRecord | undefined
+  try {
+    local = await getProject(record.id)
+  } catch (err) {
+    console.warn("[useProject] failed to read device-local project cache", err)
+    return record
+  }
+  if (!local?.completionSettings) return record
+  return {
+    ...record,
+    completionSettings: local.completionSettings,
+  }
 }
 
 export type ProjectLoadStatus =
@@ -95,7 +111,8 @@ export function useProject(projectId: string) {
         hasLoaded.current = true
         return
       }
-      const hydrated = minimalProjectRecord(result.project)
+      const hydrated = await overlayDeviceLocalSettings(minimalProjectRecord(result.project))
+      if (cancelled) return
       setProject(hydrated)
       setStatus("ready")
       hasLoaded.current = true

@@ -5,6 +5,7 @@
 import { useState } from "react"
 import { Mic, MicOff } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 interface Props {
   onOpenRecording: () => void
@@ -45,23 +46,26 @@ export function CellAudioRecordButton({ onOpenRecording, disabled, micDenied }: 
 
   return (
     <span className="relative inline-flex">
-      <button
-        type="button"
-        onClick={handleClick}
-        disabled={Boolean(disabled || unsupportedReason)}
-        title={tooltip}
-        aria-label={tooltip}
-        className={cn(
-          "flex h-5 w-5 items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
-          blocked
-            ? micDenied
-              ? "cursor-pointer text-amber-500/70 hover:text-amber-500"
-              : "cursor-not-allowed text-muted-foreground/20"
-            : "text-muted-foreground/50 hover:text-foreground",
-        )}
-      >
-        {blocked ? <MicOff className="h-3 w-3" /> : <Mic className="h-3 w-3" />}
-      </button>
+      <AppTooltip content={tooltip}>
+        <span className="inline-flex">
+          <button
+            type="button"
+            onClick={handleClick}
+            disabled={Boolean(disabled || unsupportedReason)}
+            aria-label={tooltip}
+            className={cn(
+              "flex h-5 w-5 items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
+              blocked
+                ? micDenied
+                  ? "cursor-pointer text-amber-500/70 hover:text-amber-500"
+                  : "cursor-not-allowed text-muted-foreground/20"
+                : "text-muted-foreground/50 hover:text-foreground",
+            )}
+          >
+            {blocked ? <MicOff className="h-3 w-3" /> : <Mic className="h-3 w-3" />}
+          </button>
+        </span>
+      </AppTooltip>
 
       {/* Mic-denied help popover — shown when micDenied and user clicked */}
       {micDenied && showDeniedHelp && (

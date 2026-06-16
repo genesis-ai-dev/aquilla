@@ -10,14 +10,14 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 /**
  * CommentsPage — "Go to cell" button navigates to the cell in editor.
  *
- * CommentsPage.tsx renders a "Go to cell" button (title="Go to cell in editor")
+ * CommentsPage.tsx renders an "Open file" button with a "Go to cell in editor" tooltip
  * for each cell-scoped comment thread. Clicking it calls onNavigate(root)
  * which navigates to /project/:id/file/:fileId?cell=:cellId.
  *
  * Setup:
  *   1. Post a comment on cell 0 via the editor CommentsDrawer.
  *   2. Navigate to /project/:id/comments.
- *   3. Find the "Go to cell" button on the comment thread.
+ *   3. Find the "Open file" button on the comment thread.
  *   4. Click it and verify the URL changes to /project/:id/file/:fileId.
  */
 test("comments page Go to cell navigates to the cell in editor", async ({ alice }) => {
@@ -76,10 +76,8 @@ test("comments page Go to cell navigates to the cell in editor", async ({ alice 
     await expect(alice.getByText(commentText).first()).toBeVisible({ timeout: 1_000 })
   }).toPass({ timeout: 15_000 })
 
-  // Click "Go to cell" button on the thread.
-  const goToCellBtn = alice.locator('button[title="Go to cell in editor"]')
-    .or(alice.getByRole("button", { name: /Go to cell/i }))
-    .first()
+  // Click the cell-scoped navigation button on the thread.
+  const goToCellBtn = alice.getByRole("button", { name: /Open file/i }).first()
   await expect(goToCellBtn).toBeVisible({ timeout: 5_000 })
   await goToCellBtn.click()
 

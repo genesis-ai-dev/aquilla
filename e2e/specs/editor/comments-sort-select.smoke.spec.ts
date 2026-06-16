@@ -35,7 +35,7 @@ test("comments page sort select changes sort order", async ({ alice }) => {
   // Post a comment so the comments page has content.
   const row = ws.cellRow(0)
   await row.hover()
-  const commentBtn = row.locator('[aria-label*="comment" i], [title*="comment" i]').first()
+  const commentBtn = row.locator('[aria-label*="comment" i]').first()
   if (await commentBtn.isVisible()) {
     await commentBtn.click()
   } else {

@@ -32,7 +32,7 @@ test("setup checklist AI models step expand reveals transcription fieldset", asy
   await ws.waitForEditor()
 
   // Open the setup checklist.
-  const chip = alice.locator('[title="Open setup checklist"]')
+  const chip = alice.getByRole("button", { name: /Setup:/i })
   await expect(chip).toBeVisible({ timeout: 10_000 })
   await chip.click()
 

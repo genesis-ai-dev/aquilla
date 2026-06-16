@@ -113,7 +113,6 @@ export function CellActionsMenu({
         render={
           <button
             type="button"
-            title="More actions"
             aria-label="More actions"
             className={cn(
               "flex h-5 w-5 items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",

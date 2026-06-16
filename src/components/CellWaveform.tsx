@@ -5,6 +5,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Download, RotateCw } from "lucide-react"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { UseCellAudioResult } from "@/hooks/useCellAudio"
 import type { AudioMediaStrategy } from "@/lib/parsers/types"
@@ -101,31 +102,32 @@ export function CellWaveform({
     void requestPeaks(bins, { force: true })
   }
 
+  const waveformTooltip =
+    peaksState === "error"
+      ? "Couldn't decode the waveform; click retry"
+      : isLoading
+        ? "Loading waveform..."
+        : needsUserAction
+          ? "Click to download and decode this clip's waveform"
+          : "Click to seek"
+
   return (
-    <div
-      className={cn(
-        "group/wf neu-inset relative w-full select-none rounded-xl transition-shadow",
-        hasPeaks ? "cursor-pointer" : "cursor-default",
-        peaksState === "error" && "ring-1 ring-amber-500/30 ring-inset",
-        className,
-      )}
-      style={{ height, ["--waveform-bar" as string]: "var(--color-muted-foreground, #888)" } as React.CSSProperties}
-      onPointerDown={hasPeaks ? onPointerDown : undefined}
-      role={hasPeaks ? "slider" : undefined}
-      aria-label="Audio scrubber"
-      aria-valuemin={0}
-      aria-valuemax={duration || 0}
-      aria-valuenow={currentTime}
-      title={
-        peaksState === "error"
-          ? "Couldn't decode the waveform — click retry"
-          : isLoading
-            ? "Loading waveform…"
-            : needsUserAction
-              ? "Click to download and decode this clip's waveform"
-              : "Click to seek"
-      }
-    >
+    <AppTooltip content={waveformTooltip} disabled={peaksState === "error"}>
+      <div
+        className={cn(
+          "group/wf neu-inset relative w-full select-none rounded-xl transition-shadow",
+          hasPeaks ? "cursor-pointer" : "cursor-default",
+          peaksState === "error" && "ring-1 ring-amber-500/30 ring-inset",
+          className,
+        )}
+        style={{ height, ["--waveform-bar" as string]: "var(--color-muted-foreground, #888)" } as React.CSSProperties}
+        onPointerDown={hasPeaks ? onPointerDown : undefined}
+        role={hasPeaks ? "slider" : undefined}
+        aria-label="Audio scrubber"
+        aria-valuemin={0}
+        aria-valuemax={duration || 0}
+        aria-valuenow={currentTime}
+      >
       <canvas
         ref={canvasRef}
         className={cn(
@@ -153,16 +155,19 @@ export function CellWaveform({
         </button>
       )}
       {peaksState === "error" && (
-        <button
-          type="button"
-          onClick={handleRetryClick}
-          className="absolute inset-0 flex items-center justify-center gap-1.5 rounded-xl text-[10px] font-medium text-amber-700 dark:text-amber-300 transition-colors hover:bg-amber-500/10"
-          title="Couldn't load this clip's waveform — click to retry"
-        >
-          <RotateCw className="h-3 w-3" />
-          <span>Retry waveform</span>
-        </button>
+        <AppTooltip content="Couldn't load this clip's waveform; click to retry">
+          <button
+            type="button"
+            onClick={handleRetryClick}
+            aria-label="Retry waveform"
+            className="absolute inset-0 flex items-center justify-center gap-1.5 rounded-xl text-[10px] font-medium text-amber-700 dark:text-amber-300 transition-colors hover:bg-amber-500/10"
+          >
+            <RotateCw className="h-3 w-3" />
+            <span>Retry waveform</span>
+          </button>
+        </AppTooltip>
       )}
-    </div>
+      </div>
+    </AppTooltip>
   )
 }

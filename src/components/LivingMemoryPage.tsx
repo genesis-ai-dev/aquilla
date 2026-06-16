@@ -30,6 +30,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import {
+  AppTooltip,
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -495,18 +496,19 @@ export function LivingMemoryPage() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <h1 className="text-sm font-semibold leading-none">Living Memory</h1>
-              <span
-                aria-label={livenessLabel}
-                title={livenessLabel}
-                className={[
-                  "h-2 w-2 shrink-0 rounded-full transition-colors",
-                  livenessState === "offline"
-                    ? "bg-red-500"
-                    : livenessState === "updating"
-                      ? "bg-amber-400 animate-pulse"
-                      : "bg-emerald-500",
-                ].join(" ")}
-              />
+              <AppTooltip content={livenessLabel}>
+                <span
+                  aria-label={livenessLabel}
+                  className={[
+                    "h-2 w-2 shrink-0 rounded-full transition-colors",
+                    livenessState === "offline"
+                      ? "bg-red-500"
+                      : livenessState === "updating"
+                        ? "bg-amber-400 animate-pulse"
+                        : "bg-emerald-500",
+                  ].join(" ")}
+                />
+              </AppTooltip>
               {isLoading ? (
                 <Skeleton className="h-4 w-20 rounded-full" aria-label="Loading count" />
               ) : (

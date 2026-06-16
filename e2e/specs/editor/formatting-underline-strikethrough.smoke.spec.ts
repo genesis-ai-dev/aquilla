@@ -1,6 +1,7 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
+import { selectEditorContents } from "../../helpers/editor-selection"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -44,15 +45,14 @@ test("formatting bubble menu Underline and Strikethrough toggle on and off", asy
   const targetCell = row.locator('[contenteditable="true"]').first()
   await targetCell.dblclick()
 
-  // Clear and type text.
-  await alice.keyboard.press("Control+a")
+  // Type text.
   await alice.keyboard.type("underline strikethrough test")
 
   // Select all to trigger BubbleMenu.
-  await alice.keyboard.press("Control+a")
+  await selectEditorContents(targetCell)
 
   // --- Underline ---
-  const underlineBtn = alice.locator('button[title="Underline (Cmd+U)"]')
+  const underlineBtn = alice.getByRole("button", { name: "Underline" })
   await expect(underlineBtn).toBeVisible({ timeout: 5_000 })
   await expect(underlineBtn).not.toHaveClass(ACTIVE_CLASS, { timeout: 2_000 })
 
@@ -63,7 +63,7 @@ test("formatting bubble menu Underline and Strikethrough toggle on and off", asy
   await expect(underlineBtn).not.toHaveClass(ACTIVE_CLASS, { timeout: 3_000 })
 
   // --- Strikethrough ---
-  const strikeBtn = alice.locator('button[title="Strikethrough"]')
+  const strikeBtn = alice.getByRole("button", { name: "Strikethrough" })
   await expect(strikeBtn).toBeVisible({ timeout: 5_000 })
   await expect(strikeBtn).not.toHaveClass(ACTIVE_CLASS, { timeout: 2_000 })
 

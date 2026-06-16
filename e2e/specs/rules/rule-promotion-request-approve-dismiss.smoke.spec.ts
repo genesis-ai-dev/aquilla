@@ -10,8 +10,7 @@ import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
  * "Request promotion" button), a pending request appears in the org
  * maintainer's rules panel under "Pending promotion requests".
  *
- * The maintainer sees "Approve" (title="Promote this rule to org scope")
- * and "Dismiss" (title="Dismiss this request") per request.
+ * The maintainer sees "Approve" and "Dismiss" per request.
  *
  * This spec tests the Dismiss path (it's non-destructive and doesn't
  * require further DB state):

@@ -2,6 +2,7 @@ import { useState, useEffect, forwardRef, useImperativeHandle } from "react"
 import { Menu } from "@base-ui/react/menu"
 import { Eye, X, Languages } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
 
@@ -112,14 +113,16 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
           >
             Adjust
           </button>
-          <button
-            type="button"
-            onClick={handleDismissHint}
-            title="Dismiss"
-            className="flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground/70 transition-all duration-150 ease-out hover:bg-card hover:text-foreground hover:shadow-neu-xs active:scale-[0.92]"
-          >
-            <X className="h-3 w-3" />
-          </button>
+          <AppTooltip content="Dismiss">
+            <button
+              type="button"
+              onClick={handleDismissHint}
+              aria-label="Dismiss"
+              className="flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground/70 transition-all duration-150 ease-out hover:bg-card hover:text-foreground hover:shadow-neu-xs active:scale-[0.92]"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </AppTooltip>
           {/* Arrow pointing to the eye icon */}
           <span
             className="absolute left-full top-1/2 -translate-y-1/2 border-y-4 border-l-4 border-y-transparent border-l-card"
@@ -263,27 +266,33 @@ function FontSizeRow({
     >
       <span>{label}</span>
       <span className="flex items-center gap-1">
-        <button
-          type="button"
-          aria-label={`Decrease ${label.toLowerCase()} font size`}
-          title={`Decrease ${label.toLowerCase()} font size`}
-          disabled={disabled || value <= MIN_FONT_SIZE}
-          onClick={() => onChange(Math.max(MIN_FONT_SIZE, value - FONT_SIZE_STEP))}
-          className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 disabled:cursor-not-allowed disabled:opacity-30 transition-colors"
-        >
-          <span className="text-[11px] leading-none select-none">A−</span>
-        </button>
+        <AppTooltip content={`Decrease ${label.toLowerCase()} font size`}>
+          <span className="inline-flex">
+            <button
+              type="button"
+              aria-label={`Decrease ${label.toLowerCase()} font size`}
+              disabled={disabled || value <= MIN_FONT_SIZE}
+              onClick={() => onChange(Math.max(MIN_FONT_SIZE, value - FONT_SIZE_STEP))}
+              className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 disabled:cursor-not-allowed disabled:opacity-30 transition-colors"
+            >
+              <span className="text-[11px] leading-none select-none">A−</span>
+            </button>
+          </span>
+        </AppTooltip>
         <span className="w-9 text-center text-[10px] tabular-nums text-muted-foreground">{value}px</span>
-        <button
-          type="button"
-          aria-label={`Increase ${label.toLowerCase()} font size`}
-          title={`Increase ${label.toLowerCase()} font size`}
-          disabled={disabled || value >= MAX_FONT_SIZE}
-          onClick={() => onChange(Math.min(MAX_FONT_SIZE, value + FONT_SIZE_STEP))}
-          className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 disabled:cursor-not-allowed disabled:opacity-30 transition-colors"
-        >
-          <span className="text-[11px] leading-none select-none">A+</span>
-        </button>
+        <AppTooltip content={`Increase ${label.toLowerCase()} font size`}>
+          <span className="inline-flex">
+            <button
+              type="button"
+              aria-label={`Increase ${label.toLowerCase()} font size`}
+              disabled={disabled || value >= MAX_FONT_SIZE}
+              onClick={() => onChange(Math.min(MAX_FONT_SIZE, value + FONT_SIZE_STEP))}
+              className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 disabled:cursor-not-allowed disabled:opacity-30 transition-colors"
+            >
+              <span className="text-[11px] leading-none select-none">A+</span>
+            </button>
+          </span>
+        </AppTooltip>
       </span>
     </div>
   )

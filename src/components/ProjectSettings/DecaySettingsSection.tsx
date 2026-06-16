@@ -1,5 +1,6 @@
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
+import { AppTooltip } from "@/components/ui/tooltip"
 import type { DecaySettings } from "@/lib/parsers/types"
 import { DECAY_DEFAULTS } from "@/lib/health/decay-engine"
 
@@ -29,8 +30,10 @@ export function DecaySettingsSection({
   const decayWarnThreshold = settings?.decayWarnThreshold ?? DECAY_DEFAULTS.decayWarnThreshold
 
   return (
-    <details className="rounded-lg border p-3" title={disabled ? disabledTooltip : undefined}>
-      <summary className="cursor-pointer text-sm font-medium">Staleness &amp; health</summary>
+    <details className="rounded-lg border p-3">
+      <AppTooltip content={disabledTooltip} disabled={!disabled}>
+        <summary className="cursor-pointer text-sm font-medium">Staleness &amp; health</summary>
+      </AppTooltip>
       <div className="mt-3 space-y-4">
         <p className="text-xs text-muted-foreground">
           Cell health is a confidence score derived from validated neighboring cells in the

@@ -134,12 +134,11 @@ function FootnoteRow({ index, sourceFn, targetFn, editable, onSave }: FootnoteRo
     }
   }
 
-  const callerPill = (
-    <span
-      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-bold text-muted-foreground"
-      title="Footnote caller"
-      aria-hidden
-    >
+	  const callerPill = (
+	    <span
+	      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-bold text-muted-foreground"
+	      aria-hidden
+	    >
       {sourceFn.caller === "+" ? "fn" : sourceFn.caller}
     </span>
   )

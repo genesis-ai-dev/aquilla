@@ -6,6 +6,7 @@ import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
+import { AppTooltip } from "@/components/ui/tooltip"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog"
@@ -215,15 +216,18 @@ export function MultiProjectInviteDialog({
                         >
                           {isSelected && <Check className="h-3.5 w-3.5" />}
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => toggleProject(p.id)}
-                          disabled={busy}
-                          title={p.name}
-                          className="min-w-0 truncate text-left hover:text-foreground disabled:opacity-50"
-                        >
-                          {p.name}
-                        </button>
+                        <AppTooltip content={p.name}>
+                          <span className="min-w-0">
+                            <button
+                              type="button"
+                              onClick={() => toggleProject(p.id)}
+                              disabled={busy}
+                              className="min-w-0 truncate text-left hover:text-foreground disabled:opacity-50"
+                            >
+                              {p.name}
+                            </button>
+                          </span>
+                        </AppTooltip>
                         {isDone ? (
                           <span className="shrink-0 text-[10px] text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
                             <Check className="h-3 w-3" /> added
@@ -262,12 +266,11 @@ export function MultiProjectInviteDialog({
                         )}
                       </div>
                       {errorMsg && (
-                        <p
-                          className="mt-1 pl-7 text-[10px] text-destructive break-words"
-                          title={errorMsg}
-                        >
-                          {errorMsg}
-                        </p>
+                        <AppTooltip content={errorMsg} className="max-w-xs">
+                          <p className="mt-1 pl-7 text-[10px] text-destructive break-words">
+                            {errorMsg}
+                          </p>
+                        </AppTooltip>
                       )}
                     </li>
                   )

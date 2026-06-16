@@ -1,6 +1,7 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
+import { selectEditorContents } from "../../helpers/editor-selection"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -39,12 +40,13 @@ test("formatting bubble menu appears on text selection and Bold toggles", async 
   const targetCell = row.locator('[contenteditable="true"]').first()
   await targetCell.dblclick()
   await expect(targetCell).toBeFocused({ timeout: 3_000 })
+  await alice.keyboard.insertText("bubble menu test")
 
-  // Select all text inside the editor (Ctrl+A in the context of the editor).
-  await alice.keyboard.press("Control+a")
+  // Select all text inside the editor.
+  await selectEditorContents(targetCell)
 
-  // BubbleMenu should appear — look for the Bold button (title="Bold (Cmd+B)").
-  const boldBtn = alice.locator('button[title="Bold (Cmd+B)"]')
+  // BubbleMenu should appear — look for the Bold button.
+  const boldBtn = alice.getByRole("button", { name: "Bold" })
   await expect(boldBtn).toBeVisible({ timeout: 5_000 })
 
   // Click Bold.

@@ -12,8 +12,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *
  * In audio lens (EditorTable audioLens), each cell row renders a CellVoicePanel
  * which contains a SpeakerChip. The chip:
- *   - Shows "Unassigned" when no voice is assigned.
- *   - Has title="Assign a character to this line".
+ *   - Shows the current assigned/default speaker.
  *   - Opens a Popover with a flat list of project voices on click.
  *   - Clicking a voice row calls onAssign(voiceId) and the chip updates.
  *

@@ -77,6 +77,6 @@ test("comment stale indicator appears when translation changes after thread was 
   await expect(drawer2).toContainText(commentText, { timeout: 5_000 })
 
   // Step 5: The stale indicator should be visible on the thread.
-  const staleIndicator = drawer2.locator('[title="Translation changed since this thread was created"]')
+  const staleIndicator = drawer2.getByText("stale", { exact: true })
   await expect(staleIndicator).toBeVisible({ timeout: 5_000 })
 })

@@ -8,6 +8,7 @@
 
 import { ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 // Bouncy spring matches the reference popout, slightly tamed for desktop.
 // Original: cubic-bezier(.68,-0.75,.27,1.75)
@@ -42,7 +43,7 @@ export function RailButton({
           ? "bg-emerald-500"
           : null
 
-  return (
+  const button = (
     <div className="relative">
       <button
         type="button"
@@ -50,7 +51,6 @@ export function RailButton({
         onMouseDown={onMouseDown}
         onMouseEnter={onMouseEnter}
         disabled={disabled}
-        title={tooltip}
         aria-label={tooltip}
         className={cn(
           "flex h-6 w-6 items-center justify-center rounded-full",
@@ -77,6 +77,8 @@ export function RailButton({
       )}
     </div>
   )
+
+  return <AppTooltip content={tooltip}>{button}</AppTooltip>
 }
 
 interface CellActionRailProps {

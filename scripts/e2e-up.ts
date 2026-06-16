@@ -23,11 +23,21 @@ const SYNC_WORKER_DIR = path.join(REPO_ROOT, "sync-worker")
 // sync-worker (writes files/cells/events) see the same aquilla-db rows. Without
 // --persist-to each cwd gets its own isolated sqlite and the two drift apart.
 const PERSIST_DIR = path.join(REPO_ROOT, ".wrangler-e2e-state")
-// Local Postgres (Docker aquilla-dev-pg) used as the Hyperdrive target for e2e.
-// Wrangler reads WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_<BINDING> to
-// override the Hyperdrive connection without needing a deployed Hyperdrive ID.
-// The aquilla_e2e database is recreated from db/postgres/schema.sql on each run.
+// Local Postgres used as the Hyperdrive target for e2e. Wrangler reads
+// WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_<BINDING> to override the
+// Hyperdrive connection without needing a deployed Hyperdrive ID. The
+// aquilla_e2e database is recreated from db/postgres/schema.sql on each run.
+//
+// The reset prefers the Docker container `aquilla-dev-pg` (the canonical
+// CI/dev setup); when Docker isn't available it falls back to a local `psql`
+// against the same localhost:5432 endpoint (e.g. a Homebrew Postgres dev box).
 const E2E_PG_URL = "postgresql://aquilla:aquilla@localhost:5432/aquilla_e2e"
+const PG_CONTAINER = "aquilla-dev-pg"
+// Admin connection used only by the Docker-less reset fallback. Drop/recreate
+// needs CREATE DATABASE, which the `aquilla` login role lacks, so we default to
+// the OS superuser over the default unix socket (Homebrew Postgres convention).
+// Override with E2E_PG_ADMIN_URL for non-standard local setups.
+const E2E_PG_ADMIN_URL = process.env.E2E_PG_ADMIN_URL || "postgresql:///postgres"
 const HYPERDRIVE_ENV = { WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: E2E_PG_URL }
 const IDENTITY_PORT = 8787
 const SYNC_WORKER_PORT = 8788
@@ -144,6 +154,92 @@ function ensureDevVars(appDir: string, label: string): void {
   console.log(`[e2e-up] ${label}: created .dev.vars from .dev.vars.example`)
 }
 
+/** True when the Docker-managed Postgres container is reachable. False when
+ * there's no Docker daemon (the binary is missing → spawnSync status is null)
+ * or the container isn't running — e.g. a Homebrew-Postgres dev machine. */
+function dockerPgAvailable(): boolean {
+  return spawnSync("docker", ["exec", PG_CONTAINER, "true"], { stdio: "ignore" }).status === 0
+}
+
+/** True when a local `psql` client is on PATH (the Docker-less fallback). */
+function hasLocalPsql(): boolean {
+  return spawnSync("psql", ["--version"], { stdio: "ignore" }).status === 0
+}
+
+/**
+ * Drop + recreate the e2e database from a clean schema. Prefers the Docker
+ * container (`aquilla-dev-pg`, the canonical CI/dev setup); falls back to a
+ * local `psql` against localhost:5432 when Docker is unavailable. Exits the
+ * process on failure — we refuse to run the suite against a stale/partial
+ * schema (it manifests as confusing 500s like "column p.is_active does not
+ * exist").
+ *
+ * ON_ERROR_STOP makes psql exit non-zero on the first error — without it a
+ * failed DROP (held connections) or a partial schema apply returns 0 and the
+ * suite silently runs against a stale schema.
+ */
+function resetE2ePostgres(): void {
+  const schemaSql = readFileSync(path.join(REPO_ROOT, "db/postgres/schema.sql"))
+
+  if (dockerPgAvailable()) {
+    const dropResult = spawnSync(
+      "docker",
+      ["exec", PG_CONTAINER, "psql", "-v", "ON_ERROR_STOP=1", "-U", "aquilla", "-d", "postgres",
+        "-c", "DROP DATABASE IF EXISTS aquilla_e2e WITH (FORCE)", "-c", "CREATE DATABASE aquilla_e2e"],
+      { stdio: ["ignore", "inherit", "inherit"] },
+    )
+    if (dropResult.status !== 0) {
+      console.error(`[e2e-up] aquilla_e2e drop/recreate failed (psql exit ${dropResult.status}) — refusing to run against a stale schema.`)
+      process.exit(1)
+    }
+    // Pipe schema.sql into psql via stdin — no shell interpolation needed.
+    const psqlResult = spawnSync(
+      "docker",
+      ["exec", "-i", PG_CONTAINER, "psql", "-v", "ON_ERROR_STOP=1", "-U", "aquilla", "-d", "aquilla_e2e"],
+      { input: schemaSql, stdio: ["pipe", "pipe", "pipe"] },
+    )
+    if (psqlResult.status !== 0) {
+      console.error("[e2e-up] schema apply failed:", psqlResult.stderr?.toString())
+      process.exit(1)
+    }
+    return
+  }
+
+  // Docker-less fallback: use a local psql (e.g. Homebrew Postgres on :5432).
+  if (!hasLocalPsql()) {
+    console.error(
+      "[e2e-up] no Docker container 'aquilla-dev-pg' and no local 'psql' on PATH.\n" +
+        "  Start Docker (with the aquilla-dev-pg container) or install a local\n" +
+        "  Postgres reachable at localhost:5432 with role 'aquilla'. See e2e/README.md.",
+    )
+    process.exit(1)
+  }
+  console.log("[e2e-up] Docker unavailable — resetting via local psql (localhost:5432).")
+  // Drop/recreate needs CREATE DATABASE (the `aquilla` login role lacks it), so
+  // run it through the admin connection and hand ownership to `aquilla` so the
+  // schema apply (as aquilla) can create objects in the public schema.
+  const dropResult = spawnSync(
+    "psql",
+    [E2E_PG_ADMIN_URL, "-v", "ON_ERROR_STOP=1",
+      "-c", "DROP DATABASE IF EXISTS aquilla_e2e WITH (FORCE)",
+      "-c", "CREATE DATABASE aquilla_e2e OWNER aquilla"],
+    { stdio: ["ignore", "inherit", "inherit"] },
+  )
+  if (dropResult.status !== 0) {
+    console.error(`[e2e-up] aquilla_e2e drop/recreate failed (psql exit ${dropResult.status}) — refusing to run against a stale schema.`)
+    process.exit(1)
+  }
+  const psqlResult = spawnSync(
+    "psql",
+    [E2E_PG_URL, "-v", "ON_ERROR_STOP=1"],
+    { input: schemaSql, stdio: ["pipe", "pipe", "pipe"] },
+  )
+  if (psqlResult.status !== 0) {
+    console.error("[e2e-up] schema apply failed:", psqlResult.stderr?.toString())
+    process.exit(1)
+  }
+}
+
 async function main(): Promise<void> {
   if (!existsSync(AUTH_WORKER_DIR)) {
     console.error(`[e2e-up] auth-worker not found at ${AUTH_WORKER_DIR}`)
@@ -182,31 +278,7 @@ async function main(): Promise<void> {
   //    and sync queries, so we apply db/postgres/schema.sql here instead of
   //    wrangler d1 migrations apply.
   console.log("[boot 2/8] resetting aquilla_e2e postgres schema…")
-  // ON_ERROR_STOP makes psql exit non-zero on the first error — without it
-  // a failed DROP (held connections) or a partial schema apply returns 0 and
-  // the suite runs against a stale schema (manifests as 500s like
-  // "column p.is_active does not exist").
-  const dropResult = spawnSync(
-    "docker",
-    ["exec", "aquilla-dev-pg", "psql", "-v", "ON_ERROR_STOP=1", "-U", "aquilla", "-d", "postgres",
-      "-c", "DROP DATABASE IF EXISTS aquilla_e2e WITH (FORCE)", "-c", "CREATE DATABASE aquilla_e2e"],
-    { stdio: ["ignore", "inherit", "inherit"] },
-  )
-  if (dropResult.status !== 0) {
-    console.error(`[e2e-up] aquilla_e2e drop/recreate failed (psql exit ${dropResult.status}) — refusing to run against a stale schema.`)
-    process.exit(1)
-  }
-  // Pipe schema.sql into psql via stdin — no shell interpolation needed.
-  const schemaSql = readFileSync(path.join(REPO_ROOT, "db/postgres/schema.sql"))
-  const psqlResult = spawnSync(
-    "docker",
-    ["exec", "-i", "aquilla-dev-pg", "psql", "-v", "ON_ERROR_STOP=1", "-U", "aquilla", "-d", "aquilla_e2e"],
-    { input: schemaSql, stdio: ["pipe", "pipe", "pipe"] },
-  )
-  if (psqlResult.status !== 0) {
-    console.error("[e2e-up] schema apply failed:", psqlResult.stderr?.toString())
-    process.exit(1)
-  }
+  resetE2ePostgres()
 
   // 3. Boot identity (auth-worker). WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE
   // redirects Hyperdrive to the local Docker Postgres (aquilla_e2e) so all auth

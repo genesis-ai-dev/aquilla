@@ -2,6 +2,7 @@
 // Subscribes to the batch-audio progress store; renders nothing when idle.
 
 import { X } from "lucide-react"
+import { AppTooltip } from "@/components/ui/tooltip"
 import {
   useBatchProgress,
   cancelBatchTranscribe,
@@ -33,14 +34,16 @@ export function AudioBulkProgressBanner() {
         {done}/{total}
       </span>
       {!cancelled && (
-        <button
-          type="button"
-          onClick={handleCancel}
-          title="Cancel batch"
-          className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
+        <AppTooltip content="Cancel batch">
+          <button
+            type="button"
+            onClick={handleCancel}
+            aria-label="Cancel batch"
+            className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </AppTooltip>
       )}
       {cancelled && (
         <span className="text-muted-foreground">cancelling…</span>

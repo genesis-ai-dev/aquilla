@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react"
 import { CheckCircle2, Sparkles, Download } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Badge, badgeVariants } from "@/components/ui/badge"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import {
   clearTranscribeStatus,
@@ -58,20 +59,21 @@ export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpTo
     const secs = (flashedDone.durationMs / 1000).toFixed(1)
     const words = `${flashedDone.wordCount} word${flashedDone.wordCount === 1 ? "" : "s"}`
     return (
-      <button
-        type="button"
-        onClick={onJumpToTranscript}
-        title={`Transcribed ${words} in ${secs}s${onJumpToTranscript ? " — click to view" : ""}`}
-        className={cn(
-          badgeVariants({ variant: "secondary" }),
-          PILL,
-          "text-emerald-700 dark:text-emerald-400",
-          onJumpToTranscript && "cursor-pointer",
-        )}
-      >
-        <CheckCircle2 className="h-2.5 w-2.5" />
-        <span className="tabular-nums">{flashedDone.wordCount}w</span>
-      </button>
+      <AppTooltip content={`Transcribed ${words} in ${secs}s${onJumpToTranscript ? "; click to view" : ""}`}>
+        <button
+          type="button"
+          onClick={onJumpToTranscript}
+          className={cn(
+            badgeVariants({ variant: "secondary" }),
+            PILL,
+            "text-emerald-700 dark:text-emerald-400",
+            onJumpToTranscript && "cursor-pointer",
+          )}
+        >
+          <CheckCircle2 className="h-2.5 w-2.5" />
+          <span className="tabular-nums">{flashedDone.wordCount}w</span>
+        </button>
+      </AppTooltip>
     )
   }
 

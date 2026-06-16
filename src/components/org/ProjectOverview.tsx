@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useProject } from "@/hooks/useProject"
@@ -77,12 +78,13 @@ function DeadlineChip({ status }: { status: "overdue" | "soon" | "ok" | null }) 
 // ── Stat tiles (big %) ────────────────────────────────────────────────────────
 
 function StatTile({ label, pct, colorClass, tooltip }: { label: string; pct: number; colorClass: string; tooltip?: string }) {
-  return (
-    <div className="flex flex-col items-center rounded-lg bg-muted/40 px-5 py-3 text-center" title={tooltip}>
+  const tile = (
+    <div className="flex flex-col items-center rounded-lg bg-muted/40 px-5 py-3 text-center">
       <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{Math.round(pct * 100)}%</p>
       <p className="mt-0.5 text-[11px] text-muted-foreground">{label}</p>
     </div>
   )
+  return tooltip ? <AppTooltip content={tooltip}>{tile}</AppTooltip> : tile
 }
 
 // ── Stat bar ──────────────────────────────────────────────────────────────────
@@ -530,14 +532,15 @@ export function ProjectOverview() {
                         const vPct = f.cellCount > 0 ? Math.round((f.approvedCount / f.cellCount) * 100) : 0
                         return (
                           <li key={f.fileId} className="flex items-center gap-3 text-sm">
-                            <span className="w-36 shrink-0 truncate text-sm font-medium" title={f.name}>{f.name}</span>
+                            <AppTooltip content={f.name}>
+                              <span className="w-36 shrink-0 truncate text-sm font-medium">{f.name}</span>
+                            </AppTooltip>
                             <FileProgressBars tPct={tPct} vPct={vPct} />
-                            <span
-                              className="w-36 shrink-0 text-right text-xs tabular-nums text-muted-foreground"
-                              title="filled / approved / total cells · word count"
-                            >
-                              {f.filledCount}/{f.approvedCount}/{f.cellCount} · {f.wordCount}w
-                            </span>
+                            <AppTooltip content="filled / approved / total cells · word count">
+                              <span className="w-36 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                                {f.filledCount}/{f.approvedCount}/{f.cellCount} · {f.wordCount}w
+                              </span>
+                            </AppTooltip>
                           </li>
                         )
                       })}
@@ -635,9 +638,11 @@ export function ProjectOverview() {
                       const donePct = w.cellsTotal > 0 ? Math.round((w.cellsDone / w.cellsTotal) * 100) : 0
                       return (
                         <li key={w.userId} className="flex items-center gap-3 text-sm">
-                          <span className="w-32 shrink-0 font-medium truncate" title={w.username ?? String(w.userId)}>
-                            {w.username ?? `User ${w.userId}`}
-                          </span>
+                          <AppTooltip content={w.username ?? String(w.userId)}>
+                            <span className="w-32 shrink-0 font-medium truncate">
+                              {w.username ?? `User ${w.userId}`}
+                            </span>
+                          </AppTooltip>
                           <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
                             <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
                           </span>

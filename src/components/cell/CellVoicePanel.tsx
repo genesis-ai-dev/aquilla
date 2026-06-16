@@ -21,6 +21,7 @@ import {
   MoreHorizontal, Pause, Play, RefreshCw, Sparkles, UserPlus, Volume2, VolumeX,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { SpeakerChip } from "./SpeakerChip"
 import { CropButton } from "./CropEditor"
 import { cn } from "@/lib/utils"
@@ -116,7 +117,6 @@ function VolumeButton({ volume, onChange }: { volume: number; onChange: (v: numb
         render={
           <button
             type="button"
-            title="Volume"
             aria-label="Volume"
             className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
           >
@@ -164,7 +164,6 @@ function OverflowMenu({
         render={
           <button
             type="button"
-            title="More actions"
             aria-label="More actions"
             className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
           >
@@ -357,28 +356,29 @@ export function CellVoicePanel({
       dir="ltr"
     >
       {/* Primary: magic-generate when empty, play/pause once there's a take. */}
-      <button
-        type="button"
-        onClick={onPrimary}
-        title={primaryTitle}
-        aria-label={primaryTitle}
-        className={cn(
-          "grid h-8 w-8 shrink-0 place-items-center rounded-full transition-colors",
-          hasTake
-            ? "bg-foreground text-background hover:opacity-90"
-            : "bg-primary text-primary-foreground hover:bg-primary/90",
-        )}
-      >
-        {loading ? (
-          <Spinner />
-        ) : !hasTake ? (
-          <Sparkles className="h-4 w-4" />
-        ) : isPlaying ? (
-          <Pause className="h-4 w-4" />
-        ) : (
-          <Play className="h-4 w-4 translate-x-[1px]" />
-        )}
-      </button>
+      <AppTooltip content={primaryTitle}>
+        <button
+          type="button"
+          onClick={onPrimary}
+          aria-label={primaryTitle}
+          className={cn(
+            "grid h-9 w-9 shrink-0 place-items-center rounded-full transition-colors",
+            hasTake
+              ? "bg-foreground text-background hover:opacity-90"
+              : "bg-primary text-primary-foreground hover:bg-primary/90",
+          )}
+        >
+          {loading ? (
+            <Spinner />
+          ) : !hasTake ? (
+            <Sparkles className="h-4 w-4" />
+          ) : isPlaying ? (
+            <Pause className="h-4 w-4" />
+          ) : (
+            <Play className="h-4 w-4 translate-x-[1px]" />
+          )}
+        </button>
+      </AppTooltip>
 
       {/* Who speaks this line. */}
       <SpeakerChip voice={resolvedVoice} voices={voices} onAssign={onAssign} />

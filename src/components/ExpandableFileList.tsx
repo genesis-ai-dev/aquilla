@@ -9,6 +9,7 @@ import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import { useEditorScroll } from "@/context/EditorScrollContext"
 import { FileSectionGrid } from "./sidebar/FileSectionGrid"
 import { cn } from "@/lib/utils"
+import { AppTooltip } from "@/components/ui/tooltip"
 import {
   downloadSourceFile,
   SourceExportError,
@@ -152,14 +153,15 @@ export function ExpandableFileList({
                       )}
                     </button>
                     {canEditCorpus && !isEditingCorpus && (
-                      <button
-                        className="rounded-full p-0.5 opacity-0 transition-shadow group-hover/corpus:opacity-100 hover:shadow-neu-xs"
-                        onClick={(e) => { e.stopPropagation(); setEditingCorpus(group.label) }}
-                        aria-label={`Rename ${group.label}`}
-                        title={`Rename ${group.label}`}
-                      >
-                        <Pencil className="h-3 w-3" />
-                      </button>
+                      <AppTooltip content={`Rename ${group.label}`} side="right">
+                        <button
+                          className="rounded-full p-0.5 opacity-0 transition-shadow group-hover/corpus:opacity-100 hover:shadow-neu-xs"
+                          onClick={(e) => { e.stopPropagation(); setEditingCorpus(group.label) }}
+                          aria-label={`Rename ${group.label}`}
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                      </AppTooltip>
                     )}
                   </div>
                 )}

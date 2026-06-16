@@ -7,6 +7,7 @@ import { AlertCircle, CloudDownload, CloudOff, FileQuestion, Pause, Play, Trash2
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import type { UseCellAudioResult } from "@/hooks/useCellAudio"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 interface Props {
   controller: UseCellAudioResult
@@ -32,13 +33,12 @@ export function CellAudioButton({ controller, hidden }: Props) {
           ? "Pause audio"
           : "Play audio"
 
-  return (
+  const button = (
     <button
       type="button"
       onClick={onClick}
       onPointerEnter={state === "cloud" ? () => { void play() } : undefined}
       disabled={state === "loading"}
-      title={tooltip}
       aria-label={tooltip}
       className={cn(
         "flex h-5 w-5 items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
@@ -59,6 +59,14 @@ export function CellAudioButton({ controller, hidden }: Props) {
         : <Play className="h-3 w-3" />
       )}
     </button>
+  )
+
+  return (
+    <AppTooltip content={tooltip}>
+      <span className="inline-flex">
+        {button}
+      </span>
+    </AppTooltip>
   )
 }
 

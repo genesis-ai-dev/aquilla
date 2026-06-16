@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { Check, ChevronDown, Search } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
@@ -50,6 +54,17 @@ const ROLE_DESCRIPTIONS: Record<number, string> = {
   500: "Project Lead (500) — can add members to projects, mint share-link invites, and lead project work.",
   600: "Maintainer (600) — can create/manage teams, rename the org, set project deadlines, and remove project members.",
   700: "Owner (700) — full control: add/remove org members, archive/restore projects, and all maintainer actions.",
+}
+
+function roleLabel(roleLevel: number | null | undefined): string {
+  if (roleLevel == null) return "Unknown"
+  return ROLE_OPTIONS.find((role) => role.level === roleLevel)?.name ?? `Level ${roleLevel}`
+}
+
+function lockedOrgRoleTooltip(roleLevel: number | null | undefined): string {
+  const roleDescription = roleLevel != null ? ROLE_DESCRIPTIONS[roleLevel] : null
+  const prefix = roleDescription ?? "This member's org-level role is unknown."
+  return `${prefix} This permission is set at the org level and can only be changed by an org owner.`
 }
 
 export function TeamDetail() {
@@ -117,8 +132,21 @@ export function TeamDetail() {
     fetchAccessibleProjects(jwt, activeOrgId).then(setOrgProjects).catch(() => {})
   }, [isAdmin, jwt, activeOrgId])
 
-  // All org members available to add (server handles duplicate-membership rejection)
-  const availableOrgMembers = orgMembers
+  // Only offer org members who are not already in this team, sorted for scanning.
+  const availableOrgMembers = useMemo(
+    () =>
+      orgMembers
+        .filter((member) => !team?.members.some((teamMember) => teamMember.userId === member.userId))
+        .sort((a, b) => a.username.localeCompare(b.username, undefined, { sensitivity: "base" })),
+    [orgMembers, team?.members],
+  )
+
+  useEffect(() => {
+    if (!selectedUsername) return
+    if (!availableOrgMembers.some((member) => member.username === selectedUsername)) {
+      setSelectedUsername("")
+    }
+  }, [availableOrgMembers, selectedUsername])
 
   async function handleSave() {
     if (!jwt || activeOrgId == null || groupIdNum == null) return
@@ -292,20 +320,21 @@ export function TeamDetail() {
                   <div className="flex items-center gap-1.5">
                     <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Members</h2>
                     {/* "?" tooltip summarising all access levels — hover or focus to read */}
-                    <span
-                      className="inline-flex items-center justify-center rounded-full border w-4 h-4 text-[10px] leading-none text-muted-foreground cursor-help"
-                      title={Object.values(ROLE_DESCRIPTIONS).join("\n")}
-                      aria-label="Access level definitions"
-                      tabIndex={0}
-                    >
-                      ?
-                    </span>
+                    <AppTooltip content={Object.values(ROLE_DESCRIPTIONS).join("\n")} className="max-w-xs">
+                      <span
+                        className="inline-flex items-center justify-center rounded-full border w-4 h-4 text-[10px] leading-none text-muted-foreground cursor-help"
+                        aria-label="Access level definitions"
+                        tabIndex={0}
+                      >
+                        ?
+                      </span>
+                    </AppTooltip>
                   </div>
                   {isAdmin && !addingMember && (
                     <button
                       type="button"
                       className="text-xs underline text-muted-foreground"
-                      onClick={() => { setAddingMember(true); setSelectedUsername(availableOrgMembers[0]?.username ?? "") }}
+                      onClick={() => { setAddingMember(true); setSelectedUsername("") }}
                     >
                       Add member
                     </button>
@@ -313,26 +342,18 @@ export function TeamDetail() {
                 </div>
 
                 {isAdmin && addingMember && (
-                  <div className="flex items-center gap-2 mb-3">
-                    <Select
+                  <div className="flex flex-wrap items-center gap-2 mb-3">
+                    <TeamMemberCombobox
+                      members={availableOrgMembers}
                       value={selectedUsername}
-                      onValueChange={(v) => setSelectedUsername(v ?? "")}
-                    >
-                      <SelectTrigger aria-label="Member to add">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          {availableOrgMembers.map((m) => (
-                            <SelectItem key={m.userId} value={m.username}>{m.username}</SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
+                      onChange={setSelectedUsername}
+                      disabled={availableOrgMembers.length === 0}
+                    />
                     <button
                       type="button"
-                      className="text-sm px-3 py-1 rounded bg-primary text-primary-foreground"
+                      className="text-sm px-3 py-1 rounded bg-primary text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
                       onClick={handleAddMember}
+                      disabled={!selectedUsername || availableOrgMembers.length === 0}
                     >
                       Add
                     </button>
@@ -343,6 +364,11 @@ export function TeamDetail() {
                     >
                       Cancel
                     </button>
+                    {availableOrgMembers.length === 0 && (
+                      <p className="basis-full text-xs text-muted-foreground">
+                        All org members are already in this team.
+                      </p>
+                    )}
                   </div>
                 )}
 
@@ -365,14 +391,13 @@ export function TeamDetail() {
                                 size="sm"
                                 className="text-xs"
                                 aria-label={`Role for ${m.username}`}
-                                title={m.roleLevel != null ? ROLE_DESCRIPTIONS[m.roleLevel] : "Unknown role"}
                               >
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectGroup>
                                   {ROLE_OPTIONS.map((r) => (
-                                    <SelectItem key={r.level} value={String(r.level)} title={ROLE_DESCRIPTIONS[r.level]}>
+                                    <SelectItem key={r.level} value={String(r.level)}>
                                       {r.name}
                                     </SelectItem>
                                   ))}
@@ -380,18 +405,17 @@ export function TeamDetail() {
                               </SelectContent>
                             </Select>
                           ) : (
-                            /* Non-owners see a read-only label with a tooltip explaining the role */
-                            <span
-                              className="text-xs text-muted-foreground cursor-help"
-                              title={m.roleLevel != null ? ROLE_DESCRIPTIONS[m.roleLevel] : "Unknown role"}
-                              aria-label={m.roleLevel != null ? `Role: ${ROLE_OPTIONS.find((r) => r.level === m.roleLevel)?.name ?? `level ${m.roleLevel}`}` : "Role unknown"}
-                            >
-                              {m.roleLevel != null
-                                ? (ROLE_OPTIONS.find((r) => r.level === m.roleLevel)?.name ?? `Level ${m.roleLevel}`)
-                                : "—"}
-                              {" "}
-                              <span className="inline-flex items-center justify-center rounded-full border w-3.5 h-3.5 text-[10px] leading-none text-muted-foreground" aria-hidden="true">?</span>
-                            </span>
+                            /* Non-owners see the org-level role but cannot edit it here. */
+                            <AppTooltip content={lockedOrgRoleTooltip(m.roleLevel)} className="max-w-xs">
+                              <span
+                                tabIndex={0}
+                                className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground cursor-help"
+                                aria-label={`Org-level role: ${roleLabel(m.roleLevel)}`}
+                              >
+                                {roleLabel(m.roleLevel)}
+                                <span className="inline-flex items-center justify-center rounded-full border w-3.5 h-3.5 text-[10px] leading-none text-muted-foreground" aria-hidden="true">?</span>
+                              </span>
+                            </AppTooltip>
                           )}
                           {isAdmin && (
                             <button
@@ -548,5 +572,112 @@ export function TeamDetail() {
         </div>
       }
     />
+  )
+}
+
+function TeamMemberCombobox({
+  members,
+  value,
+  onChange,
+  disabled,
+}: {
+  members: OrgMember[]
+  value: string
+  onChange: (username: string) => void
+  disabled?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
+  const selectedMember = members.find((member) => member.username === value)
+  const filteredMembers = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase()
+    if (!normalizedQuery) return members
+    return members.filter((member) =>
+      member.username.toLocaleLowerCase().includes(normalizedQuery)
+    )
+  }, [members, query])
+
+  function handleOpenChange(nextOpen: boolean) {
+    setOpen(nextOpen)
+    if (nextOpen) setQuery("")
+  }
+
+  function handlePick(username: string) {
+    onChange(username)
+    setOpen(false)
+    setQuery("")
+  }
+
+  return (
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            role="combobox"
+            aria-label="Member to add"
+            aria-expanded={open}
+            aria-controls="team-member-combobox-list"
+            disabled={disabled}
+            className="inline-flex h-8 min-w-64 items-center justify-between gap-2 rounded-lg border border-input bg-background px-2.5 text-left text-sm outline-none transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          />
+        }
+      >
+        <span className={selectedMember ? "truncate" : "truncate text-muted-foreground"}>
+          {selectedMember?.username ?? "Search members..."}
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-2" side="bottom" sideOffset={4}>
+        <div className="relative mb-2">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search org members..."
+            aria-label="Search org members"
+            className="pl-8"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            autoFocus
+          />
+        </div>
+        <div
+          id="team-member-combobox-list"
+          role="listbox"
+          aria-label="Org members"
+          className="max-h-56 overflow-y-auto rounded-md border bg-background p-1"
+        >
+          {filteredMembers.length === 0 ? (
+            <p className="px-2 py-2 text-xs text-muted-foreground">
+              No available members match.
+            </p>
+          ) : (
+            filteredMembers.map((member) => {
+              const isSelected = member.username === value
+              return (
+                <button
+                  key={member.userId}
+                  type="button"
+                  role="option"
+                  aria-selected={isSelected}
+                  className={`flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${
+                    isSelected ? "bg-muted/60" : ""
+                  }`}
+                  onClick={() => handlePick(member.username)}
+                >
+                  <span className="truncate">{member.username}</span>
+                  {isSelected && (
+                    <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  )}
+                </button>
+              )
+            })
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }

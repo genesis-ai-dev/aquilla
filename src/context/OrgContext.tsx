@@ -5,12 +5,15 @@ import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 
 const STORAGE_KEY = "org:active"
+const ALL_ORGS_VALUE = "all"
 
 interface OrgContextValue {
   orgs: OrgSummary[]
   activeOrgId: number | null
   activeOrg: OrgSummary | null
+  isAllOrgs: boolean
   setActiveOrg: (id: number) => void
+  setAllOrgs: () => void
   isLoading: boolean
   error: string | null
   /** Fetch the latest org list. Returns the freshly loaded orgs so callers
@@ -26,7 +29,9 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [orgs, setOrgs] = useState<OrgSummary[]>([])
   const [activeOrgId, setActiveOrgId] = useState<number | null>(() => {
     const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? Number(raw) : null
+    if (!raw || raw === ALL_ORGS_VALUE) return null
+    const parsed = Number(raw)
+    return Number.isFinite(parsed) ? parsed : null
   })
   const [isLoading, setLoading] = useState<boolean>(!!jwt)
   const [error, setError] = useState<string | null>(null)
@@ -37,7 +42,12 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     try {
       const list = await listMyOrgs(jwt)
       setOrgs(list)
-      setActiveOrgId((cur) => (cur != null && list.some((o) => o.id === cur) ? cur : list[0]?.id ?? null))
+      setActiveOrgId((cur) => {
+        if (list.length === 0) return null
+        if (list.length === 1) return list[0].id
+        if (cur != null && list.some((o) => o.id === cur)) return cur
+        return null
+      })
       return list
     } catch (e) {
       if (e instanceof UserError && e.category === "session-expired") {
@@ -57,10 +67,16 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(STORAGE_KEY, String(id))
   }, [])
 
+  const setAllOrgs = useCallback(() => {
+    setActiveOrgId(null)
+    localStorage.setItem(STORAGE_KEY, ALL_ORGS_VALUE)
+  }, [])
+
+  const isAllOrgs = orgs.length > 1 && activeOrgId == null
   const activeOrg = orgs.find((o) => o.id === activeOrgId) ?? null
 
   return (
-    <OrgContext.Provider value={{ orgs, activeOrgId, activeOrg, setActiveOrg, isLoading, error, refresh }}>
+    <OrgContext.Provider value={{ orgs, activeOrgId, activeOrg, isAllOrgs, setActiveOrg, setAllOrgs, isLoading, error, refresh }}>
       {children}
     </OrgContext.Provider>
   )

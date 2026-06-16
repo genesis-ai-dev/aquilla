@@ -16,7 +16,11 @@ export function ArchivedProjects() {
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(() => {
-    if (!jwt || activeOrgId == null) return
+    if (!jwt || activeOrgId == null) {
+      setProjects([])
+      setLoading(false)
+      return
+    }
     setLoading(true)
     fetchArchivedProjects(jwt, activeOrgId)
       .then(setProjects)
@@ -48,7 +52,14 @@ export function ArchivedProjects() {
       main={
         <div className="h-full overflow-y-auto p-6 space-y-3">
           {error && <p className="text-sm text-destructive">{error}</p>}
-          {loading ? (
+          {activeOrgId == null ? (
+            <div className="rounded-lg border bg-card p-6 text-center">
+              <p className="text-sm font-medium">Select an organization</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Archived projects are managed within a single organization.
+              </p>
+            </div>
+          ) : loading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : projects.length === 0 ? (
             <p className="text-sm text-muted-foreground">No archived projects.</p>

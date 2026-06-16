@@ -12,8 +12,8 @@ const link = ({ isActive }: { isActive: boolean }) =>
   `block rounded-md px-2 py-1.5 text-sm ${isActive ? "bg-accent font-medium" : "hover:bg-accent/60"}`
 
 export function OrgSidebar() {
-  const { activeOrg } = useActiveOrg()
-  const isAdmin = (activeOrg?.role.level ?? 0) >= 600
+  const { activeOrg, isAllOrgs } = useActiveOrg()
+  const isAdmin = !isAllOrgs && (activeOrg?.role.level ?? 0) >= 600
   // Platform-operator (site-wide admin) — separate axis from the org role.
   const { isAdmin: isPlatformAdmin } = usePlatformAdmin()
   const { openTour } = useProductTourContext()
@@ -32,8 +32,10 @@ export function OrgSidebar() {
         {/* FRO-243: data-tour anchors for product tour steps */}
         <NavLink to="/" end className={link} data-tour="nav-overview">Overview</NavLink>
         <NavLink to="/projects" className={link} data-tour="nav-projects">Projects</NavLink>
-        <NavLink to="/teams" className={link}>Teams</NavLink>
-        <NavLink to="/assigned" className={link} data-tour="nav-assigned">Assigned to me</NavLink>
+        {!isAllOrgs && <>
+          <NavLink to="/teams" className={link}>Teams</NavLink>
+          <NavLink to="/assigned" className={link} data-tour="nav-assigned">Assigned to me</NavLink>
+        </>}
         {isAdmin && <>
           <div className="my-1 border-t" />
           <NavLink to="/members" className={link}>Members</NavLink>

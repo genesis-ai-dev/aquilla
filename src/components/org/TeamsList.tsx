@@ -47,7 +47,11 @@ export function TeamsList() {
   const isAdmin = (activeOrg?.role.level ?? 0) >= 600
 
   useEffect(() => {
-    if (!jwt || activeOrgId == null) return
+    if (!jwt || activeOrgId == null) {
+      setTeams([])
+      setLoading(false)
+      return
+    }
     let cancelled = false
     setLoading(true)
     listTeams(jwt, activeOrgId)
@@ -122,7 +126,14 @@ export function TeamsList() {
             </div>
           )}
 
-          {loading ? (
+          {activeOrgId == null ? (
+            <div className="rounded-lg border bg-card p-6 text-center">
+              <p className="text-sm font-medium">Select an organization</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Teams are managed within a single organization.
+              </p>
+            </div>
+          ) : loading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : teams.length === 0 ? (
             <p className="text-sm text-muted-foreground">No teams in this org yet.</p>

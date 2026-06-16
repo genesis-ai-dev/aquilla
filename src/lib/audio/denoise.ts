@@ -132,7 +132,7 @@ export async function denoiseMono48k(samples: Float32Array): Promise<DenoiseResu
     rnnoise = new mod.RnnoiseWorkletNode(ctx, { maxChannels: 1, wasmBinary })
 
     const buffer = ctx.createBuffer(1, samples.length, TARGET_RATE)
-    buffer.copyToChannel(samples, 0)
+    buffer.copyToChannel(samples as Float32Array<ArrayBuffer>, 0)
     const source = ctx.createBufferSource()
     source.buffer = buffer
 

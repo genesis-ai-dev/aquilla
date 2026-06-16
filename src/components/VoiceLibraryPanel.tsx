@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Plus, Sparkles, Star, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { ProjectTtsSettings, TtsProvider, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
@@ -180,7 +181,6 @@ export function VoiceLibraryPanel({
                   e.dataTransfer.effectAllowed = "copy"
                 }}
                 onClick={() => openEdit(voice)}
-                title="Click to craft · drag onto a line to assign"
                 className={cn(
                   "group flex w-full cursor-grab items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm transition-colors active:cursor-grabbing",
                   active ? "border-primary/50 bg-primary/10"
@@ -197,13 +197,17 @@ export function VoiceLibraryPanel({
                     {isNarrator && (
                       // FRO-239: wrap in a span so the tooltip and aria-label
                       // are exposed without needing to pass title to the SVG.
-                      <span
-                        title="Narrator (default) — lines without an explicit speaker assignment use this voice. Tagging lines by character lets you export each speaker's audio separately, e.g. all of one character's lines for voice-over work."
-                        aria-label="Narrator (default voice)"
-                        className="inline-flex shrink-0 items-center"
+                      <AppTooltip
+                        content="Narrator (default): lines without an explicit speaker assignment use this voice. Tagging lines by character lets you export each speaker's audio separately."
+                        className="max-w-xs"
                       >
-                        <Star className="h-3 w-3 text-primary" aria-hidden />
-                      </span>
+                        <span
+                          aria-label="Narrator (default voice)"
+                          className="inline-flex shrink-0 items-center"
+                        >
+                          <Star className="h-3 w-3 text-primary" aria-hidden />
+                        </span>
+                      </AppTooltip>
                     )}
                     {isClone && (
                       <span className="inline-flex items-center gap-0.5 rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground dark:bg-muted dark:text-muted-foreground">

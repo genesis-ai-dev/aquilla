@@ -35,14 +35,12 @@ test("share panel invite mode toggles between @user and email", async ({ alice }
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
 
-  // "@user" button is visible (title="Invite an existing Aquilla user").
-  const userModeBtn = dialog.locator('button[title="Invite an existing Aquilla user"]')
+  // "@user" button is visible.
+  const userModeBtn = dialog.getByRole("button", { name: "@user" })
   await expect(userModeBtn).toBeVisible({ timeout: 5_000 })
 
   // "email" button is visible.
-  const emailModeBtn = dialog.locator(
-    'button[title="Invite by email — they\'ll be prompted to sign up if needed"]'
-  )
+  const emailModeBtn = dialog.getByRole("button", { name: "email" })
   await expect(emailModeBtn).toBeVisible({ timeout: 3_000 })
 
   // Switch to email mode — recipient input becomes type="email".

@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Bird, Check, Pause, Play, RotateCcw, Trash2 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -188,16 +189,18 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
                     : "border-border bg-muted/30",
               )}
             >
-              <button
-                type="button"
-                onClick={() => void play(att)}
-                title={isPlaying ? "Stop" : "Play take"}
-                className="flex h-6 w-6 items-center justify-center rounded-full hover:bg-background"
-              >
-                {isLoading ? <Spinner className="size-3.5" />
-                  : isPlaying ? <Pause className="h-3.5 w-3.5" />
-                  : <Play className="h-3.5 w-3.5" />}
-              </button>
+              <AppTooltip content={isPlaying ? "Stop" : "Play take"}>
+                <button
+                  type="button"
+                  onClick={() => void play(att)}
+                  aria-label={isPlaying ? "Stop" : "Play take"}
+                  className="flex h-6 w-6 items-center justify-center rounded-full hover:bg-background"
+                >
+                  {isLoading ? <Spinner className="size-3.5" />
+                    : isPlaying ? <Pause className="h-3.5 w-3.5" />
+                    : <Play className="h-3.5 w-3.5" />}
+                </button>
+              </AppTooltip>
               <span className="inline-flex items-center gap-1 tabular-nums">
                 {isCleaned && <Bird className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />}
                 {label}
@@ -206,48 +209,64 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
                 )}
               </span>
               {!isCleaned && (
-                <button
-                  type="button"
-                  onClick={() => void denoise(att)}
-                  disabled={!session?.jwt || denoisingId !== null}
-                  title="Remove noise (adds a cleaned take)"
-                  className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground/60 hover:bg-background hover:text-foreground disabled:opacity-40"
-                >
-                  {isDenoising ? <Spinner className="size-3.5" /> : <Bird className="h-3.5 w-3.5" />}
-                </button>
+                <AppTooltip content="Remove noise (adds a cleaned take)">
+                  <span className="inline-flex">
+                    <button
+                      type="button"
+                      onClick={() => void denoise(att)}
+                      disabled={!session?.jwt || denoisingId !== null}
+                      aria-label="Remove noise (adds a cleaned take)"
+                      className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground/60 hover:bg-background hover:text-foreground disabled:opacity-40"
+                    >
+                      {isDenoising ? <Spinner className="size-3.5" /> : <Bird className="h-3.5 w-3.5" />}
+                    </button>
+                  </span>
+                </AppTooltip>
               )}
               {canRevert && (
-                <button
-                  type="button"
-                  onClick={() => void circle(revertTo)}
-                  disabled={isSelectInFlight}
-                  title="Revert to the original recording"
-                  className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground/60 hover:bg-background hover:text-foreground disabled:opacity-40"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                </button>
+                <AppTooltip content="Revert to the original recording">
+                  <span className="inline-flex">
+                    <button
+                      type="button"
+                      onClick={() => void circle(revertTo)}
+                      disabled={isSelectInFlight}
+                      aria-label="Revert to the original recording"
+                      className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground/60 hover:bg-background hover:text-foreground disabled:opacity-40"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                    </button>
+                  </span>
+                </AppTooltip>
               )}
-              <button
-                type="button"
-                onClick={() => void circle(att.audioId)}
-                disabled={isSelectInFlight || isCircled}
-                title={isCircled ? "Active take" : "Use this take"}
-                className={cn(
-                  "flex h-6 w-6 items-center justify-center rounded-full",
-                  isCircled ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground/60 hover:bg-background hover:text-foreground",
-                )}
-              >
-                {isBusy ? <Spinner className="size-3.5" /> : <Check className="h-3.5 w-3.5" />}
-              </button>
-              <button
-                type="button"
-                onClick={() => void remove(att.audioId)}
-                disabled={isBusy}
-                title="Delete take"
-                className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              <AppTooltip content={isCircled ? "Active take" : "Use this take"}>
+                <span className="inline-flex">
+                  <button
+                    type="button"
+                    onClick={() => void circle(att.audioId)}
+                    disabled={isSelectInFlight || isCircled}
+                    aria-label={isCircled ? "Active take" : "Use this take"}
+                    className={cn(
+                      "flex h-6 w-6 items-center justify-center rounded-full",
+                      isCircled ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground/60 hover:bg-background hover:text-foreground",
+                    )}
+                  >
+                    {isBusy ? <Spinner className="size-3.5" /> : <Check className="h-3.5 w-3.5" />}
+                  </button>
+                </span>
+              </AppTooltip>
+              <AppTooltip content="Delete take">
+                <span className="inline-flex">
+                  <button
+                    type="button"
+                    onClick={() => void remove(att.audioId)}
+                    disabled={isBusy}
+                    aria-label="Delete take"
+                    className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </span>
+              </AppTooltip>
             </div>
           )
         })}

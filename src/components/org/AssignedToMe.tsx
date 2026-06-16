@@ -23,7 +23,11 @@ export function AssignedToMe() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!jwt || activeOrgId == null) return
+    if (!jwt || activeOrgId == null) {
+      setRows([])
+      setLoading(false)
+      return
+    }
     let cancelled = false
     setLoading(true)
     setError(null)
@@ -48,7 +52,14 @@ export function AssignedToMe() {
       main={
         <div className="h-full overflow-y-auto space-y-4 p-6">
           <h1 className="text-lg font-semibold">Assigned to me</h1>
-          {loading ? (
+          {activeOrgId == null ? (
+            <div className="rounded-lg border bg-card p-6 text-center">
+              <p className="text-sm font-medium">Select an organization</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Assignments are scoped to a single organization.
+              </p>
+            </div>
+          ) : loading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : error ? (
             <p className="text-sm text-destructive">{error}</p>

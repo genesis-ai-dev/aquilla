@@ -37,25 +37,25 @@ test("cell Remove your validation button removes the validation", async ({ alice
   await ws.editCell(0, "Translation to validate then remove")
   await ws.validateCell(0)
 
-  // Health button now says "— validated".
+  // Validation button now reports validated state through aria-pressed.
   const row = ws.cellRow(0)
   await row.hover()
-  const healthBtn = row.locator("button[title*='Health']").first()
-  await expect(healthBtn).toHaveAttribute("title", /validated/, { timeout: 5_000 })
+  const healthBtn = row.getByRole("button", { name: /Validated/i }).first()
+  await expect(healthBtn).toHaveAttribute("aria-pressed", "true", { timeout: 5_000 })
 
   // Open the validation popover by hovering (openOnHover mode).
   // Hover triggers the popover to open; we then click inside it.
   await healthBtn.hover()
 
   // "Remove your validation" trash button should appear inside the popover.
-  const removeBtn = alice.locator('button[title="Remove your validation"]')
+  const removeBtn = alice.locator('[data-tooltip="Remove your validation"] button, button[aria-label="Remove your validation"]')
   await expect(removeBtn).toBeVisible({ timeout: 8_000 })
 
   // Click to remove the validation.
   await removeBtn.click()
 
-  // Health button title should no longer contain "validated". Like
+  // Validation state should no longer be pressed. Like
   // Workspace.validateCell, allow 15s for the sync round-trip (IDB →
   // sync-worker → D1 → push back) under load.
-  await expect(healthBtn).not.toHaveAttribute("title", /validated/, { timeout: 15_000 })
+  await expect(healthBtn).toHaveAttribute("aria-pressed", "false", { timeout: 15_000 })
 })

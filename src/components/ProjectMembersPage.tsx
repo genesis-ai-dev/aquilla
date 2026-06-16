@@ -16,6 +16,7 @@ import {
   AlertTriangle, Copy, Users,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -293,12 +294,11 @@ export function MembersTab({
                         Remove
                       </Button>
                     ) : isLocked ? (
-                      <span
-                        className="text-[10px] text-muted-foreground"
-                        title={lockedHint}
-                      >
-                        {lockedHint ?? ""}
-                      </span>
+                      <AppTooltip content={lockedHint}>
+                        <span className="text-[10px] text-muted-foreground">
+                          {lockedHint ?? ""}
+                        </span>
+                      </AppTooltip>
                     ) : null}
 
                     {/* Revoke all — available when session exists + maintainer+ */}

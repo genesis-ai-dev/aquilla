@@ -19,7 +19,6 @@ export function SpeakerChip({ voice, voices, onAssign }: {
         render={
           <button
             type="button"
-            title="Assign a character to this line"
             className="flex max-w-[9rem] shrink-0 items-center gap-1.5 rounded-full border bg-background px-2 py-1 text-xs hover:bg-accent/50"
           >
             <span className="h-2.5 w-2.5 shrink-0 rounded-full border" style={{ backgroundColor: voice?.color || "#94a3b8" }} />

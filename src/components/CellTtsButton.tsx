@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { AlertCircle, Pause, Volume2 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { synthesizeForCell, setTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
@@ -281,12 +282,11 @@ export function CellTtsButton({
             ? `Play generated voice (${voice.name})`
             : `Generate & play (${voice.name})`
 
-  return (
+  const button = (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled || isLoadingModel || isSynthesizing}
-      title={tooltip}
       aria-label={tooltip}
       className={cn(
         "flex h-5 items-center justify-center gap-1 rounded-full transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
@@ -309,6 +309,14 @@ export function CellTtsButton({
         <span className="tabular-nums text-[9px] font-medium leading-none">{pct}%</span>
       )}
     </button>
+  )
+
+  return (
+    <AppTooltip content={tooltip}>
+      <span className="inline-flex">
+        {button}
+      </span>
+    </AppTooltip>
   )
 }
 

@@ -55,7 +55,7 @@ test("CharacterModal Make narrator sets the voice as narrator/default", async ({
 
   // Dialog closes, voice appears in library.
   await expect(dialog).not.toBeVisible({ timeout: 5_000 })
-  const voiceRow = alice.getByTitle("Click to craft · drag onto a line to assign").filter({ hasText: voiceName })
+  const voiceRow = alice.getByRole("button", { name: new RegExp(voiceName) })
   await expect(voiceRow).toBeVisible({ timeout: 5_000 })
 
   // Click the row to open CharacterModal in edit mode.

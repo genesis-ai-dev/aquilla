@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 export type SyncStatus = "live" | "connecting" | "offline" | "idle" | "disabled"
 
@@ -20,20 +21,21 @@ interface SyncStatusIndicatorProps {
 export function SyncStatusIndicator({ status, className }: SyncStatusIndicatorProps) {
   const { dot, label, tooltip } = describeStatus(status)
   return (
-    <span
-      className={cn("inline-flex min-w-[5.5rem] items-center gap-1.5 text-xs shrink-0", className)}
-      title={tooltip}
-      aria-label={tooltip}
-    >
+    <AppTooltip content={tooltip}>
       <span
-        className={cn(
-          "h-1.5 w-1.5 rounded-full",
-          dot,
-          status === "connecting" && "animate-pulse"
-        )}
-      />
-      <span className="text-muted-foreground">{label}</span>
-    </span>
+        className={cn("inline-flex min-w-[5.5rem] items-center gap-1.5 text-xs shrink-0", className)}
+        aria-label={tooltip}
+      >
+        <span
+          className={cn(
+            "h-1.5 w-1.5 rounded-full",
+            dot,
+            status === "connecting" && "animate-pulse"
+          )}
+        />
+        <span className="text-muted-foreground">{label}</span>
+      </span>
+    </AppTooltip>
   )
 }
 

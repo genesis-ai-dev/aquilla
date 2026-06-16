@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/time/relative"
 import type { UiChatMessage } from "@/hooks/useChat"
 import { ChatMarkdown } from "./ChatMarkdown"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 export interface ChatMessageBubbleProps {
   message: UiChatMessage
@@ -39,15 +40,16 @@ function ActionButton({
   children: React.ReactNode
 }) {
   return (
-    <button
-      type="button"
-      title={title}
-      aria-label={title}
-      onClick={onClick}
-      className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-    >
-      {children}
-    </button>
+    <AppTooltip content={title}>
+      <button
+        type="button"
+        aria-label={title}
+        onClick={onClick}
+        className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      >
+        {children}
+      </button>
+    </AppTooltip>
   )
 }
 

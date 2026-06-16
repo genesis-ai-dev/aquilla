@@ -19,6 +19,7 @@ import { Search, Replace, BookOpen, X, Maximize2, Book, ArrowLeft, ExternalLink 
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { MarkedSnippet } from "@/components/search/MarkedSnippet"
 import { ChatMarkdown } from "@/components/chat/ChatMarkdown"
@@ -120,52 +121,55 @@ export function SearchDockPanel({
     <div className="flex h-full flex-col overflow-hidden">
       {/* Toolbar */}
       <div className="flex items-center gap-1 border-b px-2 py-1.5">
-        <button
-          type="button"
-          title="Search"
-          aria-label="Search"
-          aria-pressed={mode === "search"}
-          onClick={() => setMode("search")}
-          className={cn(
-            "flex h-6 w-6 items-center justify-center rounded transition-colors",
-            mode === "search"
-              ? "bg-accent text-foreground"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          <Search className="h-3 w-3" />
-        </button>
-        <button
-          type="button"
-          title="Find & Replace"
-          aria-label="Find & Replace"
-          aria-pressed={mode === "replace"}
-          onClick={() => setMode("replace")}
-          className={cn(
-            "flex h-6 w-6 items-center justify-center rounded transition-colors",
-            mode === "replace"
-              ? "bg-accent text-foreground"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          <Replace className="h-3 w-3" />
-        </button>
-        {bibleResourcesEnabled && (
+        <AppTooltip content="Search">
           <button
             type="button"
-            title="Bible resources"
-            aria-label="Bible resources"
-            aria-pressed={mode === "bible"}
-            onClick={() => setMode("bible")}
+            aria-label="Search"
+            aria-pressed={mode === "search"}
+            onClick={() => setMode("search")}
             className={cn(
               "flex h-6 w-6 items-center justify-center rounded transition-colors",
-              mode === "bible"
+              mode === "search"
                 ? "bg-accent text-foreground"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
-            <Book className="h-3 w-3" />
+            <Search className="h-3 w-3" />
           </button>
+        </AppTooltip>
+        <AppTooltip content="Find & Replace">
+          <button
+            type="button"
+            aria-label="Find & Replace"
+            aria-pressed={mode === "replace"}
+            onClick={() => setMode("replace")}
+            className={cn(
+              "flex h-6 w-6 items-center justify-center rounded transition-colors",
+              mode === "replace"
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Replace className="h-3 w-3" />
+          </button>
+        </AppTooltip>
+        {bibleResourcesEnabled && (
+          <AppTooltip content="Bible resources">
+            <button
+              type="button"
+              aria-label="Bible resources"
+              aria-pressed={mode === "bible"}
+              onClick={() => setMode("bible")}
+              className={cn(
+                "flex h-6 w-6 items-center justify-center rounded transition-colors",
+                mode === "bible"
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Book className="h-3 w-3" />
+            </button>
+          </AppTooltip>
         )}
 
         {/* Scope toggle — only meaningful for project text search */}
@@ -196,15 +200,16 @@ export function SearchDockPanel({
 
         {/* Open full panel */}
         {onOpenFullPanel && (
-          <button
-            type="button"
-            title="Open full search panel"
-            aria-label="Open full search panel"
-            onClick={onOpenFullPanel}
-            className="ml-0.5 flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <BookOpen className="h-3 w-3" />
-          </button>
+          <AppTooltip content="Open full search panel">
+            <button
+              type="button"
+              aria-label="Open full search panel"
+              onClick={onOpenFullPanel}
+              className="ml-0.5 flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <BookOpen className="h-3 w-3" />
+            </button>
+          </AppTooltip>
         )}
         </>
         ) : (
@@ -265,16 +270,17 @@ export function SearchDockPanel({
                 <span className="text-[10px] text-muted-foreground">
                   {results.length} result{results.length !== 1 ? "s" : ""}
                 </span>
-                <button
-                  type="button"
-                  title="Expand all results in main area"
-                  aria-label="Expand all results"
-                  onClick={() => onExpandResults(query)}
-                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                >
-                  <Maximize2 className="h-2.5 w-2.5" />
-                  Expand all
-                </button>
+                <AppTooltip content="Expand all results in main area">
+                  <button
+                    type="button"
+                    aria-label="Expand all results"
+                    onClick={() => onExpandResults(query)}
+                    className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  >
+                    <Maximize2 className="h-2.5 w-2.5" />
+                    Expand all
+                  </button>
+                </AppTooltip>
               </div>
             )}
             {results.slice(0, 50).map((r) => (
@@ -433,15 +439,17 @@ function BibleResourcesPanel({
             <ArrowLeft className="h-3 w-3" />
           </button>
           <span className="min-w-0 flex-1 truncate text-xs font-medium">{page.title}</span>
-          <a
-            href={page.url}
-            target="_blank"
-            rel="noreferrer"
-            title="Open on bibletranslation.org"
-            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-          >
-            <ExternalLink className="h-3 w-3" />
-          </a>
+          <AppTooltip content="Open on bibletranslation.org">
+            <a
+              href={page.url}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Open on bibletranslation.org"
+              className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+            >
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          </AppTooltip>
         </div>
         <div className="flex-1 overflow-y-auto px-2 py-2 text-xs">
           {looksLikeMarkdown(page.text) ? (

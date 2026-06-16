@@ -8,6 +8,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
@@ -45,7 +46,7 @@ const ORG_ROLE_OPTIONS = ORG_ROLE_PICKER.map((level) => ({
  * design loop concluded operational PMs need.
  */
 export function MembersPage() {
-  const { activeOrg, isLoading, error } = useActiveOrg()
+  const { activeOrg, isAllOrgs, isLoading, error } = useActiveOrg()
 
   if (isLoading) {
     return (
@@ -76,11 +77,12 @@ export function MembersPage() {
   if (!activeOrg) {
     return (
       <PageShell>
-        <div className="rounded-md border bg-muted/30 p-6 text-center">
-          <p className="text-sm font-medium">Sign in to manage members</p>
+        <div className="rounded-lg border bg-card p-6 text-center">
+          <p className="text-sm font-medium">{isAllOrgs ? "Select an organization" : "Sign in to manage members"}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Member access requires a Frontier session. Sign in from the dashboard
-            and come back to this page.
+            {isAllOrgs
+              ? "Member access is managed within a single organization."
+              : "Member access requires a Frontier session. Sign in from the dashboard and come back to this page."}
           </p>
         </div>
       </PageShell>
@@ -275,6 +277,7 @@ function RosterWithProjectChips({
         defaultRole={ROLE.MAINTAINER}
         callerUserId={callerUserId}
         callerMaxRole={ROLE.MAINTAINER}
+        scopedUserSearch={false}
         onAdd={async (username, role) => {
           const result = await add(username, role)
           return result
@@ -376,19 +379,17 @@ function PendingInviteRow({
             {invite.role.name.replace(/_/g, " ")}
           </span>
           {invite.email ? (
-            <span
-              className="rounded bg-blue-500/15 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 text-[9px] font-mono"
-              title="Targeted invite — sign-up form will be prefilled with this email"
-            >
-              {invite.email}
-            </span>
+            <AppTooltip content="Targeted invite: sign-up form will be prefilled with this email">
+              <span className="rounded bg-blue-500/15 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 text-[9px] font-mono">
+                {invite.email}
+              </span>
+            </AppTooltip>
           ) : (
-            <span
-              className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground"
-              title="Open link — anyone holding the URL can redeem"
-            >
-              open link
-            </span>
+            <AppTooltip content="Open link: anyone holding the URL can redeem">
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">
+                open link
+              </span>
+            </AppTooltip>
           )}
         </div>
         <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
@@ -434,4 +435,3 @@ function computeFutureLabel(iso: string | null): string | null {
   const minutes = Math.max(1, Math.floor(ms / (60 * 1000)))
   return `expires in ${minutes} minute${minutes === 1 ? "" : "s"}`
 }
-

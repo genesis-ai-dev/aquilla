@@ -1,6 +1,12 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
+function isoDateOffset(days: number): string {
+  const date = new Date()
+  date.setDate(date.getDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
 /**
  * ProjectOverview — StatusChip shows "Due soon" / "Overdue".
  *
@@ -33,7 +39,7 @@ test("status chip shows Overdue when deadline is in the past", async ({ alice })
   await expect(dateInput).toBeVisible({ timeout: 3_000 })
 
   // Set a past date to trigger "Overdue".
-  await dateInput.fill("2020-01-01")
+  await dateInput.fill(isoDateOffset(-3))
 
   // Save.
   const saveBtn = alice.getByRole("button", { name: /^Save$/i })
@@ -62,8 +68,8 @@ test("status chip shows Due soon when deadline is within 7 days", async ({ alice
   const dateInput = alice.locator('[aria-label="Project deadline"]')
   await expect(dateInput).toBeVisible({ timeout: 3_000 })
 
-  // Set a date 3 days in the future (2026-06-12) to trigger "Due soon".
-  await dateInput.fill("2026-06-12")
+  // Set a date 3 days in the future to trigger "Due soon".
+  await dateInput.fill(isoDateOffset(3))
 
   const saveBtn = alice.getByRole("button", { name: /^Save$/i })
   await expect(saveBtn).toBeEnabled()

@@ -66,7 +66,11 @@ function renderDetail() {
 beforeEach(() => {
   localStorage.clear()
   listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
-  listOrgMembers.mockResolvedValue([{ userId: 2, username: "anna", role: { level: 100, name: "viewer" } }])
+  listOrgMembers.mockResolvedValue([
+    { userId: 4, username: "zara", role: { level: 100, name: "viewer" } },
+    { userId: 2, username: "anna", role: { level: 100, name: "viewer" } },
+    { userId: 3, username: "Ben", role: { level: 100, name: "viewer" } },
+  ])
   getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [] })
   addTeamMember.mockResolvedValue({ userId: 2, username: "anna" })
   removeTeamMember.mockResolvedValue(undefined)
@@ -108,10 +112,20 @@ describe("TeamDetail admin management", () => {
     renderDetail()
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
     await act(async () => { (await screen.findByRole("button", { name: /add member/i })).click() })
-    // After clicking "Add member", the username picker appears (aria-label "Member to add").
-    await pickSelectOption(/member to add/i, /^anna$/)
+    const picker = screen.getByRole("combobox", { name: /member to add/i })
+    expect(picker).toHaveTextContent("Search members...")
+    fireEvent.click(picker)
+    expect(screen.queryByRole("option", { name: /^anna$/ })).toBeNull()
+    const options = await screen.findAllByRole("option")
+    expect(options.map((option) => option.textContent)).toEqual(["Ben", "zara"])
+    fireEvent.change(screen.getByRole("textbox", { name: /search org members/i }), {
+      target: { value: "be" },
+    })
+    expect(screen.queryByRole("option", { name: /^zara$/ })).toBeNull()
+    const benOption = screen.getByRole("option", { name: /^Ben$/ })
+    fireEvent.click(benOption)
     await act(async () => { screen.getByRole("button", { name: /^add$/i }).click() })
-    await waitFor(() => expect(addTeamMember).toHaveBeenCalledWith("jwt", 1, 10, "anna"))
+    await waitFor(() => expect(addTeamMember).toHaveBeenCalledWith("jwt", 1, 10, "Ben"))
   })
 
   it("removes a member", async () => {
@@ -180,8 +194,8 @@ describe("TeamDetail member role editing (FRO-139)", () => {
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
     // No role-change combobox for maintainer
     expect(screen.queryByRole("combobox", { name: /role for anna/i })).toBeNull()
-    // Read-only role label with tooltip (title attr) is present
-    expect(screen.getByLabelText(/role: viewer/i)).toBeInTheDocument()
+    // Read-only org-level role label with shadcn tooltip is present
+    expect(screen.getByLabelText(/org-level role: viewer/i)).toBeInTheDocument()
   })
 
   it("access level definitions tooltip is present on the Members heading", async () => {

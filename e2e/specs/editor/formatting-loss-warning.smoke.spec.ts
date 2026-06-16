@@ -54,6 +54,6 @@ test("formatting loss warning appears when target drops source formatting", asyn
   await ws.editCell(1, "plain translation without bold")
 
   // The formatting loss warning should appear on this row.
-  const warningIcon = row.locator('[title="Source has inline formatting (bold, italic, etc.) that the target doesn\'t preserve. Formatting will be lost on export."]')
+  const warningIcon = row.locator('[data-tooltip="Source has inline formatting that the target does not preserve. Formatting will be lost on export."]')
   await expect(warningIcon).toBeVisible({ timeout: 8_000 })
 })

@@ -12,8 +12,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *
  * In audio lens (EditorTable audioLens), each cell row renders a CellVoicePanel
  * which contains a SpeakerChip. The chip:
- *   - Shows "Unassigned" when no voice is assigned.
- *   - Has title="Assign a character to this line".
+ *   - Shows the current assigned/default speaker.
  *   - Opens a Popover with a flat list of project voices on click.
  *   - Clicking a voice row calls onAssign(voiceId) and the chip updates.
  *
@@ -61,10 +60,12 @@ test("SpeakerChip assigns a character to a cell line in audio mode", async ({ al
   await expect(alice.getByText(voiceName)).toBeVisible({ timeout: 5_000 })
 
   // Find the first SpeakerChip in the editor cells.
-  const chip = alice.locator('[title="Assign a character to this line"]').first()
+  const chip = alice
+    .getByRole("main")
+    .locator("button")
+    .filter({ hasText: new RegExp(`^(Unassigned|Narrator|${voiceName})$`) })
+    .first()
   await expect(chip).toBeVisible({ timeout: 8_000 })
-  // Chip should say "Unassigned" before assignment.
-  await expect(chip).toContainText("Unassigned")
   await chip.click()
 
   // Popover opens with the voice list. Scope to the popover content — the

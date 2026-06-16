@@ -112,6 +112,15 @@ describe("TOUR_STEPS — FRO-262 copy and anchor correctness", () => {
     expect(orgSwitcherIdx).toBeLessThan(navOverviewIdx)
   })
 
+  it("FRO-262: projects step describes the consolidated project hub", () => {
+    const step = TOUR_STEPS.find((s) => s.anchor === "nav-overview")
+    expect(step).toBeDefined()
+    expect(step!.title).toBe("Projects")
+    expect(step!.body.toLowerCase()).toContain("project hub")
+    expect(step!.body.toLowerCase()).toContain("all organizations")
+    expect(step!.body.toLowerCase()).toMatch(/filter.*sort|sort.*filter/)
+  })
+
   it("FRO-262: splash step (anchor=null) still comes first", () => {
     expect(TOUR_STEPS[0].anchor).toBeNull()
   })

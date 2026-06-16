@@ -1,4 +1,5 @@
 import type { ProjectMember } from "@/lib/frontier/members";
+import { AppTooltip } from "@/components/ui/tooltip";
 
 interface MembershipAvatarsProps {
   members: ProjectMember[];
@@ -31,17 +32,17 @@ export function MembershipAvatars({ members, maxVisible = 4 }: MembershipAvatars
   return (
     <div
       className="flex -space-x-1.5"
-      title={`${members.length} member${members.length !== 1 ? "s" : ""}`}
+      aria-label={`${members.length} member${members.length !== 1 ? "s" : ""}`}
     >
       {visible.map((m) => (
-        <div
-          key={m.userId}
-          title={`${m.username} (${m.role.name})`}
-          className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-background text-[10px] font-semibold text-white"
-          style={{ backgroundColor: colorFor(m.username) }}
-        >
-          {getInitial(m.username)}
-        </div>
+        <AppTooltip key={m.userId} content={`${m.username} (${m.role.name})`}>
+          <div
+            className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-background text-[10px] font-semibold text-white"
+            style={{ backgroundColor: colorFor(m.username) }}
+          >
+            {getInitial(m.username)}
+          </div>
+        </AppTooltip>
       ))}
       {overflow > 0 && (
         <div className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-background bg-muted text-[10px] font-semibold text-muted-foreground">

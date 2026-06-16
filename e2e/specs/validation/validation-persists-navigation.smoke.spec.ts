@@ -61,10 +61,10 @@ test("validated cell stays validated after navigating away and back", async ({ a
   await ws2.openFileBySubstring("sample")
   await ws2.waitForEditor()
 
-  // Cell 0 health button should still say "— validated".
+  // Cell 0 validation button should still report validated state.
   const row = ws2.cellRow(0)
   await row.hover()
-  const validationButton = row.locator("button[title*='Health']").first()
+  const validationButton = row.getByRole("button", { name: /Validated/i }).first()
   await expect(validationButton).toBeVisible({ timeout: 10_000 })
-  await expect(validationButton).toHaveAttribute("title", /validated/, { timeout: 15_000 })
+  await expect(validationButton).toHaveAttribute("aria-pressed", "true", { timeout: 15_000 })
 })

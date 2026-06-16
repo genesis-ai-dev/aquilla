@@ -7,6 +7,7 @@
 // its content so it never blocks the Preferences page).
 
 import { useEffect, useState } from "react"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getMyUsage, type MyUsage } from "@/lib/sync/usage"
 
@@ -55,13 +56,13 @@ function MiniBarChart({ history }: { history: MyUsage["history"] }) {
           const pct = Math.max((day.audioSeconds / maxSeconds) * 100, day.audioSeconds > 0 ? 8 : 2)
           const label = `${day.date}: ${fmtAudioSeconds(day.audioSeconds)}`
           return (
-            <div
-              key={day.date}
-              title={label}
-              aria-label={label}
-              className="flex-1 rounded-sm bg-primary/40 min-h-[2px] transition-all"
-              style={{ height: `${pct}%` }}
-            />
+            <AppTooltip key={day.date} content={label}>
+              <div
+                aria-label={label}
+                className="flex-1 rounded-sm bg-primary/40 min-h-[2px] transition-all"
+                style={{ height: `${pct}%` }}
+              />
+            </AppTooltip>
           )
         })}
       </div>

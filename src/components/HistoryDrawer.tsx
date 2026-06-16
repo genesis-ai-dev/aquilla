@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { X, User, Bot, Check, BookOpen, ChevronDown, ChevronRight, GitBranch } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import type { CellData } from "@/hooks/useCells"
 import type { CellHistoryEntry } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
@@ -273,13 +274,15 @@ function GroupItem({
           {terminal.validated ? "validated" : "unvalidated"}
         </span>
         {isStale && (
-          <span
-            className="flex items-center gap-0.5 rounded bg-amber-200/60 px-1.5 py-0.5 font-medium text-amber-900 dark:bg-amber-800/50 dark:text-amber-200"
-            title="This edit lost the first-child-of-parent race for its slot. It was logged but never applied to the cell's current value."
+          <AppTooltip
+            content="This edit lost the first-child-of-parent race for its slot. It was logged but never applied to the cell's current value."
+            className="max-w-xs"
           >
-            <GitBranch className="h-3 w-3" />
-            stale branch
-          </span>
+            <span className="flex items-center gap-0.5 rounded bg-amber-200/60 px-1.5 py-0.5 font-medium text-amber-900 dark:bg-amber-800/50 dark:text-amber-200">
+              <GitBranch className="h-3 w-3" />
+              stale branch
+            </span>
+          </AppTooltip>
         )}
         {hasSubEntries && (
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">

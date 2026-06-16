@@ -14,7 +14,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * "Or share a link" section with a "Create link" button. Clicking it calls
  * createServerInvite() and renders:
  *   - A read-only input containing the join URL (contains "/join/")
- *   - A Copy button (title="Copy")
+ *   - A Copy button with a tooltip
  *
  * This spec: open the setup checklist → expand "Invite collaborators" →
  * click "Create link" → verify a join URL appears in the input →
@@ -33,7 +33,7 @@ test("setup checklist invite step Create link shows join URL and copy button", a
   await ws.waitForEditor()
 
   // Open the setup checklist.
-  const chip = alice.locator('[title="Open setup checklist"]')
+  const chip = alice.getByRole("button", { name: /Setup:/i })
   await expect(chip).toBeVisible({ timeout: 10_000 })
   await chip.click()
 
@@ -64,6 +64,6 @@ test("setup checklist invite step Create link shows join URL and copy button", a
   await expect(linkInput).toHaveValue(/\/join\//, { timeout: 8_000 })
 
   // Copy button is present.
-  const copyBtn = alice.locator('button[title="Copy"]')
+  const copyBtn = alice.locator('[data-tooltip="Copy"] button, button[aria-label="Copy"]')
   await expect(copyBtn).toBeVisible({ timeout: 2_000 })
 })

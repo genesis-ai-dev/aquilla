@@ -21,7 +21,7 @@ test("setup checklist shows Coming soon items for standards and glossary", async
   await dash.openProject(name)
 
   // Open the setup checklist.
-  const openChecklistBtn = alice.locator('[title="Open setup checklist"]')
+  const openChecklistBtn = alice.getByRole("button", { name: /Setup:/i })
   await expect(openChecklistBtn).toBeVisible({ timeout: 10_000 })
   await openChecklistBtn.click()
 

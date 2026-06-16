@@ -13,8 +13,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *   1. Creates a project.
  *   2. Navigates directly to /project/:id/voice.
  *   3. Verifies the workspace renders (not a 404).
- *   4. Verifies the audio lens is active — the toolbar should show audio-mode
- *      UI elements (e.g. the "Text" lens button visible, meaning audio is active).
+ *   4. Verifies the voice surface is active even before files are imported.
  */
 test("/project/:id/voice deep-link activates audio lens on load", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -31,9 +30,8 @@ test("/project/:id/voice deep-link activates audio lens on load", async ({ alice
   await alice.goto(`/project/${projectId}/voice`)
   await alice.waitForLoadState("networkidle")
 
-  // The workspace should render (not a 404 blank page).
-  // ProjectWorkspace renders the editor toolbar with a lens selector.
-  // When audio lens is active, there's a "Text" button to switch back to text mode.
-  const textLensBtn = alice.getByRole("button", { name: /^Text$/i })
-  await expect(textLensBtn).toBeVisible({ timeout: 10_000 })
+  // The workspace should render the voice surface (not a 404 blank page).
+  // Empty projects have no file lens selector yet, but the Cast sidebar is active.
+  await expect(alice.getByRole("heading", { name: /^Cast$/i })).toBeVisible({ timeout: 10_000 })
+  await expect(alice.getByRole("button", { name: /New voice/i })).toBeVisible()
 })

@@ -1,4 +1,6 @@
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
+import { cloneElement } from "react"
+import type { ReactElement, ReactNode } from "react"
 
 import { cn } from "@/lib/utils"
 
@@ -43,4 +45,41 @@ function TooltipContent({
   )
 }
 
-export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger }
+function AppTooltip({
+  children,
+  content,
+  side = "top",
+  delay = 300,
+  disabled = false,
+  className,
+}: {
+  children: ReactElement
+  content: ReactNode
+  side?: "top" | "bottom" | "left" | "right"
+  delay?: number
+  disabled?: boolean
+  className?: string
+}) {
+  if (disabled || !content) return children
+  const testTooltipAttr =
+    import.meta.env.MODE === "test" && typeof content === "string"
+      ? content
+      : undefined
+  const trigger =
+    typeof content === "string"
+      ? cloneElement(children, { "data-tooltip": testTooltipAttr, title: undefined } as Record<string, string | undefined>)
+      : children
+
+  return (
+    <TooltipProvider delay={delay}>
+      <Tooltip>
+        <TooltipTrigger render={trigger} />
+        <TooltipContent side={side} className={className}>
+          {content}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
+export { AppTooltip, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger }

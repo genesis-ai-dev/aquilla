@@ -16,6 +16,7 @@ import { Pause, Play, X } from "lucide-react"
 import { CellWaveform } from "@/components/CellWaveform"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { setCellPref } from "@/lib/store/audio-cell-prefs"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
@@ -207,18 +208,18 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
             const leftPct = (start / duration) * 100
             const widthPct = ((end - start) / duration) * 100
             return (
-              <button
-                key={i}
-                type="button"
-                onClick={() => previewSeg(i)}
-                title={`Preview ${snippet(cells[i], i)}`}
-                className={cn(
-                  "absolute inset-y-0 border-l border-transparent transition-colors",
-                  activeSeg === i ? "bg-primary/15" : i % 2 ? "bg-foreground/[0.03]" : "bg-transparent",
-                  "hover:bg-primary/10",
-                )}
-                style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
-              />
+              <AppTooltip key={i} content={`Preview ${snippet(cells[i], i)}`}>
+                <button
+                  type="button"
+                  onClick={() => previewSeg(i)}
+                  className={cn(
+                    "absolute inset-y-0 border-l border-transparent transition-colors",
+                    activeSeg === i ? "bg-primary/15" : i % 2 ? "bg-foreground/[0.03]" : "bg-transparent",
+                    "hover:bg-primary/10",
+                  )}
+                  style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                />
+              </AppTooltip>
             )
           })}
 

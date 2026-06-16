@@ -58,7 +58,7 @@ describe("TakesStrip", () => {
     )
     // "Use this take" is the circle action; it's disabled on the active take,
     // so the only enabled one targets take "a".
-    const useButtons = screen.getAllByTitle("Use this take")
+    const useButtons = screen.getAllByRole("button", { name: "Use this take" })
     fireEvent.click(useButtons[0])
     await waitFor(() => expect(emitSelect).toHaveBeenCalledTimes(1))
     expect(emitSelect).toHaveBeenCalledWith(
@@ -79,16 +79,16 @@ describe("TakesStrip", () => {
     )
 
     // Click "Use this take" for take "a"
-    const useButtons = screen.getAllByTitle("Use this take")
+    const useButtons = screen.getAllByRole("button", { name: "Use this take" })
     fireEvent.click(useButtons[0])
 
     // Optimistic: take "a"'s circle button should now be titled "Active take"
     // (disabled) while take "b"'s remains "Use this take".
     await waitFor(() => {
-      const activeTakeBtn = screen.queryByTitle("Active take")
+      const activeTakeBtn = screen.queryByRole("button", { name: "Active take" })
       expect(activeTakeBtn).not.toBeNull()
       // Take "b"'s button is still enabled (not optimistically selected)
-      const useBtns = screen.getAllByTitle("Use this take")
+      const useBtns = screen.getAllByRole("button", { name: "Use this take" })
       expect(useBtns.length).toBe(1)
     })
 
@@ -108,7 +108,7 @@ describe("TakesStrip", () => {
 
     // Fire 3 rapid clicks: a, b, c — all while busyId is set.
     // Only the last one should remain as optimistic selection.
-    const buttons = screen.getAllByTitle("Use this take")
+    const buttons = screen.getAllByRole("button", { name: "Use this take" })
     fireEvent.click(buttons[0]) // click take "a"
     // After first click busyId is set — subsequent clicks are disabled by
     // isSelectInFlight, so no extra emits are fired. This IS the spam-safety.
@@ -122,21 +122,21 @@ describe("TakesStrip", () => {
 
     // After confirmation: take "a" should be shown as active take, others as "Use this take"
     await waitFor(() => {
-      expect(screen.getByTitle("Active take")).toBeTruthy()
-      expect(screen.getAllByTitle("Use this take").length).toBe(2)
+      expect(screen.getByRole("button", { name: "Active take" })).toBeTruthy()
+      expect(screen.getAllByRole("button", { name: "Use this take" }).length).toBe(2)
     })
   })
 
   it("does not emit select for the already-active take", () => {
     render(<TakesStrip {...common} takes={[take("a", 1000)]} selectedAudioId="a" />)
     // The active take's circle button is disabled and labelled differently.
-    expect(screen.queryByTitle("Use this take")).toBeNull()
-    expect(screen.getByTitle("Active take")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Use this take" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Active take" })).toBeTruthy()
   })
 
   it("deleting a take emits remove and pokes the bus", async () => {
     render(<TakesStrip {...common} takes={[take("a", 1000)]} selectedAudioId="a" />)
-    fireEvent.click(screen.getByTitle("Delete take"))
+    fireEvent.click(screen.getByRole("button", { name: "Delete take" }))
     await waitFor(() => expect(emitRemove).toHaveBeenCalledTimes(1))
     expect(emitRemove).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: "p1", fileId: "f1", cellId: "c1", audioId: "a", author: "dir" }),
@@ -167,7 +167,7 @@ describe("TakesStrip", () => {
       cleanedLabel.compareDocumentPosition(originalLabel) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
     // Originals offer denoise; cleaned takes do not.
-    expect(screen.getAllByTitle(/Remove noise/).length).toBe(1)
+    expect(screen.getAllByRole("button", { name: /Remove noise/ }).length).toBe(1)
     expect(container).toBeTruthy()
   })
 
@@ -180,7 +180,7 @@ describe("TakesStrip", () => {
         selectedAudioId="dn-audio-c"
       />,
     )
-    fireEvent.click(screen.getByTitle("Revert to the original recording"))
+    fireEvent.click(screen.getByRole("button", { name: "Revert to the original recording" }))
     await waitFor(() => expect(emitSelect).toHaveBeenCalledTimes(1))
     expect(emitSelect).toHaveBeenCalledWith(
       expect.objectContaining({ audioId: "audio-a", slot: "recording", cellId: "c1" }),
@@ -195,6 +195,6 @@ describe("TakesStrip", () => {
         selectedAudioId="dn-audio-c"
       />,
     )
-    expect(screen.queryByTitle("Revert to the original recording")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Revert to the original recording" })).toBeNull()
   })
 })

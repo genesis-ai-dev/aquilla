@@ -23,6 +23,7 @@ import {
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -306,22 +307,22 @@ function CharacterModalBody({
             <Label>Engine</Label>
             <div className="grid grid-cols-3 gap-1.5">
               {TTS_PROVIDER_INFOS.map((info) => (
-                <button
-                  key={info.id}
-                  type="button"
-                  onClick={() => update({
-                    provider: info.id,
-                    voiceName: defaultVoiceNameForProvider(info.id, { targetLanguage }),
-                  })}
-                  aria-pressed={activeProvider === info.id}
-                  title={info.hint}
-                  className={cn(
-                    "rounded-lg border px-2 py-1.5 text-center text-xs transition-colors",
-                    activeProvider === info.id ? "border-primary bg-primary/10 font-medium" : "hover:bg-accent/40",
-                  )}
-                >
-                  {info.shortTitle ?? info.title}
-                </button>
+                <AppTooltip key={info.id} content={info.hint} className="max-w-xs">
+                  <button
+                    type="button"
+                    onClick={() => update({
+                      provider: info.id,
+                      voiceName: defaultVoiceNameForProvider(info.id, { targetLanguage }),
+                    })}
+                    aria-pressed={activeProvider === info.id}
+                    className={cn(
+                      "rounded-lg border px-2 py-1.5 text-center text-xs transition-colors",
+                      activeProvider === info.id ? "border-primary bg-primary/10 font-medium" : "hover:bg-accent/40",
+                    )}
+                  >
+                    {info.shortTitle ?? info.title}
+                  </button>
+                </AppTooltip>
               ))}
             </div>
           </div>
@@ -479,12 +480,14 @@ function CharacterModalBody({
             </Button>
           )}
           {isDefault && (
-            <span
-              className="inline-flex items-center gap-1 text-xs text-muted-foreground"
-              title="This voice is the narrator — it handles all lines without an explicit speaker assignment. Tag other characters to their own voices to separate their audio for multi-voice export."
+            <AppTooltip
+              content="This voice is the narrator: it handles all lines without an explicit speaker assignment. Tag other characters to their own voices to separate their audio for multi-voice export."
+              className="max-w-xs"
             >
-              <Star className="h-3.5 w-3.5 text-primary" /> Narrator (default)
-            </span>
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                <Star className="h-3.5 w-3.5 text-primary" /> Narrator (default)
+              </span>
+            </AppTooltip>
           )}
           {onDelete && !draft.builtIn && (
             <Button

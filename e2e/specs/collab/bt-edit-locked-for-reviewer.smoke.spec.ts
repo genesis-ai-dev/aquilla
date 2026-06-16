@@ -13,8 +13,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * EditorTable — BT "Edit" button is locked for Reviewer role.
  *
  * EditorTable.tsx: in the BT tab of the expanded cell, if the user's
- * role is below Contributor, the "Edit" button is a disabled span with:
- *   title="Contributor+ required to edit back-translations"
+ * role is below Contributor, the "Edit" affordance is a disabled span
+ * labelled "Contributor+ required to edit back-translations".
  *
  * This spec:
  *   1. Alice creates a project, imports sample.md, edits cell 0.
@@ -77,12 +77,12 @@ test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice,
   // role-independent; only *editing* the BT is Contributor+.
   const btPanel = bob.getByRole("tabpanel", { name: "BT" })
   const generateBtn = btPanel.getByRole("button", { name: /^(Generate|Generating…)$/ })
-  const lockedSpan = bob.locator('[title="Contributor+ required to edit back-translations"]')
-  await expect(generateBtn.or(lockedSpan).first()).toBeVisible({ timeout: 8_000 })
+  const lockedEdit = btPanel.getByLabel("Contributor+ required to edit back-translations")
+  await expect(generateBtn.or(lockedEdit).first()).toBeVisible({ timeout: 8_000 })
   if (await generateBtn.isVisible().catch(() => false)) {
     await generateBtn.click()
   }
 
   // The locked Edit span should appear — Reviewer cannot edit BT.
-  await expect(lockedSpan).toBeVisible({ timeout: 8_000 })
+  await expect(lockedEdit).toBeVisible({ timeout: 8_000 })
 })

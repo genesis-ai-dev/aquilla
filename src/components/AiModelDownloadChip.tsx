@@ -7,6 +7,7 @@ import { AlertCircle, CheckCircle2, RotateCw, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { prefetchAiModels, useModelStatus, type ModelId } from "@/lib/audio/prefetch"
 import { cn } from "@/lib/utils"
 
@@ -165,10 +166,12 @@ export function AiModelDownloadChip() {
         <ul className="space-y-2">
           {errors.map((err) => (
             <li key={err.id} className="space-y-1">
-              <p className="text-[11px] leading-snug text-destructive" title={err.message}>
-                <span className="font-medium">{err.label}:</span>{" "}
-                {err.message}
-              </p>
+              <AppTooltip content={err.message} className="max-w-xs">
+                <p className="text-[11px] leading-snug text-destructive">
+                  <span className="font-medium">{err.label}:</span>{" "}
+                  {err.message}
+                </p>
+              </AppTooltip>
               <Button
                 type="button"
                 size="xs"

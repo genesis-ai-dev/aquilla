@@ -44,9 +44,9 @@ test("RTL detection hint shows for Arabic target language and can be dismissed",
   // The hint mentions "target" (since source is "en" = ltr, target is "ar" = rtl).
   await expect(hint).toContainText(/target/i)
 
-  // The Dismiss button (title="Dismiss") is visible.
-  const dismissBtn = hint.locator('button[title="Dismiss"]')
-    .or(alice.locator('button[title="Dismiss"]').first())
+  // The Dismiss button is visible.
+  const dismissBtn = hint.getByRole("button", { name: "Dismiss" })
+    .or(alice.locator('[data-tooltip="Dismiss"] button').first())
   await expect(dismissBtn).toBeVisible({ timeout: 3_000 })
 
   // Click Dismiss — the hint should disappear.

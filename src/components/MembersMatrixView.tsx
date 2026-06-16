@@ -7,6 +7,7 @@ import { MembersMatrixCellEditor } from "./MembersMatrixCellEditor"
 import { MemberAccessDrillDown } from "./MemberAccessDrillDown"
 import { AccessModelLegend } from "./AccessModelLegend"
 import {
+  AppTooltip,
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -179,19 +180,17 @@ function ProjectHeaderCell({
       style={{ minWidth: "9rem", maxWidth: "14rem" }}
     >
       <div className="flex items-center gap-1">
-        <span
-          className="truncate"
-          title={project.name}
-        >
-          {project.name}
-        </span>
-        {concentrationRisk && (
-          <span
-            title="Sole Owner — losing this person locks the project"
-            className="inline-flex items-center text-amber-600 dark:text-amber-400"
-          >
-            <AlertTriangle className="h-3 w-3" />
+        <AppTooltip content={project.name}>
+          <span className="truncate">
+            {project.name}
           </span>
+        </AppTooltip>
+        {concentrationRisk && (
+          <AppTooltip content="Sole Owner: losing this person locks the project">
+            <span className="inline-flex items-center text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="h-3 w-3" />
+            </span>
+          </AppTooltip>
         )}
       </div>
       <div className="mt-0.5 text-[10px] text-muted-foreground capitalize">
@@ -235,17 +234,15 @@ const MatrixRow = memo(function MatrixRow({
             "text-sm rounded px-1 -mx-1 hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
             isSelected ? "font-semibold text-primary" : "",
           ].join(" ")}
-          title="Click to see project access breakdown"
         >
           {member.username}
         </button>
         {member.isOrgInherited && (
-          <span
-            className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground align-middle"
-            title="Access on every project comes from org-wide role; no per-project overrides."
-          >
-            org-wide
-          </span>
+          <AppTooltip content="Access on every project comes from org-wide role; no per-project overrides.">
+            <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground align-middle">
+              org-wide
+            </span>
+          </AppTooltip>
         )}
       </th>
       {projects.map((p) => {
@@ -298,4 +295,3 @@ export function sourceInfo(source: string): { label: string; badge: string } {
     default:         return { label: "", badge: "" }
   }
 }
-

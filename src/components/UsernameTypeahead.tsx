@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { Check, AtSign } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
 
 export type RecipientMode = "username" | "email"
@@ -28,6 +30,9 @@ interface Props {
    * support email invites yet. */
   showModeToggle?: boolean
   placeholder?: { username?: string; email?: string }
+  excludedUserIds?: readonly number[]
+  /** Scope search to related users. Disable for org membership, where any Aquilla user can be added. */
+  scopedSearch?: boolean
 }
 
 /**
@@ -58,23 +63,88 @@ export function UsernameTypeahead({
   inputId,
   showModeToggle = true,
   placeholder,
+  excludedUserIds = [],
+  scopedSearch = true,
 }: Props) {
   const [open, setOpen] = useState(false)
+  const [dropdownPosition, setDropdownPosition] = useState<{
+    left: number
+    top: number
+    width: number
+  } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const { results, isLoading, needsMorePrefix, lastFetchOk } = useUserSearch(
-    value.mode === "username" ? value.raw : ""
+  const dropdownRef = useRef<HTMLDivElement>(null)
+  const { query, results, isLoading, lastFetchOk } = useUserSearch(
+    value.mode === "username" ? value.raw : "",
+    undefined,
+    undefined,
+    scopedSearch
   )
+  const trimmedRaw = value.raw.trim()
+  const searchMatchesInput = query.trim() === trimmedRaw
+  const needsMorePrefix = trimmedRaw.length > 0 && trimmedRaw.length < 2
+  const excludedUserIdSet = new Set(excludedUserIds)
+  const visibleResults = searchMatchesInput
+    ? results
+        .filter((u) => !excludedUserIdSet.has(u.id))
+        .sort((a, b) =>
+          a.username.localeCompare(b.username, undefined, { sensitivity: "base" })
+        )
+    : []
+  const allMatchesAlreadyAdded =
+    !needsMorePrefix &&
+    searchMatchesInput &&
+    !isLoading &&
+    results.length > 0 &&
+    visibleResults.length === 0
+  const searchPendingForInput =
+    !needsMorePrefix && trimmedRaw.length >= 2 && (!searchMatchesInput || isLoading)
+  const canShowSettledEmptyState =
+    !needsMorePrefix &&
+    searchMatchesInput &&
+    !isLoading &&
+    results.length === 0 &&
+    trimmedRaw.length >= 2
+  const showSuggestions =
+    value.mode === "username" && open && trimmedRaw.length > 0
 
   // Close the dropdown on outside click — typeahead UX expects this.
   useEffect(() => {
     if (!open) return
     function onDocClick(e: MouseEvent) {
-      if (!containerRef.current) return
-      if (!containerRef.current.contains(e.target as Node)) setOpen(false)
+      const target = e.target as Node
+      if (containerRef.current?.contains(target)) return
+      if (dropdownRef.current?.contains(target)) return
+      setOpen(false)
     }
     document.addEventListener("mousedown", onDocClick)
     return () => document.removeEventListener("mousedown", onDocClick)
   }, [open])
+
+  useEffect(() => {
+    if (!showSuggestions) {
+      setDropdownPosition(null)
+      return
+    }
+
+    function updateDropdownPosition() {
+      const rect = containerRef.current?.getBoundingClientRect()
+      if (!rect) return
+      setDropdownPosition({
+        left: rect.left,
+        top: rect.bottom + 4,
+        width: rect.width,
+      })
+    }
+
+    updateDropdownPosition()
+    window.addEventListener("resize", updateDropdownPosition)
+    window.addEventListener("scroll", updateDropdownPosition, true)
+    return () => {
+      window.removeEventListener("resize", updateDropdownPosition)
+      window.removeEventListener("scroll", updateDropdownPosition, true)
+    }
+  }, [showSuggestions])
 
   function handleChange(raw: string) {
     onChange({
@@ -97,40 +167,43 @@ export function UsernameTypeahead({
     setOpen(false)
   }
 
-  const showSuggestions =
-    value.mode === "username" && open && value.raw.trim().length > 0
-
   return (
     <div ref={containerRef} className="relative space-y-1">
       <div className="flex items-center gap-1.5">
         {showModeToggle && (
           <div className="inline-flex shrink-0 rounded-md border bg-muted/20 p-0.5 text-[10px]">
-            <button
-              type="button"
-              onClick={() => handleSwitchMode("username")}
-              disabled={disabled}
-              className={`rounded px-1.5 py-0.5 ${
-                value.mode === "username"
-                  ? "bg-background shadow-sm text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-              title="Invite an existing Aquilla user"
-            >
-              @user
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSwitchMode("email")}
-              disabled={disabled}
-              className={`rounded px-1.5 py-0.5 ${
-                value.mode === "email"
-                  ? "bg-background shadow-sm text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-              title="Invite by email — they'll be prompted to sign up if needed"
-            >
-              email
-            </button>
+            <AppTooltip content="Invite an existing Aquilla user">
+              <span className="inline-flex">
+                <button
+                  type="button"
+                  onClick={() => handleSwitchMode("username")}
+                  disabled={disabled}
+                  className={`rounded px-1.5 py-0.5 ${
+                    value.mode === "username"
+                      ? "bg-background shadow-sm text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  @user
+                </button>
+              </span>
+            </AppTooltip>
+            <AppTooltip content="Invite by email; they'll be prompted to sign up if needed" className="max-w-xs">
+              <span className="inline-flex">
+                <button
+                  type="button"
+                  onClick={() => handleSwitchMode("email")}
+                  disabled={disabled}
+                  className={`rounded px-1.5 py-0.5 ${
+                    value.mode === "email"
+                      ? "bg-background shadow-sm text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  email
+                </button>
+              </span>
+            </AppTooltip>
           </div>
         )}
 
@@ -140,6 +213,9 @@ export function UsernameTypeahead({
             type={value.mode === "email" ? "email" : "text"}
             inputMode={value.mode === "email" ? "email" : undefined}
             autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="none"
+            spellCheck={false}
             disabled={disabled}
             value={value.raw}
             onChange={(e) => handleChange(e.target.value)}
@@ -152,28 +228,41 @@ export function UsernameTypeahead({
             }
           />
           {value.mode === "username" && value.resolved && (
-            <span
-              className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 text-[10px]"
-              title="Verified Aquilla user"
-            >
-              <Check className="h-3 w-3" /> verified
-            </span>
+            <AppTooltip content="Verified Aquilla user">
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 text-[10px]">
+                <Check className="h-3 w-3" /> verified
+              </span>
+            </AppTooltip>
           )}
         </div>
       </div>
 
       {/* Username suggestions dropdown */}
-      {showSuggestions && (
-        <div className="absolute left-0 right-0 top-full mt-0.5 z-40 max-h-56 overflow-y-auto rounded-md border bg-popover shadow-md">
+      {showSuggestions && dropdownPosition && typeof document !== "undefined" && createPortal(
+        <div
+          ref={dropdownRef}
+          className="fixed z-[60] max-h-44 overflow-y-auto rounded-md border bg-popover shadow-md"
+          style={{
+            left: dropdownPosition.left,
+            top: dropdownPosition.top,
+            width: dropdownPosition.width,
+          }}
+        >
           {needsMorePrefix && (
             <p className="px-3 py-2 text-[11px] text-muted-foreground">
               Type at least 2 characters to search.
             </p>
           )}
 
-          {!needsMorePrefix && isLoading && results.length === 0 && (
+          {searchPendingForInput && visibleResults.length === 0 && (
             <p className="flex items-center gap-1.5 px-3 py-2 text-[11px] text-muted-foreground">
               <Spinner className="size-3" /> Searching…
+            </p>
+          )}
+
+          {allMatchesAlreadyAdded && (
+            <p className="px-3 py-2 text-[11px] text-muted-foreground">
+              Matching users are already members.
             </p>
           )}
 
@@ -182,10 +271,10 @@ export function UsernameTypeahead({
               deployed yet (404) or the network errored, we'd otherwise
               be lying about the user's existence — suppress the
               false-negative and render a softer fallback hint. */}
-          {!needsMorePrefix && !isLoading && results.length === 0 && value.raw.trim().length >= 2 && lastFetchOk && (
+          {canShowSettledEmptyState && lastFetchOk && (
             <div className="px-3 py-2">
               <p className="text-[11px] text-muted-foreground">
-                No Aquilla user named "{value.raw.trim()}".
+                No Aquilla user named "{trimmedRaw}".
               </p>
               {showModeToggle && (
                 <button
@@ -200,15 +289,15 @@ export function UsernameTypeahead({
             </div>
           )}
 
-          {!needsMorePrefix && !isLoading && results.length === 0 && value.raw.trim().length >= 2 && !lastFetchOk && (
+          {canShowSettledEmptyState && !lastFetchOk && (
             <p className="px-3 py-2 text-[11px] text-muted-foreground">
               Couldn't search right now — we'll verify the username when you submit.
             </p>
           )}
 
-          {results.length > 0 && (
+          {visibleResults.length > 0 && (
             <ul className="py-0.5">
-              {results.map((u) => {
+              {visibleResults.map((u) => {
                 const isSelected =
                   value.resolved?.id === u.id && value.resolved?.username === u.username
                 return (
@@ -235,7 +324,8 @@ export function UsernameTypeahead({
               )}
             </ul>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

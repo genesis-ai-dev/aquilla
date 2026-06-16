@@ -19,7 +19,7 @@ test("account switcher add-account dialog Forgot password switches to reset mode
   await alice.waitForLoadState("networkidle")
 
   // Open the account switcher (username button with ChevronsUpDown icon).
-  const accountBtn = alice.getByRole("button", { name: /alice/i }).first()
+  const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
   await expect(accountBtn).toBeVisible({ timeout: 10_000 })
   await accountBtn.click()
 

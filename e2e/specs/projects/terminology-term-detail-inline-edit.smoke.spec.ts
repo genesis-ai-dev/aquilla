@@ -86,7 +86,7 @@ test("terminology term detail occurrence row opens inline editor on click", asyn
   await expect(occurrenceCount).toBeVisible({ timeout: 10_000 })
 
   // Click the occurrence row's "Click to edit" button.
-  const editableRow = alice.locator('button[title="Click to edit"]').first()
+  const editableRow = alice.getByRole("button", { name: /\(empty\)/ }).first()
   await expect(editableRow).toBeVisible({ timeout: 5_000 })
   await editableRow.click()
 

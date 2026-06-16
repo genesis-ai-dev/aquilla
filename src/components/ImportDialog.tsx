@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import {
   importFile,
@@ -677,13 +678,17 @@ function OptionBadge({ kind }: { kind: "beta" | "soon" }) {
 function OptionCard({ option, onSelect }: { option: ImportOption; onSelect: (s: Screen) => void }) {
   const { icon: Icon, disabled } = option
   const select = () => { if (!disabled && option.id) onSelect(option.id) }
-  return (
+  const disabledTooltip = disabled
+    ? `Coming soon — ${option.title} import is tracked for a later release`
+    : undefined
+  const testTooltipAttr = import.meta.env.MODE === "test" ? disabledTooltip : undefined
+  const card = (
     <Card
       size="sm"
       role="button"
       tabIndex={disabled ? -1 : 0}
       aria-disabled={disabled || undefined}
-      title={disabled ? "Coming soon" : undefined}
+      data-tooltip={testTooltipAttr}
       onClick={select}
       onKeyDown={(e) => {
         if (!disabled && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); select() }
@@ -710,6 +715,10 @@ function OptionCard({ option, onSelect }: { option: ImportOption; onSelect: (s: 
       </div>
     </Card>
   )
+
+  if (!disabled) return card
+
+  return <AppTooltip content={disabledTooltip}>{card}</AppTooltip>
 }
 
 function ImportSection({ label, children }: { label: string; children: ReactNode }) {
@@ -1297,7 +1306,7 @@ function ParatextChoice({
                       type="button"
                       onClick={() => setExpandedBook(expanded ? null : key)}
                       className="flex min-w-0 flex-1 items-baseline gap-2 text-left"
-                      title="Show the first parsed cells"
+                      aria-label="Show the first parsed cells"
                     >
                       <span className={`truncate text-sm ${included ? "" : "text-muted-foreground line-through"}`}>{b.book.displayName}</span>
                       <span className="shrink-0 text-xs text-muted-foreground">

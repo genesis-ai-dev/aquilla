@@ -35,7 +35,7 @@ test("setup checklist AI instructions textarea edit and reset", async ({ alice }
   await ws.waitForEditor()
 
   // Open the setup checklist.
-  const chip = alice.locator('[title="Open setup checklist"]')
+  const chip = alice.getByRole("button", { name: /Setup:/i })
   await expect(chip).toBeVisible({ timeout: 10_000 })
   await chip.click()
 

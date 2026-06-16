@@ -1,5 +1,6 @@
 import { cva, type VariantProps } from "class-variance-authority"
 
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 const badgeVariants = cva(
@@ -22,11 +23,16 @@ const badgeVariants = cva(
 function Badge({
   className,
   variant = "default",
+  title,
   ...props
 }: React.HTMLAttributes<HTMLSpanElement> & VariantProps<typeof badgeVariants>) {
-  return (
+  const badge = (
     <span data-slot="badge" className={cn(badgeVariants({ variant }), className)} {...props} />
   )
+
+  if (!title) return badge
+
+  return <AppTooltip content={title}>{badge}</AppTooltip>
 }
 
 export { Badge, badgeVariants }

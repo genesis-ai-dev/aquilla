@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { getProject } from "@/lib/store/project-index"
 import { useRules } from "@/hooks/useRules"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
@@ -187,7 +188,9 @@ export function RulesPage() {
 
       <main className="mx-auto max-w-2xl space-y-6 p-6">
         {usageSummary && (
-          <p className="text-xs text-muted-foreground" title="LLM usage on this project">{usageSummary}</p>
+          <AppTooltip content="LLM usage on this project">
+            <p className="text-xs text-muted-foreground">{usageSummary}</p>
+          </AppTooltip>
         )}
 
         <BuiltinChecksList

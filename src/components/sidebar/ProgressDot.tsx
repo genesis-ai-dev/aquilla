@@ -1,4 +1,5 @@
 import { getProgressDisplay } from "@/lib/progress/progress-colors"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 const MAX_VALIDATION_LEVELS = 15
@@ -45,10 +46,10 @@ export function ProgressDot({
   }
 
   return (
+    <AppTooltip content={`${label}\n${display.title}`}>
     <button
       type="button"
       onClick={onClick}
-      title={`${label}\n${display.title}`}
       aria-label={`${label}: ${display.title}`}
       className={cn(
         "h-2 w-2 rounded-full transition-opacity hover:opacity-80",
@@ -59,5 +60,6 @@ export function ProgressDot({
         filter: filter || undefined,
       }}
     />
+    </AppTooltip>
   )
 }

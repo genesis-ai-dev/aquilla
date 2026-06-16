@@ -39,7 +39,7 @@ test("comments page search box filters threads and clear filters resets", async 
   const row = ws.cellRow(0)
   await row.hover()
   const commentBtn = row.locator('[aria-label="Add comment"]').or(
-    row.locator('[title="Add comment"]')
+    row.locator('[data-tooltip="Add comment"]')
   )
   await expect(commentBtn.first()).toBeVisible({ timeout: 5_000 })
   await commentBtn.first().click()

@@ -3,6 +3,7 @@
 // Mirrors AudioBulkProgressBanner — same visual pattern, different data source.
 
 import { X } from "lucide-react"
+import { AppTooltip } from "@/components/ui/tooltip"
 import {
   useCompletionBatchProgress,
   cancelBatchCompletion,
@@ -28,14 +29,16 @@ export function CompletionBulkProgressBanner() {
         {done}/{total}
       </span>
       {!cancelled && (
-        <button
-          type="button"
-          onClick={cancelBatchCompletion}
-          title="Stop translating"
-          className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
+        <AppTooltip content="Stop translating">
+          <button
+            type="button"
+            onClick={cancelBatchCompletion}
+            aria-label="Stop translating"
+            className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </AppTooltip>
       )}
       {cancelled && (
         <span className="text-muted-foreground">cancelling…</span>

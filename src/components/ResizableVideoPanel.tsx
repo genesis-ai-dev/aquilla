@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 const STORAGE_KEY = "codex:video-height"
@@ -61,17 +62,18 @@ export function ResizableVideoPanel({ children, className }: ResizableVideoPanel
   return (
     <div className={cn("flex flex-col", className)}>
       {children(height)}
-      <div
-        role="separator"
-        onMouseDown={handleMouseDown}
-        className={cn(
-          "flex h-1.5 cursor-ns-resize items-center justify-center bg-border hover:bg-primary/30",
-          dragStateRef.current ? "bg-primary/50" : ""
-        )}
-        title="Drag to resize video"
-      >
-        <div className="h-0.5 w-8 rounded-full bg-muted-foreground/40" />
-      </div>
+      <AppTooltip content="Drag to resize video">
+        <div
+          role="separator"
+          onMouseDown={handleMouseDown}
+          className={cn(
+            "flex h-1.5 cursor-ns-resize items-center justify-center bg-border hover:bg-primary/30",
+            dragStateRef.current ? "bg-primary/50" : ""
+          )}
+        >
+          <div className="h-0.5 w-8 rounded-full bg-muted-foreground/40" />
+        </div>
+      </AppTooltip>
     </div>
   )
 }

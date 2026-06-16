@@ -6,7 +6,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *
  * RuleImportDialog.tsx renders a "Import from doc" button (DialogTrigger) that:
  *   - Is disabled when isConfigured = false
- *   - Has title="Configure LLM in settings first" when disabled
+ *   - Has tooltip "Configure LLM in settings first" when disabled
  *
  * For the default "frontier" provider, isConfigured = session.jwt AND the
  * /api/v2/health probe succeeding (frontier-health.ts). In the e2e stack the
@@ -15,7 +15,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * the frontier provider unavailable.
  *
  * This spec: block /api/v2/health → navigate to /project/:id/rules → verify
- * "Import from doc" button is disabled with the configuration-required title.
+ * "Import from doc" button is disabled with the configuration-required tooltip.
  */
 test("rule import button is disabled when LLM is not configured", async ({ alice }) => {
   // Make the frontier LLM provider unavailable (health probe fails).
@@ -37,6 +37,9 @@ test("rule import button is disabled when LLM is not configured", async ({ alice
   await expect(importBtn).toBeVisible({ timeout: 10_000 })
   await expect(importBtn).toBeDisabled({ timeout: 3_000 })
 
-  // The tooltip title says "Configure LLM in settings first".
-  await expect(importBtn).toHaveAttribute("title", /Configure LLM/i)
+  // The tooltip trigger wrapper says "Configure LLM in settings first".
+  const importTooltip = alice
+    .locator('[data-tooltip*="Configure LLM"]')
+    .filter({ has: alice.getByRole("button", { name: /Import from doc/i }) })
+  await expect(importTooltip).toBeVisible({ timeout: 3_000 })
 })

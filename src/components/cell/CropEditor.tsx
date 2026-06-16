@@ -39,7 +39,6 @@ export function CropButton({
         render={
           <button
             type="button"
-            title={trimmed ? "Edit crop" : "Crop"}
             aria-label="Crop audio"
             className={cn(
               "grid h-7 w-7 shrink-0 place-items-center rounded-md transition-colors hover:bg-accent/50 hover:text-foreground",
@@ -111,7 +110,7 @@ function CropPanel({ controller, trim, onChange }: {
         <button
           type="button"
           onClick={() => onChange(null, null)}
-          title="Reset to full clip"
+          aria-label="Reset to full clip"
           className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent/50 hover:text-foreground"
         >
           <RotateCcw className="h-3 w-3" /> Reset

@@ -10,6 +10,7 @@ import { useRef, useState, type ReactNode, type ComponentProps } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { Copy, Check } from "lucide-react"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 function CodeBlock({ children }: { children?: ReactNode }) {
@@ -36,18 +37,19 @@ function CodeBlock({ children }: { children?: ReactNode }) {
       >
         {children}
       </pre>
-      <button
-        type="button"
-        onClick={() => void handleCopy()}
-        title="Copy code"
-        aria-label="Copy code"
-        className={cn(
-          "absolute right-1 top-1 rounded border bg-background p-1 text-muted-foreground",
-          "opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/code:opacity-100",
-        )}
-      >
-        {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-      </button>
+      <AppTooltip content="Copy code">
+        <button
+          type="button"
+          onClick={() => void handleCopy()}
+          aria-label="Copy code"
+          className={cn(
+            "absolute right-1 top-1 rounded border bg-background p-1 text-muted-foreground",
+            "opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/code:opacity-100",
+          )}
+        >
+          {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+        </button>
+      </AppTooltip>
     </div>
   )
 }

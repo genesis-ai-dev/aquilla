@@ -134,7 +134,12 @@ export function Settings() {
             {isLoading ? (
               <p className="text-sm text-muted-foreground">Loading…</p>
             ) : !activeOrg ? (
-              <p className="text-sm text-muted-foreground">No active organization.</p>
+              <div className="rounded-lg border bg-card p-6 text-center">
+                <p className="text-sm font-medium">Select an organization</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Organization settings are managed within a single organization.
+                </p>
+              </div>
             ) : (
               <div className="space-y-6">
                 {/* Identity */}

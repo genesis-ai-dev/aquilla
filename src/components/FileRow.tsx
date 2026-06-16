@@ -3,6 +3,7 @@ import { ChevronRight, MoreHorizontal, Sparkles, AudioWaveform } from "lucide-re
 import type { FileReference } from "@/lib/parsers/types"
 import { fileTypeHasSections, fileOrderedBy } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 interface FileStats { translated: number; validated: number; total: number }
 
@@ -48,6 +49,9 @@ export function FileRow(props: FileRowProps) {
   // exceptional timeline files carry a marker — repeating an icon on every
   // row says nothing.
   const isTimeOrdered = fileOrderedBy(file) === "time"
+  const fileNameTooltip = file.originalName && file.originalName !== file.name
+    ? `${file.name} (imported as ${file.originalName})`
+    : file.name
 
   return (
     <div
@@ -66,24 +70,27 @@ export function FileRow(props: FileRowProps) {
       tabIndex={0}
     >
       {canExpand ? (
-        <button
-          className="p-0.5 rounded-full text-muted-foreground transition-colors hover:text-foreground"
-          onClick={(e) => { e.stopPropagation(); onToggleExpand() }}
-          aria-label={expanded ? "Collapse" : "Expand"}
-        >
-          <ChevronRight className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")} />
-        </button>
+        <AppTooltip content={expanded ? "Collapse sections" : "Expand sections"} side="right">
+          <button
+            className="p-0.5 rounded-full text-muted-foreground transition-colors hover:text-foreground"
+            onClick={(e) => { e.stopPropagation(); onToggleExpand() }}
+            aria-label={expanded ? "Collapse" : "Expand"}
+          >
+            <ChevronRight className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")} />
+          </button>
+        </AppTooltip>
       ) : (
         <span className="w-[18px] shrink-0" aria-hidden="true" />
       )}
       {isTimeOrdered && (
-        <span
-          className="shrink-0 text-muted-foreground/70"
-          title="Timeline-ordered (timecodes are the spine)"
-          aria-label="Timeline-ordered file"
-        >
-          <AudioWaveform className="h-3.5 w-3.5" />
-        </span>
+        <AppTooltip content="Timeline-ordered (timecodes are the spine)" side="right">
+          <span
+            className="shrink-0 text-muted-foreground/70"
+            aria-label="Timeline-ordered file"
+          >
+            <AudioWaveform className="h-3.5 w-3.5" />
+          </span>
+        </AppTooltip>
       )}
       <div className="flex-1 min-w-0">
         {editing ? (
@@ -100,12 +107,19 @@ export function FileRow(props: FileRowProps) {
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <div
-            className="truncate"
-            title={file.originalName ? `Imported as ${file.originalName}` : undefined}
-          >
-            {file.name}
-          </div>
+          <AppTooltip content={fileNameTooltip} side="right">
+            <button
+              type="button"
+              tabIndex={-1}
+              className="block w-full truncate text-left"
+              onClick={(e) => {
+                e.stopPropagation()
+                onSelect()
+              }}
+            >
+              {file.name}
+            </button>
+          </AppTooltip>
         )}
       </div>
       {progress && progress.total > 0 && !editing && (
@@ -119,23 +133,26 @@ export function FileRow(props: FileRowProps) {
         </div>
       )}
       {!editing && (
-        <button
-          className="p-1 rounded-full text-muted-foreground opacity-0 transition-colors hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
-          onClick={(e) => { e.stopPropagation(); onOpenMenu(e.clientX, e.clientY) }}
-          aria-label="File actions"
-        >
-          <MoreHorizontal className="h-3.5 w-3.5" />
-        </button>
+        <AppTooltip content="File actions" side="right">
+          <button
+            className="p-1 rounded-full text-muted-foreground opacity-0 transition-colors hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
+            onClick={(e) => { e.stopPropagation(); onOpenMenu(e.clientX, e.clientY) }}
+            aria-label="File actions"
+          >
+            <MoreHorizontal className="h-3.5 w-3.5" />
+          </button>
+        </AppTooltip>
       )}
       {hasSuggestion && !editing && (
-        <button
-          className="p-1 rounded-full shrink-0 transition-colors hover:text-foreground"
-          onClick={(e) => { e.stopPropagation(); onApplySuggestion?.() }}
-          aria-label="Apply rename suggestion"
-          title="A cleaner name was detected for this file. Click to apply, or use the Apply button at the top of the sidebar."
-        >
-          <Sparkles className="h-3 w-3 text-amber-500" />
-        </button>
+        <AppTooltip content="A cleaner name was detected for this file. Click to apply, or use the Apply button at the top of the sidebar." side="right" className="max-w-xs">
+          <button
+            className="p-1 rounded-full shrink-0 transition-colors hover:text-foreground"
+            onClick={(e) => { e.stopPropagation(); onApplySuggestion?.() }}
+            aria-label="Apply rename suggestion"
+          >
+            <Sparkles className="h-3 w-3 text-amber-500" />
+          </button>
+        </AppTooltip>
       )}
     </div>
   )

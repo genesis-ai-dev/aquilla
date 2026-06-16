@@ -2,6 +2,7 @@ import { useState, useEffect } from "react"
 import { Check, Undo2, Send, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { AppTooltip } from "@/components/ui/tooltip"
 import type { CommentThread as ThreadData } from "@/lib/parsers/types"
 import { renderCommentHtml } from "@/lib/comments/comment-helpers"
 import DOMPurify from "dompurify"
@@ -99,9 +100,11 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
           {thread.status}
         </span>
         {isStale && (
-          <span className="flex items-center gap-0.5 text-amber-500" title="Translation changed since this thread was created">
-            <AlertTriangle className="h-3 w-3" /> stale
-          </span>
+          <AppTooltip content="Translation changed since this thread was created">
+            <span className="flex items-center gap-0.5 text-amber-500">
+              <AlertTriangle className="h-3 w-3" /> stale
+            </span>
+          </AppTooltip>
         )}
         <span className="text-muted-foreground">{formatTimestamp(thread.createdAt)}</span>
       </div>

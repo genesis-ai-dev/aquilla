@@ -126,6 +126,24 @@ const EXECUTE_TOOL = {
 
 // ── Request body ────────────────────────────────────────────────────────────
 
+// Translator profile: all fields optional free-text. The zod `.max` is a
+// generous payload-size sanity ceiling; the precise per-field cap that reaches
+// the prompt is applied in buildSystemPrompt (never trust the client's lengths).
+const PROFILE_FIELD_CEILING = 2000
+const profileField = z.string().max(PROFILE_FIELD_CEILING).optional()
+const translatorProfileSchema = z
+  .object({
+    responseLanguage: profileField,
+    age: profileField,
+    gender: profileField,
+    educationLevel: profileField,
+    religiousBackground: profileField,
+    translationExperience: profileField,
+    geographicalSetting: profileField,
+    otherInfo: profileField,
+  })
+  .optional()
+
 const runRequestSchema = z.object({
   projectId: z.string().min(1),
   messages: z
@@ -133,6 +151,7 @@ const runRequestSchema = z.object({
     .min(1)
     .max(10),
   context: z.object({ fileId: z.string().optional(), cellId: z.string().optional() }).optional(),
+  translatorProfile: translatorProfileSchema,
 })
 
 // ── OpenRouter message plumbing ─────────────────────────────────────────────
@@ -342,6 +361,12 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, signal, 
         sourceLanguage: languages.sourceLanguage,
         targetLanguage: languages.targetLanguage,
         bibleResourcesEnabled,
+        translatorProfile: body.translatorProfile,
+        // Profile language is the sole driver for the agent — it never had a
+        // response-language setting, and defaulting to the project target
+        // language would force target-language replies on owners/PMs who don't
+        // read it. Unset → current English-default behavior.
+        responseLanguage: body.translatorProfile?.responseLanguage,
       }),
     },
     ...body.messages,

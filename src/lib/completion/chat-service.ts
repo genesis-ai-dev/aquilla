@@ -13,6 +13,10 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { complete, resolveProvider } from "./completion-service"
 import { cellTextForDisplay } from "@/lib/cell-text"
 import { getUserProviderOverride } from "@/lib/store/user-provider-override"
+import {
+  translatorProfilePromptBlock,
+  type TranslatorProfile,
+} from "@/lib/translator-profile"
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -51,8 +55,21 @@ export function buildChatMessages(options: {
   targetLanguage: string
   /** Name of the file open in the editor, if any. */
   fileName?: string
+  /** User-level translator profile — injected as JSON to tailor replies. */
+  translatorProfile?: TranslatorProfile | null
+  /** Language the assistant should reply in (profile wins over project setting). */
+  responseLanguage?: string
 }): ChatMessage[] {
-  const { history, userMessage, cellContext, sourceLanguage, targetLanguage, fileName } = options
+  const {
+    history,
+    userMessage,
+    cellContext,
+    sourceLanguage,
+    targetLanguage,
+    fileName,
+    translatorProfile,
+    responseLanguage,
+  } = options
 
   let systemContent = CHAT_SYSTEM_PROMPT
   systemContent += `\n\nProject languages: source = ${sourceLanguage || "unknown"}, target = ${targetLanguage || "unknown"}.`
@@ -70,6 +87,10 @@ export function buildChatMessages(options: {
       (translatedText ? `  Current translation: ${translatedText}\n` : "") +
       (cellContext.context ? `  Reference: ${cellContext.context}\n` : "")
   }
+
+  // Translator profile (JSON) + the language to reply in. Empty profile +
+  // no language → adds nothing.
+  systemContent += translatorProfilePromptBlock(translatorProfile, responseLanguage)
 
   const systemMessage: ChatMessage = { role: "system", content: systemContent }
 

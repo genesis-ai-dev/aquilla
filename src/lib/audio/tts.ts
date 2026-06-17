@@ -129,6 +129,11 @@ export async function synthesizeToWavBlob(
   if (!cleanText) throw new Error("No text to synthesize.")
 
   const provider = opts.projectProvider ?? opts.voice.provider ?? "gemini"
+  if (provider === "omnivoice") {
+    throw new Error(
+      "OmniVoice runs server-side — generate from a project cell, not the local synth path.",
+    )
+  }
   const voice = normalizeVoiceForProvider(opts.voice, provider, {
     targetLanguage: opts.geminiContext?.targetLanguage,
   })
@@ -220,9 +225,12 @@ export async function synthesizeForCell(
   },
 ): Promise<Blob> {
   const voice = resolveVoice(args.projectTtsSettings, args.cellVoiceId)
+  // Engine is per-voice: the resolved voice's provider wins; the project
+  // setting is only a fallback for legacy voices with no provider of their own.
+  const provider = voice.provider ?? resolveTtsProvider(args.projectTtsSettings)
   return synthesizeToWavBlob(text, {
     voice,
-    projectProvider: resolveTtsProvider(args.projectTtsSettings),
+    projectProvider: provider,
     apiKey: resolveApiKey("gemini-tts", args.projectTtsSettings?.apiKey),
     speed: args.speed,
     geminiContext: args.geminiContext,

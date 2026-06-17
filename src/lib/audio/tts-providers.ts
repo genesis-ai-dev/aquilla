@@ -1,7 +1,7 @@
 import type { ProjectTtsSettings, TtsProvider, Voice } from "@/lib/parsers/types"
 import { HAS_HOSTED_MMS_MODELS, USE_SHERPA_MMS_MODELS, isSupportedMmsLanguageCode } from "./mms-languages"
 
-export const DEFAULT_TTS_PROVIDER: TtsProvider = "gemini"
+export const DEFAULT_TTS_PROVIDER: TtsProvider = "omnivoice"
 
 export const GEMINI_TTS_VOICES: readonly { name: string; description: string }[] = [
   { name: "Zephyr", description: "Bright" },
@@ -45,6 +45,18 @@ export interface TtsProviderInfo {
   title: string
   shortTitle: string
   hint: string
+  /** Where the engine runs. Drives the Cloud/On-device grouping in the picker. */
+  tier: "cloud" | "device"
+  /** Whether a reference recording can clone a target timbre for this engine. */
+  supportsCloning: boolean
+  /** Whether the engine exposes named base voices (false for OmniVoice). */
+  hasNamedVoices: boolean
+  /** A few words of value-prop for the engine card. */
+  blurb: string
+  /** Short caveat shown under the blurb (key needed, performance, etc.). */
+  caveat?: string
+  /** Optional external info page; only set when a real page exists. */
+  learnMoreUrl?: string
   badge?: string
   localModel?: "kokoro" | "mms"
   requiresGeminiKey?: boolean
@@ -52,30 +64,55 @@ export interface TtsProviderInfo {
 
 export const TTS_PROVIDER_INFOS: readonly TtsProviderInfo[] = [
   {
+    id: "omnivoice",
+    title: "OmniVoice",
+    shortTitle: "OmniVoice",
+    tier: "cloud",
+    supportsCloning: true,
+    hasNamedVoices: false,
+    badge: "Recommended",
+    blurb: "Hosted neural voice — no setup or API key.",
+    hint: "Runs on our servers. No key or download; usage is cloud-metered. Supports voice cloning from a reference recording.",
+  },
+  {
     id: "gemini",
     title: "Gemini TTS",
     shortTitle: "Gemini",
-    badge: "Recommended",
-    hint: "BYOK Google AI key. Promptable, high-quality voices.",
+    tier: "cloud",
+    supportsCloning: true,
+    hasNamedVoices: true,
     requiresGeminiKey: true,
-  },
-  {
-    id: "mms",
-    title: "MMS (multilingual)",
-    shortTitle: "MMS",
-    hint: USE_SHERPA_MMS_MODELS
-      ? "Local browser voices loaded from the Sherpa-ONNX MMS mirror."
-      : HAS_HOSTED_MMS_MODELS
-        ? "Local browser voices loaded from the hosted MMS model bucket."
-        : "Local browser voices for supported MMS language repos.",
-    localModel: "mms",
+    blurb: "Highest quality, promptable; many languages.",
+    caveat: "Needs your own Google AI key.",
+    hint: "BYOK Google AI key. Promptable, high-quality voices.",
   },
   {
     id: "kokoro",
     title: "Kokoro (local)",
     shortTitle: "Kokoro",
-    hint: "Runs in-browser after a one-time local model download.",
+    tier: "device",
+    supportsCloning: false,
+    hasNamedVoices: true,
     localModel: "kokoro",
+    blurb: "Free, on-device English voices.",
+    caveat: "One-time download; may affect performance.",
+    hint: "Runs in-browser after a one-time local model download.",
+  },
+  {
+    id: "mms",
+    title: "MMS (multilingual)",
+    shortTitle: "MMS",
+    tier: "device",
+    supportsCloning: false,
+    hasNamedVoices: true,
+    localModel: "mms",
+    blurb: "Free, on-device; many languages.",
+    caveat: "One model per language; may affect performance.",
+    hint: USE_SHERPA_MMS_MODELS
+      ? "Local browser voices loaded from the Sherpa-ONNX MMS mirror."
+      : HAS_HOSTED_MMS_MODELS
+        ? "Local browser voices loaded from the hosted MMS model bucket."
+        : "Local browser voices for supported MMS language repos.",
   },
 ] as const
 
@@ -130,6 +167,7 @@ export function defaultVoiceNameForProvider(
   provider: TtsProvider,
   context: { targetLanguage?: string } = {},
 ): string {
+  if (provider === "omnivoice") return ""
   if (provider === "kokoro") return DEFAULT_KOKORO_VOICE
   if (provider === "mms") return inferMmsLanguageCode(context.targetLanguage) ?? DEFAULT_MMS_LANGUAGE
   return DEFAULT_GEMINI_VOICE
@@ -141,6 +179,10 @@ export function normalizeVoiceForProvider(
   context: { targetLanguage?: string } = {},
 ): Voice {
   const next: Voice = { ...voice, provider }
+  if (provider === "omnivoice") {
+    next.voiceName = ""
+    return next
+  }
   if (provider === "gemini") {
     if (!isGeminiVoiceName(next.voiceName)) next.voiceName = DEFAULT_GEMINI_VOICE
     return next

@@ -404,7 +404,7 @@ interface EditorTableProps {
   rules?: TranslationRule[]
   onInfractionClick?: (ruleId: string) => void
   isBacktranslationConfigured?: boolean
-  onBacktranslate?: (cell: CellData) => void
+  onBacktranslate?: (cell: CellData, polish?: boolean) => void
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
   /** Called when user saves a BT edit. Parent emits `cell.backtranslation.set`. */
@@ -1175,7 +1175,7 @@ interface MemoizedRowProps {
   isBacktranslationConfigured?: boolean
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
-  onBacktranslate?: (cell: CellData) => void
+  onBacktranslate?: (cell: CellData, polish?: boolean) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   cellOpenCommentCount?: Map<string, number>
   onOpenComments?: (cellId: string) => void
@@ -1443,7 +1443,7 @@ interface EditorRowProps {
   isBacktranslationConfigured?: boolean
   isBacktranslating?: boolean
   backtranslationError?: string
-  onBacktranslate?: (cell: CellData) => void
+  onBacktranslate?: (cell: CellData, polish?: boolean) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   /** FRO-207: Pre-built interlinear alignment model. */
   alignmentModel?: import("@/lib/completion/interlinear").AlignmentModel | null
@@ -1786,7 +1786,7 @@ function EditorRow({
   cellExamples, highlights, error, health,
   cellInfractions, waivedInfractions, ruleMap,
   onCompleteSingle, onInfractionClick,
-  isBacktranslationConfigured: _isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate, onSaveBacktranslation,
+  isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate, onSaveBacktranslation,
   openCommentCount, onOpenComments, onOpenHistory,
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
@@ -3388,20 +3388,35 @@ function EditorRow({
                       )}
                     </div>
                     <div className="flex items-center gap-1">
-                      {/* Polish toggle — only when BT is present and user can edit */}
+                      {/* Polish toggle — only when BT is present and user can edit.
+                          Toggling ON regenerates the BT through the AI; OFF
+                          regenerates the statistical-only gloss so the displayed
+                          text always matches the polished/statistical label.
+                          Disabled when no AI model is configured. */}
                       {editable && cell.backtranslation && (
-                        <AppTooltip content={btPolishOn ? "Polish on: LLM step will run on next generate" : "Polish off: statistical-only BT"}>
+                        <AppTooltip content={
+                          !isBacktranslationConfigured
+                            ? "Configure an AI model in project settings to enable Polish"
+                            : btPolishOn
+                              ? "Polish on: regenerate statistical-only by turning this off"
+                              : "Polish off: turn on to regenerate with AI"
+                        }>
                           <button
                             type="button"
-                            onClick={() => setBtPolishOn((v) => !v)}
+                            disabled={!isBacktranslationConfigured || isBacktranslating}
+                            onClick={() => {
+                              const next = !btPolishOn
+                              setBtPolishOn(next)
+                              onBacktranslate?.(cell, next)
+                            }}
                             className={cn(
-                              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors",
+                              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
                               btPolishOn
                                 ? "bg-violet-500/15 text-violet-700 dark:text-violet-300 hover:bg-violet-500/25"
                                 : "text-muted-foreground hover:bg-muted hover:text-foreground",
                             )}
                           >
-                            <Sparkles className="h-3 w-3" />
+                            <Sparkles className={cn("h-3 w-3", isBacktranslating && btPolishOn && "animate-pulse")} />
                             Polish
                           </button>
                         </AppTooltip>
@@ -3411,7 +3426,7 @@ function EditorRow({
                         <AppTooltip content="Translation changed — click to regenerate BT">
                           <button
                             type="button"
-                            onClick={() => onBacktranslate?.(cell)}
+                            onClick={() => onBacktranslate?.(cell, btPolishOn)}
                             disabled={isBacktranslating || cell.translated.trim().length === 0}
                             className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 transition-colors hover:bg-amber-500/20 dark:text-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
                           >
@@ -3424,7 +3439,7 @@ function EditorRow({
                       {!cell.backtranslation && !isBtStale && (
                         <button
                           type="button"
-                          onClick={() => onBacktranslate?.(cell)}
+                          onClick={() => onBacktranslate?.(cell, btPolishOn)}
                           disabled={isBacktranslating || cell.translated.trim().length === 0}
                           className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                         >

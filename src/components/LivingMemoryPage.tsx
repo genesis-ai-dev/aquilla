@@ -43,6 +43,12 @@ import { useProject } from "@/hooks/useProject"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { LivingMemoryEntry } from "@/lib/parsers/types"
+import { BriefSection } from "@/components/brief/BriefSection"
+import { BriefBuilder } from "@/components/brief/BriefBuilder"
+import { emptyBrief, isL1Stale } from "@/lib/brief/brief"
+import { useTranslationBrief } from "@/hooks/useTranslationBrief"
+import { generateL1Summary, extractBriefFromDocument, draftField } from "@/lib/brief/brief-generator"
+import { checkInputSize } from "@/lib/rules/rule-extractor"
 
 // ── Pure helpers (add/update/delete for living memory entries) ─────────────
 
@@ -470,6 +476,30 @@ export function LivingMemoryPage() {
 
   const author = session?.username ?? "unknown"
 
+  // Translation Brief wiring
+  const brief = settings.translationBrief ?? project?.translationBrief
+  const stale = brief ? isL1Stale(brief) : false
+  const [builderOpen, setBuilderOpen] = useState(false)
+  // completionSettings comes from the overlaid project record (device-local apiKey +
+  // server-side voice profiles merged in overlayDeviceLocalSettings / overlaySettings).
+  // SWARM-TODO: verify orchestrator: if project?.completionSettings is undefined (no
+  // LLM configured), generation buttons will fail at call time with an informative error.
+  const completionSettings = project?.completionSettings
+  const { save: saveBrief, attachL1 } = useTranslationBrief({
+    brief,
+    author,
+    patch: patchSettings,
+  })
+
+  async function handleGenerate() {
+    if (brief && completionSettings) {
+      const l1 = await generateL1Summary(brief, completionSettings, session ?? null)
+      await attachL1(brief, l1, completionSettings.model)
+    } else {
+      setBuilderOpen(true)
+    }
+  }
+
   async function handleAdd(kind: LivingMemoryEntry["kind"], text: string) {
     const next = addEntry(entries, kind, text, author)
     await patchSettings({ livingMemoryEntries: next })
@@ -541,6 +571,48 @@ export function LivingMemoryPage() {
           </button>
         </div>
       </div>
+
+      {/* Translation Brief section */}
+      <BriefSection
+        brief={brief}
+        canEdit={entriesReady && canEdit}
+        stale={stale}
+        onEdit={() => setBuilderOpen(true)}
+        onGenerate={handleGenerate}
+      />
+
+      {/* Translation Brief builder dialog */}
+      {builderOpen && (
+        <BriefBuilder
+          open={builderOpen}
+          brief={brief ?? emptyBrief(author)}
+          canEdit={entriesReady && canEdit}
+          onClose={() => setBuilderOpen(false)}
+          onSaveDraft={async (draft) => {
+            const prev = brief ?? emptyBrief(author)
+            return saveBrief(prev, draft)
+          }}
+          onGenerateL1={async (draft) => {
+            if (!completionSettings) return
+            const prev = brief ?? emptyBrief(author)
+            const saved = await saveBrief(prev, draft)
+            const l1 = await generateL1Summary(saved, completionSettings, session ?? null)
+            await attachL1(saved, l1, completionSettings.model)
+          }}
+          onHelpDraft={completionSettings
+            ? (fieldId, draft) => draftField(fieldId, draft, completionSettings, session ?? null)
+            : undefined
+          }
+          onExtractDocument={completionSettings
+            ? async (text) => {
+                const chk = checkInputSize(text)
+                if (!chk.ok) throw new Error(chk.message)
+                return extractBriefFromDocument(text, completionSettings, session ?? null)
+              }
+            : undefined
+          }
+        />
+      )}
 
       {/* Truncation warning */}
       {isTruncated && (

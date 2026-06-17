@@ -222,7 +222,7 @@ export interface Voice {
 }
 
 export interface ProjectTtsSettings {
-  /** "gemini" is the recommended BYOK default. "kokoro" keeps the local browser model path. */
+  /** "omnivoice" (hosted, no key) is the default. "gemini" is BYOK; "kokoro"/"mms" run locally. */
   provider?: TtsProvider
   /** Gemini API key for BYOK TTS. Stored in the local project record. */
   apiKey?: string

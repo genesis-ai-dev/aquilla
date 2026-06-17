@@ -8,6 +8,7 @@ import type {
 } from "@/lib/parsers/types"
 import type { Concept } from "@/lib/terminology/types"
 import type { LivingMemoryEntry } from "@/lib/parsers/types"
+import type { TranslationBrief } from "@/lib/brief/types"
 
 /** Initial server version for projects with no settings row. */
 export const PROJECT_SETTINGS_VERSION_INITIAL = 0
@@ -49,6 +50,11 @@ export interface ProjectWideSettings {
   terminology?: Concept[]
   /** Authored living-memory guidance entries (instructions + standards). */
   livingMemoryEntries?: LivingMemoryEntry[]
+  /** The project's skopos/Paratext translation brief. Synced like
+   *  `livingMemoryEntries` — replacing this key replaces the whole object.
+   *  Absent → no brief authored yet. See
+   *  docs/superpowers/specs/2026-06-17-translation-brief-design.md. */
+  translationBrief?: TranslationBrief
   /**
    * Persisted interlinear alignment seeds (FRO-207). Each entry is a
    * (srcToken, tgtToken, weight) triple; positive weight = confirmed,

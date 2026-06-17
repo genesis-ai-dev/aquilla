@@ -183,6 +183,61 @@ export interface AgentPromptContext {
   /** project_settings.bibleResourcesEnabled — when on, the execute.aquifer
    *  contract is added to L1; off, the model is never told the branch exists. */
   bibleResourcesEnabled?: boolean
+  /** User-level translator profile (all fields optional, free-text). Rendered as
+   *  JSON so summaries/answers are tailored to the person. Mirrors
+   *  src/lib/translator-profile.ts TranslatorProfile. */
+  translatorProfile?: {
+    responseLanguage?: string
+    age?: string
+    gender?: string
+    educationLevel?: string
+    religiousBackground?: string
+    translationExperience?: string
+    geographicalSetting?: string
+    otherInfo?: string
+  }
+  /** Language the agent should reply in (driven by the profile). */
+  responseLanguage?: string
+}
+
+// MIRROR of src/lib/translator-profile.ts translatorProfilePromptBlock — the
+// agent builds its prompt here on the worker. Keep the heading text + JSON shape
+// in sync with the client copy (same reason protocol.ts mirrors the wire types).
+const PROFILE_FIELD_MAX = 280
+const PROFILE_FIELDS = [
+  "responseLanguage",
+  "age",
+  "gender",
+  "educationLevel",
+  "religiousBackground",
+  "translationExperience",
+  "geographicalSetting",
+  "otherInfo",
+] as const
+
+function translatorProfileBlock(ctx: AgentPromptContext): string {
+  const p = ctx.translatorProfile
+  const clean: Record<string, string> = {}
+  if (p) {
+    for (const k of PROFILE_FIELDS) {
+      const v = p[k]
+      if (typeof v === "string") {
+        const t = v.trim().slice(0, PROFILE_FIELD_MAX)
+        if (t) clean[k] = t
+      }
+    }
+  }
+  const language = (ctx.responseLanguage ?? "").trim()
+  const hasProfile = Object.keys(clean).length > 0
+  if (!hasProfile && !language) return ""
+  let block = ""
+  if (hasProfile) {
+    block += `\n\n## Translator profile (the person you are assisting — tailor depth, examples, and application to them)\n${JSON.stringify(clean, null, 2)}`
+  }
+  if (language) {
+    block += `\n\nRespond to the user in ${language}.`
+  }
+  return block
 }
 
 /** Event kinds the given role may stage (drives both prompt + emit-stage). */
@@ -224,7 +279,7 @@ ${kinds.map((k) => `- ${EVENT_LINES[k]}`).join("\n")}${
     ? ` The project translates ${ctx.sourceLanguage ? `from ${ctx.sourceLanguage} ` : ""}into ${ctx.targetLanguage} — never ask the user what language to translate into.`
     : ` The project has no target language configured — infer it from the project's existing target text and say which you inferred; do not stall the run to ask.`
 
-  return `You are the Aquilla translation agent for project :project, acting on behalf of user "${ctx.username}" (role: ${roleName}). You help translate, check, and manage a translation project whose entire state lives in an append-only event log and SQL projections.${languagePair} You act ONLY through the execute tool; every write is an event, staged for the user's approval.
+  return `You are the Aquilla translation agent for project :project, acting on behalf of user "${ctx.username}" (role: ${roleName}). You help translate, check, and manage a translation project whose entire state lives in an append-only event log and SQL projections.${languagePair} You act ONLY through the execute tool; every write is an event, staged for the user's approval.${translatorProfileBlock(ctx)}
 
 ${EXECUTE_CONTRACT}
 ${ctx.bibleResourcesEnabled ? `\n${AQUIFER_CONTRACT}\n` : ""}

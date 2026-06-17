@@ -1,8 +1,11 @@
+import { useState } from "react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
 import { PersonalProviderSection } from "@/components/settings/PersonalProviderSection"
@@ -10,6 +13,11 @@ import { LocalModelsSection } from "@/components/ProjectSettings/LocalModelsSect
 import { UsageSection } from "@/components/settings/UsageSection"
 import { cn } from "@/lib/utils"
 import type { DockRailPosition } from "@/lib/dock-rail-position"
+import {
+  getTranslatorProfile,
+  setTranslatorProfile,
+  type TranslatorProfile,
+} from "@/lib/translator-profile"
 
 /**
  * Personal, device-scoped preferences. Split out of the old /settings page so
@@ -20,6 +28,80 @@ const RAIL_OPTIONS: { id: DockRailPosition; label: string }[] = [
   { id: "left", label: "Left rail" },
   { id: "top", label: "Top bar" },
 ]
+
+/** Single-line fields rendered as text inputs, in render order. */
+const PROFILE_TEXT_FIELDS: {
+  key: Exclude<keyof TranslatorProfile, "otherInfo">
+  label: string
+  placeholder: string
+}[] = [
+  { key: "responseLanguage", label: "Assistant language", placeholder: "e.g. Tagalog — the AI replies in this language" },
+  { key: "age", label: "Age", placeholder: "e.g. 32" },
+  { key: "gender", label: "Gender", placeholder: "e.g. Female" },
+  { key: "educationLevel", label: "Level of education", placeholder: "e.g. High school" },
+  { key: "religiousBackground", label: "Religious background", placeholder: "e.g. Christian" },
+  { key: "translationExperience", label: "Translation experience", placeholder: "e.g. 2 years" },
+  { key: "geographicalSetting", label: "Geographical setting", placeholder: "e.g. Rural, Asia" },
+]
+
+/**
+ * Translator profile editor. Local form state so editing (incl. trailing
+ * spaces) is smooth; every change is persisted via setTranslatorProfile, which
+ * sanitizes for storage and notifies the chat/agent hooks.
+ */
+function TranslatorProfileSection() {
+  const [form, setForm] = useState<TranslatorProfile>(() => getTranslatorProfile())
+
+  function update(key: keyof TranslatorProfile, value: string) {
+    const next = { ...form, [key]: value }
+    setForm(next)
+    setTranslatorProfile(next)
+  }
+
+  return (
+    <section className="mt-8 space-y-3">
+      <div>
+        <h2 className="text-base font-semibold">Translator profile</h2>
+        <p className="text-xs text-muted-foreground">
+          Tell the AI about yourself so its summaries and answers fit your context — and so it
+          replies in your language. All fields are optional.
+        </p>
+      </div>
+      <div className="rounded-lg border bg-card p-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          {PROFILE_TEXT_FIELDS.map(({ key, label, placeholder }) => (
+            <div key={key} className="space-y-1">
+              <Label htmlFor={`profile-${key}`} className="text-sm font-medium">
+                {label}
+              </Label>
+              <Input
+                id={`profile-${key}`}
+                value={form[key] ?? ""}
+                onChange={(e) => update(key, e.target.value)}
+                placeholder={placeholder}
+              />
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 space-y-1">
+          <Label htmlFor="profile-otherInfo" className="text-sm font-medium">
+            Other relevant information
+          </Label>
+          <Textarea
+            id="profile-otherInfo"
+            value={form.otherInfo ?? ""}
+            onChange={(e) => update("otherInfo", e.target.value)}
+            placeholder="Anything else that should shape the summaries you get"
+            rows={3}
+          />
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground">
+          This profile is stored on this device and sent to the AI to tailor your summaries.
+        </p>
+      </div>
+    </section>
+  )
+}
 
 export function Preferences() {
   const { enabled, setEnabled } = useAnalyticsConsent()
@@ -114,6 +196,8 @@ export function Preferences() {
                 )}
               </div>
             </section>
+
+            <TranslatorProfileSection />
 
             <UsageSection />
 

@@ -128,6 +128,37 @@ describe("buildSystemPrompt — role filtering", () => {
     expect(prompt).toContain("at most ONE question")
   })
 
+  it("injects the translator profile as JSON and a respond-in line", () => {
+    const prompt = buildSystemPrompt({
+      ...baseCtx,
+      roleLevel: 400,
+      translatorProfile: { age: "32", religiousBackground: "Christian", responseLanguage: "Tagalog" },
+      responseLanguage: "Tagalog",
+    })
+    expect(prompt).toContain("## Translator profile")
+    expect(prompt).toContain('"age": "32"')
+    expect(prompt).toContain('"religiousBackground": "Christian"')
+    expect(prompt).toContain("Respond to the user in Tagalog.")
+  })
+
+  it("caps over-long profile fields and drops empty ones (never trust the client)", () => {
+    const prompt = buildSystemPrompt({
+      ...baseCtx,
+      roleLevel: 400,
+      translatorProfile: { otherInfo: "z".repeat(500), gender: "   " },
+    })
+    // 280-char cap (PROFILE_FIELD_MAX) — the 281st z must not appear.
+    expect(prompt).toContain("z".repeat(280))
+    expect(prompt).not.toContain("z".repeat(281))
+    expect(prompt).not.toContain('"gender"')
+  })
+
+  it("adds no profile block when none is supplied", () => {
+    const prompt = buildSystemPrompt({ ...baseCtx, roleLevel: 400 })
+    expect(prompt).not.toContain("## Translator profile")
+    expect(prompt).not.toContain("Respond to the user in")
+  })
+
   it("grounds the situation when a file is focused — name, kind, and relative-reference rule", () => {
     const unfocused = buildSystemPrompt({ ...baseCtx, roleLevel: 400 })
     expect(unfocused).not.toContain("## Current situation")

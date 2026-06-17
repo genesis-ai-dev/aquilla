@@ -163,6 +163,35 @@ describe("buildChatMessages", () => {
     expect(msgs[0].content).toContain("Swahili")
     expect(msgs[0].content).toContain("Bambara")
   })
+
+  it("injects the translator profile as JSON and the reply language", () => {
+    const msgs = buildChatMessages({
+      history: [],
+      userMessage: "Summarize this",
+      cellContext: null,
+      sourceLanguage: "English",
+      targetLanguage: "Tagalog",
+      translatorProfile: { age: "32", educationLevel: "High School" },
+      responseLanguage: "Tagalog",
+    })
+    const sys = msgs[0].content
+    expect(sys).toContain("## Translator profile")
+    expect(sys).toContain('"age": "32"')
+    // The whole point: the reply must come back in the translator's language.
+    expect(sys).toContain("Respond to the user in Tagalog.")
+  })
+
+  it("adds nothing when no profile and no reply language are given", () => {
+    const msgs = buildChatMessages({
+      history: [],
+      userMessage: "hi",
+      cellContext: null,
+      sourceLanguage: "English",
+      targetLanguage: "French",
+    })
+    expect(msgs[0].content).not.toContain("Translator profile")
+    expect(msgs[0].content).not.toContain("Respond to the user in")
+  })
 })
 
 // ---------------------------------------------------------------------------

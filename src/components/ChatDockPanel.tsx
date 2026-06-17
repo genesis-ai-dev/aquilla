@@ -12,17 +12,27 @@
  * mode — and every caller that omits `agent` — is byte-for-byte unchanged.
  */
 
-import { useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { Bot, MessageSquare } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { UseChatReturn, CellContext } from "@/hooks/useChat"
 import { ChatContextPin } from "./chat/ChatContextPin"
 import { ChatMessageList } from "./chat/ChatMessageList"
-import { ChatComposer } from "./chat/ChatComposer"
+import { ChatComposer, type SuggestedAction } from "./chat/ChatComposer"
 import { ChatClearButton } from "./chat/ChatClearButton"
 import { AgentDockView, type AgentDockViewProps } from "./agent/AgentDockView"
+import { bookSummaryPrompt, chapterSummaryPrompt } from "@/lib/summary-prompts"
 
 type DockMode = "chat" | "agent"
+
+/** Scripture context that powers the Summarize book/chapter buttons. */
+export interface BibleSummaryContext {
+  /** The open book's display name (drives "Summarize book"). */
+  bookName?: string
+  /** The focused cell's chapter ref, e.g. "GEN 1" (drives "Summarize chapter").
+   *  Null when no verse is focused — the chapter button is then disabled. */
+  chapterRef?: string | null
+}
 
 export interface ChatDockPanelProps {
   chat: UseChatReturn
@@ -31,7 +41,10 @@ export interface ChatDockPanelProps {
   /** Commit plain text into the focused cell via the AI-completion commit path. */
   onInsertIntoCell?: (text: string) => void | Promise<void>
   /** Agent-mode wiring. Omit to render the classic chat-only dock. */
-  agent?: Omit<AgentDockViewProps, "currentCell">
+  agent?: Omit<AgentDockViewProps, "currentCell" | "suggestedActions" | "pendingPrompt" | "onPendingPromptConsumed">
+  /** When a scripture file is open, shows Summarize book/chapter buttons that
+   *  run an agent-backed, vetted-resource summary. Requires `agent`. */
+  bibleSummary?: BibleSummaryContext | null
 }
 
 function ModeToggle({ mode, onChange }: { mode: DockMode; onChange: (mode: DockMode) => void }) {
@@ -67,8 +80,16 @@ function ModeToggle({ mode, onChange }: { mode: DockMode; onChange: (mode: DockM
   )
 }
 
-export function ChatDockPanel({ chat, currentCell, onInsertIntoCell, agent }: ChatDockPanelProps) {
+export function ChatDockPanel({
+  chat,
+  currentCell,
+  onInsertIntoCell,
+  agent,
+  bibleSummary,
+}: ChatDockPanelProps) {
   const [mode, setMode] = useState<DockMode>("chat")
+  // A summary prompt queued by a button tap; AgentDockView runs it once.
+  const [pendingAgentPrompt, setPendingAgentPrompt] = useState<string | null>(null)
   const {
     messages,
     streamingText,
@@ -86,6 +107,37 @@ export function ChatDockPanel({ chat, currentCell, onInsertIntoCell, agent }: Ch
 
   const hasHistory = messages.length > 0 || isStreaming
   const agentMode = mode === "agent" && agent
+
+  // Tapping a summary button switches to agent mode (summaries are agent-backed
+  // so they can pull vetted Aquifer resources) and queues the prompt.
+  const triggerSummary = useCallback((prompt: string) => {
+    setMode("agent")
+    setPendingAgentPrompt(prompt)
+  }, [])
+
+  // Summary buttons appear (in both chat and agent mode) only when a scripture
+  // file is open AND agent mode is wired. The chapter button needs a focused verse.
+  const summaryActions = useMemo<SuggestedAction[] | undefined>(() => {
+    if (!agent || !bibleSummary) return undefined
+    const actions: SuggestedAction[] = []
+    const { bookName, chapterRef } = bibleSummary
+    if (bookName) {
+      actions.push({
+        label: "Summarize book",
+        title: `Summarize ${bookName} using vetted Bible resources, in your profile language`,
+        onClick: () => triggerSummary(bookSummaryPrompt(bookName)),
+      })
+    }
+    actions.push({
+      label: "Summarize chapter",
+      title: chapterRef
+        ? `Summarize ${chapterRef} using vetted Bible resources`
+        : "Focus a verse to summarize its chapter",
+      disabled: !chapterRef,
+      onClick: () => chapterRef && triggerSummary(chapterSummaryPrompt(chapterRef)),
+    })
+    return actions.length ? actions : undefined
+  }, [agent, bibleSummary, triggerSummary])
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -106,7 +158,13 @@ export function ChatDockPanel({ chat, currentCell, onInsertIntoCell, agent }: Ch
       </div>
 
       {agentMode ? (
-        <AgentDockView {...agent} currentCell={currentCell} />
+        <AgentDockView
+          {...agent}
+          currentCell={currentCell}
+          suggestedActions={summaryActions}
+          pendingPrompt={pendingAgentPrompt}
+          onPendingPromptConsumed={() => setPendingAgentPrompt(null)}
+        />
       ) : (
         <>
           <ChatContextPin
@@ -136,6 +194,7 @@ export function ChatDockPanel({ chat, currentCell, onInsertIntoCell, agent }: Ch
             onSend={(text) => void sendMessage(text, currentCell)}
             onStop={stopStreaming}
             compact
+            suggestedActions={summaryActions}
           />
         </>
       )}

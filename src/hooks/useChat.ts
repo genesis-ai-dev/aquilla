@@ -24,6 +24,8 @@ import {
   type ChatMessage,
   type CellContext,
 } from "@/lib/completion/chat-service"
+import { useTranslatorProfile } from "@/hooks/useTranslatorProfile"
+import { effectiveResponseLanguage } from "@/lib/translator-profile"
 
 export type { ChatMessage, CellContext }
 
@@ -145,6 +147,10 @@ export interface UseChatReturn {
 export function useChat(options: UseChatOptions): UseChatReturn {
   const { settings, session, sourceLanguage, targetLanguage, currentFileName, projectId } = options
 
+  // User-level translator profile: replies come back in its language (overriding
+  // the project's `main_chat_language`) and are tailored to the demographics.
+  const { profile: translatorProfile } = useTranslatorProfile()
+
   const [messages, setMessages] = useState<UiChatMessage[]>(() => loadHistory(projectId))
   const [streamingText, setStreamingText] = useState("")
   const [isStreaming, setIsStreaming] = useState(false)
@@ -220,6 +226,8 @@ export function useChat(options: UseChatOptions): UseChatReturn {
         sourceLanguage,
         targetLanguage,
         fileName: currentFileName,
+        translatorProfile,
+        responseLanguage: effectiveResponseLanguage(translatorProfile, settings?.main_chat_language),
       })
 
       let accumulated = ""
@@ -273,7 +281,7 @@ export function useChat(options: UseChatOptions): UseChatReturn {
         abortRef.current = null
       }
     },
-    [settings, session, sourceLanguage, targetLanguage, includeCellContext, currentFileName],
+    [settings, session, sourceLanguage, targetLanguage, includeCellContext, currentFileName, translatorProfile],
   )
 
   const sendMessage = useCallback(

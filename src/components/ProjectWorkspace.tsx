@@ -1536,15 +1536,20 @@ export function ProjectWorkspace() {
   setBacktranslationCacheRef.current = setBacktranslationCache
 
   /**
-   * Re-runs statistical BT on demand + optional LLM polish. Called by the BT
-   * tab's Generate/Polish button. Statistical BT is always computed first;
-   * LLM polish is only triggered when `isBacktranslationConfigured` is true.
+   * Re-runs statistical BT on demand + optional AI polish. Called by the BT
+   * tab's Generate/Regenerate buttons and the Polish toggle. Statistical BT is
+   * always computed first; the AI step only runs when the caller requests
+   * `polish` AND an AI model is configured (`isBacktranslationConfigured`).
+   *
+   * The Polish toggle passes its on/off state as `polish`, so turning it on
+   * regenerates with AI and turning it off regenerates statistical-only —
+   * keeping the displayed text in sync with the polished/statistical label.
    *
    * Auto-BT (on every target commit) uses `buildStatisticalBt` directly and
    * does NOT call this function — that path lives in handleCellCommitted and
    * commitCompletedCell (FRO-203).
    */
-  const runBacktranslation = useCallback(async (cell: CellData) => {
+  const runBacktranslation = useCallback(async (cell: CellData, polish = false) => {
     if (!cell.translated?.trim()) return
     const cellId = cell.id
     setBacktranslatingState((prev) => new Set(prev).add(cellId))
@@ -1556,12 +1561,11 @@ export function ProjectWorkspace() {
         btText = cell.translated // last-resort literal fallback
       }
 
-      // Step 2: LLM polish if configured and available
-      // (Polish toggle is per-tab; we use `isBacktranslationConfigured` as a
-      //  proxy for "polish wanted" here — the per-cell polish flag lives in the
-      //  EditorRow's local state and calls onSaveBacktranslation for user edits.)
+      // Step 2: AI polish — only when the caller asked for it (Polish toggle on)
+      // and a model is configured. The polished result replaces the statistical
+      // gloss and renders above the substring-alignment panel.
       let polished = false
-      if (isBacktranslationConfigured && project?.completionSettings) {
+      if (polish && isBacktranslationConfigured && project?.completionSettings) {
         try {
           btText = await generateBacktranslation({
             settings: project.completionSettings,
@@ -1895,6 +1899,23 @@ export function ProjectWorkspace() {
     projectId ? readTnSidebarVisible(projectId) : false,
   )
   const [focusedCellCanonicalRef, setFocusedCellCanonicalRef] = useState<string | null>(null)
+
+  // Scripture context for the chat dock's Summarize book/chapter buttons. A
+  // "Bible file" is one whose format is scripture (usfm/ebible/helloao), carries
+  // a corpus marker, or whose focused cell has a canonical ref. The chapter is
+  // the ref minus the verse, e.g. "GEN 1:1" → "GEN 1".
+  const bibleSummary = useMemo(() => {
+    if (!activeFile) return null
+    const isScripture =
+      ["usfm", "ebible", "helloao"].includes(activeFile.type) ||
+      Boolean(activeFile.corpusMarker) ||
+      Boolean(focusedCellCanonicalRef)
+    if (!isScripture) return null
+    const chapterRef = focusedCellCanonicalRef
+      ? focusedCellCanonicalRef.split(":")[0].trim()
+      : null
+    return { bookName: activeFile.name, chapterRef }
+  }, [activeFile, focusedCellCanonicalRef])
   // Parallel-bibles sidebar (helloao): open state persisted per project, plus
   // the canonical ref the panel follows. Fed by two signals, most recent
   // wins: the first visible editor row (scroll) and the focused cell
@@ -3154,6 +3175,7 @@ export function ProjectWorkspace() {
                   resolveCell: resolveCellById,
                   onApplied: handleAgentApplied,
                 }}
+                bibleSummary={bibleSummary}
               />
             }
             searchPanel={

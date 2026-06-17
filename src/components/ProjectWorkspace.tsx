@@ -141,7 +141,7 @@ import { addConcept } from "@/lib/terminology/store"
 import type { Concept } from "@/lib/terminology/types"
 import { buildGlosser, type BtSeed } from "@/lib/completion/bt-glosser"
 import { buildAlignmentModel } from "@/lib/completion/interlinear"
-import { buildStatisticalBt } from "@/lib/completion/bt-auto"
+import { buildStatisticalBt, resolveBtTargetEventId } from "@/lib/completion/bt-auto"
 // FRO-192: assignment work-pickup UI
 import { AssignModal } from "./AssignModal"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
@@ -772,7 +772,7 @@ export function ProjectWorkspace() {
   // hook order) can still call the latest version without stale-closure issues.
   // Updated unconditionally each render — refs never cause re-renders.
   const glosserRef = useRef<import("@/lib/completion/bt-glosser").Glosser | null>(null)
-  const persistBtRef = useRef<((cell: CellData, btText: string, polished: boolean) => void) | null>(null)
+  const persistBtRef = useRef<((cell: CellData, btText: string, polished: boolean, committedEventId?: string) => void) | null>(null)
   // cellsRef is already declared later in the file (line ~689) — we reuse it.
   const setBacktranslationCacheRef = useRef<React.Dispatch<React.SetStateAction<Map<string, string>>> | null>(null)
 
@@ -1299,7 +1299,8 @@ export function ProjectWorkspace() {
       const btText = buildStatisticalBt(glosserRef.current, text)
       if (btText) {
         setBacktranslationCacheRef.current((prev) => new Map(prev).set(cell.id, btText))
-        persistBtRef.current(cell, btText, false)
+        // Pin to the just-committed event id (the projection still lags here).
+        persistBtRef.current(cell, btText, false, eventId)
       }
     }
   }, [project?.id, applyOptimisticTargetEdit, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell])
@@ -1489,7 +1490,13 @@ export function ProjectWorkspace() {
     cell: CellData,
     btText: string,
     polished: boolean,
+    committedEventId?: string,
   ) => {
+    // The BT must pin to the commit it describes. Right after a target commit
+    // the cell projection still reports the PRE-commit head, so prefer the
+    // just-committed event id when the caller has it (auto-BT-on-commit path).
+    const pinnedTargetEventId = resolveBtTargetEventId(committedEventId, cell.targetEventId)
+
     // 1. In-memory cache
     setBacktranslationCache((prev) => new Map(prev).set(cell.id, btText))
 
@@ -1499,13 +1506,13 @@ export function ProjectWorkspace() {
       localStorage.setItem(lsKey, JSON.stringify({
         btText,
         polished,
-        targetEventId: cell.targetEventId ?? "",
+        targetEventId: pinnedTargetEventId,
         savedAt: Date.now(),
       }))
     } catch { /* ignore quota/private-browsing errors */ }
 
     // 3. Outbox event
-    if (!project?.id || !cell.fileId || !cell.targetEventId) {
+    if (!project?.id || !cell.fileId || !pinnedTargetEventId) {
       console.warn("[bt-persist] missing project/file/targetEventId — skipping outbox emit")
       return
     }
@@ -1514,7 +1521,7 @@ export function ProjectWorkspace() {
       fileId: cell.fileId,
       cellId: cell.id,
       btText,
-      targetEventId: cell.targetEventId,
+      targetEventId: pinnedTargetEventId,
       polished,
       author: currentUsername,
     }).catch((err) => {
@@ -2719,7 +2726,7 @@ export function ProjectWorkspace() {
     navigate,
   }), [activeFileId, completeBatch, cells, project, frontierSession, currentUsername, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell])
 
-  const handleCellCommitted = useCallback(async (cellId?: string) => {
+  const handleCellCommitted = useCallback(async (cellId?: string, committedEventId?: string) => {
     // Capture before async work — another edit could arrive during the flush.
     const pendingBt = lastOptimisticEditRef.current
     lastOptimisticEditRef.current = null
@@ -2746,7 +2753,8 @@ export function ProjectWorkspace() {
         const cell = cellsRef.current.find((c) => c.id === cellId)
         setBacktranslationCacheRef.current((prev) => new Map(prev).set(cellId, btText))
         if (cell && persistBtRef.current) {
-          persistBtRef.current(cell, btText, false)
+          // Pin to the just-committed event id (the projection still lags here).
+          persistBtRef.current(cell, btText, false, committedEventId)
         }
       }
     }

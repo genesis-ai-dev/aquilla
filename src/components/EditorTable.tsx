@@ -374,8 +374,10 @@ interface EditorTableProps {
   onAttachMediaFile?: (file: File) => Promise<void>
   onAttachMediaUrl?: (url: string) => Promise<void>
   /** Called after a successful `target.cell.commit` enqueue so the parent
-   *  refetches the cells projection. */
-  onCellCommitted?: (cellId: string) => void | Promise<void>
+   *  refetches the cells projection. `committedEventId` is the event id the
+   *  commit was assigned (known only here, before the projection round-trip);
+   *  the parent's auto-BT pins to it so the BT isn't instantly stale. */
+  onCellCommitted?: (cellId: string, committedEventId?: string) => void | Promise<void>
   /** Optimistic local patch fired BEFORE the outbox enqueue so the editor's
    *  rule infractions + per-cell UI re-derive instantly without waiting for
    *  the projection round-trip. The follow-up `onCellCommitted` -> revalidate
@@ -1226,7 +1228,7 @@ interface MemoizedRowProps {
    *  Resolved once per file by the parent (membership look-up) so this prop
    *  is just a stable boolean — preserves the row's React.memo invariant. */
   isStaleSource: boolean
-  onCellCommitted?: (cellId: string) => void | Promise<void>
+  onCellCommitted?: (cellId: string, committedEventId?: string) => void | Promise<void>
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
   remoteChangedWhileFocused: boolean
@@ -1500,7 +1502,7 @@ interface EditorRowProps {
    *  target commit. Renders a small warning badge next to the validation
    *  status. Computed once-per-file by the parent. */
   isStaleSource: boolean
-  onCellCommitted?: (cellId: string) => void
+  onCellCommitted?: (cellId: string, committedEventId?: string) => void
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
   remoteChangedWhileFocused: boolean
@@ -2274,7 +2276,9 @@ function EditorRow({
       author: username,
     }).then((eventId) => {
       pendingTargetEventIdRef.current = eventId
-      void onCellCommitted?.(cell.id)
+      // Pass the just-assigned event id: the auto-BT in the parent pins to it
+      // so the BT describes THIS commit, not the lagging projection head.
+      void onCellCommitted?.(cell.id, eventId)
     }).catch((err) => {
       // RES-4/M1-3: enqueue failure (IDB quota, private-mode, InsufficientRoleError)
       // must be loud. Revert the optimistic patch so the cell doesn't show

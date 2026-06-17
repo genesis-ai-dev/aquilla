@@ -485,6 +485,7 @@ export function LivingMemoryPage() {
   // SWARM-TODO: verify orchestrator: if project?.completionSettings is undefined (no
   // LLM configured), generation buttons will fail at call time with an informative error.
   const completionSettings = project?.completionSettings
+  const [generating, setGenerating] = useState(false)
   const { save: saveBrief, attachL1 } = useTranslationBrief({
     brief,
     author,
@@ -492,11 +493,22 @@ export function LivingMemoryPage() {
   })
 
   async function handleGenerate() {
-    if (brief && completionSettings) {
+    // Edit gate (defense-in-depth; the server + patch() also enforce MAINTAINER).
+    if (!(entriesReady && canEdit)) return
+    // No brief yet, or no LLM configured → fall back to opening the builder.
+    if (!brief || !completionSettings) {
+      setBuilderOpen(true)
+      return
+    }
+    // Lock the section's edit/generate affordances while the LLM call is in
+    // flight so a concurrent open-and-save can't clobber the brief object we
+    // re-persist in attachL1 (adversarial review: races lens, finding 2).
+    setGenerating(true)
+    try {
       const l1 = await generateL1Summary(brief, completionSettings, session ?? null)
       await attachL1(brief, l1, completionSettings.model)
-    } else {
-      setBuilderOpen(true)
+    } finally {
+      setGenerating(false)
     }
   }
 
@@ -577,6 +589,7 @@ export function LivingMemoryPage() {
         brief={brief}
         canEdit={entriesReady && canEdit}
         stale={stale}
+        busy={generating}
         onEdit={() => setBuilderOpen(true)}
         onGenerate={handleGenerate}
       />

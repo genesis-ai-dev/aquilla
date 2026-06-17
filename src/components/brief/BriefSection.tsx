@@ -10,10 +10,13 @@ export interface BriefSectionProps {
   stale: boolean
   onEdit: () => void
   onGenerate: () => void
+  /** True while an L1 generation is in flight — locks edit/generate so a
+   *  concurrent open-and-save can't clobber the brief mid-regenerate. */
+  busy?: boolean
 }
 
 export function BriefSection(props: BriefSectionProps) {
-  const { brief, canEdit, stale, onEdit, onGenerate } = props
+  const { brief, canEdit, stale, onEdit, onGenerate, busy = false } = props
   const status = briefStatus(brief)
 
   return (
@@ -29,7 +32,7 @@ export function BriefSection(props: BriefSectionProps) {
           <p className="mb-3">
             Capture this project&apos;s purpose, audience, and standards so the AI drafts to your brief.
           </p>
-          {canEdit && <Button size="sm" onClick={onEdit}>Create brief</Button>}
+          {canEdit && <Button size="sm" onClick={onEdit} disabled={busy}>Create brief</Button>}
         </div>
       ) : (
         <div className="rounded-lg border border-border/50 p-4 space-y-3">
@@ -40,9 +43,9 @@ export function BriefSection(props: BriefSectionProps) {
           )}
           {canEdit && (
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={onEdit}>Edit brief</Button>
-              <Button size="sm" variant={stale ? "default" : "ghost"} onClick={onGenerate}>
-                {brief?.l1Summary ? "Regenerate summary" : "Generate summary"}
+              <Button size="sm" variant="outline" onClick={onEdit} disabled={busy}>Edit brief</Button>
+              <Button size="sm" variant={stale ? "default" : "ghost"} onClick={onGenerate} disabled={busy}>
+                {busy ? "Generating…" : brief?.l1Summary ? "Regenerate summary" : "Generate summary"}
               </Button>
             </div>
           )}

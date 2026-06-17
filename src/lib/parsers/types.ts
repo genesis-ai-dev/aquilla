@@ -375,6 +375,9 @@ export interface ProjectRecord {
   /** Authored living-memory entries (instructions + standards). Persisted and
    *  synced via ProjectWideSettings the same way as `rules` / `terminology`. */
   livingMemoryEntries?: LivingMemoryEntry[]
+  /** The project's skopos/Paratext translation brief. Persisted and synced via
+   *  ProjectWideSettings the same way as `livingMemoryEntries`. */
+  translationBrief?: import("@/lib/brief/types").TranslationBrief
   /**
    * Persisted interlinear alignment seeds (FRO-207). Synced via
    * ProjectWideSettings the same way as `terminology`. Positive weight =

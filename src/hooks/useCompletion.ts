@@ -94,6 +94,8 @@ export function useCompletion(
   // e.g.:  useCompletion(...existingArgs, frontierSession, commitCompletedCell, rules, fileCells)
   rules?: TranslationRule[],
   allCells?: CellData[],
+  /** The project brief's L1 summary — injected into every prompt (Task 6). */
+  briefSummary?: string,
 ) {
   const [completing, setCompleting] = useState<Map<string, string>>(new Map())
   const [examples, setExamples] = useState<Map<string, ScoredPair[]>>(new Map())
@@ -162,6 +164,7 @@ export function useCompletion(
         rules,
         validatedPairs,
         exampleFormat: effectiveSettings.fewShotExampleFormat,
+        briefSummary,
       })
       const result = await complete({
         settings: effectiveSettings, session,
@@ -199,7 +202,7 @@ export function useCompletion(
       setCompleting((p) => new Map(p).set(cell.id, "error"))
       setErrors((p) => new Map(p).set(cell.id, err instanceof Error ? err.message : "Failed"))
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session, provider, commitCompletedCell, rules, allCells])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session, provider, commitCompletedCell, rules, allCells, briefSummary])
 
   // Segmented batch translation: each sub-batch goes out as one <vN>-framed
   // prompt and the response is demuxed back to cells. LLMs translate a passage
@@ -309,6 +312,7 @@ export function useCompletion(
           rules,
           validatedPairs: batchValidatedPairs,
           exampleFormat: effectiveSettings.fewShotExampleFormat,
+          briefSummary,
         })
 
         let result = ""
@@ -439,7 +443,7 @@ export function useCompletion(
       // !== _currentRunId — a finishing run A cannot null run B's banner.
       clearBatchCompletionProgress(runId)
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, completeSingle, commitCompletedCell, rules, allCells])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, completeSingle, commitCompletedCell, rules, allCells, briefSummary])
 
   return { completeSingle, completeBatch, cancelCompletion: cancelBatchCompletion, isConfigured, isAvailable, completing, examples, errors, previews }
 }

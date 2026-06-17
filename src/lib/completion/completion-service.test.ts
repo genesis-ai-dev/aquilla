@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, collectValidatedPairs, buildRulesBlock } from "./completion-service"
+import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, collectValidatedPairs, buildRulesBlock, buildBriefBlock } from "./completion-service"
 import type { CompletionSettings, TranslationRule } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -803,5 +803,33 @@ describe("buildBatchPrompt — target-only format", () => {
     expect(messages[1].content).toContain("<v1>Hello</v1>")
     expect(messages[1].content).toContain("<v1>Bonjour</v1>")
     expect(messages[0].content).not.toContain("reference translations")
+  })
+})
+
+describe("buildBriefBlock", () => {
+  it("wraps a non-empty summary in a labeled block", () => {
+    expect(buildBriefBlock("Translate for youth.")).toContain("Translation brief")
+    expect(buildBriefBlock("Translate for youth.")).toContain("Translate for youth.")
+  })
+  it("returns empty string for blank input", () => {
+    expect(buildBriefBlock("")).toBe("")
+    expect(buildBriefBlock("   ")).toBe("")
+  })
+})
+
+describe("buildPrompt with brief summary", () => {
+  it("injects the brief block into the system message when present", () => {
+    const [sys] = buildPrompt({
+      sourceLanguage: "Greek", targetLanguage: "X", systemPrompt: "Base.",
+      sourceText: "logos", examples: [], briefSummary: "Prefer natural phrasing.",
+    })
+    expect(sys.content).toContain("Prefer natural phrasing.")
+  })
+  it("omits the brief block when absent", () => {
+    const [sys] = buildPrompt({
+      sourceLanguage: "Greek", targetLanguage: "X", systemPrompt: "Base.",
+      sourceText: "logos", examples: [],
+    })
+    expect(sys.content).not.toContain("Translation brief")
   })
 })

@@ -52,3 +52,15 @@ describe("extractBriefFromDocument", () => {
     expect(out).toEqual({ purpose: "Study Bible", literalness: "Formal" })
   })
 })
+
+import { draftField } from "./brief-generator"
+
+describe("draftField", () => {
+  it("asks the model to draft one field using the other answers as context", async () => {
+    vi.mocked(complete).mockResolvedValue("Young, unchurched readers aged 15-25.")
+    const out = await draftField("audience", { parameters: { purpose: "Evangelistic" }, freeformNotes: "" }, settings, null)
+    expect(out).toBe("Young, unchurched readers aged 15-25.")
+    const sys = vi.mocked(complete).mock.calls.at(-1)![0].messages[0].content
+    expect(sys).toContain("Audience / addressees") // field label drives the prompt
+  })
+})

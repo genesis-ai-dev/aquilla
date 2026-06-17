@@ -121,6 +121,8 @@ interface TranslatedEditorProps {
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
   /** Number of automatic numeric footnotes before this cell in the current chapter/file. */
   footnoteNumberOffset?: number
+  /** Show the footnote text on marker hover when no separate footnote panel is visible. */
+  showFootnoteTooltips?: boolean
   /** Called when the user hovers a rendered target footnote marker. */
   onFootnoteHover?: (index: number | null) => void
   /**
@@ -162,6 +164,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   terminologyConcepts,
   onTermChipClick,
   footnoteNumberOffset = 0,
+  showFootnoteTooltips = true,
   onFootnoteHover,
   ariaLabel,
   onEscapeToGrid,
@@ -174,6 +177,8 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => { onEscapeToGridRef.current = onEscapeToGrid }, [onEscapeToGrid])
   const footnoteNumberOffsetRef = useRef(footnoteNumberOffset)
   useEffect(() => { footnoteNumberOffsetRef.current = footnoteNumberOffset }, [footnoteNumberOffset])
+  const showFootnoteTooltipsRef = useRef(showFootnoteTooltips)
+  useEffect(() => { showFootnoteTooltipsRef.current = showFootnoteTooltips }, [showFootnoteTooltips])
   const onFootnoteHoverRef = useRef(onFootnoteHover)
   useEffect(() => { onFootnoteHoverRef.current = onFootnoteHover }, [onFootnoteHover])
   const [pendingFootnoteDelete, setPendingFootnoteDelete] = useState<PendingFootnoteDelete | null>(null)
@@ -228,7 +233,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       }),
       // The callback is invoked by the PM plugin, not during React render —
       // the lint rule is overly conservative here.
-      createFootnoteDecorationExtension(() => footnoteNumberOffsetRef.current),
+      createFootnoteDecorationExtension(
+        () => footnoteNumberOffsetRef.current,
+        () => showFootnoteTooltipsRef.current,
+      ),
       createViolationDecorationExtension(() => latestViolationStateRef.current),
       createKaraokeExtension(() => latestKaraokeStateRef.current),
       ...(terminologyConcepts !== undefined
@@ -284,6 +292,21 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           if (!marker || !view.dom.contains(marker)) return false
           const related = event.relatedTarget as HTMLElement | null
           if (related && marker.contains(related)) return false
+          onFootnoteHoverRef.current?.(null)
+          return false
+        },
+        focusin(view, event) {
+          const target = event.target as HTMLElement | null
+          const marker = target?.closest<HTMLElement>(".usfm-footnote-marker")
+          if (!marker || !view.dom.contains(marker)) return false
+          const index = Number(marker.dataset.footnoteIndex)
+          onFootnoteHoverRef.current?.(Number.isFinite(index) ? index : null)
+          return false
+        },
+        focusout(view, event) {
+          const target = event.target as HTMLElement | null
+          const marker = target?.closest<HTMLElement>(".usfm-footnote-marker")
+          if (!marker || !view.dom.contains(marker)) return false
           onFootnoteHoverRef.current?.(null)
           return false
         },
@@ -559,7 +582,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => {
     if (!editor) return
     editor.view.dispatch(editor.state.tr.setMeta(footnoteDecorationPluginKey, "rebuild"))
-  }, [editor, footnoteNumberOffset])
+  }, [editor, footnoteNumberOffset, showFootnoteTooltips])
 
   const lastActiveIdxRef = useRef(-1)
   useEffect(() => {

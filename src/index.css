@@ -506,6 +506,7 @@ html.dark[data-color-theme="rose"] {
 }
 
 .usfm-footnote-marker {
+  position: relative;
   display: inline-flex;
   min-width: 1.15em;
   height: 1.15em;
@@ -519,8 +520,50 @@ html.dark[data-color-theme="rose"] {
   font-weight: 700;
   line-height: 1;
   vertical-align: super;
-  pointer-events: none;
+  pointer-events: auto;
   user-select: none;
+}
+
+.usfm-footnote-marker-tooltip {
+  position: absolute;
+  z-index: 70;
+  bottom: calc(100% + 0.45rem);
+  left: 50%;
+  width: max-content;
+  max-width: min(22rem, 80vw);
+  transform: translateX(-50%) translateY(0.125rem);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--popover);
+  box-shadow: 0 14px 35px color-mix(in oklch, black 16%, transparent);
+  color: var(--popover-foreground);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.25;
+  opacity: 0;
+  padding: 0.375rem 0.625rem;
+  pointer-events: none;
+  text-align: left;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    visibility 120ms ease;
+  visibility: hidden;
+  white-space: normal;
+}
+
+.usfm-footnote-marker:hover,
+.usfm-footnote-marker:focus-visible {
+  background-color: color-mix(in oklch, var(--primary) 24%, transparent);
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--primary) 18%, transparent);
+}
+
+.usfm-footnote-marker:hover .usfm-footnote-marker-tooltip,
+.usfm-footnote-marker:focus-visible .usfm-footnote-marker-tooltip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  visibility: visible;
 }
 
 .usfm-footnote-marker::selection {

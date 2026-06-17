@@ -9,6 +9,7 @@ export interface VisibleFootnoteEntry {
   rowIndex: number
   sourceFootnotes: ExtractedFootnote[]
   targetFootnotes: ExtractedFootnote[]
+  activeFootnoteIndex: number | null
   isDocx: boolean
   numberOffset: number
 }

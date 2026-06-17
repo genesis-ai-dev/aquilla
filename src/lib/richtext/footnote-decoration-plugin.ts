@@ -6,7 +6,7 @@ import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
 
 export const footnoteDecorationPluginKey = new PluginKey<DecorationSet>("footnoteDecorations")
 
-export function buildFootnoteDecorationSet(doc: PMNode, numberOffset = 0): DecorationSet {
+export function buildFootnoteDecorationSet(doc: PMNode, numberOffset = 0, showTooltips = true): DecorationSet {
   const plainToPm: number[] = []
   let plainCursor = 0
   doc.descendants((node, pos) => {
@@ -36,14 +36,25 @@ export function buildFootnoteDecorationSet(doc: PMNode, numberOffset = 0): Decor
       ? footnote.caller
       : String(numberOffset + index + 1)
     const ariaLabel = `Footnote${footnote.ref ? ` ${footnote.ref}` : ""}${footnote.text ? `: ${footnote.text}` : ""}`
+    const tooltip = footnote.text || footnote.ref || ariaLabel
 
     decorations.push(
       Decoration.widget(to, () => {
         const marker = document.createElement("span")
         marker.className = "usfm-footnote-marker"
         marker.setAttribute("aria-label", ariaLabel)
+        marker.setAttribute("role", "note")
+        marker.tabIndex = 0
         marker.dataset.footnoteIndex = String(index)
-        marker.textContent = label
+        marker.dataset.footnoteTooltip = tooltip
+        marker.append(document.createTextNode(label))
+        if (showTooltips) {
+          const tooltipNode = document.createElement("span")
+          tooltipNode.className = "usfm-footnote-marker-tooltip"
+          tooltipNode.setAttribute("role", "tooltip")
+          tooltipNode.textContent = tooltip
+          marker.append(tooltipNode)
+        }
         return marker
       }, { side: -1 }),
     )
@@ -59,7 +70,10 @@ export function buildFootnoteDecorationSet(doc: PMNode, numberOffset = 0): Decor
   return DecorationSet.create(doc, decorations)
 }
 
-export function createFootnoteDecorationExtension(getNumberOffset: () => number = () => 0) {
+export function createFootnoteDecorationExtension(
+  getNumberOffset: () => number = () => 0,
+  shouldShowTooltips: () => boolean = () => true,
+) {
   return Extension.create({
     name: "footnoteDecorations",
     addProseMirrorPlugins() {
@@ -67,10 +81,10 @@ export function createFootnoteDecorationExtension(getNumberOffset: () => number 
         new Plugin({
           key: footnoteDecorationPluginKey,
           state: {
-            init: (_, state) => buildFootnoteDecorationSet(state.doc, getNumberOffset()),
+            init: (_, state) => buildFootnoteDecorationSet(state.doc, getNumberOffset(), shouldShowTooltips()),
             apply: (tr, old, _oldState, newState) => {
               if (tr.docChanged || tr.getMeta(footnoteDecorationPluginKey) === "rebuild") {
-                return buildFootnoteDecorationSet(newState.doc, getNumberOffset())
+                return buildFootnoteDecorationSet(newState.doc, getNumberOffset(), shouldShowTooltips())
               }
               return old
             },

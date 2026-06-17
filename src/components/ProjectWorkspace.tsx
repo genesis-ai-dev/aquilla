@@ -875,6 +875,7 @@ export function ProjectWorkspace() {
     const key = entries
       .map((entry) => [
         entry.cellId,
+        entry.activeFootnoteIndex ?? "",
         entry.sourceFootnotes.map((fn) => `${fn.index}:${fn.text}`).join(","),
         entry.targetFootnotes.map((fn) => `${fn.index}:${fn.text}`).join(","),
       ].join(":"))
@@ -3558,6 +3559,7 @@ export function ProjectWorkspace() {
             ref={editorRef} project={project} cells={cellsWithBacktranslation}
             showFootnotesInline={footnoteViewMode === "inline"}
             footnotePanelActive={footnoteViewMode !== "off"}
+            footnoteViewMode={footnoteViewMode}
             onVisibleFootnotesChange={footnoteViewMode === "tray" ? handleVisibleFootnotesChange : undefined}
             username={currentUsername}
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}

@@ -4,6 +4,7 @@ import {
   patchProjectSettings,
   PROJECT_SETTINGS_VERSION_INITIAL,
 } from "./project-settings"
+import type { TranslationBrief } from "@/lib/brief/types"
 
 const API = "https://api.example.com"
 
@@ -114,4 +115,19 @@ describe("patchProjectSettings", () => {
 
 it("PROJECT_SETTINGS_VERSION_INITIAL is 0", () => {
   expect(PROJECT_SETTINGS_VERSION_INITIAL).toBe(0)
+})
+
+describe("ProjectWideSettings.translationBrief", () => {
+  it("serializes a brief in the settings payload round-trip", () => {
+    const brief: TranslationBrief = {
+      version: 1, updatedAt: "2026-06-17T11:00:00.000Z", updatedBy: "alice",
+      parameters: { purpose: "Evangelistic" }, freeformNotes: "",
+      l2Markdown: "# Translation Brief", l1Summary: "Be evangelistic.",
+      l1GeneratedAt: "2026-06-17T11:00:00.000Z", l1ModelId: "claude",
+    }
+    const settings: import("./project-settings").ProjectWideSettings = { translationBrief: brief }
+    const json = JSON.parse(JSON.stringify(settings))
+    expect(json.translationBrief.parameters.purpose).toBe("Evangelistic")
+    expect(json.translationBrief.l1Summary).toBe("Be evangelistic.")
+  })
 })

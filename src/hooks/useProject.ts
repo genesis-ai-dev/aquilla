@@ -40,6 +40,8 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   if (settings.algorithmicChecks != null) next.algorithmicChecks = settings.algorithmicChecks
   if (settings.terminology != null) next.terminology = settings.terminology
   if (settings.livingMemoryEntries != null) next.livingMemoryEntries = settings.livingMemoryEntries
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- translationBrief is synced via ProjectWideSettings; type will be added to ProjectRecord in a follow-up
+  if (settings.translationBrief != null) (next as any).translationBrief = settings.translationBrief
   if (settings.validationCount != null) next.validationCount = settings.validationCount
   if (settings.validationCountAudio != null) next.validationCountAudio = settings.validationCountAudio
   if (settings.validationRoleFloor != null) next.validationRoleFloor = settings.validationRoleFloor

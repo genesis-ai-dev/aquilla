@@ -47,9 +47,16 @@ Measured facts about the XML:
   `{DefinitionLong, DefinitionShort, Glosses>Gloss*, Comments}`.
 - **23 alpha-buckets** via `@AlphaPos` (note: `שׁ`/`שׂ` are distinct; `ו` has only
   10 senses). Largest bucket `מ` = 1,796 senses / 948 lemmas.
-- There is also a second localization layer — **23,809 `ContextualMeaning`
-  (`CONSenses`)** with their own glosses. **Out of scope for v1** (the gap list
-  does not target them).
+- There is also a second layer — **23,809 `ContextualMeaning` (CON) nodes**.
+  In the supplied Spanish file these are almost entirely **structural** (Hebrew
+  collocations, syntactic forms like `verb qal`, scripture references, domain
+  codes): only **3 of 23,809** contain a `CONSense` element at all, and all 3 are
+  empty. The localizable free-text (definitions + glosses) lives in the **LEX**
+  layer, which the gap list targets. The CON `CONDomain` **labels** are localized
+  ("Vida y muerte") but belong to a finite shared **domain taxonomy**, not
+  per-entry text. See §13/§14: whether CON senses are meant to carry per-language
+  glosses (a ~23.8k-node frontier) or are language-neutral by design is an open
+  question for Reinier; the architecture accommodates CON localization either way.
 - **Critical:** the supplied XML is **Spanish-only — it contains no English.**
 
 Gap-list shape (1,261 rows): 948 have an English source definition but no Spanish
@@ -261,9 +268,14 @@ source blob.
   structure/nav + field-level cells + AI-draft/vetting on the existing workflow.
   Pilot: Spanish.
 - **Phase 2:** round-trip export to SDBH XML; schema validation; provenance stamps.
-- **Later / out of scope:** `ContextualMeaning` (CON) localization layer; the other
-  15 languages (mechanically a repeat of Phase 1 per language once English source
-  is imported).
+- **CON layer (pending Reinier):** if he confirms contextual senses should carry
+  per-language glosses, add them as `con-<Id>-gloss` field-cells under their lemma
+  (no structural change; ~23.8k additional potential cells). If CON is
+  language-neutral, the only CON localization is the **domain taxonomy** — a small,
+  bounded controlled-vocabulary list localized once per language (worth a tiny
+  separate importer/screen if any target language is missing labels).
+- **Later:** the other 15 languages (mechanically a repeat of Phase 1 per language
+  once the English source is imported).
 
 ## 14. Open dependencies / questions for Reinier
 
@@ -273,3 +285,8 @@ source blob.
    matching and round-trip are exact).
 3. Confirm desired provenance marking for AI/edited entries on export
    (`LastEditedBy` value, dates).
+4. **Contextual senses:** should `ContextualMeaning` (CON) senses carry
+   per-language glosses/definitions (in this Spanish file 3/23,809 have a
+   `CONSense` and all are empty), or is the CON layer language-neutral structure
+   with only the domain taxonomy localized? This roughly doubles scope if the
+   former, so it gates Phase planning.

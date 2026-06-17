@@ -130,6 +130,17 @@ Staleness is derived, not stored: `isStale = l1GeneratedAt == null || updatedAt 
    produces `l1Summary` (length-capped at generation).
 5. **Save** → `patchProjectSettings({ translationBrief })`.
 
+**Partial completion & resumability.** The interview can be exited at any step.
+On exit, whatever fields are filled are saved as a `draft` (sparse `parameters`
+map — unanswered field ids are simply absent). Re-opening `BriefBuilder` resumes
+at the first unanswered field, with all prior answers prefilled; the lead can
+also jump directly to any field. L2 assembly and L1 generation work from a
+partial brief (absent fields are omitted, not stubbed), so a lead who wants a
+quick brief can stop early, while a lead who wants to work through the whole
+schema in one sitting can. `status` is derived: `none` (no brief), `draft`
+(some but not all fields, or L1 stale/absent), `complete` (all fields filled and
+a current L1 exists).
+
 ## AI consumption
 
 - **L1 always injected:** a brief block added in `buildPrompt()` /

@@ -97,8 +97,7 @@ function localSettingsFrom(
   }
   if (record.terminology != null) out.terminology = record.terminology
   if (record.livingMemoryEntries != null) out.livingMemoryEntries = record.livingMemoryEntries
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- translationBrief is mirrored into IDB alongside ProjectRecord; type will be added to ProjectRecord in a follow-up
-  if ((record as any).translationBrief != null) out.translationBrief = (record as any).translationBrief
+  if (record.translationBrief != null) out.translationBrief = record.translationBrief
   return out
 }
 

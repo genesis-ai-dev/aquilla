@@ -40,6 +40,7 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   if (settings.algorithmicChecks != null) next.algorithmicChecks = settings.algorithmicChecks
   if (settings.terminology != null) next.terminology = settings.terminology
   if (settings.livingMemoryEntries != null) next.livingMemoryEntries = settings.livingMemoryEntries
+  if (settings.translationBrief != null) next.translationBrief = settings.translationBrief
   if (settings.validationCount != null) next.validationCount = settings.validationCount
   if (settings.validationCountAudio != null) next.validationCountAudio = settings.validationCountAudio
   if (settings.validationRoleFloor != null) next.validationRoleFloor = settings.validationRoleFloor

@@ -62,6 +62,17 @@ describe("buildSystemPrompt — role filtering", () => {
     expect(prompt.split("\n").length).toBeLessThanOrEqual(250)
   })
 
+  it("stays within the L1 budget even with a worst-case multi-line brief summary", () => {
+    // The injected brief block can carry up to L1_MAX_CHARS; a multi-paragraph
+    // summary adds the most newlines. Pin that the card still fits the budget.
+    const prompt = buildSystemPrompt({
+      ...baseCtx,
+      roleLevel: AGENT_ROLE.OWNER,
+      briefSummary: "Line of brief guidance.\n".repeat(30),
+    })
+    expect(prompt.split("\n").length).toBeLessThanOrEqual(250)
+  })
+
   // First real-model run (2026-06-12): the model treated #c aliases as the
   // user's segment numbers and could not order a sequence file. These pins
   // keep the card teaching what that run proved it must teach.
@@ -174,6 +185,19 @@ describe("buildSystemPrompt — role filtering", () => {
     expect(focused).toContain('"Ruth"')
     expect(focused).toContain("kind: sequence")
     expect(focused).toContain("refer to THIS file")
+  })
+})
+
+describe("buildSystemPrompt brief block", () => {
+  const base = { projectId: "p", username: "u", roleLevel: 600 }
+  it("includes the brief summary when provided", () => {
+    const out = buildSystemPrompt({ ...base, briefSummary: "Translate for unchurched youth." })
+    expect(out).toContain("Translate for unchurched youth.")
+    expect(out).toContain("docs('brief')") // points the agent at the full L2
+  })
+  it("omits the brief section when no summary is set", () => {
+    const out = buildSystemPrompt(base)
+    expect(out).not.toContain("Project translation brief")
   })
 })
 

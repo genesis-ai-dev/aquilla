@@ -24,6 +24,7 @@ import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { convertToCloneVoice } from "./voice-clone"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
+import { synthesizeCellTts } from "@/lib/sync/tts"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -97,48 +98,67 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
 
   setAll({ kind: "synthesizing" })
   try {
-    onProgress?.("Synthesizing combined clip…")
-    const ttsBlob = await synthesizeForCell(joined, {
-      projectTtsSettings: settings,
-      cellVoiceId: voice.id,
-      geminiContext: {
-        sourceLanguage: project.sourceLanguage,
-        targetLanguage: project.targetLanguage,
-        original: chosen[0].original,
-        context: chosen[0].context,
-        cellLabel: chosen[0].cellLabel,
-      },
-      onProgress: (p) => setAll(
-        p.status === "ready" || (p.total > 0 && p.loaded >= p.total)
-          ? { kind: "synthesizing" }
-          : { kind: "loading", loaded: p.loaded, total: p.total, file: p.file },
-      ),
-    })
-
-    // Upload once (clone-revoice the whole clip if the voice is a clone).
     let audioId: string
     let ext: string
     let url: string
-    if (voice.referenceAudioId) {
-      onProgress?.("Applying voice clone…")
-      const conv = await convertToCloneVoice({
-        projectId: project.id,
-        fileId,
-        referenceAudioId: voice.referenceAudioId,
-        source: ttsBlob,
+
+    if (voice.provider === "omnivoice") {
+      // Server-side: one OmniVoice call for the whole joined clip; the worker
+      // stores it (native clone when a reference is set) and returns its id.
+      onProgress?.("Synthesizing combined clip…")
+      const result = await synthesizeCellTts(
+        {
+          projectId: project.id,
+          fileId,
+          cellId: chosen[0].id,
+          text: joined,
+          ...(project.targetLanguage ? { language: project.targetLanguage } : {}),
+          ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
+        },
         getSyncToken,
-      })
-      audioId = conv.audioId
-      ext = conv.ext
-      url = conv.url
-      // Warm the cache so the editor can decode immediately (no second fetch).
-      await fetchCellAudio({ projectId: project.id, fileId, audioId: conv.audioId, ext: conv.ext, getSyncToken })
-    } else {
-      const baseId = buildAudioId(chosen[0].id)
+      )
+      audioId = result.audioId
       ext = "wav"
-      const res = await uploadCellAudio({ projectId: project.id, fileId, audioId: baseId, ext, blob: ttsBlob, getSyncToken })
-      audioId = res.audioId
-      url = res.url
+      url = result.url
+    } else {
+      onProgress?.("Synthesizing combined clip…")
+      const ttsBlob = await synthesizeForCell(joined, {
+        projectTtsSettings: settings,
+        cellVoiceId: voice.id,
+        geminiContext: {
+          sourceLanguage: project.sourceLanguage,
+          targetLanguage: project.targetLanguage,
+          original: chosen[0].original,
+          context: chosen[0].context,
+          cellLabel: chosen[0].cellLabel,
+        },
+        onProgress: (p) => setAll(
+          p.status === "ready" || (p.total > 0 && p.loaded >= p.total)
+            ? { kind: "synthesizing" }
+            : { kind: "loading", loaded: p.loaded, total: p.total, file: p.file },
+        ),
+      })
+
+      if (voice.referenceAudioId) {
+        onProgress?.("Applying voice clone…")
+        const conv = await convertToCloneVoice({
+          projectId: project.id,
+          fileId,
+          referenceAudioId: voice.referenceAudioId,
+          source: ttsBlob,
+          getSyncToken,
+        })
+        audioId = conv.audioId
+        ext = conv.ext
+        url = conv.url
+        await fetchCellAudio({ projectId: project.id, fileId, audioId: conv.audioId, ext: conv.ext, getSyncToken })
+      } else {
+        const baseId = buildAudioId(chosen[0].id)
+        ext = "wav"
+        const res = await uploadCellAudio({ projectId: project.id, fileId, audioId: baseId, ext, blob: ttsBlob, getSyncToken })
+        audioId = res.audioId
+        url = res.url
+      }
     }
     const objectName = `${audioId}.${ext}`
 

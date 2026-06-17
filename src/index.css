@@ -501,10 +501,6 @@ html.dark[data-color-theme="rose"] {
   box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-red-500, oklch(0.637 0.237 25.331)) 40%, transparent);
 }
 
-.usfm-footnote-raw {
-  display: none;
-}
-
 .usfm-footnote-marker {
   position: relative;
   display: inline-flex;
@@ -521,7 +517,22 @@ html.dark[data-color-theme="rose"] {
   line-height: 1;
   vertical-align: super;
   pointer-events: auto;
-  user-select: none;
+  cursor: pointer;
+}
+
+/* When the footnote node is the sole selection (e.g. clicked) ProseMirror tags
+   it; match the text-selection highlight so it reads as "selected". */
+.usfm-footnote-marker.ProseMirror-selectednode {
+  background-color: color-mix(in oklch, var(--primary) 28%, transparent);
+  outline: none;
+}
+
+/* Footnote sitting inside an active text selection: the browser can't paint
+   ::selection onto this contenteditable=false pill, so mimic the native
+   highlight (system Highlight colour) so it reads as selected, like Word. */
+.usfm-footnote-marker.usfm-footnote-marker-selected {
+  background-color: Highlight;
+  color: HighlightText;
 }
 
 .usfm-footnote-marker-tooltip {
@@ -564,10 +575,6 @@ html.dark[data-color-theme="rose"] {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
   visibility: visible;
-}
-
-.usfm-footnote-marker::selection {
-  background: transparent;
 }
 
 .karaoke-active {

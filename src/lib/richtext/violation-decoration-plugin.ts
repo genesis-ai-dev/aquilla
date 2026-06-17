@@ -3,6 +3,7 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view"
 import type { Node as PMNode } from "@tiptap/pm/model"
 import { Extension } from "@tiptap/core"
 import type { RuleInfraction } from "@/lib/parsers/types"
+import { buildUsfmPlainTextMap } from "@/lib/richtext/usfm-plain-text"
 
 export const violationPluginKey = new PluginKey<DecorationSet>("violationDecorations")
 
@@ -14,21 +15,10 @@ export function buildViolationDecorationSet(
 ): DecorationSet {
   const decorations: Decoration[] = []
   // Convert plain-text offsets into ProseMirror positions by walking the doc
-  // in reading order. For a single-paragraph cell (the common case —
-  // TranslatedEditor disables headings/lists/blockquote), this reduces to
-  // pm_pos = plain_offset + 1. Multi-paragraph cells will still work for
-  // spans that live entirely inside one paragraph; spans crossing a
-  // paragraph boundary are a follow-up (rare in translation cells).
-  const plainToPm: number[] = []
-  let plainCursor = 0
-  doc.descendants((node, pos) => {
-    if (node.isText) {
-      const len = node.text?.length ?? 0
-      for (let i = 0; i <= len; i++) plainToPm[plainCursor + i] = pos + i
-      plainCursor += len
-    }
-  })
-  if (!(plainCursor in plainToPm)) plainToPm[plainCursor] = doc.content.size
+  // in reading order. Footnote nodes contribute their raw `\f...\f*` length so
+  // offsets computed against the plain `value` stay aligned. For a
+  // single-paragraph cell this reduces to pm_pos = plain_offset + 1.
+  const { plainToPm } = buildUsfmPlainTextMap(doc)
 
   for (const inf of infractions) {
     for (const span of inf.spans) {

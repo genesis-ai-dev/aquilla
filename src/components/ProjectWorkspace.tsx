@@ -1871,6 +1871,23 @@ export function ProjectWorkspace() {
     projectId ? readTnSidebarVisible(projectId) : false,
   )
   const [focusedCellCanonicalRef, setFocusedCellCanonicalRef] = useState<string | null>(null)
+
+  // Scripture context for the chat dock's Summarize book/chapter buttons. A
+  // "Bible file" is one whose format is scripture (usfm/ebible/helloao), carries
+  // a corpus marker, or whose focused cell has a canonical ref. The chapter is
+  // the ref minus the verse, e.g. "GEN 1:1" → "GEN 1".
+  const bibleSummary = useMemo(() => {
+    if (!activeFile) return null
+    const isScripture =
+      ["usfm", "ebible", "helloao"].includes(activeFile.type) ||
+      Boolean(activeFile.corpusMarker) ||
+      Boolean(focusedCellCanonicalRef)
+    if (!isScripture) return null
+    const chapterRef = focusedCellCanonicalRef
+      ? focusedCellCanonicalRef.split(":")[0].trim()
+      : null
+    return { bookName: activeFile.name, chapterRef }
+  }, [activeFile, focusedCellCanonicalRef])
   // Parallel-bibles sidebar (helloao): open state persisted per project, plus
   // the canonical ref the panel follows. Fed by two signals, most recent
   // wins: the first visible editor row (scroll) and the focused cell
@@ -3083,6 +3100,7 @@ export function ProjectWorkspace() {
                   resolveCell: resolveCellById,
                   onApplied: handleAgentApplied,
                 }}
+                bibleSummary={bibleSummary}
               />
             }
             searchPanel={

@@ -10,9 +10,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Bot } from "lucide-react"
-import { ChatComposer } from "@/components/chat/ChatComposer"
+import { ChatComposer, type SuggestedAction } from "@/components/chat/ChatComposer"
 import { ChatContextPin } from "@/components/chat/ChatContextPin"
 import type { CellContext } from "@/hooks/useChat"
+import { getTranslatorProfile, profileForPrompt } from "@/lib/translator-profile"
 import type { CellData } from "@/hooks/useCells"
 import type { TranslationRule } from "@/lib/parsers/types"
 import { runAgent } from "@/lib/agent/agent-client"
@@ -45,6 +46,13 @@ export interface AgentDockViewProps {
   resolveCell?: (cellId: string) => CellData | undefined
   /** Post-apply hook: flush outbox + revalidate the touched cells. */
   onApplied?: (eventIds: string[], cellIds: string[]) => void | Promise<void>
+  /** One-tap prompts shown above the composer (e.g. Summarize book/chapter). */
+  suggestedActions?: SuggestedAction[]
+  /** A prompt to run as soon as the view is ready (set when the user taps a
+   *  suggested action from chat mode, which switches to agent mode). */
+  pendingPrompt?: string | null
+  /** Called once the pending prompt has been dispatched, so the parent clears it. */
+  onPendingPromptConsumed?: () => void
 }
 
 export function AgentDockView({
@@ -58,6 +66,9 @@ export function AgentDockView({
   rules,
   resolveCell,
   onApplied,
+  suggestedActions,
+  pendingPrompt,
+  onPendingPromptConsumed,
 }: AgentDockViewProps) {
   const [runs, setRuns] = useState<AgentRunUi[]>([])
   const [includeContext, setIncludeContext] = useState(true)
@@ -99,6 +110,10 @@ export function AgentDockView({
       messages.push({ role: "user", content: prompt })
       const truncated = messages.slice(-MAX_WIRE_TURNS)
 
+      // Read the profile at send time (fresh, no extra re-render). The server
+      // re-caps every field; this just avoids sending an empty object.
+      const translatorProfile = profileForPrompt(getTranslatorProfile())
+
       try {
         await runAgent({
           request: {
@@ -107,6 +122,7 @@ export function AgentDockView({
             ...(includeContext && (context.fileId || context.cellId)
               ? { context: { ...context } }
               : {}),
+            ...(translatorProfile ? { translatorProfile } : {}),
           },
           jwt,
           signal: controller.signal,
@@ -135,6 +151,15 @@ export function AgentDockView({
   )
 
   const stop = useCallback(() => abortRef.current?.abort(), [])
+
+  // Run a prompt handed in from a suggested action (tapped in chat mode, which
+  // flips the dock to agent mode). Waits out any in-flight run, then dispatches
+  // once and tells the parent to clear it so it fires exactly once.
+  useEffect(() => {
+    if (!pendingPrompt || !jwt || isStreaming) return
+    void sendPrompt(pendingPrompt)
+    onPendingPromptConsumed?.()
+  }, [pendingPrompt, jwt, isStreaming, sendPrompt, onPendingPromptConsumed])
 
   const applyContext: ApplyContext = {
     projectId,
@@ -202,6 +227,7 @@ export function AgentDockView({
         onSend={(text) => void sendPrompt(text)}
         onStop={stop}
         compact
+        suggestedActions={suggestedActions}
       />
     </div>
   )

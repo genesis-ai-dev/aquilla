@@ -64,4 +64,20 @@ export interface AgentRunRequest {
   /** ≤10 turns, client truncates. */
   messages: { role: 'user' | 'assistant'; content: string }[]
   context?: { fileId?: string; cellId?: string }
+  /**
+   * User-level translator profile (all fields optional, free-text). Injected as
+   * JSON into the agent's system prompt to tailor answers and pick the reply
+   * language. The server re-caps each field — never trust the client's lengths.
+   * Mirrors src/lib/translator-profile.ts TranslatorProfile.
+   */
+  translatorProfile?: {
+    responseLanguage?: string
+    age?: string
+    gender?: string
+    educationLevel?: string
+    religiousBackground?: string
+    translationExperience?: string
+    geographicalSetting?: string
+    otherInfo?: string
+  }
 }

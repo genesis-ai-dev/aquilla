@@ -108,7 +108,7 @@ export function CellTtsButton({
   const statusKey = ttsStatusKey(cellId)
   const status = useTtsStatus(statusKey)
   const baseVoice = resolveVoice(projectTtsSettings, cellTtsSettings?.voiceId)
-  const provider = resolveTtsProvider(projectTtsSettings)
+  const provider = baseVoice.provider ?? resolveTtsProvider(projectTtsSettings)
   const voice = normalizeVoiceForProvider(baseVoice, provider, { targetLanguage })
   const modelStatus = useModelStatus(provider === "mms" ? "mms" : "kokoro")
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -258,7 +258,8 @@ export function CellTtsButton({
 
   if (!trimmed) return null
 
-  const downloadingModel = !playableAttachId && provider !== "gemini" && modelStatus.kind === "downloading" && status.kind !== "idle"
+  const isLocalModel = provider === "mms" || provider === "kokoro"
+  const downloadingModel = !playableAttachId && isLocalModel && modelStatus.kind === "downloading" && status.kind !== "idle"
   const isLoadingModel = status.kind === "loading" || downloadingModel
   const isSynthesizing = status.kind === "synthesizing"
   const isError = status.kind === "error"

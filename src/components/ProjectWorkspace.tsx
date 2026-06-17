@@ -37,6 +37,7 @@ import { StatusBar } from "./StatusBar"
 import { SyncStatusIndicator } from "./SyncStatusIndicator"
 import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
 import { EditorTable, type AudioLensContext } from "./EditorTable"
+import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { startQueue } from "@/lib/audio/play-queue"
@@ -108,6 +109,8 @@ import { PeerPresence } from "./PeerPresence"
 import { ViewSettingsMenu, type ViewSettingsMenuHandle } from "./ViewSettingsMenu"
 import type { OverflowMenuItem } from "./OverflowMenu"
 import { useFootnotesPreference } from "@/hooks/useFootnotesPreference"
+import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
+import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import { useFileFontSizes, setFileViewPref } from "@/lib/store/file-view-prefs"
 import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
@@ -858,13 +861,34 @@ export function ProjectWorkspace() {
   }, [findNextUnfinished])
   const fileMeta = useFileMeta(activeFileId, project?.sourceLanguage, project?.targetLanguage)
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
-  const [footnotesInlineEnabled, setFootnotesInlineEnabled] = useFootnotesPreference(projectId!)
+  const [footnoteViewMode, setFootnoteViewMode] = useFootnotesPreference(projectId!)
+  const [visibleFootnotes, setVisibleFootnotes] = useState<VisibleFootnoteEntry[]>([])
+  const visibleFootnotesKeyRef = useRef("")
   // FRO-251: per-file, per-side font sizes — adjusted from the View settings
   // (eye) menu, rendered by EditorTable.
   const fontSizes = useFileFontSizes(activeFileId)
 
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const isSubtitleFile = activeFile?.type === "vtt" || activeFile?.type === "srt"
+
+  const handleVisibleFootnotesChange = useCallback((entries: VisibleFootnoteEntry[]) => {
+    const key = entries
+      .map((entry) => [
+        entry.cellId,
+        entry.sourceFootnotes.map((fn) => `${fn.index}:${fn.text}`).join(","),
+        entry.targetFootnotes.map((fn) => `${fn.index}:${fn.text}`).join(","),
+      ].join(":"))
+      .join("|")
+    if (visibleFootnotesKeyRef.current === key) return
+    visibleFootnotesKeyRef.current = key
+    setVisibleFootnotes(entries)
+  }, [])
+
+  useEffect(() => {
+    if (footnoteViewMode === "tray") return
+    visibleFootnotesKeyRef.current = ""
+    setVisibleFootnotes([])
+  }, [footnoteViewMode])
 
   // Diarization (M3): "Diarize" a time-ordered media file → replace its media
   // segments with one per detected speaker turn + create "Speaker N" cast.
@@ -2143,6 +2167,53 @@ export function ProjectWorkspace() {
   const perms = useProjectPermissions(project)
   const isReadOnly = !perms.canEditContent
 
+  const commitTrayFootnoteText = useCallback(async (cellId: string, updatedText: string) => {
+    if (!project?.id || isReadOnly) return
+    if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
+    const cell = cellsRef.current.find((candidate) => candidate.id === cellId)
+    if (!cell) return
+
+    applyOptimisticTargetEditWithCapture(cell.id, { value: updatedText, valueHtml: updatedText })
+    await emitTargetCellCommit({
+      projectId: project.id,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
+      sourceEventId: cell.sourceEventId ?? null,
+      value: updatedText,
+      valueHtml: updatedText,
+      author: currentUsername,
+    })
+    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    await refreshOutboxPending()
+    revalidateAuditStats()
+    revalidateCell(cell.id)
+  }, [
+    project?.id,
+    project?.syncRole?.level,
+    isReadOnly,
+    applyOptimisticTargetEditWithCapture,
+    currentUsername,
+    getTokenForProjectFile,
+    refreshOutboxPending,
+    revalidateAuditStats,
+    revalidateCell,
+  ])
+
+  const handleTrayFootnoteSave = useCallback((cellId: string, footnoteIndex: number, newText: string) => {
+    const cell = cellsRef.current.find((candidate) => candidate.id === cellId)
+    if (!cell) return
+    const updated = spliceFootnoteText(cell.translated ?? "", footnoteIndex, newText)
+    void commitTrayFootnoteText(cellId, updated)
+  }, [commitTrayFootnoteText])
+
+  const handleTrayFootnoteDelete = useCallback((cellId: string, footnoteIndex: number) => {
+    const cell = cellsRef.current.find((candidate) => candidate.id === cellId)
+    if (!cell) return
+    const updated = deleteFootnote(cell.translated ?? "", footnoteIndex)
+    void commitTrayFootnoteText(cellId, updated)
+  }, [commitTrayFootnoteText])
+
   const { state: checklistState, dismissed: checklistDismissed, dismiss: dismissChecklist, refreshShares: refreshChecklistShares } = useSetupChecklist(project ?? null)
   const [checklistOpen, setChecklistOpen] = useState(false)
   const [showChipTooltip, setShowChipTooltip] = useState(false)
@@ -3158,8 +3229,8 @@ export function ProjectWorkspace() {
               sourceTextDirection={fileMeta.sourceTextDirection}
               targetTextDirection={fileMeta.targetTextDirection}
               cellLabelsEnabled={cellLabelsEnabled}
-              footnotesInlineEnabled={footnotesInlineEnabled}
-              onFootnotesInlineChange={setFootnotesInlineEnabled}
+              footnoteViewMode={footnoteViewMode}
+              onFootnoteViewModeChange={setFootnoteViewMode}
               tnSidebarEnabled={tnSidebarVisible}
               rtlHintDismissed={fileMeta.rtlHintDismissed}
               sourceFontSize={fontSizes.source}
@@ -3437,7 +3508,7 @@ export function ProjectWorkspace() {
           </div>
         ) : cellAreaState.kind === "ready" ? (
           // FRO-309: relative wrapper so the search-expanded overlay can cover the editor
-          <div className="relative h-full w-full">
+          <div className="relative flex h-full w-full flex-col">
             {/* FRO-309: Expanded search results overlay */}
             {searchExpandedQuery !== null && (
               <div className="absolute inset-0 z-20 bg-background">
@@ -3452,9 +3523,12 @@ export function ProjectWorkspace() {
                 />
               </div>
             )}
-            <EditorTable
+            <div className="min-h-0 flex-1">
+              <EditorTable
             ref={editorRef} project={project} cells={cellsWithBacktranslation}
-            showFootnotesInline={footnotesInlineEnabled}
+            showFootnotesInline={footnoteViewMode === "inline"}
+            footnotePanelActive={footnoteViewMode !== "off"}
+            onVisibleFootnotesChange={footnoteViewMode === "tray" ? handleVisibleFootnotesChange : undefined}
             username={currentUsername}
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
@@ -3523,6 +3597,16 @@ export function ProjectWorkspace() {
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
           />
+            </div>
+            {footnoteViewMode === "tray" && (
+              <FootnotesTray
+                entries={visibleFootnotes}
+                editable={!isReadOnly}
+                onSave={handleTrayFootnoteSave}
+                onDelete={handleTrayFootnoteDelete}
+                onClose={() => setFootnoteViewMode("off")}
+              />
+            )}
           </div>
         ) : (
           <CellAreaPlaceholder

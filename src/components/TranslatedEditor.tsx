@@ -19,15 +19,20 @@
 
 import { useEditor, EditorContent } from "@tiptap/react"
 import { BubbleMenu } from "@tiptap/react/menus"
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
+import { TextSelection } from "@tiptap/pm/state"
+import type { EditorView } from "@tiptap/pm/view"
 import StarterKit from "@tiptap/starter-kit"
 import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { useEffect, useRef } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { createViolationDecorationExtension, violationPluginKey } from "@/lib/richtext/violation-decoration-plugin"
 import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } from "@/lib/richtext/karaoke-plugin"
 import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/richtext/terminology-chip-plugin"
+import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "@/lib/richtext/footnote-decoration-plugin"
+import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
 import type { Concept } from "@/lib/terminology/types"
 import { findActiveTimingIndex } from "@/lib/audio/timings"
 import type { WordTiming } from "@/lib/codex-editor/types"
@@ -42,6 +47,27 @@ export interface TranslatedEditorCommit {
   valueHtml: string
 }
 
+export interface FootnoteInsertionAnchor {
+  position: number
+  from: number
+  to: number
+  plainPosition: number
+  source: "selection" | "word" | "cursor" | "end"
+  previewText?: string
+  previewBefore?: string
+  previewAfter?: string
+}
+
+export interface TranslatedEditorHandle {
+  getFootnoteInsertionAnchor: () => FootnoteInsertionAnchor | null
+  insertFootnoteMarker: (marker: string, anchor?: FootnoteInsertionAnchor | null, anchorText?: string) => boolean
+}
+
+interface PendingFootnoteDelete {
+  index: number
+  label: string
+}
+
 interface TranslatedEditorProps {
   /** Stable cell id — switching cells re-hydrates the editor from html. */
   cellId: string
@@ -53,6 +79,7 @@ interface TranslatedEditorProps {
   onBlur?: () => void
   placeholder?: string
   className?: string
+  compactHeight?: boolean
   editable?: boolean
   /** "Alice is editing" — when present, the editor is read-only and the banner shows. */
   heldByLabel?: string | null
@@ -92,6 +119,10 @@ interface TranslatedEditorProps {
    * The caller is responsible for opening TermLookupPopover.
    */
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
+  /** Number of automatic numeric footnotes before this cell in the current chapter/file. */
+  footnoteNumberOffset?: number
+  /** Called when the user hovers a rendered target footnote marker. */
+  onFootnoteHover?: (index: number | null) => void
   /**
    * FRO-297: Accessible label for the target editor textbox.
    * Should include the cell reference and validation state,
@@ -106,7 +137,7 @@ interface TranslatedEditorProps {
   onEscapeToGrid?: () => void
 }
 
-export function TranslatedEditor({
+export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEditorProps>(function TranslatedEditor({
   cellId,
   initialHtml,
   initialPlain,
@@ -115,6 +146,7 @@ export function TranslatedEditor({
   onBlur,
   placeholder,
   className,
+  compactHeight = false,
   editable = true,
   heldByLabel,
   infractions,
@@ -129,15 +161,26 @@ export function TranslatedEditor({
   onNavigateCell,
   terminologyConcepts,
   onTermChipClick,
+  footnoteNumberOffset = 0,
+  onFootnoteHover,
   ariaLabel,
   onEscapeToGrid,
-}: TranslatedEditorProps) {
+}, ref) {
   // Held in a ref so the editor's keydown handler — created once per cellId —
   // always sees the latest navigation callback without re-creating the editor.
   const onNavigateCellRef = useRef(onNavigateCell)
   useEffect(() => { onNavigateCellRef.current = onNavigateCell }, [onNavigateCell])
   const onEscapeToGridRef = useRef(onEscapeToGrid)
   useEffect(() => { onEscapeToGridRef.current = onEscapeToGrid }, [onEscapeToGrid])
+  const footnoteNumberOffsetRef = useRef(footnoteNumberOffset)
+  useEffect(() => { footnoteNumberOffsetRef.current = footnoteNumberOffset }, [footnoteNumberOffset])
+  const onFootnoteHoverRef = useRef(onFootnoteHover)
+  useEffect(() => { onFootnoteHoverRef.current = onFootnoteHover }, [onFootnoteHover])
+  const [pendingFootnoteDelete, setPendingFootnoteDelete] = useState<PendingFootnoteDelete | null>(null)
+  const pendingFootnoteDeleteRef = useRef<PendingFootnoteDelete | null>(null)
+  useEffect(() => {
+    pendingFootnoteDeleteRef.current = pendingFootnoteDelete
+  }, [pendingFootnoteDelete])
   const latestViolationStateRef = useRef({
     infractions: infractions ?? [],
     ruleSeverity: ruleSeverity ?? new Map<string, "major" | "minor">(),
@@ -168,6 +211,8 @@ export function TranslatedEditor({
   const onCommitRef = useRef(onCommit)
   useEffect(() => { onCommitRef.current = onCommit }, [onCommit])
 
+  const commitEditorSnapshot = useRef<(reason?: string) => void>(() => undefined)
+
   const editor = useEditor({
     editable: !isReadOnly,
     content: initialContent,
@@ -183,6 +228,7 @@ export function TranslatedEditor({
       }),
       // The callback is invoked by the PM plugin, not during React render —
       // the lint rule is overly conservative here.
+      createFootnoteDecorationExtension(() => footnoteNumberOffsetRef.current),
       createViolationDecorationExtension(() => latestViolationStateRef.current),
       createKaraokeExtension(() => latestKaraokeStateRef.current),
       ...(terminologyConcepts !== undefined
@@ -204,13 +250,58 @@ export function TranslatedEditor({
           // background tints competing with the soft recess.
           // No fixed text-* class: font size inherits from the target column
           // wrapper, which carries the per-file font-size pref inline.
-          "prose prose-sm max-w-none h-full min-h-[40px] px-1 py-0.5 leading-relaxed focus:outline-none",
+          compactHeight
+            ? "prose prose-sm max-w-none px-1 py-0 leading-snug focus:outline-none"
+            : "prose prose-sm max-w-none h-full min-h-[40px] px-1 py-0.5 leading-relaxed focus:outline-none",
           "rounded-lg transition-colors",
           className
         ),
       },
       transformPastedHTML(html: string) {
         return stripToAllowedHtml(html)
+      },
+      handleDoubleClick(view, pos, event) {
+        const didSelect = selectVisibleWord(view, pos)
+        if (!didSelect) return false
+        event.preventDefault()
+        window.requestAnimationFrame(() => {
+          selectVisibleWord(view, pos)
+        })
+        return true
+      },
+      handleDOMEvents: {
+        mouseover(view, event) {
+          const target = event.target as HTMLElement | null
+          const marker = target?.closest<HTMLElement>(".usfm-footnote-marker")
+          if (!marker || !view.dom.contains(marker)) return false
+          const index = Number(marker.dataset.footnoteIndex)
+          onFootnoteHoverRef.current?.(Number.isFinite(index) ? index : null)
+          return false
+        },
+        mouseout(view, event) {
+          const target = event.target as HTMLElement | null
+          const marker = target?.closest<HTMLElement>(".usfm-footnote-marker")
+          if (!marker || !view.dom.contains(marker)) return false
+          const related = event.relatedTarget as HTMLElement | null
+          if (related && marker.contains(related)) return false
+          onFootnoteHoverRef.current?.(null)
+          return false
+        },
+        dblclick(view, event) {
+          const mouseEvent = event as MouseEvent
+          const position = view.posAtCoords({
+            left: mouseEvent.clientX,
+            top: mouseEvent.clientY,
+          })
+          if (!position) return false
+          const didSelect = selectVisibleWord(view, position.pos)
+          if (!didSelect) return false
+          mouseEvent.preventDefault()
+          window.requestAnimationFrame(() => {
+            selectVisibleWord(view, position.pos)
+          })
+          return true
+        },
       },
       // Cell navigation. Tab/Shift+Tab always step cells; Up/Down step cells
       // only at the first/last visual line so the caret can still move between
@@ -227,6 +318,33 @@ export function TranslatedEditor({
           onEscapeToGridRef.current?.()
           return true
         }
+        const plain = !event.shiftKey && !event.metaKey && !event.altKey && !event.ctrlKey
+        if (plain && (event.key === "Backspace" || event.key === "Delete")) {
+          const target = findFootnoteDeleteTarget(view, event.key, footnoteNumberOffsetRef.current)
+          if (target) {
+            event.preventDefault()
+            const pending = pendingFootnoteDeleteRef.current
+            if (pending?.index === target.index) {
+              if (deleteFootnoteByIndex(view, target.index, footnoteNumberOffsetRef.current)) {
+                setPendingFootnoteDelete(null)
+                commitEditorSnapshot.current("footnote-delete")
+              }
+              return true
+            }
+            setPendingFootnoteDelete({ index: target.index, label: target.label })
+            return true
+          }
+        } else if (pendingFootnoteDeleteRef.current) {
+          setPendingFootnoteDelete(null)
+        }
+        if (plain && event.key === "ArrowLeft" && moveCaretAcrossFootnoteRaw(view, "left")) {
+          event.preventDefault()
+          return true
+        }
+        if (plain && event.key === "ArrowRight" && moveCaretAcrossFootnoteRaw(view, "right")) {
+          event.preventDefault()
+          return true
+        }
         const navigate = onNavigateCellRef.current
         if (!navigate) return false
         if (event.key === "Tab") {
@@ -234,7 +352,6 @@ export function TranslatedEditor({
           navigate(event.shiftKey ? "prev" : "next")
           return true
         }
-        const plain = !event.shiftKey && !event.metaKey && !event.altKey && !event.ctrlKey
         if (plain && event.key === "ArrowUp" && view.endOfTextblock("up")) {
           event.preventDefault()
           navigate("prev")
@@ -279,6 +396,103 @@ export function TranslatedEditor({
       onBlur?.()
     },
   }, [cellId])
+
+  commitEditorSnapshot.current = () => {
+    if (!editor) return
+    if (idleTimerRef.current !== null) {
+      clearTimeout(idleTimerRef.current)
+      idleTimerRef.current = null
+    }
+    const text = editor.getText()
+    const html = editor.getHTML()
+    pendingCommitRef.current = null
+    if (text !== lastCommittedRef.current) {
+      lastCommittedRef.current = text
+      onCommitRef.current({ value: text, valueHtml: html })
+    }
+  }
+
+  const confirmPendingFootnoteDelete = useCallback(() => {
+    if (!editor || isReadOnly) return
+    const pending = pendingFootnoteDeleteRef.current
+    if (!pending) return
+    if (deleteFootnoteByIndex(editor.view, pending.index, footnoteNumberOffsetRef.current)) {
+      setPendingFootnoteDelete(null)
+      commitEditorSnapshot.current("footnote-delete")
+      editor.commands.focus()
+    }
+  }, [editor, isReadOnly])
+
+  const cancelPendingFootnoteDelete = useCallback(() => {
+    setPendingFootnoteDelete(null)
+    editor?.commands.focus()
+  }, [editor])
+
+  useImperativeHandle(ref, () => ({
+    getFootnoteInsertionAnchor() {
+      if (!editor || isReadOnly) return null
+      const { state } = editor
+      if (!editor.isFocused) {
+        return withFootnotePreview(state.doc, {
+          position: getDocumentEndPosition(state.doc),
+          from: getDocumentEndPosition(state.doc),
+          to: getDocumentEndPosition(state.doc),
+          plainPosition: getDocumentPlainText(state.doc).length,
+          source: "end",
+          previewText: getDocumentEndPreview(state.doc),
+        })
+      }
+      const { from, to, empty } = state.selection
+      if (!empty) {
+        return withFootnotePreview(state.doc, {
+          position: to,
+          from,
+          to,
+          plainPosition: pmPositionToPlainPosition(state.doc, to),
+          source: "selection",
+          previewText: state.doc.textBetween(from, to, "", ""),
+        })
+      }
+      const wordAnchor = getWordAnchor(state.doc, from)
+      if (wordAnchor) return withFootnotePreview(state.doc, wordAnchor)
+      return withFootnotePreview(state.doc, {
+        position: from,
+        from,
+        to: from,
+        plainPosition: pmPositionToPlainPosition(state.doc, from),
+        source: "cursor",
+        previewText: "Cursor position",
+      })
+    },
+    insertFootnoteMarker(marker, anchor, anchorText) {
+      if (!editor || isReadOnly) return false
+      const fallbackPosition = getDocumentEndPosition(editor.state.doc)
+      const fallback = {
+        position: fallbackPosition,
+        from: fallbackPosition,
+        to: fallbackPosition,
+        plainPosition: getDocumentPlainText(editor.state.doc).length,
+        source: "end",
+      } satisfies FootnoteInsertionAnchor
+      const insertion = anchor ?? fallback
+      const maxPosition = Math.max(1, editor.state.doc.content.size - 1)
+      const shouldReplaceAnchor = anchorText !== undefined && insertion.from !== insertion.to
+      const replacement = `${anchorText ?? ""}${marker}`
+      const inserted = shouldReplaceAnchor
+        ? editor.commands.insertContentAt({
+          from: Math.max(1, Math.min(insertion.from, maxPosition)),
+          to: Math.max(1, Math.min(insertion.to, maxPosition)),
+        }, replacement, { updateSelection: false })
+        : editor.commands.insertContentAt(
+          Math.max(1, Math.min(insertion.position, maxPosition)),
+          replacement,
+          { updateSelection: false },
+        )
+      if (!inserted) return false
+      commitEditorSnapshot.current("footnote")
+      return true
+    },
+  }), [editor, isReadOnly])
 
   // The committed baseline is the editor's OWN canonical text, never the raw
   // stored value. Stored values can be HTML-escaped or otherwise differ from
@@ -342,6 +556,11 @@ export function TranslatedEditor({
     }
   }, [editor, terminologyConcepts])
 
+  useEffect(() => {
+    if (!editor) return
+    editor.view.dispatch(editor.state.tr.setMeta(footnoteDecorationPluginKey, "rebuild"))
+  }, [editor, footnoteNumberOffset])
+
   const lastActiveIdxRef = useRef(-1)
   useEffect(() => {
     if (!editor) return
@@ -380,7 +599,7 @@ export function TranslatedEditor({
   }
 
   return (
-    <div className="relative h-full">
+    <div className={cn("relative", compactHeight ? "" : "h-full")}>
       {heldByLabel && (
         <div
           aria-live="polite"
@@ -398,6 +617,29 @@ export function TranslatedEditor({
             className="rounded-full bg-amber-500/20 px-2 py-0.5 text-amber-900 hover:bg-amber-500/30 dark:text-amber-100"
           >
             Discard and reload
+          </button>
+        </div>
+      )}
+      {pendingFootnoteDelete && (
+        <div className="absolute right-2 top-2 z-20 flex items-center gap-2 rounded-lg border border-destructive/20 bg-background px-2 py-1 text-[11px] shadow-neu-sm">
+          <span className="text-muted-foreground">
+            Delete footnote {pendingFootnoteDelete.label}?
+          </span>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={confirmPendingFootnoteDelete}
+            className="rounded px-2 py-0.5 font-medium text-destructive hover:bg-destructive/10"
+          >
+            I'm sure
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={cancelPendingFootnoteDelete}
+            className="rounded px-2 py-0.5 text-muted-foreground hover:bg-muted"
+          >
+            Cancel
           </button>
         </div>
       )}
@@ -475,7 +717,7 @@ export function TranslatedEditor({
         </div>
       </BubbleMenu>
       <div
-        className="h-full"
+        className={cn(compactHeight ? "" : "h-full")}
         onClick={(e) => {
           const target = e.target as HTMLElement
           // FRO-204: term chip click → open TermLookupPopover via caller
@@ -496,10 +738,255 @@ export function TranslatedEditor({
           }
         }}
       >
-        <EditorContent editor={editor} className="h-full [&>.ProseMirror]:h-full" />
+        <EditorContent
+          editor={editor}
+          className={cn(compactHeight ? "" : "h-full [&>.ProseMirror]:h-full")}
+        />
       </div>
     </div>
   )
+})
+
+function getDocumentEndPosition(doc: ProseMirrorNode): number {
+  return Math.max(1, doc.content.size - 1)
+}
+
+function moveCaretAcrossFootnoteRaw(
+  view: EditorView,
+  direction: "left" | "right",
+): boolean {
+  const { selection, doc } = view.state
+  if (!selection.empty) return false
+  const pos = selection.from
+  const range = getFootnotePmRanges(doc).find((candidate) => (
+    direction === "right"
+      ? pos >= candidate.from && pos < candidate.to
+      : pos > candidate.from && pos <= candidate.to
+  ))
+  if (!range) return false
+  const nextPos = direction === "right" ? range.to : range.from
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(doc, nextPos)).scrollIntoView())
+  return true
+}
+
+function findFootnoteDeleteTarget(
+  view: EditorView,
+  key: "Backspace" | "Delete",
+  numberOffset: number,
+): (PendingFootnoteDelete & { from: number; to: number }) | null {
+  const { selection, doc } = view.state
+  const ranges = getFootnotePmTargets(doc, numberOffset)
+  if (!selection.empty) {
+    return ranges.find((range) => selection.from < range.to && selection.to > range.from) ?? null
+  }
+  const pos = selection.from
+  return ranges.find((range) => (
+    key === "Backspace"
+      ? pos > range.from && pos <= range.to
+      : pos >= range.from && pos < range.to
+  )) ?? null
+}
+
+function deleteFootnoteByIndex(view: EditorView, index: number, numberOffset: number): boolean {
+  const target = getFootnotePmTargets(view.state.doc, numberOffset).find((range) => range.index === index)
+  if (!target) return false
+  view.dispatch(view.state.tr.delete(target.from, target.to).scrollIntoView())
+  return true
+}
+
+function selectVisibleWord(view: EditorView, position: number): boolean {
+  const selection = findVisibleWordSelection(view.state.doc, position)
+  if (!selection) return false
+  view.dispatch(
+    view.state.tr
+      .setSelection(TextSelection.create(view.state.doc, selection.from, selection.to))
+      .scrollIntoView(),
+  )
+  return true
+}
+
+function findVisibleWordSelection(
+  doc: ProseMirrorNode,
+  position: number,
+): { from: number; to: number } | null {
+  const map = getDocumentTextMap(doc)
+  if (!map.text) return null
+  const footnotes = extractUsfmFootnotes(map.text)
+  const hiddenRanges = footnotes.map((footnote) => ({
+    from: footnote.index,
+    to: footnote.index + footnote.raw.length,
+  }))
+  const isHidden = (offset: number) => hiddenRanges.some((range) => offset >= range.from && offset < range.to)
+  const hiddenAtPosition = hiddenRanges.find((range) => {
+    const plain = pmPositionToPlainPosition(doc, position)
+    return plain >= range.from && plain <= range.to
+  })
+
+  let plainPosition = pmPositionToPlainPosition(doc, position)
+  if (hiddenAtPosition) plainPosition = Math.max(0, hiddenAtPosition.from - 1)
+  if (!isWordChar(map.text[plainPosition] ?? "") && plainPosition > 0 && isWordChar(map.text[plainPosition - 1] ?? "")) {
+    plainPosition -= 1
+  }
+  if (!isWordChar(map.text[plainPosition] ?? "") || isHidden(plainPosition)) return null
+
+  let start = plainPosition
+  while (start > 0 && !isHidden(start - 1) && isWordChar(map.text[start - 1] ?? "")) {
+    start -= 1
+  }
+  let end = plainPosition + 1
+  while (end < map.text.length && !isHidden(end) && isWordChar(map.text[end] ?? "")) {
+    end += 1
+  }
+
+  const from = map.plainToPm[start]
+  const to = map.plainToPm[end]
+  if (from === undefined || to === undefined || from >= to) return null
+  return { from, to }
+}
+
+function getFootnotePmRanges(doc: ProseMirrorNode): Array<{ from: number; to: number }> {
+  return getFootnotePmTargets(doc, 0).map(({ from, to }) => ({ from, to }))
+}
+
+function getFootnotePmTargets(
+  doc: ProseMirrorNode,
+  numberOffset: number,
+): Array<PendingFootnoteDelete & { from: number; to: number }> {
+  const map = getDocumentTextMap(doc)
+  return extractUsfmFootnotes(map.text)
+    .map((footnote, i) => ({
+      index: i,
+      label: footnoteTargetLabel(footnote.caller, i, numberOffset),
+      from: map.plainToPm[footnote.index],
+      to: map.plainToPm[footnote.index + footnote.raw.length],
+    }))
+    .filter((range): range is PendingFootnoteDelete & { from: number; to: number } => (
+      range.from !== undefined && range.to !== undefined && range.from < range.to
+    ))
+}
+
+function footnoteTargetLabel(caller: string, index: number, numberOffset: number): string {
+  const trimmed = caller.trim()
+  if (trimmed && trimmed !== "+" && trimmed !== "-") return trimmed
+  return String(numberOffset + index + 1)
+}
+
+function getDocumentTextMap(doc: ProseMirrorNode): { text: string; plainToPm: number[] } {
+  const plainToPm: number[] = []
+  let text = ""
+  let plainCursor = 0
+  doc.descendants((node, pos) => {
+    if (!node.isText) return true
+    const nodeText = node.text ?? ""
+    for (let i = 0; i <= nodeText.length; i++) plainToPm[plainCursor + i] = pos + i
+    text += nodeText
+    plainCursor += nodeText.length
+    return true
+  })
+  if (!(plainCursor in plainToPm)) plainToPm[plainCursor] = doc.content.size
+  return { text, plainToPm }
+}
+
+function isWordChar(value: string): boolean {
+  return /^[\p{L}\p{N}'’-]$/u.test(value)
+}
+
+function getWordAnchor(
+  doc: ProseMirrorNode,
+  position: number,
+): FootnoteInsertionAnchor | null {
+  const resolved = doc.resolve(position)
+  const parentText = resolved.parent.textContent
+  const parentOffset = resolved.parentOffset
+  if (
+    !parentText ||
+    parentOffset >= parentText.length ||
+    /\s/.test(parentText[parentOffset] ?? "") ||
+    isFootnoteSyntaxAtOffset(parentText, parentOffset)
+  ) {
+    return null
+  }
+
+  let previousOffset = parentOffset
+  while (previousOffset > 0 && !/\s/.test(parentText[previousOffset - 1] ?? "")) {
+    previousOffset -= 1
+  }
+  let nextOffset = parentOffset
+  while (nextOffset < parentText.length && !/\s/.test(parentText[nextOffset] ?? "")) {
+    nextOffset += 1
+  }
+  const candidate = parentText.slice(previousOffset, nextOffset)
+  if (candidate.includes("\\") || /^f\*?$/.test(candidate)) return null
+  return {
+    position: position + (nextOffset - parentOffset),
+    from: position - (parentOffset - previousOffset),
+    to: position + (nextOffset - parentOffset),
+    plainPosition: pmPositionToPlainPosition(doc, position + (nextOffset - parentOffset)),
+    source: "word",
+    previewText: candidate,
+  }
+}
+
+function isFootnoteSyntaxAtOffset(text: string, offset: number): boolean {
+  if (text[offset] === "\\") return true
+  const before = text.slice(Math.max(0, offset - 8), offset)
+  return /\\$/.test(before) || /\\f\s*$/.test(before)
+}
+
+function getDocumentEndPreview(doc: ProseMirrorNode): string {
+  const text = normalizeAnchorPreview(doc.textBetween(0, doc.content.size, " ", " "))
+  if (!text) return "End of cell"
+  const words = text.split(/\s+/)
+  return words.slice(Math.max(0, words.length - 6)).join(" ")
+}
+
+function withFootnotePreview(
+  doc: ProseMirrorNode,
+  anchor: FootnoteInsertionAnchor,
+): FootnoteInsertionAnchor {
+  const text = getDocumentPlainText(doc)
+  const plainPosition = Math.max(0, Math.min(anchor.plainPosition, text.length))
+  return {
+    ...anchor,
+    plainPosition,
+    previewBefore: text.slice(0, plainPosition),
+    previewAfter: text.slice(plainPosition),
+  }
+}
+
+function getDocumentPlainText(doc: ProseMirrorNode): string {
+  let text = ""
+  doc.descendants((node) => {
+    if (node.isText) text += node.text ?? ""
+  })
+  return text
+}
+
+function pmPositionToPlainPosition(doc: ProseMirrorNode, position: number): number {
+  let plainPosition = 0
+  let found = false
+  doc.descendants((node, pos) => {
+    if (found || !node.isText) return !found
+    const length = node.text?.length ?? 0
+    if (position <= pos) {
+      found = true
+      return false
+    }
+    if (position <= pos + length) {
+      plainPosition += Math.max(0, position - pos)
+      found = true
+      return false
+    }
+    plainPosition += length
+    return true
+  })
+  return plainPosition
+}
+
+function normalizeAnchorPreview(value: string): string {
+  const normalized = value.replace(/\s+/g, " ").trim()
+  if (normalized.length <= 80) return normalized
+  return `${normalized.slice(0, 77).trimEnd()}...`
 }
 
 // Strip pasted HTML to only the marks we support.

@@ -51,17 +51,16 @@ export function extractUsfmFootnotes(text: string): ExtractedFootnote[] {
     const caller = m[1].trim()
     const body = m[2] ?? ""
 
-    // Parse \fr (reference) if present
-    const frMatch = body.match(/\\fr\s+([^\\\n]+)/)
-    const ref = frMatch ? frMatch[1].trim() : ""
+    const fields = parseFootnoteFields(body)
+    const ref = fields.find((field) => field.name === "fr")?.value.trim() ?? ""
 
-    // Collect all translatable content fields in order: \ft \fq \fqa \fk \fl
-    const textParts: string[] = []
-    const fieldRe = /\\(?:ft|fq|fqa|fk|fl)\s+([^\\\n]+)/g
-    let fm: RegExpExecArray | null
-    while ((fm = fieldRe.exec(body)) !== null) {
-      textParts.push(fm[1].trim())
-    }
+    // Collect all translatable content fields in order: \ft \fq \fqa \fk \fl.
+    // Values may contain nested character markers like \bd...\bd*, so the
+    // parser stops only at the next footnote field marker, not every backslash.
+    const textParts = fields
+      .filter((field) => field.name !== "fr")
+      .map((field) => field.value.trim())
+      .filter(Boolean)
     const footnoteText = textParts.join(" ").trim()
 
     results.push({
@@ -74,6 +73,20 @@ export function extractUsfmFootnotes(text: string): ExtractedFootnote[] {
   }
 
   return results
+}
+
+function parseFootnoteFields(body: string): Array<{ name: string; value: string }> {
+  const fieldRe = /\\(fr|ft|fq|fqa|fk|fl)\s+/g
+  const matches = Array.from(body.matchAll(fieldRe))
+  const fields: Array<{ name: string; value: string }> = []
+  for (let i = 0; i < matches.length; i++) {
+    const match = matches[i]
+    const name = match[1]
+    const valueStart = match.index + match[0].length
+    const valueEnd = matches[i + 1]?.index ?? body.length
+    fields.push({ name, value: body.slice(valueStart, valueEnd) })
+  }
+  return fields
 }
 
 /**

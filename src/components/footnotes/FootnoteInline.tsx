@@ -1,24 +1,17 @@
 /**
- * FootnoteInline — renders USFM footnotes extracted from a cell's text as a
- * distinct panel immediately below the cell row.
+ * USFM footnote surfaces.
  *
- * Clicking a footnote opens an in-place editor so the translator can modify
- * the footnote text. The edited value is written back via onSave, which the
- * parent (EditorRow) routes through the normal TranslatedEditor commit path.
- *
- * Round-trip safety:
- *   - USFM: SAFE. The cell text retains the raw \f...\f* markers; onSave
- *     splices only the \ft (and translatable) field content in the raw span.
- *   - DOCX: NOT SAFE (see TRACE in src/lib/footnotes/extract.ts). DOCX cells
- *     show a read-only notice rather than an editor.
- *
- * FRO-317
+ * Stored cell text keeps raw \f...\f* markers for lossless round-trip. These
+ * components render those markers as either inline child rows or a read-only
+ * bottom tray without introducing a separate footnote storage model.
  */
 
-import { useState, useRef, useEffect } from "react"
-import { Textarea } from "@/components/ui/textarea"
-import type { ExtractedFootnote } from "@/lib/footnotes/extract"
+import { useState, useEffect, type ReactNode } from "react"
+import { X } from "lucide-react"
+import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
+import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { cn } from "@/lib/utils"
+import { FootnoteTextEditor, renderFootnoteRichText } from "./FootnoteTextEditor"
 
 interface FootnoteInlineProps {
   /** The footnotes extracted from this cell's original (source) text. */
@@ -36,6 +29,16 @@ interface FootnoteInlineProps {
    * @param newText The new text content for the translatable part of the footnote.
    */
   onSave: (footnoteIndex: number, newText: string) => void
+  /** Called when the user confirms deleting the full target footnote marker. */
+  onDelete?: (footnoteIndex: number) => void
+  /** Creates a target footnote from the corresponding source footnote. */
+  onCreateTarget?: (sourceFootnote: ExtractedFootnote) => void
+  /** Number of numeric footnotes before this cell in the current chapter/file. */
+  numberOffset?: number
+  /** Target footnote marker currently hovered/focused inside the cell. */
+  activeFootnoteIndex?: number | null
+  /** Render as a compact block inside the target cell instead of a full-width band. */
+  compact?: boolean
 }
 
 export function FootnoteInline({
@@ -44,83 +47,301 @@ export function FootnoteInline({
   editable,
   isDocx,
   onSave,
+  onDelete,
+  onCreateTarget,
+  numberOffset = 0,
+  activeFootnoteIndex = null,
+  compact = false,
 }: FootnoteInlineProps) {
   const hasSrc = sourceFootnotes.length > 0
   const hasTgt = targetFootnotes.length > 0
 
   if (!hasSrc && !hasTgt) return null
 
+  if (compact) {
+    const rowsSourceFootnotes = hasTgt ? [] : sourceFootnotes
+    return (
+      <div
+        className="mt-1 rounded-md border border-border/40 bg-muted/20 px-1.5 py-0.5"
+        role="region"
+        aria-label="Footnotes"
+      >
+        <FootnoteSurfaceHeader
+          title="Footnotes"
+          isDocx={isDocx}
+          count={targetFootnotes.length || sourceFootnotes.length}
+          className="mb-0.5"
+        />
+        <FootnoteRows
+          sourceFootnotes={rowsSourceFootnotes}
+          targetFootnotes={targetFootnotes}
+          editable={editable && !isDocx && hasTgt}
+          canCreateTarget={editable && !isDocx}
+          onSave={onSave}
+          onDelete={onDelete}
+          onCreateTarget={onCreateTarget}
+          numberOffset={numberOffset}
+          activeFootnoteIndex={activeFootnoteIndex}
+          targetOnlyLayout="fill"
+          compact
+        />
+      </div>
+    )
+  }
+
   return (
     <div
-      className="border-t border-border/40 bg-muted/30 px-4 py-2"
+      className="grid items-start gap-1.5 border-t border-border/40 bg-muted/20 px-4 py-1.5 md:grid-cols-[minmax(0,1fr)_minmax(18rem,1fr)]"
       role="region"
       aria-label="Footnotes"
     >
-      <div className="mb-1 flex items-center gap-1.5">
-        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-          Footnotes
-        </span>
-        {isDocx && (
-          <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium text-amber-600 dark:text-amber-400">
-            read-only · DOCX round-trip not yet safe
+      <FootnoteSurfaceHeader
+        title="Footnotes"
+        isDocx={isDocx}
+        count={targetFootnotes.length || sourceFootnotes.length}
+      />
+      <div className="min-w-0 md:border-l md:border-border/40 md:pl-2.5">
+        <FootnoteRows
+          sourceFootnotes={sourceFootnotes}
+          targetFootnotes={targetFootnotes}
+          editable={editable && !isDocx && hasTgt}
+          canCreateTarget={editable && !isDocx}
+          onSave={onSave}
+          onDelete={onDelete}
+          onCreateTarget={onCreateTarget}
+          numberOffset={numberOffset}
+          activeFootnoteIndex={activeFootnoteIndex}
+          targetOnlyLayout="fill"
+        />
+      </div>
+    </div>
+  )
+}
+
+export function FootnotesTray({
+  entries,
+  className,
+  editable = false,
+  onSave,
+  onDelete,
+  onClose,
+}: {
+  entries: VisibleFootnoteEntry[]
+  className?: string
+  editable?: boolean
+  onSave?: (cellId: string, footnoteIndex: number, newText: string) => void
+  onDelete?: (cellId: string, footnoteIndex: number) => void
+  onClose?: () => void
+}) {
+  const visibleEntries = entries.filter((entry) => entry.targetFootnotes.length > 0)
+  const visibleFootnoteCount = visibleEntries.reduce((sum, entry) => sum + entry.targetFootnotes.length, 0)
+
+  return (
+    <section
+      className={cn(
+        "border-t border-border bg-background/95 shadow-[0_-10px_30px_rgba(15,23,42,0.06)] backdrop-blur supports-[backdrop-filter]:bg-background/85",
+        className,
+      )}
+      aria-label="Visible footnotes"
+    >
+      <div className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-1.5">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold text-foreground">
+            Footnotes
+          </div>
+          <div className="truncate text-[11px] text-muted-foreground/80">
+            Updates as the editor scrolls
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+            {visibleFootnoteCount}
           </span>
-        )}
+          {onClose && (
+            <button
+              type="button"
+              aria-label="Close footnotes tray"
+              className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              onClick={onClose}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="space-y-1.5">
-        {(hasSrc ? sourceFootnotes : targetFootnotes).map((srcFn, i) => {
-          const tgtFn = hasTgt ? targetFootnotes[i] : undefined
-          return (
-            <FootnoteRow
-              key={i}
-              index={i}
-              sourceFn={srcFn}
-              targetFn={tgtFn}
-              editable={editable && !isDocx && hasTgt}
-              onSave={onSave}
-            />
-          )
-        })}
+      <div className="h-[min(24vh,220px)] overflow-y-auto overscroll-contain">
+        {visibleEntries.length === 0 ? (
+          <div className="px-4 py-5 text-sm text-muted-foreground">
+            No footnotes in the visible rows.
+          </div>
+        ) : (
+          <>
+            {visibleEntries.map((entry) => (
+              <article
+                key={entry.cellId}
+                className="grid gap-2 border-b border-border/50 px-4 py-2 last:border-b-0 md:grid-cols-[minmax(4rem,0.45fr)_minmax(18rem,0.55fr)]"
+              >
+                <div className="flex min-w-0 items-start gap-2 pt-0.5">
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    {entry.cellLabel}
+                  </span>
+                  {entry.cellRef && (
+                    <span className="truncate text-[11px] text-muted-foreground">
+                      {entry.cellRef}
+                    </span>
+                  )}
+                </div>
+                <div className="min-w-0 md:border-l md:border-border/40 md:pl-3">
+                  <FootnoteRows
+                    sourceFootnotes={[]}
+                    targetFootnotes={entry.targetFootnotes}
+                    editable={editable && !entry.isDocx}
+                    onSave={(footnoteIndex, newText) => onSave?.(entry.cellId, footnoteIndex, newText)}
+                    onDelete={onDelete ? (footnoteIndex) => onDelete(entry.cellId, footnoteIndex) : undefined}
+                    numberOffset={entry.numberOffset}
+                    targetOnlyLayout="fill"
+                  />
+                </div>
+              </article>
+            ))}
+          </>
+        )}
       </div>
+    </section>
+  )
+}
+
+function FootnoteSurfaceHeader({
+  title,
+  isDocx,
+  count,
+  className,
+}: {
+  title: string
+  isDocx: boolean
+  count?: number
+  className?: string
+}) {
+  return (
+    <div className={cn("flex items-center gap-1.5", className)}>
+      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        {title}
+      </span>
+      {typeof count === "number" && count > 0 && (
+        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold leading-none text-primary">
+          {count}
+        </span>
+      )}
+      {isDocx && (
+        <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium text-amber-600 dark:text-amber-400">
+          read-only · DOCX round-trip not yet safe
+        </span>
+      )}
+    </div>
+  )
+}
+
+function FootnoteRows({
+  sourceFootnotes,
+  targetFootnotes,
+  editable,
+  canCreateTarget,
+  onSave,
+  onDelete,
+  onCreateTarget,
+  numberOffset = 0,
+  activeFootnoteIndex = null,
+  targetOnlyLayout = "right-half",
+  compact = false,
+}: {
+  sourceFootnotes: ExtractedFootnote[]
+  targetFootnotes: ExtractedFootnote[]
+  editable: boolean
+  canCreateTarget?: boolean
+  onSave: (footnoteIndex: number, newText: string) => void
+  onDelete?: (footnoteIndex: number) => void
+  onCreateTarget?: (sourceFootnote: ExtractedFootnote) => void
+  numberOffset?: number
+  activeFootnoteIndex?: number | null
+  targetOnlyLayout?: "right-half" | "fill"
+  compact?: boolean
+}) {
+  const rowCount = Math.max(sourceFootnotes.length, targetFootnotes.length)
+
+  return (
+    <div className={cn(compact ? "space-y-0.5" : "space-y-1")}>
+      {Array.from({ length: rowCount }, (_, i) => (
+        <FootnoteRow
+          key={`${sourceFootnotes[i]?.index ?? "target"}-${targetFootnotes[i]?.index ?? "source"}-${i}`}
+          index={i}
+          sourceFn={sourceFootnotes[i]}
+          targetFn={targetFootnotes[i]}
+          editable={editable}
+          canCreateTarget={canCreateTarget}
+          active={activeFootnoteIndex === i}
+          numberOffset={numberOffset}
+          onSave={onSave}
+          onDelete={onDelete}
+          onCreateTarget={onCreateTarget}
+          targetOnlyLayout={targetOnlyLayout}
+          compact={compact}
+        />
+      ))}
     </div>
   )
 }
 
 interface FootnoteRowProps {
   index: number
-  sourceFn: ExtractedFootnote
+  sourceFn?: ExtractedFootnote
   targetFn?: ExtractedFootnote
   editable: boolean
+  canCreateTarget?: boolean
+  active?: boolean
+  numberOffset: number
+  targetOnlyLayout: "right-half" | "fill"
+  compact?: boolean
   onSave: (footnoteIndex: number, newText: string) => void
+  onDelete?: (footnoteIndex: number) => void
+  onCreateTarget?: (sourceFootnote: ExtractedFootnote) => void
 }
 
-function FootnoteRow({ index, sourceFn, targetFn, editable, onSave }: FootnoteRowProps) {
+function FootnoteRow({
+  index,
+  sourceFn,
+  targetFn,
+  editable,
+  canCreateTarget,
+  active,
+  numberOffset,
+  targetOnlyLayout,
+  compact = false,
+  onSave,
+  onDelete,
+  onCreateTarget,
+}: FootnoteRowProps) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(targetFn?.text ?? "")
-  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   useEffect(() => {
-    if (editing && inputRef.current) {
-      inputRef.current.focus()
-      // Place cursor at end
-      const len = inputRef.current.value.length
-      inputRef.current.setSelectionRange(len, len)
+    if (!editing) {
+      setDraft(targetFn?.text ?? "")
+      setConfirmDelete(false)
     }
-  }, [editing])
-
-  // Sync draft if targetFn changes externally
-  useEffect(() => {
-    if (!editing) setDraft(targetFn?.text ?? "")
   }, [targetFn?.text, editing])
 
   function handleSave() {
     onSave(index, draft)
     setEditing(false)
+    setConfirmDelete(false)
   }
 
   function handleCancel() {
     setDraft(targetFn?.text ?? "")
     setEditing(false)
+    setConfirmDelete(false)
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -134,85 +355,240 @@ function FootnoteRow({ index, sourceFn, targetFn, editable, onSave }: FootnoteRo
     }
   }
 
-	  const callerPill = (
-	    <span
-	      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-bold text-muted-foreground"
-	      aria-hidden
-	    >
-      {sourceFn.caller === "+" ? "fn" : sourceFn.caller}
-    </span>
-  )
+  function handleDelete() {
+    if (!targetFn || !onDelete) return
+    if (!confirmDelete) {
+      setConfirmDelete(true)
+      return
+    }
+    onDelete(index)
+    setEditing(false)
+    setConfirmDelete(false)
+  }
 
-  return (
-    <div className="flex gap-2 text-xs">
-      {/* Left: source footnote */}
-      <div className="flex min-w-0 flex-1 items-start gap-1.5">
-        {callerPill}
-        <div className="min-w-0 flex-1">
-          {sourceFn.ref && (
-            <span className="mr-1 font-mono text-[10px] text-muted-foreground">
-              {sourceFn.ref}
-            </span>
-          )}
-          <span className="text-muted-foreground">{sourceFn.text}</span>
-        </div>
-      </div>
-
-      {/* Right: target footnote (editable) */}
-      {targetFn !== undefined && (
-        <div className="flex min-w-0 flex-1 items-start gap-1.5 border-l border-border/40 pl-2">
-          <div className="min-w-0 flex-1">
-            {editing ? (
-              <div className="flex flex-col gap-1">
-                <Textarea
-                  ref={inputRef}
-                  className="min-h-0 resize-none text-xs"
-                  rows={2}
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Translate footnote…"
-                  aria-label="Edit footnote"
-                />
-                <div className="flex gap-1">
-                  <button
-                    type="button"
-                    onClick={handleSave}
-                    className="rounded px-2 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/10"
-                  >
-                    Save
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleCancel}
-                    className="rounded px-2 py-0.5 text-[10px] text-muted-foreground hover:bg-muted"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : (
+  const visibleFootnote = targetFn ?? sourceFn
+  const callerLabel = footnoteDisplayLabel(visibleFootnote, index, numberOffset)
+  const targetContent = (
+    <div className="min-w-0 flex-1">
+      {targetFn === undefined ? (
+        sourceFn && canCreateTarget && onCreateTarget ? (
+          <button
+            type="button"
+            className="rounded px-1 py-0.5 text-left text-xs font-medium text-primary hover:bg-primary/10"
+            onClick={() => onCreateTarget(sourceFn)}
+          >
+            Add target footnote
+          </button>
+        ) : (
+          <span className="italic text-muted-foreground/70">No target footnote</span>
+        )
+      ) : editing ? (
+        <div className="flex flex-col gap-1">
+          <FootnoteTextEditor
+            className="text-xs"
+            rows={2}
+            value={draft}
+            onChange={(next) => {
+              setDraft(next)
+              if (confirmDelete && next.trim().length > 0) setConfirmDelete(false)
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder="Translate footnote..."
+            ariaLabel="Edit footnote"
+          />
+          <div className="flex gap-1">
+            <button
+              type="button"
+              onClick={handleSave}
+              className="rounded px-2 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/10"
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              onClick={handleCancel}
+              className="rounded px-2 py-0.5 text-[10px] text-muted-foreground hover:bg-muted"
+            >
+              Cancel
+            </button>
+            {onDelete && (
               <button
                 type="button"
+                onClick={handleDelete}
                 className={cn(
-                  "block w-full rounded px-1 py-0.5 text-left text-xs",
-                  editable
-                    ? "cursor-pointer text-foreground hover:bg-muted/60"
-                    : "cursor-default text-muted-foreground",
-                  !targetFn.text && editable && "italic text-muted-foreground/60",
+                  "ml-auto rounded px-2 py-0.5 text-[10px] font-medium",
+                  confirmDelete
+                    ? "bg-destructive/15 text-destructive hover:bg-destructive/20"
+                    : "text-destructive hover:bg-destructive/10",
                 )}
-                onClick={() => {
-                  if (editable) setEditing(true)
-                }}
-                aria-label={editable ? "Click to edit footnote" : "Footnote translation"}
-                disabled={!editable}
               >
-                {targetFn.text || (editable ? "Add translation…" : "—")}
+                {confirmDelete ? "I'm sure" : "Delete"}
               </button>
             )}
           </div>
         </div>
+      ) : (
+        <button
+          type="button"
+          className={cn(
+            "block w-full rounded text-left text-xs",
+            compact ? "px-0.5 py-0 leading-snug" : "px-1 py-0.5",
+            editable
+              ? "cursor-pointer text-foreground hover:bg-muted/60"
+              : "cursor-default text-muted-foreground",
+            !targetFn.text && editable && "italic text-muted-foreground/60",
+          )}
+          onClick={() => {
+            if (editable) setEditing(true)
+          }}
+          aria-label={editable ? "Click to edit footnote" : "Footnote translation"}
+          disabled={!editable}
+        >
+          {targetFn.text || (editable ? "Add translation..." : "Empty target footnote")}
+        </button>
       )}
+    </div>
+  )
+
+  if (!sourceFn && targetFn) {
+    return (
+      <div
+        className={cn(
+          "text-xs",
+          targetOnlyLayout === "right-half" && "flex justify-end rounded-md px-1 py-0.5",
+          active && "bg-primary/10 ring-1 ring-primary/20",
+        )}
+      >
+        <div
+          className={cn(
+            "flex min-w-0 items-start rounded-md bg-primary/5",
+            compact ? "gap-1 px-1.5 py-0.5 ring-1 ring-primary/5" : "gap-1.5 px-2 py-0.5 ring-1 ring-primary/10",
+            targetOnlyLayout === "right-half" && "w-full md:w-[calc(50%-0.25rem)]",
+            targetOnlyLayout === "fill" && "w-full",
+          )}
+        >
+          <span className="sr-only">Target footnote</span>
+          <FootnoteMarkerBadge label={callerLabel} active />
+          {targetContent}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className={cn(
+        "grid gap-2 rounded-md px-1 py-0.5 text-xs md:grid-cols-2",
+        active && "bg-primary/10 ring-1 ring-primary/20",
+      )}
+    >
+      <div className="flex min-w-0 items-start gap-1.5">
+        <FootnoteMarkerBadge label={callerLabel} />
+        {sourceFn ? (
+          <FootnoteText footnote={sourceFn} muted />
+        ) : (
+          <span className="italic text-muted-foreground/60">No source footnote</span>
+        )}
+      </div>
+
+      <div className="flex min-w-0 items-start gap-1.5 border-border/40 md:border-l md:pl-2">
+        <span className="sr-only">Target footnote</span>
+        {targetFn && <FootnoteMarkerBadge label={callerLabel} active />}
+        {targetContent}
+      </div>
+    </div>
+  )
+}
+
+export function FootnotedTextValue({
+  value,
+  numberOffset = 0,
+  showFootnotes = false,
+  className,
+  emptyLabel = "(empty)",
+}: {
+  value: string
+  numberOffset?: number
+  showFootnotes?: boolean
+  className?: string
+  emptyLabel?: ReactNode
+}) {
+  const footnotes = extractUsfmFootnotes(value)
+  const content: ReactNode[] = []
+  let cursor = 0
+
+  footnotes.forEach((footnote, index) => {
+    if (footnote.index > cursor) {
+      content.push(value.slice(cursor, footnote.index))
+    }
+    content.push(
+      <sup
+        key={`fn-${footnote.index}-${index}`}
+        className="mx-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary/15 px-0.5 align-super text-[9px] font-bold leading-none text-primary"
+      >
+        {footnoteDisplayLabel(footnote, index, numberOffset)}
+      </sup>,
+    )
+    cursor = footnote.index + footnote.raw.length
+  })
+
+  if (cursor < value.length) content.push(value.slice(cursor))
+
+  return (
+    <div className={cn("min-w-0", className)}>
+      <div className="whitespace-pre-wrap">
+        {content.length > 0 ? content : <span className="italic text-muted-foreground">{emptyLabel}</span>}
+      </div>
+      {showFootnotes && footnotes.length > 0 && (
+        <div className="mt-1 border-t border-border/40 pt-1">
+          <FootnoteRows
+            sourceFootnotes={[]}
+            targetFootnotes={footnotes}
+            editable={false}
+            onSave={() => undefined}
+            numberOffset={numberOffset}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FootnoteMarkerBadge({ label, active }: { label: string; active?: boolean }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 text-[9px] font-bold",
+        active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground",
+      )}
+      aria-hidden
+    >
+      {label}
+    </span>
+  )
+}
+
+function footnoteDisplayLabel(
+  footnote: ExtractedFootnote | undefined,
+  index: number,
+  numberOffset: number,
+): string {
+  const caller = footnote?.caller.trim()
+  if (caller && caller !== "+" && caller !== "-") return caller
+  return String(numberOffset + index + 1)
+}
+
+function FootnoteText({ footnote, muted }: { footnote: ExtractedFootnote; muted?: boolean }) {
+  return (
+    <div className="min-w-0 flex-1">
+      {footnote.ref && (
+        <span className="mr-1 font-mono text-[10px] text-muted-foreground">
+          {footnote.ref}
+        </span>
+      )}
+      <span className={cn(muted ? "text-muted-foreground" : "text-foreground")}>
+        {footnote.text ? renderFootnoteRichText(footnote.text) : <span className="italic text-muted-foreground/70">Empty footnote</span>}
+      </span>
     </div>
   )
 }

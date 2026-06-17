@@ -44,6 +44,25 @@ export function spliceFootnoteText(
 }
 
 /**
+ * Remove footnote[footnoteIndex] from `cellText`, including its full raw
+ * \f...\f* marker span.
+ */
+export function deleteFootnote(
+  cellText: string,
+  footnoteIndex: number,
+): string {
+  const footnotes = extractUsfmFootnotes(cellText)
+  const fn = footnotes[footnoteIndex]
+  if (!fn) return cellText
+
+  const before = cellText.slice(0, fn.index)
+  const after = cellText.slice(fn.index + fn.raw.length)
+  const needsGap = before.length > 0 && after.length > 0 && !/\s$/.test(before) && !/^\s/.test(after)
+  const joined = `${before}${needsGap ? " " : ""}${after}`
+  return joined.replace(/[ \t]{2,}/g, " ")
+}
+
+/**
  * Given a raw \f...\f* span and a new text value, return an updated span
  * where the \ft field carries newText.
  *

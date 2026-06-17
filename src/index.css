@@ -501,6 +501,32 @@ html.dark[data-color-theme="rose"] {
   box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-red-500, oklch(0.637 0.237 25.331)) 40%, transparent);
 }
 
+.usfm-footnote-raw {
+  display: none;
+}
+
+.usfm-footnote-marker {
+  display: inline-flex;
+  min-width: 1.15em;
+  height: 1.15em;
+  align-items: center;
+  justify-content: center;
+  margin-inline: 0.08em;
+  border-radius: 999px;
+  background-color: color-mix(in oklch, var(--primary) 14%, transparent);
+  color: var(--primary);
+  font-size: 0.58em;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: super;
+  pointer-events: none;
+  user-select: none;
+}
+
+.usfm-footnote-marker::selection {
+  background: transparent;
+}
+
 .karaoke-active {
   background-color: color-mix(in oklch, var(--color-primary, oklch(0.65 0.2 250)) 22%, transparent);
   border-radius: 2px;

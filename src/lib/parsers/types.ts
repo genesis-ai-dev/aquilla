@@ -254,6 +254,8 @@ export interface CellTtsSettings {
 export interface ProjectRecord {
   id: string
   name: string
+  /** Owning org id when the project was hydrated from the server. */
+  orgId?: number | null
   sourceLanguage: string
   targetLanguage: string
   createdAt: string

@@ -1,7 +1,7 @@
 const ORG_SCOPED_ROUTE_PREFIXES = [
   "/assigned",
   "/members",
-  "/projects/archived",
+  "/projects",
   "/settings",
   "/teams",
 ]

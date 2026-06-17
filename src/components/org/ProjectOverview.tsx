@@ -213,6 +213,14 @@ export function ProjectOverview() {
     void loadRow()
   }, [loadRow])
 
+  useEffect(() => {
+    if (status !== "ready") return
+    if (activeOrgId == null) return
+    if (project?.orgId == null) return
+    if (project.orgId === activeOrgId) return
+    navigate({ pathname: "/", search: `?org=${activeOrgId}` }, { replace: true })
+  }, [activeOrgId, navigate, project?.orgId, status])
+
   // Load per-project assignment roster for the Team card (maintainer+)
   useEffect(() => {
     if (!jwt || !id) return

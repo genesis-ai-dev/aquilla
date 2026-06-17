@@ -370,10 +370,17 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         } else if (pendingFootnoteDeleteRef.current) {
           setPendingFootnoteDelete(null)
         }
-        // Shift+Arrow that would cross a footnote: extend the text selection
-        // over the whole atomic node in one step. Browsers treat the
-        // contenteditable=false marker inconsistently (some balloon the
-        // selection to the whole block), so we drive it deterministically.
+        // Shift+Arrow in a footnote-containing cell: drive the selection
+        // ourselves. Real Safari's native keyboard selection extension across
+        // contenteditable=false inline atoms is unreliable (it flips the
+        // anchor / paints a split, ballooned selection — the bug seen on
+        // Safari but not Chromium, and not reproducible via WebDriver synthetic
+        // keys). By intercepting the key, preventing the default, and setting a
+        // deterministic TextSelection, native Safari selection never runs, so
+        // it can't corrupt the range. This pairs with two other fixes: the
+        // marker is not focusable (no tabIndex focus-steal) and the footnote
+        // decoration set is not rebuilt on selection change (no mid-selection
+        // DOM churn). Ordinary cells (no footnote) keep native selection.
         const shiftArrow = event.shiftKey && !event.metaKey && !event.altKey && !event.ctrlKey
         if (shiftArrow && event.key === "ArrowLeft" && extendSelectionAcrossFootnote(view, "left")) {
           event.preventDefault()
@@ -806,17 +813,12 @@ function docContainsFootnote(doc: ProseMirrorNode): boolean {
   return found
 }
 
-// Horizontal Shift+Arrow handling for cells that contain footnotes.
-//
-// ProseMirror's built-in only extends a selection across an inline atom when the
-// caret is exactly at the node boundary; otherwise it bails and the browser
-// takes over — and WebKit can't place a selection edge next to (or between)
-// contenteditable=false atoms, so it balloons the selection to the whole line.
-// To get Word-like behaviour we drive every horizontal Shift+Arrow ourselves
-// (one char for text, one node for a footnote) so the browser never balloons.
-//
-// We only take over when the cell actually has a footnote, so ordinary cells
-// keep the browser's grapheme-aware selection (combining marks, emoji, etc.).
+// Deterministic horizontal Shift+Arrow for cells that contain footnotes. We
+// step one position (one char, or the whole footnote atom when the neighbour is
+// a footnote) and dispatch the extended TextSelection ourselves, so real
+// Safari's unreliable native selection extension across contenteditable=false
+// atoms never runs. Returns false (letting native handle it) when there is no
+// footnote in the cell, so ordinary cells keep grapheme-aware native selection.
 function extendSelectionAcrossFootnote(view: EditorView, direction: "left" | "right"): boolean {
   const { selection, doc } = view.state
   if (!docContainsFootnote(doc)) return false

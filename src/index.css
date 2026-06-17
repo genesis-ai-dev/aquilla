@@ -520,19 +520,26 @@ html.dark[data-color-theme="rose"] {
   cursor: pointer;
 }
 
+/* Safari mis-paints native text-selection rectangles around our
+   contenteditable=false footnote pills (it paints the wrong/adjacent region
+   when a selection edge sits at an element offset next to the atom). So in
+   editors that contain footnotes we hide the native selection paint and draw
+   the highlight ourselves via the .usfm-text-sel decoration below, positioned
+   by document position rather than by Safari's buggy selection rects. */
+.usfm-fn-editor ::selection {
+  background: transparent;
+}
+.usfm-fn-editor .usfm-text-sel,
+.usfm-fn-editor .usfm-footnote-marker.usfm-text-sel {
+  background-color: Highlight;
+  color: HighlightText;
+}
+
 /* When the footnote node is the sole selection (e.g. clicked) ProseMirror tags
    it; match the text-selection highlight so it reads as "selected". */
 .usfm-footnote-marker.ProseMirror-selectednode {
   background-color: color-mix(in oklch, var(--primary) 28%, transparent);
   outline: none;
-}
-
-/* Footnote sitting inside an active text selection: the browser can't paint
-   ::selection onto this contenteditable=false pill, so mimic the native
-   highlight (system Highlight colour) so it reads as selected, like Word. */
-.usfm-footnote-marker.usfm-footnote-marker-selected {
-  background-color: Highlight;
-  color: HighlightText;
 }
 
 .usfm-footnote-marker-tooltip {

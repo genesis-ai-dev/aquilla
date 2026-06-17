@@ -4,6 +4,15 @@
 // outside the doc — so this rebuilds on doc change or on an explicit "rebuild"
 // meta dispatched when the offset / tooltip preference changes.
 //
+// IMPORTANT: this set is NOT rebuilt on selection change. The selected-state
+// highlight is left entirely to the browser's native text selection (it paints
+// over the contenteditable=false pill just fine — verified in WebKit/Blink).
+// An earlier version toggled a "selected" class here on every selectionChanged,
+// which recreated every node decoration's spec object each cursor move and made
+// ProseMirror re-render the footnote NodeViews' DOM mid-selection. Real Safari
+// reacts to that mid-selection DOM mutation by collapsing/ballooning the live
+// selection (the "selects the whole row, then corrects on the next press" bug).
+//
 // The footnote itself is an atomic node (see footnote-node.ts); this plugin only
 // decorates it, it does not hide or render raw text.
 
@@ -16,18 +25,43 @@ import { FOOTNOTE_NODE_NAME } from "@/lib/richtext/usfm-plain-text"
 import { FOOTNOTE_DECORATION_SPEC, type FootnoteMarkerInfo } from "@/lib/richtext/footnote-node"
 
 export const footnoteDecorationPluginKey = new PluginKey<DecorationSet>("footnoteDecorations")
+export const footnoteSelectionPluginKey = new PluginKey<DecorationSet>("footnoteSelectionOverlay")
 
-/** Selection range (or null) used to highlight footnotes that fall inside it. */
-interface SelectionRange {
-  from: number
-  to: number
+function docHasFootnote(doc: PMNode): boolean {
+  let found = false
+  doc.descendants((node) => {
+    if (found) return false
+    if (node.type.name === FOOTNOTE_NODE_NAME) {
+      found = true
+      return false
+    }
+    return true
+  })
+  return found
+}
+
+/**
+ * Draw the text selection ourselves, positioned by document position, for cells
+ * that contain footnotes. Safari mis-paints the native selection rectangles
+ * around our contenteditable=false footnote pills (it highlights the adjacent
+ * region when a selection edge lands at an element offset next to the atom), so
+ * we hide the native paint (see .usfm-fn-editor ::selection in index.css) and
+ * render an inline decoration over the live selection range instead. PM maps
+ * the range to the DOM by position, sidestepping Safari's broken selection-rect
+ * math entirely. Only active when the cell has a footnote AND the selection is a
+ * non-empty text range.
+ */
+function buildSelectionOverlay(doc: PMNode, from: number, to: number, empty: boolean): DecorationSet {
+  if (empty || from === to || !docHasFootnote(doc)) return DecorationSet.empty
+  return DecorationSet.create(doc, [
+    Decoration.inline(from, to, { class: "usfm-text-sel" }),
+  ])
 }
 
 export function buildFootnoteDecorationSet(
   doc: PMNode,
   numberOffset = 0,
   showTooltips = true,
-  selection: SelectionRange | null = null,
 ): DecorationSet {
   const decorations: Decoration[] = []
   let ordinal = 0
@@ -47,28 +81,13 @@ export function buildFootnoteDecorationSet(
       index: ordinal,
       showTooltips,
     }
-    // The browser can't paint its text-selection highlight onto a
-    // contenteditable=false pill, so when the node sits fully inside the
-    // selection we add a class (PM applies it to the NodeView DOM) that mimics
-    // the native highlight — making the marker read as selected, like Word.
-    const selected = selection !== null && selection.from <= pos && selection.to >= pos + node.nodeSize
     decorations.push(
-      Decoration.node(
-        pos,
-        pos + node.nodeSize,
-        selected ? { class: "usfm-footnote-marker-selected" } : {},
-        { [FOOTNOTE_DECORATION_SPEC]: info },
-      ),
+      Decoration.node(pos, pos + node.nodeSize, {}, { [FOOTNOTE_DECORATION_SPEC]: info }),
     )
     ordinal += 1
     return false
   })
   return decorations.length === 0 ? DecorationSet.empty : DecorationSet.create(doc, decorations)
-}
-
-function selectionRange(state: { selection: { from: number; to: number; empty: boolean } }): SelectionRange | null {
-  const { selection } = state
-  return selection.empty ? null : { from: selection.from, to: selection.to }
 }
 
 export function createFootnoteDecorationExtension(
@@ -86,24 +105,53 @@ export function createFootnoteDecorationExtension(
               state.doc,
               getNumberOffset(),
               shouldShowTooltips(),
-              selectionRange(state),
             ),
-            apply: (tr, old, oldState, newState) => {
-              const selectionChanged = !oldState.selection.eq(newState.selection)
-              if (tr.docChanged || selectionChanged || tr.getMeta(footnoteDecorationPluginKey) === "rebuild") {
+            apply: (tr, old) => {
+              if (tr.docChanged || tr.getMeta(footnoteDecorationPluginKey) === "rebuild") {
                 return buildFootnoteDecorationSet(
-                  newState.doc,
+                  tr.doc,
                   getNumberOffset(),
                   shouldShowTooltips(),
-                  selectionRange(newState),
+                )
+              }
+              return old.map(tr.mapping, tr.doc)
+            },
+          },
+          props: {
+            decorations(state) {
+              return this.getState(state)
+            },
+          },
+        }),
+        new Plugin({
+          key: footnoteSelectionPluginKey,
+          state: {
+            init: (_, state) => buildSelectionOverlay(
+              state.doc,
+              state.selection.from,
+              state.selection.to,
+              state.selection.empty,
+            ),
+            apply: (tr, old, oldState, newState) => {
+              if (tr.docChanged || !oldState.selection.eq(newState.selection) || !old) {
+                return buildSelectionOverlay(
+                  newState.doc,
+                  newState.selection.from,
+                  newState.selection.to,
+                  newState.selection.empty,
                 )
               }
               return old
             },
           },
           props: {
+            // Tag the editor root so the CSS that hides native ::selection and
+            // styles .usfm-text-sel only applies to footnote-bearing cells.
+            attributes(state): { [name: string]: string } {
+              return { class: docHasFootnote(state.doc) ? "usfm-fn-editor" : "" }
+            },
             decorations(state) {
-              return this.getState(state)
+              return footnoteSelectionPluginKey.getState(state)
             },
           },
         }),

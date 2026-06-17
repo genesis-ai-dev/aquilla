@@ -1,5 +1,5 @@
 // src/hooks/useTranslationBrief.test.ts
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect } from "vitest"
 import { buildSavePayload, withGeneratedL1 } from "./useTranslationBrief"
 import { emptyBrief } from "@/lib/brief/brief"
 

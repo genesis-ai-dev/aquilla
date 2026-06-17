@@ -177,6 +177,19 @@ describe("buildSystemPrompt — role filtering", () => {
   })
 })
 
+describe("buildSystemPrompt brief block", () => {
+  const base = { projectId: "p", username: "u", roleLevel: 600 }
+  it("includes the brief summary when provided", () => {
+    const out = buildSystemPrompt({ ...base, briefSummary: "Translate for unchurched youth." })
+    expect(out).toContain("Translate for unchurched youth.")
+    expect(out).toContain("docs('brief')") // points the agent at the full L2
+  })
+  it("omits the brief section when no summary is set", () => {
+    const out = buildSystemPrompt(base)
+    expect(out).not.toContain("Project translation brief")
+  })
+})
+
 describe("AGENT_REQUIRED_ROLE — mirror of sync-worker role-policy.ts", () => {
   it("pins the floors the agent's safety depends on", () => {
     expect(AGENT_REQUIRED_ROLE["target.cell.commit"]).toBe(400)

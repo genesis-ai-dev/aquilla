@@ -275,6 +275,26 @@ The loop:
    needs ≥1 citation. Publish even when status:"undetermined" — explain why the
    sources were inconclusive.`
 
+const BRIEF = `# Translation brief cookbook — the project's purpose & standards
+
+The brief encodes WHY this translation exists and the standards it must meet
+(skopos: audience, purpose, medium, register, literalness, key terms,
+constraints). A short summary is already in your system card; fetch the FULL
+brief only when a judgment call needs the detail behind the summary.
+
+The brief lives in project_settings as JSON (key 'translationBrief'):
+SELECT settings::jsonb -> 'translationBrief' ->> 'l1Summary'  AS summary,
+       settings::jsonb -> 'translationBrief' ->> 'l2Markdown' AS full_brief,
+       settings::jsonb -> 'translationBrief' -> 'parameters'  AS parameters
+FROM project_settings WHERE project_id = :project
+
+When drafting or checking, honour the brief: match the stated register and level
+of literalness, apply the key-term strategy, and avoid anything the constraints
+forbid. If the brief and a validated pair conflict, prefer the validated pair
+(it is observed project practice) but flag the tension to the user.
+If 'translationBrief' is null, the project has not authored a brief yet — say so
+rather than inventing standards.`
+
 const COOKBOOKS: Record<string, string> = {
   drafting: DRAFTING,
   checking: CHECKING,
@@ -284,6 +304,7 @@ const COOKBOOKS: Record<string, string> = {
   assignments: ASSIGNMENTS,
   "files-and-refs": FILES_AND_REFS,
   aquifer: AQUIFER,
+  brief: BRIEF,
 }
 
 export const COOKBOOK_TOPICS = Object.keys(COOKBOOKS)

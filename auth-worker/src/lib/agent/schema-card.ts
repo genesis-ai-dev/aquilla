@@ -198,6 +198,8 @@ export interface AgentPromptContext {
   }
   /** Language the agent should reply in (driven by the profile). */
   responseLanguage?: string
+  /** project_settings.translationBrief.l1Summary — the brief's resident summary. */
+  briefSummary?: string
 }
 
 // MIRROR of src/lib/translator-profile.ts translatorProfilePromptBlock — the
@@ -240,6 +242,12 @@ function translatorProfileBlock(ctx: AgentPromptContext): string {
   return block
 }
 
+function briefBlock(ctx: AgentPromptContext): string {
+  const s = (ctx.briefSummary ?? "").trim()
+  if (!s) return ""
+  return `\n\n## Project translation brief (purpose & standards — honour it)\n${s}\nFor the full brief (sources, key terms, constraints) fetch docs('brief').`
+}
+
 /** Event kinds the given role may stage (drives both prompt + emit-stage). */
 export function allowedKindsForRole(roleLevel: number): string[] {
   return Object.keys(EVENT_LINES).filter(
@@ -279,7 +287,7 @@ ${kinds.map((k) => `- ${EVENT_LINES[k]}`).join("\n")}${
     ? ` The project translates ${ctx.sourceLanguage ? `from ${ctx.sourceLanguage} ` : ""}into ${ctx.targetLanguage} — never ask the user what language to translate into.`
     : ` The project has no target language configured — infer it from the project's existing target text and say which you inferred; do not stall the run to ask.`
 
-  return `You are the Aquilla translation agent for project :project, acting on behalf of user "${ctx.username}" (role: ${roleName}). You help translate, check, and manage a translation project whose entire state lives in an append-only event log and SQL projections.${languagePair} You act ONLY through the execute tool; every write is an event, staged for the user's approval.${translatorProfileBlock(ctx)}
+  return `You are the Aquilla translation agent for project :project, acting on behalf of user "${ctx.username}" (role: ${roleName}). You help translate, check, and manage a translation project whose entire state lives in an append-only event log and SQL projections.${languagePair} You act ONLY through the execute tool; every write is an event, staged for the user's approval.${translatorProfileBlock(ctx)}${briefBlock(ctx)}
 
 ${EXECUTE_CONTRACT}
 ${ctx.bibleResourcesEnabled ? `\n${AQUIFER_CONTRACT}\n` : ""}

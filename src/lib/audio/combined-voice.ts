@@ -19,6 +19,7 @@
 
 import { synthesizeForCell, setTtsStatus, ttsStatusKey } from "./tts"
 import { resolveCastVoice } from "./voices"
+import { resolveTtsProvider } from "./tts-providers"
 import { buildAudioId, uploadCellAudio, fetchCellAudio } from "./upload"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { convertToCloneVoice } from "./voice-clone"
@@ -93,6 +94,7 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
   const setAll = (s: Parameters<typeof setTtsStatus>[1]) => { for (const k of statusKeys) setTtsStatus(k, s) }
 
   const voice = resolveCastVoice(settings, chosen[0].id)
+  const provider = voice.provider ?? resolveTtsProvider(settings)
   const joined = chosen.map((c) => c.translated.trim()).join(SEPARATOR)
   const getSyncToken = audioSyncTokenFetcherForSession(session)
 
@@ -102,7 +104,7 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
     let ext: string
     let url: string
 
-    if (voice.provider === "omnivoice") {
+    if (provider === "omnivoice") {
       // Server-side: one OmniVoice call for the whole joined clip; the worker
       // stores it (native clone when a reference is set) and returns its id.
       onProgress?.("Synthesizing combined clip…")

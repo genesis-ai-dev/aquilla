@@ -195,7 +195,7 @@ export interface Voice {
   name: string
   /** Hex color for the voice's chip/dot in the UI. */
   color?: string
-  /** Defaults to "gemini" when absent. Kokoro voices ignore everything below voiceName. */
+  /** Defaults to "omnivoice" when absent. Kokoro voices ignore everything below voiceName. */
   provider?: TtsProvider
   /** Optional Gemini model override. */
   model?: string

@@ -199,6 +199,15 @@ export function CellTtsButton({
               onProgress,
             })
             blob = gen.blob
+          } else if (provider === "omnivoice") {
+            // OmniVoice has no client-side synth — there's nothing to preview
+            // until the cell has durably-generated audio. Guide the user
+            // instead of surfacing the internal server-only guard error.
+            setTtsStatus(statusKey, {
+              kind: "error",
+              message: "Generate audio on this line first to hear OmniVoice.",
+            })
+            return
           } else {
             blob = await synthesizeForCell(trimmed, {
               projectTtsSettings,

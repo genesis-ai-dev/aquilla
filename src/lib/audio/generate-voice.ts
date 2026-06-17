@@ -10,6 +10,7 @@
 
 import { synthesizeForCell } from "./tts"
 import { resolveVoice } from "./voices"
+import { resolveTtsProvider } from "./tts-providers"
 import { buildAudioId, uploadCellAudio, fetchCellAudio } from "./upload"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { convertToCloneVoice } from "./voice-clone"
@@ -51,12 +52,15 @@ export async function generateAndAttachCellVoice(
   if (!text) throw new Error("Cell has no text to synthesize")
 
   const voice = resolveVoice(args.projectTtsSettings, args.cellVoiceId)
+  // Resolve the effective engine: a voice with no provider falls back to the
+  // project default (now OmniVoice), which must still route server-side.
+  const provider = voice.provider ?? resolveTtsProvider(args.projectTtsSettings)
   const getSyncToken = audioSyncTokenFetcherForSession(args.session)
 
   // OmniVoice is server-side: the sync-worker synthesizes, stores the clip in
   // R2 (native voice-cloning when a reference is set), and returns its id —
   // no client synth, no upload, no Seed-VC. Branch out entirely.
-  if (voice.provider === "omnivoice") {
+  if (provider === "omnivoice") {
     const result = await synthesizeCellTts(
       {
         projectId: args.projectId,

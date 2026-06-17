@@ -35,7 +35,7 @@ describe("generateAndAttachCellVoice routing", () => {
     expect(synthCellTts).toHaveBeenCalledTimes(1)
     expect(synthForCell).not.toHaveBeenCalled()
     expect(emitAttach).toHaveBeenCalledWith(
-      expect.objectContaining({ audioId: "audio-tts-1.wav", slot: "generatedVoice" }),
+      expect.objectContaining({ audioId: "audio-tts-1.wav", slot: "generatedVoice", durationMs: 1200 }),
     )
   })
 })

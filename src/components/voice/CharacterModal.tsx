@@ -337,32 +337,33 @@ function CharacterModalBody({
                 </p>
                 <div className="grid grid-cols-2 gap-1.5">
                   {TTS_PROVIDER_INFOS.filter((info) => info.tier === tier).map((info) => (
-                    <button
-                      key={info.id}
-                      type="button"
-                      onClick={() => update({
-                        provider: info.id,
-                        voiceName: defaultVoiceNameForProvider(info.id, { targetLanguage }),
-                      })}
-                      aria-pressed={activeProvider === info.id}
-                      className={cn(
-                        "rounded-lg border px-2.5 py-2 text-left transition-colors",
-                        activeProvider === info.id ? "border-primary bg-primary/10" : "hover:bg-accent/40",
-                      )}
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-medium">{info.shortTitle ?? info.title}</span>
-                        {info.badge && (
-                          <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
-                            {info.badge}
-                          </span>
+                    <AppTooltip key={info.id} content={info.hint} className="max-w-xs">
+                      <button
+                        type="button"
+                        onClick={() => update({
+                          provider: info.id,
+                          voiceName: defaultVoiceNameForProvider(info.id, { targetLanguage }),
+                        })}
+                        aria-pressed={activeProvider === info.id}
+                        className={cn(
+                          "rounded-lg border px-2.5 py-2 text-left transition-colors",
+                          activeProvider === info.id ? "border-primary bg-primary/10" : "hover:bg-accent/40",
                         )}
-                      </div>
-                      <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">{info.blurb}</p>
-                      {info.caveat && (
-                        <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground/70">{info.caveat}</p>
-                      )}
-                    </button>
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-medium">{info.shortTitle ?? info.title}</span>
+                          {info.badge && (
+                            <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+                              {info.badge}
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">{info.blurb}</p>
+                        {info.caveat && (
+                          <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground/70">{info.caveat}</p>
+                        )}
+                      </button>
+                    </AppTooltip>
                   ))}
                 </div>
               </div>

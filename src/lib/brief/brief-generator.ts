@@ -6,6 +6,7 @@ import type { UsageCallback } from "@/lib/rules/rule-suggester"
 import { assembleL2Markdown } from "./brief"
 import { BRIEF_FIELDS, L1_MAX_CHARS } from "./schema"
 import type { TranslationBrief } from "./types"
+import type { BriefDraft } from "@/hooks/useTranslationBrief"
 
 const L1_SYSTEM_PROMPT = `You are condensing a Bible/translation project's full translation brief into a SHORT, practical, actionable summary for an AI translation assistant.
 
@@ -87,8 +88,6 @@ export async function extractBriefFromDocument(
   onLlmCall?.({ kind: "brief-extract", model: settings.model, provider: settings.provider || "frontier" })
   return parseExtractedParameters(response)
 }
-
-import type { BriefDraft } from "@/hooks/useTranslationBrief"
 
 /** Draft a single brief field using already-answered fields as context. */
 export async function draftField(

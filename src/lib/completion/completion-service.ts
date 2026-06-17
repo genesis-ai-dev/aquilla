@@ -86,6 +86,18 @@ export function buildRulesBlock(rules: TranslationRule[]): string {
   return "Project terminology and style rules (MUST follow):\n" + lines.join("\n")
 }
 
+/**
+ * Render the brief's L1 summary as a labeled block for the system prompt.
+ * Empty/blank input → "" (caller skips injection). The brief states the
+ * project's purpose, audience, register, and constraints; it sits ABOVE the
+ * mechanical rules block so the model reads intent before specifics.
+ */
+export function buildBriefBlock(summary: string | undefined | null): string {
+  const s = (summary ?? "").trim()
+  if (!s) return ""
+  return "Translation brief (the project's purpose and standards — follow it):\n" + s
+}
+
 export const DEFAULT_SYSTEM_PROMPT =
   "You are a translation assistant completing a project that translates from {sourceLanguage} into {targetLanguage}.\n\n" +
   "The translation examples the user provides are your PRIMARY source of truth. They show the exact terminology, tone, register, punctuation, and stylistic conventions this specific project uses. Study them and reproduce those patterns precisely. This may be an ultra-low-resource language, so do not fall back on general knowledge of {targetLanguage} — follow the project's own patterns above all else.\n\n" +
@@ -140,10 +152,15 @@ export function buildPrompt(options: {
   validatedPairs?: ValidatedPair[]
   /** How to render few-shot examples. Default "source-and-target". */
   exampleFormat?: "source-and-target" | "target-only"
+  /** The project brief's L1 summary — injected before the rules block. */
+  briefSummary?: string
 }): ChatMessage[] {
   let sys = options.systemPrompt
     .replace(/\{sourceLanguage\}/g, options.sourceLanguage)
     .replace(/\{targetLanguage\}/g, options.targetLanguage)
+
+  const briefBlock = buildBriefBlock(options.briefSummary)
+  if (briefBlock) sys = sys + "\n\n" + briefBlock
 
   // Inject rules block after the base system prompt so it is always visible.
   if (options.rules?.length) {
@@ -211,10 +228,14 @@ export function buildBatchPrompt(options: {
   validatedPairs?: ValidatedPair[]
   /** How to render few-shot examples. Default "source-and-target". */
   exampleFormat?: "source-and-target" | "target-only"
+  /** The project brief's L1 summary — injected before the rules block. */
+  briefSummary?: string
 }): ChatMessage[] {
   const targetOnly = options.exampleFormat === "target-only"
 
   let baseSys = BATCH_FRAMING_INSTRUCTIONS + "\n\n" + options.systemPrompt
+  const batchBriefBlock = buildBriefBlock(options.briefSummary)
+  if (batchBriefBlock) baseSys = baseSys + "\n\n" + batchBriefBlock
   // Inject rules block after the base system prompt.
   if (options.rules?.length) {
     const block = buildRulesBlock(options.rules)

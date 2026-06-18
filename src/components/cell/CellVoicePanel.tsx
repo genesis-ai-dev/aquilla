@@ -15,13 +15,14 @@
 // play-queue, so each line gets an independent scrubber + volume; the app-wide
 // audio-coordinator still guarantees only one source plays at a time.
 
-import { useCallback, useEffect, useMemo, useRef } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  Pause, Play, UserPlus, Volume2, VolumeX,
+  Check, MoreHorizontal, Pause, Play, Search, UserPlus, Volume2, VolumeX,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
+import { useVoiceRecency, touchVoice } from "@/lib/store/voice-recency"
 import { CropButton } from "./CropEditor"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -58,6 +59,10 @@ interface CellVoicePanelProps {
   /** Open the character creator seeded with THIS cell's take (clone source). */
   onMakeCharacter: () => void
 }
+
+// How many voices the per-line cast strip shows inline before the rest collapse
+// into the "More" picker.
+const INLINE_VOICES = 5
 
 function fmtTime(s: number): string {
   if (!Number.isFinite(s) || s <= 0) return "0:00"
@@ -311,12 +316,14 @@ export function CellVoicePanel({
   }, [isVoicing, canGenerate, project, cell, sess, username, resolvedVoice.id, onAfterGenerate])
 
   // Clicking a voice chip IS the generate action: assign the line to that voice
-  // and voice it immediately (autoplay when the take lands).
+  // and voice it immediately (autoplay when the take lands). Record it as
+  // most-recently-used so the cast strip keeps the voices you reach for up front.
   const generateWith = useCallback((voiceId: string) => {
     if (isVoicing || !canGenerate) return
+    touchVoice(projectId, voiceId)
     onAssign(voiceId)
     void generate(true, voiceId)
-  }, [isVoicing, canGenerate, onAssign, generate])
+  }, [isVoicing, canGenerate, projectId, onAssign, generate])
 
   // The play/pause button only appears once a line is voiced.
   const onPrimary = useCallback(() => {
@@ -324,6 +331,29 @@ export function CellVoicePanel({
     if (isPlaying) pause()
     else void play()
   }, [isVoicing, hasTake, isPlaying, pause, play])
+
+  // Surface the few voices you actually reach for. The cast strip shows the most
+  // recently used INLINE_VOICES (the active voice always kept in view); the long
+  // tail (60+ voices) lives behind a searchable "More" picker so it never clogs
+  // the row. (Hooks must run before the paratext/untranslated early-returns.)
+  const recency = useVoiceRecency(projectId)
+  const visible = useMemo(() => {
+    const rank = (id: string) => {
+      const i = recency.indexOf(id)
+      return i === -1 ? Number.MAX_SAFE_INTEGER : i
+    }
+    const ordered = [...voices].sort((a, b) => rank(a.id) - rank(b.id))
+    const head = ordered.slice(0, INLINE_VOICES)
+    const active = voices.find((v) => v.id === resolvedVoice.id)
+    if (active && !head.some((v) => v.id === active.id)) {
+      return [active, ...head.slice(0, INLINE_VOICES - 1)]
+    }
+    return head
+  }, [voices, recency, resolvedVoice.id])
+  const overflow = useMemo(
+    () => voices.filter((v) => !visible.some((x) => x.id === v.id)),
+    [voices, visible],
+  )
 
   // Section breaks (paratext) aren't voiced — render nothing.
   if (isParatext) return null
@@ -392,10 +422,10 @@ export function CellVoicePanel({
         </div>
       )}
 
-      {/* The whole cast — clicking a chip instantly (re)voices this line with
-          that voice. Scrolls horizontally when there are many. */}
-      <div className="flex gap-1.5 overflow-x-auto pb-0.5">
-        {voices.map((v) => (
+      {/* The cast — clicking a chip instantly (re)voices this line with that
+          voice. Shows your most-recent few; the rest hide behind "More". */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+        {visible.map((v) => (
           <VoiceChip
             key={v.id}
             voice={v}
@@ -404,6 +434,14 @@ export function CellVoicePanel({
             onClick={() => generateWith(v.id)}
           />
         ))}
+        {overflow.length > 0 && (
+          <MoreVoicesButton
+            voices={overflow}
+            activeId={resolvedVoice.id}
+            busy={isVoicing}
+            onPick={generateWith}
+          />
+        )}
       </div>
     </div>
   )
@@ -444,5 +482,72 @@ function VoiceChip({
         <span className="max-w-[8rem] truncate">{voice.name}</span>
       </button>
     </AppTooltip>
+  )
+}
+
+/** The overflow picker: a "More" chip that opens a searchable list of the
+ *  remaining voices. Clicking one (re)voices the line instantly — same one-click
+ *  action as the inline chips, just for the long tail. */
+function MoreVoicesButton({
+  voices, activeId, busy, onPick,
+}: {
+  voices: Voice[]
+  activeId: string
+  busy: boolean
+  onPick: (voiceId: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return q ? voices.filter((v) => v.name.toLowerCase().includes(q)) : voices
+  }, [voices, query])
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            title="More voices"
+            className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-dashed px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground data-[popup-open]:bg-accent/50"
+          >
+            <MoreHorizontal className="h-3.5 w-3.5" /> More
+            <span className="tabular-nums opacity-70">{voices.length}</span>
+          </button>
+        }
+      />
+      <PopoverContent align="start" side="top" className="w-60 p-2">
+        <div className="relative mb-1.5">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search voices…"
+            className="h-8 w-full rounded-lg border bg-background pl-8 pr-2 text-sm outline-none ring-primary/40 placeholder:text-muted-foreground focus:ring-2"
+          />
+        </div>
+        <div className="max-h-56 space-y-0.5 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <p className="px-2 py-3 text-center text-xs italic text-muted-foreground">No matches</p>
+          ) : (
+            filtered.map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                disabled={busy}
+                onClick={() => { onPick(v.id); setOpen(false) }}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/50 disabled:opacity-60"
+              >
+                <VoiceAvatar voice={v} size={20} />
+                <span className="min-w-0 flex-1 truncate">{v.name}</span>
+                {v.id === activeId && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+              </button>
+            ))
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }

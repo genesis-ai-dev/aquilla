@@ -1,13 +1,17 @@
 import { useState } from "react"
-import { ChevronsUpDown } from "lucide-react"
+import { useLocation, useNavigate } from "react-router-dom"
+import { Check, ChevronsUpDown } from "lucide-react"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { createOrg, renameOrg } from "@/lib/frontier/orgs"
+import { isOrgScopedRoute } from "./org-route-scope"
 
 export function OrgSwitcher() {
-  const { orgs, activeOrg, setActiveOrg, refresh } = useActiveOrg()
+  const { orgs, activeOrg, activeOrgId, isAllOrgs, setActiveOrg, setAllOrgs, refresh } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
+  const location = useLocation()
+  const navigate = useNavigate()
 
   const [open, setOpen] = useState(false)
 
@@ -21,9 +25,26 @@ export function OrgSwitcher() {
   const [renameName, setRenameName] = useState("")
   const [renaming, setRenaming] = useState(false)
 
-  if (!activeOrg) return null
+  if (!activeOrg && !isAllOrgs) return null
 
-  const canRename = (activeOrg.role.level ?? 0) >= 600
+  const showAllOrgs = orgs.length > 1
+  const canRename = !isAllOrgs && (activeOrg?.role.level ?? 0) >= 600
+  const title = isAllOrgs ? "All organizations" : activeOrg?.name ?? "Workspace"
+  const subtitle = isAllOrgs ? `${orgs.length} organizations` : activeOrg?.role.name ?? ""
+
+  function handleAllOrgs() {
+    setAllOrgs()
+    setOpen(false)
+    navigate({ pathname: "/", search: "?org=all" })
+  }
+
+  function handleActiveOrg(orgId: number) {
+    setActiveOrg(orgId)
+    setOpen(false)
+    if (isOrgScopedRoute(location.pathname) || location.pathname === "/") {
+      navigate({ pathname: "/", search: `?org=${orgId}` })
+    }
+  }
 
   async function handleCreate() {
     if (!jwt || !createName.trim()) return
@@ -60,26 +81,44 @@ export function OrgSwitcher() {
         className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent"
       >
         <span className="min-w-0">
-          <span className="block truncate text-sm font-medium">{activeOrg.name ?? "Workspace"}</span>
-          <span className="block text-xs text-muted-foreground">{activeOrg.role.name}</span>
+          <span className="block truncate text-sm font-medium">{title}</span>
+          <span className="block text-xs text-muted-foreground">{subtitle}</span>
         </span>
         <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
       </button>
       {open && (
         <div className="absolute z-20 mt-1 w-full rounded-md border bg-popover shadow-md">
           <ul className="max-h-60 overflow-y-auto">
-          {orgs.map((o) => (
-            <li key={o.id}>
-              <button
-                type="button"
-                onClick={() => { setActiveOrg(o.id); setOpen(false) }}
-                className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm hover:bg-accent"
-              >
-                <span className="truncate">{o.name ?? "Workspace"}</span>
-                <span className="text-xs text-muted-foreground">{o.role.name}</span>
-              </button>
-            </li>
-          ))}
+            {showAllOrgs && (
+              <li>
+                <button
+                  type="button"
+                  onClick={handleAllOrgs}
+                  className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-sm hover:bg-accent"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate">All organizations</span>
+                    <span className="block text-xs text-muted-foreground">All projects</span>
+                  </span>
+                  {isAllOrgs && <Check className="size-3.5 shrink-0" aria-hidden />}
+                </button>
+              </li>
+            )}
+            {orgs.map((o) => (
+              <li key={o.id}>
+                <button
+                  type="button"
+                  onClick={() => handleActiveOrg(o.id)}
+                  className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-sm hover:bg-accent"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate">{o.name ?? "Workspace"}</span>
+                    <span className="block text-xs text-muted-foreground">{o.role.name}</span>
+                  </span>
+                  {activeOrgId === o.id && <Check className="size-3.5 shrink-0" aria-hidden />}
+                </button>
+              </li>
+            ))}
           </ul>
 
           {canRename && (
@@ -106,7 +145,7 @@ export function OrgSwitcher() {
               ) : (
                 <button
                   type="button"
-                  onClick={() => { setRenameName(activeOrg.name ?? ""); setShowRename(true) }}
+                  onClick={() => { setRenameName(activeOrg?.name ?? ""); setShowRename(true) }}
                   className="text-xs text-muted-foreground hover:text-foreground"
                 >
                   Rename

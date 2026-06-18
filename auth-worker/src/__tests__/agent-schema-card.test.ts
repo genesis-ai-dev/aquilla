@@ -62,6 +62,17 @@ describe("buildSystemPrompt — role filtering", () => {
     expect(prompt.split("\n").length).toBeLessThanOrEqual(250)
   })
 
+  it("stays within the L1 budget even with a worst-case multi-line brief summary", () => {
+    // The injected brief block can carry up to L1_MAX_CHARS; a multi-paragraph
+    // summary adds the most newlines. Pin that the card still fits the budget.
+    const prompt = buildSystemPrompt({
+      ...baseCtx,
+      roleLevel: AGENT_ROLE.OWNER,
+      briefSummary: "Line of brief guidance.\n".repeat(30),
+    })
+    expect(prompt.split("\n").length).toBeLessThanOrEqual(250)
+  })
+
   // First real-model run (2026-06-12): the model treated #c aliases as the
   // user's segment numbers and could not order a sequence file. These pins
   // keep the card teaching what that run proved it must teach.
@@ -128,6 +139,37 @@ describe("buildSystemPrompt — role filtering", () => {
     expect(prompt).toContain("at most ONE question")
   })
 
+  it("injects the translator profile as JSON and a respond-in line", () => {
+    const prompt = buildSystemPrompt({
+      ...baseCtx,
+      roleLevel: 400,
+      translatorProfile: { age: "32", religiousBackground: "Christian", responseLanguage: "Tagalog" },
+      responseLanguage: "Tagalog",
+    })
+    expect(prompt).toContain("## Translator profile")
+    expect(prompt).toContain('"age": "32"')
+    expect(prompt).toContain('"religiousBackground": "Christian"')
+    expect(prompt).toContain("Respond to the user in Tagalog.")
+  })
+
+  it("caps over-long profile fields and drops empty ones (never trust the client)", () => {
+    const prompt = buildSystemPrompt({
+      ...baseCtx,
+      roleLevel: 400,
+      translatorProfile: { otherInfo: "z".repeat(500), gender: "   " },
+    })
+    // 280-char cap (PROFILE_FIELD_MAX) — the 281st z must not appear.
+    expect(prompt).toContain("z".repeat(280))
+    expect(prompt).not.toContain("z".repeat(281))
+    expect(prompt).not.toContain('"gender"')
+  })
+
+  it("adds no profile block when none is supplied", () => {
+    const prompt = buildSystemPrompt({ ...baseCtx, roleLevel: 400 })
+    expect(prompt).not.toContain("## Translator profile")
+    expect(prompt).not.toContain("Respond to the user in")
+  })
+
   it("grounds the situation when a file is focused — name, kind, and relative-reference rule", () => {
     const unfocused = buildSystemPrompt({ ...baseCtx, roleLevel: 400 })
     expect(unfocused).not.toContain("## Current situation")
@@ -143,6 +185,19 @@ describe("buildSystemPrompt — role filtering", () => {
     expect(focused).toContain('"Ruth"')
     expect(focused).toContain("kind: sequence")
     expect(focused).toContain("refer to THIS file")
+  })
+})
+
+describe("buildSystemPrompt brief block", () => {
+  const base = { projectId: "p", username: "u", roleLevel: 600 }
+  it("includes the brief summary when provided", () => {
+    const out = buildSystemPrompt({ ...base, briefSummary: "Translate for unchurched youth." })
+    expect(out).toContain("Translate for unchurched youth.")
+    expect(out).toContain("docs('brief')") // points the agent at the full L2
+  })
+  it("omits the brief section when no summary is set", () => {
+    const out = buildSystemPrompt(base)
+    expect(out).not.toContain("Project translation brief")
   })
 })
 

@@ -16,9 +16,19 @@ import type { Voice } from "@/lib/parsers/types"
 vi.mock("@/lib/audio/tts", () => ({
   synthesizeToWavBlob: vi.fn(),
 }))
+vi.mock("@/lib/sync/tts", () => ({
+  synthesizeCellTts: vi.fn(),
+}))
 vi.mock("@/lib/audio/tts-providers", () => ({
   normalizeVoiceForProvider: vi.fn((v: Voice) => v),
   defaultVoiceNameForProvider: vi.fn(() => "en-US-Standard-A"),
+  providerInfo: vi.fn(() => ({
+    id: "gemini",
+    tier: "cloud",
+    supportsCloning: true,
+    hasNamedVoices: true,
+    blurb: "",
+  })),
   TTS_PROVIDER_INFOS: [],
 }))
 vi.mock("@/lib/audio/gemini-tts", () => ({

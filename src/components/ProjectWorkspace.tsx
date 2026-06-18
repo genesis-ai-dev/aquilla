@@ -37,6 +37,7 @@ import { StatusBar } from "./StatusBar"
 import { SyncStatusIndicator } from "./SyncStatusIndicator"
 import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
 import { EditorTable, type AudioLensContext } from "./EditorTable"
+import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
@@ -109,6 +110,8 @@ import { PeerPresence } from "./PeerPresence"
 import { ViewSettingsMenu, type ViewSettingsMenuHandle } from "./ViewSettingsMenu"
 import type { OverflowMenuItem } from "./OverflowMenu"
 import { useFootnotesPreference } from "@/hooks/useFootnotesPreference"
+import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
+import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import { useFileFontSizes, setFileViewPref } from "@/lib/store/file-view-prefs"
 import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
@@ -139,7 +142,7 @@ import { addConcept } from "@/lib/terminology/store"
 import type { Concept } from "@/lib/terminology/types"
 import { buildGlosser, type BtSeed } from "@/lib/completion/bt-glosser"
 import { buildAlignmentModel } from "@/lib/completion/interlinear"
-import { buildStatisticalBt } from "@/lib/completion/bt-auto"
+import { buildStatisticalBt, resolveBtTargetEventId } from "@/lib/completion/bt-auto"
 // FRO-192: assignment work-pickup UI
 import { AssignModal } from "./AssignModal"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
@@ -212,9 +215,13 @@ export function shouldPatchSystemPrompt(
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
+  const { activeOrg, activeOrgId, isAllOrgs } = useActiveOrg()
   const goToProjects = useCallback(() => {
-    navigate("/")
-  }, [navigate])
+    navigate({
+      pathname: "/",
+      search: isAllOrgs ? "?org=all" : activeOrgId != null ? `?org=${activeOrgId}` : "",
+    })
+  }, [activeOrgId, isAllOrgs, navigate])
   const { project: loadedProject, status, refresh, patchSettings } = useProject(projectId!)
   // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt)
   // live in IDB; merge them onto the server-fetched record on load and after
@@ -767,7 +774,7 @@ export function ProjectWorkspace() {
   // hook order) can still call the latest version without stale-closure issues.
   // Updated unconditionally each render — refs never cause re-renders.
   const glosserRef = useRef<import("@/lib/completion/bt-glosser").Glosser | null>(null)
-  const persistBtRef = useRef<((cell: CellData, btText: string, polished: boolean) => void) | null>(null)
+  const persistBtRef = useRef<((cell: CellData, btText: string, polished: boolean, committedEventId?: string) => void) | null>(null)
   // cellsRef is already declared later in the file (line ~689) — we reuse it.
   const setBacktranslationCacheRef = useRef<React.Dispatch<React.SetStateAction<Map<string, string>>> | null>(null)
 
@@ -856,13 +863,35 @@ export function ProjectWorkspace() {
   }, [findNextUnfinished])
   const fileMeta = useFileMeta(activeFileId, project?.sourceLanguage, project?.targetLanguage)
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
-  const [footnotesInlineEnabled, setFootnotesInlineEnabled] = useFootnotesPreference(projectId!)
+  const [footnoteViewMode, setFootnoteViewMode] = useFootnotesPreference(projectId!)
+  const [visibleFootnotes, setVisibleFootnotes] = useState<VisibleFootnoteEntry[]>([])
+  const visibleFootnotesKeyRef = useRef("")
   // FRO-251: per-file, per-side font sizes — adjusted from the View settings
   // (eye) menu, rendered by EditorTable.
   const fontSizes = useFileFontSizes(activeFileId)
 
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const isSubtitleFile = activeFile?.type === "vtt" || activeFile?.type === "srt"
+
+  const handleVisibleFootnotesChange = useCallback((entries: VisibleFootnoteEntry[]) => {
+    const key = entries
+      .map((entry) => [
+        entry.cellId,
+        entry.activeFootnoteIndex ?? "",
+        entry.sourceFootnotes.map((fn) => `${fn.index}:${fn.text}`).join(","),
+        entry.targetFootnotes.map((fn) => `${fn.index}:${fn.text}`).join(","),
+      ].join(":"))
+      .join("|")
+    if (visibleFootnotesKeyRef.current === key) return
+    visibleFootnotesKeyRef.current = key
+    setVisibleFootnotes(entries)
+  }, [])
+
+  useEffect(() => {
+    if (footnoteViewMode === "tray") return
+    visibleFootnotesKeyRef.current = ""
+    setVisibleFootnotes([])
+  }, [footnoteViewMode])
 
   // Diarization (M3): "Diarize" a time-ordered media file → replace its media
   // segments with one per detected speaker turn + create "Speaker N" cast.
@@ -995,7 +1024,6 @@ export function ProjectWorkspace() {
   // on Y.Doc maps and the v1.x event grammar isn't in this build, so these are
   // no-ops and the drawer renders empty.
   // Org-level rules: fetch from org settings and merge with project rules.
-  const { activeOrg } = useActiveOrg()
   const {
     orgRules,
     promotionRequests,
@@ -1274,7 +1302,8 @@ export function ProjectWorkspace() {
       const btText = buildStatisticalBt(glosserRef.current, text)
       if (btText) {
         setBacktranslationCacheRef.current((prev) => new Map(prev).set(cell.id, btText))
-        persistBtRef.current(cell, btText, false)
+        // Pin to the just-committed event id (the projection still lags here).
+        persistBtRef.current(cell, btText, false, eventId)
       }
     }
   }, [project?.id, applyOptimisticTargetEdit, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell])
@@ -1308,7 +1337,7 @@ export function ProjectWorkspace() {
   }, [project?.id, historyCellId, cells, applyOptimisticTargetEdit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateAuditStats, revalidateCell])
 
   const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
-    project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, allProjectCells
+    project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, allProjectCells, project?.translationBrief?.l1Summary ?? undefined
   )
 
   // FRO-175: workspace AI chat panel
@@ -1464,7 +1493,13 @@ export function ProjectWorkspace() {
     cell: CellData,
     btText: string,
     polished: boolean,
+    committedEventId?: string,
   ) => {
+    // The BT must pin to the commit it describes. Right after a target commit
+    // the cell projection still reports the PRE-commit head, so prefer the
+    // just-committed event id when the caller has it (auto-BT-on-commit path).
+    const pinnedTargetEventId = resolveBtTargetEventId(committedEventId, cell.targetEventId)
+
     // 1. In-memory cache
     setBacktranslationCache((prev) => new Map(prev).set(cell.id, btText))
 
@@ -1474,13 +1509,13 @@ export function ProjectWorkspace() {
       localStorage.setItem(lsKey, JSON.stringify({
         btText,
         polished,
-        targetEventId: cell.targetEventId ?? "",
+        targetEventId: pinnedTargetEventId,
         savedAt: Date.now(),
       }))
     } catch { /* ignore quota/private-browsing errors */ }
 
     // 3. Outbox event
-    if (!project?.id || !cell.fileId || !cell.targetEventId) {
+    if (!project?.id || !cell.fileId || !pinnedTargetEventId) {
       console.warn("[bt-persist] missing project/file/targetEventId — skipping outbox emit")
       return
     }
@@ -1489,7 +1524,7 @@ export function ProjectWorkspace() {
       fileId: cell.fileId,
       cellId: cell.id,
       btText,
-      targetEventId: cell.targetEventId,
+      targetEventId: pinnedTargetEventId,
       polished,
       author: currentUsername,
     }).catch((err) => {
@@ -1511,15 +1546,20 @@ export function ProjectWorkspace() {
   setBacktranslationCacheRef.current = setBacktranslationCache
 
   /**
-   * Re-runs statistical BT on demand + optional LLM polish. Called by the BT
-   * tab's Generate/Polish button. Statistical BT is always computed first;
-   * LLM polish is only triggered when `isBacktranslationConfigured` is true.
+   * Re-runs statistical BT on demand + optional AI polish. Called by the BT
+   * tab's Generate/Regenerate buttons and the Polish toggle. Statistical BT is
+   * always computed first; the AI step only runs when the caller requests
+   * `polish` AND an AI model is configured (`isBacktranslationConfigured`).
+   *
+   * The Polish toggle passes its on/off state as `polish`, so turning it on
+   * regenerates with AI and turning it off regenerates statistical-only —
+   * keeping the displayed text in sync with the polished/statistical label.
    *
    * Auto-BT (on every target commit) uses `buildStatisticalBt` directly and
    * does NOT call this function — that path lives in handleCellCommitted and
    * commitCompletedCell (FRO-203).
    */
-  const runBacktranslation = useCallback(async (cell: CellData) => {
+  const runBacktranslation = useCallback(async (cell: CellData, polish = false) => {
     if (!cell.translated?.trim()) return
     const cellId = cell.id
     setBacktranslatingState((prev) => new Set(prev).add(cellId))
@@ -1531,12 +1571,11 @@ export function ProjectWorkspace() {
         btText = cell.translated // last-resort literal fallback
       }
 
-      // Step 2: LLM polish if configured and available
-      // (Polish toggle is per-tab; we use `isBacktranslationConfigured` as a
-      //  proxy for "polish wanted" here — the per-cell polish flag lives in the
-      //  EditorRow's local state and calls onSaveBacktranslation for user edits.)
+      // Step 2: AI polish — only when the caller asked for it (Polish toggle on)
+      // and a model is configured. The polished result replaces the statistical
+      // gloss and renders above the substring-alignment panel.
       let polished = false
-      if (isBacktranslationConfigured && project?.completionSettings) {
+      if (polish && isBacktranslationConfigured && project?.completionSettings) {
         try {
           btText = await generateBacktranslation({
             settings: project.completionSettings,
@@ -1870,6 +1909,23 @@ export function ProjectWorkspace() {
     projectId ? readTnSidebarVisible(projectId) : false,
   )
   const [focusedCellCanonicalRef, setFocusedCellCanonicalRef] = useState<string | null>(null)
+
+  // Scripture context for the chat dock's Summarize book/chapter buttons. A
+  // "Bible file" is one whose format is scripture (usfm/ebible/helloao), carries
+  // a corpus marker, or whose focused cell has a canonical ref. The chapter is
+  // the ref minus the verse, e.g. "GEN 1:1" → "GEN 1".
+  const bibleSummary = useMemo(() => {
+    if (!activeFile) return null
+    const isScripture =
+      ["usfm", "ebible", "helloao"].includes(activeFile.type) ||
+      Boolean(activeFile.corpusMarker) ||
+      Boolean(focusedCellCanonicalRef)
+    if (!isScripture) return null
+    const chapterRef = focusedCellCanonicalRef
+      ? focusedCellCanonicalRef.split(":")[0].trim()
+      : null
+    return { bookName: activeFile.name, chapterRef }
+  }, [activeFile, focusedCellCanonicalRef])
   // Parallel-bibles sidebar (helloao): open state persisted per project, plus
   // the canonical ref the panel follows. Fed by two signals, most recent
   // wins: the first visible editor row (scroll) and the focused cell
@@ -2141,6 +2197,53 @@ export function ProjectWorkspace() {
 
   const perms = useProjectPermissions(project)
   const isReadOnly = !perms.canEditContent
+
+  const commitTrayFootnoteText = useCallback(async (cellId: string, updatedText: string) => {
+    if (!project?.id || isReadOnly) return
+    if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
+    const cell = cellsRef.current.find((candidate) => candidate.id === cellId)
+    if (!cell) return
+
+    applyOptimisticTargetEditWithCapture(cell.id, { value: updatedText, valueHtml: updatedText })
+    await emitTargetCellCommit({
+      projectId: project.id,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
+      sourceEventId: cell.sourceEventId ?? null,
+      value: updatedText,
+      valueHtml: updatedText,
+      author: currentUsername,
+    })
+    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    await refreshOutboxPending()
+    revalidateAuditStats()
+    revalidateCell(cell.id)
+  }, [
+    project?.id,
+    project?.syncRole?.level,
+    isReadOnly,
+    applyOptimisticTargetEditWithCapture,
+    currentUsername,
+    getTokenForProjectFile,
+    refreshOutboxPending,
+    revalidateAuditStats,
+    revalidateCell,
+  ])
+
+  const handleTrayFootnoteSave = useCallback((cellId: string, footnoteIndex: number, newText: string) => {
+    const cell = cellsRef.current.find((candidate) => candidate.id === cellId)
+    if (!cell) return
+    const updated = spliceFootnoteText(cell.translated ?? "", footnoteIndex, newText)
+    void commitTrayFootnoteText(cellId, updated)
+  }, [commitTrayFootnoteText])
+
+  const handleTrayFootnoteDelete = useCallback((cellId: string, footnoteIndex: number) => {
+    const cell = cellsRef.current.find((candidate) => candidate.id === cellId)
+    if (!cell) return
+    const updated = deleteFootnote(cell.translated ?? "", footnoteIndex)
+    void commitTrayFootnoteText(cellId, updated)
+  }, [commitTrayFootnoteText])
 
   const { state: checklistState, dismissed: checklistDismissed, dismiss: dismissChecklist, refreshShares: refreshChecklistShares } = useSetupChecklist(project ?? null)
   const [checklistOpen, setChecklistOpen] = useState(false)
@@ -2632,7 +2735,7 @@ export function ProjectWorkspace() {
     navigate,
   }), [activeFileId, completeBatch, cells, project, frontierSession, currentUsername, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell])
 
-  const handleCellCommitted = useCallback(async (cellId?: string) => {
+  const handleCellCommitted = useCallback(async (cellId?: string, committedEventId?: string) => {
     // Capture before async work — another edit could arrive during the flush.
     const pendingBt = lastOptimisticEditRef.current
     lastOptimisticEditRef.current = null
@@ -2659,7 +2762,8 @@ export function ProjectWorkspace() {
         const cell = cellsRef.current.find((c) => c.id === cellId)
         setBacktranslationCacheRef.current((prev) => new Map(prev).set(cellId, btText))
         if (cell && persistBtRef.current) {
-          persistBtRef.current(cell, btText, false)
+          // Pin to the just-committed event id (the projection still lags here).
+          persistBtRef.current(cell, btText, false, committedEventId)
         }
       }
     }
@@ -3097,6 +3201,7 @@ export function ProjectWorkspace() {
                   resolveCell: resolveCellById,
                   onApplied: handleAgentApplied,
                 }}
+                bibleSummary={bibleSummary}
               />
             }
             searchPanel={
@@ -3172,8 +3277,8 @@ export function ProjectWorkspace() {
               sourceTextDirection={fileMeta.sourceTextDirection}
               targetTextDirection={fileMeta.targetTextDirection}
               cellLabelsEnabled={cellLabelsEnabled}
-              footnotesInlineEnabled={footnotesInlineEnabled}
-              onFootnotesInlineChange={setFootnotesInlineEnabled}
+              footnoteViewMode={footnoteViewMode}
+              onFootnoteViewModeChange={setFootnoteViewMode}
               tnSidebarEnabled={tnSidebarVisible}
               rtlHintDismissed={fileMeta.rtlHintDismissed}
               sourceFontSize={fontSizes.source}
@@ -3455,7 +3560,7 @@ export function ProjectWorkspace() {
           </div>
         ) : cellAreaState.kind === "ready" ? (
           // FRO-309: relative wrapper so the search-expanded overlay can cover the editor
-          <div className="relative h-full w-full">
+          <div className="relative flex h-full w-full flex-col">
             {/* FRO-309: Expanded search results overlay */}
             {searchExpandedQuery !== null && (
               <div className="absolute inset-0 z-20 bg-background">
@@ -3470,9 +3575,13 @@ export function ProjectWorkspace() {
                 />
               </div>
             )}
-            <EditorTable
+            <div className="min-h-0 flex-1">
+              <EditorTable
             ref={editorRef} project={project} cells={cellsWithBacktranslation}
-            showFootnotesInline={footnotesInlineEnabled}
+            showFootnotesInline={footnoteViewMode === "inline"}
+            footnotePanelActive={footnoteViewMode !== "off"}
+            footnoteViewMode={footnoteViewMode}
+            onVisibleFootnotesChange={footnoteViewMode === "tray" ? handleVisibleFootnotesChange : undefined}
             username={currentUsername}
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
@@ -3541,6 +3650,16 @@ export function ProjectWorkspace() {
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
           />
+            </div>
+            {footnoteViewMode === "tray" && (
+              <FootnotesTray
+                entries={visibleFootnotes}
+                editable={!isReadOnly}
+                onSave={handleTrayFootnoteSave}
+                onDelete={handleTrayFootnoteDelete}
+                onClose={() => setFootnoteViewMode("off")}
+              />
+            )}
           </div>
         ) : (
           <CellAreaPlaceholder

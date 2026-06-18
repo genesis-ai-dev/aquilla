@@ -182,7 +182,7 @@ export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { name: str
   },
 }
 
-export type TtsProvider = "kokoro" | "gemini" | "mms"
+export type TtsProvider = "omnivoice" | "gemini" | "kokoro" | "mms"
 
 /**
  * A reusable voice in the project's voice library. Voice owns *all* the knobs
@@ -195,7 +195,7 @@ export interface Voice {
   name: string
   /** Hex color for the voice's chip/dot in the UI. */
   color?: string
-  /** Defaults to "gemini" when absent. Kokoro voices ignore everything below voiceName. */
+  /** Defaults to "omnivoice" when absent. Kokoro voices ignore everything below voiceName. */
   provider?: TtsProvider
   /** Optional Gemini model override. */
   model?: string
@@ -222,7 +222,7 @@ export interface Voice {
 }
 
 export interface ProjectTtsSettings {
-  /** "gemini" is the recommended BYOK default. "kokoro" keeps the local browser model path. */
+  /** "omnivoice" (hosted, no key) is the default. "gemini" is BYOK; "kokoro"/"mms" run locally. */
   provider?: TtsProvider
   /** Gemini API key for BYOK TTS. Stored in the local project record. */
   apiKey?: string
@@ -254,6 +254,8 @@ export interface CellTtsSettings {
 export interface ProjectRecord {
   id: string
   name: string
+  /** Owning org id when the project was hydrated from the server. */
+  orgId?: number | null
   sourceLanguage: string
   targetLanguage: string
   createdAt: string
@@ -375,6 +377,9 @@ export interface ProjectRecord {
   /** Authored living-memory entries (instructions + standards). Persisted and
    *  synced via ProjectWideSettings the same way as `rules` / `terminology`. */
   livingMemoryEntries?: LivingMemoryEntry[]
+  /** The project's skopos/Paratext translation brief. Persisted and synced via
+   *  ProjectWideSettings the same way as `livingMemoryEntries`. */
+  translationBrief?: import("@/lib/brief/types").TranslationBrief
   /**
    * Persisted interlinear alignment seeds (FRO-207). Synced via
    * ProjectWideSettings the same way as `terminology`. Positive weight =

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
+import type { FootnoteViewMode } from "@/lib/footnotes/types"
 
 export interface ViewSettingsMenuHandle {
   open: () => void
@@ -19,8 +20,8 @@ interface ViewSettingsMenuProps {
   targetTextDirection: "ltr" | "rtl"
   cellLabelsEnabled: boolean
   tnSidebarEnabled: boolean
-  /** FRO-317: show USFM \f...\f* footnotes as a distinct panel below each cell. */
-  footnotesInlineEnabled?: boolean
+  /** FRO-317: USFM \f...\f* footnote display mode. */
+  footnoteViewMode?: FootnoteViewMode
   rtlHintDismissed?: boolean
   /** Per-file source-column font size in px. */
   sourceFontSize: number
@@ -33,7 +34,7 @@ interface ViewSettingsMenuProps {
   onSourceFontSizeChange: (v: number) => void
   onTargetFontSizeChange: (v: number) => void
   onTnSidebarChange: (v: boolean) => void
-  onFootnotesInlineChange?: (v: boolean) => void
+  onFootnoteViewModeChange?: (v: FootnoteViewMode) => void
   onDismissRtlHint?: () => void
 }
 
@@ -45,7 +46,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   targetTextDirection,
   cellLabelsEnabled,
   tnSidebarEnabled,
-  footnotesInlineEnabled = false,
+  footnoteViewMode = "off",
   rtlHintDismissed = true,
   sourceFontSize,
   targetFontSize,
@@ -56,7 +57,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   onSourceFontSizeChange,
   onTargetFontSizeChange,
   onTnSidebarChange,
-  onFootnotesInlineChange,
+  onFootnoteViewModeChange,
   onDismissRtlHint,
 }, ref) {
   const rtlDetected = sourceTextDirection === "rtl" || targetTextDirection === "rtl"
@@ -177,15 +178,31 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
                 <span>Show translation notes</span>
                 <Pill on={tnSidebarEnabled} />
               </Menu.Item>
-              {onFootnotesInlineChange && (
-                <Menu.Item
-                  disabled={!fileOpen}
-                  onClick={() => onFootnotesInlineChange(!footnotesInlineEnabled)}
-                  className="flex cursor-pointer select-none items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-50"
-                >
-                  <span>Show footnotes inline</span>
-                  <Pill on={footnotesInlineEnabled} />
-                </Menu.Item>
+              {onFootnoteViewModeChange && (
+                <>
+                  <div className="-mx-1 my-1.5 h-px rounded-full shadow-neu-inset" role="separator" />
+                  <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Footnotes
+                  </div>
+                  <FootnoteModeItem
+                    disabled={!fileOpen}
+                    label="Hidden"
+                    active={footnoteViewMode === "off"}
+                    onSelect={() => onFootnoteViewModeChange("off")}
+                  />
+                  <FootnoteModeItem
+                    disabled={!fileOpen}
+                    label="Inline under cells"
+                    active={footnoteViewMode === "inline"}
+                    onSelect={() => onFootnoteViewModeChange("inline")}
+                  />
+                  <FootnoteModeItem
+                    disabled={!fileOpen}
+                    label="Bottom tray"
+                    active={footnoteViewMode === "tray"}
+                    onSelect={() => onFootnoteViewModeChange("tray")}
+                  />
+                </>
               )}
               <div className="-mx-1 my-1.5 h-px rounded-full shadow-neu-inset" role="separator" />
               <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -243,6 +260,35 @@ function Pill({ on }: { on: boolean }) {
     >
       {on ? "On" : "Off"}
     </span>
+  )
+}
+
+function FootnoteModeItem({
+  label,
+  active,
+  disabled,
+  onSelect,
+}: {
+  label: string
+  active: boolean
+  disabled: boolean
+  onSelect: () => void
+}) {
+  return (
+    <Menu.Item
+      disabled={disabled}
+      onClick={onSelect}
+      className="flex cursor-pointer select-none items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-50"
+    >
+      <span>{label}</span>
+      <span
+        className={cn(
+          "h-2 w-2 rounded-full",
+          active ? "bg-primary" : "bg-muted shadow-neu-inset",
+        )}
+        aria-hidden="true"
+      />
+    </Menu.Item>
   )
 }
 

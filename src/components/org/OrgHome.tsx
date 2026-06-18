@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
+import type { OrgSummary } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { getPortfolio, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
@@ -14,19 +15,103 @@ import { UsageRollup } from "./UsageRollup"
 import { CreditsPanel } from "./CreditsPanel"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
+import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
+import type { ProjectRecord } from "@/lib/parsers/types"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { X } from "lucide-react"
 
 const STALE_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000
 
 type ActivityStatus = "not-started" | "stalled" | "active"
 
-type StatusFilter = "all" | "active" | "stalled" | "overdue"
+type StatusFilter = "all" | "stalled" | "overdue"
+
+type ProjectLens = "recent" | "attention" | "least-translated" | "most-progress" | "name"
+
+const PROJECT_LENS_STORAGE_KEY = "org:all-projects:view"
+const PROJECT_LENS_VALUES: ProjectLens[] = ["recent", "attention", "least-translated", "most-progress", "name"]
+
+type PortfolioProjectRow = PortfolioProject & {
+  orgId?: number
+  orgName?: string | null
+}
+
+type OrgPortfolioSummary = {
+  org: OrgSummary
+  projectCount: number
+  avgTranslatedPct: number
+  avgValidatedPct: number
+  avgAudioPct: number
+  stalledCount: number
+  overdueCount: number
+}
 
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "active", label: "Active" },
   { value: "stalled", label: "Stalled" },
   { value: "overdue", label: "Overdue" },
 ]
+
+const PROJECT_LENSES: { value: ProjectLens; label: string; description: string; empty: string }[] = [
+  {
+    value: "recent",
+    label: "Recently updated",
+    description: "Latest project activity across all organizations",
+    empty: "No recently updated projects yet.",
+  },
+  {
+    value: "attention",
+    label: "Needs attention",
+    description: "Highest-priority projects by deadline, activity, and progress",
+    empty: "No projects need attention yet.",
+  },
+  {
+    value: "least-translated",
+    label: "Least translated",
+    description: "Projects with the lowest translation progress",
+    empty: "No projects yet.",
+  },
+  {
+    value: "most-progress",
+    label: "Most progress",
+    description: "Projects with the highest translation progress",
+    empty: "No projects yet.",
+  },
+  {
+    value: "name",
+    label: "Name",
+    description: "Projects sorted alphabetically",
+    empty: "No projects yet.",
+  },
+]
+
+function readProjectLens(): ProjectLens {
+  try {
+    const stored = localStorage.getItem(PROJECT_LENS_STORAGE_KEY)
+    return PROJECT_LENS_VALUES.includes(stored as ProjectLens) ? stored as ProjectLens : "recent"
+  } catch {
+    return "recent"
+  }
+}
+
+function writeProjectLens(lens: ProjectLens) {
+  try {
+    localStorage.setItem(PROJECT_LENS_STORAGE_KEY, lens)
+  } catch {
+    // Ignore local storage restrictions; the in-memory state still updates.
+  }
+}
+
+function isProjectLens(value: string | null | undefined): value is ProjectLens {
+  return PROJECT_LENS_VALUES.includes(value as ProjectLens)
+}
 
 /**
  * A project that has never been edited and has no translated cells hasn't
@@ -39,31 +124,122 @@ export function activityStatus(p: PortfolioProject, now: number): ActivityStatus
   return "active"
 }
 
+function averagePct(projects: PortfolioProjectRow[], readPct: (project: PortfolioProjectRow) => number): number {
+  return projects.length > 0 ? projects.reduce((sum, project) => sum + readPct(project), 0) / projects.length : 0
+}
+
+function orgDisplayName(org: OrgSummary): string {
+  return org.name ?? "Workspace"
+}
+
+function roleLabel(org: OrgSummary): string {
+  return org.role.name.replace(/_/g, " ")
+}
+
+function formatUpdatedAt(value: number | null): string {
+  if (value == null) return "No activity yet"
+  return `Updated ${new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(value))}`
+}
+
+function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, now: number): PortfolioProjectRow[] {
+  return [...projects].sort((a, b) => {
+    switch (lens) {
+      case "recent":
+        return (b.lastEditAt ?? 0) - (a.lastEditAt ?? 0) || a.name.localeCompare(b.name)
+      case "least-translated":
+        return translatedPct(a) - translatedPct(b) || a.name.localeCompare(b.name)
+      case "most-progress":
+        return translatedPct(b) - translatedPct(a) || a.name.localeCompare(b.name)
+      case "name":
+        return a.name.localeCompare(b.name)
+      case "attention":
+        return attentionRank(b, now) - attentionRank(a, now) || a.name.localeCompare(b.name)
+    }
+  })
+}
+
 export function OrgHome() {
-  const { activeOrg, activeOrgId, orgs, isLoading: orgLoading } = useActiveOrg()
+  const { activeOrg, activeOrgId, isAllOrgs, orgs, isLoading: orgLoading, setActiveOrg } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
+  const navigate = useNavigate()
   const jwt = session?.jwt ?? null
 
-  const [projects, setProjects] = useState<PortfolioProject[]>([])
-  // FRO-335: projects shared from orgs the caller isn't a member of
-  // (invite-link / bulk-add grants) — the org portfolio above can't see them.
-  const [sharedProjects, setSharedProjects] = useState<CloudProjectSummary[]>([])
+  const [projects, setProjects] = useState<PortfolioProjectRow[]>([])
+  // FRO-335: accessible-project rows supply direct/group/org role attribution
+  // and identify projects shared from orgs the portfolio endpoint can't see.
+  const [accessibleProjects, setAccessibleProjects] = useState<CloudProjectSummary[]>([])
   // FRO-326: unredeemed invites addressed to the caller's email — without
   // this card, an invite whose link never arrived is undiscoverable in-app.
   const [pendingInvites, setPendingInvites] = useState<MyPendingInvite[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [query, setQuery] = useState("")
+  const [projectQuery, setProjectQuery] = useState("")
+  const [orgQuery, setOrgQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
+  const [projectLens, setProjectLens] = useState<ProjectLens>(readProjectLens)
 
   useEffect(() => {
-    if (!jwt || activeOrgId == null) return
+    if (!jwt) {
+      setProjects([])
+      setLoading(false)
+      return
+    }
+    if (isAllOrgs) {
+      if (orgLoading) {
+        setLoading(false)
+        return
+      }
+      if (orgs.length === 0) {
+        setProjects([])
+        setLoading(false)
+        return
+      }
+      let cancelled = false
+      setLoading(true)
+      setError(null)
+      const orgById = new Map(orgs.map((org) => [org.id, org]))
+      getPortfolios(jwt, orgs.map((org) => org.id))
+        .then((portfolios) => {
+          if (!cancelled) setProjects(portfolios.flatMap(({ orgId, projects: list }) => {
+            const org = orgById.get(orgId)
+            if (!org) return []
+            return list.map((project) => ({
+              ...project,
+              orgId: org.id,
+              orgName: org.name ?? "Workspace",
+            }))
+          }))
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            if (err instanceof UserError && err.category === "session-expired") {
+              notifySessionExpired()
+            }
+            setError(err instanceof Error ? err.message : String(err))
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false)
+        })
+      return () => { cancelled = true }
+    }
+    if (activeOrgId == null) {
+      setProjects([])
+      setLoading(false)
+      return
+    }
     let cancelled = false
     setLoading(true)
     setError(null)
     getPortfolio(jwt, activeOrgId)
       .then((list) => {
-        if (!cancelled) setProjects(list)
+        if (!cancelled) {
+          setProjects(list.map((project) => ({
+            ...project,
+            orgId: activeOrgId,
+            orgName: activeOrg?.name ?? "Workspace",
+          })))
+        }
       })
       .catch((err) => {
         if (!cancelled) {
@@ -77,19 +253,23 @@ export function OrgHome() {
         if (!cancelled) setLoading(false)
       })
     return () => { cancelled = true }
-  }, [jwt, activeOrgId])
+  }, [jwt, activeOrgId, activeOrg?.name, isAllOrgs, orgLoading, orgs])
 
-  // FRO-335: surface cross-org grants on the Overview too — otherwise a user
+  // FRO-335: surface cross-org grants on the Projects page too — otherwise a user
   // whose only project arrived via an invite link sees an empty dashboard.
   useEffect(() => {
-    if (!jwt || orgLoading) return
+    if (!jwt) {
+      setAccessibleProjects([])
+      return
+    }
+    if (orgLoading) return
     let cancelled = false
     fetchAccessibleProjects(jwt)
       .then((all) => {
         if (cancelled) return
-        setSharedProjects(partitionSharedProjects(all, orgs, activeOrgId).sharedWithMe)
+        setAccessibleProjects(all)
       })
-      .catch(() => { if (!cancelled) setSharedProjects([]) })
+      .catch(() => { if (!cancelled) setAccessibleProjects([]) })
     return () => { cancelled = true }
   }, [jwt, orgs, activeOrgId, orgLoading])
 
@@ -109,7 +289,7 @@ export function OrgHome() {
     return (
       <AppShell
         sidebar={<OrgSidebar />}
-        header={<OrgBreadcrumb section="Overview" />}
+        header={<OrgBreadcrumb section="Projects" />}
         statusBar={null}
         main={
           <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
@@ -130,6 +310,7 @@ export function OrgHome() {
   }
 
   const isPageLoading = sessionLoading || orgLoading || loading
+  const workspaceLabel = isAllOrgs ? "All organizations" : activeOrg?.name ?? "Workspace"
 
   // Rollup stats
   const now = Date.now()
@@ -145,17 +326,61 @@ export function OrgHome() {
   const overdueCount = projects.filter((p) => deadlineStatus(p, now) === "overdue").length
   const avgAudioPct =
     projects.length > 0 ? projects.reduce((sum, p) => sum + audioPct(p), 0) / projects.length : 0
+  const accessByProjectId = new Map(accessibleProjects.map((project) => [project.id, project]))
+  const sharedProjects = partitionSharedProjects(accessibleProjects, orgs, activeOrgId).sharedWithMe
 
-  // Attention-ranked list
-  const ranked = [...projects].sort((a, b) => attentionRank(b, now) - attentionRank(a, now))
+  const orgSummaries: OrgPortfolioSummary[] = orgs
+    .map((org) => {
+      const orgProjects = projects.filter((project) => project.orgId === org.id)
+      return {
+        org,
+        projectCount: orgProjects.length,
+        avgTranslatedPct: averagePct(orgProjects, translatedPct),
+        avgValidatedPct: averagePct(orgProjects, validatedPct),
+        avgAudioPct: averagePct(orgProjects, audioPct),
+        stalledCount: orgProjects.filter((project) => activityStatus(project, now) === "stalled").length,
+        overdueCount: orgProjects.filter((project) => deadlineStatus(project, now) === "overdue").length,
+      }
+    })
+    .sort((a, b) => orgDisplayName(a.org).localeCompare(orgDisplayName(b.org)))
+
+  const visibleOrgSummaries = orgSummaries.filter((summary) => {
+    if (!orgQuery) return true
+    return orgDisplayName(summary.org).toLowerCase().includes(orgQuery.toLowerCase())
+  })
+
+  function openOrg(orgId: number) {
+    setActiveOrg(orgId)
+    navigate({ pathname: "/", search: `?org=${orgId}` })
+  }
+
+  function selectProjectLens(lens: ProjectLens) {
+    setProjectLens(lens)
+    writeProjectLens(lens)
+  }
+
+  function handleProjectLensChange(value: string | null) {
+    if (!isProjectLens(value)) return
+    selectProjectLens(value)
+  }
+
+  function handleCreated(project: ProjectRecord) {
+    navigate(`/projects/${project.id}`)
+  }
+
+  const projectSearchClassName =
+    "h-9 w-full rounded-md border border-border bg-background px-3 pr-9 text-sm focus-visible:border-muted-foreground/40 focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-sm"
+  const projectControlGroupClassName =
+    "flex min-w-fit shrink-0 items-center gap-2 whitespace-nowrap"
+
+  // Project lists
+  const currentProjectLens = PROJECT_LENSES.find((lens) => lens.value === projectLens) ?? PROJECT_LENSES[0]
 
   // Filter bar — narrows the listed projects only; the rollup strip above
   // continues to reflect the full portfolio.
-  const visible = ranked.filter((p) => {
-    if (query && !p.name.toLowerCase().includes(query.toLowerCase())) return false
+  const filteredProjects = projects.filter((p) => {
+    if (projectQuery && !p.name.toLowerCase().includes(projectQuery.toLowerCase())) return false
     switch (statusFilter) {
-      case "active":
-        return activityStatus(p, now) === "active"
       case "stalled":
         return activityStatus(p, now) === "stalled"
       case "overdue":
@@ -164,11 +389,23 @@ export function OrgHome() {
         return true
     }
   })
+  const visible = sortProjectsByLens(filteredProjects, projectLens, now)
 
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section="Overview" />}
+      header={
+        <div className="flex items-center justify-between pr-4">
+          <OrgBreadcrumb section="Projects" />
+          {activeOrgId != null ? (
+            <ProjectCreateDialog orgId={activeOrgId} onCreated={handleCreated} />
+          ) : (
+            <span className="rounded-full border bg-muted/40 px-3 py-1 text-xs text-muted-foreground">
+              Select an organization to create a project
+            </span>
+          )}
+        </div>
+      }
       statusBar={null}
       main={
         <div className="h-full overflow-y-auto p-6 space-y-6">
@@ -180,7 +417,7 @@ export function OrgHome() {
             <>
               {/* Org header */}
               <div className="rounded-lg border p-4">
-                <h1 className="text-lg font-semibold">{activeOrg?.name ?? "Workspace"}</h1>
+                <h1 className="text-lg font-semibold">{workspaceLabel}</h1>
               </div>
 
               {/* FRO-326: received invites — the user has been invited but
@@ -213,151 +450,458 @@ export function OrgHome() {
                 </section>
               )}
 
-              {/* Rollup strip */}
-              <div className="grid grid-cols-6 gap-4">
-                <div className="rounded-lg border p-4 text-center">
-                  <p className="text-2xl font-bold">{projects.length}</p>
-                  <p className="text-sm text-muted-foreground">Projects</p>
-                </div>
-                <div className="rounded-lg border p-4 text-center">
-                  <p className="text-2xl font-bold">{Math.round(avgTranslatedPct * 100)}%</p>
-                  <p className="text-sm text-muted-foreground">Avg translated</p>
-                </div>
-                <div className="rounded-lg border p-4 text-center">
-                  <p className="text-2xl font-bold">{Math.round(avgValidatedPct * 100)}%</p>
-                  <p className="text-sm text-muted-foreground">Avg validated</p>
-                </div>
-                <div className="rounded-lg border p-4 text-center">
-                  <p className="text-2xl font-bold">{Math.round(avgAudioPct * 100)}%</p>
-                  <p className="text-sm text-muted-foreground">Avg audio</p>
-                </div>
-                <div className="rounded-lg border p-4 text-center">
-                  <p className="text-2xl font-bold">{stalledCount}</p>
-                  <p className="text-sm text-muted-foreground">Stalled</p>
-                </div>
-                <div className="rounded-lg border p-4 text-center">
-                  <p className={`text-2xl font-bold ${overdueCount > 0 ? "text-destructive" : ""}`}>{overdueCount}</p>
-                  <p className="text-sm text-muted-foreground">Overdue</p>
-                </div>
-              </div>
-
-              {/* Filter bar */}
-              {projects.length > 0 && (
-                <div className="flex flex-wrap items-center gap-3">
-                  <input
-                    type="text"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Filter projects…"
-                    aria-label="Filter projects by name"
-                    className="h-9 w-56 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  />
-                  <div className="flex items-center gap-1">
-                    {STATUS_FILTERS.map((f) => (
-                      <button
-                        key={f.value}
-                        type="button"
-                        onClick={() => setStatusFilter(f.value)}
-                        aria-pressed={statusFilter === f.value}
-                        className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                          statusFilter === f.value
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-muted text-muted-foreground hover:bg-muted/70"
-                        }`}
-                      >
-                        {f.label}
-                      </button>
-                    ))}
+              {isAllOrgs ? (
+                <>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-6">
+                    <div className="rounded-lg border bg-card p-4 text-center">
+                      <p className="text-2xl font-bold">{orgs.length}</p>
+                      <p className="text-sm text-muted-foreground">Organizations</p>
+                    </div>
+                    <div className="rounded-lg border bg-card p-4 text-center">
+                      <p className="text-2xl font-bold">{projects.length}</p>
+                      <p className="text-sm text-muted-foreground">Projects</p>
+                    </div>
+                    <div className="rounded-lg border bg-card p-4 text-center">
+                      <p className="text-2xl font-bold">{Math.round(avgTranslatedPct * 100)}%</p>
+                      <p className="text-sm text-muted-foreground">Avg translated</p>
+                    </div>
+                    <div className="rounded-lg border bg-card p-4 text-center">
+                      <p className="text-2xl font-bold">{Math.round(avgValidatedPct * 100)}%</p>
+                      <p className="text-sm text-muted-foreground">Avg validated</p>
+                    </div>
+                    <div className="rounded-lg border bg-card p-4 text-center">
+                      <p className="text-2xl font-bold">{stalledCount}</p>
+                      <p className="text-sm text-muted-foreground">Stalled</p>
+                    </div>
+                    <div className="rounded-lg border bg-card p-4 text-center">
+                      <p className={`text-2xl font-bold ${overdueCount > 0 ? "text-destructive" : ""}`}>{overdueCount}</p>
+                      <p className="text-sm text-muted-foreground">Overdue</p>
+                    </div>
                   </div>
-                </div>
-              )}
 
-              {/* Attention-ranked list */}
-              {projects.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No projects in this org yet.</p>
-              ) : visible.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No matching projects.</p>
-              ) : (
-                <div className="rounded-lg border divide-y">
-                  {visible.map((p) => {
-                    const tpct = Math.round(translatedPct(p) * 100)
-                    const pct = Math.round(validatedPct(p) * 100)
-                    const apct = Math.round(audioPct(p) * 100)
-                    const status = activityStatus(p, now)
-                    const dstatus = deadlineStatus(p, now)
-                    return (
-                      <Link
-                        key={p.id}
-                        to={`/projects/${p.id}`}
-                        className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className="font-medium truncate">{p.name}</p>
-                            {dstatus === "overdue" && (
-                              <span className="shrink-0 rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-medium text-destructive">
-                                Overdue
-                              </span>
-                            )}
-                            {dstatus === "soon" && (
-                              <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
-                                Due soon
-                              </span>
-                            )}
-                          </div>
-                          <div
-                            className="mt-1 space-y-0.5"
-                            aria-label={`${tpct}% translated, ${pct}% validated`}
-                          >
-                            <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                              <div className="h-full rounded-full bg-amber-500" style={{ width: `${tpct}%` }} />
-                            </div>
-                            <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                              <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
-                            </div>
-                          </div>
-                        </div>
-                        <div className="shrink-0 text-right">
-                          <p className={`text-xs ${status === "stalled" ? "text-destructive" : "text-muted-foreground"}`}>
-                            {status === "stalled"
-                              ? "Stalled"
-                              : status === "not-started"
-                                ? "Not started"
-                                : `${tpct}% translated`}
+                  <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+                    <section className="rounded-lg border bg-card">
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+                        <div>
+                          <h2 className="text-base font-semibold">Organizations</h2>
+                          <p className="text-xs text-muted-foreground">
+                            {visibleOrgSummaries.length} of {orgSummaries.length}
                           </p>
-                          <p className="text-xs text-muted-foreground">{pct}% validated</p>
-                          <p className="text-xs text-muted-foreground">{apct}% audio</p>
                         </div>
-                      </Link>
-                    )
-                  })}
-                </div>
-              )}
+                        {orgSummaries.length > 0 && (
+                          <input
+                            type="search"
+                            value={orgQuery}
+                            onChange={(e) => setOrgQuery(e.target.value)}
+                            placeholder="Filter organizations…"
+                            aria-label="Filter organizations by name"
+                            className="h-9 w-full rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:w-56"
+                          />
+                        )}
+                      </div>
 
-              {/* FRO-335: cross-org projects (invite-link / bulk-add grants).
-                  Listed separately — they're not part of this org's portfolio,
-                  but hiding them made them unreachable from every nav surface. */}
-              {sharedProjects.length > 0 && (
-                <section data-testid="shared-with-you" className="space-y-2">
-                  <h2 className="text-sm font-medium text-muted-foreground">Shared with you</h2>
-                  <div className="rounded-lg border divide-y">
-                    {sharedProjects.map((p) => (
-                      <Link
-                        key={p.id}
-                        to={`/projects/${p.id}`}
-                        className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
-                      >
-                        <p className="flex-1 min-w-0 truncate font-medium">{p.name}</p>
-                        <span className="shrink-0 text-xs text-muted-foreground">{p.role.name}</span>
-                      </Link>
-                    ))}
+                      {orgSummaries.length === 0 ? (
+                        <div className="px-4 py-10 text-center">
+                          <p className="text-sm text-muted-foreground">No organizations yet.</p>
+                        </div>
+                      ) : visibleOrgSummaries.length === 0 ? (
+                        <div className="px-4 py-10 text-center">
+                          <p className="text-sm text-muted-foreground">No matching organizations.</p>
+                        </div>
+                      ) : (
+                        <div className="divide-y">
+                          {visibleOrgSummaries.map((summary) => (
+                            <button
+                              key={summary.org.id}
+                              type="button"
+                              onClick={() => openOrg(summary.org.id)}
+                              className="flex w-full items-center gap-4 p-4 text-left transition-colors hover:bg-muted/50"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="truncate font-medium">{orgDisplayName(summary.org)}</p>
+                                  <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                    {roleLabel(summary.org)}
+                                  </span>
+                                </div>
+                                <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+                                  <span>{summary.projectCount} project{summary.projectCount === 1 ? "" : "s"}</span>
+                                  <span>{Math.round(summary.avgTranslatedPct * 100)}% translated</span>
+                                  <span>{Math.round(summary.avgValidatedPct * 100)}% validated</span>
+                                </div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+
+                    <section className="rounded-lg border bg-card">
+                      <div className="space-y-3 border-b px-4 py-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <h2 className="text-base font-semibold">Projects</h2>
+                            <p className="text-xs text-muted-foreground">{currentProjectLens.description}</p>
+                          </div>
+                        </div>
+                        <div className="flex w-full flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden">
+                          <div className="relative min-w-[12rem] flex-[1_1_13rem] max-w-52">
+                            <input
+                              type="text"
+                              value={projectQuery}
+                              onChange={(e) => setProjectQuery(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Escape") e.currentTarget.blur()
+                              }}
+                              placeholder="Filter projects…"
+                              aria-label="Filter projects by name"
+                              autoCorrect="off"
+                              autoCapitalize="none"
+                              spellCheck={false}
+                              className={projectSearchClassName}
+                            />
+                            {projectQuery && (
+                              <button
+                                type="button"
+                                aria-label="Clear project filter"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => setProjectQuery("")}
+                                className="absolute right-2 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                              >
+                                <X className="size-3.5" aria-hidden />
+                              </button>
+                            )}
+                          </div>
+                          <div className={projectControlGroupClassName}>
+                            <div className="flex items-center gap-2" aria-label="Project status filter">
+                              <span className="text-xs font-medium text-muted-foreground">Status</span>
+                              <div className="flex items-center gap-1">
+                                {STATUS_FILTERS.map((f) => (
+                                  <button
+                                    key={f.value}
+                                    type="button"
+                                    onClick={() => setStatusFilter(f.value)}
+                                    aria-pressed={statusFilter === f.value}
+                                    className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                                      statusFilter === f.value
+                                        ? "bg-primary text-primary-foreground"
+                                        : "bg-muted text-muted-foreground hover:bg-muted/70"
+                                    }`}
+                                  >
+                                    {f.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2" aria-label="Project sort">
+                              <span className="text-xs font-medium text-muted-foreground">Sort by</span>
+                              <Select
+                                items={PROJECT_LENSES.map((lens) => ({ value: lens.value, label: lens.label }))}
+                                value={projectLens}
+                                onValueChange={handleProjectLensChange}
+                              >
+                                <SelectTrigger aria-label="Sort projects" size="sm" className="min-w-40 bg-background">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectGroup>
+                                    {PROJECT_LENSES.map((lens) => (
+                                      <SelectItem key={lens.value} value={lens.value}>
+                                        {lens.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectGroup>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {projects.length === 0 ? (
+                        <div className="px-4 py-10 text-center">
+                          <p className="text-sm text-muted-foreground">No projects yet.</p>
+                        </div>
+                      ) : visible.length === 0 ? (
+                        <div className="px-4 py-10 text-center">
+                          <p className="text-sm text-muted-foreground">
+                            {projectQuery ? "No matching projects." : currentProjectLens.empty}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="divide-y">
+                          {visible.map((p) => {
+                            const access = accessByProjectId.get(p.id)
+                            const tpct = Math.round(translatedPct(p) * 100)
+                            const pct = Math.round(validatedPct(p) * 100)
+                            const apct = Math.round(audioPct(p) * 100)
+                            const status = activityStatus(p, now)
+                            const dstatus = deadlineStatus(p, now)
+                            const statusText =
+                              projectLens === "recent"
+                                ? formatUpdatedAt(p.lastEditAt)
+                                : status === "stalled"
+                                  ? "Stalled"
+                                  : status === "not-started"
+                                    ? "Not started"
+                                    : `${tpct}% translated`
+                            return (
+                              <Link
+                                key={p.id}
+                                to={`/projects/${p.id}`}
+                                className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <p className="truncate font-medium">{p.name}</p>
+                                    {p.orgName && (
+                                      <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                        {p.orgName}
+                                      </span>
+                                    )}
+                                    {access && (
+                                      <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                        {access.role.name}
+                                      </span>
+                                    )}
+                                    {dstatus === "overdue" && (
+                                      <span className="shrink-0 rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-medium text-destructive">
+                                        Overdue
+                                      </span>
+                                    )}
+                                    {dstatus === "soon" && (
+                                      <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                                        Due soon
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div
+                                    className="mt-1 space-y-0.5"
+                                    aria-label={`${tpct}% translated, ${pct}% validated`}
+                                  >
+                                    <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                                      <div className="h-full rounded-full bg-amber-500" style={{ width: `${tpct}%` }} />
+                                    </div>
+                                    <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                                      <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="shrink-0 text-right">
+                                  <p className={`text-xs ${status === "stalled" ? "text-destructive" : "text-muted-foreground"}`}>
+                                    {statusText}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">{pct}% validated</p>
+                                  <p className="text-xs text-muted-foreground">{apct}% audio</p>
+                                </div>
+                              </Link>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </section>
                   </div>
-                </section>
+                </>
+              ) : (
+                <>
+                  {/* Rollup strip */}
+                  <div className="grid grid-cols-6 gap-4">
+                    <div className="rounded-lg border p-4 text-center">
+                      <p className="text-2xl font-bold">{projects.length}</p>
+                      <p className="text-sm text-muted-foreground">Projects</p>
+                    </div>
+                    <div className="rounded-lg border p-4 text-center">
+                      <p className="text-2xl font-bold">{Math.round(avgTranslatedPct * 100)}%</p>
+                      <p className="text-sm text-muted-foreground">Avg translated</p>
+                    </div>
+                    <div className="rounded-lg border p-4 text-center">
+                      <p className="text-2xl font-bold">{Math.round(avgValidatedPct * 100)}%</p>
+                      <p className="text-sm text-muted-foreground">Avg validated</p>
+                    </div>
+                    <div className="rounded-lg border p-4 text-center">
+                      <p className="text-2xl font-bold">{Math.round(avgAudioPct * 100)}%</p>
+                      <p className="text-sm text-muted-foreground">Avg audio</p>
+                    </div>
+                    <div className="rounded-lg border p-4 text-center">
+                      <p className="text-2xl font-bold">{stalledCount}</p>
+                      <p className="text-sm text-muted-foreground">Stalled</p>
+                    </div>
+                    <div className="rounded-lg border p-4 text-center">
+                      <p className={`text-2xl font-bold ${overdueCount > 0 ? "text-destructive" : ""}`}>{overdueCount}</p>
+                      <p className="text-sm text-muted-foreground">Overdue</p>
+                    </div>
+                  </div>
+
+                  {/* Filter bar */}
+                  {projects.length > 0 && (
+                    <div className="flex w-full flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden">
+                      <div className="relative min-w-[12rem] flex-[1_1_13rem] max-w-52">
+                        <input
+                          type="text"
+                          value={projectQuery}
+                          onChange={(e) => setProjectQuery(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") e.currentTarget.blur()
+                          }}
+                          placeholder="Filter projects…"
+                          aria-label="Filter projects by name"
+                          autoCorrect="off"
+                          autoCapitalize="none"
+                          spellCheck={false}
+                          className={projectSearchClassName}
+                        />
+                        {projectQuery && (
+                          <button
+                            type="button"
+                            aria-label="Clear project filter"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => setProjectQuery("")}
+                            className="absolute right-2 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                          >
+                            <X className="size-3.5" aria-hidden />
+                          </button>
+                        )}
+                      </div>
+                      <div className={projectControlGroupClassName}>
+                        <div className="flex items-center gap-2" aria-label="Project status filter">
+                          <span className="text-xs font-medium text-muted-foreground">Status</span>
+                          <div className="flex items-center gap-1">
+                            {STATUS_FILTERS.map((f) => (
+                              <button
+                                key={f.value}
+                                type="button"
+                                onClick={() => setStatusFilter(f.value)}
+                                aria-pressed={statusFilter === f.value}
+                                className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                                  statusFilter === f.value
+                                    ? "bg-primary text-primary-foreground"
+                                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                                }`}
+                              >
+                                {f.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2" aria-label="Project sort">
+                          <span className="text-xs font-medium text-muted-foreground">Sort by</span>
+                          <Select
+                            items={PROJECT_LENSES.map((lens) => ({ value: lens.value, label: lens.label }))}
+                            value={projectLens}
+                            onValueChange={handleProjectLensChange}
+                          >
+                            <SelectTrigger aria-label="Sort projects" size="sm" className="min-w-40 bg-background">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectGroup>
+                                {PROJECT_LENSES.map((lens) => (
+                                  <SelectItem key={lens.value} value={lens.value}>
+                                    {lens.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Project directory */}
+                  {projects.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No projects in this org yet.</p>
+                  ) : visible.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No matching projects.</p>
+                  ) : (
+                    <div className="rounded-lg border divide-y">
+                      {visible.map((p) => {
+                        const access = accessByProjectId.get(p.id)
+                        const tpct = Math.round(translatedPct(p) * 100)
+                        const pct = Math.round(validatedPct(p) * 100)
+                        const apct = Math.round(audioPct(p) * 100)
+                        const status = activityStatus(p, now)
+                        const dstatus = deadlineStatus(p, now)
+                        return (
+                          <Link
+                            key={p.id}
+                            to={`/projects/${p.id}`}
+                            className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <p className="font-medium truncate">{p.name}</p>
+                                {access && (
+                                  <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                    {access.role.name}
+                                  </span>
+                                )}
+                                {dstatus === "overdue" && (
+                                  <span className="shrink-0 rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-medium text-destructive">
+                                    Overdue
+                                  </span>
+                                )}
+                                {dstatus === "soon" && (
+                                  <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                                    Due soon
+                                  </span>
+                                )}
+                              </div>
+                              <div
+                                className="mt-1 space-y-0.5"
+                                aria-label={`${tpct}% translated, ${pct}% validated`}
+                              >
+                                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                                  <div className="h-full rounded-full bg-amber-500" style={{ width: `${tpct}%` }} />
+                                </div>
+                                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                                  <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
+                                </div>
+                              </div>
+                            </div>
+                            <div className="shrink-0 text-right">
+                              <p className={`text-xs ${status === "stalled" ? "text-destructive" : "text-muted-foreground"}`}>
+                                {status === "stalled"
+                                  ? "Stalled"
+                                  : status === "not-started"
+                                    ? "Not started"
+                                    : `${tpct}% translated`}
+                              </p>
+                              <p className="text-xs text-muted-foreground">{pct}% validated</p>
+                              <p className="text-xs text-muted-foreground">{apct}% audio</p>
+                            </div>
+                          </Link>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {/* FRO-335: cross-org projects (invite-link / bulk-add grants).
+                      Listed separately — they're not part of this org's portfolio,
+                      but hiding them made them unreachable from every nav surface. */}
+                  {sharedProjects.length > 0 && (
+                    <section data-testid="shared-with-you" className="space-y-2">
+                      <h2 className="text-sm font-medium text-muted-foreground">Shared with you</h2>
+                      <div className="rounded-lg border divide-y">
+                        {sharedProjects.map((p) => (
+                          <Link
+                            key={p.id}
+                            to={`/projects/${p.id}`}
+                            className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
+                          >
+                            <p className="flex-1 min-w-0 truncate font-medium">{p.name}</p>
+                            <span className="shrink-0 text-xs text-muted-foreground">{p.role.name}</span>
+                          </Link>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+                </>
               )}
 
-              {jwt && activeOrgId != null && <WorkloadRollup jwt={jwt} orgId={activeOrgId} />}
-              {jwt && activeOrgId != null && <UsageRollup jwt={jwt} orgId={activeOrgId} />}
-              {jwt && activeOrgId != null && (
+              {jwt && !isAllOrgs && activeOrgId != null && <WorkloadRollup jwt={jwt} orgId={activeOrgId} />}
+              {jwt && !isAllOrgs && activeOrgId != null && <UsageRollup jwt={jwt} orgId={activeOrgId} />}
+              {jwt && !isAllOrgs && activeOrgId != null && (
                 <CreditsPanel
                   jwt={jwt}
                   orgId={activeOrgId}

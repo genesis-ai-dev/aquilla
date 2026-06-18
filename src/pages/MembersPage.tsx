@@ -46,7 +46,7 @@ const ORG_ROLE_OPTIONS = ORG_ROLE_PICKER.map((level) => ({
  * design loop concluded operational PMs need.
  */
 export function MembersPage() {
-  const { activeOrg, isLoading, error } = useActiveOrg()
+  const { activeOrg, isAllOrgs, isLoading, error } = useActiveOrg()
 
   if (isLoading) {
     return (
@@ -77,11 +77,12 @@ export function MembersPage() {
   if (!activeOrg) {
     return (
       <PageShell>
-        <div className="rounded-md border bg-muted/30 p-6 text-center">
-          <p className="text-sm font-medium">Sign in to manage members</p>
+        <div className="rounded-lg border bg-card p-6 text-center">
+          <p className="text-sm font-medium">{isAllOrgs ? "Select an organization" : "Sign in to manage members"}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Member access requires a Frontier session. Sign in from the dashboard
-            and come back to this page.
+            {isAllOrgs
+              ? "Member access is managed within a single organization."
+              : "Member access requires a Frontier session. Sign in from the dashboard and come back to this page."}
           </p>
         </div>
       </PageShell>

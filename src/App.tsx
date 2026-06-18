@@ -1,9 +1,8 @@
 import { Suspense, lazy } from "react"
-import { Routes, Route } from "react-router-dom"
+import { Navigate, Routes, Route } from "react-router-dom"
 import { hasAuthHintCookie } from "@/lib/frontier/session-store"
 import { OrgHome } from "@/components/org/OrgHome"
 import { ProductTourProvider } from "@/context/ProductTourContext"
-import { ProjectsList } from "@/components/org/ProjectsList"
 import { ArchivedProjects } from "@/components/org/ArchivedProjects"
 import { ProjectOverview } from "@/components/org/ProjectOverview"
 import { AssignedToMe } from "@/components/org/AssignedToMe"
@@ -151,7 +150,7 @@ function AppRoutes() {
       <Routes>
         {/* Eager — needed for first paint / sign-in flow */}
         <Route path="/" element={<RootRedirect />} />
-        <Route path="/projects" element={<ProjectsList />} />
+        <Route path="/projects" element={<Navigate to="/" replace />} />
         <Route path="/projects/:id" element={<ProjectOverview />} />
         <Route path="/assigned" element={<AssignedToMe />} />
         <Route path="/join/:token" element={<JoinPage />} />

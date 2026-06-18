@@ -108,7 +108,7 @@ export function CellTtsButton({
   const statusKey = ttsStatusKey(cellId)
   const status = useTtsStatus(statusKey)
   const baseVoice = resolveVoice(projectTtsSettings, cellTtsSettings?.voiceId)
-  const provider = resolveTtsProvider(projectTtsSettings)
+  const provider = baseVoice.provider ?? resolveTtsProvider(projectTtsSettings)
   const voice = normalizeVoiceForProvider(baseVoice, provider, { targetLanguage })
   const modelStatus = useModelStatus(provider === "mms" ? "mms" : "kokoro")
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -199,6 +199,15 @@ export function CellTtsButton({
               onProgress,
             })
             blob = gen.blob
+          } else if (provider === "omnivoice") {
+            // OmniVoice has no client-side synth — there's nothing to preview
+            // until the cell has durably-generated audio. Guide the user
+            // instead of surfacing the internal server-only guard error.
+            setTtsStatus(statusKey, {
+              kind: "error",
+              message: "Generate audio on this line first to hear OmniVoice.",
+            })
+            return
           } else {
             blob = await synthesizeForCell(trimmed, {
               projectTtsSettings,
@@ -258,7 +267,8 @@ export function CellTtsButton({
 
   if (!trimmed) return null
 
-  const downloadingModel = !playableAttachId && provider !== "gemini" && modelStatus.kind === "downloading" && status.kind !== "idle"
+  const isLocalModel = provider === "mms" || provider === "kokoro"
+  const downloadingModel = !playableAttachId && isLocalModel && modelStatus.kind === "downloading" && status.kind !== "idle"
   const isLoadingModel = status.kind === "loading" || downloadingModel
   const isSynthesizing = status.kind === "synthesizing"
   const isError = status.kind === "error"

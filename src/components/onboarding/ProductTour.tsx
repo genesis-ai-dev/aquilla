@@ -44,14 +44,8 @@ export const TOUR_STEPS: TourStep[] = [
   },
   {
     anchor: "nav-overview",
-    title: "Overview",
-    body: "See the health of your whole portfolio at a glance — translation progress, stalled projects, and overdue deadlines.",
-    placement: "right",
-  },
-  {
-    anchor: "nav-projects",
     title: "Projects",
-    body: "Open any project to start translating. Create new ones with the button at the top of this list.",
+    body: "Open the project hub for the current organization or All organizations, then filter, sort, open, or create projects from one place.",
     placement: "right",
   },
   {

@@ -197,6 +197,7 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
   const record: ProjectRecord = {
     id: summary.id,
     name: summary.name,
+    orgId: summary.orgId ?? null,
     sourceLanguage: "",
     targetLanguage: "",
     createdAt: now,

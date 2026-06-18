@@ -38,6 +38,27 @@ export function buildAudioId(cellId: string): string {
   return `audio-${normalised}-${ts}-${rnd}`
 }
 
+/** Prefix that marks a take produced by on-device noise removal (RNNoise). */
+const DENOISED_AUDIO_PREFIX = "dn-"
+
+/**
+ * Build the id for a denoised (noise-removed) take: the normal id with a `dn-`
+ * marker prefix. Self-describing so a cleaned take is recognisable anywhere it
+ * surfaces (no projection/schema change needed). The source take it was derived
+ * from is recorded separately via the attachment's `referenceAudioId`.
+ */
+export function buildDenoisedAudioId(cellId: string): string {
+  return `${DENOISED_AUDIO_PREFIX}${buildAudioId(cellId)}`
+}
+
+/**
+ * True when an audioId names a denoised take. Tolerates the stored
+ * `<id>.<ext>` form since the marker is on the leading segment.
+ */
+export function isDenoisedAudioId(audioId: string): boolean {
+  return audioId.startsWith(DENOISED_AUDIO_PREFIX)
+}
+
 /** Extract the (audioId, ext) marker. Returns null for legacy LFS-pointer paths. */
 export function parseFrontierAudioUrl(url: string): { audioId: string; ext: string } | null {
   const prefix = `${AUDIO_URL_SCHEME}://`

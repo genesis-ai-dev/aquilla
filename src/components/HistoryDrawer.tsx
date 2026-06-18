@@ -6,6 +6,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { CellHistoryEntry } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
 import { useCellEditHistory } from "@/hooks/useCellEditHistory"
+import { FootnotedTextValue } from "./footnotes/FootnoteInline"
 
 interface HistoryDrawerProps {
   cell: CellData
@@ -302,8 +303,8 @@ function GroupItem({
           </span>
         )}
       </div>
-      <div className="mt-1 whitespace-pre-wrap rounded bg-muted/40 p-2 text-xs">
-        {terminal.value || <span className="italic text-muted-foreground">(empty)</span>}
+      <div className="mt-1 rounded bg-muted/40 p-2 text-xs">
+        <FootnotedTextValue value={terminal.value} showFootnotes />
       </div>
       {terminal.examples && terminal.examples.length > 0 && (
         <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
@@ -353,8 +354,8 @@ function GroupItem({
                   className="rounded bg-muted/20 p-1 text-[10px]"
                 >
                   <div className="text-muted-foreground">{formatTimestamp(entry.timestamp)}</div>
-                  <div className="mt-0.5 whitespace-pre-wrap">
-                    {entry.value || <span className="italic text-muted-foreground">(empty)</span>}
+                  <div className="mt-0.5">
+                    <FootnotedTextValue value={entry.value} showFootnotes />
                   </div>
                 </li>
               ))}

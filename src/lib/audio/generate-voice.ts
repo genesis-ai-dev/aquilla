@@ -10,11 +10,13 @@
 
 import { synthesizeForCell } from "./tts"
 import { resolveVoice } from "./voices"
+import { resolveTtsProvider } from "./tts-providers"
 import { buildAudioId, uploadCellAudio, fetchCellAudio } from "./upload"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { convertToCloneVoice } from "./voice-clone"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
+import { synthesizeCellTts } from "@/lib/sync/tts"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { GeminiTtsContext } from "./gemini-tts"
@@ -50,7 +52,53 @@ export async function generateAndAttachCellVoice(
   if (!text) throw new Error("Cell has no text to synthesize")
 
   const voice = resolveVoice(args.projectTtsSettings, args.cellVoiceId)
+  // Resolve the effective engine: a voice with no provider falls back to the
+  // project default (now OmniVoice), which must still route server-side.
+  const provider = voice.provider ?? resolveTtsProvider(args.projectTtsSettings)
   const getSyncToken = audioSyncTokenFetcherForSession(args.session)
+
+  // OmniVoice is server-side: the sync-worker synthesizes, stores the clip in
+  // R2 (native voice-cloning when a reference is set), and returns its id —
+  // no client synth, no upload, no Seed-VC. Branch out entirely.
+  if (provider === "omnivoice") {
+    const result = await synthesizeCellTts(
+      {
+        projectId: args.projectId,
+        fileId: args.fileId,
+        cellId: args.cellId,
+        text,
+        ...(args.geminiContext?.targetLanguage ? { language: args.geminiContext.targetLanguage } : {}),
+        ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
+      },
+      getSyncToken,
+    )
+    await emitCellAudioAttach({
+      projectId: args.projectId,
+      fileId: args.fileId,
+      cellId: args.cellId,
+      audioId: result.objectName,
+      url: result.url,
+      durationMs: Math.round(result.durationSeconds * 1000),
+      slot: "generatedVoice",
+      mimeType: "audio/wav",
+      voiceId: voice.id,
+      ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
+      author: args.username,
+    })
+    notifyAudioAttachmentsChanged(args.fileId)
+    const bytes = await fetchCellAudio({
+      projectId: args.projectId,
+      fileId: args.fileId,
+      audioId: result.audioId,
+      ext: "wav",
+      getSyncToken,
+    })
+    return {
+      audioId: result.objectName,
+      url: result.url,
+      blob: new Blob([bytes as BlobPart], { type: "audio/wav" }),
+    }
+  }
 
   // 1. Multilingual TTS.
   const ttsBlob = await synthesizeForCell(text, {

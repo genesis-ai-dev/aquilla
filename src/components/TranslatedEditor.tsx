@@ -19,15 +19,27 @@
 
 import { useEditor, EditorContent } from "@tiptap/react"
 import { BubbleMenu } from "@tiptap/react/menus"
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
+import { TextSelection } from "@tiptap/pm/state"
+import type { EditorView } from "@tiptap/pm/view"
 import StarterKit from "@tiptap/starter-kit"
 import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { useEffect, useRef } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { createViolationDecorationExtension, violationPluginKey } from "@/lib/richtext/violation-decoration-plugin"
 import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } from "@/lib/richtext/karaoke-plugin"
 import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/richtext/terminology-chip-plugin"
+import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "@/lib/richtext/footnote-decoration-plugin"
+import { UsfmFootnote } from "@/lib/richtext/footnote-node"
+import {
+  FOOTNOTE_NODE_NAME,
+  buildUsfmPlainTextMap,
+  injectFootnoteSpans,
+  pmToPlainOffset,
+} from "@/lib/richtext/usfm-plain-text"
+import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
 import type { Concept } from "@/lib/terminology/types"
 import { findActiveTimingIndex } from "@/lib/audio/timings"
 import type { WordTiming } from "@/lib/codex-editor/types"
@@ -42,6 +54,27 @@ export interface TranslatedEditorCommit {
   valueHtml: string
 }
 
+export interface FootnoteInsertionAnchor {
+  position: number
+  from: number
+  to: number
+  plainPosition: number
+  source: "selection" | "word" | "cursor" | "end"
+  previewText?: string
+  previewBefore?: string
+  previewAfter?: string
+}
+
+export interface TranslatedEditorHandle {
+  getFootnoteInsertionAnchor: () => FootnoteInsertionAnchor | null
+  insertFootnoteMarker: (marker: string, anchor?: FootnoteInsertionAnchor | null, anchorText?: string) => boolean
+}
+
+interface PendingFootnoteDelete {
+  index: number
+  label: string
+}
+
 interface TranslatedEditorProps {
   /** Stable cell id — switching cells re-hydrates the editor from html. */
   cellId: string
@@ -53,6 +86,7 @@ interface TranslatedEditorProps {
   onBlur?: () => void
   placeholder?: string
   className?: string
+  compactHeight?: boolean
   editable?: boolean
   /** "Alice is editing" — when present, the editor is read-only and the banner shows. */
   heldByLabel?: string | null
@@ -92,6 +126,12 @@ interface TranslatedEditorProps {
    * The caller is responsible for opening TermLookupPopover.
    */
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
+  /** Number of automatic numeric footnotes before this cell in the current chapter/file. */
+  footnoteNumberOffset?: number
+  /** Show the footnote text on marker hover when no separate footnote panel is visible. */
+  showFootnoteTooltips?: boolean
+  /** Called when the user hovers a rendered target footnote marker. */
+  onFootnoteHover?: (index: number | null) => void
   /**
    * FRO-297: Accessible label for the target editor textbox.
    * Should include the cell reference and validation state,
@@ -106,7 +146,7 @@ interface TranslatedEditorProps {
   onEscapeToGrid?: () => void
 }
 
-export function TranslatedEditor({
+export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEditorProps>(function TranslatedEditor({
   cellId,
   initialHtml,
   initialPlain,
@@ -115,6 +155,7 @@ export function TranslatedEditor({
   onBlur,
   placeholder,
   className,
+  compactHeight = false,
   editable = true,
   heldByLabel,
   infractions,
@@ -129,15 +170,29 @@ export function TranslatedEditor({
   onNavigateCell,
   terminologyConcepts,
   onTermChipClick,
+  footnoteNumberOffset = 0,
+  showFootnoteTooltips = true,
+  onFootnoteHover,
   ariaLabel,
   onEscapeToGrid,
-}: TranslatedEditorProps) {
+}, ref) {
   // Held in a ref so the editor's keydown handler — created once per cellId —
   // always sees the latest navigation callback without re-creating the editor.
   const onNavigateCellRef = useRef(onNavigateCell)
   useEffect(() => { onNavigateCellRef.current = onNavigateCell }, [onNavigateCell])
   const onEscapeToGridRef = useRef(onEscapeToGrid)
   useEffect(() => { onEscapeToGridRef.current = onEscapeToGrid }, [onEscapeToGrid])
+  const footnoteNumberOffsetRef = useRef(footnoteNumberOffset)
+  useEffect(() => { footnoteNumberOffsetRef.current = footnoteNumberOffset }, [footnoteNumberOffset])
+  const showFootnoteTooltipsRef = useRef(showFootnoteTooltips)
+  useEffect(() => { showFootnoteTooltipsRef.current = showFootnoteTooltips }, [showFootnoteTooltips])
+  const onFootnoteHoverRef = useRef(onFootnoteHover)
+  useEffect(() => { onFootnoteHoverRef.current = onFootnoteHover }, [onFootnoteHover])
+  const [pendingFootnoteDelete, setPendingFootnoteDelete] = useState<PendingFootnoteDelete | null>(null)
+  const pendingFootnoteDeleteRef = useRef<PendingFootnoteDelete | null>(null)
+  useEffect(() => {
+    pendingFootnoteDeleteRef.current = pendingFootnoteDelete
+  }, [pendingFootnoteDelete])
   const latestViolationStateRef = useRef({
     infractions: infractions ?? [],
     ruleSeverity: ruleSeverity ?? new Map<string, "major" | "minor">(),
@@ -152,10 +207,11 @@ export function TranslatedEditor({
 
   const latestTerminologyConceptsRef = useRef<Concept[]>(terminologyConcepts ?? [])
 
-  // Resolve initial content once per cellId — prefer rich HTML, fall back to plain text.
-  const initialContent = initialHtml && initialHtml.length > 0
-    ? stripToAllowedHtml(initialHtml)
-    : initialPlain
+  // Resolve initial content once per cellId — prefer rich HTML, fall back to
+  // plain text. Either form may carry raw `\f...\f*` (legacy) or footnote spans
+  // (our own serialisation); prepareEditorContent normalises both into the
+  // <span data-usfm-footnote> form that parses into footnote nodes.
+  const initialContent = prepareEditorContent(initialHtml, initialPlain)
 
   const isReadOnly = !editable || Boolean(heldByLabel)
 
@@ -167,6 +223,8 @@ export function TranslatedEditor({
   const pendingCommitRef = useRef<TranslatedEditorCommit | null>(null)
   const onCommitRef = useRef(onCommit)
   useEffect(() => { onCommitRef.current = onCommit }, [onCommit])
+
+  const commitEditorSnapshot = useRef<(reason?: string) => void>(() => undefined)
 
   const editor = useEditor({
     editable: !isReadOnly,
@@ -181,8 +239,14 @@ export function TranslatedEditor({
         codeBlock: false,
         horizontalRule: false,
       }),
+      // Footnotes are atomic inline nodes (selectable as one unit, like Word).
+      UsfmFootnote,
       // The callback is invoked by the PM plugin, not during React render —
       // the lint rule is overly conservative here.
+      createFootnoteDecorationExtension(
+        () => footnoteNumberOffsetRef.current,
+        () => showFootnoteTooltipsRef.current,
+      ),
       createViolationDecorationExtension(() => latestViolationStateRef.current),
       createKaraokeExtension(() => latestKaraokeStateRef.current),
       ...(terminologyConcepts !== undefined
@@ -204,13 +268,73 @@ export function TranslatedEditor({
           // background tints competing with the soft recess.
           // No fixed text-* class: font size inherits from the target column
           // wrapper, which carries the per-file font-size pref inline.
-          "prose prose-sm max-w-none h-full min-h-[40px] px-1 py-0.5 leading-relaxed focus:outline-none",
+          compactHeight
+            ? "prose prose-sm max-w-none px-1 py-0 leading-snug focus:outline-none"
+            : "prose prose-sm max-w-none h-full min-h-[40px] px-1 py-0.5 leading-relaxed focus:outline-none",
           "rounded-lg transition-colors",
           className
         ),
       },
       transformPastedHTML(html: string) {
         return stripToAllowedHtml(html)
+      },
+      handleDoubleClick(view, pos, event) {
+        const didSelect = selectVisibleWord(view, pos)
+        if (!didSelect) return false
+        event.preventDefault()
+        window.requestAnimationFrame(() => {
+          selectVisibleWord(view, pos)
+        })
+        return true
+      },
+      handleDOMEvents: {
+        mouseover(view, event) {
+          const target = event.target as HTMLElement | null
+          const marker = target?.closest<HTMLElement>(".usfm-footnote-marker")
+          if (!marker || !view.dom.contains(marker)) return false
+          const index = Number(marker.dataset.footnoteIndex)
+          onFootnoteHoverRef.current?.(Number.isFinite(index) ? index : null)
+          return false
+        },
+        mouseout(view, event) {
+          const target = event.target as HTMLElement | null
+          const marker = target?.closest<HTMLElement>(".usfm-footnote-marker")
+          if (!marker || !view.dom.contains(marker)) return false
+          const related = event.relatedTarget as HTMLElement | null
+          if (related && marker.contains(related)) return false
+          onFootnoteHoverRef.current?.(null)
+          return false
+        },
+        focusin(view, event) {
+          const target = event.target as HTMLElement | null
+          const marker = target?.closest<HTMLElement>(".usfm-footnote-marker")
+          if (!marker || !view.dom.contains(marker)) return false
+          const index = Number(marker.dataset.footnoteIndex)
+          onFootnoteHoverRef.current?.(Number.isFinite(index) ? index : null)
+          return false
+        },
+        focusout(view, event) {
+          const target = event.target as HTMLElement | null
+          const marker = target?.closest<HTMLElement>(".usfm-footnote-marker")
+          if (!marker || !view.dom.contains(marker)) return false
+          onFootnoteHoverRef.current?.(null)
+          return false
+        },
+        dblclick(view, event) {
+          const mouseEvent = event as MouseEvent
+          const position = view.posAtCoords({
+            left: mouseEvent.clientX,
+            top: mouseEvent.clientY,
+          })
+          if (!position) return false
+          const didSelect = selectVisibleWord(view, position.pos)
+          if (!didSelect) return false
+          mouseEvent.preventDefault()
+          window.requestAnimationFrame(() => {
+            selectVisibleWord(view, position.pos)
+          })
+          return true
+        },
       },
       // Cell navigation. Tab/Shift+Tab always step cells; Up/Down step cells
       // only at the first/last visual line so the caret can still move between
@@ -227,6 +351,45 @@ export function TranslatedEditor({
           onEscapeToGridRef.current?.()
           return true
         }
+        const plain = !event.shiftKey && !event.metaKey && !event.altKey && !event.ctrlKey
+        if (plain && (event.key === "Backspace" || event.key === "Delete")) {
+          const target = findFootnoteDeleteTarget(view, event.key, footnoteNumberOffsetRef.current)
+          if (target) {
+            event.preventDefault()
+            const pending = pendingFootnoteDeleteRef.current
+            if (pending?.index === target.index) {
+              if (deleteFootnoteByIndex(view, target.index, footnoteNumberOffsetRef.current)) {
+                setPendingFootnoteDelete(null)
+                commitEditorSnapshot.current("footnote-delete")
+              }
+              return true
+            }
+            setPendingFootnoteDelete({ index: target.index, label: target.label })
+            return true
+          }
+        } else if (pendingFootnoteDeleteRef.current) {
+          setPendingFootnoteDelete(null)
+        }
+        // Shift+Arrow in a footnote-containing cell: drive the selection
+        // ourselves. Real Safari's native keyboard selection extension across
+        // contenteditable=false inline atoms is unreliable (it flips the
+        // anchor / paints a split, ballooned selection — the bug seen on
+        // Safari but not Chromium, and not reproducible via WebDriver synthetic
+        // keys). By intercepting the key, preventing the default, and setting a
+        // deterministic TextSelection, native Safari selection never runs, so
+        // it can't corrupt the range. This pairs with two other fixes: the
+        // marker is not focusable (no tabIndex focus-steal) and the footnote
+        // decoration set is not rebuilt on selection change (no mid-selection
+        // DOM churn). Ordinary cells (no footnote) keep native selection.
+        const shiftArrow = event.shiftKey && !event.metaKey && !event.altKey && !event.ctrlKey
+        if (shiftArrow && event.key === "ArrowLeft" && extendSelectionAcrossFootnote(view, "left")) {
+          event.preventDefault()
+          return true
+        }
+        if (shiftArrow && event.key === "ArrowRight" && extendSelectionAcrossFootnote(view, "right")) {
+          event.preventDefault()
+          return true
+        }
         const navigate = onNavigateCellRef.current
         if (!navigate) return false
         if (event.key === "Tab") {
@@ -234,7 +397,6 @@ export function TranslatedEditor({
           navigate(event.shiftKey ? "prev" : "next")
           return true
         }
-        const plain = !event.shiftKey && !event.metaKey && !event.altKey && !event.ctrlKey
         if (plain && event.key === "ArrowUp" && view.endOfTextblock("up")) {
           event.preventDefault()
           navigate("prev")
@@ -279,6 +441,107 @@ export function TranslatedEditor({
       onBlur?.()
     },
   }, [cellId])
+
+  commitEditorSnapshot.current = () => {
+    if (!editor) return
+    if (idleTimerRef.current !== null) {
+      clearTimeout(idleTimerRef.current)
+      idleTimerRef.current = null
+    }
+    const text = editor.getText()
+    const html = editor.getHTML()
+    pendingCommitRef.current = null
+    if (text !== lastCommittedRef.current) {
+      lastCommittedRef.current = text
+      onCommitRef.current({ value: text, valueHtml: html })
+    }
+  }
+
+  const confirmPendingFootnoteDelete = useCallback(() => {
+    if (!editor || isReadOnly) return
+    const pending = pendingFootnoteDeleteRef.current
+    if (!pending) return
+    if (deleteFootnoteByIndex(editor.view, pending.index, footnoteNumberOffsetRef.current)) {
+      setPendingFootnoteDelete(null)
+      commitEditorSnapshot.current("footnote-delete")
+      editor.commands.focus()
+    }
+  }, [editor, isReadOnly])
+
+  const cancelPendingFootnoteDelete = useCallback(() => {
+    setPendingFootnoteDelete(null)
+    editor?.commands.focus()
+  }, [editor])
+
+  useImperativeHandle(ref, () => ({
+    getFootnoteInsertionAnchor() {
+      if (!editor || isReadOnly) return null
+      const { state } = editor
+      if (!editor.isFocused) {
+        return withFootnotePreview(state.doc, {
+          position: getDocumentEndPosition(state.doc),
+          from: getDocumentEndPosition(state.doc),
+          to: getDocumentEndPosition(state.doc),
+          plainPosition: getDocumentPlainText(state.doc).length,
+          source: "end",
+          previewText: getDocumentEndPreview(state.doc),
+        })
+      }
+      const { from, to, empty } = state.selection
+      if (!empty) {
+        return withFootnotePreview(state.doc, {
+          position: to,
+          from,
+          to,
+          plainPosition: pmPositionToPlainPosition(state.doc, to),
+          source: "selection",
+          previewText: state.doc.textBetween(from, to, "", ""),
+        })
+      }
+      const wordAnchor = getWordAnchor(state.doc, from)
+      if (wordAnchor) return withFootnotePreview(state.doc, wordAnchor)
+      return withFootnotePreview(state.doc, {
+        position: from,
+        from,
+        to: from,
+        plainPosition: pmPositionToPlainPosition(state.doc, from),
+        source: "cursor",
+        previewText: "Cursor position",
+      })
+    },
+    insertFootnoteMarker(marker, anchor, anchorText) {
+      if (!editor || isReadOnly) return false
+      const fallbackPosition = getDocumentEndPosition(editor.state.doc)
+      const fallback = {
+        position: fallbackPosition,
+        from: fallbackPosition,
+        to: fallbackPosition,
+        plainPosition: getDocumentPlainText(editor.state.doc).length,
+        source: "end",
+      } satisfies FootnoteInsertionAnchor
+      const insertion = anchor ?? fallback
+      const maxPosition = Math.max(1, editor.state.doc.content.size - 1)
+      const shouldReplaceAnchor = anchorText !== undefined && insertion.from !== insertion.to
+      const includeText = anchorText !== undefined && anchorText.length > 0
+      const content = [
+        ...(includeText ? [{ type: "text", text: anchorText as string }] : []),
+        { type: FOOTNOTE_NODE_NAME, attrs: { raw: marker } },
+      ]
+      const inserted = shouldReplaceAnchor
+        ? editor.commands.insertContentAt({
+          from: Math.max(1, Math.min(insertion.from, maxPosition)),
+          to: Math.max(1, Math.min(insertion.to, maxPosition)),
+        }, content, { updateSelection: false })
+        : editor.commands.insertContentAt(
+          Math.max(1, Math.min(insertion.position, maxPosition)),
+          content,
+          { updateSelection: false },
+        )
+      if (!inserted) return false
+      commitEditorSnapshot.current("footnote")
+      return true
+    },
+  }), [editor, isReadOnly])
 
   // The committed baseline is the editor's OWN canonical text, never the raw
   // stored value. Stored values can be HTML-escaped or otherwise differ from
@@ -342,6 +605,11 @@ export function TranslatedEditor({
     }
   }, [editor, terminologyConcepts])
 
+  useEffect(() => {
+    if (!editor) return
+    editor.view.dispatch(editor.state.tr.setMeta(footnoteDecorationPluginKey, "rebuild"))
+  }, [editor, footnoteNumberOffset, showFootnoteTooltips])
+
   const lastActiveIdxRef = useRef(-1)
   useEffect(() => {
     if (!editor) return
@@ -380,7 +648,7 @@ export function TranslatedEditor({
   }
 
   return (
-    <div className="relative h-full">
+    <div className={cn("relative", compactHeight ? "" : "h-full")}>
       {heldByLabel && (
         <div
           aria-live="polite"
@@ -398,6 +666,29 @@ export function TranslatedEditor({
             className="rounded-full bg-amber-500/20 px-2 py-0.5 text-amber-900 hover:bg-amber-500/30 dark:text-amber-100"
           >
             Discard and reload
+          </button>
+        </div>
+      )}
+      {pendingFootnoteDelete && (
+        <div className="absolute right-2 top-2 z-20 flex items-center gap-2 rounded-lg border border-destructive/20 bg-background px-2 py-1 text-[11px] shadow-neu-sm">
+          <span className="text-muted-foreground">
+            Delete footnote {pendingFootnoteDelete.label}?
+          </span>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={confirmPendingFootnoteDelete}
+            className="rounded px-2 py-0.5 font-medium text-destructive hover:bg-destructive/10"
+          >
+            I'm sure
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={cancelPendingFootnoteDelete}
+            className="rounded px-2 py-0.5 text-muted-foreground hover:bg-muted"
+          >
+            Cancel
           </button>
         </div>
       )}
@@ -475,7 +766,7 @@ export function TranslatedEditor({
         </div>
       </BubbleMenu>
       <div
-        className="h-full"
+        className={cn(compactHeight ? "" : "h-full")}
         onClick={(e) => {
           const target = e.target as HTMLElement
           // FRO-204: term chip click → open TermLookupPopover via caller
@@ -496,15 +787,257 @@ export function TranslatedEditor({
           }
         }}
       >
-        <EditorContent editor={editor} className="h-full [&>.ProseMirror]:h-full" />
+        <EditorContent
+          editor={editor}
+          className={cn(compactHeight ? "" : "h-full [&>.ProseMirror]:h-full")}
+        />
       </div>
     </div>
   )
+})
+
+function getDocumentEndPosition(doc: ProseMirrorNode): number {
+  return Math.max(1, doc.content.size - 1)
+}
+
+function docContainsFootnote(doc: ProseMirrorNode): boolean {
+  let found = false
+  doc.descendants((node) => {
+    if (found) return false
+    if (node.type.name === FOOTNOTE_NODE_NAME) {
+      found = true
+      return false
+    }
+    return true
+  })
+  return found
+}
+
+// Deterministic horizontal Shift+Arrow for cells that contain footnotes. We
+// step one position (one char, or the whole footnote atom when the neighbour is
+// a footnote) and dispatch the extended TextSelection ourselves, so real
+// Safari's unreliable native selection extension across contenteditable=false
+// atoms never runs. Returns false (letting native handle it) when there is no
+// footnote in the cell, so ordinary cells keep grapheme-aware native selection.
+function extendSelectionAcrossFootnote(view: EditorView, direction: "left" | "right"): boolean {
+  const { selection, doc } = view.state
+  if (!docContainsFootnote(doc)) return false
+
+  const head = selection.head
+  const $head = doc.resolve(head)
+  const neighbour = direction === "left" ? $head.nodeBefore : $head.nodeAfter
+  const step = neighbour && neighbour.type.name === FOOTNOTE_NODE_NAME ? neighbour.nodeSize : 1
+  const min = 1
+  const max = Math.max(1, doc.content.size - 1)
+  const newHead = direction === "left"
+    ? Math.max(min, head - step)
+    : Math.min(max, head + step)
+  if (newHead === head) return false
+
+  view.dispatch(
+    view.state.tr
+      .setSelection(TextSelection.create(doc, selection.anchor, newHead))
+      .scrollIntoView(),
+  )
+  return true
+}
+
+function findFootnoteDeleteTarget(
+  view: EditorView,
+  key: "Backspace" | "Delete",
+  numberOffset: number,
+): (PendingFootnoteDelete & { from: number; to: number }) | null {
+  const { selection, doc } = view.state
+  // Range selections delete the whole range (footnote nodes go with it cleanly,
+  // since they're atomic) — only guard caret-adjacent single-press deletes.
+  if (!selection.empty) return null
+  const ranges = getFootnotePmTargets(doc, numberOffset)
+  const pos = selection.from
+  return ranges.find((range) => (
+    key === "Backspace"
+      ? pos > range.from && pos <= range.to
+      : pos >= range.from && pos < range.to
+  )) ?? null
+}
+
+function deleteFootnoteByIndex(view: EditorView, index: number, numberOffset: number): boolean {
+  const target = getFootnotePmTargets(view.state.doc, numberOffset).find((range) => range.index === index)
+  if (!target) return false
+  view.dispatch(view.state.tr.delete(target.from, target.to).scrollIntoView())
+  return true
+}
+
+function selectVisibleWord(view: EditorView, position: number): boolean {
+  const selection = findVisibleWordSelection(view.state.doc, position)
+  if (!selection) return false
+  view.dispatch(
+    view.state.tr
+      .setSelection(TextSelection.create(view.state.doc, selection.from, selection.to))
+      .scrollIntoView(),
+  )
+  return true
+}
+
+function findVisibleWordSelection(
+  doc: ProseMirrorNode,
+  position: number,
+): { from: number; to: number } | null {
+  const map = buildUsfmPlainTextMap(doc)
+  if (!map.text) return null
+  const footnotes = extractUsfmFootnotes(map.text)
+  const hiddenRanges = footnotes.map((footnote) => ({
+    from: footnote.index,
+    to: footnote.index + footnote.raw.length,
+  }))
+  const isHidden = (offset: number) => hiddenRanges.some((range) => offset >= range.from && offset < range.to)
+  const hiddenAtPosition = hiddenRanges.find((range) => {
+    const plain = pmToPlainOffset(doc, position)
+    return plain >= range.from && plain <= range.to
+  })
+
+  let plainPosition = pmToPlainOffset(doc, position)
+  if (hiddenAtPosition) plainPosition = Math.max(0, hiddenAtPosition.from - 1)
+  if (!isWordChar(map.text[plainPosition] ?? "") && plainPosition > 0 && isWordChar(map.text[plainPosition - 1] ?? "")) {
+    plainPosition -= 1
+  }
+  if (!isWordChar(map.text[plainPosition] ?? "") || isHidden(plainPosition)) return null
+
+  let start = plainPosition
+  while (start > 0 && !isHidden(start - 1) && isWordChar(map.text[start - 1] ?? "")) {
+    start -= 1
+  }
+  let end = plainPosition + 1
+  while (end < map.text.length && !isHidden(end) && isWordChar(map.text[end] ?? "")) {
+    end += 1
+  }
+
+  const from = map.plainToPm[start]
+  const to = map.plainToPm[end]
+  if (from === undefined || to === undefined || from >= to) return null
+  return { from, to }
+}
+
+function getFootnotePmTargets(
+  doc: ProseMirrorNode,
+  numberOffset: number,
+): Array<PendingFootnoteDelete & { from: number; to: number }> {
+  const targets: Array<PendingFootnoteDelete & { from: number; to: number }> = []
+  let ordinal = 0
+  doc.descendants((node, pos) => {
+    if (node.type.name !== FOOTNOTE_NODE_NAME) return true
+    const parsed = extractUsfmFootnotes((node.attrs.raw as string) ?? "")[0]
+    targets.push({
+      index: ordinal,
+      label: footnoteTargetLabel(parsed?.caller ?? "", ordinal, numberOffset),
+      from: pos,
+      to: pos + node.nodeSize,
+    })
+    ordinal += 1
+    return false
+  })
+  return targets
+}
+
+function footnoteTargetLabel(caller: string, index: number, numberOffset: number): string {
+  const trimmed = caller.trim()
+  if (trimmed && trimmed !== "+" && trimmed !== "-") return trimmed
+  return String(numberOffset + index + 1)
+}
+
+function isWordChar(value: string): boolean {
+  return /^[\p{L}\p{N}'’-]$/u.test(value)
+}
+
+function getWordAnchor(
+  doc: ProseMirrorNode,
+  position: number,
+): FootnoteInsertionAnchor | null {
+  // Work in plain-text space (footnote nodes expand to their raw `\f...\f*`) so
+  // the word boundaries — and the bail-out when the caret sits on footnote
+  // syntax — stay correct even with footnotes earlier in the same paragraph.
+  const { text, plainToPm } = buildUsfmPlainTextMap(doc)
+  const offset = pmToPlainOffset(doc, position)
+  if (
+    offset >= text.length ||
+    /\s/.test(text[offset] ?? "") ||
+    isFootnoteSyntaxAtOffset(text, offset)
+  ) {
+    return null
+  }
+
+  let start = offset
+  while (start > 0 && !/\s/.test(text[start - 1] ?? "")) start -= 1
+  let end = offset
+  while (end < text.length && !/\s/.test(text[end] ?? "")) end += 1
+
+  const candidate = text.slice(start, end)
+  if (candidate.includes("\\") || /^f\*?$/.test(candidate)) return null
+
+  const from = plainToPm[start]
+  const to = plainToPm[end]
+  if (from === undefined || to === undefined) return null
+  return {
+    position: to,
+    from,
+    to,
+    plainPosition: end,
+    source: "word",
+    previewText: candidate,
+  }
+}
+
+function isFootnoteSyntaxAtOffset(text: string, offset: number): boolean {
+  if (text[offset] === "\\") return true
+  const before = text.slice(Math.max(0, offset - 8), offset)
+  return /\\$/.test(before) || /\\f\s*$/.test(before)
+}
+
+function getDocumentEndPreview(doc: ProseMirrorNode): string {
+  const text = normalizeAnchorPreview(doc.textBetween(0, doc.content.size, " ", " "))
+  if (!text) return "End of cell"
+  const words = text.split(/\s+/)
+  return words.slice(Math.max(0, words.length - 6)).join(" ")
+}
+
+function withFootnotePreview(
+  doc: ProseMirrorNode,
+  anchor: FootnoteInsertionAnchor,
+): FootnoteInsertionAnchor {
+  const text = getDocumentPlainText(doc)
+  const plainPosition = Math.max(0, Math.min(anchor.plainPosition, text.length))
+  return {
+    ...anchor,
+    plainPosition,
+    previewBefore: text.slice(0, plainPosition),
+    previewAfter: text.slice(plainPosition),
+  }
+}
+
+function getDocumentPlainText(doc: ProseMirrorNode): string {
+  return buildUsfmPlainTextMap(doc).text
+}
+
+function pmPositionToPlainPosition(doc: ProseMirrorNode, position: number): number {
+  return pmToPlainOffset(doc, position)
+}
+
+function normalizeAnchorPreview(value: string): string {
+  const normalized = value.replace(/\s+/g, " ").trim()
+  if (normalized.length <= 80) return normalized
+  return `${normalized.slice(0, 77).trimEnd()}...`
+}
+
+// Normalise stored content (HTML or plain) into the form TipTap hydrates from:
+// allowed inline marks only, with raw `\f...\f*` turned into footnote-node spans.
+function prepareEditorContent(html: string | undefined, plain: string): string {
+  const base = html && html.length > 0 ? stripToAllowedHtml(html) : plain
+  return injectFootnoteSpans(base)
 }
 
 // Strip pasted HTML to only the marks we support.
 // Allowed tags: b, strong, i, em, u, s, strike, del, code, p, br
-// Everything else is removed (content preserved).
+// Footnote markers (<span data-usfm-footnote>) are preserved so they re-parse
+// into footnote nodes. Everything else is removed (content preserved).
 function stripToAllowedHtml(html: string): string {
   const parser = new DOMParser()
   const doc = parser.parseFromString(`<body>${html}</body>`, "text/html")
@@ -519,6 +1052,14 @@ function walkAndStrip(el: Element): void {
   for (const child of children) {
     if (child.nodeType === 1) {
       const elChild = child as Element
+      // Preserve footnote markers verbatim (drop every attribute except the
+      // raw payload); they carry no text content to recurse into.
+      if (elChild.tagName === "SPAN" && elChild.hasAttribute("data-usfm-footnote")) {
+        const raw = elChild.getAttribute("data-usfm-footnote") ?? ""
+        for (const attr of Array.from(elChild.attributes)) elChild.removeAttribute(attr.name)
+        elChild.setAttribute("data-usfm-footnote", raw)
+        continue
+      }
       walkAndStrip(elChild)
       if (!ALLOWED_TAGS.has(elChild.tagName)) {
         const parent = elChild.parentNode

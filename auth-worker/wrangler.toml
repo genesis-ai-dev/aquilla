@@ -85,6 +85,15 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 [observability]
 enabled = true
 
+# Smart Placement: run the Worker near its backend (Hyperdrive→Neon, US-side)
+# instead of at the requester's edge PoP. Primary reason is geo: outbound
+# fetches to OpenRouter then egress from a US region, so Anthropic models stop
+# returning 403 "not available in your region" for users in geo-restricted
+# locales (e.g. the Philippines hit a Manila/Singapore PoP). Bonus: this worker
+# is DB-heavy, so co-locating with Postgres also cuts round-trip latency.
+[placement]
+mode = "smart"
+
 [vars]
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
@@ -114,6 +123,10 @@ routes = [
   "api.aquilla.app/identity/*",
   "api.aquilla.app/chat/*",
 ]
+
+# See top-level [placement] — keep env blocks in sync (they don't inherit it).
+[env.production.placement]
+mode = "smart"
 
 [[env.production.hyperdrive]]
 binding = "HYPERDRIVE"
@@ -145,6 +158,10 @@ routes = [
   "api.dev.aquilla.app/identity/*",
   "api.dev.aquilla.app/chat/*",
 ]
+
+# See top-level [placement] — keep env blocks in sync (they don't inherit it).
+[env.development.placement]
+mode = "smart"
 
 # Dev runs on Neon (Postgres) to mirror prod. index.ts builds AQUILLA_PG
 # from the Postgres shim over Hyperdrive → the Neon `dev` branch.
@@ -184,6 +201,10 @@ routes = [
   "api.staging.aquilla.app/identity/*",
   "api.staging.aquilla.app/chat/*",
 ]
+
+# See top-level [placement] — keep env blocks in sync (they don't inherit it).
+[env.staging.placement]
+mode = "smart"
 
 # Staging runs on Neon (Postgres) to mirror prod. index.ts builds AQUILLA_PG
 # from the Postgres shim over Hyperdrive → the Neon `staging` branch (project

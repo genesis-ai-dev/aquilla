@@ -365,7 +365,7 @@ projects.get("/:projectId", authMiddleware, async (c) => {
   if (!role) return c.json({ error: "not found or no access" }, 403)
 
   const row = await c.env.AQUILLA_PG.prepare(
-    `SELECT p.id, p.name, p.archived_at, p.archived_by, p.is_active,
+    `SELECT p.id, p.name, p.org_id, p.archived_at, p.archived_by, p.is_active,
             u.username AS archived_by_username
        FROM projects p
        LEFT JOIN users u ON u.id = p.archived_by
@@ -375,6 +375,7 @@ projects.get("/:projectId", authMiddleware, async (c) => {
     .first<{
       id: string
       name: string
+      org_id: number | null
       archived_at: string | null
       archived_by: number | null
       archived_by_username: string | null
@@ -389,6 +390,7 @@ projects.get("/:projectId", authMiddleware, async (c) => {
   return c.json({
     id: row.id,
     name: row.name,
+    orgId: row.org_id,
     archivedAt: row.archived_at,
     archivedBy: row.archived_by
       ? { id: row.archived_by, username: row.archived_by_username }

@@ -44,7 +44,7 @@ import { GEMINI_TTS_VOICES } from "@/lib/audio/gemini-tts"
 import { newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import { synthesizeToWavBlob } from "@/lib/audio/tts"
 import {
-  normalizeVoiceForProvider, defaultVoiceNameForProvider, TTS_PROVIDER_INFOS,
+  normalizeVoiceForProvider, defaultVoiceNameForProvider, providerInfo, TTS_PROVIDER_INFOS,
 } from "@/lib/audio/tts-providers"
 import {
   HAS_EXTENDED_MMS_MODELS, POPULAR_MMS_LANGUAGES,
@@ -52,6 +52,7 @@ import {
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { buildVoiceReferenceId, uploadVoiceReference } from "@/lib/audio/voice-clone"
 import { parseFrontierAudioUrl, fetchCellAudio } from "@/lib/audio/upload"
+import { synthesizeCellTts } from "@/lib/sync/tts"
 import { VoiceCloneSection } from "@/components/VoiceCloneSection"
 
 const SAMPLE_TEXT = "The quick brown fox jumps over the lazy dog."
@@ -154,6 +155,7 @@ function CharacterModalBody({
 
   // Engine is per-voice; fall back to the project default for legacy voices.
   const activeProvider = draft.provider ?? provider
+  const activeInfo = providerInfo(activeProvider)
 
   const update = useCallback((patch: Partial<Voice>) => {
     setDraft((cur) => ({ ...cur, ...patch }))
@@ -190,14 +192,37 @@ function CharacterModalBody({
       setPreview({ kind: "error", message: "Add a Gemini API key to test voices." })
       return
     }
+    if (activeProvider === "omnivoice" && (!projectId || !fileId || !session?.jwt)) {
+      setPreview({ kind: "error", message: "Open a project file to preview OmniVoice." })
+      return
+    }
     setPreview({ kind: "loading" })
     try {
-      const blob = await synthesizeToWavBlob(SAMPLE_TEXT, {
-        voice: effectiveVoice,
-        projectProvider: activeProvider,
-        apiKey,
-        geminiContext: { targetLanguage },
-      })
+      let blob: Blob
+      if (activeProvider === "omnivoice") {
+        const getSyncToken = audioSyncTokenFetcherForSession(session ?? null)
+        const result = await synthesizeCellTts(
+          {
+            projectId: projectId!,
+            fileId: fileId!,
+            text: SAMPLE_TEXT,
+            ...(targetLanguage ? { language: targetLanguage } : {}),
+            ...(draft.referenceAudioId ? { referenceAudioId: draft.referenceAudioId } : {}),
+          },
+          getSyncToken,
+        )
+        const bytes = await fetchCellAudio({
+          projectId: projectId!, fileId: fileId!, audioId: result.audioId, ext: "wav", getSyncToken,
+        })
+        blob = new Blob([bytes as BlobPart], { type: "audio/wav" })
+      } else {
+        blob = await synthesizeToWavBlob(SAMPLE_TEXT, {
+          voice: effectiveVoice,
+          projectProvider: activeProvider,
+          apiKey,
+          geminiContext: { targetLanguage },
+        })
+      }
       const url = URL.createObjectURL(blob)
       previewUrlRef.current = url
       const audio = new Audio(url)
@@ -211,7 +236,7 @@ function CharacterModalBody({
     } catch (e) {
       setPreview({ kind: "error", message: e instanceof Error ? e.message : String(e) })
     }
-  }, [preview.kind, activeProvider, apiKey, effectiveVoice, targetLanguage, stopPreview])
+  }, [preview.kind, activeProvider, apiKey, effectiveVoice, targetLanguage, stopPreview, projectId, fileId, session, draft.referenceAudioId])
 
   // ── "Reuse audio from a line" ───────────────────────────────────────────
   // Recorded (human) takes first — cloning from AI-generated audio is rarely
@@ -301,42 +326,68 @@ function CharacterModalBody({
             />
           </div>
 
-          {/* Engine — per-voice. Switching it resets the base voice to that
-              engine's default. */}
+          {/* Engine — per-voice. Cloud engines first; on-device demoted below.
+              Switching resets the base voice to that engine's default. */}
           <div className="space-y-2">
             <Label>Engine</Label>
-            <div className="grid grid-cols-3 gap-1.5">
-              {TTS_PROVIDER_INFOS.map((info) => (
-                <AppTooltip key={info.id} content={info.hint} className="max-w-xs">
-                  <button
-                    type="button"
-                    onClick={() => update({
-                      provider: info.id,
-                      voiceName: defaultVoiceNameForProvider(info.id, { targetLanguage }),
-                    })}
-                    aria-pressed={activeProvider === info.id}
-                    className={cn(
-                      "rounded-lg border px-2 py-1.5 text-center text-xs transition-colors",
-                      activeProvider === info.id ? "border-primary bg-primary/10 font-medium" : "hover:bg-accent/40",
-                    )}
-                  >
-                    {info.shortTitle ?? info.title}
-                  </button>
-                </AppTooltip>
-              ))}
-            </div>
+            {(["cloud", "device"] as const).map((tier) => (
+              <div key={tier} className="space-y-1.5">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  {tier === "cloud" ? "Cloud" : "On-device"}
+                </p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {TTS_PROVIDER_INFOS.filter((info) => info.tier === tier).map((info) => (
+                    <AppTooltip key={info.id} content={info.hint} className="max-w-xs">
+                      <button
+                        type="button"
+                        onClick={() => update({
+                          provider: info.id,
+                          voiceName: defaultVoiceNameForProvider(info.id, { targetLanguage }),
+                        })}
+                        aria-pressed={activeProvider === info.id}
+                        className={cn(
+                          "rounded-lg border px-2.5 py-2 text-left transition-colors",
+                          activeProvider === info.id ? "border-primary bg-primary/10" : "hover:bg-accent/40",
+                        )}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-medium">{info.shortTitle ?? info.title}</span>
+                          {info.badge && (
+                            <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+                              {info.badge}
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">{info.blurb}</p>
+                        {info.caveat && (
+                          <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground/70">{info.caveat}</p>
+                        )}
+                      </button>
+                    </AppTooltip>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
 
-          {/* Base voice — driven by the draft's engine. */}
-          <div className="space-y-2">
-            <Label>Base voice</Label>
-            <PresetPicker
-              isGemini={isGemini}
-              isMms={isMms}
-              value={effectiveVoice.voiceName ?? ""}
-              onChange={(v) => update({ voiceName: v || undefined })}
-            />
-          </div>
+          {/* Base voice — driven by the draft's engine. OmniVoice has no named
+              voices (its timbre comes from the optional clone below). */}
+          {activeInfo.hasNamedVoices ? (
+            <div className="space-y-2">
+              <Label>Base voice</Label>
+              <PresetPicker
+                isGemini={isGemini}
+                isMms={isMms}
+                value={effectiveVoice.voiceName ?? ""}
+                onChange={(v) => update({ voiceName: v || undefined })}
+              />
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              OmniVoice uses a single neural voice. Add a reference recording below to
+              clone a specific person.
+            </p>
+          )}
 
           {/* Guidance — the single free-text knob; routes to Voice.prompt.
               Only Gemini is promptable, so this field only appears for Gemini
@@ -377,70 +428,79 @@ function CharacterModalBody({
               </p>
             </div>
 
-            {/* Priority: record a segment or upload an audio file — a real
-                target voice for this character. (Handles removal too.) */}
-            <VoiceCloneSection
-              voice={draft}
-              projectId={projectId}
-              fileId={fileId}
-              session={session}
-              onChange={update}
-            />
+            {activeInfo.supportsCloning ? (
+              <>
+                {/* Priority: record a segment or upload an audio file — a real
+                    target voice for this character. (Handles removal too.) */}
+                <VoiceCloneSection
+                  voice={draft}
+                  projectId={projectId}
+                  fileId={fileId}
+                  session={session}
+                  onChange={update}
+                />
 
-            {/* Secondary, collapsed: reuse audio already in the project. This
-                is deliberately not a headline option — cloning from
-                AI-generated audio in particular is rarely what you want. */}
-            {takes.length > 0 && (
-              <details open={seededTakePresent} className="rounded-lg border bg-muted/10">
-                <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground">
-                  Or reuse audio from a line
-                </summary>
-                <div className="space-y-1.5 px-3 pb-3">
-                  <div className="max-h-40 space-y-1 overflow-auto rounded-lg border bg-muted/20 p-1">
-                    {takes.map((t) => {
-                      const seeded = seedCellId != null && t.cell.id === seedCellId
-                      return (
-                        <button
-                          key={takeKey(t)}
-                          type="button"
-                          onClick={() => void applyTake(t)}
-                          disabled={takeBusy}
-                          className={cn(
-                            "flex w-full items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors disabled:opacity-50",
-                            seeded ? "border-primary bg-primary/10" : "border-transparent hover:bg-accent/40",
-                          )}
-                        >
-                          <span className="truncate">{cellSnippet(t.cell)}</span>
-                          <span
-                            className={cn(
-                              "shrink-0 rounded px-1.5 py-0.5 text-[10px]",
-                              t.slot === "recorded"
-                                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-                                : "bg-muted text-muted-foreground",
-                            )}
-                          >
-                            {t.slot === "recorded" ? "Recorded" : "AI-generated"}
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                  <p className="text-[11px] leading-snug text-muted-foreground">
-                    Recorded human takes work best. AI-generated takes just echo an
-                    existing synthetic voice, so they rarely make a useful clone.
-                  </p>
-                  {takeBusy && (
-                    <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <Spinner className="h-3.5 w-3.5" /> Lifting take…
-                    </p>
-                  )}
-                  {takeError && (
-                    <p className="rounded border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
-                      {takeError}
-                    </p>
-                  )}
-                </div>
-              </details>
+                {/* Secondary, collapsed: reuse audio already in the project. This
+                    is deliberately not a headline option — cloning from
+                    AI-generated audio in particular is rarely what you want. */}
+                {takes.length > 0 && (
+                  <details open={seededTakePresent} className="rounded-lg border bg-muted/10">
+                    <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground">
+                      Or reuse audio from a line
+                    </summary>
+                    <div className="space-y-1.5 px-3 pb-3">
+                      <div className="max-h-40 space-y-1 overflow-auto rounded-lg border bg-muted/20 p-1">
+                        {takes.map((t) => {
+                          const seeded = seedCellId != null && t.cell.id === seedCellId
+                          return (
+                            <button
+                              key={takeKey(t)}
+                              type="button"
+                              onClick={() => void applyTake(t)}
+                              disabled={takeBusy}
+                              className={cn(
+                                "flex w-full items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors disabled:opacity-50",
+                                seeded ? "border-primary bg-primary/10" : "border-transparent hover:bg-accent/40",
+                              )}
+                            >
+                              <span className="truncate">{cellSnippet(t.cell)}</span>
+                              <span
+                                className={cn(
+                                  "shrink-0 rounded px-1.5 py-0.5 text-[10px]",
+                                  t.slot === "recorded"
+                                    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                                    : "bg-muted text-muted-foreground",
+                                )}
+                              >
+                                {t.slot === "recorded" ? "Recorded" : "AI-generated"}
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                      <p className="text-[11px] leading-snug text-muted-foreground">
+                        Recorded human takes work best. AI-generated takes just echo an
+                        existing synthetic voice, so they rarely make a useful clone.
+                      </p>
+                      {takeBusy && (
+                        <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <Spinner className="h-3.5 w-3.5" /> Lifting take…
+                        </p>
+                      )}
+                      {takeError && (
+                        <p className="rounded border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
+                          {takeError}
+                        </p>
+                      )}
+                    </div>
+                  </details>
+                )}
+              </>
+            ) : (
+              <p className="rounded-lg border border-dashed bg-muted/20 px-3 py-2 text-[11px] leading-snug text-muted-foreground">
+                On-device voices (Kokoro, MMS) don't support voice cloning. Switch to
+                OmniVoice or Gemini to clone a specific person.
+              </p>
             )}
           </div>
 

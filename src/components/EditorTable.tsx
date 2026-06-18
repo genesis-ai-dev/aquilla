@@ -4,7 +4,7 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw, BookOpen,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity, AudioLines,
+  ArrowRight, Activity, NotebookPen,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
@@ -16,16 +16,17 @@ import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsS
 import { sortByLens, hasTiming } from "@/lib/timeline/derive"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform } from "@/lib/sync/role-policy"
-import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive, emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { needsAttention, needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
 import { HealthRing } from "./HealthRing"
-import { TranslatedEditor } from "./TranslatedEditor"
+import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
 import { CellWaveform } from "./CellWaveform"
 import { CellAudioButton } from "./CellAudioButton"
+import { DenoiseButton } from "./audio/DenoiseButton"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
@@ -63,9 +64,6 @@ import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { looksLikeUuid } from "@/lib/uuid"
 import { isPerfLogEnabled } from "@/lib/perf-log"
-import { synthesizeCellTts } from "@/lib/sync/tts"
-import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
-import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { ViolationPopover } from "./ViolationPopover"
 import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
@@ -76,14 +74,23 @@ import { PreAcceptanceWarningBand } from "./PreAcceptanceWarningBand"
 import { detectPreAcceptanceWarnings } from "@/lib/terminology/preacceptance"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { AddConceptDialog } from "./AddConceptDialog"
-import { FootnoteInline } from "./footnotes/FootnoteInline"
+import { FootnoteInline, FootnotedTextValue } from "./footnotes/FootnoteInline"
+import {
+  AddFootnoteDialog,
+  type AddFootnoteMarkerOption,
+  type AddFootnoteDialogDefaults,
+  type AddFootnoteDialogValue,
+  type FootnoteMarkerStyle,
+} from "./footnotes/AddFootnoteDialog"
 import {
   segmentUsfmForDisplay,
   clipRangesToSegment,
   type UsfmNoteSegment,
 } from "@/lib/parsers/usfm-display"
-import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
-import { spliceFootnoteText } from "@/lib/footnotes/splice"
+import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
+import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
+import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
+import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 
 // Per-row render counter. Always accumulated when perf logging is on (cheap)
 // but NOT auto-logged — render logs would flood the console and push the
@@ -367,8 +374,10 @@ interface EditorTableProps {
   onAttachMediaFile?: (file: File) => Promise<void>
   onAttachMediaUrl?: (url: string) => Promise<void>
   /** Called after a successful `target.cell.commit` enqueue so the parent
-   *  refetches the cells projection. */
-  onCellCommitted?: (cellId: string) => void | Promise<void>
+   *  refetches the cells projection. `committedEventId` is the event id the
+   *  commit was assigned (known only here, before the projection round-trip);
+   *  the parent's auto-BT pins to it so the BT isn't instantly stale. */
+  onCellCommitted?: (cellId: string, committedEventId?: string) => void | Promise<void>
   /** Optimistic local patch fired BEFORE the outbox enqueue so the editor's
    *  rule infractions + per-cell UI re-derive instantly without waiting for
    *  the projection round-trip. The follow-up `onCellCommitted` -> revalidate
@@ -403,7 +412,7 @@ interface EditorTableProps {
   rules?: TranslationRule[]
   onInfractionClick?: (ruleId: string) => void
   isBacktranslationConfigured?: boolean
-  onBacktranslate?: (cell: CellData) => void
+  onBacktranslate?: (cell: CellData, polish?: boolean) => void
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
   /** Called when user saves a BT edit. Parent emits `cell.backtranslation.set`. */
@@ -467,6 +476,14 @@ interface EditorTableProps {
    * immediately below each cell row. Editing is safe only for USFM files.
    */
   showFootnotesInline?: boolean
+  /** True when a full footnote surface is active, so source chips stay markers only. */
+  footnotePanelActive?: boolean
+  /** Current footnote display preference. */
+  footnoteViewMode?: FootnoteViewMode
+  /** Emits USFM footnotes from the currently visible virtual rows. */
+  onVisibleFootnotesChange?: (entries: VisibleFootnoteEntry[]) => void
+  /** Called after a target footnote is created so the parent can reveal footnotes. */
+  onFootnoteCreated?: () => void
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -496,13 +513,18 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   assignmentsByCellId,
   checkLockHolder,
   showFootnotesInline,
+  footnotePanelActive,
+  footnoteViewMode = "off",
   onVisibleRefChange,
+  onVisibleFootnotesChange,
+  onFootnoteCreated,
 }, ref) {
   const { canEdit, canValidate, readOnlyLabel } = useEditorCapabilities(project)
   // Probe mic permission once (shared across all rows) so the help affordance
   // on CellAudioRecordButton activates when the user has blocked the mic.
   const { micDenied } = useMicPermission(audioLens !== null)
   const parentRef = useRef<HTMLDivElement>(null)
+  const [hoveredFootnote, setHoveredFootnote] = useState<{ cellId: string; index: number } | null>(null)
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
   const cellsRef = useRef(cells)
@@ -952,6 +974,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // getVirtualItemForOffset(scrollOffset) returns the item that spans that
   // pixel, giving us the true first-visible row without overscan noise.
   const scrollOffset = virtualizer.scrollOffset ?? 0
+  const virtualItems = virtualizer.getVirtualItems()
   const firstVisibleItem = virtualizer.getVirtualItemForOffset(scrollOffset)
   const firstVisibleIndex = firstVisibleItem?.index ?? 0
   const currentSectionLabel = sectionByIndex[firstVisibleIndex] ?? ""
@@ -963,6 +986,59 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   useEffect(() => {
     onVisibleRefChange?.(firstVisibleRef)
   }, [firstVisibleRef, onVisibleRefChange])
+
+  const footnoteNumberOffsets = useMemo(() => {
+    const offsets = new Map<string, { source: number; target: number }>()
+    const countsByScope = new Map<string, { source: number; target: number }>()
+
+    for (const cell of displayCells) {
+      const scopeKey = footnoteScopeKey(cell)
+      const counts = countsByScope.get(scopeKey) ?? { source: 0, target: 0 }
+      offsets.set(cell.id, { source: counts.source, target: counts.target })
+      counts.source += countNumericFootnotes(cell.original ?? "")
+      counts.target += countNumericFootnotes(cell.translated ?? "")
+      countsByScope.set(scopeKey, counts)
+    }
+
+    return offsets
+  }, [displayCells])
+
+  const visibleFootnoteEntries = useMemo<VisibleFootnoteEntry[]>(() => {
+    if (!onVisibleFootnotesChange || displayCells.length === 0) return []
+
+    const viewportStart = scrollOffset
+    const viewportEnd = viewportStart + (parentRef.current?.clientHeight ?? Number.POSITIVE_INFINITY)
+
+    return virtualItems
+      .filter((item) => item.start + item.size > viewportStart && item.start < viewportEnd)
+      .map((item) => {
+        const cell = displayCells[item.index]
+        if (!cell) return null
+        const sourceFootnotes = extractUsfmFootnotes(cell.original ?? "")
+        const targetFootnotes = extractUsfmFootnotes(cell.translated ?? "")
+        if (sourceFootnotes.length === 0 && targetFootnotes.length === 0) return null
+        return {
+          cellId: cell.id,
+          cellLabel: cell.cellLabel || String(item.index + 1),
+          cellRef: humanFootnoteCellRef(cell),
+          rowIndex: item.index,
+          sourceFootnotes,
+          targetFootnotes,
+          activeFootnoteIndex: hoveredFootnote?.cellId === cell.id ? hoveredFootnote.index : null,
+          isDocx: (cell.fileId ?? "").endsWith(".docx"),
+          numberOffset: footnoteNumberOffsets.get(cell.id)?.target ?? 0,
+        }
+      })
+      .filter((entry): entry is VisibleFootnoteEntry => entry !== null)
+  }, [displayCells, footnoteNumberOffsets, hoveredFootnote, onVisibleFootnotesChange, scrollOffset, virtualItems])
+
+  useEffect(() => {
+    onVisibleFootnotesChange?.(visibleFootnoteEntries)
+  }, [onVisibleFootnotesChange, visibleFootnoteEntries])
+
+  useEffect(() => () => {
+    onVisibleFootnotesChange?.([])
+  }, [onVisibleFootnotesChange])
 
   return (
     <div ref={parentRef} className="h-full overflow-auto" onMouseUp={handleMouseUp}>
@@ -1008,7 +1084,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       </div>
 
       <div style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
-        {virtualizer.getVirtualItems().map((virtualRow) => {
+        {virtualItems.map((virtualRow) => {
           const cell = displayCells[virtualRow.index]
           // The positioning wrapper lives OUTSIDE MemoizedRow. When the typed
           // cell grows in height, every row below it gets a new virtualRow.start
@@ -1110,6 +1186,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 assigneeNote={assignmentsByCellId?.get(cell.id)?.scopeLabel ?? null}
                 checkLockHolder={checkLockHolder}
                 showFootnotesInline={showFootnotesInline}
+                footnotePanelActive={footnotePanelActive}
+                footnoteViewMode={footnoteViewMode}
+                onFootnoteHoverChange={setHoveredFootnote}
+                onFootnoteCreated={onFootnoteCreated}
+                sourceFootnoteNumberOffset={footnoteNumberOffsets.get(cell.id)?.source ?? 0}
+                targetFootnoteNumberOffset={footnoteNumberOffsets.get(cell.id)?.target ?? 0}
               />
             </div>
           )
@@ -1153,7 +1235,7 @@ interface MemoizedRowProps {
    *  Resolved once per file by the parent (membership look-up) so this prop
    *  is just a stable boolean — preserves the row's React.memo invariant. */
   isStaleSource: boolean
-  onCellCommitted?: (cellId: string) => void | Promise<void>
+  onCellCommitted?: (cellId: string, committedEventId?: string) => void | Promise<void>
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
   remoteChangedWhileFocused: boolean
@@ -1174,7 +1256,7 @@ interface MemoizedRowProps {
   isBacktranslationConfigured?: boolean
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
-  onBacktranslate?: (cell: CellData) => void
+  onBacktranslate?: (cell: CellData, polish?: boolean) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   cellOpenCommentCount?: Map<string, number>
   onOpenComments?: (cellId: string) => void
@@ -1228,6 +1310,16 @@ interface MemoizedRowProps {
   checkLockHolder?: (cellId: string) => string | null
   /** FRO-317: when true, USFM \f...\f* footnotes render below each cell. */
   showFootnotesInline?: boolean
+  /** True when inline/tray footnote detail is already visible elsewhere. */
+  footnotePanelActive?: boolean
+  /** Current footnote display preference. */
+  footnoteViewMode?: FootnoteViewMode
+  /** Reports the target footnote currently hovered in this row. */
+  onFootnoteHoverChange?: (hovered: { cellId: string; index: number } | null) => void
+  /** Called after a target footnote is created. */
+  onFootnoteCreated?: () => void
+  sourceFootnoteNumberOffset: number
+  targetFootnoteNumberOffset: number
 }
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
@@ -1261,6 +1353,12 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     assigneeNote,
     checkLockHolder,
     showFootnotesInline,
+    footnotePanelActive,
+    footnoteViewMode = "off",
+    onFootnoteHoverChange,
+    onFootnoteCreated,
+    sourceFootnoteNumberOffset,
+    targetFootnoteNumberOffset,
   } = props
 
   const cellId = cell.id
@@ -1397,6 +1495,12 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         assigneeNote={assigneeNote}
         checkLockHolder={checkLockHolder}
         showFootnotesInline={showFootnotesInline}
+        footnotePanelActive={footnotePanelActive}
+        footnoteViewMode={footnoteViewMode}
+        onFootnoteHoverChange={onFootnoteHoverChange}
+        onFootnoteCreated={onFootnoteCreated}
+        sourceFootnoteNumberOffset={sourceFootnoteNumberOffset}
+        targetFootnoteNumberOffset={targetFootnoteNumberOffset}
       />
     </div>
   )
@@ -1413,7 +1517,7 @@ interface EditorRowProps {
    *  target commit. Renders a small warning badge next to the validation
    *  status. Computed once-per-file by the parent. */
   isStaleSource: boolean
-  onCellCommitted?: (cellId: string) => void
+  onCellCommitted?: (cellId: string, committedEventId?: string) => void
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
   remoteChangedWhileFocused: boolean
@@ -1442,7 +1546,7 @@ interface EditorRowProps {
   isBacktranslationConfigured?: boolean
   isBacktranslating?: boolean
   backtranslationError?: string
-  onBacktranslate?: (cell: CellData) => void
+  onBacktranslate?: (cell: CellData, polish?: boolean) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   /** FRO-207: Pre-built interlinear alignment model. */
   alignmentModel?: import("@/lib/completion/interlinear").AlignmentModel | null
@@ -1492,6 +1596,16 @@ interface EditorRowProps {
   checkLockHolder?: (cellId: string) => string | null
   /** FRO-317: when true, USFM \f...\f* footnotes render below the cell row. */
   showFootnotesInline?: boolean
+  /** True when inline/tray footnote detail is already visible elsewhere. */
+  footnotePanelActive?: boolean
+  /** Current footnote display preference. */
+  footnoteViewMode?: FootnoteViewMode
+  /** Reports the target footnote currently hovered in this row. */
+  onFootnoteHoverChange?: (hovered: { cellId: string; index: number } | null) => void
+  /** Called after a target footnote is created. */
+  onFootnoteCreated?: () => void
+  sourceFootnoteNumberOffset: number
+  targetFootnoteNumberOffset: number
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1601,6 +1715,9 @@ interface SourceWithTermLookupProps {
   onTermApply: (rendering: string) => void
   /** Render as an inline span (used per-segment by UsfmSourceText). */
   inline?: boolean
+  /** When true, note chips stay markers because detail is shown in a panel. */
+  footnotePanelActive?: boolean
+  footnoteNumberOffset?: number
 }
 
 function SourceWithTermLookup({
@@ -1711,32 +1828,192 @@ function SourceWithTermLookup({
 // popover. The stored value is untouched — violation ranges are clipped from
 // raw-text offsets into each segment via clipRangesToSegment.
 
-function UsfmNoteChip({ note, ordinal }: { note: UsfmNoteSegment; ordinal: number }) {
+function UsfmNoteChip({
+  note,
+  ordinal,
+  panelActive,
+}: {
+  note: UsfmNoteSegment
+  ordinal: number
+  panelActive?: boolean
+}) {
   const label =
     note.noteKind === "xref" ? "†" : note.caller && note.caller !== "+" && note.caller !== "-" ? note.caller : String(ordinal)
   const kindLabel = note.noteKind === "xref" ? "Cross reference" : note.noteKind === "endnote" ? "Endnote" : "Footnote"
-  return (
-    <Popover>
-      <PopoverTrigger
-        render={
-          <button
-            type="button"
-            className="mx-0.5 inline-flex h-3.5 min-w-3.5 cursor-pointer items-center justify-center rounded-full bg-muted px-0.5 align-super text-[9px] font-bold leading-none text-muted-foreground hover:bg-primary/15 hover:text-primary"
-            aria-label={`${kindLabel}${note.ref ? ` ${note.ref}` : ""}`}
-          >
-            {label}
-          </button>
-        }
-      />
-      <PopoverContent className="max-w-72 p-2 text-xs" side="bottom" align="start">
-        <div className="mb-0.5 flex items-center gap-1.5">
-          <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">{kindLabel}</span>
-          {note.ref && <span className="font-mono text-[10px] text-muted-foreground">{note.ref}</span>}
-        </div>
-        <div>{note.text || <span className="italic text-muted-foreground">(empty)</span>}</div>
-      </PopoverContent>
-    </Popover>
+  const tooltipContent = (
+    <div className="max-w-72 text-xs">
+      <div className="mb-0.5 flex items-center gap-1.5">
+        <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">{kindLabel}</span>
+        {note.ref && <span className="font-mono text-[10px] text-muted-foreground">{note.ref}</span>}
+      </div>
+      <div>{note.text || <span className="italic text-muted-foreground">(empty)</span>}</div>
+    </div>
   )
+  const chip = (
+    <button
+      type="button"
+      className={cn(
+        "mx-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-muted px-0.5 align-super text-[9px] font-bold leading-none text-muted-foreground transition-colors hover:bg-primary/15 hover:text-primary focus-visible:bg-primary/15 focus-visible:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
+        panelActive ? "cursor-default" : "cursor-help",
+      )}
+      aria-label={`${kindLabel}${note.ref ? ` ${note.ref}` : ""}`}
+    >
+      {label}
+    </button>
+  )
+
+  return (
+    <AppTooltip content={tooltipContent} side="bottom">
+      {chip}
+    </AppTooltip>
+  )
+}
+
+function defaultFootnoteRef(cell: CellData): string {
+  const candidates = [
+    ...(cell.globalReferences ?? []),
+    cell.group,
+    cell.context,
+    cell.cellLabel,
+  ].filter(Boolean)
+
+  for (const candidate of candidates) {
+    const text = String(candidate).trim()
+    const canonicalRef = text.match(/\b[1-3]?\s?[A-Z][A-Z0-9]{1,4}\s+\d+:\d+(?:[-–]\d+)?\b/i)
+    if (canonicalRef) return canonicalRef[0].replace(/\s+/g, " ")
+  }
+
+  for (const candidate of candidates) {
+    const text = String(candidate).trim()
+    const verseOnlyRef = text.match(/\b\d+:\d+(?:[-–]\d+)?\b/)
+    if (verseOnlyRef) return verseOnlyRef[0]
+  }
+
+  return ""
+}
+
+function footnoteScopeKey(cell: CellData): string {
+  const candidates = [
+    ...(cell.globalReferences ?? []),
+    cell.group,
+    cell.context,
+    cell.cellLabel,
+  ].filter(Boolean)
+
+  for (const candidate of candidates) {
+    const parsed = parseFootnoteChapterScope(String(candidate))
+    if (parsed) return `${cell.fileId}:${parsed}`
+  }
+
+  return `${cell.fileId}:${cell.section || cell.context || "__file__"}`
+}
+
+function humanFootnoteCellRef(cell: CellData): string {
+  const value = (cell.group || cell.context || "").trim()
+  if (!value || looksLikeUuid(value)) return ""
+  return value
+}
+
+function parseFootnoteChapterScope(value: string): string | null {
+  const canonical = value.match(/\b([1-3]?\s?[A-Z][A-Z0-9]{1,4})\s+(\d+):\d+/i)
+  if (canonical) return `${canonical[1].replace(/\s+/g, "").toUpperCase()}:${canonical[2]}`
+  const chapterOnly = value.match(/\b(\d+):\d+\b/)
+  if (chapterOnly) return `chapter:${chapterOnly[1]}`
+  return null
+}
+
+function countNumericFootnotes(text: string): number {
+  return extractUsfmFootnotes(text).filter((footnote) => {
+    const caller = footnote.caller.trim()
+    return caller === "" || caller === "+" || caller === "-" || /^\d+$/.test(caller)
+  }).length
+}
+
+function footnoteMarkerOptions(
+  cell: CellData,
+  anchor: FootnoteInsertionAnchor | null,
+  numberOffset: number,
+): Record<FootnoteMarkerStyle, AddFootnoteMarkerOption> {
+  const targetFootnotes = extractUsfmFootnotes(cell.translated ?? "")
+  const insertionIndex = anchor?.plainPosition ?? Number.POSITIVE_INFINITY
+  const targetFootnotesBeforeInsertion = targetFootnotes.filter((footnote) => footnote.index < insertionIndex)
+  const numberedPreview = numberOffset + targetFootnotesBeforeInsertion.length + 1
+  const letterCallers = targetFootnotes
+    .map((footnote) => footnote.caller.trim().toLowerCase())
+    .filter((caller) => /^[a-z]+$/.test(caller))
+  const nextLetter = nextFootnoteLetter(letterCallers)
+
+  return {
+    numbered: {
+      label: "Numbering",
+      caller: "+",
+      startCaller: "1",
+      preview: String(numberedPreview),
+      startPreview: "1",
+      description: "Use automatic numeric markers.",
+    },
+    lettered: {
+      label: "Lettering",
+      caller: nextLetter,
+      startCaller: "a",
+      preview: nextLetter,
+      startPreview: "a",
+      description: "Use letter markers for a separate note sequence.",
+    },
+  }
+}
+
+function footnoteMarkerStyleFromCaller(caller: string | undefined): FootnoteMarkerStyle {
+  const trimmed = caller?.trim().toLowerCase() ?? ""
+  return /^[a-z]+$/.test(trimmed) ? "lettered" : "numbered"
+}
+
+function nextFootnoteLetter(existingLetters: string[]): string {
+  let max = 0
+  for (const letter of existingLetters) {
+    max = Math.max(max, letterToNumber(letter))
+  }
+  return numberToLetter(max + 1)
+}
+
+function letterToNumber(value: string): number {
+  let total = 0
+  for (const char of value) {
+    const code = char.charCodeAt(0)
+    if (code < 97 || code > 122) continue
+    total = total * 26 + (code - 96)
+  }
+  return total
+}
+
+function numberToLetter(value: number): string {
+  let current = Math.max(1, value)
+  let output = ""
+  while (current > 0) {
+    current -= 1
+    output = String.fromCharCode(97 + (current % 26)) + output
+    current = Math.floor(current / 26)
+  }
+  return output
+}
+
+function footnoteAnchorText(anchor: FootnoteInsertionAnchor | null): string {
+  if (!anchor) return ""
+  if (anchor.source === "selection" || anchor.source === "word") {
+    return anchor.previewText ?? ""
+  }
+  return lastVisibleWordBeforeFootnote(anchor.previewBefore ?? "")
+}
+
+const FOOTNOTE_ANCHOR_RE = /\\f\s+[^\s\\]+[\s\S]*?\\f\*/g
+
+function lastVisibleWordBeforeFootnote(value: string): string {
+  const visible = value
+    .replace(FOOTNOTE_ANCHOR_RE, "")
+    .replace(/\\[a-z0-9*]+/gi, " ")
+    .trim()
+  const match = visible.match(/([\p{L}\p{N}][\p{L}\p{N}'’-]*)[^\p{L}\p{N}]*$/u)
+  return match?.[1] ?? ""
 }
 
 function UsfmSourceText(props: SourceWithTermLookupProps) {
@@ -1745,7 +2022,7 @@ function UsfmSourceText(props: SourceWithTermLookupProps) {
   // Fast path: no USFM markers in this cell — render exactly as before.
   if (segments === null) return <SourceWithTermLookup {...props} />
 
-  let ordinal = 0
+  let ordinal = props.footnoteNumberOffset ?? 0
   const parts: React.ReactNode[] = []
   segments.forEach((seg, i) => {
     if (seg.kind === "break") {
@@ -1762,7 +2039,14 @@ function UsfmSourceText(props: SourceWithTermLookupProps) {
     }
     if (seg.kind === "note") {
       ordinal += 1
-      parts.push(<UsfmNoteChip key={`note-${i}`} note={seg} ordinal={ordinal} />)
+      parts.push(
+        <UsfmNoteChip
+          key={`note-${i}`}
+          note={seg}
+          ordinal={ordinal}
+          panelActive={props.footnotePanelActive}
+        />,
+      )
       return
     }
     parts.push(
@@ -1785,7 +2069,7 @@ function EditorRow({
   cellExamples, highlights, error, health,
   cellInfractions, waivedInfractions, ruleMap,
   onCompleteSingle, onInfractionClick,
-  isBacktranslationConfigured: _isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate, onSaveBacktranslation,
+  isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate, onSaveBacktranslation,
   openCommentCount, onOpenComments, onOpenHistory,
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
@@ -1805,6 +2089,12 @@ function EditorRow({
   assigneeNote,
   checkLockHolder,
   showFootnotesInline,
+  footnotePanelActive,
+  footnoteViewMode = "off",
+  onFootnoteHoverChange,
+  onFootnoteCreated,
+  sourceFootnoteNumberOffset,
+  targetFootnoteNumberOffset,
 }: EditorRowProps) {
   const hasTranslatedText = Boolean(cell.translated?.trim())
   const showCompletionOverlay = isLoading && !hasTranslatedText
@@ -1848,9 +2138,41 @@ function EditorRow({
   // cell. True = dialog is open; clicking Confirm calls onCompleteSingle,
   // clicking Cancel discards the pending action (nothing committed).
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false)
-  // OmniVoice TTS generation state for the "Generate audio" rail button.
-  const [omniTtsLoading, setOmniTtsLoading] = useState(false)
-  const [omniTtsError, setOmniTtsError] = useState<string | null>(null)
+  const translatedEditorRef = useRef<TranslatedEditorHandle | null>(null)
+  const pendingFootnoteAnchorRef = useRef<FootnoteInsertionAnchor | null>(null)
+  const [activeFootnoteIndex, setActiveFootnoteIndex] = useState<number | null>(null)
+  const [addFootnoteOpen, setAddFootnoteOpen] = useState(false)
+  const [addFootnoteDefaults, setAddFootnoteDefaults] = useState<AddFootnoteDialogDefaults>({
+    caller: "+",
+    ref: "",
+    text: "",
+  })
+  const allFootnotes = useMemo(() => ({
+    sourceFootnotes: extractUsfmFootnotes(cell.original ?? ""),
+    targetFootnotes: extractUsfmFootnotes(cell.translated ?? ""),
+  }), [cell.original, cell.translated])
+  const sourceDisplayFootnotes = useMemo(() => {
+    const segments = segmentUsfmForDisplay(cell.original ?? "")
+    if (!segments) return []
+    return segments
+      .filter((segment): segment is UsfmNoteSegment => segment.kind === "note")
+      .map((note) => ({
+        index: note.rawStart,
+        raw: note.raw,
+        caller: note.caller,
+        ref: note.ref,
+        text: note.text,
+      }))
+  }, [cell.original])
+  const sourceDetailFootnotes = allFootnotes.sourceFootnotes.length > 0
+    ? allFootnotes.sourceFootnotes
+    : sourceDisplayFootnotes
+  const sourceFootnotes = showFootnotesInline ? allFootnotes.sourceFootnotes : []
+  const targetFootnotes = showFootnotesInline ? allFootnotes.targetFootnotes : []
+  const hasInlineFootnotes = sourceFootnotes.length > 0 || targetFootnotes.length > 0
+  const hasAnyFootnotes = sourceDetailFootnotes.length > 0 || allFootnotes.targetFootnotes.length > 0
+  const showFootnotesInExpansion = footnoteViewMode === "off" && hasAnyFootnotes
+  const isDocxFile = (cell.fileId ?? "").endsWith(".docx")
 
   useEffect(() => {
     if (cell.targetEventId) pendingTargetEventIdRef.current = cell.targetEventId
@@ -1987,7 +2309,9 @@ function EditorRow({
       author: username,
     }).then((eventId) => {
       pendingTargetEventIdRef.current = eventId
-      void onCellCommitted?.(cell.id)
+      // Pass the just-assigned event id: the auto-BT in the parent pins to it
+      // so the BT describes THIS commit, not the lagging projection head.
+      void onCellCommitted?.(cell.id, eventId)
     }).catch((err) => {
       // RES-4/M1-3: enqueue failure (IDB quota, private-mode, InsufficientRoleError)
       // must be loud. Revert the optimistic patch so the cell doesn't show
@@ -2022,6 +2346,59 @@ function EditorRow({
     }
     handleEditorCommit({ value: next, valueHtml: next })
   }, [cell.translated, handleEditorCommit])
+
+  const captureFootnoteAnchor = useCallback(() => {
+    pendingFootnoteAnchorRef.current = translatedEditorRef.current?.getFootnoteInsertionAnchor() ?? null
+  }, [])
+
+  const openAddFootnoteDialog = useCallback((defaults?: AddFootnoteDialogDefaults) => {
+    if (!pendingFootnoteAnchorRef.current) captureFootnoteAnchor()
+    const anchor = pendingFootnoteAnchorRef.current
+    const markerOptions = footnoteMarkerOptions(cell, anchor, targetFootnoteNumberOffset)
+    const markerStyle = defaults?.markerStyle ?? footnoteMarkerStyleFromCaller(defaults?.caller)
+    setAddFootnoteDefaults({
+      caller: defaults?.caller ?? "+",
+      ref: defaults?.ref ?? defaultFootnoteRef(cell),
+      text: defaults?.text ?? "",
+      markerStyle,
+      anchorText: defaults?.anchorText ?? footnoteAnchorText(anchor),
+      insertionPreview: anchor
+        ? {
+          before: anchor.previewBefore ?? "",
+          after: anchor.previewAfter ?? "",
+        }
+        : undefined,
+      markerOptions,
+    })
+    setAddFootnoteOpen(true)
+  }, [captureFootnoteAnchor, cell, targetFootnoteNumberOffset])
+
+  const handleAddFootnote = useCallback((value: AddFootnoteDialogValue) => {
+    const marker = createUsfmFootnoteMarker(value)
+    const inserted = translatedEditorRef.current?.insertFootnoteMarker(
+      marker,
+      pendingFootnoteAnchorRef.current,
+    ) ?? false
+
+    if (!inserted) {
+      const next = `${cell.translated ?? ""}${marker}`
+      handleEditorCommit({ value: next, valueHtml: next })
+    }
+
+    pendingFootnoteAnchorRef.current = null
+    onFootnoteCreated?.()
+    setAddFootnoteOpen(false)
+  }, [cell.translated, handleEditorCommit, onFootnoteCreated])
+
+  const handleCreateTargetFootnote = useCallback((sourceFootnote: ExtractedFootnote) => {
+    pendingFootnoteAnchorRef.current = null
+    openAddFootnoteDialog({
+      caller: sourceFootnote.caller || "+",
+      ref: sourceFootnote.ref || defaultFootnoteRef(cell),
+      text: sourceFootnote.text,
+      markerStyle: footnoteMarkerStyleFromCaller(sourceFootnote.caller),
+    })
+  }, [cell, openAddFootnoteDialog])
 
   // Add-from-selection (Slice 5): capture a source-side text selection so the
   // translator can promote it to a DRAFT concept without leaving the editor.
@@ -2247,55 +2624,6 @@ function EditorRow({
     void transcribeCell({ cell, session: rowSession, projectId: project.id, language: project.targetLanguage })
   }, [cell, rowSession, project.id, project.targetLanguage])
 
-  /**
-   * OmniVoice TTS (use case 1): synthesize the cell's translated text via the
-   * sync-worker /api/v1/voice/tts endpoint, then attach the returned clip to
-   * this cell's "generatedVoice" slot via cell.audio.attach. The attach event's
-   * projection auto-selects the new clip (sets selected=0 on siblings), so no
-   * follow-up select is needed.
-   */
-  const handleOmniTts = useCallback(async () => {
-    const text = cell.translated.trim()
-    if (!text || !project.id || !cell.fileId) return
-    if (!rowSession?.jwt) return
-    setOmniTtsLoading(true)
-    setOmniTtsError(null)
-    const getSyncToken = audioSyncTokenFetcherForSession(rowSession)
-    try {
-      const result = await synthesizeCellTts(
-        {
-          projectId: project.id,
-          fileId: cell.fileId,
-          cellId: cell.id,
-          text,
-          ...(project.targetLanguage ? { language: project.targetLanguage } : {}),
-        },
-        getSyncToken,
-      )
-      // Attach the returned clip to the "generatedVoice" slot. Use objectName
-      // (WITH .wav) as the audioId and the server's canonical url — audioId
-      // alone has no extension and would not resolve (R2 404 / pointer-invalid).
-      await emitCellAudioAttach({
-        projectId: project.id,
-        fileId: cell.fileId,
-        cellId: cell.id,
-        audioId: result.objectName,
-        url: result.url,
-        durationMs: Math.round(result.durationSeconds * 1000),
-        slot: "generatedVoice",
-        mimeType: "audio/wav",
-        author: username,
-      })
-      notifyAudioAttachmentsChanged(cell.fileId)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      setOmniTtsError(msg)
-      console.error("[omni-tts]", err)
-    } finally {
-      setOmniTtsLoading(false)
-    }
-  }, [cell.translated, cell.fileId, cell.id, project.id, project.targetLanguage, rowSession, username])
-
   const vs = cell.validationStatus
   const [validationPopoverOpen, setValidationPopoverOpen] = useState(false)
   const isSelfValidated = cell.activeValidators.includes(username)
@@ -2474,6 +2802,12 @@ function EditorRow({
     }
     previousExpandedRef.current = expanded
   }, [expanded, cellInfractions.length, transcriptNeedsAttention])
+
+  useEffect(() => {
+    if (expansionTab === "footnotes" && !showFootnotesInExpansion) {
+      setExpansionTab("backtranslation")
+    }
+  }, [expansionTab, showFootnotesInExpansion])
 
   const railRevealed = isHovering || hasFocusWithin || isTapSelected || expanded
 
@@ -2673,6 +3007,7 @@ function EditorRow({
           // not shadows. Depth is gone by design — the Linear model reserves
           // elevation for floating layers.
           "group relative grid gap-2 overflow-hidden px-4 py-2 transition-colors duration-150 ease-out",
+          hasInlineFootnotes && "gap-y-1 py-1.5",
           // Keyboard-focus ring for the grid row (only when focused directly,
           // not via a child element — :focus-visible + :not(:focus-within:not(:focus))).
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-inset",
@@ -2706,7 +3041,7 @@ function EditorRow({
             is the single issue surface (severity tint + title); no
             stripe/dot/warning. Selection lives on the source/target divider so
             range selection follows the text. */}
-        <div className="flex h-full items-start justify-center gap-1 py-0.5">
+        <div className="flex h-full items-start justify-center gap-1 pt-5">
           {numberPill}
           {/* Validation circle — single bare icon until validated, with a
               health ring appearing around it once there's a substantive score. */}
@@ -2844,7 +3179,7 @@ function EditorRow({
                 onToolbarMouseUp={handleToolbarMouseUp}
               />
             )}
-            <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground" dir="ltr">
+            <div className="mb-1 flex h-4 items-center gap-1 text-xs text-muted-foreground" dir="ltr">
               <span>{cell.context}</span>
               {showFormattingLossWarning && (
                 <AppTooltip content="Source has inline formatting that the target does not preserve. Formatting will be lost on export." className="max-w-xs">
@@ -2871,6 +3206,8 @@ function EditorRow({
                 onRangeClick={openInlineRule}
                 concepts={project.terminology ?? []}
                 onTermApply={handleTermApply}
+                footnotePanelActive={footnotePanelActive}
+                footnoteNumberOffset={sourceFootnoteNumberOffset}
               />
             )}
             {cellExamples.length > 0 && (
@@ -2918,7 +3255,7 @@ function EditorRow({
               onPointerDown={onSelectionPointerDown}
               onClick={(e) => e.stopPropagation()}
               className={cn(
-                "absolute left-0 top-1/2 z-20 grid h-5 w-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border",
+                "absolute left-0 top-8 z-20 grid h-5 w-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border",
                 "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color] duration-150 ease-out",
                 "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
                 isMultiSelected
@@ -2955,18 +3292,24 @@ function EditorRow({
             <div
               className={cn(
                 "relative flex min-h-[40px] flex-1 flex-col rounded-lg px-2 py-1.5 transition-colors",
+                hasInlineFootnotes && "min-h-0 py-0.5",
                 "hover:bg-muted/60 focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
                 !cell.translated?.trim() && "bg-muted/40",
               )}
             >
               <TranslatedEditor
+                ref={translatedEditorRef}
                 cellId={cell.id}
                 initialPlain={cell.translated}
                 initialHtml={cell.translatedHtml}
                 onCommit={handleEditorCommit}
                 onFocus={handleEditorFocus}
                 onBlur={handleEditorBlurOuter}
-                className={cn("w-full", showCompletionOverlay && "opacity-30 transition-opacity")}
+                className={cn(
+                  "w-full",
+                  showCompletionOverlay && "opacity-30 transition-opacity",
+                )}
+                compactHeight={hasInlineFootnotes}
                 editable={editable && !isLoading}
                 heldByLabel={lockHolderLabel}
                 infractions={[...cellInfractions, ...waivedInfractions]}
@@ -2981,6 +3324,12 @@ function EditorRow({
                 onNavigateCell={onNavigateCell}
                 terminologyConcepts={project.terminology ?? []}
                 onTermChipClick={handleTermChipClick}
+                footnoteNumberOffset={targetFootnoteNumberOffset}
+                showFootnoteTooltips={!footnotePanelActive}
+                onFootnoteHover={(index) => {
+                  setActiveFootnoteIndex(index)
+                  onFootnoteHoverChange?.(index === null ? null : { cellId: cell.id, index })
+                }}
                 ariaLabel={editorAriaLabel}
                 onEscapeToGrid={onEscapeToGrid}
               />
@@ -3046,6 +3395,26 @@ function EditorRow({
                 </div>
               )}
             </div>
+            {hasInlineFootnotes && (
+              <FootnoteInline
+                sourceFootnotes={sourceFootnotes}
+                targetFootnotes={targetFootnotes}
+                editable={editable}
+                isDocx={isDocxFile}
+                onSave={(footnoteIndex, newText) => {
+                  const updated = spliceFootnoteText(cell.translated ?? "", footnoteIndex, newText)
+                  handleEditorCommit({ value: updated, valueHtml: updated })
+                }}
+                onDelete={(footnoteIndex) => {
+                  const updated = deleteFootnote(cell.translated ?? "", footnoteIndex)
+                  handleEditorCommit({ value: updated, valueHtml: updated })
+                }}
+                onCreateTarget={handleCreateTargetFootnote}
+                numberOffset={targetFootnoteNumberOffset}
+                activeFootnoteIndex={activeFootnoteIndex}
+                compact
+              />
+            )}
             {/* Slice 4: advisory terminology warning band for the copilot
                 completion. Renders nothing when there are no warnings; never
                 blocks accept/commit. */}
@@ -3265,36 +3634,16 @@ function EditorRow({
                 />
               )}
 
-              {/* OmniVoice TTS: generate server-side audio for the translated cell
-                  and attach it to the generatedVoice slot. Only shown when the cell
-                  has translated text, the project ID + file ID are known, and the
-                  caller has a session (sync token can be minted). Hidden in play-only
-                  surfaces — audio production belongs to Voice Studio. */}
-              {editable && cell.translated.trim().length > 0 && project.id && cell.fileId && rowSession?.jwt && (
+              {editable && !isLoading && (
                 <RailButton
-                  icon={
-                    omniTtsLoading
-                      ? <Spinner className="size-3" />
-                      : omniTtsError
-                        ? <AlertCircle className="h-3.5 w-3.5" />
-                        : <AudioLines className="h-3.5 w-3.5" />
-                  }
-                  tooltip={
-                    omniTtsLoading
-                      ? "Generating audio…"
-                      : omniTtsError
-                        ? `Audio generation failed — ${omniTtsError}`
-                        : "Generate audio (OmniVoice)"
-                  }
-                  onClick={() => { void handleOmniTts() }}
-                  disabled={omniTtsLoading}
-                  toneClass={
-                    omniTtsError
-                      ? "text-destructive hover:text-destructive/80"
-                      : omniTtsLoading
-                        ? "text-amber-600 dark:text-amber-400"
-                        : undefined
-                  }
+                  icon={<NotebookPen className="h-3.5 w-3.5" />}
+                  tooltip="Add footnote"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    captureFootnoteAnchor()
+                  }}
+                  onClick={() => openAddFootnoteDialog()}
                 />
               )}
 
@@ -3387,20 +3736,35 @@ function EditorRow({
                       )}
                     </div>
                     <div className="flex items-center gap-1">
-                      {/* Polish toggle — only when BT is present and user can edit */}
+                      {/* Polish toggle — only when BT is present and user can edit.
+                          Toggling ON regenerates the BT through the AI; OFF
+                          regenerates the statistical-only gloss so the displayed
+                          text always matches the polished/statistical label.
+                          Disabled when no AI model is configured. */}
                       {editable && cell.backtranslation && (
-                        <AppTooltip content={btPolishOn ? "Polish on: LLM step will run on next generate" : "Polish off: statistical-only BT"}>
+                        <AppTooltip content={
+                          !isBacktranslationConfigured
+                            ? "Configure an AI model in project settings to enable Polish"
+                            : btPolishOn
+                              ? "Polish on: regenerate statistical-only by turning this off"
+                              : "Polish off: turn on to regenerate with AI"
+                        }>
                           <button
                             type="button"
-                            onClick={() => setBtPolishOn((v) => !v)}
+                            disabled={!isBacktranslationConfigured || isBacktranslating}
+                            onClick={() => {
+                              const next = !btPolishOn
+                              setBtPolishOn(next)
+                              onBacktranslate?.(cell, next)
+                            }}
                             className={cn(
-                              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors",
+                              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
                               btPolishOn
                                 ? "bg-violet-500/15 text-violet-700 dark:text-violet-300 hover:bg-violet-500/25"
                                 : "text-muted-foreground hover:bg-muted hover:text-foreground",
                             )}
                           >
-                            <Sparkles className="h-3 w-3" />
+                            <Sparkles className={cn("h-3 w-3", isBacktranslating && btPolishOn && "animate-pulse")} />
                             Polish
                           </button>
                         </AppTooltip>
@@ -3410,7 +3774,7 @@ function EditorRow({
                         <AppTooltip content="Translation changed — click to regenerate BT">
                           <button
                             type="button"
-                            onClick={() => onBacktranslate?.(cell)}
+                            onClick={() => onBacktranslate?.(cell, btPolishOn)}
                             disabled={isBacktranslating || cell.translated.trim().length === 0}
                             className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 transition-colors hover:bg-amber-500/20 dark:text-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
                           >
@@ -3423,7 +3787,7 @@ function EditorRow({
                       {!cell.backtranslation && !isBtStale && (
                         <button
                           type="button"
-                          onClick={() => onBacktranslate?.(cell)}
+                          onClick={() => onBacktranslate?.(cell, btPolishOn)}
                           disabled={isBacktranslating || cell.translated.trim().length === 0}
                           className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                         >
@@ -3531,6 +3895,31 @@ function EditorRow({
                 </div>
               ),
             },
+            ...(showFootnotesInExpansion ? [{
+              value: "footnotes",
+              icon: <NotebookPen className="h-3 w-3" />,
+              label: "Footnotes",
+              content: (
+                <FootnoteInline
+                  sourceFootnotes={sourceDetailFootnotes}
+                  targetFootnotes={allFootnotes.targetFootnotes}
+                  editable={editable}
+                  isDocx={isDocxFile}
+                  onSave={(footnoteIndex, newText) => {
+                    const updated = spliceFootnoteText(cell.translated ?? "", footnoteIndex, newText)
+                    handleEditorCommit({ value: updated, valueHtml: updated })
+                  }}
+                  onDelete={(footnoteIndex) => {
+                    const updated = deleteFootnote(cell.translated ?? "", footnoteIndex)
+                    handleEditorCommit({ value: updated, valueHtml: updated })
+                  }}
+                  onCreateTarget={handleCreateTargetFootnote}
+                  numberOffset={targetFootnoteNumberOffset}
+                  activeFootnoteIndex={activeFootnoteIndex}
+                  compact
+                />
+              ),
+            }] : []),
             {
               value: "audio",
               icon: <Mic className="h-3 w-3" />,
@@ -3622,6 +4011,29 @@ function EditorRow({
                           />
                           {isTranscribing ? "Transcribing…" : "Transcribe"}
                         </button>
+                        {cell.selectedAudioId && selectedAudio && (
+                          <DenoiseButton
+                            projectId={project.id}
+                            fileId={cell.fileId}
+                            cellId={cell.id}
+                            selectedAudioId={cell.selectedAudioId}
+                            selectedUrl={selectedAudio.url}
+                            referenceAudioId={selectedAudio.referenceAudioId ?? null}
+                            originalUrl={
+                              selectedAudio.referenceAudioId
+                                ? cell.attachments?.[selectedAudio.referenceAudioId]?.url ?? null
+                                : null
+                            }
+                            originalDurationMs={
+                              selectedAudio.referenceAudioId
+                                ? cell.attachments?.[selectedAudio.referenceAudioId]?.durationMs ?? null
+                                : null
+                            }
+                            author={username}
+                            session={rowSession}
+                            editable={editable}
+                          />
+                        )}
                       </div>
                     </>
                   ) : hasGeneratedVoice ? (
@@ -3804,8 +4216,8 @@ function EditorRow({
                                 <span>{entry.author}</span>
                                 <span>{date}</span>
                               </div>
-                              <div className="mt-0.5 truncate italic text-muted-foreground">
-                                "{entry.value}"
+                              <div className="mt-0.5 text-muted-foreground">
+                                <FootnotedTextValue value={entry.value} showFootnotes />
                               </div>
                             </li>
                           )
@@ -3873,26 +4285,16 @@ function EditorRow({
         onCancel={() => setShowGenerateConfirm(false)}
       />
 
-      {/* FRO-317: inline footnotes panel — rendered only when enabled and the
-          cell has at least one USFM \f...\f* footnote in source or target. */}
-      {showFootnotesInline && (() => {
-        const srcFootnotes = extractUsfmFootnotes(cell.original ?? "")
-        const tgtFootnotes = extractUsfmFootnotes(cell.translated ?? "")
-        if (srcFootnotes.length === 0 && tgtFootnotes.length === 0) return null
-        const isDocx = (cell.fileId ?? "").endsWith(".docx")
-        return (
-          <FootnoteInline
-            sourceFootnotes={srcFootnotes}
-            targetFootnotes={tgtFootnotes}
-            editable={editable}
-            isDocx={isDocx}
-            onSave={(footnoteIndex, newText) => {
-              const updated = spliceFootnoteText(cell.translated ?? "", footnoteIndex, newText)
-              handleEditorCommit({ value: updated, valueHtml: updated })
-            }}
-          />
-        )
-      })()}
+      <AddFootnoteDialog
+        open={addFootnoteOpen}
+        defaults={addFootnoteDefaults}
+        onOpenChange={(open) => {
+          setAddFootnoteOpen(open)
+          if (!open) pendingFootnoteAnchorRef.current = null
+        }}
+        onAdd={handleAddFootnote}
+      />
+
     </div>
   )
 }

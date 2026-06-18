@@ -781,11 +781,41 @@ export async function detachGroupProject(env: Env, groupId: number, projectId: s
 }
 
 export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number }
+export interface OrgPortfolioRow extends PortfolioRow { orgId: number }
+
+interface PortfolioDbRow {
+  org_id: number
+  id: string
+  name: string
+  deadline_at: string | null
+  total_cells: number
+  validated_cells: number
+  filled_cells: number
+  ai_drafted_cells: number
+  last_edit_at: number | null
+  audio_cells: number
+  recorded_ms: number
+}
+
+function mapPortfolioRow(r: PortfolioDbRow): PortfolioRow {
+  return {
+    id: r.id,
+    name: r.name,
+    totalCells: r.total_cells,
+    validatedCells: r.validated_cells,
+    filledCells: r.filled_cells,
+    aiDraftedCells: r.ai_drafted_cells,
+    lastEditAt: r.last_edit_at,
+    audioCells: r.audio_cells,
+    recordedMs: r.recorded_ms,
+    deadlineAt: r.deadline_at,
+  }
+}
 
 /** Per-project rollup over the org's non-archived projects (derive-on-read, one GROUP BY). */
 export async function getOrgPortfolio(env: Env, orgId: number): Promise<PortfolioRow[]> {
   const rows = await env.AQUILLA_PG.prepare(
-    `SELECT p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
+    `SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
             COALESCE(SUM(f.cell_count), 0)          AS total_cells,
             COALESCE(SUM(f.approved_count), 0)      AS validated_cells,
             COALESCE(SUM(f.filled_count), 0)        AS filled_cells,
@@ -800,19 +830,33 @@ export async function getOrgPortfolio(env: Env, orgId: number): Promise<Portfoli
       WHERE p.org_id = ? AND p.archived_at IS NULL
       GROUP BY p.id, p.name
       ORDER BY LOWER(p.name)`,
-  ).bind(orgId).all<{ id: string; name: string; deadline_at: string | null; total_cells: number; validated_cells: number; filled_cells: number; ai_drafted_cells: number; last_edit_at: number | null; audio_cells: number; recorded_ms: number }>()
-  return (rows.results ?? []).map((r) => ({
-    id: r.id,
-    name: r.name,
-    totalCells: r.total_cells,
-    validatedCells: r.validated_cells,
-    filledCells: r.filled_cells,
-    aiDraftedCells: r.ai_drafted_cells,
-    lastEditAt: r.last_edit_at,
-    audioCells: r.audio_cells,
-    recordedMs: r.recorded_ms,
-    deadlineAt: r.deadline_at,
-  }))
+  ).bind(orgId).all<PortfolioDbRow>()
+  return (rows.results ?? []).map(mapPortfolioRow)
+}
+
+/** Batched portfolio rollup for all-org dashboard/list views. */
+export async function getOrgPortfolios(env: Env, orgIds: number[]): Promise<OrgPortfolioRow[]> {
+  const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
+  if (uniqueOrgIds.length === 0) return []
+  const placeholders = uniqueOrgIds.map(() => "?").join(", ")
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
+            COALESCE(SUM(f.cell_count), 0)          AS total_cells,
+            COALESCE(SUM(f.approved_count), 0)      AS validated_cells,
+            COALESCE(SUM(f.filled_count), 0)        AS filled_cells,
+            COALESCE(SUM(f.ai_drafted_count), 0)    AS ai_drafted_cells,
+            MAX(f.last_edit_at)                     AS last_edit_at,
+            (SELECT COUNT(DISTINCT ca.cell_id) FROM cell_audio ca
+              WHERE ca.project_id = p.id AND ca.deleted = 0)                    AS audio_cells,
+            (SELECT COALESCE(SUM(ca.duration_ms), 0) FROM cell_audio ca
+              WHERE ca.project_id = p.id AND ca.deleted = 0 AND ca.selected = 1) AS recorded_ms
+       FROM projects p
+       LEFT JOIN files f ON f.project_id = p.id
+      WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL
+      GROUP BY p.org_id, p.id, p.name
+      ORDER BY p.org_id, LOWER(p.name)`,
+  ).bind(...uniqueOrgIds).all<PortfolioDbRow>()
+  return (rows.results ?? []).map((r) => ({ ...mapPortfolioRow(r), orgId: r.org_id }))
 }
 
 export interface ProjectAccessBreakdown {

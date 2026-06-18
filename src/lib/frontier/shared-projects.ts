@@ -19,11 +19,18 @@ export interface PartitionedProjects {
   sharedWithMe: CloudProjectSummary[]
 }
 
+export type ProjectPartitionScope = "active-org" | "all-orgs"
+
 export function partitionSharedProjects(
   projects: CloudProjectSummary[],
   myOrgs: Pick<OrgSummary, "id">[],
   activeOrgId: number | null,
+  scope: ProjectPartitionScope = "active-org",
 ): PartitionedProjects {
+  if (scope === "all-orgs") {
+    return { inActiveOrg: projects, sharedWithMe: [] }
+  }
+
   const myOrgIds = new Set(myOrgs.map((o) => o.id))
   const inActiveOrg: CloudProjectSummary[] = []
   const sharedWithMe: CloudProjectSummary[] = []

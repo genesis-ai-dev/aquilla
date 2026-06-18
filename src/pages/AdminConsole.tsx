@@ -101,7 +101,7 @@ export function AdminConsole() {
   const openOrg = useCallback(
     (orgId: number) => {
       setActiveOrg(orgId)
-      navigate("/")
+      navigate({ pathname: "/", search: `?org=${orgId}` })
     },
     [setActiveOrg, navigate],
   )

@@ -97,6 +97,7 @@ function localSettingsFrom(
   }
   if (record.terminology != null) out.terminology = record.terminology
   if (record.livingMemoryEntries != null) out.livingMemoryEntries = record.livingMemoryEntries
+  if (record.translationBrief != null) out.translationBrief = record.translationBrief
   return out
 }
 
@@ -213,6 +214,9 @@ export function useProjectSettings(
             : {}),
           ...(got.settings.livingMemoryEntries != null
             ? { livingMemoryEntries: got.settings.livingMemoryEntries }
+            : {}),
+          ...(got.settings.translationBrief != null
+            ? { translationBrief: got.settings.translationBrief }
             : {}),
         }))
       } catch (err) {

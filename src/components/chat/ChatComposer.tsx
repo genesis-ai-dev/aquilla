@@ -8,9 +8,19 @@
  */
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react"
-import { Square } from "lucide-react"
+import { Sparkles, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+
+/** A one-tap prompt offered above the textarea (e.g. "Summarize book"). */
+export interface SuggestedAction {
+  label: string
+  onClick: () => void
+  /** Disabled with this reason as a tooltip (e.g. no chapter focused yet). */
+  disabled?: boolean
+  /** Native tooltip text. */
+  title?: string
+}
 
 export interface ChatComposerProps {
   isStreaming: boolean
@@ -18,9 +28,18 @@ export interface ChatComposerProps {
   onSend: (text: string) => void
   onStop: () => void
   compact?: boolean
+  /** One-tap prompts rendered as a chip row above the input. Hidden when empty. */
+  suggestedActions?: SuggestedAction[]
 }
 
-export function ChatComposer({ isStreaming, isConfigured, onSend, onStop, compact }: ChatComposerProps) {
+export function ChatComposer({
+  isStreaming,
+  isConfigured,
+  onSend,
+  onStop,
+  compact,
+  suggestedActions,
+}: ChatComposerProps) {
   const [draft, setDraft] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -57,6 +76,25 @@ export function ChatComposer({ isStreaming, isConfigured, onSend, onStop, compac
   return (
     <div className={cn("border-t", compact ? "p-2" : "p-3")}>
       <div className={cn("flex flex-col", compact ? "gap-1.5" : "gap-2")}>
+        {suggestedActions && suggestedActions.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {suggestedActions.map((action) => (
+              <Button
+                key={action.label}
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={action.disabled || !isConfigured || isStreaming}
+                title={action.title}
+                onClick={action.onClick}
+                className={cn("gap-1", compact ? "h-6 text-[10px]" : "h-7 text-xs")}
+              >
+                <Sparkles className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />
+                {action.label}
+              </Button>
+            ))}
+          </div>
+        )}
         <textarea
           ref={textareaRef}
           value={draft}

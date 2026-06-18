@@ -21,6 +21,7 @@ import {
   getOrCreateUserOrg,
   getOrgGroupDetail,
   getOrgPortfolio,
+  getOrgPortfolios,
   groupExistsInOrg,
   listEffectiveMembersForOrg,
   listOrgGroups,
@@ -116,6 +117,44 @@ orgs.get("/me", async (c) => {
     id: org.id,
     name: org.name,
     role: { level: org.role, name: ROLE_NAMES[org.role] ?? "owner" },
+  })
+})
+
+const portfolioBatchBody = z.object({
+  orgIds: z.array(z.number().int().positive()).max(100),
+})
+
+/** POST /api/v2/orgs/portfolio — batched per-project rollups for all-org views. */
+orgs.post("/portfolio", zValidator("json", portfolioBatchBody), async (c) => {
+  const user = c.get("user")
+  const { orgIds } = c.req.valid("json")
+  const uniqueOrgIds = [...new Set(orgIds)]
+  if (uniqueOrgIds.length === 0) return c.json({ portfolios: [] })
+
+  if (!isPlatformAdminUsername(c.env, user.username)) {
+    const placeholders = uniqueOrgIds.map(() => "?").join(", ")
+    const allowed = await c.env.AQUILLA_PG.prepare(
+      `SELECT org_id FROM org_members WHERE user_id = ? AND org_id IN (${placeholders})`,
+    ).bind(user.id, ...uniqueOrgIds).all<{ org_id: number }>()
+    const allowedOrgIds = new Set((allowed.results ?? []).map((row) => row.org_id))
+    if (uniqueOrgIds.some((orgId) => !allowedOrgIds.has(orgId))) {
+      return c.json({ error: "not an org member" }, 403)
+    }
+  }
+
+  const rows = await getOrgPortfolios(c.env, uniqueOrgIds)
+  const byOrg = new Map<number, typeof rows>()
+  for (const row of rows) {
+    const list = byOrg.get(row.orgId)
+    if (list) list.push(row)
+    else byOrg.set(row.orgId, [row])
+  }
+
+  return c.json({
+    portfolios: uniqueOrgIds.map((orgId) => ({
+      orgId,
+      projects: (byOrg.get(orgId) ?? []).map(({ orgId: _orgId, ...project }) => project),
+    })),
   })
 })
 

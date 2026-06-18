@@ -103,29 +103,40 @@ absent or not a valid pointer yields `null`; that take is skipped and counted as
 `gitlabLfsKey(oid)` is a small pure helper (own module + unit test) so the layout is
 verifiable and changeable in one place.
 
-### 4. Event emission + driver — `scripts/migrate-audio-copy.ts`
+### 4. Event emission + driver — `--audio-fast` pass in `scripts/migrate-all.ts`
 
-New script (existing `--audio` pass untouched). Per project:
+**Implementation note / deviation from original plan:** the spec first proposed a
+standalone `scripts/migrate-audio-copy.ts`. During implementation this was changed to a
+parallel **`--audio-fast`** pass inside `scripts/migrate-all.ts`, because the bulk audio
+import needs the project-discovery, `fetchProject`, `headSha`, `.migrate-state.json`,
+`fetchExistingEventIds`, and `ingest` plumbing that already lives there — a standalone
+script would duplicate ~200 lines. The existing `--audio` pass is left **untouched** as a
+fallback (the spec's real requirement). The pure logic lives in
+`src/lib/migrate/audio-copy.ts` and is fully unit-tested; the pass is thin orchestration.
 
-1. Fetch with `--no-lfs` (reuse `scripts/migrate-fetch.ts` machinery): metadata +
-   pointers only.
-2. Parse the project; for each cell, `collectAllCellAudio` → takes; read each take's
-   pointer → oid (skip + count `lfs-miss`).
-3. For each take, `POST /migrate/audio-copy`. On `copied`/`exists`, queue a
-   deterministic `cell.audio.attach` event (`frontier-audio://{audioId}`, slot
-   `recording`, `mimeType`, `durationMs`, `clientTs = createdAt` so `TakesStrip`'s
-   `created_ts ASC` ordering reproduces "Take 1..N"). Reuse `audioAttachEvent`.
-4. After queueing all of a cell's attaches, if the legacy `selectedAudioId` is among
-   the successfully-copied takes, queue one `cell.audio.select` event for it (slot
-   `recording`). Rationale: each `cell.audio.attach` auto-selects its row, so without a
-   final explicit select the *last-attached* take would be active. The explicit select
-   pins the correct active take. Requires a new deterministic `audioSelectEventId` in
-   `src/lib/migrate/ids.ts`.
-5. Ingest queued events via the existing `/migrate/ingest`, **delta-filtered** against
-   existing event ids (reuse `fetchExistingEventIds` from `migrate-all.ts`).
-6. Per-project log line: `copied / skipped(exists) / lfs-miss / events`. Track
-   completion in `.migrate-state.json` (mirror the existing `audioSha` pattern) so
-   re-runs skip unchanged projects.
+`doProjectAudioFast(p, args)`, per project:
+
+1. Fetch with `--no-lfs` (reuse `fetchProject(id, true)`): metadata + pointers only.
+2. `buildOidIndex(discoverPointers(dir).pointers)`; for each cell, `planCellAudio` →
+   `{ copies: {take, oid}[], missingOid[], selectedAquillaAudioId }`. `missingOid` (no
+   pointer resolved) is counted as `no-oid`.
+3. For each copy, `POST /migrate/audio-copy`. On `copied`/`exists` the take's bytes are
+   in place → include it in the cell's copied set. `404 lfs-miss` and other failures are
+   counted + warned, never silently dropped.
+4. `buildCellAudioEvents(cellId, copiedTakes, selectedAquillaAudioId, opts)` →
+   `cell.audio.attach` per copied take (`frontier-audio://{audioId}`, slot `recording`,
+   `clientTs = createdAt` so `TakesStrip`'s `created_ts ASC` reproduces "Take 1..N"),
+   then one `cell.audio.select` to pin the active take — omitted if that take wasn't
+   copied or there is none. Uses the new deterministic `audioSelectEventId`.
+5. Ingest via the existing `/migrate/ingest`, **delta-filtered** against
+   `fetchExistingEventIds`.
+6. Per-project log: `copied / existing / lfs-miss / no-oid / failed`. State tracked under
+   a new `audioFastSha` key in `.migrate-state.json` so re-runs skip unchanged projects
+   (separate from `audioSha` so the two passes don't clobber each other).
+
+Run: `npx tsx scripts/migrate-all.ts --audio-fast --only <id>` (dry-run one), then
+`--audio-fast --apply` (sweep). Requires the sync-worker deployed with the `LFS_SRC`
+binding.
 
 ## Data flow
 
@@ -200,4 +211,5 @@ Net effect: the second run of any project is near-instant.
 - Scope: **every historical (non-deleted) take**.
 - Slot: **all takes are `recording`** (no legacy voice generation).
 - Active take pinned via explicit **`cell.audio.select`** on legacy `selectedAudioId`.
-- Delivered as a **new script**; existing `--audio` pass left intact as fallback.
+- Delivered as a **`--audio-fast` pass in `migrate-all.ts`** (reuses the sweep plumbing;
+  see §4 implementation note); existing `--audio` pass left intact as fallback.

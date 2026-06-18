@@ -49,6 +49,14 @@ binding = "SNAPSHOTS"
 bucket_name = "aquilla-snapshots"
 # For local `wrangler dev`, wrangler will use a local simulator if the bucket doesn't exist.
 
+# Read-only source for the fast audio import (/migrate/audio-copy): the bucket
+# that backs GitLab LFS (same CF account), keyed by LFS oid. Copying from here to
+# SNAPSHOTS happens inside Cloudflare's network — no GitLab egress. Only the
+# audio-copy route reads it; nothing in the worker writes to it.
+[[r2_buckets]]
+binding = "LFS_SRC"
+bucket_name = "codex-attachments-v1-1"
+
 # Datastore: Postgres (Neon) via Hyperdrive. index.ts builds AQUILLA_PG from the
 # Postgres-backed shim (db/shim/postgres.ts) over this binding — there is no
 # D1 datastore (the D1→Neon cutover is complete). The worker fails fast if this
@@ -110,6 +118,11 @@ new_sqlite_classes = ["ProjectSync"]
 binding = "SNAPSHOTS"
 bucket_name = "aquilla-snapshots"
 
+# Read-only LFS source for /migrate/audio-copy (see top-level binding).
+[[env.production.r2_buckets]]
+binding = "LFS_SRC"
+bucket_name = "codex-attachments-v1-1"
+
 [[env.production.hyperdrive]]
 binding = "HYPERDRIVE"
 id = "69bcc10e67464f2eaf4fe91a9141e7cd"
@@ -151,6 +164,13 @@ new_sqlite_classes = ["ProjectSync"]
 [[env.development.r2_buckets]]
 binding = "SNAPSHOTS"
 bucket_name = "aquilla-snapshots-dev"
+
+# Read-only LFS source for /migrate/audio-copy. Same prod LFS bucket — legacy
+# audio lives in exactly one place — so a dev trial run can copy into
+# aquilla-snapshots-dev for verification without touching prod media.
+[[env.development.r2_buckets]]
+binding = "LFS_SRC"
+bucket_name = "codex-attachments-v1-1"
 
 # Dev runs on Neon (Postgres) to mirror prod. index.ts builds AQUILLA_PG
 # from the Postgres shim (db/shim/postgres.ts) over Hyperdrive → the Neon

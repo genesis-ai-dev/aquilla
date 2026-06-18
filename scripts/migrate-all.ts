@@ -19,7 +19,14 @@
 //   npx tsx scripts/migrate-all.ts --only 47               # dry-run ONE (canary)
 //   npx tsx scripts/migrate-all.ts --only 47 --apply       # write ONE to prod
 //   npx tsx scripts/migrate-all.ts --apply                 # full sweep
+//   npx tsx scripts/migrate-all.ts --audio-fast --only 47  # one project, dry-run
+//   npx tsx scripts/migrate-all.ts --audio-fast --apply    # fast audio (all takes)
 //   flags: --search <term>  --limit N  --target local|remote (default remote/prod)
+//
+// Audio passes (run AFTER content): --audio re-uploads active clips pulled from
+// GitLab LFS (slow, bytes over the wire); --audio-fast imports EVERY take by
+// copying bytes R2→R2 inside Cloudflare (needs the sync-worker's LFS_SRC binding
+// deployed). Prefer --audio-fast.
 
 import fs from "node:fs"
 import path from "node:path"
@@ -38,6 +45,9 @@ import { projectIdFor, fileIdFor, orgLegacyUuidFor, teamLegacyUuidFor } from "..
 import { parseCodexNotebook } from "../src/lib/codex-editor/parse-codex"
 import { mapFilePairToEvents, collectSpeakers, type FilePairInput } from "../src/lib/migrate/map"
 import { collectCellAudio, audioAttachEvent } from "../src/lib/migrate/audio"
+import type { AudioImport } from "../src/lib/migrate/audio"
+import { buildOidIndex, planCellAudio, buildCellAudioEvents } from "../src/lib/migrate/audio-copy"
+import { discoverPointers } from "../src/lib/migrate/gitlab/lfs"
 import { mapComments } from "../src/lib/migrate/comments"
 import { buildCastAdditions } from "../src/lib/import/cast-from-speakers"
 import type { ProjectTtsSettings } from "../src/lib/parsers/types"
@@ -56,7 +66,7 @@ const execFileP = promisify(execFile)
 // in .migrate-state.json so re-runs are cheap. --force ignores it. ───────────
 let CREDS: GitLabCredentials
 const STATE_FILE = ".migrate-state.json"
-type MigState = Record<string, { contentSha?: string; audioSha?: string }>
+type MigState = Record<string, { contentSha?: string; audioSha?: string; audioFastSha?: string }>
 let STATE: MigState = {}
 let FORCE = false
 function loadState(): MigState {
@@ -88,6 +98,7 @@ interface Args {
   apply: boolean
   remote: boolean
   audio: boolean
+  audioFast: boolean
   force: boolean
   concurrency: number
   eventsOnly: boolean
@@ -106,6 +117,7 @@ function parseArgs(): Args {
     apply: a.includes("--apply"),
     remote: target !== "local",
     audio: a.includes("--audio"),
+    audioFast: a.includes("--audio-fast"),
     force: a.includes("--force"),
     concurrency: val("--concurrency") ? Number(val("--concurrency")) : 8,
     eventsOnly: a.includes("--events-only"),
@@ -490,6 +502,90 @@ async function doProjectAudio(p: CodexProjectMatch, args: Args) {
   }
 }
 
+// Fast audio pass (--audio-fast): imports EVERY historical take by copying its
+// bytes bucket→bucket inside Cloudflare (POST /migrate/audio-copy) instead of
+// pulling them out of GitLab and re-uploading. Fetches with --no-lfs (pointers +
+// metadata only, no GBs); the oid in each pointer locates the bytes already in
+// R2. Emits cell.audio.attach per copied take + a cell.audio.select to pin the
+// legacy active take. Delta-filtered, idempotent, state-tracked under audioFastSha.
+async function doProjectAudioFast(p: CodexProjectMatch, args: Args) {
+  const projectId = projectIdFor(String(p.id), "gitlab")
+  console.log(`\n• [audio-fast] ${p.name} (gitlab ${p.id}) → ${projectId}`)
+  const sha = await headSha(p.id)
+  if (args.apply && !FORCE && sha && STATE[String(p.id)]?.audioFastSha === sha) {
+    console.log(`  ↩ audio unchanged (${sha.slice(0, 8)}) — skipped`)
+    return
+  }
+  if (args.apply && !process.env.SYNC_SECRET_KEY) throw new Error("SYNC_SECRET_KEY not set")
+  const dir = await fetchProject(p.id, true) // --no-lfs: pointers + metadata only
+  const oidIndex = buildOidIndex(discoverPointers(dir).pointers)
+  const pairs = buildPairs(dir)
+
+  const events: IngestEvent[] = []
+  let copied = 0
+  let already = 0
+  let lfsMiss = 0
+  let noOid = 0
+  let failed = 0
+  for (const pair of pairs) {
+    if (!pair.target) continue
+    const fileId = fileIdFor(String(p.id), pair.relPath)
+    const opts = { projectId, fileId, fallbackAuthor: FALLBACK_AUTHOR, fallbackTs: Date.now() }
+    for (const cell of pair.target.cells) {
+      const plan = planCellAudio(cell, oidIndex)
+      noOid += plan.missingOid.length
+      if (!args.apply) {
+        copied += plan.copies.length
+        continue
+      }
+      const present: AudioImport[] = []
+      for (const c of plan.copies) {
+        const res = await fetch(`${SYNC}/migrate/audio-copy`, {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({ projectId, fileId, audioId: c.take.aquillaAudioId, oid: c.oid }),
+        })
+        if (res.ok) {
+          const body = (await res.json()) as { copied?: boolean; reason?: string }
+          if (body.copied) copied++
+          else if (body.reason === "exists") already++
+          present.push(c.take) // bytes are in place either way → attach it
+        } else if (res.status === 404) {
+          lfsMiss++
+          console.warn(`\n  ! lfs-miss ${c.take.aquillaAudioId} (oid ${c.oid.slice(0, 12)})`)
+        } else {
+          failed++
+          console.warn(`\n  ! audio-copy ${res.status} ${c.take.aquillaAudioId}`)
+        }
+        if ((copied + already) % 50 === 0 && copied + already > 0) {
+          process.stdout.write(`\r    copied ${copied} / existing ${already}`)
+        }
+      }
+      events.push(...buildCellAudioEvents(cell.metadata.id, present, plan.selectedAquillaAudioId, opts))
+    }
+  }
+  process.stdout.write(
+    `\r    ${args.apply ? "copied" : "would copy"} ${copied}` +
+      (already ? ` / existing ${already}` : "") +
+      (lfsMiss ? ` / lfs-miss ${lfsMiss}` : "") +
+      (noOid ? ` / no-oid ${noOid}` : "") +
+      (failed ? ` / failed ${failed}` : "") +
+      "\n",
+  )
+
+  if (args.apply && events.length) {
+    const existing = await fetchExistingEventIds(projectId)
+    const newEvents = existing.size ? events.filter((e) => !existing.has(e.id)) : events
+    if (existing.size) console.log(`  ↳ delta: ${newEvents.length} new / ${events.length} total`)
+    if (newEvents.length) await ingest(projectId, newEvents)
+  }
+  console.log(`  ✓ audio-fast${args.apply ? "" : " (dry-run)"}`)
+  if (args.apply) {
+    STATE[String(p.id)] = { ...STATE[String(p.id)], audioFastSha: sha ?? undefined }
+    saveState()
+  }
+}
+
 async function main() {
   const args = parseArgs()
   if (args.apply && !process.env.SYNC_SECRET_KEY) {
@@ -501,12 +597,12 @@ async function main() {
   STATE = loadState()
   FORCE = args.force
   console.log(
-    `GitLab: ${creds.gitlabUrl}   target: ${args.remote ? "REMOTE/prod" : "local"}   ${args.audio ? "AUDIO" : "content"}   ${args.apply ? "APPLY" : "dry-run"}${args.force ? "   FORCE" : ""}`,
+    `GitLab: ${creds.gitlabUrl}   target: ${args.remote ? "REMOTE/prod" : "local"}   ${args.audioFast ? "AUDIO-FAST" : args.audio ? "AUDIO" : "content"}   ${args.apply ? "APPLY" : "dry-run"}${args.force ? "   FORCE" : ""}`,
   )
   let placeIdx = new Map<string, Placement>()
   let orgMap = new Map<string, OrgRow>()
   let teamMap = new Map<string, number>()
-  if (!args.audio) {
+  if (!args.audio && !args.audioFast) {
     console.log("Building org/team placement index from group tree…")
     placeIdx = await buildPlacementIndex(creds)
     orgMap = loadOrgMap(args.remote)
@@ -540,7 +636,8 @@ async function main() {
   console.log(`Processing ${projects.length} projects with concurrency ${n}…`)
   await pool(projects, n, async (p) => {
     try {
-      if (args.audio) await doProjectAudio(p, args)
+      if (args.audioFast) await doProjectAudioFast(p, args)
+      else if (args.audio) await doProjectAudio(p, args)
       else await doProject(p, placeIdx, orgMap, teamMap, args)
       done++
       if (done % 10 === 0) console.log(`  …${done}/${projects.length} done`)

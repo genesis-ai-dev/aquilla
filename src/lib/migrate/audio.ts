@@ -9,7 +9,7 @@
 // for now (only the active clip per slot).
 
 import type { CodexCell } from "../codex-editor/types"
-import { audioAttachEventId } from "./ids"
+import { audioAttachEventId, audioSelectEventId } from "./ids"
 import type { IngestEvent } from "./types"
 
 export interface AudioImport {
@@ -90,6 +90,26 @@ export function collectCellAudio(cell: CodexCell): AudioImport[] {
   return out
 }
 
+// Like collectCellAudio, but returns EVERY non-deleted take (not just the
+// active clip per slot). The fast R2→R2 import wants full take history, so it
+// copies + attaches all takes; the legacy app had no voice generation, so every
+// take is a "recording". The active take is pinned separately by the driver via
+// audioSelectEvent (keyed on the cell's selectedAudioId). `legacyAudioId` is
+// preserved on each take so the driver can match selectedAudioId → aquillaAudioId.
+export function collectAllCellAudio(cell: CodexCell): AudioImport[] {
+  const md = cell.metadata as unknown as {
+    attachments?: Record<string, LegacyAttachment>
+  }
+  const atts = md.attachments
+  if (!atts) return []
+  const out: AudioImport[] = []
+  for (const [audioId, att] of Object.entries(atts)) {
+    const imp = toImport(audioId, att, "recording")
+    if (imp) out.push(imp)
+  }
+  return out
+}
+
 export interface AudioEventOptions {
   projectId: string
   fileId: string
@@ -112,6 +132,30 @@ export function audioAttachEvent(cellId: string, a: AudioImport, opts: AudioEven
       slot: a.slot,
       ...(a.mimeType ? { mimeType: a.mimeType } : {}),
       ...(a.durationMs != null ? { durationMs: a.durationMs } : {}),
+    },
+  }
+}
+
+// Pin the legacy active take. Emitted once per cell AFTER all that cell's
+// cell.audio.attach events, because each attach auto-selects its own row — so
+// without this the last-attached take would end up active. All legacy takes are
+// recordings, so the slot is always "recording".
+export function audioSelectEvent(
+  cellId: string,
+  aquillaAudioId: string,
+  opts: AudioEventOptions,
+): IngestEvent {
+  return {
+    id: audioSelectEventId(opts.projectId, opts.fileId, cellId, aquillaAudioId),
+    kind: "cell.audio.select",
+    fileId: opts.fileId,
+    cellId,
+    parentId: null,
+    author: opts.fallbackAuthor,
+    clientTs: opts.fallbackTs,
+    payload: {
+      audioId: aquillaAudioId,
+      slot: "recording",
     },
   }
 }

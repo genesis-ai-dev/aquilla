@@ -53,7 +53,7 @@ test("create a new voice character and it appears in the voice library", async (
   await nameInput.fill(voiceName)
 
   // Click Create.
-  const saveBtn = dialog.getByRole("button", { name: /^Create$/i })
+  const saveBtn = dialog.getByRole("button", { name: /Create voice/i })
   await expect(saveBtn).toBeVisible({ timeout: 3_000 })
   await saveBtn.click()
 

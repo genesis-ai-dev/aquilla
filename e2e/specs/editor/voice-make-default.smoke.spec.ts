@@ -51,7 +51,7 @@ test("CharacterModal Make narrator sets the voice as narrator/default", async ({
 
   const voiceName = `DefaultVoice ${Date.now()}`
   await dialog.locator('input[aria-label="Voice name"]').fill(voiceName)
-  await dialog.getByRole("button", { name: /^Create$/i }).click()
+  await dialog.getByRole("button", { name: /Create voice/i }).click()
 
   // Dialog closes, voice appears in the selector list as a row.
   await expect(dialog).not.toBeVisible({ timeout: 5_000 })

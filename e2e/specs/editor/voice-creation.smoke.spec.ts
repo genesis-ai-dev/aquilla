@@ -8,18 +8,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * Voice creation — "Craft character" dialog.
+ * Voice creation — unified "New voice" modal.
  *
  * Audio mode (lens === "audio") renders VoiceSidebar with VoiceLibraryPanel.
- * The panel has a "+ New voice" button that opens CharacterModal with
- * h2 "Craft character" and input[aria-label="Character name"].
+ * The panel has a single "New voice" button that opens NewVoiceModal (Gemini /
+ * Clone tabs) with h2 "New voice" and input[aria-label="Voice name"].
  *
  * Flow:
  *   1. Import file, open editor.
  *   2. Click the Audio toggle button (EditorModeToggle) to enter audio mode.
- *   3. VoiceSidebar renders with the Cast panel.
- *   4. Click "+ New voice" → CharacterModal opens.
- *   5. Verify "Craft character" heading and character name input.
+ *   3. VoiceSidebar renders with the Voices panel.
+ *   4. Click "New voice" → NewVoiceModal opens.
+ *   5. Verify "New voice" heading and Voice name input.
  *   6. Dismiss via Escape.
  */
 test("new voice dialog opens in audio mode with New voice heading", async ({ alice }) => {
@@ -44,7 +44,7 @@ test("new voice dialog opens in audio mode with New voice heading", async ({ ali
   await expect(newVoiceBtn).toBeVisible({ timeout: 10_000 })
   await newVoiceBtn.click()
 
-  // VoiceCreator opens as a Dialog.
+  // NewVoiceModal opens as a Dialog.
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
 

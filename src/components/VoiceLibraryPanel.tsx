@@ -1,14 +1,13 @@
 // The Audio lens' Voices panel — a pure SELECTOR. One simple job: see your
-// voices, pick which one is active, set the narrator. Creating and cloning are
-// two distinct, focused workflows behind the buttons at the bottom:
-//   • New voice   → VoiceCreator (name · describe · base voice · preview)
-//   • Clone a voice → CloneVoiceModal (capture a reference, separate concept)
+// voices, pick which one is active, set the narrator. Making a voice is a single
+// "New voice" button → NewVoiceModal, which carries both ways to make one
+// (Gemini / Clone) behind tabs.
 //
 // Click a row to select it (the active voice — the assign target). Drag a row
 // onto a line to assign it. The row's ⋯ menu edits / sets-narrator / deletes.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Check, MoreHorizontal, Pencil, Plus, Search, Sparkles, Star, Trash2 } from "lucide-react"
+import { Check, MoreHorizontal, Pencil, Plus, Search, Star, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
@@ -16,9 +15,7 @@ import { cn } from "@/lib/utils"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { PRESET_VOICES } from "@/lib/audio/voices"
-import { useUserApiKey } from "@/lib/store/user-api-keys"
-import { VoiceCreator } from "@/components/voice/VoiceCreator"
-import { CloneVoiceModal } from "@/components/voice/CloneVoiceModal"
+import { NewVoiceModal } from "@/components/voice/NewVoiceModal"
 import type { FrontierSession } from "@/lib/frontier/types"
 
 export interface CastMemberStats {
@@ -58,9 +55,6 @@ export function VoiceLibraryPanel({
   targetLanguage, settings, onSettingsChange, projectId, fileId, session,
   selectedVoiceId, onSelectVoice, castStats, cells, seedCellId, seedSignal,
 }: Props) {
-  const userKey = useUserApiKey("gemini-tts")
-  const apiKey = (settings?.apiKey?.trim() || userKey) ?? ""
-
   const [voices, setVoices] = useState<Voice[]>([])
   const [defaultVoiceId, setDefaultVoiceId] = useState<string | undefined>(undefined)
   const [localSelectedId, setLocalSelectedId] = useState<string>("")
@@ -169,52 +163,35 @@ export function VoiceLibraryPanel({
         )}
       </div>
 
-      {/* Create / Clone */}
-      <div className="space-y-1.5 border-t p-3">
+      {/* One button — the modal carries both ways to make a voice. */}
+      <div className="border-t p-3">
         <Button
           type="button"
           variant="outline"
-          className="w-full justify-start"
+          className="w-full justify-center border-dashed"
           onClick={() => setEditing({ kind: "create" })}
         >
           <Plus className="mr-2 h-4 w-4" /> New voice
         </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          className="w-full justify-start text-muted-foreground"
-          onClick={() => setEditing({ kind: "clone", seedCellId: null })}
-        >
-          <Sparkles className="mr-2 h-4 w-4 text-violet-500" /> Clone a voice
-        </Button>
       </div>
 
-      {(editing.kind === "create" || editing.kind === "edit") && (
-        <VoiceCreator
+      {editing.kind !== "closed" && (
+        <NewVoiceModal
           open
           onClose={() => setEditing({ kind: "closed" })}
           voice={editing.kind === "edit" ? editing.voice : null}
-          apiKey={apiKey}
           targetLanguage={targetLanguage}
           isDefault={editing.kind === "edit" ? editing.voice.id === defaultVoiceId : false}
           paletteIndex={voices.length}
-          onSave={saveVoice}
-          onDelete={editing.kind === "edit" ? () => deleteVoice(editing.voice) : undefined}
-          onMakeDefault={editing.kind === "edit" ? () => makeDefault(editing.voice) : undefined}
-        />
-      )}
-
-      {editing.kind === "clone" && (
-        <CloneVoiceModal
-          open
-          onClose={() => setEditing({ kind: "closed" })}
           projectId={projectId}
           fileId={fileId}
           session={session}
           cells={cells ?? []}
-          paletteIndex={voices.length}
           onSave={saveVoice}
-          seedCellId={editing.seedCellId}
+          onDelete={editing.kind === "edit" ? () => deleteVoice(editing.voice) : undefined}
+          onMakeDefault={editing.kind === "edit" ? () => makeDefault(editing.voice) : undefined}
+          initialMode={editing.kind === "clone" ? "clone" : "gemini"}
+          seedCellId={editing.kind === "clone" ? editing.seedCellId : null}
         />
       )}
     </div>
@@ -257,9 +234,13 @@ function VoiceRow({
       <span className="min-w-0 flex-1">
         <span className="block truncate font-medium leading-tight">{voice.name}</span>
         <span className="block truncate text-[10px] leading-tight text-muted-foreground">
+          <span className={cn("font-medium", voice.referenceAudioId && "text-emerald-600 dark:text-emerald-400")}>
+            {voice.referenceAudioId ? "Clone" : "Gemini"}
+          </span>
+          {" · "}
           {stats && stats.assigned > 0
-            ? `${stats.voiced}/${stats.assigned} lines voiced`
-            : isDefault ? "narrator · unassigned lines" : "no lines yet"}
+            ? `${stats.voiced}/${stats.assigned} voiced`
+            : isDefault ? "narrator" : "no lines yet"}
         </span>
       </span>
       {isDefault && (

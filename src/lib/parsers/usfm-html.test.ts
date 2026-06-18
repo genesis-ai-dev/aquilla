@@ -221,3 +221,27 @@ describe("codex-web TipTap footnote node interop (data-usfm-footnote)", () => {
     expect(diffInlineMarkers(sourceHtml, targetHtml).missingNote).toEqual([])
   })
 })
+
+describe("Phase 2 restore → export chain", () => {
+  it("restores a dropped non-emphasis style and it reconstructs to USFM on export", () => {
+    const source = "the \\nd LORD\\nd* said"
+    const sourceHtml = usfmSpanToHtml(source)
+    const target = "the LORD said" // translator dropped the styling
+    // drift is detected
+    expect(diffInlineMarkers(sourceHtml, target).missingFormat).toEqual(["nd"])
+    // one-click restore wraps the matching word with the generic data-usfm span
+    const restored = restoreFormattingToTarget(sourceHtml, target)
+    expect(restored).toContain('<span data-usfm="nd">LORD</span>')
+    // after restore, no drift remains
+    expect(diffInlineMarkers(sourceHtml, restored).missingFormat).toEqual([])
+    // and export reconstructs the marker
+    expect(htmlSpanToUsfm(restored)).toBe("the \\nd LORD\\nd* said")
+  })
+
+  it("restore is generic over marker names (not a hard-coded set)", () => {
+    const sourceHtml = usfmSpanToHtml("\\wj Come\\wj* to me")
+    const restored = restoreFormattingToTarget(sourceHtml, "Come to me")
+    expect(restored).toContain('<span data-usfm="wj">Come</span>')
+    expect(htmlSpanToUsfm(restored)).toBe("\\wj Come\\wj* to me")
+  })
+})

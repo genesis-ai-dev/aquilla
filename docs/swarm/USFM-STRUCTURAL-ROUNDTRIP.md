@@ -101,19 +101,54 @@ It is HTML-aware, so the builtin-check framework grew an optional third arg
 blocks align, footnote reconstructed from `value_html`). The FRO-276 header tests
 are unchanged and still pass.
 
-## Phase 2 — editor affordances (deferred / to be researched)
+## Phase 2 — editor affordances (implemented)
 
-The full benefit of inline reconstruction needs the editor to emit
-USFM-structured `value_html` (data-usfm spans, `<sup>` notes) rather than plain
-bold/italic, plus translator-facing UX:
+Bold/italic already round-trip (the export mapper falls back to semantic tags
+and StarterKit's marks persist them), so the gap was the *non-emphasis* USFM
+character styles (`\nd`, `\wj`, `\add`, `\sc`…): the source has them, the
+translator can't reproduce them, and they're dropped on an edited export (now
+flagged by the Phase 1 rule). Phase 2 lets the translator restore them.
 
-- underline the mismatched source styling (`markMismatchedSourceMarkers`),
-- a **"restore formatting"** chip (`restoreFormattingToTarget`) that re-applies
-  dropped formatting and commits the new `value_html`,
-- a **"footnote"** chip flagging a dropped note.
+### Generic preserved-annotation mark (`usfm-style-mark.ts`)
 
-`main`'s `EditorTable.tsx` / `TranslatedEditor.tsx` (TipTap) have diverged
-substantially from where this was first prototyped, so Phase 2 should first
-research how the TipTap editor produces `value_html` today and recommend the
-least-invasive integration before building. The helpers above are already in
-`usfm-html.ts` and unit-tested, ready for that work.
+A TipTap mark (`UsfmStyle`) that round-trips **any** `<span data-usfm="X">`
+through the editor by treating the carrier attribute as opaque — it does **not**
+enumerate marker names, so a new annotation family is a parse/render tweak, not a
+node type per name. It matches `span[data-usfm]` only; emphasis stays with
+StarterKit and footnotes with the atomic `UsfmFootnote` node (carrier
+`data-usfm-footnote`), so the three never overlap. Registered in
+`TranslatedEditor.tsx`; `stripToAllowedHtml` now preserves `<span data-usfm>` (as
+it already did footnote spans) so restored styling survives paste/load.
+
+### Restore affordance (`EditorTable.tsx`)
+
+When the `usfm-marker-integrity` rule fires for a cell (so the affordance
+respects the rule's enable/severity), the source header shows:
+
+- a **"restore formatting"** chip when `diffInlineMarkers` reports dropped
+  character styles — clicking it runs `restoreFormattingToTarget`, wraps the
+  matching words in `<span data-usfm="…">`, and commits the enriched `value_html`
+  via the normal `handleEditorCommit` path (plain `value` is unchanged); the
+  drift then clears and export reconstructs the marker.
+- a **"footnote"** flag chip when notes/cross-refs were dropped (not
+  auto-creatable).
+
+`.usfm-style[data-usfm]` gets a subtle dotted underline in `index.css` (plus
+small-caps for `\nd`, red for `\wj`) so restored runs are visible; rendering is
+decorative — round-trip is by `data-usfm`.
+
+### Verification
+
+Logic is unit-tested (`usfm-html.test.ts` restore→export chain) and the editor
+round-trip is proven with a real TipTap editor in happy-dom
+(`usfm-style-mark.test.ts`: a restored `<span data-usfm>` survives `getHTML` and
+a reload, is generic over marker names, and doesn't swallow footnote spans). The
+live UI flow (chip appears, click re-renders the styled run) needs a browser +
+seeded backend; not runnable in the headless CI container used here.
+
+### Still open (future)
+
+- Underline the mismatched styling on the *source* render
+  (`markMismatchedSourceMarkers`) — currently the source uses `UsfmSourceText`
+  (raw text), so this needs routing structured source HTML into that renderer.
+- A toolbar control to apply a USFM style manually (not just restore).

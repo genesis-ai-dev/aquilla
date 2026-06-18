@@ -33,6 +33,7 @@ import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } fro
 import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/richtext/terminology-chip-plugin"
 import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "@/lib/richtext/footnote-decoration-plugin"
 import { UsfmFootnote } from "@/lib/richtext/footnote-node"
+import { UsfmStyle } from "@/lib/richtext/usfm-style-mark"
 import {
   FOOTNOTE_NODE_NAME,
   buildUsfmPlainTextMap,
@@ -241,6 +242,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       }),
       // Footnotes are atomic inline nodes (selectable as one unit, like Word).
       UsfmFootnote,
+      // Generic preserved inline annotation (<span data-usfm="…">): keeps
+      // restored character styles round-tripping through the editor.
+      UsfmStyle,
       // The callback is invoked by the PM plugin, not during React render —
       // the lint rule is overly conservative here.
       createFootnoteDecorationExtension(
@@ -1058,6 +1062,16 @@ function walkAndStrip(el: Element): void {
         const raw = elChild.getAttribute("data-usfm-footnote") ?? ""
         for (const attr of Array.from(elChild.attributes)) elChild.removeAttribute(attr.name)
         elChild.setAttribute("data-usfm-footnote", raw)
+        continue
+      }
+      // Preserve generic USFM character-style spans (<span data-usfm="nd">…);
+      // keep only the data-usfm carrier so the UsfmStyle mark re-parses them and
+      // restored formatting survives a round-trip. Recurse into their text.
+      if (elChild.tagName === "SPAN" && elChild.hasAttribute("data-usfm")) {
+        const usfm = elChild.getAttribute("data-usfm") ?? ""
+        for (const attr of Array.from(elChild.attributes)) elChild.removeAttribute(attr.name)
+        elChild.setAttribute("data-usfm", usfm)
+        walkAndStrip(elChild)
         continue
       }
       walkAndStrip(elChild)

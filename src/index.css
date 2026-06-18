@@ -501,6 +501,18 @@ html.dark[data-color-theme="rose"] {
   box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-red-500, oklch(0.637 0.237 25.331)) 40%, transparent);
 }
 
+/* Generic preserved USFM character-style spans (restored formatting). Subtle
+   dotted underline so the translator can see which runs carry a marker; the
+   specific marker name is in data-usfm and reconstructs to \marker on export. */
+.usfm-style[data-usfm] {
+  text-decoration: underline dotted;
+  text-decoration-color: color-mix(in oklch, currentColor 35%, transparent);
+  text-underline-offset: 2px;
+}
+/* Common semantic renderings (decorative only; round-trip is by data-usfm). */
+.usfm-style[data-usfm="nd"] { font-variant-caps: small-caps; }
+.usfm-style[data-usfm="wj"] { color: var(--color-red-600, oklch(0.577 0.245 27.325)); }
+
 .usfm-footnote-marker {
   position: relative;
   display: inline-flex;

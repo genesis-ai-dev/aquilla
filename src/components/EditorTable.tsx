@@ -4,9 +4,14 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw, BookOpen,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity, NotebookPen,
+  ArrowRight, Activity, NotebookPen, Wand2,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import {
+  usfmSpanToHtml,
+  diffInlineMarkers,
+  restoreFormattingToTarget,
+} from "@/lib/parsers/usfm-html"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
@@ -2548,6 +2553,37 @@ function EditorRow({
   const showFormattingLossWarning =
     sourceHasFormatting && !targetHasFormatting && cell.translated.trim().length > 0
 
+  // Inline-markup drift (Phase 2): when the usfm-marker-integrity rule fires for
+  // this cell, compute which source inline markers the translation dropped so we
+  // can offer a one-click restore (formatting) or flag (footnotes/cross-refs).
+  // Gated on the rule actually firing so it respects the rule's enable/severity.
+  const markerIntegrityActive = useMemo(
+    () =>
+      cellInfractions.some((inf) => {
+        const rule = ruleMap.get(inf.ruleId)
+        return rule?.check.type === "builtin" && rule.check.checkId === "usfm-marker-integrity"
+      }),
+    [cellInfractions, ruleMap],
+  )
+  const markerDrift = useMemo(() => {
+    if (!markerIntegrityActive) return null
+    const sourceHtml = usfmSpanToHtml(cell.original ?? "")
+    const targetForDiff = cell.translatedHtml ?? cell.translated ?? ""
+    const diff = diffInlineMarkers(sourceHtml, targetForDiff)
+    if (diff.missingFormat.length === 0 && diff.missingNote.length === 0) return null
+    return diff
+  }, [markerIntegrityActive, cell.original, cell.translatedHtml, cell.translated])
+
+  const handleRestoreFormatting = useCallback(() => {
+    const sourceHtml = usfmSpanToHtml(cell.original ?? "")
+    const current = cell.translatedHtml ?? cell.translated ?? ""
+    const restored = restoreFormattingToTarget(sourceHtml, current)
+    // restoreFormattingToTarget only wraps existing words, so the plain text is
+    // unchanged — keep `value`, commit the enriched `valueHtml`.
+    if (restored === current) return
+    handleEditorCommit({ value: cell.translated ?? "", valueHtml: restored })
+  }, [cell.original, cell.translatedHtml, cell.translated, handleEditorCommit])
+
   const healthValue = health ?? (cell.status === "validated" ? 100 : 0)
 
   const selectedAudio = cell.selectedAudioId ? cell.attachments?.[cell.selectedAudioId] : undefined
@@ -3186,6 +3222,34 @@ function EditorRow({
                   <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
                     <AlertTriangle className="h-2.5 w-2.5" />
                     formatting
+                  </span>
+                </AppTooltip>
+              )}
+              {editable && markerDrift && markerDrift.missingFormat.length > 0 && (
+                <AppTooltip
+                  content={`Source styling the translation dropped (${markerDrift.missingFormat
+                    .map((m) => `\\${m}`)
+                    .join(", ")}). Click to re-apply it to the matching words.`}
+                  className="max-w-xs"
+                >
+                  <button
+                    type="button"
+                    onClick={handleRestoreFormatting}
+                    className="inline-flex items-center gap-0.5 rounded bg-violet-100 px-1 py-0.5 text-[9px] font-medium text-violet-700 hover:bg-violet-200 dark:bg-violet-950 dark:text-violet-300 dark:hover:bg-violet-900"
+                  >
+                    <Wand2 className="h-2.5 w-2.5" />
+                    restore formatting
+                  </button>
+                </AppTooltip>
+              )}
+              {markerDrift && markerDrift.missingNote.length > 0 && (
+                <AppTooltip
+                  content={`The translation is missing ${markerDrift.missingNote.length} footnote/cross-reference marker(s) present in the source. These can't be auto-created — add them in the editor if needed.`}
+                  className="max-w-xs"
+                >
+                  <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+                    <AlertTriangle className="h-2.5 w-2.5" />
+                    footnote
                   </span>
                 </AppTooltip>
               )}

@@ -140,7 +140,12 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
     case "builtin": {
       const def = BUILTIN_CHECKS[check.checkId]
       if (!def) return null
-      const spans = def.run(cell.original, cell.translated)
+      // HTML-aware checks (USFM inline-marker integrity) need the rich-text on
+      // both sides; plain-text checks ignore the third argument.
+      const spans = def.run(cell.original, cell.translated, {
+        sourceHtml: cell.originalHtml,
+        targetHtml: cell.translatedHtml,
+      })
       if (!spans || spans.length === 0) return null
       return {
         ruleId: rule.id,

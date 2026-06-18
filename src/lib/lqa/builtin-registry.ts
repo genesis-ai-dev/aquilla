@@ -8,6 +8,14 @@ import * as doubleSpace from "./check-functions/double-space"
 import * as repeatedWord from "./check-functions/repeated-word"
 import * as unpairedSymbols from "./check-functions/unpaired-symbols"
 import * as abbreviationMismatch from "./check-functions/abbreviation-mismatch"
+import * as usfmMarkerIntegrity from "./check-functions/usfm-marker-integrity"
+
+/** Optional rich-text context threaded to HTML-aware checks (e.g. USFM inline
+ *  marker integrity). Plain-text checks ignore it. */
+export interface BuiltinCheckContext {
+  sourceHtml?: string
+  targetHtml?: string
+}
 
 export interface BuiltinCheckDefinition {
   id: BuiltinCheckId
@@ -17,7 +25,7 @@ export interface BuiltinCheckDefinition {
   defaultEnabled: boolean
   /** True if the check should run even when target is empty. */
   runsOnEmptyTarget: boolean
-  run: (source: string, target: string) => InfractionSpan[] | null
+  run: (source: string, target: string, ctx?: BuiltinCheckContext) => InfractionSpan[] | null
   message: string
 }
 
@@ -112,6 +120,17 @@ export const BUILTIN_CHECKS: Record<BuiltinCheckId, BuiltinCheckDefinition> = {
     run: abbreviationMismatch.runCheck,
     message: abbreviationMismatch.MESSAGE,
   },
+  "usfm-marker-integrity": {
+    id: "usfm-marker-integrity",
+    name: "Inline markup integrity",
+    description:
+      "Inline formatting (\\nd, \\bd, \\wj…) and footnotes/cross-refs in the source should be preserved in the translation. Formatting can be auto-restored; footnotes are flagged only.",
+    defaultSeverity: "minor",
+    defaultEnabled: true,
+    runsOnEmptyTarget: false,
+    run: usfmMarkerIntegrity.runCheck,
+    message: usfmMarkerIntegrity.MESSAGE,
+  },
 }
 
 export const BUILTIN_CHECK_IDS: BuiltinCheckId[] = [
@@ -124,4 +143,5 @@ export const BUILTIN_CHECK_IDS: BuiltinCheckId[] = [
   "repeated-word",
   "unpaired-symbols",
   "abbreviation-mismatch",
+  "usfm-marker-integrity",
 ]

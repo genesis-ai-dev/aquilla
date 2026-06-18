@@ -8,6 +8,8 @@
 
 const BOM = "﻿"
 
+import { usfmSpanBlocks, extractTargetBlocks, htmlSpanToUsfm } from "./usfm-html"
+
 const TERMINATE_VERSE_MARKERS = new Set<string>([
   "v",
   "c", "cl", "cd", "cp", "cat",
@@ -270,4 +272,109 @@ export function countLossyVerses(
 
 export function stripBom(s: string): string {
   return s.startsWith(BOM) ? s.slice(1) : s
+}
+
+/** A target cell's content for export: plain text plus optional rich HTML. */
+export interface UsfmTarget {
+  value: string
+  valueHtml?: string
+}
+
+/** Inline USFM for each non-empty block of a target cell, in document order.
+ *  HTML → per-block inline USFM via the mapper; plain text becomes one block. */
+function targetBlocks(t: UsfmTarget): string[] {
+  if (t.valueHtml) {
+    return extractTargetBlocks(t.valueHtml)
+      .map((seg) => htmlSpanToUsfm(seg).trim())
+      .filter((s) => s !== "")
+  }
+  const v = (t.value ?? "").trim()
+  return v ? [v] : []
+}
+
+/**
+ * Serialize with translations re-inserted into the ORIGINAL file's blocks.
+ *
+ * BLOCK scaffolding is owned by the original: for each verse we split the span
+ * at block markers (`usfmSpanBlocks`) and keep those markers + their whitespace
+ * byte-for-byte. The INLINE content of each block (text, character styles,
+ * footnotes/cross-refs) is driven by the TARGET — so anything the translation
+ * dropped (a style, a note) is absent on export (and flagged by the
+ * usfm-marker-integrity rule), while markers and indentation are never
+ * disturbed. When the source's block count doesn't match the translation's (the
+ * translator merged/split lines), we fall back to whole-span reconstruction via
+ * `htmlSpanToUsfm`. Headings are single-block, so they take that path directly.
+ * Replacements are applied back-to-front so character offsets stay valid.
+ *
+ * With no targets the output is byte-identical to `doc.raw`. With plain-text
+ * targets (no valueHtml) it matches `serializeUsfmLossless` for single-block
+ * verses and preserves block structure when the translation's block count lines
+ * up — a strict superset of the legacy whole-span substitution.
+ */
+export function serializeUsfmPerRun(
+  doc: UsfmDocument,
+  targets?: Map<string, UsfmTarget> | Record<string, UsfmTarget>,
+): string {
+  const get = (ref: string): UsfmTarget | undefined => {
+    if (!targets) return undefined
+    if (targets instanceof Map) return targets.get(ref)
+    return Object.prototype.hasOwnProperty.call(targets, ref) ? targets[ref] : undefined
+  }
+
+  const raw = doc.raw
+  type Op = { start: number; end: number; text: string; inject: boolean }
+  const ops: Op[] = []
+
+  for (const v of doc.verses) {
+    const t = get(v.ref)
+    if (!t) continue
+    if (!t.valueHtml && (t.value ?? "") === "") continue // empty → keep source
+    const span = raw.slice(v.textStart, v.textEnd)
+    const regions = usfmSpanBlocks(span)
+    const blocks = targetBlocks(t)
+    if (regions.length > 0 && regions.length === blocks.length) {
+      // Aligned: rebuild the span keeping block markers/whitespace from the
+      // source (the gaps between regions) and the inline content from the target.
+      let rebuilt = span.slice(0, regions[0].start)
+      for (let i = 0; i < regions.length; i++) {
+        rebuilt += blocks[i]
+        rebuilt +=
+          i < regions.length - 1
+            ? span.slice(regions[i].end, regions[i + 1].start)
+            : span.slice(regions[i].end)
+      }
+      ops.push({ start: v.textStart, end: v.textEnd, text: rebuilt, inject: false })
+    } else {
+      // Fallback: reconstruct the whole verse span from the HTML (or plain text).
+      const repl = t.valueHtml ? htmlSpanToUsfm(t.valueHtml) : t.value ?? ""
+      if (repl === "") continue
+      ops.push({ start: v.textStart, end: v.textEnd, text: repl, inject: true })
+    }
+  }
+
+  for (const h of doc.headings) {
+    const t = get(h.ref)
+    if (!t) continue
+    const repl = t.valueHtml ? htmlSpanToUsfm(t.valueHtml) : t.value ?? ""
+    if (repl === "") continue
+    ops.push({ start: h.textStart, end: h.textEnd, text: repl, inject: true })
+  }
+
+  // Apply back-to-front so earlier offsets stay valid. Injection context is read
+  // from the ORIGINAL raw (the surrounding markers/whitespace never move).
+  ops.sort((a, b) => b.start - a.start)
+  let out = raw
+  for (const op of ops) {
+    let text = op.text
+    if (op.inject) {
+      const prior = op.start > 0 ? raw[op.start - 1] : ""
+      if (prior !== "" && prior !== " " && prior !== "\t" && prior !== "\n" && prior !== "\r") {
+        text = " " + text
+      }
+      const next = op.end < raw.length ? raw[op.end] : ""
+      if (next === "\\" && !/\s$/.test(text)) text = text + "\n"
+    }
+    out = out.slice(0, op.start) + text + out.slice(op.end)
+  }
+  return out
 }

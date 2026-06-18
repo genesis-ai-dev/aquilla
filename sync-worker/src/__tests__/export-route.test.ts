@@ -27,8 +27,8 @@ function makeStubDb(
     orgSettings?: string
     /** file_source_blobs row; null = 404. */
     blob?: { format: string; raw_source: string } | null
-    /** Translated cell rows: [{canonical_ref, value}]. Empty by default. */
-    cells?: { canonical_ref: string; value: string }[]
+    /** Translated cell rows: [{canonical_ref, value, value_html?}]. Empty by default. */
+    cells?: { canonical_ref: string; value: string; value_html?: string | null }[]
   } = {},
 ): ExportRouteEnv["AQUILLA_PG"] {
   const { orgSettings, blob = null, cells = [] } = options
@@ -215,5 +215,97 @@ describe("X-Usfm-Lossy-Verse-Count header (FRO-276)", () => {
     const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
     expect(res?.status).toBe(200)
     expect(res?.headers.get("X-Usfm-Lossy-Verse-Count")).toBe("0")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Per-run structural export (serializeUsfmPerRun)
+// ---------------------------------------------------------------------------
+
+const POETRY_USFM = `\\id PSA
+\\c 1
+\\v 1 Blessed is the man
+\\q2 who walks not`
+
+describe("per-run structural export", () => {
+  it("no translated cells ⇒ output is byte-identical to the source", async () => {
+    const env: ExportRouteEnv = {
+      SYNC_SECRET_KEY: SECRET,
+      AQUILLA_PG: makeStubDb({ blob: { format: "usfm", raw_source: PLAIN_USFM }, cells: [] }),
+    }
+    const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
+    expect(res?.status).toBe(200)
+    expect(await res?.text()).toBe(PLAIN_USFM)
+  })
+
+  it("preserves intra-verse block markers (\\q2) when the translation's blocks align", async () => {
+    const env: ExportRouteEnv = {
+      SYNC_SECRET_KEY: SECRET,
+      AQUILLA_PG: makeStubDb({
+        blob: { format: "usfm", raw_source: POETRY_USFM },
+        cells: [
+          // value_html carries two blocks (split on <br>) matching the source's
+          // two poetry lines, so each line's text is replaced but \q2 survives.
+          {
+            canonical_ref: "PSA 1:1",
+            value: "Heureux\nqui ne marche pas",
+            value_html: "Heureux<br>qui ne marche pas",
+          },
+        ],
+      }),
+    }
+    const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
+    const out = await res!.text()
+    expect(res?.status).toBe(200)
+    expect(out).toContain("\\q2")              // block marker preserved
+    expect(out).toContain("Heureux")            // first line translated
+    expect(out).toContain("qui ne marche pas")  // second line translated
+    expect(out).not.toContain("Blessed")        // source text replaced
+  })
+
+  it("reconstructs a footnote the translation kept via value_html", async () => {
+    const env: ExportRouteEnv = {
+      SYNC_SECRET_KEY: SECRET,
+      AQUILLA_PG: makeStubDb({
+        blob: { format: "usfm", raw_source: FOOTNOTED_USFM },
+        cells: [
+          {
+            canonical_ref: "MAT 1:4",
+            value: "texte traduit",
+            value_html: 'texte traduit<sup data-usfm="f" data-usfm-body=" + \\ft gardée">+</sup>',
+          },
+        ],
+      }),
+    }
+    const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
+    const out = await res!.text()
+    expect(res?.status).toBe(200)
+    expect(out).toContain("\\f ") // footnote opener reconstructed
+    expect(out).toContain("\\ft gardée")
+    expect(out).toContain("\\f*")
+  })
+})
+
+describe("per-run export interop with codex-web footnote node", () => {
+  it("reconstructs a footnote kept as a data-usfm-footnote span in value_html", async () => {
+    const env: ExportRouteEnv = {
+      SYNC_SECRET_KEY: SECRET,
+      AQUILLA_PG: makeStubDb({
+        blob: { format: "usfm", raw_source: FOOTNOTED_USFM },
+        cells: [
+          {
+            canonical_ref: "MAT 1:4",
+            // value (plain) carries the raw \f…\f* via the node's renderText
+            value: "texte \\f + \\ft gardée\\f*",
+            // value_html uses codex-web's TipTap footnote node representation
+            value_html: 'texte <span data-usfm-footnote="\\f + \\ft gardée\\f*">+</span>',
+          },
+        ],
+      }),
+    }
+    const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
+    const out = await res!.text()
+    expect(res?.status).toBe(200)
+    expect(out).toContain("\\f + \\ft gardée\\f*") // footnote reconstructed, not dropped
   })
 })

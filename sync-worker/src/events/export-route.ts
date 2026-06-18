@@ -23,8 +23,9 @@ import { ROLE } from "./role-policy"
 import { resolveExportFloor } from "./export-floor"
 import {
   parseUsfmLossless,
-  serializeUsfmLossless,
+  serializeUsfmPerRun,
   countLossyVerses,
+  type UsfmTarget,
 } from "../lib/usfm-lossless"
 
 export interface ExportRouteEnv {
@@ -155,7 +156,7 @@ export async function handleExportSourceRequest(
   // and inherits its addressability from the source twin.
   const cells = await db
     .prepare(
-      `SELECT s.canonical_ref AS canonical_ref, t.value AS value
+      `SELECT s.canonical_ref AS canonical_ref, t.value AS value, t.value_html AS value_html
          FROM cells t
          JOIN cells s
            ON s.project_id = t.project_id
@@ -169,16 +170,32 @@ export async function handleExportSourceRequest(
           AND t.value <> ''`,
     )
     .bind(projectId, fileId)
-    .all<{ canonical_ref: string; value: string }>()
+    .all<{ canonical_ref: string; value: string; value_html: string | null }>()
 
+  // Per-run export: translated text is spliced back into the ORIGINAL file's
+  // blocks (serializeUsfmPerRun), so block markers/whitespace and any footnote
+  // bodies stay byte-for-byte and only translatable runs are swapped.
+  // `value_html`, when present, carries the run/inline structure; otherwise the
+  // plain `value` is used and the serializer falls back to whole-span
+  // substitution — identical to the legacy behavior for plain-text cells.
+  const targets = new Map<string, UsfmTarget>()
+  // `overrides` (plain text) feeds the FRO-276 lossy-verse count: a verse whose
+  // ORIGINAL span carried intra-verse markers that a plain-text cell can't
+  // preserve still counts as lossy. Per-run preserves block markers when the
+  // translation's block structure aligns, but inline notes/styles a plain-text
+  // cell omits are still dropped — so the warning stays meaningful.
   const overrides = new Map<string, string>()
   for (const row of cells.results ?? []) {
+    targets.set(row.canonical_ref, {
+      value: row.value,
+      ...(row.value_html ? { valueHtml: row.value_html } : {}),
+    })
     overrides.set(row.canonical_ref, row.value)
   }
 
   const doc = parseUsfmLossless(blob.raw_source)
   const lossyVerseCount = countLossyVerses(doc, overrides)
-  const out = serializeUsfmLossless(doc, overrides)
+  const out = serializeUsfmPerRun(doc, targets)
 
   const downloadName = fileName.toLowerCase().endsWith(".sfm")
     ? fileName

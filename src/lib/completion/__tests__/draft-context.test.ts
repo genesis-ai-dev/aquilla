@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { gatherPrecedingContext, DEFAULT_DRAFT_CONTEXT } from "../draft-context"
+import { gatherPrecedingContext, gatherFollowingSource, DEFAULT_DRAFT_CONTEXT } from "../draft-context"
 
 const cell = (id: string, fileId: string, original: string, translated: string) =>
   ({ id, fileId, original, translated })
@@ -81,5 +81,41 @@ describe("gatherPrecedingContext", () => {
     expect(gatherPrecedingContext(withBlankSrc, "d", 5, true)).toEqual([
       { source: "v2 src", target: "" },
     ])
+  })
+})
+
+describe("gatherFollowingSource", () => {
+  const cells = [
+    cell("a", "f1", "v1 src", "v1 tgt"),
+    cell("b", "f1", "v2 src", ""),
+    cell("c", "f1", "", ""),          // no source — skipped
+    cell("d", "f1", "v4 src", ""),
+    cell("x", "f2", "other src", ""), // different file — not crossed
+  ]
+
+  it("returns the N cells' source immediately FOLLOWING the target, in document order", () => {
+    // From 'a', forward: b (src), c (no source → skip), d (src). count 3 → [b, d].
+    expect(gatherFollowingSource(cells, "a", 3)).toEqual([
+      { source: "v2 src" },
+      { source: "v4 src" },
+    ])
+  })
+
+  it("never crosses a file boundary", () => {
+    expect(gatherFollowingSource(cells, "d", 5)).toEqual([]) // next is x (f2) → stop
+  })
+
+  it("respects the count cap", () => {
+    const many = Array.from({ length: 6 }, (_, i) => cell(`c${i}`, "f1", `s${i}`, ""))
+    expect(gatherFollowingSource(many, "c0", 2)).toEqual([
+      { source: "s1" },
+      { source: "s2" },
+    ])
+  })
+
+  it("returns [] for count <= 0, unknown id, or last cell in file", () => {
+    expect(gatherFollowingSource(cells, "a", 0)).toEqual([])
+    expect(gatherFollowingSource(cells, "nope", 3)).toEqual([])
+    expect(gatherFollowingSource(cells, "x", 3)).toEqual([]) // x is last (its file)
   })
 })

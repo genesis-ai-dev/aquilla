@@ -49,3 +49,30 @@ export function gatherPrecedingContext(
   }
   return out.reverse() // restore document order (oldest → newest)
 }
+
+/**
+ * Collect the SOURCE of up to `count` cells immediately FOLLOWING `cellId`
+ * within the SAME file, in document order. This is the right side of the
+ * discourse window (D4): source only — the following cells are not drafted yet,
+ * so there is no target. Cells with no source are skipped. Returns [] for
+ * count <= 0 or an unknown cellId.
+ */
+export function gatherFollowingSource(
+  cells: MinimalCell[],
+  cellId: string,
+  count: number,
+): { source: string }[] {
+  if (count <= 0) return []
+  const idx = cells.findIndex((c) => c.id === cellId)
+  if (idx === -1) return []
+  const fileId = cells[idx].fileId
+
+  const out: { source: string }[] = []
+  for (let i = idx + 1; i < cells.length && out.length < count; i++) {
+    const c = cells[i]
+    if (c.fileId !== fileId) break // do not cross a file boundary
+    if (!c.original.trim()) continue
+    out.push({ source: c.original })
+  }
+  return out // already in document order (forward scan)
+}

@@ -42,7 +42,7 @@ import type { PassageHit } from "./useSearchIndex"
 import { useFrontierHealth } from "@/lib/completion/frontier-health"
 import posthog from "@/lib/posthog"
 import { compressExampleSource, dedupeExamples, dropPrecedingContextDuplicates } from "@/lib/completion/compress-examples"
-import { gatherPrecedingContext, DEFAULT_DRAFT_CONTEXT, type DraftContextSettings } from "@/lib/completion/draft-context"
+import { gatherPrecedingContext, gatherFollowingSource, DEFAULT_DRAFT_CONTEXT, type DraftContextSettings } from "@/lib/completion/draft-context"
 
 // Cap per LLM call. Above this we split sequentially and chain via priorBatch.
 // Tuned for typical context windows; revisit if real selections start brushing
@@ -537,9 +537,15 @@ export function useCompletion(
         briefSummary,
         exampleFormat: effectiveSettings.fewShotExampleFormat,
         precedingContext,
-        // SWARM-TODO(p1-draft): following-source context (right side of discourse window, D4)
-        // requires knowing the cells *after* the paragraph group. Wire once the
-        // paragraph-group API is available in this hook's cell snapshot.
+        // Following-source context (right side of discourse window, D4): the
+        // source of cells after the paragraph group, same file. Reuses the
+        // preceding budget as a symmetric window size for v1.
+        // SWARM-TODO(p1-followups): split into its own followingSourceCells budget + settings UI (D10).
+        followingSource: gatherFollowingSource(
+          cells,
+          groupIds[groupIds.length - 1],
+          draftContext.precedingTargetCells,
+        ),
       })
 
       // 4. Call model (on-complete; progressive streaming disabled for Frontier per spec).

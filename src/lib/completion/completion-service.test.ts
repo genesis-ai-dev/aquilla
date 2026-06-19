@@ -909,17 +909,24 @@ describe("buildParagraphPrompt", () => {
     expect(c.indexOf("PREV_SRC")).toBeLessThan(c.indexOf("LIVE_SRC"))
   })
 
-  it("omits preceding context pairs with blank target (D4 fallback — blank target skipped)", () => {
+  it("renders a blank-target preceding cell as source-only fallback, not a Translation pair (D4)", () => {
     const [, user] = buildParagraphPrompt({
       sourceLanguage: "English", targetLanguage: "French",
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       cells: [{ cellId: ID_A, source: "LIVE" }],
       examples: [],
-      precedingContext: [{ source: "S", target: "  " }],
+      precedingContext: [
+        { source: "COMMITTED_SRC", target: "COMMITTED_TGT" },
+        { source: "UNCOMMITTED_SRC", target: "" },
+      ],
     })
-    // Blank-target pair must not appear in content
-    expect(user.content).not.toContain("Translation: S")
-    expect(user.content).not.toContain("PREV_SRC")
+    const c = user.content
+    // Committed cell renders as a Source/Translation pair.
+    expect(c).toContain("Source: COMMITTED_SRC\nTranslation: COMMITTED_TGT")
+    // Uncommitted cell appears as source-only discourse context — never a
+    // (mimickable) Translation pair the model could copy as a blank answer.
+    expect(c).toContain("Preceding (source, not yet translated): UNCOMMITTED_SRC")
+    expect(c).not.toContain("UNCOMMITTED_SRC\nTranslation")
   })
 
   it("includes following source context labeled as context-only (D4 right side)", () => {

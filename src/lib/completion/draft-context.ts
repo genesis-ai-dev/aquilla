@@ -27,6 +27,12 @@ export function gatherPrecedingContext(
   cells: MinimalCell[],
   cellId: string,
   count: number,
+  // D4 source-fallback: when true, a preceding cell that has source but no
+  // committed target yet is still included (target stays ""), so the first
+  // paragraphs get SOME discourse context instead of none. Off by default — the
+  // shipped single-cell path keeps committed-target-only behavior; the paragraph
+  // draft path opts in. See spec (D4), the deferred-to-Phase-1 note.
+  sourceFallback = false,
 ): { source: string; target: string }[] {
   if (count <= 0) return []
   const idx = cells.findIndex((c) => c.id === cellId)
@@ -37,8 +43,9 @@ export function gatherPrecedingContext(
   for (let i = idx - 1; i >= 0 && out.length < count; i--) {
     const c = cells[i]
     if (c.fileId !== fileId) break // do not cross a file boundary
-    if (!c.original.trim() || !c.translated.trim()) continue
-    out.push({ source: c.original, target: c.translated })
+    if (!c.original.trim()) continue // no source → nothing to show
+    if (!c.translated.trim() && !sourceFallback) continue // uncommitted, fallback off
+    out.push({ source: c.original, target: c.translated.trim() ? c.translated : "" })
   }
   return out.reverse() // restore document order (oldest → newest)
 }

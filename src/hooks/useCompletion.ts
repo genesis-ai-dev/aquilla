@@ -503,6 +503,7 @@ export function useCompletion(
         cells,
         startCellId,
         draftContext.precedingTargetCells,
+        true, // D4 source-fallback: paragraph path shows preceding source when no target committed yet
       )
 
       // Validated pairs from living memory for relevance-ranked few-shot.

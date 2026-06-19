@@ -53,4 +53,33 @@ describe("gatherPrecedingContext", () => {
   it("ships a sane default budget", () => {
     expect(DEFAULT_DRAFT_CONTEXT.precedingTargetCells).toBe(3)
   })
+
+  // D4 source-fallback (opt-in): before anything is committed, fall back to
+  // showing the preceding SOURCE as left-context rather than nothing.
+  it("with sourceFallback=true, includes uncommitted preceding cells carrying source (empty target)", () => {
+    // From 'd', count 3, scanning back: c (uncommitted → fallback), b, a (committed). Doc order.
+    expect(gatherPrecedingContext(cells, "d", 3, true)).toEqual([
+      { source: "v1 src", target: "v1 tgt" },
+      { source: "v2 src", target: "v2 tgt" },
+      { source: "v3 src", target: "" },
+    ])
+  })
+
+  it("sourceFallback defaults OFF — uncommitted cells are still skipped (shipped behavior unchanged)", () => {
+    expect(gatherPrecedingContext(cells, "d", 3)).toEqual([
+      { source: "v1 src", target: "v1 tgt" },
+      { source: "v2 src", target: "v2 tgt" },
+    ])
+  })
+
+  it("with sourceFallback, still skips a preceding cell that has no source at all", () => {
+    const withBlankSrc = [
+      cell("a", "f1", "", ""),          // no source — nothing to show, even as fallback
+      cell("b", "f1", "v2 src", ""),    // source present, uncommitted → fallback
+      cell("d", "f1", "v4 src", "v4 tgt"),
+    ]
+    expect(gatherPrecedingContext(withBlankSrc, "d", 5, true)).toEqual([
+      { source: "v2 src", target: "" },
+    ])
+  })
 })

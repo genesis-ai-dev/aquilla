@@ -410,6 +410,11 @@ export function buildParagraphPrompt(options: {
     for (const ctx of options.precedingContext) {
       if (ctx.source.trim() && ctx.target.trim()) {
         user += `Source: ${ctx.source}\nTranslation: ${ctx.target}\n\n`
+      } else if (ctx.source.trim()) {
+        // D4 source-fallback: no committed target yet — surface the preceding
+        // source as discourse context WITHOUT a Source/Translation pair the model
+        // could mimic by echoing a blank "translation".
+        user += `Preceding (source, not yet translated): ${ctx.source}\n\n`
       }
     }
   }

@@ -154,6 +154,11 @@ export function buildPrompt(options: {
   exampleFormat?: "source-and-target" | "target-only"
   /** The project brief's L1 summary — injected before the rules block. */
   briefSummary?: string
+  /** Committed target of the immediately preceding cells (document order) — the
+   *  discourse window. Rendered last (closest to the live source) because it is
+   *  real continuity, not a retrieved example. Left-context is the TARGET, not the
+   *  source: it is what gives connectives and participant reference real flow. (D4) */
+  precedingContext?: { source: string; target: string }[]
 }): ChatMessage[] {
   let sys = options.systemPrompt
     .replace(/\{sourceLanguage\}/g, options.sourceLanguage)
@@ -191,6 +196,14 @@ export function buildPrompt(options: {
     for (const ex of allExamples) user += `Target: ${ex.target}\n\n`
   } else {
     for (const ex of allExamples) user += `Source: ${ex.source}\nTranslation: ${ex.target}\n\n`
+  }
+  // Immediately-preceding committed context (discourse window): render after the
+  // few-shot examples and just before the live source so it sits closest to what
+  // the model is about to translate. Skip blank pairs. (D4)
+  for (const ctx of options.precedingContext ?? []) {
+    if (ctx.source.trim() && ctx.target.trim()) {
+      user += `Source: ${ctx.source}\nTranslation: ${ctx.target}\n\n`
+    }
   }
   user += `Source: ${options.sourceText}\nTranslation:`
 

@@ -833,3 +833,29 @@ describe("buildPrompt with brief summary", () => {
     expect(sys.content).not.toContain("Translation brief")
   })
 })
+
+describe("buildPrompt precedingContext (D4)", () => {
+  it("renders preceding committed context after examples and just before the live source", () => {
+    const [, user] = buildPrompt({
+      sourceLanguage: "Greek", targetLanguage: "Kala", systemPrompt: "X",
+      sourceText: "LIVE_SRC",
+      examples: [{ source: "EX_SRC", target: "EX_TGT" }],
+      precedingContext: [{ source: "PREV_SRC", target: "PREV_TGT" }],
+    })
+    const c = user.content
+    // example comes before preceding-context, which comes before the live source
+    expect(c.indexOf("EX_SRC")).toBeLessThan(c.indexOf("PREV_SRC"))
+    expect(c.indexOf("PREV_SRC")).toBeLessThan(c.indexOf("LIVE_SRC"))
+    expect(c).toContain("PREV_TGT")
+    expect(c.trimEnd().endsWith("LIVE_SRC\nTranslation:")).toBe(true)
+  })
+
+  it("omits empty/blank preceding pairs and works when absent", () => {
+    const [, user] = buildPrompt({
+      sourceLanguage: "Greek", targetLanguage: "Kala", systemPrompt: "X",
+      sourceText: "LIVE", examples: [],
+      precedingContext: [{ source: "S", target: "  " }],
+    })
+    expect(user.content).not.toContain("\nTranslation:   \n")
+  })
+})

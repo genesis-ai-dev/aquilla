@@ -22,9 +22,18 @@ describe("gatherPrecedingContext", () => {
     ])
   })
 
-  it("never crosses a file boundary", () => {
-    const out = gatherPrecedingContext(cells, "a", 3)
-    expect(out).toEqual([]) // nothing precedes 'a' within f1
+  it("never crosses a file boundary (excludes a preceding cell from another file)", () => {
+    const mixed = [
+      cell("x", "f2", "other src", "other tgt"), // different file, precedes target
+      cell("a", "f1", "v1 src", "v1 tgt"),
+      cell("b", "f1", "v2 src", "v2 tgt"),
+    ]
+    // going back from b: include a (f1), then hit x (f2) and stop — x excluded
+    expect(gatherPrecedingContext(mixed, "b", 5)).toEqual([
+      { source: "v1 src", target: "v1 tgt" },
+    ])
+    // nothing precedes the first f1 cell
+    expect(gatherPrecedingContext(mixed, "a", 5)).toEqual([])
   })
 
   it("respects the count cap (most recent first-in-order)", () => {
@@ -42,6 +51,6 @@ describe("gatherPrecedingContext", () => {
   })
 
   it("ships a sane default budget", () => {
-    expect(DEFAULT_DRAFT_CONTEXT.precedingTargetCells).toBeGreaterThan(0)
+    expect(DEFAULT_DRAFT_CONTEXT.precedingTargetCells).toBe(3)
   })
 })

@@ -2,6 +2,7 @@ import type { CompletionSettings, CompletionProvider, TranslationRule } from "@/
 import type { FrontierSession } from "@/lib/frontier/types"
 import { resolveApiKey } from "@/lib/store/user-api-keys"
 import { getUserProviderOverride } from "@/lib/store/user-provider-override"
+import { encodeParagraphCells } from "@/lib/completion/paragraph-protocol"
 
 // ---------------------------------------------------------------------------
 // Memory primitives
@@ -299,6 +300,136 @@ export function buildBatchPrompt(options: {
   }
   const liveSource = options.cells.map((c, i) => `<v${i + 1}>${c.source}</v${i + 1}>`).join("\n")
   user += `Source:\n${liveSource}\n\nTranslation:\n`
+
+  return [{ role: "system", content: sys }, { role: "user", content: user.trim() }]
+}
+
+// ---------------------------------------------------------------------------
+// Paragraph-unit prompt builder (D3, D4, D11) — additive, does NOT alter
+// buildPrompt/buildBatchPrompt.
+// ---------------------------------------------------------------------------
+
+// We compress the INVARIANT (examples/terminology) precisely so the freed token budget
+// can hold the VARIANT (discourse window). v1 spent the whole budget re-dumping examples
+// and had no room for discourse — which is why it produced translationese. (background)
+
+const PARAGRAPH_SYSTEM_SUFFIX =
+  "\n\nYou are translating a PARAGRAPH — an ordered group of source cells. " +
+  "Each cell is wrapped in a <c id=\"CELL_ID\"> tag that carries the stable cell identifier. " +
+  "Respond with the SAME tags in the SAME order: <c id=\"CELL_ID\">TRANSLATION</c>. " +
+  "Do not merge, split, omit, reorder, or invent cell ids. " +
+  "Translate only into {targetLanguage}. No commentary."
+
+export interface ParagraphPromptCell {
+  cellId: string
+  source: string
+}
+
+export function buildParagraphPrompt(options: {
+  sourceLanguage: string
+  targetLanguage: string
+  systemPrompt: string
+  /** The paragraph's source cells, in document order. */
+  cells: ParagraphPromptCell[]
+  /** Few-shot examples (whole passages). Same format as buildBatchPrompt. */
+  examples: PassageExample[]
+  /** Validated source→target pairs from living memory. */
+  validatedPairs?: ValidatedPair[]
+  /** Active project rules injected into the system prompt. */
+  rules?: TranslationRule[]
+  /** Project brief L1 summary. */
+  briefSummary?: string
+  /** How to render few-shot examples. */
+  exampleFormat?: "source-and-target" | "target-only"
+  // Left-context is the COMMITTED TARGET of preceding paragraphs (not source): this is what
+  // gives real discourse flow — connectives and participant reference that follow what was
+  // actually said in the target language. Falls back to source before anything is committed. (D4)
+  /** Preceding committed target context (discourse window left side). */
+  precedingContext?: { source: string; target: string }[]
+  /** Following source context (discourse window right side) — source only, no committed target. */
+  followingSource?: { source: string }[]
+}): ChatMessage[] {
+  const targetOnly = options.exampleFormat === "target-only"
+
+  // Build system prompt: base + framing + brief + rules
+  const framingSuffix = PARAGRAPH_SYSTEM_SUFFIX
+    .replace(/\{targetLanguage\}/g, options.targetLanguage)
+
+  let sys = (options.systemPrompt + framingSuffix)
+    .replace(/\{sourceLanguage\}/g, options.sourceLanguage)
+    .replace(/\{targetLanguage\}/g, options.targetLanguage)
+
+  const briefBlock = buildBriefBlock(options.briefSummary)
+  if (briefBlock) sys = sys + "\n\n" + briefBlock
+
+  if (options.rules?.length) {
+    const block = buildRulesBlock(options.rules)
+    if (block) sys = sys + "\n\n" + block
+  }
+
+  if (targetOnly) {
+    sys = sys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."
+  }
+
+  // Build user message: examples → discourse window → live paragraph
+  let user = ""
+
+  // Validated pairs (living memory) lead as the strongest signal.
+  if (options.validatedPairs?.length) {
+    const pairs = options.validatedPairs.filter((p) =>
+      targetOnly ? p.target.trim() : p.source.trim() && p.target.trim(),
+    )
+    if (pairs.length) {
+      if (targetOnly) {
+        user += pairs.map((p) => `Target: ${p.target}`).join("\n\n") + "\n\n"
+      } else {
+        user += pairs.map((p) => `Source: ${p.source}\nTranslation: ${p.target}`).join("\n\n") + "\n\n"
+      }
+    }
+  }
+
+  // Retrieved passage examples.
+  const renderSide = (rows: { source: string; target: string }[], side: "source" | "target") =>
+    rows.map((r, i) => `<v${i + 1}>${side === "source" ? r.source : r.target}</v${i + 1}>`).join("\n")
+
+  for (const ex of options.examples) {
+    const cells = ex.cells.filter((c) => c.source.trim() && c.target.trim())
+    if (!cells.length) continue
+    if (targetOnly) {
+      user += `Translation:\n${renderSide(cells, "target")}\n\n`
+    } else {
+      user += `Source:\n${renderSide(cells, "source")}\n\nTranslation:\n${renderSide(cells, "target")}\n\n`
+    }
+  }
+
+  // Discourse window — preceding committed target (left).
+  // Left-context is the COMMITTED TARGET of preceding paragraphs (not source): this is what
+  // gives real discourse flow — connectives and participant reference that follow what was
+  // actually said in the target language. Falls back to source before anything is committed. (D4)
+  if (options.precedingContext?.length) {
+    for (const ctx of options.precedingContext) {
+      if (ctx.source.trim() && ctx.target.trim()) {
+        user += `Source: ${ctx.source}\nTranslation: ${ctx.target}\n\n`
+      }
+    }
+  }
+
+  // Discourse window — following source (right). Source only; no target available yet.
+  if (options.followingSource?.length) {
+    const followingSrc = options.followingSource.filter((f) => f.source.trim())
+    if (followingSrc.length) {
+      // Encode as a context block so the model sees what comes next without
+      // being asked to translate it (it will translate the live paragraph).
+      user += `Following context (source only — do not translate this block):\n`
+      user += followingSrc.map((f) => f.source).join("\n") + "\n\n"
+    }
+  }
+
+  // Live paragraph: encode source cells with stable <c id> tags (D11).
+  const liveSource = encodeParagraphCells(
+    options.cells.map((c) => ({ cellId: c.cellId, text: c.source })),
+  )
+  user += `Source paragraph:\n${liveSource}\n\nTranslation paragraph:\n`
 
   return [{ role: "system", content: sys }, { role: "user", content: user.trim() }]
 }

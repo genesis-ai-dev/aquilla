@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { compressExampleSource, dedupeExamples } from "../compress-examples"
+import { compressExampleSource, dedupeExamples, dropPrecedingContextDuplicates } from "../compress-examples"
 
 describe("compressExampleSource", () => {
   it("returns short source unchanged (no truncation needed)", () => {
@@ -52,5 +52,35 @@ describe("dedupeExamples", () => {
       { source: "real", target: "Y" },
     ])
     expect(out.map((e) => e.target)).toEqual(["Y"])
+  })
+})
+
+describe("dropPrecedingContextDuplicates", () => {
+  it("removes an example whose source already appears in the preceding context", () => {
+    // In a small project the only translated cell can be both the top
+    // branching-search hit AND the immediately-preceding cell — rendering it
+    // twice. Preceding-context is the stronger, exact signal, so the example
+    // copy is dropped. (D4/D6)
+    const out = dropPrecedingContextDuplicates(
+      [
+        { source: "and it was so", target: "FEWSHOT" },
+        { source: "the LORD said", target: "KEEP" },
+      ],
+      [{ source: "and  it  was  so", target: "PRECEDING" }], // whitespace-normalized match
+    )
+    expect(out.map((e) => e.target)).toEqual(["KEEP"])
+  })
+
+  it("keeps all examples when none match the preceding context", () => {
+    const examples = [
+      { source: "alpha", target: "A" },
+      { source: "bravo", target: "B" },
+    ]
+    expect(dropPrecedingContextDuplicates(examples, [{ source: "charlie", target: "C" }])).toEqual(examples)
+  })
+
+  it("returns examples unchanged when preceding context is empty", () => {
+    const examples = [{ source: "alpha", target: "A" }]
+    expect(dropPrecedingContextDuplicates(examples, [])).toEqual(examples)
   })
 })

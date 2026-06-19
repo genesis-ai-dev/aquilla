@@ -39,7 +39,7 @@ import type { TranslationRule } from "@/lib/parsers/types"
 import type { PassageHit } from "./useSearchIndex"
 import { useFrontierHealth } from "@/lib/completion/frontier-health"
 import posthog from "@/lib/posthog"
-import { compressExampleSource, dedupeExamples } from "@/lib/completion/compress-examples"
+import { compressExampleSource, dedupeExamples, dropPrecedingContextDuplicates } from "@/lib/completion/compress-examples"
 import { gatherPrecedingContext, DEFAULT_DRAFT_CONTEXT, type DraftContextSettings } from "@/lib/completion/draft-context"
 
 // Cap per LLM call. Above this we split sequentially and chain via priorBatch.
@@ -159,21 +159,25 @@ export function useCompletion(
       : []
 
     try {
-      // Compress the retrieved examples (deterministic source-span truncation using the
-      // matched-token provenance the search already returns) and drop near-duplicates,
-      // so the freed budget can hold the discourse window below. (D6)
-      const compressedExamples = dedupeExamples(
-        found.map((e) => ({
-          source: compressExampleSource(e.source, { matchedTokens: e.matchedTokens }),
-          target: e.target,
-        })),
-      )
-
       // Left-context = committed target of the preceding cells (D4).
       const precedingContext = gatherPrecedingContext(
         allCells ?? [],
         cell.id,
         draftContext.precedingTargetCells,
+      )
+
+      // Compress the retrieved examples (deterministic source-span truncation using the
+      // matched-token provenance the search already returns) and drop near-duplicates,
+      // so the freed budget can hold the discourse window below. (D6)
+      // Examples that duplicate a preceding-context cell are dropped first (on the
+      // FULL source, before compression, so the match is exact cell identity):
+      // preceding-context is the stronger, exact signal, so we keep it and avoid
+      // rendering the same cell twice.
+      const compressedExamples = dedupeExamples(
+        dropPrecedingContextDuplicates(found, precedingContext).map((e) => ({
+          source: compressExampleSource(e.source, { matchedTokens: e.matchedTokens }),
+          target: e.target,
+        })),
       )
 
       const messages = buildPrompt({

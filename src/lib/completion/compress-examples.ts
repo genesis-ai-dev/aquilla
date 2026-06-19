@@ -60,16 +60,34 @@ export function compressExampleSource(source: string, opts: CompressExampleOptio
   return head + source.slice(start, end).trim() + tail
 }
 
+/** Whitespace-and-case-normalized source key used for duplicate detection. */
+function normalizeSource(source: string): string {
+  return source.trim().toLowerCase().replace(/\s+/g, " ")
+}
+
 /** Drop examples whose whitespace-normalized source duplicates an earlier one
  *  (keep the first = highest-ranked). Skips blank/empty-source examples. */
 export function dedupeExamples<T extends { source: string }>(examples: T[]): T[] {
   const seen = new Set<string>()
   const out: T[] = []
   for (const ex of examples) {
-    const key = ex.source.trim().toLowerCase().replace(/\s+/g, " ")
+    const key = normalizeSource(ex.source)
     if (!key || seen.has(key)) continue
     seen.add(key)
     out.push(ex)
   }
   return out
+}
+
+/** Drop few-shot examples whose source also appears in the preceding-context
+ *  window. In a small project the only translated cell can be both the top
+ *  branching-search hit and the immediately-preceding cell, so it would render
+ *  twice. Preceding-context is the stronger, exact discourse signal (D4), so we
+ *  keep it and remove the redundant example. (D6) */
+export function dropPrecedingContextDuplicates<T extends { source: string }>(
+  examples: T[],
+  precedingContext: { source: string }[],
+): T[] {
+  const preceding = new Set(precedingContext.map((c) => normalizeSource(c.source)))
+  return examples.filter((ex) => !preceding.has(normalizeSource(ex.source)))
 }

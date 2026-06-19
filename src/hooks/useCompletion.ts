@@ -39,6 +39,8 @@ import type { TranslationRule } from "@/lib/parsers/types"
 import type { PassageHit } from "./useSearchIndex"
 import { useFrontierHealth } from "@/lib/completion/frontier-health"
 import posthog from "@/lib/posthog"
+import { compressExampleSource, dedupeExamples } from "@/lib/completion/compress-examples"
+import { gatherPrecedingContext, DEFAULT_DRAFT_CONTEXT, type DraftContextSettings } from "@/lib/completion/draft-context"
 
 // Cap per LLM call. Above this we split sequentially and chain via priorBatch.
 // Tuned for typical context windows; revisit if real selections start brushing
@@ -96,6 +98,7 @@ export function useCompletion(
   allCells?: CellData[],
   /** The project brief's L1 summary — injected into every prompt (Task 6). */
   briefSummary?: string,
+  draftContext: DraftContextSettings = DEFAULT_DRAFT_CONTEXT,
 ) {
   const [completing, setCompleting] = useState<Map<string, string>>(new Map())
   const [examples, setExamples] = useState<Map<string, ScoredPair[]>>(new Map())
@@ -156,15 +159,33 @@ export function useCompletion(
       : []
 
     try {
+      // Compress the retrieved examples (deterministic source-span truncation using the
+      // matched-token provenance the search already returns) and drop near-duplicates,
+      // so the freed budget can hold the discourse window below. (D6)
+      const compressedExamples = dedupeExamples(
+        found.map((e) => ({
+          source: compressExampleSource(e.source, { matchedTokens: e.matchedTokens }),
+          target: e.target,
+        })),
+      )
+
+      // Left-context = committed target of the preceding cells (D4).
+      const precedingContext = gatherPrecedingContext(
+        allCells ?? [],
+        cell.id,
+        draftContext.precedingTargetCells,
+      )
+
       const messages = buildPrompt({
         sourceLanguage, targetLanguage,
         systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
         sourceText: cell.original,
-        examples: found.map((e) => ({ source: e.source, target: e.target })),
+        examples: compressedExamples,
         rules,
         validatedPairs,
         exampleFormat: effectiveSettings.fewShotExampleFormat,
         briefSummary,
+        precedingContext,
       })
       const result = await complete({
         settings: effectiveSettings, session,
@@ -202,7 +223,7 @@ export function useCompletion(
       setCompleting((p) => new Map(p).set(cell.id, "error"))
       setErrors((p) => new Map(p).set(cell.id, err instanceof Error ? err.message : "Failed"))
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session, provider, commitCompletedCell, rules, allCells, briefSummary])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session, provider, commitCompletedCell, rules, allCells, briefSummary, draftContext])
 
   // Segmented batch translation: each sub-batch goes out as one <vN>-framed
   // prompt and the response is demuxed back to cells. LLMs translate a passage

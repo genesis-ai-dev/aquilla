@@ -15,6 +15,7 @@ import { useCells } from "@/hooks/useCells"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { useSearchIndex } from "@/hooks/useSearchIndex"
 import { useCompletion } from "@/hooks/useCompletion"
+import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { fetchBranchingSearch } from "@/lib/sync/branching-search-read"
 import { fetchBranchingSearchPassages } from "@/lib/sync/branching-search-passages-read"
 import type { ScoredPair } from "@/lib/search/dual-index"
@@ -1334,7 +1335,8 @@ export function ProjectWorkspace() {
   }, [project?.id, historyCellId, cells, applyOptimisticTargetEdit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateAuditStats, revalidateCell])
 
   const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
-    project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, allProjectCells, project?.translationBrief?.l1Summary ?? undefined
+    project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, allProjectCells, project?.translationBrief?.l1Summary ?? undefined,
+    project?.draftContext ?? DEFAULT_DRAFT_CONTEXT,
   )
 
   // FRO-175: workspace AI chat panel

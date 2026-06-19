@@ -20,6 +20,7 @@ import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { getProject } from "@/lib/store/project-index"
+import { perfMark } from "@/lib/perf-log"
 
 /**
  * Overlay synced project-wide settings onto the server-returned ProjectRecord.
@@ -47,6 +48,7 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   if (settings.validationNamedUsers != null) next.validationNamedUsers = settings.validationNamedUsers
   if (settings.allowSelfValidation != null) next.allowSelfValidation = settings.allowSelfValidation
   if (settings.bibleResourcesEnabled != null) next.bibleResourcesEnabled = settings.bibleResourcesEnabled
+  if (settings.draftContext != null) next.draftContext = settings.draftContext
   if (settings.ttsSettings != null) {
     // Server carries voice profiles (no apiKey); keep any device-local apiKey.
     next.ttsSettings = { ...next.ttsSettings, ...settings.ttsSettings }
@@ -104,7 +106,9 @@ export function useProject(projectId: string) {
         hasLoaded.current = true
         return
       }
+      const endResolve = perfMark("useProject.resolveCloud")
       const result = await resolveCloudProjectResult(projectId, session.jwt)
+      endResolve()
       if (cancelled) return
       if (!result.ok) {
         setProject(null)
@@ -112,7 +116,9 @@ export function useProject(projectId: string) {
         hasLoaded.current = true
         return
       }
+      const endOverlay = perfMark("useProject.overlayDeviceLocal")
       const hydrated = await overlayDeviceLocalSettings(minimalProjectRecord(result.project))
+      endOverlay()
       if (cancelled) return
       setProject(hydrated)
       setStatus("ready")

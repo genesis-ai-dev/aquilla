@@ -391,6 +391,9 @@ export interface ProjectRecord {
    *  ProjectWideSettings; default off. Gates the Search-dock "Bible resources"
    *  mode and the agent's aquifer branch. */
   bibleResourcesEnabled?: boolean
+  /** AI-draft context budget. Synced via ProjectWideSettings; absent →
+   *  DEFAULT_DRAFT_CONTEXT applies. See D10 in paragraph-drafting spec. */
+  draftContext?: import("@/lib/completion/draft-context").DraftContextSettings
 }
 
 /** A single authored guidance entry in the Living Memory page. */

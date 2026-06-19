@@ -97,4 +97,18 @@ describe("parseParagraphResponse", () => {
     expect(result.mapped).toEqual([])
     expect(result.missing).toEqual([])
   })
+
+  it("duplicate expected id in response: first occurrence is mapped, repeat goes to extra", () => {
+    // ID_A appears twice; first should map, second should surface in extra
+    const response = `<c id="${ID_A}">First text</c>\n<c id="${ID_B}">B text</c>\n<c id="${ID_A}">Duplicate text</c>`
+    const result = parseParagraphResponse(response, [ID_A, ID_B])
+    // Mapped should have each expected id once, using the FIRST occurrence's text
+    expect(result.mapped).toEqual([
+      { cellId: ID_A, text: "First text" },
+      { cellId: ID_B, text: "B text" },
+    ])
+    expect(result.missing).toEqual([])
+    // The duplicate ID_A should appear in extra
+    expect(result.extra).toEqual([ID_A])
+  })
 })

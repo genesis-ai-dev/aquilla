@@ -9,6 +9,7 @@ import type {
 import type { Concept } from "@/lib/terminology/types"
 import type { LivingMemoryEntry } from "@/lib/parsers/types"
 import type { TranslationBrief } from "@/lib/brief/types"
+import type { DraftContextSettings } from "@/lib/completion/draft-context"
 
 /** Initial server version for projects with no settings row. */
 export const PROJECT_SETTINGS_VERSION_INITIAL = 0
@@ -55,6 +56,13 @@ export interface ProjectWideSettings {
    *  Absent → no brief authored yet. See
    *  docs/superpowers/specs/2026-06-17-translation-brief-design.md. */
   translationBrief?: TranslationBrief
+  /**
+   * AI-draft context budget (Phase 0). Currently just how many preceding
+   * committed-target cells to feed the draft as discourse left-context. Synced
+   * like other top-level keys; absent → DEFAULT_DRAFT_CONTEXT applies.
+   * See docs/superpowers/specs/2026-06-18-paragraph-drafting-retrieval-context-design.md (D10).
+   */
+  draftContext?: DraftContextSettings
   /**
    * Persisted interlinear alignment seeds (FRO-207). Each entry is a
    * (srcToken, tgtToken, weight) triple; positive weight = confirmed,

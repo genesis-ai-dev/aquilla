@@ -32,11 +32,11 @@
 Status: `in-flight | review | merged-integration | merged-main | blocked`
 | ID | Title | Branch | Owns | Wave | Status | Agent |
 |----|-------|--------|------|------|--------|-------|
-| F1 | Grouping model + protocol contract | `swarm/p1-foundation` | `parsers/types.ts`, `bulk-import.ts`, `parsers/paragraphs.ts`, `completion/paragraph-protocol.ts` + tests | 0 | pending | — |
-| S1 | USFM split branch | `swarm/p1-usfm` | `parsers/usfm-lossless.ts`, `import.ts` (usfmSectionToStrings) | 1 | pending | — |
-| S2 | md/docx/txt split branch | `swarm/p1-text` | `parsers/markdown.ts`, `plaintext.ts`, `docx.ts`, `text-splitter.ts` | 1 | pending | — |
-| S3+S4 | completeParagraph unit + output parse/reconcile | `swarm/p1-draft` | `hooks/useCompletion.ts`, `completion/completion-service.ts`, consume `paragraph-protocol.ts` | 1 | pending | — |
-| S5 | draftContext settings UI | `swarm/p1-settings-ui` | project settings component (grep `translationBrief` UI) | 1 | pending | — |
+| F1 | Grouping model + protocol contract | `swarm/p1-foundation` | `parsers/types.ts`, `bulk-import.ts`, `parsers/paragraphs.ts`, `completion/paragraph-protocol.ts` + tests | 0 | merged-integration | — |
+| S1 | USFM split branch | `swarm/p1-usfm` | `parsers/usfm-lossless.ts` (additive), USFM-path `import.ts`/`usfm.ts` verse→string mapping; NOT `buildBulkCells*` | 1 | in-flight | a5f5031 |
+| S2 | md/docx/txt split branch | `swarm/p1-text` | `parsers/markdown.ts`, `plaintext.ts`, `docx.ts`, `text-splitter.ts` + the SINGLE `buildBulkCellsWithSpeakers` paragraphStart carry-line in `import.ts` | 1 | in-flight | acbf720 |
+| S3+S4 | completeParagraph unit + output parse/reconcile | `swarm/p1-draft` | `hooks/useCompletion.ts`, `completion/completion-service.ts` (additive); consume `paragraphs.ts`+`paragraph-protocol.ts`+`draft-context.ts` | 1 | in-flight | a073dae |
+| S5 | draftContext settings UI | `swarm/p1-settings-ui` | `components/ProjectSettings.tsx` (precedingTargetCells L2 knob) | 1 | in-flight | a7b0875 |
 | S6 | UI-driver QA | — | read-only real-app drive | 2 | pending | — |
 
 ## §4 Forbidden paths (all agents)
@@ -46,6 +46,7 @@ Status: `in-flight | review | merged-integration | merged-main | blocked`
 
 ## §M Merge log (this goal)
 - 2026-06-19 · integration `swarm/phase1` off `main@ec2eed875`; green-base tsc fix `ece4c6557` (widen `dropPrecedingContextDuplicates` preceding param). Foundation-first plan recorded. NEXT: dispatch Wave 0 (F1) sequentially, then fan out Wave 1.
+- 2026-06-19 · **WAVE 1 DISPATCHED** (4 manual worktrees off live tip `3c188800d`, sonnet, background): S1 p1-usfm (a5f5031), S2 p1-text (acbf720), S3+S4 p1-draft (a073dae), S5 p1-settings-ui (a7b0875). Scope = NEW IMPORTS ONLY. **Cross-slice seam resolved:** `buildBulkCellsWithSpeakers` (import.ts:747) is the single TranslatableString→BulkImportCell chokepoint — S2 owns the lone `paragraphStart` carry-line there; S1 only SETS the field on USFM-path TranslatableString (disjoint hunks → clean 3-way). S3+S4 reuses `commitCompletedCell` fan-out (no event-model change). NEXT: merge as each returns → central verify → adversarial panel → S6 UI-driver → promote to LOCAL main only (no dev/staging push).
 - 2026-06-19 · **F1 FOUNDATION MERGED** (sequential, committed on integration tip): `e7b2ba8ee` (paragraphStart on TranslatableString+BulkImportCell; `paragraphs.ts` deriveParagraphs/paragraphGroupForCell; `paragraph-protocol.ts` encode/parseParagraphResponse) + `ab25f4827` (hardening). Reviewed ✅ spec+quality; 1 Important fixed (duplicate cell-id now surfaced in `extra`, not silently collapsed); 2 Minor noted (TAG_RE assumes text lacks literal `</c>`). **Gate: tsc 0 · 555 parsers+completion tests green.** Contract is FROZEN for Wave 1. NEXT: fan out Wave 1 off tip `ab25f4827` — S1 usfm, S2 text, S3+S4 draft+parse, S5 settings UI.
 
 ---

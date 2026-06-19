@@ -271,6 +271,39 @@ describe("completeParagraph (D3)", () => {
     expect(result.current.errors.has("cell-2")).toBe(true)
   })
 
+  it("on a mid-fan-out commit failure, does NOT relabel already-committed cells as errored", async () => {
+    // Model returns all 3; commit succeeds for cell-1 then throws on cell-2.
+    const modelResponse = buildModelResponse([
+      { id: "cell-1", text: "T1" },
+      { id: "cell-2", text: "T2" },
+      { id: "cell-3", text: "T3" },
+    ])
+    mockFetch(modelResponse)
+
+    const commitMock = vi.fn()
+      .mockResolvedValueOnce(undefined)         // cell-1 commits OK
+      .mockRejectedValueOnce(new Error("boom")) // cell-2 commit throws
+
+    const { result } = renderHook(() =>
+      useCompletion(
+        SETTINGS, "English", "French",
+        searchMock, searchPassagesMock,
+        SESSION, commitMock, [],
+        ALL_CELLS as never, undefined, DEFAULT_DRAFT_CONTEXT,
+      ),
+    )
+
+    await act(async () => {
+      await result.current.completeParagraph("cell-1")
+    })
+
+    // cell-1 was committed before the throw → it must NOT be marked errored.
+    expect(result.current.errors.has("cell-1")).toBe(false)
+    // cell-2 (failed) and cell-3 (never reached) are the still-uncommitted ones → errored.
+    expect(result.current.errors.has("cell-2")).toBe(true)
+    expect(result.current.errors.has("cell-3")).toBe(true)
+  })
+
   it("includes preceding committed TARGET (not source) in the prompt when available (D4)", async () => {
     // Set up a preceding cell with a committed translation.
     const precedingCell = makeCell("cell-0", FILE_A, "Verse zero source", "Verse zero TARGET", true)

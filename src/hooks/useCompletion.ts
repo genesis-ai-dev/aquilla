@@ -494,6 +494,11 @@ export function useCompletion(
     // Mark all cells in the paragraph as "generating".
     for (const c of groupCells) setCompleting((p) => new Map(p).set(c.id, "generating"))
 
+    // Track which cells were actually committed so a mid-loop commit failure
+    // does NOT relabel already-persisted cells as errored (declared outside the
+    // try so the catch can read it).
+    const committedIds = new Set<string>()
+
     try {
       // 2. Gather discourse window: preceding committed TARGET context (D4).
       // Left-context is the COMMITTED TARGET of preceding paragraphs (not source): this is what
@@ -585,7 +590,6 @@ export function useCompletion(
 
       // 6. Fan out: commit each mapped cell via the EXISTING commitCompletedCell path.
       const llmAuthor = effectiveSettings.model || "frontier-default"
-      let committedCount = 0
       for (const { cellId, text } of mapped) {
         const cell = groupCells.find((c) => c.id === cellId)
         if (!cell) continue
@@ -601,7 +605,7 @@ export function useCompletion(
         }
         setPreviews((p) => new Map(p).set(cellId, text))
         await commitCompletedCell?.(cell, text, llmAuthor)
-        committedCount += 1
+        committedIds.add(cellId)
         setPreviews((p) => { const m = new Map(p); m.delete(cellId); return m })
         setCompleting((p) => { const m = new Map(p); m.delete(cellId); return m })
       }
@@ -613,7 +617,7 @@ export function useCompletion(
         target_language: targetLanguage,
         group_size: groupCells.length,
         mapped_count: mapped.length,
-        committed_count: committedCount,
+        committed_count: committedIds.size,
         missing_count: missing.length,
         extra_count: extra.length,
       })
@@ -628,6 +632,12 @@ export function useCompletion(
       posthog.captureException(err instanceof Error ? err : new Error(String(err)))
       const msg = err instanceof Error ? err.message : "Failed"
       for (const c of groupCells) {
+        // Don't relabel a cell that was already committed before the failure —
+        // its AI draft is persisted; only the still-uncommitted cells errored.
+        if (committedIds.has(c.id)) {
+          setCompleting((p) => { const m = new Map(p); m.delete(c.id); return m })
+          continue
+        }
         setCompleting((p) => new Map(p).set(c.id, "error"))
         setErrors((p) => new Map(p).set(c.id, msg))
       }

@@ -10,7 +10,8 @@ export function extractPlaintextStrings(content: string): TranslatableString[] {
     const trimmed = para.trim()
     const segments = splitIntoSegments(trimmed)
 
-    for (const seg of segments) {
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i]
       results.push({
         id: uuid(),
         original: seg.text,
@@ -18,6 +19,8 @@ export function extractPlaintextStrings(content: string): TranslatableString[] {
         context: `Paragraph ${index + 1}`,
         group: seg.group,
         type: "text",
+        // D2: first sub-cell of each paragraph block carries paragraphStart; continuations do not.
+        ...(i === 0 ? { paragraphStart: true } : {}),
       })
     }
   })

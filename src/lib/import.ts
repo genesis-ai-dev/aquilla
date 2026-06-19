@@ -769,6 +769,7 @@ export function buildBulkCellsWithSpeakers(strings: TranslatableString[]): {
       // (absent), so only an explicit media import needs to set it.
       sequenceIndex: seq,
       ...(str.medium ? { medium: str.medium } : {}),
+      ...(str.paragraphStart ? { paragraphStart: true } : {}),
     })
     speakerPairs.push({ cellId, speaker: str.speaker })
     prevCellId = cellId

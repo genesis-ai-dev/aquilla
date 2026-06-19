@@ -36,7 +36,7 @@ Status: `in-flight | review | merged-integration | merged-main | blocked`
 | S1 | USFM split branch | `swarm/p1-usfm` | `parsers/usfm-lossless.ts` (additive), USFM-path `import.ts`/`usfm.ts` verse→string mapping; NOT `buildBulkCells*` | 1 | in-flight | a5f5031 |
 | S2 | md/docx/txt split branch | `swarm/p1-text` | `parsers/markdown.ts`, `plaintext.ts`, `docx.ts`, `text-splitter.ts` + the SINGLE `buildBulkCellsWithSpeakers` paragraphStart carry-line in `import.ts` | 1 | merged-integration | acbf720 |
 | S3+S4 | completeParagraph unit + output parse/reconcile | `swarm/p1-draft` | `hooks/useCompletion.ts`, `completion/completion-service.ts` (additive); consume `paragraphs.ts`+`paragraph-protocol.ts`+`draft-context.ts` | 1 | in-flight | a073dae |
-| S5 | draftContext settings UI | `swarm/p1-settings-ui` | `components/ProjectSettings.tsx` (precedingTargetCells L2 knob) | 1 | in-flight | a7b0875 |
+| S5 | draftContext settings UI | `swarm/p1-settings-ui` | `components/ProjectSettings.tsx` (precedingTargetCells L2 knob) | 1 | merged-integration | a7b0875 |
 | S6 | UI-driver QA | — | read-only real-app drive | 2 | pending | — |
 
 ## §4 Forbidden paths (all agents)

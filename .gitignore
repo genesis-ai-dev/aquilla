@@ -76,3 +76,8 @@ __pycache__/
 db/seed/.cache/
 
 .pnpm-store
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules

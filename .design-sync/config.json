@@ -1,0 +1,10 @@
+{
+  "pkg": "codex-web-app",
+  "globalName": "AquillaUI",
+  "projectId": "03787fbe-1606-44cf-87ac-224b0e0d370f",
+  "shape": "package",
+  "srcDir": "src/components/ui",
+  "tsconfig": "./tsconfig.json",
+  "cssEntry": ".design-sync/.cache/compiled.css",
+  "buildCmd": "pnpm exec vite build && cp \"$(ls -t dist/assets/BrandProvider-*.css | head -1)\" .design-sync/.cache/compiled.css"
+}

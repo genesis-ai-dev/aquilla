@@ -41,6 +41,7 @@ import type {
   DecaySettings,
   ProjectRecord,
 } from "@/lib/parsers/types"
+import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
@@ -129,6 +130,7 @@ interface Baseline {
   decaySettings: DecaySettings | undefined
   audioMediaStrategy: AudioMediaStrategy
   geminiApiKey: string
+  precedingTargetCells: number
 }
 
 function buildBaseline(project: ProjectRecord): Baseline {
@@ -162,6 +164,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     decaySettings: project.decaySettings,
     audioMediaStrategy: project.audioMediaStrategy ?? "lazy",
     geminiApiKey: project.ttsSettings?.apiKey ?? "",
+    precedingTargetCells: project.draftContext?.precedingTargetCells ?? DEFAULT_DRAFT_CONTEXT.precedingTargetCells,
   }
 }
 
@@ -268,6 +271,7 @@ export function ProjectSettings() {
   const [bibleResourcesEnabled, setBibleResourcesEnabled] = useState(false)
   const [decaySettings, setDecaySettings] = useState<DecaySettings | undefined>(undefined)
   const [audioMediaStrategy, setAudioMediaStrategy] = useState<AudioMediaStrategy>("lazy")
+  const [precedingTargetCells, setPrecedingTargetCells] = useState(DEFAULT_DRAFT_CONTEXT.precedingTargetCells)
 
   // Per-device user-scoped key — not part of the project record, not server-
   // synced, no race with the project save flow. Kept on its own immediate-save
@@ -317,6 +321,7 @@ export function ProjectSettings() {
     setDecaySettings(b.decaySettings)
     setAudioMediaStrategy(b.audioMediaStrategy)
     setGeminiApiKey(b.geminiApiKey)
+    setPrecedingTargetCells(b.precedingTargetCells)
   }, [])
 
   // Seed once when the project first loads. We intentionally don't reseed on
@@ -387,7 +392,8 @@ export function ProjectSettings() {
       bibleResourcesEnabled !== baseline.bibleResourcesEnabled ||
       audioMediaStrategy !== baseline.audioMediaStrategy ||
       !decayEqual(decaySettings, baseline.decaySettings) ||
-      geminiApiKey !== baseline.geminiApiKey
+      geminiApiKey !== baseline.geminiApiKey ||
+      precedingTargetCells !== baseline.precedingTargetCells
     )
   }, [
     baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
@@ -396,6 +402,7 @@ export function ProjectSettings() {
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation,
     harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
+    precedingTargetCells,
   ])
 
   // Warn before browser-level navigation (back button, tab close, reload).
@@ -524,6 +531,9 @@ export function ProjectSettings() {
       if (allowSelfValidation !== baseline.allowSelfValidation) sharedUpdates.allowSelfValidation = allowSelfValidation
       if (harmonizeMinRole !== baseline.harmonize_min_role) sharedUpdates.harmonize_min_role = harmonizeMinRole
       if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled
+      if (precedingTargetCells !== baseline.precedingTargetCells) {
+        sharedUpdates.draftContext = { precedingTargetCells }
+      }
 
       if (Object.keys(sharedUpdates).length > 0) {
         const out = await patchShared(sharedUpdates)
@@ -581,6 +591,7 @@ export function ProjectSettings() {
         decaySettings,
         audioMediaStrategy,
         geminiApiKey,
+        precedingTargetCells,
       }
       setBaseline(newBaseline)
       // Refresh `useProject` in the background so other components see the
@@ -600,6 +611,7 @@ export function ProjectSettings() {
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, harmonizeMinRole,
     bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
+    precedingTargetCells,
   ])
 
   const handleSaveAndClose = useCallback(async () => {
@@ -632,6 +644,7 @@ export function ProjectSettings() {
     { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["system prompt", "ai", "llm", "instructions"] },
+    { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
     { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
     { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "kokoro", "mms", "transcription", "model", "download", "offline", "local ai"] },
@@ -928,6 +941,37 @@ export function ProjectSettings() {
                     "Target only" shows only the target text of each example, useful when source alignment is unavailable or undesirable. The model is told these are reference translations to imitate.
                   </p>
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {visibleSections.some((s) => s.id === "section-draft-context") && (
+          <Card id="section-draft-context">
+            <CardHeader>
+              <CardTitle>Draft Context</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-1">
+                <Label htmlFor="preceding-target-cells">Preceding committed-target cells</Label>
+                <Input
+                  id="preceding-target-cells"
+                  type="number"
+                  min={0}
+                  max={10}
+                  value={precedingTargetCells}
+                  onChange={(e) =>
+                    setPrecedingTargetCells(
+                      Math.max(0, Math.min(10, Number(e.target.value))),
+                    )
+                  }
+                  className="w-24"
+                />
+                <p className="text-xs text-muted-foreground">
+                  How many immediately preceding committed target cells to include as discourse
+                  left-context when drafting. 0 disables preceding-context. Default:{" "}
+                  {DEFAULT_DRAFT_CONTEXT.precedingTargetCells}.
+                </p>
               </div>
             </CardContent>
           </Card>

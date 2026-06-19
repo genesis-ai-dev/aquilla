@@ -122,7 +122,7 @@ The L2 (prompt/context) improvements are **decoupled** from the L1-of-segmentati
 
 **Phase 0 — prompt-only wins (no segmentation change, all inside `completion-service.ts` + project settings):**
 
-1. **Left-context = committed target (D4).** Even at per-cell granularity, feed the preceding cell/paragraph's committed `translated` text into the prompt. Cheapest, highest-leverage discourse fix; directly attacks participant reference and connectives. *Ship first.*
+1. **Left-context = committed target (D4).** Even at per-cell granularity, feed the preceding cell/paragraph's committed `translated` text into the prompt. Cheapest, highest-leverage discourse fix; directly attacks participant reference and connectives. *Ship first.* **Phase-0 status: SHIPPED** — committed-target only; the D4 *source* fallback for not-yet-translated left-context is **deferred to Phase 1** (empty-target cells are currently skipped, not source-substituted).
 2. **Source-side retrieval (D5).** Replace `collectValidatedPairs()` token-overlap with `/search/passages` source-side queries.
 3. **Source-span compression + terminology elision (D6, D7).** Reuse `BREAK_PATTERNS` for ellipsis snapping; elide legend-covered terms.
 4. **`draftContext` configurable budgets (D10).** Project-settings knob for the L2 budgets.

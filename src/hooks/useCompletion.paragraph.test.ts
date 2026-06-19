@@ -304,6 +304,48 @@ describe("completeParagraph (D3)", () => {
     expect(result.current.errors.has("cell-3")).toBe(true)
   })
 
+  it("forwards an AbortSignal to complete() — an aborted signal cancels without committing or erroring", async () => {
+    // fetch honors the signal: reject with an AbortError when it's already aborted.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+        if (init?.signal?.aborted) {
+          return Promise.reject(new DOMException("Aborted", "AbortError"))
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              choices: [{ message: { content: buildModelResponse([{ id: "cell-1", text: "T1" }]) } }],
+            }),
+          body: null,
+        })
+      }),
+    )
+
+    const commitMock = vi.fn().mockResolvedValue(undefined)
+    const controller = new AbortController()
+    controller.abort()
+
+    const { result } = renderHook(() =>
+      useCompletion(
+        SETTINGS, "English", "French",
+        searchMock, searchPassagesMock,
+        SESSION, commitMock, [],
+        ALL_CELLS as never, undefined, DEFAULT_DRAFT_CONTEXT,
+      ),
+    )
+
+    await act(async () => {
+      await result.current.completeParagraph("cell-1", controller.signal)
+    })
+
+    // Aborted before any model output → nothing committed, and cells are cleared,
+    // not errored (the AbortError branch).
+    expect(commitMock).not.toHaveBeenCalled()
+    expect(result.current.errors.has("cell-1")).toBe(false)
+  })
+
   it("includes preceding committed TARGET (not source) in the prompt when available (D4)", async () => {
     // Set up a preceding cell with a committed translation.
     const precedingCell = makeCell("cell-0", FILE_A, "Verse zero source", "Verse zero TARGET", true)

@@ -474,7 +474,7 @@ export function useCompletion(
 
   // completeParagraph: draft a whole paragraph group as ONE model call, fan results
   // out to per-cell commits via the existing commitCompletedCell path (D3, D11).
-  const completeParagraph = useCallback(async (startCellId: string) => {
+  const completeParagraph = useCallback(async (startCellId: string, signal?: AbortSignal) => {
     if (!isConfigured || !isAvailable) return
 
     // 1. Identify paragraph group from the starting cell.
@@ -561,6 +561,7 @@ export function useCompletion(
         // SWARM-TODO(p1-draft): enable progressive streaming here once Frontier SSE fix ships
         // (the tag format already supports it — see paragraph-protocol.ts).
         stream: false,
+        signal,
       })
 
       // 5. Parse + reconcile LOUDLY (D11).

@@ -21,6 +21,28 @@
 
 const BOM = "﻿"
 
+// Paragraph is a GROUPING over cells, never a re-segmentation of them. The verse-cell
+// is the alignment unit and must NOT be split below — the alignment/BT/terminology
+// stack depends on source↔target cell correspondence. \p and \v are orthogonal.
+// See docs/superpowers/specs/2026-06-18-paragraph-drafting-retrieval-context-design.md (D1,D2).
+
+/** USFM markers that begin a new paragraph block. When one of these appears
+ *  on a line BEFORE a \v marker (between the previous verse-terminating event
+ *  and the \v), that verse begins a new paragraph. The verse boundary is never
+ *  split — the marker just signals paragraph membership. */
+const PARAGRAPH_START_MARKERS = new Set<string>([
+  "p", "m", "nb", "b",        // prose paragraphs + blank line
+  "q", "q1", "q2", "q3", "q4", // poetry
+  "qm", "qm1", "qm2",          // embedded quotation
+  "qc", "qr",                   // centered / right poetry
+  "pi", "pi1", "pi2", "pi3",   // indented prose
+  "mi",                          // indented continuation
+  "li", "li1", "li2", "li3", "li4", // list items
+  "lim", "lim1", "lim2",        // embedded list items
+  "pc",                          // centered paragraph
+  "pr",                          // right-aligned paragraph
+])
+
 /** Markers that terminate a verse text span. Everything NOT in this set —
  *  paragraph markers (\p, \m, \nb, \b), poetry (\q1-4), lists (\li1-4),
  *  inline character markers (\wj, \nd, \add), footnotes (\f...\f*), etc. —
@@ -106,6 +128,11 @@ export interface UsfmVerse {
   textStart: number
   /** Byte offset where the verse text ends (exclusive). */
   textEnd: number
+  /** D2: true when a paragraph-class marker (\p, \q, \q1-4, \m, \nb, \b,
+   *  \pi, \li…) immediately precedes this verse in the source (between the
+   *  prior verse-boundary event and this \v). Absent/false = continuation.
+   *  The verse boundary is never altered — this is a grouping signal only. */
+  paragraphStart?: boolean
 }
 
 export interface UsfmHeading {
@@ -201,6 +228,40 @@ export function parseUsfmLossless(raw: string): UsfmDocument {
     }
   }
 
+  // Pre-scan: for each \v at marker-list index k, determine whether a
+  // paragraph-class marker precedes it (between the nearest prior \v or \c
+  // boundary and this \v, inclusive of the gap on both ends exclusive of
+  // the \v/\c themselves).
+  //
+  // KEY DISTINCTION — pre-verse vs intra-verse paragraph markers:
+  //   A bare \p / \q1 on its own line (m.rest === "") is a pre-verse signal
+  //   that opens a new paragraph for the upcoming \v. It carries no verse text.
+  //
+  //   A \q1 / \q2 with content on the same line (m.rest !== "") is an
+  //   intra-verse poetry-continuation line that carries part of the preceding
+  //   verse's text. It should NOT trigger paragraphStart for the following verse.
+  //
+  // This matches USFM convention: paragraph markers appear alone on a line
+  // immediately before the \v they govern; continuation markers appear with
+  // the verse text content on the same line.
+  //
+  // Scan backwards from k-1 and stop at the first prior \v or \c.
+  const verseIsParagraphStart = new Set<number>()  // marker-list indices of \v entries
+  for (let k = 0; k < markers.length; k++) {
+    if (markers[k].name !== "v") continue
+    for (let j = k - 1; j >= 0; j--) {
+      const mj = markers[j]
+      if (mj.name === "v" || mj.name === "c") break  // prior boundary — stop
+      // Only count bare paragraph markers (no content on the same line).
+      // Content-bearing paragraph markers (e.g. \q2 text) are intra-verse
+      // continuations and must not bleed into the next verse.
+      if (PARAGRAPH_START_MARKERS.has(mj.name) && mj.rest.trim() === "") {
+        verseIsParagraphStart.add(k)
+        break
+      }
+    }
+  }
+
   const verses: UsfmVerse[] = []
   const headings: UsfmHeading[] = []
   // Per-marker occurrence counters → stable synthetic refs across re-parses.
@@ -242,6 +303,7 @@ export function parseUsfmLossless(raw: string): UsfmDocument {
         text: raw.slice(textStart, textEnd),
         textStart,
         textEnd,
+        ...(verseIsParagraphStart.has(i) ? { paragraphStart: true } : {}),
       })
       continue
     }

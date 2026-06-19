@@ -378,13 +378,20 @@ describe("parseUsfmLossless — paragraphStart (D2)", () => {
     expect(doc.verses[1].paragraphStart).toBeUndefined()
   })
 
-  it("verse without any preceding paragraph marker has no paragraphStart", () => {
-    // The first verse in a chapter when no \\p/\\q/\\m precedes it.
+  it("first verse of a chapter starts a paragraph even without \\p; mid-chapter unmarked verses do not (p1-usfm-chapter-no-p)", () => {
+    // Minimal/malformed USFM may omit the \\p after \\c. A chapter boundary still
+    // begins a new paragraph group; a mid-chapter verse with no marker continues.
     const raw = `\\id GEN
 \\c 1
-\\v 1 no paragraph marker before this verse`
+\\v 1 first verse of the chapter, no paragraph marker
+\\v 2 second verse, still no marker
+\\c 2
+\\v 1 first verse of chapter two, also no marker`
     const doc = parseUsfmLossless(raw)
-    expect(doc.verses[0].paragraphStart).toBeUndefined()
+    expect(doc.verses).toHaveLength(3)
+    expect(doc.verses[0].paragraphStart).toBe(true)      // c1 v1 — chapter boundary
+    expect(doc.verses[2].paragraphStart).toBe(true)      // c2 v1 — chapter boundary
+    expect(doc.verses[1].paragraphStart).toBeUndefined() // c1 v2 — mid-chapter continuation
   })
 
   it("section headings between verses reset paragraph-start accumulation", () => {

@@ -254,7 +254,15 @@ export function parseUsfmLossless(raw: string): UsfmDocument {
     if (markers[k].name !== "v") continue
     for (let j = k - 1; j >= 0; j--) {
       const mj = markers[j]
-      if (mj.name === "v" || mj.name === "c") break  // prior boundary — stop
+      if (mj.name === "v") break  // prior verse, same chapter → continuation, no start
+      if (mj.name === "c") {
+        // First verse of a chapter with no explicit \p between \c and \v: a new
+        // chapter always begins a new paragraph group. Defensive — real USFM
+        // usually has \p after \c (handled by the marker check below), but
+        // minimal/malformed USFM may omit it. (p1-usfm-chapter-no-p)
+        verseIsParagraphStart.add(k)
+        break
+      }
       // Only count bare paragraph markers (no content on the same line).
       // Content-bearing paragraph markers (e.g. \q2 text) are intra-verse
       // continuations and must not bleed into the next verse.

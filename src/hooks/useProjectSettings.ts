@@ -98,6 +98,7 @@ function localSettingsFrom(
   if (record.terminology != null) out.terminology = record.terminology
   if (record.livingMemoryEntries != null) out.livingMemoryEntries = record.livingMemoryEntries
   if (record.translationBrief != null) out.translationBrief = record.translationBrief
+  if (record.draftContext != null) out.draftContext = record.draftContext
   return out
 }
 

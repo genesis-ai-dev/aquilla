@@ -125,6 +125,22 @@ describe("useProjectSettings — read path", () => {
     expect(result.current.settings.sourceLanguage).toBe("en") // from local IDB
   })
 
+  it("surfaces a locally-cached draftContext from IDB when the server has none (p1-draftcontext-idb)", async () => {
+    const idbMod = await import("@/lib/store/project-index")
+    vi.mocked(idbMod.getProject).mockResolvedValueOnce({
+      id: "p1", name: "P", sourceLanguage: "en", targetLanguage: "swh",
+      files: [], members: [], createdAt: "",
+      syncRole: { level: 700, name: "owner", source: "creator", fetchedAt: "" },
+      draftContext: { precedingTargetCells: 7 },
+    } as never)
+    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue(null)
+    const { result } = renderHook(() => useProjectSettings("p1", 700))
+    // Local override (7) must win over the shipped default, not be dropped on offline/IDB load.
+    await waitFor(() =>
+      expect(result.current.settings.draftContext?.precedingTargetCells).toBe(7),
+    )
+  })
+
   it("canEdit is false when offline even at OWNER role", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: false })
     vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue(null)

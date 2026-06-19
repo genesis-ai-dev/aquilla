@@ -46,6 +46,7 @@ Status: `in-flight | review | merged-integration | merged-main | blocked`
 
 ## §M Merge log (this goal)
 - 2026-06-19 · integration `swarm/phase1` off `main@ec2eed875`; green-base tsc fix `ece4c6557` (widen `dropPrecedingContextDuplicates` preceding param). Foundation-first plan recorded. NEXT: dispatch Wave 0 (F1) sequentially, then fan out Wave 1.
+- 2026-06-19 · **F1 FOUNDATION MERGED** (sequential, committed on integration tip): `e7b2ba8ee` (paragraphStart on TranslatableString+BulkImportCell; `paragraphs.ts` deriveParagraphs/paragraphGroupForCell; `paragraph-protocol.ts` encode/parseParagraphResponse) + `ab25f4827` (hardening). Reviewed ✅ spec+quality; 1 Important fixed (duplicate cell-id now surfaced in `extra`, not silently collapsed); 2 Minor noted (TAG_RE assumes text lacks literal `</c>`). **Gate: tsc 0 · 555 parsers+completion tests green.** Contract is FROZEN for Wave 1. NEXT: fan out Wave 1 off tip `ab25f4827` — S1 usfm, S2 text, S3+S4 draft+parse, S5 settings UI.
 
 ---
 

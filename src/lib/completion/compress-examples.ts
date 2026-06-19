@@ -86,7 +86,8 @@ export function dedupeExamples<T extends { source: string }>(examples: T[]): T[]
  *  keep it and remove the redundant example. (D6) */
 export function dropPrecedingContextDuplicates<T extends { source: string }>(
   examples: T[],
-  precedingContext: { source: string }[],
+  // Only `source` is read for matching; callers pass full {source, target} pairs.
+  precedingContext: { source: string; target?: string }[],
 ): T[] {
   const preceding = new Set(precedingContext.map((c) => normalizeSource(c.source)))
   return examples.filter((ex) => !preceding.has(normalizeSource(ex.source)))

@@ -252,3 +252,153 @@ describe("stripBom", () => {
     expect(stripBom("hello")).toBe("hello")
   })
 })
+
+// ── D2: paragraphStart detection ────────────────────────────────────────────
+//
+// These tests encode WHY the behaviour matters, not just WHAT it does:
+//   - Paragraph is a GROUPING over cells; the verse is the alignment unit and
+//     must never be split (D1). paragraphStart is a grouping signal only.
+//   - \p and \v are orthogonal in USFM (D2). A \p inside a verse's text span
+//     must NOT be treated as a paragraph-start for the following verse.
+//
+// See docs/superpowers/specs/2026-06-18-paragraph-drafting-retrieval-context-design.md (D1,D2).
+
+describe("parseUsfmLossless — paragraphStart (D2)", () => {
+  it("sets paragraphStart on a verse preceded by \\p", () => {
+    const raw = `\\id RUT
+\\c 1
+\\p
+\\v 1 Now it came to pass in the days when the judges ruled.
+\\v 2 And the name of the man was Elimelech.`
+    const doc = parseUsfmLossless(raw)
+    expect(doc.verses).toHaveLength(2)
+    // Verse 1 is the paragraph-starter (\\p came before \\v 1)
+    expect(doc.verses[0].paragraphStart).toBe(true)
+    // Verse 2 is a continuation — no \\p between \\v 1 and \\v 2
+    expect(doc.verses[1].paragraphStart).toBeUndefined()
+  })
+
+  it("sets paragraphStart on a verse preceded by \\q1 (poetry opening)", () => {
+    const raw = `\\id PSA
+\\c 1
+\\q1
+\\v 1 Blessed is the man
+\\v 2 who walks not in the counsel.`
+    const doc = parseUsfmLossless(raw)
+    expect(doc.verses[0].paragraphStart).toBe(true)
+    expect(doc.verses[1].paragraphStart).toBeUndefined()
+  })
+
+  it("handles multiple paragraph blocks within a chapter", () => {
+    // Encodes D1/D2: each \\p before a verse marks that verse as a paragraph
+    // opener; continuation verses carry no flag.
+    const raw = `\\id GEN
+\\c 2
+\\p
+\\v 1 Thus the heavens and the earth were completed.
+\\v 2 By the seventh day God completed his work.
+\\p
+\\v 3 Then God blessed the seventh day.`
+    const doc = parseUsfmLossless(raw)
+    expect(doc.verses).toHaveLength(3)
+    expect(doc.verses[0].paragraphStart).toBe(true)   // after \\p
+    expect(doc.verses[1].paragraphStart).toBeUndefined() // continuation
+    expect(doc.verses[2].paragraphStart).toBe(true)   // after second \\p
+  })
+
+  it("intra-verse \\q1/\\q2 markers do NOT cause the NEXT verse to be a paragraph-start", () => {
+    // This is the critical anti-split invariant (D1):
+    //   \\q1/\\q2 inside a verse's text span belong to that verse and must
+    //   never be confused with a pre-verse paragraph signal for the FOLLOWING
+    //   verse. Splitting below the verse would shred alignment.
+    const raw = `\\id PSA
+\\c 1
+\\q1
+\\v 1 Blessed is the man
+\\q1 who walks not in the counsel of the wicked
+\\q2 nor stands in the way of sinners
+\\v 2 but his delight is in the law of the LORD`
+    const doc = parseUsfmLossless(raw)
+    expect(doc.verses).toHaveLength(2)
+    // Verse 1: \\q1 before \\v 1 → paragraph-start
+    expect(doc.verses[0].paragraphStart).toBe(true)
+    // Verse 1 text must include the intra-verse \\q1/\\q2 markers unchanged
+    expect(doc.verses[0].text).toContain("\\q1 who walks not in the counsel")
+    expect(doc.verses[0].text).toContain("\\q2 nor stands in the way")
+    // Verse 2: the \\q1/\\q2 inside verse 1 must NOT bleed into verse 2
+    expect(doc.verses[1].paragraphStart).toBeUndefined()
+    // And verse 1 still has only ONE verse (D1: never split)
+    expect(doc.verses).toHaveLength(2)
+  })
+
+  it("a verse containing \\p mid-text is not split — verse boundary unchanged", () => {
+    // D1: paragraph is a grouping over cells, never a re-segmentation.
+    // \\p markers in USFM are bare lines (no content on the same line); the
+    // verse scanner captures them inside the verse's text span verbatim, but
+    // the verse boundary itself is NEVER moved. paragraphStart is a grouping
+    // signal only — the verse count stays at 3 regardless of how many \\p appear.
+    const raw = `\\id ACT
+\\c 1
+\\p
+\\v 1 first verse
+\\p
+\\v 2 second verse text
+\\p
+\\v 3 third verse`
+    const doc = parseUsfmLossless(raw)
+    // Critical: verse count is unchanged — no splitting below the alignment unit.
+    expect(doc.verses).toHaveLength(3)
+    // Each verse preceded by a bare \\p carries paragraphStart.
+    expect(doc.verses[0].paragraphStart).toBe(true)
+    expect(doc.verses[1].paragraphStart).toBe(true)
+    expect(doc.verses[2].paragraphStart).toBe(true)
+  })
+
+  it("\\b (blank line) marker triggers paragraphStart", () => {
+    const raw = `\\id PSA
+\\c 119
+\\p
+\\v 1 Blessed are those whose way is blameless.
+\\b
+\\q1
+\\v 9 How can a young man keep his way pure?`
+    const doc = parseUsfmLossless(raw)
+    expect(doc.verses[0].paragraphStart).toBe(true)
+    expect(doc.verses[1].paragraphStart).toBe(true)
+  })
+
+  it("\\m (margin paragraph) triggers paragraphStart", () => {
+    const raw = `\\id MAT
+\\c 5
+\\m
+\\v 1 Seeing the crowds, he went up on the mountain.
+\\v 2 And he opened his mouth and taught them.`
+    const doc = parseUsfmLossless(raw)
+    expect(doc.verses[0].paragraphStart).toBe(true)
+    expect(doc.verses[1].paragraphStart).toBeUndefined()
+  })
+
+  it("verse without any preceding paragraph marker has no paragraphStart", () => {
+    // The first verse in a chapter when no \\p/\\q/\\m precedes it.
+    const raw = `\\id GEN
+\\c 1
+\\v 1 no paragraph marker before this verse`
+    const doc = parseUsfmLossless(raw)
+    expect(doc.verses[0].paragraphStart).toBeUndefined()
+  })
+
+  it("section headings between verses reset paragraph-start accumulation", () => {
+    // A \\s (section heading — a TERMINATE_VERSE_MARKERS member) appears between
+    // two verses. A \\p after \\s and before \\v should still trigger paragraphStart.
+    const raw = `\\id MAT
+\\c 5
+\\p
+\\v 1 first verse
+\\s The Beatitudes
+\\p
+\\v 2 second verse`
+    const doc = parseUsfmLossless(raw)
+    expect(doc.verses[0].paragraphStart).toBe(true)
+    expect(doc.verses[1].paragraphStart).toBe(true)
+  })
+})

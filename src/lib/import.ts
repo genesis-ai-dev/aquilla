@@ -356,6 +356,10 @@ function usfmSectionToStrings(section: string): {
       text: v.text.trim(),
       section: `${bookId} ${v.chapter}`,
       type: "verse" as const,
+      // D2: propagate paragraph-start signal from the lossless parser.
+      // The verse is never split — paragraphStart is a grouping signal only.
+      // See docs/superpowers/specs/2026-06-18-paragraph-drafting-retrieval-context-design.md (D1,D2).
+      paragraphStart: v.paragraphStart,
     })),
     ...doc.headings.map((h) => ({
       order: h.textStart,
@@ -363,6 +367,7 @@ function usfmSectionToStrings(section: string): {
       text: h.text.trim(),
       section: h.chapter > 0 ? `${bookId} ${h.chapter}` : bookId,
       type: h.kind,
+      paragraphStart: undefined as boolean | undefined,
     })),
   ].sort((a, b) => a.order - b.order)
   const strings: TranslatableString[] = allSpans.map((s) => ({
@@ -374,6 +379,7 @@ function usfmSectionToStrings(section: string): {
     section: s.section,
     globalReferences: [s.ref],
     type: s.type,
+    ...(s.paragraphStart ? { paragraphStart: true } : {}),
   }))
   return { bookId, strings, duplicateRefs }
 }

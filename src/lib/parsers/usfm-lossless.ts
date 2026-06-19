@@ -30,8 +30,11 @@ const BOM = "﻿"
  *  on a line BEFORE a \v marker (between the previous verse-terminating event
  *  and the \v), that verse begins a new paragraph. The verse boundary is never
  *  split — the marker just signals paragraph membership. */
+// \nb ("no break") is deliberately EXCLUDED: it marks a verse as a CONTINUATION
+// of the previous paragraph (no break here), the opposite of a paragraph start.
+// Spec D2's marker list omits it; including it would wrongly split a paragraph.
 const PARAGRAPH_START_MARKERS = new Set<string>([
-  "p", "m", "nb", "b",        // prose paragraphs + blank line
+  "p", "m", "b",              // prose paragraphs + blank line
   "q", "q1", "q2", "q3", "q4", // poetry
   "qm", "qm1", "qm2",          // embedded quotation
   "qc", "qr",                   // centered / right poetry

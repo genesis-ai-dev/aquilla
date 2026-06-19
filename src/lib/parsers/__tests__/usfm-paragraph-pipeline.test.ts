@@ -204,11 +204,11 @@ describe("USFM → paragraphStart → deriveParagraphs (D1/D2)", () => {
 
     // Check paragraph grouping makes sense
     const groups = deriveParagraphs(toParagraphCells(verses))
-    // \\p before v1, \\p before v2, \\q1 before v3, \\q1 before v4, \\nb before v5
-    // each verse has a paragraph marker → 5 separate groups
-    expect(groups).toHaveLength(5)
-    for (const g of groups) {
-      expect(g).toHaveLength(1)
-    }
+    // \\p before v1, \\p before v2, \\q1 before v3, \\q1 before v4 → 4 starts.
+    // \\nb before v5 is "no break" = CONTINUATION → v5 joins v4's group, not a
+    // new start. So 4 groups, with the last spanning v4+v5.
+    expect(groups).toHaveLength(4)
+    expect(groups.slice(0, 3).every((g) => g.length === 1)).toBe(true)
+    expect(groups[3]).toHaveLength(2)
   })
 })

@@ -26,7 +26,9 @@ type SearchFn = (
   excludeId?: string,
 ) => Promise<ScoredPair[]>
 import type { CellData } from "./useCells"
-import { buildPrompt, buildBatchPrompt, complete, resolveProvider, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, type PassageExample } from "@/lib/completion/completion-service"
+import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, type PassageExample } from "@/lib/completion/completion-service"
+import { paragraphGroupForCell } from "@/lib/parsers/paragraphs"
+import { parseParagraphResponse } from "@/lib/completion/paragraph-protocol"
 import {
   resetBatchCompletionState,
   clearBatchCompletionProgress,
@@ -470,5 +472,147 @@ export function useCompletion(
     }
   }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, completeSingle, commitCompletedCell, rules, allCells, briefSummary])
 
-  return { completeSingle, completeBatch, cancelCompletion: cancelBatchCompletion, isConfigured, isAvailable, completing, examples, errors, previews }
+  // completeParagraph: draft a whole paragraph group as ONE model call, fan results
+  // out to per-cell commits via the existing commitCompletedCell path (D3, D11).
+  const completeParagraph = useCallback(async (startCellId: string) => {
+    if (!isConfigured || !isAvailable) return
+
+    // 1. Identify paragraph group from the starting cell.
+    const cells = allCells ?? []
+    const groupIds = paragraphGroupForCell(cells, startCellId)
+    if (!groupIds.length) {
+      console.warn("[useCompletion] completeParagraph: cell not found in any paragraph group", startCellId)
+      return
+    }
+
+    const groupCells = groupIds
+      .map((id) => cells.find((c) => c.id === id))
+      .filter((c): c is CellData => c !== undefined)
+
+    if (!groupCells.length) return
+
+    // Mark all cells in the paragraph as "generating".
+    for (const c of groupCells) setCompleting((p) => new Map(p).set(c.id, "generating"))
+
+    try {
+      // 2. Gather discourse window: preceding committed TARGET context (D4).
+      // Left-context is the COMMITTED TARGET of preceding paragraphs (not source): this is what
+      // gives real discourse flow — connectives and participant reference that follow what was
+      // actually said in the target language. Falls back to source before anything is committed. (D4)
+      const precedingContext = gatherPrecedingContext(
+        cells,
+        startCellId,
+        draftContext.precedingTargetCells,
+      )
+
+      // Validated pairs from living memory for relevance-ranked few-shot.
+      const topK = effectiveSettings.top_k ?? 15
+      const concatenated = groupCells.map((c) => c.original).join(" ")
+      const validatedPairs = allCells
+        ? collectValidatedPairs(allCells, concatenated, topK)
+        : []
+
+      // Retrieve passage examples for the paragraph's source text.
+      let passages: import("./useSearchIndex").PassageHit[] = []
+      try {
+        passages = await searchPassages(concatenated, 3, 2)
+      } catch (err) {
+        console.warn("[useCompletion] completeParagraph: passage retrieval failed:", err)
+      }
+
+      const examplesForPrompt: PassageExample[] = passages.map((p) => ({
+        cells: p.cells.map((c) => ({ source: c.source, target: c.target })),
+      }))
+
+      // 3. Build the paragraph prompt.
+      const messages = buildParagraphPrompt({
+        sourceLanguage,
+        targetLanguage,
+        systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+        cells: groupCells.map((c) => ({ cellId: c.id, source: c.original })),
+        examples: examplesForPrompt,
+        validatedPairs,
+        rules,
+        briefSummary,
+        exampleFormat: effectiveSettings.fewShotExampleFormat,
+        precedingContext,
+        // SWARM-TODO(p1-draft): following-source context (right side of discourse window, D4)
+        // requires knowing the cells *after* the paragraph group. Wire once the
+        // paragraph-group API is available in this hook's cell snapshot.
+      })
+
+      // 4. Call model (on-complete; progressive streaming disabled for Frontier per spec).
+      const result = await complete({
+        settings: effectiveSettings,
+        session,
+        messages,
+        // SWARM-TODO(p1-draft): enable progressive streaming here once Frontier SSE fix ships
+        // (the tag format already supports it — see paragraph-protocol.ts).
+        stream: false,
+      })
+
+      // 5. Parse + reconcile LOUDLY (D11).
+      const expectedIds = groupCells.map((c) => c.id)
+      const { mapped, missing, extra } = parseParagraphResponse(result, expectedIds)
+
+      // Surface extra (unknown) tags as a warning — never commit them.
+      if (extra.length) {
+        const msg = `[completeParagraph] extra/unknown cell ids in model response (discarded): ${extra.join(", ")}`
+        console.warn(msg)
+        // Surface in hook errors so callers can show a toast/badge if desired.
+        for (const id of extra) {
+          setErrors((p) => new Map(p).set(id, `Unknown tag in response: ${id}`))
+        }
+      }
+
+      // Surface missing cells as warnings — they are flagged, NEVER committed empty.
+      if (missing.length) {
+        const msg = `[completeParagraph] cells missing from model response (not committed): ${missing.join(", ")}`
+        console.warn(msg)
+        for (const id of missing) {
+          setErrors((p) => new Map(p).set(id, `Cell not translated by model: ${id}`))
+          // Clear the "generating" spinner for the missing cell.
+          setCompleting((p) => { const m = new Map(p); m.delete(id); return m })
+        }
+      }
+
+      // 6. Fan out: commit each mapped cell via the EXISTING commitCompletedCell path.
+      const llmAuthor = effectiveSettings.model || "frontier-default"
+      for (const { cellId, text } of mapped) {
+        const cell = groupCells.find((c) => c.id === cellId)
+        if (!cell) continue
+        setPreviews((p) => new Map(p).set(cellId, text))
+        await commitCompletedCell?.(cell, text, llmAuthor)
+        setPreviews((p) => { const m = new Map(p); m.delete(cellId); return m })
+        setCompleting((p) => { const m = new Map(p); m.delete(cellId); return m })
+      }
+
+      posthog.capture("ai paragraph translation completed", {
+        provider,
+        model: effectiveSettings.model || "frontier-default",
+        source_language: sourceLanguage,
+        target_language: targetLanguage,
+        group_size: groupCells.length,
+        mapped_count: mapped.length,
+        missing_count: missing.length,
+        extra_count: extra.length,
+      })
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        for (const c of groupCells) {
+          setPreviews((p) => { const m = new Map(p); m.delete(c.id); return m })
+          setCompleting((p) => { const m = new Map(p); m.delete(c.id); return m })
+        }
+        return
+      }
+      posthog.captureException(err instanceof Error ? err : new Error(String(err)))
+      const msg = err instanceof Error ? err.message : "Failed"
+      for (const c of groupCells) {
+        setCompleting((p) => new Map(p).set(c.id, "error"))
+        setErrors((p) => new Map(p).set(c.id, msg))
+      }
+    }
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, commitCompletedCell, rules, allCells, briefSummary, draftContext])
+
+  return { completeSingle, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, isConfigured, isAvailable, completing, examples, errors, previews }
 }

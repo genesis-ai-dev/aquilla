@@ -859,3 +859,129 @@ describe("buildPrompt precedingContext (D4)", () => {
     expect(user.content).not.toContain("\nTranslation:   \n")
   })
 })
+
+// ---------------------------------------------------------------------------
+// buildParagraphPrompt (D3, D4, D11)
+// ---------------------------------------------------------------------------
+
+import { buildParagraphPrompt } from "./completion-service"
+
+const ID_A = "aaaa-aaaa"
+const ID_B = "bbbb-bbbb"
+
+describe("buildParagraphPrompt", () => {
+  it("encodes source cells as <c id> tags in the user message (D11)", () => {
+    const [, user] = buildParagraphPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [
+        { cellId: ID_A, source: "In the beginning" },
+        { cellId: ID_B, source: "God created" },
+      ],
+      examples: [],
+    })
+    expect(user.content).toContain(`<c id="${ID_A}">In the beginning</c>`)
+    expect(user.content).toContain(`<c id="${ID_B}">God created</c>`)
+  })
+
+  it("system prompt instructs model to reply with <c id> tags (D11)", () => {
+    const [sys] = buildParagraphPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ cellId: ID_A, source: "test" }],
+      examples: [],
+    })
+    expect(sys.content).toContain("<c id=")
+    expect(sys.content).toContain("CELL_ID")
+  })
+
+  it("injects preceding committed TARGET context before the live paragraph (D4)", () => {
+    const [, user] = buildParagraphPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ cellId: ID_A, source: "LIVE_SRC" }],
+      examples: [],
+      precedingContext: [{ source: "PREV_SRC", target: "PREV_TGT" }],
+    })
+    const c = user.content
+    // Preceding context appears BEFORE the live source paragraph
+    expect(c.indexOf("PREV_TGT")).toBeGreaterThan(-1)
+    expect(c.indexOf("PREV_SRC")).toBeLessThan(c.indexOf("LIVE_SRC"))
+  })
+
+  it("omits preceding context pairs with blank target (D4 fallback — blank target skipped)", () => {
+    const [, user] = buildParagraphPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ cellId: ID_A, source: "LIVE" }],
+      examples: [],
+      precedingContext: [{ source: "S", target: "  " }],
+    })
+    // Blank-target pair must not appear in content
+    expect(user.content).not.toContain("Translation: S")
+    expect(user.content).not.toContain("PREV_SRC")
+  })
+
+  it("includes following source context labeled as context-only (D4 right side)", () => {
+    const [, user] = buildParagraphPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ cellId: ID_A, source: "LIVE" }],
+      examples: [],
+      followingSource: [{ source: "NEXT_SRC" }],
+    })
+    expect(user.content).toContain("NEXT_SRC")
+    expect(user.content).toContain("do not translate")
+  })
+
+  it("renders passage examples before preceding context and live paragraph", () => {
+    const [, user] = buildParagraphPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ cellId: ID_A, source: "LIVE" }],
+      examples: [{ cells: [{ source: "EX_SRC", target: "EX_TGT" }] }],
+      precedingContext: [{ source: "PREV_SRC", target: "PREV_TGT" }],
+    })
+    const c = user.content
+    expect(c.indexOf("EX_SRC")).toBeLessThan(c.indexOf("PREV_SRC"))
+    expect(c.indexOf("PREV_SRC")).toBeLessThan(c.indexOf("LIVE"))
+  })
+
+  it("injects rules into the system prompt", () => {
+    const rule: TranslationRule = {
+      id: "r1", name: "r1", description: "", severity: "minor",
+      source: "user", scope: "project", enabled: true, createdAt: new Date().toISOString(),
+      check: { type: "target-forbids", targetPattern: "forbidden_word" },
+    }
+    const [sys] = buildParagraphPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ cellId: ID_A, source: "test" }],
+      examples: [], rules: [rule],
+    })
+    expect(sys.content).toContain("forbidden_word")
+  })
+
+  it("injects brief summary into the system prompt", () => {
+    const [sys] = buildParagraphPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ cellId: ID_A, source: "test" }],
+      examples: [], briefSummary: "Prefer natural phrasing.",
+    })
+    expect(sys.content).toContain("Prefer natural phrasing.")
+  })
+
+  it("substitutes language placeholders and none remain in output", () => {
+    const [sys] = buildParagraphPrompt({
+      sourceLanguage: "Koine Greek", targetLanguage: "Kala",
+      systemPrompt: "Translate {sourceLanguage} to {targetLanguage}.",
+      cells: [{ cellId: ID_A, source: "logos" }],
+      examples: [],
+    })
+    expect(sys.content).toContain("Koine Greek")
+    expect(sys.content).toContain("Kala")
+    expect(sys.content).not.toContain("{sourceLanguage}")
+    expect(sys.content).not.toContain("{targetLanguage}")
+  })
+})

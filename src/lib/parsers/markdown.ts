@@ -19,7 +19,8 @@ export function extractMarkdownStrings(content: string): TranslatableString[] {
     const html = markdownInlineToHtml(rawText)
     const segments = splitIntoSegments(plain)
 
-    for (const seg of segments) {
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i]
       results.push({
         id: uuid(),
         original: seg.text,
@@ -28,6 +29,8 @@ export function extractMarkdownStrings(content: string): TranslatableString[] {
         context,
         group: seg.group,
         type,
+        // D2: first sub-cell of each paragraph block carries paragraphStart; continuations do not.
+        ...(i === 0 ? { paragraphStart: true } : {}),
       })
     }
   }

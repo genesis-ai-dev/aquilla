@@ -1,5 +1,10 @@
 import { v4 as uuid } from "uuid"
 
+// Paragraph is a GROUPING over cells, never a re-segmentation of them. For aligned
+// corpora (USFM) the verse-cell is the alignment unit and must NOT be split below —
+// the alignment/BT/terminology stack depends on source↔target cell correspondence.
+// See docs/superpowers/specs/2026-06-18-paragraph-drafting-retrieval-context-design.md (D1,D2).
+
 const BREAK_PATTERNS: RegExp[] = [
   /\n\n+/,                  // paragraph
   /\n/,                     // line

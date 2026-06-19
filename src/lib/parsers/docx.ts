@@ -24,7 +24,8 @@ export async function extractDocxStrings(buffer: ArrayBuffer): Promise<Translata
       blockPath: `w:p[${i + 1}]`,
     }
 
-    for (const seg of segments) {
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i]
       results.push({
         id: uuid(),
         original: seg.text,
@@ -34,6 +35,8 @@ export async function extractDocxStrings(buffer: ArrayBuffer): Promise<Translata
         group: seg.group,
         type,
         sourceLocation,
+        // D2: first sub-cell of each paragraph block carries paragraphStart; continuations do not.
+        ...(i === 0 ? { paragraphStart: true } : {}),
       })
     }
   }

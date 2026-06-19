@@ -578,11 +578,23 @@ export function useCompletion(
 
       // 6. Fan out: commit each mapped cell via the EXISTING commitCompletedCell path.
       const llmAuthor = effectiveSettings.model || "frontier-default"
+      let committedCount = 0
       for (const { cellId, text } of mapped) {
         const cell = groupCells.find((c) => c.id === cellId)
         if (!cell) continue
+        // D11 trust-killer guard: a present-but-empty tag (<c id="…"></c>) is
+        // "no emitted content" just like a missing tag — flag it and NEVER commit
+        // an empty cell. parseParagraphResponse reports the tag as present (mapped),
+        // but the don't-commit-empty policy lives here in the draft path.
+        if (!text.trim()) {
+          console.warn(`[completeParagraph] empty content for cell (not committed): ${cellId}`)
+          setErrors((p) => new Map(p).set(cellId, `Cell not translated by model: ${cellId}`))
+          setCompleting((p) => { const m = new Map(p); m.delete(cellId); return m })
+          continue
+        }
         setPreviews((p) => new Map(p).set(cellId, text))
         await commitCompletedCell?.(cell, text, llmAuthor)
+        committedCount += 1
         setPreviews((p) => { const m = new Map(p); m.delete(cellId); return m })
         setCompleting((p) => { const m = new Map(p); m.delete(cellId); return m })
       }
@@ -594,6 +606,7 @@ export function useCompletion(
         target_language: targetLanguage,
         group_size: groupCells.length,
         mapped_count: mapped.length,
+        committed_count: committedCount,
         missing_count: missing.length,
         extra_count: extra.length,
       })

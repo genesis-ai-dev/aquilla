@@ -238,6 +238,39 @@ describe("completeParagraph (D3)", () => {
     expect(result.current.errors.has("phantom-cell")).toBe(true)
   })
 
+  it("does NOT commit a cell whose tag is present but EMPTY/whitespace (D11 trust-killer)", async () => {
+    // Model emits an empty tag for cell-2 (couldn't translate it) — this counts as
+    // "no emitted content" and must be flagged, never committed as an empty cell.
+    const modelResponse = [
+      `<c id="cell-1">Translation one</c>`,
+      `<c id="cell-2">   </c>`,
+      `<c id="cell-3">Translation three</c>`,
+    ].join("\n")
+    mockFetch(modelResponse)
+
+    const commitMock = vi.fn().mockResolvedValue(undefined)
+
+    const { result } = renderHook(() =>
+      useCompletion(
+        SETTINGS, "English", "French",
+        searchMock, searchPassagesMock,
+        SESSION, commitMock, [],
+        ALL_CELLS as never, undefined, DEFAULT_DRAFT_CONTEXT,
+      ),
+    )
+
+    await act(async () => {
+      await result.current.completeParagraph("cell-1")
+    })
+
+    // Only 2 commits — cell-2's empty tag must NOT produce an empty commit.
+    expect(commitMock).toHaveBeenCalledTimes(2)
+    const calledIds = commitMock.mock.calls.map((args: unknown[]) => (args[0] as MinimalCell).id)
+    expect(calledIds).not.toContain("cell-2")
+    // Empty cell surfaces in errors, flagged like a missing cell.
+    expect(result.current.errors.has("cell-2")).toBe(true)
+  })
+
   it("includes preceding committed TARGET (not source) in the prompt when available (D4)", async () => {
     // Set up a preceding cell with a committed translation.
     const precedingCell = makeCell("cell-0", FILE_A, "Verse zero source", "Verse zero TARGET", true)

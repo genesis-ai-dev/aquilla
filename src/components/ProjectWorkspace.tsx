@@ -1954,7 +1954,7 @@ export function ProjectWorkspace() {
     let cancelled = false
     let reconciler: import("@/lib/sync/ws-reconciler").WsReconciler | null = null
     void (async () => {
-      const { createWsReconciler } = await import("@/lib/sync/ws-reconciler")
+      const { createWsReconciler, isOwnWriteEcho } = await import("@/lib/sync/ws-reconciler")
       const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
       if (cancelled || !project?.id) return
       const pid = project.id
@@ -1996,22 +1996,35 @@ export function ProjectWorkspace() {
                 return
               }
               if (!msg.cell || msg.project !== pid) return
+              const ownWrite = isOwnWriteEcho(msg, currentUsername)
               // Targeted single-cell refetch — avoids re-streaming every
               // cell in the file for one remote change. Falls back to a
               // full revalidate inside useCells on error.
-              revalidateCell(msg.cell)
+              //
+              // Skip it for our OWN writes: the committing handler already
+              // pulled the authoritative row after its outbox flush, so the
+              // echo's refetch is pure duplication (and the in-flight coalescer
+              // misses it because the handler's refetch is gated behind the
+              // flush — see isOwnWriteEcho). The FRO-247 shadow keeps the value
+              // visible until the handler's read lands. This is the dominant
+              // edit-cycle cost: every commit + validate + auto-BT echo was
+              // firing a redundant targeted GET (~5 of 8 per edit cycle).
+              if (!ownWrite) {
+                revalidateCell(msg.cell)
+              }
               // Audio attachment events project into cell_audio (not cells);
-              // poke the per-file audio read so the new clip surfaces.
+              // poke the per-file audio read so the new clip surfaces. This
+              // runs even for own writes — the committing handler refetches
+              // the cells row, not the per-file audio attachments.
               if (msg.kind?.startsWith("cell.audio.") && msg.file) {
                 notifyAudioAttachmentsChanged(msg.file)
               }
               // Don't pop the "remote changed" banner for our own writes —
               // the editor just committed; bouncing the same event back via
-              // WS is expected. `by` is populated by post-2c-γ sync workers;
-              // older builds omit it and fall through to the legacy
-              // "always banner on focused cell" path so the user can still
-              // tell something happened.
-              if (msg.by && msg.by === currentUsername) return
+              // WS is expected. Older builds omit `by` (isOwnWriteEcho → false)
+              // and fall through to the legacy "always banner on focused cell"
+              // path so the user can still tell something happened.
+              if (ownWrite) return
               if (focusedCellIdRef.current === msg.cell) {
                 setCellsWithRemoteChange((cur) => {
                   if (cur.has(msg.cell!)) return cur

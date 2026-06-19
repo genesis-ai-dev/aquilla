@@ -56,6 +56,25 @@ export type ProjectWsServerMessage =
   | { t: "lock.released"; cellId: string; by: { userId: string; ts: number } }
   | { t: "project.archived"; project: string; archivedAt?: string; deletedBy?: string }
 
+/**
+ * True when an `event.applied` frame is the echo of a write THIS client just
+ * made. The per-project DO broadcasts every winning event back to its origin,
+ * but the committing handler already issued a targeted refetch after its
+ * outbox flush — so refetching again on the echo just doubles the GET (and the
+ * in-flight coalescer can't dedupe it: the handler's refetch is gated behind
+ * the flush and lands after this echo's fetch has already cleared). Callers use
+ * this to skip the redundant refetch (and to suppress the "remote changed"
+ * banner) for their own writes.
+ *
+ * `by` is only populated by post-2c-γ sync workers. When absent we cannot
+ * attribute the write, so we report `false` (treat as remote) — older servers
+ * keep their pre-existing "always refetch" behavior rather than risk dropping a
+ * real remote change.
+ */
+export function isOwnWriteEcho(msg: { by?: string }, currentUserId: string): boolean {
+  return !!msg.by && msg.by === currentUserId
+}
+
 export type ProjectWsClientMessage =
   | { t: "outbox.event"; event: OutboxRawEvent }
   | { t: "focus.claim"; cellId: string; leaseMs?: number }

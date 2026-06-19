@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import {
   buildProjectWsUrl,
   createWsReconciler,
+  isOwnWriteEcho,
   parseProjectWsMessage,
   type ProjectWsServerMessage,
 } from "./ws-reconciler"
@@ -337,5 +338,29 @@ describe("createWsReconciler", () => {
     FakeWebSocket.instances[0].close(1006, "")
     await vi.advanceTimersByTimeAsync(500)
     expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+})
+
+describe("isOwnWriteEcho", () => {
+  // The server broadcasts every applied event back to its origin. The
+  // committing handler already issued a targeted refetch after its outbox
+  // flush, so the workspace must NOT refetch again on its own echo — that
+  // doubles the GET (the in-flight coalescer misses it because the handler's
+  // refetch is gated behind the flush and lands after this echo's fetch
+  // cleared). This predicate is the guard; if it ever returns false for an
+  // own write, the redundant double-fetch regresses.
+  it("identifies an own-write echo (so the handler skips its redundant refetch)", () => {
+    expect(isOwnWriteEcho({ by: "ryder" }, "ryder")).toBe(true)
+  })
+
+  it("treats another user's write as remote (the handler MUST refetch to learn it)", () => {
+    expect(isOwnWriteEcho({ by: "alice" }, "ryder")).toBe(false)
+  })
+
+  it("treats a legacy frame with no `by` as remote — no regression vs pre-2c-γ servers", () => {
+    // Older sync workers omit `by`; we can't attribute the write, so we must
+    // keep refetching rather than risk silently dropping a real remote change.
+    expect(isOwnWriteEcho({}, "ryder")).toBe(false)
+    expect(isOwnWriteEcho({ by: "" }, "ryder")).toBe(false)
   })
 })

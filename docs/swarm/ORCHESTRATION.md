@@ -2,6 +2,53 @@
 
 ---
 
+# 🆕🆕🆕🆕🆕🆕🆕 CURRENT GOAL (2026-06-19) — Paragraph-drafting Phase 1 (segmentation + paragraph unit)
+
+> **This block is the active goal.** Everything below is reference-only from prior swarms.
+> Spec (read first): `docs/superpowers/specs/2026-06-18-paragraph-drafting-retrieval-context-design.md` (D1/D2/D3/D11). Phase 0 shipped on main.
+> Driver: user `/swarm-orchestration`. **Scope (user 2026-06-19): NEW IMPORTS ONLY** — no retrofit of existing files.
+
+## §0 STOP checklist
+- [ ] F1 contract: paragraph grouping represented on cells (`paragraphStart`) + derivation API (`deriveParagraphs`/`paragraphGroupForCell`) + cell-id output-protocol helpers (encode + `parseParagraphResponse` with loud reconcile) — all unit-tested.
+- [ ] D2 import split branches by corpus type: USFM sets `paragraphStart` on verse-cells WITHOUT splitting below the verse; md/docx/plaintext mark paragraphs + recursive sub-split only when over-long.
+- [ ] D3 `completeParagraph` drafts a paragraph group as one unit with discourse window; D11 output via cell-id protocol → per-cell `target.cell.commit` fan-out (reuse existing event path).
+- [ ] Output parser maps response→cells by id and reconciles LOUDLY (unmapped/missing flagged, never committed empty).
+- [ ] `draftContext` budgets editable in project settings UI (D10 follow-through).
+- [ ] Gate: root `tsc -b` 0 · `vitest run` green · `npm run build` PASS · adversarial panel passed · UI-driver agent confirms paragraph draft → per-cell commits in the real app.
+
+## §1 Operating model (this goal)
+- Base: `main@ec2eed875` (clean, 14 ahead of origin/unpushed). Integration: `swarm/phase1` (worktree `.worktrees/swarm-phase1`, node_modules symlinked), green-base tsc fix `ece4c6557`.
+- **Foundation-first:** Phase 1 has a coupled core (grouping model + output protocol) shared by several slices. Wave 0 (F1) lands SEQUENTIALLY before any dependent slice is dispatched.
+- Each Wave-1 agent → manual worktree off the live `swarm/phase1` tip (sonnet). Commits its branch; **NEVER** pushes/promotes/changes issue status, and **NEVER** runs `git pull/fetch/merge/rebase/checkout/reset` (bitten twice this session — see [[feedback_subagents_pollute_working_tree]]). Brief includes owned + forbidden files, verify cmds, SWARM-TODO requirement.
+- Orchestrator owns: integration accumulation, final gate, promotion to **local main only**. **NO push to dev/staging** without explicit user say-so.
+- Verify every merge (tsc + vitest) before next promotion. Adversarial panel (races/regressions/contracts) before main.
+
+## §2 Foundation contract (Wave 0 — SEQUENTIAL, must land first)
+- Representation: `paragraphStart?: boolean` on `TranslatableString` (`src/lib/parsers/types.ts`) + `BulkImportCell` (`src/lib/sync/bulk-import.ts`); first cell of a paragraph carries it. Membership DERIVED (scan start→next start), no stored entity.
+- `src/lib/parsers/paragraphs.ts` — `deriveParagraphs(cells): CellRef[][]`, `paragraphGroupForCell(cells, cellId): CellRef[]` (same-file, doc order). Pure + tested.
+- `src/lib/completion/paragraph-protocol.ts` — cell-id-keyed segment encode + `parseParagraphResponse(text, cellIds): { mapped: {cellId,text}[]; missing: cellId[]; extra: string[] }`. Round-trip + reconcile tests.
+
+## §3 Workstream registry (this goal)
+Status: `in-flight | review | merged-integration | merged-main | blocked`
+| ID | Title | Branch | Owns | Wave | Status | Agent |
+|----|-------|--------|------|------|--------|-------|
+| F1 | Grouping model + protocol contract | `swarm/p1-foundation` | `parsers/types.ts`, `bulk-import.ts`, `parsers/paragraphs.ts`, `completion/paragraph-protocol.ts` + tests | 0 | pending | — |
+| S1 | USFM split branch | `swarm/p1-usfm` | `parsers/usfm-lossless.ts`, `import.ts` (usfmSectionToStrings) | 1 | pending | — |
+| S2 | md/docx/txt split branch | `swarm/p1-text` | `parsers/markdown.ts`, `plaintext.ts`, `docx.ts`, `text-splitter.ts` | 1 | pending | — |
+| S3+S4 | completeParagraph unit + output parse/reconcile | `swarm/p1-draft` | `hooks/useCompletion.ts`, `completion/completion-service.ts`, consume `paragraph-protocol.ts` | 1 | pending | — |
+| S5 | draftContext settings UI | `swarm/p1-settings-ui` | project settings component (grep `translationBrief` UI) | 1 | pending | — |
+| S6 | UI-driver QA | — | read-only real-app drive | 2 | pending | — |
+
+## §4 Forbidden paths (all agents)
+- No event/commit-model changes (`sync-worker/src/events/*`, `events-emit.ts`) — reuse per-cell `target.cell.commit` fan-out.
+- No retrofit of existing files (scope = new imports only).
+- No `docs/swarm/*` edits except via orchestrator.
+
+## §M Merge log (this goal)
+- 2026-06-19 · integration `swarm/phase1` off `main@ec2eed875`; green-base tsc fix `ece4c6557` (widen `dropPrecedingContextDuplicates` preceding param). Foundation-first plan recorded. NEXT: dispatch Wave 0 (F1) sequentially, then fan out Wave 1.
+
+---
+
 # 🆕🆕🆕🆕🆕🆕 CURRENT GOAL (2026-06-13b) — Org credits & unified compute-cost model
 
 > **This block is the active goal.** Everything below is reference-only from prior swarms.

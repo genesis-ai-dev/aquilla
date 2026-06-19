@@ -45,4 +45,12 @@ describe("dedupeExamples", () => {
     ])
     expect(out.map((e) => e.target)).toEqual(["A", "C"])
   })
+
+  it("drops empty/blank-source examples", () => {
+    const out = dedupeExamples([
+      { source: "  ", target: "X" },
+      { source: "real", target: "Y" },
+    ])
+    expect(out.map((e) => e.target)).toEqual(["Y"])
+  })
 })

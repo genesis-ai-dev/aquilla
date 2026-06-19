@@ -61,15 +61,13 @@ export function compressExampleSource(source: string, opts: CompressExampleOptio
 }
 
 /** Drop examples whose whitespace-normalized source duplicates an earlier one
- *  (keep the first = highest-ranked). */
+ *  (keep the first = highest-ranked). Skips blank/empty-source examples. */
 export function dedupeExamples<T extends { source: string }>(examples: T[]): T[] {
   const seen = new Set<string>()
   const out: T[] = []
   for (const ex of examples) {
     const key = ex.source.trim().toLowerCase().replace(/\s+/g, " ")
-    if (!key || seen.has(key)) {
-      if (key) continue
-    }
+    if (!key || seen.has(key)) continue
     seen.add(key)
     out.push(ex)
   }

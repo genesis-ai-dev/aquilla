@@ -41,6 +41,9 @@ export interface TranslatableString {
   /** Timeline-segment-model: primary content kind. Absent ⇒ 'text'. Set to
    *  'media' only by the audio/video media-import path (Part B). */
   medium?: "text" | "media"
+  /** D1: true on the first cell of a paragraph block. Absent/false = continuation.
+   *  Drives paragraph grouping for multi-cell draft operations. */
+  paragraphStart?: boolean
   type: CellType
   sourceLocation?: SourceLocation
 }

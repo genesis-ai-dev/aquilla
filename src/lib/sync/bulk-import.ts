@@ -36,6 +36,9 @@ export interface BulkImportCell {
   sequenceIndex?: number
   /** Primary content kind. Absent ⇒ 'text'. */
   medium?: "text" | "media"
+  /** D1: true on the first cell of a paragraph block. Absent/false = continuation.
+   *  Drives paragraph grouping for multi-cell draft operations. */
+  paragraphStart?: boolean
 }
 
 export interface BulkImportFileMeta {

@@ -20,7 +20,6 @@ import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { getProject } from "@/lib/store/project-index"
-import { perfMark } from "@/lib/perf-log"
 
 /**
  * Overlay synced project-wide settings onto the server-returned ProjectRecord.
@@ -106,9 +105,7 @@ export function useProject(projectId: string) {
         hasLoaded.current = true
         return
       }
-      const endResolve = perfMark("useProject.resolveCloud")
       const result = await resolveCloudProjectResult(projectId, session.jwt)
-      endResolve()
       if (cancelled) return
       if (!result.ok) {
         setProject(null)
@@ -116,9 +113,7 @@ export function useProject(projectId: string) {
         hasLoaded.current = true
         return
       }
-      const endOverlay = perfMark("useProject.overlayDeviceLocal")
       const hydrated = await overlayDeviceLocalSettings(minimalProjectRecord(result.project))
-      endOverlay()
       if (cancelled) return
       setProject(hydrated)
       setStatus("ready")

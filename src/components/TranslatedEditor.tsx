@@ -32,6 +32,13 @@ import { createViolationDecorationExtension, violationPluginKey } from "@/lib/ri
 import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } from "@/lib/richtext/karaoke-plugin"
 import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/richtext/terminology-chip-plugin"
 import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "@/lib/richtext/footnote-decoration-plugin"
+import { UsfmFootnote } from "@/lib/richtext/footnote-node"
+import {
+  FOOTNOTE_NODE_NAME,
+  buildUsfmPlainTextMap,
+  injectFootnoteSpans,
+  pmToPlainOffset,
+} from "@/lib/richtext/usfm-plain-text"
 import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
 import type { Concept } from "@/lib/terminology/types"
 import { findActiveTimingIndex } from "@/lib/audio/timings"
@@ -121,6 +128,8 @@ interface TranslatedEditorProps {
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
   /** Number of automatic numeric footnotes before this cell in the current chapter/file. */
   footnoteNumberOffset?: number
+  /** Show the footnote text on marker hover when no separate footnote panel is visible. */
+  showFootnoteTooltips?: boolean
   /** Called when the user hovers a rendered target footnote marker. */
   onFootnoteHover?: (index: number | null) => void
   /**
@@ -162,6 +171,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   terminologyConcepts,
   onTermChipClick,
   footnoteNumberOffset = 0,
+  showFootnoteTooltips = true,
   onFootnoteHover,
   ariaLabel,
   onEscapeToGrid,
@@ -174,6 +184,8 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => { onEscapeToGridRef.current = onEscapeToGrid }, [onEscapeToGrid])
   const footnoteNumberOffsetRef = useRef(footnoteNumberOffset)
   useEffect(() => { footnoteNumberOffsetRef.current = footnoteNumberOffset }, [footnoteNumberOffset])
+  const showFootnoteTooltipsRef = useRef(showFootnoteTooltips)
+  useEffect(() => { showFootnoteTooltipsRef.current = showFootnoteTooltips }, [showFootnoteTooltips])
   const onFootnoteHoverRef = useRef(onFootnoteHover)
   useEffect(() => { onFootnoteHoverRef.current = onFootnoteHover }, [onFootnoteHover])
   const [pendingFootnoteDelete, setPendingFootnoteDelete] = useState<PendingFootnoteDelete | null>(null)
@@ -195,10 +207,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
 
   const latestTerminologyConceptsRef = useRef<Concept[]>(terminologyConcepts ?? [])
 
-  // Resolve initial content once per cellId — prefer rich HTML, fall back to plain text.
-  const initialContent = initialHtml && initialHtml.length > 0
-    ? stripToAllowedHtml(initialHtml)
-    : initialPlain
+  // Resolve initial content once per cellId — prefer rich HTML, fall back to
+  // plain text. Either form may carry raw `\f...\f*` (legacy) or footnote spans
+  // (our own serialisation); prepareEditorContent normalises both into the
+  // <span data-usfm-footnote> form that parses into footnote nodes.
+  const initialContent = prepareEditorContent(initialHtml, initialPlain)
 
   const isReadOnly = !editable || Boolean(heldByLabel)
 
@@ -226,9 +239,14 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         codeBlock: false,
         horizontalRule: false,
       }),
+      // Footnotes are atomic inline nodes (selectable as one unit, like Word).
+      UsfmFootnote,
       // The callback is invoked by the PM plugin, not during React render —
       // the lint rule is overly conservative here.
-      createFootnoteDecorationExtension(() => footnoteNumberOffsetRef.current),
+      createFootnoteDecorationExtension(
+        () => footnoteNumberOffsetRef.current,
+        () => showFootnoteTooltipsRef.current,
+      ),
       createViolationDecorationExtension(() => latestViolationStateRef.current),
       createKaraokeExtension(() => latestKaraokeStateRef.current),
       ...(terminologyConcepts !== undefined
@@ -287,6 +305,21 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           onFootnoteHoverRef.current?.(null)
           return false
         },
+        focusin(view, event) {
+          const target = event.target as HTMLElement | null
+          const marker = target?.closest<HTMLElement>(".usfm-footnote-marker")
+          if (!marker || !view.dom.contains(marker)) return false
+          const index = Number(marker.dataset.footnoteIndex)
+          onFootnoteHoverRef.current?.(Number.isFinite(index) ? index : null)
+          return false
+        },
+        focusout(view, event) {
+          const target = event.target as HTMLElement | null
+          const marker = target?.closest<HTMLElement>(".usfm-footnote-marker")
+          if (!marker || !view.dom.contains(marker)) return false
+          onFootnoteHoverRef.current?.(null)
+          return false
+        },
         dblclick(view, event) {
           const mouseEvent = event as MouseEvent
           const position = view.posAtCoords({
@@ -337,11 +370,23 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         } else if (pendingFootnoteDeleteRef.current) {
           setPendingFootnoteDelete(null)
         }
-        if (plain && event.key === "ArrowLeft" && moveCaretAcrossFootnoteRaw(view, "left")) {
+        // Shift+Arrow in a footnote-containing cell: drive the selection
+        // ourselves. Real Safari's native keyboard selection extension across
+        // contenteditable=false inline atoms is unreliable (it flips the
+        // anchor / paints a split, ballooned selection — the bug seen on
+        // Safari but not Chromium, and not reproducible via WebDriver synthetic
+        // keys). By intercepting the key, preventing the default, and setting a
+        // deterministic TextSelection, native Safari selection never runs, so
+        // it can't corrupt the range. This pairs with two other fixes: the
+        // marker is not focusable (no tabIndex focus-steal) and the footnote
+        // decoration set is not rebuilt on selection change (no mid-selection
+        // DOM churn). Ordinary cells (no footnote) keep native selection.
+        const shiftArrow = event.shiftKey && !event.metaKey && !event.altKey && !event.ctrlKey
+        if (shiftArrow && event.key === "ArrowLeft" && extendSelectionAcrossFootnote(view, "left")) {
           event.preventDefault()
           return true
         }
-        if (plain && event.key === "ArrowRight" && moveCaretAcrossFootnoteRaw(view, "right")) {
+        if (shiftArrow && event.key === "ArrowRight" && extendSelectionAcrossFootnote(view, "right")) {
           event.preventDefault()
           return true
         }
@@ -477,15 +522,19 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       const insertion = anchor ?? fallback
       const maxPosition = Math.max(1, editor.state.doc.content.size - 1)
       const shouldReplaceAnchor = anchorText !== undefined && insertion.from !== insertion.to
-      const replacement = `${anchorText ?? ""}${marker}`
+      const includeText = anchorText !== undefined && anchorText.length > 0
+      const content = [
+        ...(includeText ? [{ type: "text", text: anchorText as string }] : []),
+        { type: FOOTNOTE_NODE_NAME, attrs: { raw: marker } },
+      ]
       const inserted = shouldReplaceAnchor
         ? editor.commands.insertContentAt({
           from: Math.max(1, Math.min(insertion.from, maxPosition)),
           to: Math.max(1, Math.min(insertion.to, maxPosition)),
-        }, replacement, { updateSelection: false })
+        }, content, { updateSelection: false })
         : editor.commands.insertContentAt(
           Math.max(1, Math.min(insertion.position, maxPosition)),
-          replacement,
+          content,
           { updateSelection: false },
         )
       if (!inserted) return false
@@ -559,7 +608,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => {
     if (!editor) return
     editor.view.dispatch(editor.state.tr.setMeta(footnoteDecorationPluginKey, "rebuild"))
-  }, [editor, footnoteNumberOffset])
+  }, [editor, footnoteNumberOffset, showFootnoteTooltips])
 
   const lastActiveIdxRef = useRef(-1)
   useEffect(() => {
@@ -751,21 +800,45 @@ function getDocumentEndPosition(doc: ProseMirrorNode): number {
   return Math.max(1, doc.content.size - 1)
 }
 
-function moveCaretAcrossFootnoteRaw(
-  view: EditorView,
-  direction: "left" | "right",
-): boolean {
+function docContainsFootnote(doc: ProseMirrorNode): boolean {
+  let found = false
+  doc.descendants((node) => {
+    if (found) return false
+    if (node.type.name === FOOTNOTE_NODE_NAME) {
+      found = true
+      return false
+    }
+    return true
+  })
+  return found
+}
+
+// Deterministic horizontal Shift+Arrow for cells that contain footnotes. We
+// step one position (one char, or the whole footnote atom when the neighbour is
+// a footnote) and dispatch the extended TextSelection ourselves, so real
+// Safari's unreliable native selection extension across contenteditable=false
+// atoms never runs. Returns false (letting native handle it) when there is no
+// footnote in the cell, so ordinary cells keep grapheme-aware native selection.
+function extendSelectionAcrossFootnote(view: EditorView, direction: "left" | "right"): boolean {
   const { selection, doc } = view.state
-  if (!selection.empty) return false
-  const pos = selection.from
-  const range = getFootnotePmRanges(doc).find((candidate) => (
-    direction === "right"
-      ? pos >= candidate.from && pos < candidate.to
-      : pos > candidate.from && pos <= candidate.to
-  ))
-  if (!range) return false
-  const nextPos = direction === "right" ? range.to : range.from
-  view.dispatch(view.state.tr.setSelection(TextSelection.create(doc, nextPos)).scrollIntoView())
+  if (!docContainsFootnote(doc)) return false
+
+  const head = selection.head
+  const $head = doc.resolve(head)
+  const neighbour = direction === "left" ? $head.nodeBefore : $head.nodeAfter
+  const step = neighbour && neighbour.type.name === FOOTNOTE_NODE_NAME ? neighbour.nodeSize : 1
+  const min = 1
+  const max = Math.max(1, doc.content.size - 1)
+  const newHead = direction === "left"
+    ? Math.max(min, head - step)
+    : Math.min(max, head + step)
+  if (newHead === head) return false
+
+  view.dispatch(
+    view.state.tr
+      .setSelection(TextSelection.create(doc, selection.anchor, newHead))
+      .scrollIntoView(),
+  )
   return true
 }
 
@@ -775,10 +848,10 @@ function findFootnoteDeleteTarget(
   numberOffset: number,
 ): (PendingFootnoteDelete & { from: number; to: number }) | null {
   const { selection, doc } = view.state
+  // Range selections delete the whole range (footnote nodes go with it cleanly,
+  // since they're atomic) — only guard caret-adjacent single-press deletes.
+  if (!selection.empty) return null
   const ranges = getFootnotePmTargets(doc, numberOffset)
-  if (!selection.empty) {
-    return ranges.find((range) => selection.from < range.to && selection.to > range.from) ?? null
-  }
   const pos = selection.from
   return ranges.find((range) => (
     key === "Backspace"
@@ -809,7 +882,7 @@ function findVisibleWordSelection(
   doc: ProseMirrorNode,
   position: number,
 ): { from: number; to: number } | null {
-  const map = getDocumentTextMap(doc)
+  const map = buildUsfmPlainTextMap(doc)
   if (!map.text) return null
   const footnotes = extractUsfmFootnotes(map.text)
   const hiddenRanges = footnotes.map((footnote) => ({
@@ -818,11 +891,11 @@ function findVisibleWordSelection(
   }))
   const isHidden = (offset: number) => hiddenRanges.some((range) => offset >= range.from && offset < range.to)
   const hiddenAtPosition = hiddenRanges.find((range) => {
-    const plain = pmPositionToPlainPosition(doc, position)
+    const plain = pmToPlainOffset(doc, position)
     return plain >= range.from && plain <= range.to
   })
 
-  let plainPosition = pmPositionToPlainPosition(doc, position)
+  let plainPosition = pmToPlainOffset(doc, position)
   if (hiddenAtPosition) plainPosition = Math.max(0, hiddenAtPosition.from - 1)
   if (!isWordChar(map.text[plainPosition] ?? "") && plainPosition > 0 && isWordChar(map.text[plainPosition - 1] ?? "")) {
     plainPosition -= 1
@@ -844,47 +917,31 @@ function findVisibleWordSelection(
   return { from, to }
 }
 
-function getFootnotePmRanges(doc: ProseMirrorNode): Array<{ from: number; to: number }> {
-  return getFootnotePmTargets(doc, 0).map(({ from, to }) => ({ from, to }))
-}
-
 function getFootnotePmTargets(
   doc: ProseMirrorNode,
   numberOffset: number,
 ): Array<PendingFootnoteDelete & { from: number; to: number }> {
-  const map = getDocumentTextMap(doc)
-  return extractUsfmFootnotes(map.text)
-    .map((footnote, i) => ({
-      index: i,
-      label: footnoteTargetLabel(footnote.caller, i, numberOffset),
-      from: map.plainToPm[footnote.index],
-      to: map.plainToPm[footnote.index + footnote.raw.length],
-    }))
-    .filter((range): range is PendingFootnoteDelete & { from: number; to: number } => (
-      range.from !== undefined && range.to !== undefined && range.from < range.to
-    ))
+  const targets: Array<PendingFootnoteDelete & { from: number; to: number }> = []
+  let ordinal = 0
+  doc.descendants((node, pos) => {
+    if (node.type.name !== FOOTNOTE_NODE_NAME) return true
+    const parsed = extractUsfmFootnotes((node.attrs.raw as string) ?? "")[0]
+    targets.push({
+      index: ordinal,
+      label: footnoteTargetLabel(parsed?.caller ?? "", ordinal, numberOffset),
+      from: pos,
+      to: pos + node.nodeSize,
+    })
+    ordinal += 1
+    return false
+  })
+  return targets
 }
 
 function footnoteTargetLabel(caller: string, index: number, numberOffset: number): string {
   const trimmed = caller.trim()
   if (trimmed && trimmed !== "+" && trimmed !== "-") return trimmed
   return String(numberOffset + index + 1)
-}
-
-function getDocumentTextMap(doc: ProseMirrorNode): { text: string; plainToPm: number[] } {
-  const plainToPm: number[] = []
-  let text = ""
-  let plainCursor = 0
-  doc.descendants((node, pos) => {
-    if (!node.isText) return true
-    const nodeText = node.text ?? ""
-    for (let i = 0; i <= nodeText.length; i++) plainToPm[plainCursor + i] = pos + i
-    text += nodeText
-    plainCursor += nodeText.length
-    return true
-  })
-  if (!(plainCursor in plainToPm)) plainToPm[plainCursor] = doc.content.size
-  return { text, plainToPm }
 }
 
 function isWordChar(value: string): boolean {
@@ -895,33 +952,35 @@ function getWordAnchor(
   doc: ProseMirrorNode,
   position: number,
 ): FootnoteInsertionAnchor | null {
-  const resolved = doc.resolve(position)
-  const parentText = resolved.parent.textContent
-  const parentOffset = resolved.parentOffset
+  // Work in plain-text space (footnote nodes expand to their raw `\f...\f*`) so
+  // the word boundaries — and the bail-out when the caret sits on footnote
+  // syntax — stay correct even with footnotes earlier in the same paragraph.
+  const { text, plainToPm } = buildUsfmPlainTextMap(doc)
+  const offset = pmToPlainOffset(doc, position)
   if (
-    !parentText ||
-    parentOffset >= parentText.length ||
-    /\s/.test(parentText[parentOffset] ?? "") ||
-    isFootnoteSyntaxAtOffset(parentText, parentOffset)
+    offset >= text.length ||
+    /\s/.test(text[offset] ?? "") ||
+    isFootnoteSyntaxAtOffset(text, offset)
   ) {
     return null
   }
 
-  let previousOffset = parentOffset
-  while (previousOffset > 0 && !/\s/.test(parentText[previousOffset - 1] ?? "")) {
-    previousOffset -= 1
-  }
-  let nextOffset = parentOffset
-  while (nextOffset < parentText.length && !/\s/.test(parentText[nextOffset] ?? "")) {
-    nextOffset += 1
-  }
-  const candidate = parentText.slice(previousOffset, nextOffset)
+  let start = offset
+  while (start > 0 && !/\s/.test(text[start - 1] ?? "")) start -= 1
+  let end = offset
+  while (end < text.length && !/\s/.test(text[end] ?? "")) end += 1
+
+  const candidate = text.slice(start, end)
   if (candidate.includes("\\") || /^f\*?$/.test(candidate)) return null
+
+  const from = plainToPm[start]
+  const to = plainToPm[end]
+  if (from === undefined || to === undefined) return null
   return {
-    position: position + (nextOffset - parentOffset),
-    from: position - (parentOffset - previousOffset),
-    to: position + (nextOffset - parentOffset),
-    plainPosition: pmPositionToPlainPosition(doc, position + (nextOffset - parentOffset)),
+    position: to,
+    from,
+    to,
+    plainPosition: end,
     source: "word",
     previewText: candidate,
   }
@@ -955,32 +1014,11 @@ function withFootnotePreview(
 }
 
 function getDocumentPlainText(doc: ProseMirrorNode): string {
-  let text = ""
-  doc.descendants((node) => {
-    if (node.isText) text += node.text ?? ""
-  })
-  return text
+  return buildUsfmPlainTextMap(doc).text
 }
 
 function pmPositionToPlainPosition(doc: ProseMirrorNode, position: number): number {
-  let plainPosition = 0
-  let found = false
-  doc.descendants((node, pos) => {
-    if (found || !node.isText) return !found
-    const length = node.text?.length ?? 0
-    if (position <= pos) {
-      found = true
-      return false
-    }
-    if (position <= pos + length) {
-      plainPosition += Math.max(0, position - pos)
-      found = true
-      return false
-    }
-    plainPosition += length
-    return true
-  })
-  return plainPosition
+  return pmToPlainOffset(doc, position)
 }
 
 function normalizeAnchorPreview(value: string): string {
@@ -989,9 +1027,17 @@ function normalizeAnchorPreview(value: string): string {
   return `${normalized.slice(0, 77).trimEnd()}...`
 }
 
+// Normalise stored content (HTML or plain) into the form TipTap hydrates from:
+// allowed inline marks only, with raw `\f...\f*` turned into footnote-node spans.
+function prepareEditorContent(html: string | undefined, plain: string): string {
+  const base = html && html.length > 0 ? stripToAllowedHtml(html) : plain
+  return injectFootnoteSpans(base)
+}
+
 // Strip pasted HTML to only the marks we support.
 // Allowed tags: b, strong, i, em, u, s, strike, del, code, p, br
-// Everything else is removed (content preserved).
+// Footnote markers (<span data-usfm-footnote>) are preserved so they re-parse
+// into footnote nodes. Everything else is removed (content preserved).
 function stripToAllowedHtml(html: string): string {
   const parser = new DOMParser()
   const doc = parser.parseFromString(`<body>${html}</body>`, "text/html")
@@ -1006,6 +1052,14 @@ function walkAndStrip(el: Element): void {
   for (const child of children) {
     if (child.nodeType === 1) {
       const elChild = child as Element
+      // Preserve footnote markers verbatim (drop every attribute except the
+      // raw payload); they carry no text content to recurse into.
+      if (elChild.tagName === "SPAN" && elChild.hasAttribute("data-usfm-footnote")) {
+        const raw = elChild.getAttribute("data-usfm-footnote") ?? ""
+        for (const attr of Array.from(elChild.attributes)) elChild.removeAttribute(attr.name)
+        elChild.setAttribute("data-usfm-footnote", raw)
+        continue
+      }
       walkAndStrip(elChild)
       if (!ALLOWED_TAGS.has(elChild.tagName)) {
         const parent = elChild.parentNode

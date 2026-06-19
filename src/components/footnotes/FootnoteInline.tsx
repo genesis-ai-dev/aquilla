@@ -200,6 +200,7 @@ export function FootnotesTray({
                     onSave={(footnoteIndex, newText) => onSave?.(entry.cellId, footnoteIndex, newText)}
                     onDelete={onDelete ? (footnoteIndex) => onDelete(entry.cellId, footnoteIndex) : undefined}
                     numberOffset={entry.numberOffset}
+                    activeFootnoteIndex={entry.activeFootnoteIndex}
                     targetOnlyLayout="fill"
                   />
                 </div>
@@ -454,14 +455,14 @@ function FootnoteRow({
     return (
       <div
         className={cn(
-          "text-xs",
-          targetOnlyLayout === "right-half" && "flex justify-end rounded-md px-1 py-0.5",
+          "text-xs transition-colors",
+          targetOnlyLayout === "right-half" && "flex justify-end rounded-md px-1 py-0.5 hover:bg-primary/5 focus-within:bg-primary/5",
           active && "bg-primary/10 ring-1 ring-primary/20",
         )}
       >
         <div
           className={cn(
-            "flex min-w-0 items-start rounded-md bg-primary/5",
+            "flex min-w-0 items-start rounded-md bg-primary/5 transition-colors hover:bg-primary/10 focus-within:bg-primary/10",
             compact ? "gap-1 px-1.5 py-0.5 ring-1 ring-primary/5" : "gap-1.5 px-2 py-0.5 ring-1 ring-primary/10",
             targetOnlyLayout === "right-half" && "w-full md:w-[calc(50%-0.25rem)]",
             targetOnlyLayout === "fill" && "w-full",
@@ -478,7 +479,7 @@ function FootnoteRow({
   return (
     <div
       className={cn(
-        "grid gap-2 rounded-md px-1 py-0.5 text-xs md:grid-cols-2",
+        "grid gap-2 rounded-md px-1 py-0.5 text-xs transition-colors hover:bg-primary/5 focus-within:bg-primary/5 md:grid-cols-2",
         active && "bg-primary/10 ring-1 ring-primary/20",
       )}
     >

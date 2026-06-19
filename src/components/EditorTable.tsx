@@ -90,7 +90,7 @@ import {
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
-import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
+import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 
 // Per-row render counter. Always accumulated when perf logging is on (cheap)
 // but NOT auto-logged — render logs would flood the console and push the
@@ -478,6 +478,8 @@ interface EditorTableProps {
   showFootnotesInline?: boolean
   /** True when a full footnote surface is active, so source chips stay markers only. */
   footnotePanelActive?: boolean
+  /** Current footnote display preference. */
+  footnoteViewMode?: FootnoteViewMode
   /** Emits USFM footnotes from the currently visible virtual rows. */
   onVisibleFootnotesChange?: (entries: VisibleFootnoteEntry[]) => void
   /** Called after a target footnote is created so the parent can reveal footnotes. */
@@ -512,6 +514,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   checkLockHolder,
   showFootnotesInline,
   footnotePanelActive,
+  footnoteViewMode = "off",
   onVisibleRefChange,
   onVisibleFootnotesChange,
   onFootnoteCreated,
@@ -521,6 +524,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // on CellAudioRecordButton activates when the user has blocked the mic.
   const { micDenied } = useMicPermission(audioLens !== null)
   const parentRef = useRef<HTMLDivElement>(null)
+  const [hoveredFootnote, setHoveredFootnote] = useState<{ cellId: string; index: number } | null>(null)
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
   const cellsRef = useRef(cells)
@@ -1020,12 +1024,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           rowIndex: item.index,
           sourceFootnotes,
           targetFootnotes,
+          activeFootnoteIndex: hoveredFootnote?.cellId === cell.id ? hoveredFootnote.index : null,
           isDocx: (cell.fileId ?? "").endsWith(".docx"),
           numberOffset: footnoteNumberOffsets.get(cell.id)?.target ?? 0,
         }
       })
       .filter((entry): entry is VisibleFootnoteEntry => entry !== null)
-  }, [displayCells, footnoteNumberOffsets, onVisibleFootnotesChange, scrollOffset, virtualItems])
+  }, [displayCells, footnoteNumberOffsets, hoveredFootnote, onVisibleFootnotesChange, scrollOffset, virtualItems])
 
   useEffect(() => {
     onVisibleFootnotesChange?.(visibleFootnoteEntries)
@@ -1182,6 +1187,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 checkLockHolder={checkLockHolder}
                 showFootnotesInline={showFootnotesInline}
                 footnotePanelActive={footnotePanelActive}
+                footnoteViewMode={footnoteViewMode}
+                onFootnoteHoverChange={setHoveredFootnote}
                 onFootnoteCreated={onFootnoteCreated}
                 sourceFootnoteNumberOffset={footnoteNumberOffsets.get(cell.id)?.source ?? 0}
                 targetFootnoteNumberOffset={footnoteNumberOffsets.get(cell.id)?.target ?? 0}
@@ -1305,6 +1312,10 @@ interface MemoizedRowProps {
   showFootnotesInline?: boolean
   /** True when inline/tray footnote detail is already visible elsewhere. */
   footnotePanelActive?: boolean
+  /** Current footnote display preference. */
+  footnoteViewMode?: FootnoteViewMode
+  /** Reports the target footnote currently hovered in this row. */
+  onFootnoteHoverChange?: (hovered: { cellId: string; index: number } | null) => void
   /** Called after a target footnote is created. */
   onFootnoteCreated?: () => void
   sourceFootnoteNumberOffset: number
@@ -1343,6 +1354,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     checkLockHolder,
     showFootnotesInline,
     footnotePanelActive,
+    footnoteViewMode = "off",
+    onFootnoteHoverChange,
     onFootnoteCreated,
     sourceFootnoteNumberOffset,
     targetFootnoteNumberOffset,
@@ -1483,6 +1496,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         checkLockHolder={checkLockHolder}
         showFootnotesInline={showFootnotesInline}
         footnotePanelActive={footnotePanelActive}
+        footnoteViewMode={footnoteViewMode}
+        onFootnoteHoverChange={onFootnoteHoverChange}
         onFootnoteCreated={onFootnoteCreated}
         sourceFootnoteNumberOffset={sourceFootnoteNumberOffset}
         targetFootnoteNumberOffset={targetFootnoteNumberOffset}
@@ -1583,6 +1598,10 @@ interface EditorRowProps {
   showFootnotesInline?: boolean
   /** True when inline/tray footnote detail is already visible elsewhere. */
   footnotePanelActive?: boolean
+  /** Current footnote display preference. */
+  footnoteViewMode?: FootnoteViewMode
+  /** Reports the target footnote currently hovered in this row. */
+  onFootnoteHoverChange?: (hovered: { cellId: string; index: number } | null) => void
   /** Called after a target footnote is created. */
   onFootnoteCreated?: () => void
   sourceFootnoteNumberOffset: number
@@ -1821,12 +1840,21 @@ function UsfmNoteChip({
   const label =
     note.noteKind === "xref" ? "†" : note.caller && note.caller !== "+" && note.caller !== "-" ? note.caller : String(ordinal)
   const kindLabel = note.noteKind === "xref" ? "Cross reference" : note.noteKind === "endnote" ? "Endnote" : "Footnote"
+  const tooltipContent = (
+    <div className="max-w-72 text-xs">
+      <div className="mb-0.5 flex items-center gap-1.5">
+        <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">{kindLabel}</span>
+        {note.ref && <span className="font-mono text-[10px] text-muted-foreground">{note.ref}</span>}
+      </div>
+      <div>{note.text || <span className="italic text-muted-foreground">(empty)</span>}</div>
+    </div>
+  )
   const chip = (
     <button
       type="button"
       className={cn(
-        "mx-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-muted px-0.5 align-super text-[9px] font-bold leading-none text-muted-foreground",
-        panelActive ? "cursor-default" : "cursor-pointer hover:bg-primary/15 hover:text-primary",
+        "mx-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-muted px-0.5 align-super text-[9px] font-bold leading-none text-muted-foreground transition-colors hover:bg-primary/15 hover:text-primary focus-visible:bg-primary/15 focus-visible:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
+        panelActive ? "cursor-default" : "cursor-help",
       )}
       aria-label={`${kindLabel}${note.ref ? ` ${note.ref}` : ""}`}
     >
@@ -1834,27 +1862,10 @@ function UsfmNoteChip({
     </button>
   )
 
-  if (panelActive) {
-    return (
-      <AppTooltip content={`${kindLabel} shown in footnotes panel`}>
-        {chip}
-      </AppTooltip>
-    )
-  }
-
   return (
-    <Popover>
-      <PopoverTrigger
-        render={chip}
-      />
-      <PopoverContent className="max-w-72 p-2 text-xs" side="bottom" align="start">
-        <div className="mb-0.5 flex items-center gap-1.5">
-          <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">{kindLabel}</span>
-          {note.ref && <span className="font-mono text-[10px] text-muted-foreground">{note.ref}</span>}
-        </div>
-        <div>{note.text || <span className="italic text-muted-foreground">(empty)</span>}</div>
-      </PopoverContent>
-    </Popover>
+    <AppTooltip content={tooltipContent} side="bottom">
+      {chip}
+    </AppTooltip>
   )
 }
 
@@ -2079,6 +2090,8 @@ function EditorRow({
   checkLockHolder,
   showFootnotesInline,
   footnotePanelActive,
+  footnoteViewMode = "off",
+  onFootnoteHoverChange,
   onFootnoteCreated,
   sourceFootnoteNumberOffset,
   targetFootnoteNumberOffset,
@@ -2134,11 +2147,31 @@ function EditorRow({
     ref: "",
     text: "",
   })
-  const { sourceFootnotes, targetFootnotes } = useMemo(() => ({
-    sourceFootnotes: showFootnotesInline ? extractUsfmFootnotes(cell.original ?? "") : [],
-    targetFootnotes: showFootnotesInline ? extractUsfmFootnotes(cell.translated ?? "") : [],
-  }), [cell.original, cell.translated, showFootnotesInline])
+  const allFootnotes = useMemo(() => ({
+    sourceFootnotes: extractUsfmFootnotes(cell.original ?? ""),
+    targetFootnotes: extractUsfmFootnotes(cell.translated ?? ""),
+  }), [cell.original, cell.translated])
+  const sourceDisplayFootnotes = useMemo(() => {
+    const segments = segmentUsfmForDisplay(cell.original ?? "")
+    if (!segments) return []
+    return segments
+      .filter((segment): segment is UsfmNoteSegment => segment.kind === "note")
+      .map((note) => ({
+        index: note.rawStart,
+        raw: note.raw,
+        caller: note.caller,
+        ref: note.ref,
+        text: note.text,
+      }))
+  }, [cell.original])
+  const sourceDetailFootnotes = allFootnotes.sourceFootnotes.length > 0
+    ? allFootnotes.sourceFootnotes
+    : sourceDisplayFootnotes
+  const sourceFootnotes = showFootnotesInline ? allFootnotes.sourceFootnotes : []
+  const targetFootnotes = showFootnotesInline ? allFootnotes.targetFootnotes : []
   const hasInlineFootnotes = sourceFootnotes.length > 0 || targetFootnotes.length > 0
+  const hasAnyFootnotes = sourceDetailFootnotes.length > 0 || allFootnotes.targetFootnotes.length > 0
+  const showFootnotesInExpansion = footnoteViewMode === "off" && hasAnyFootnotes
   const isDocxFile = (cell.fileId ?? "").endsWith(".docx")
 
   useEffect(() => {
@@ -2770,6 +2803,12 @@ function EditorRow({
     previousExpandedRef.current = expanded
   }, [expanded, cellInfractions.length, transcriptNeedsAttention])
 
+  useEffect(() => {
+    if (expansionTab === "footnotes" && !showFootnotesInExpansion) {
+      setExpansionTab("backtranslation")
+    }
+  }, [expansionTab, showFootnotesInExpansion])
+
   const railRevealed = isHovering || hasFocusWithin || isTapSelected || expanded
 
   // ── BT tab edit state ─────────────────────────────────────────────────────
@@ -3286,7 +3325,11 @@ function EditorRow({
                 terminologyConcepts={project.terminology ?? []}
                 onTermChipClick={handleTermChipClick}
                 footnoteNumberOffset={targetFootnoteNumberOffset}
-                onFootnoteHover={setActiveFootnoteIndex}
+                showFootnoteTooltips={!footnotePanelActive}
+                onFootnoteHover={(index) => {
+                  setActiveFootnoteIndex(index)
+                  onFootnoteHoverChange?.(index === null ? null : { cellId: cell.id, index })
+                }}
                 ariaLabel={editorAriaLabel}
                 onEscapeToGrid={onEscapeToGrid}
               />
@@ -3852,6 +3895,31 @@ function EditorRow({
                 </div>
               ),
             },
+            ...(showFootnotesInExpansion ? [{
+              value: "footnotes",
+              icon: <NotebookPen className="h-3 w-3" />,
+              label: "Footnotes",
+              content: (
+                <FootnoteInline
+                  sourceFootnotes={sourceDetailFootnotes}
+                  targetFootnotes={allFootnotes.targetFootnotes}
+                  editable={editable}
+                  isDocx={isDocxFile}
+                  onSave={(footnoteIndex, newText) => {
+                    const updated = spliceFootnoteText(cell.translated ?? "", footnoteIndex, newText)
+                    handleEditorCommit({ value: updated, valueHtml: updated })
+                  }}
+                  onDelete={(footnoteIndex) => {
+                    const updated = deleteFootnote(cell.translated ?? "", footnoteIndex)
+                    handleEditorCommit({ value: updated, valueHtml: updated })
+                  }}
+                  onCreateTarget={handleCreateTargetFootnote}
+                  numberOffset={targetFootnoteNumberOffset}
+                  activeFootnoteIndex={activeFootnoteIndex}
+                  compact
+                />
+              ),
+            }] : []),
             {
               value: "audio",
               icon: <Mic className="h-3 w-3" />,

@@ -48,12 +48,12 @@ test("create a new voice character and it appears in the voice library", async (
 
   // Fill character name.
   const voiceName = `TestVoice ${Date.now()}`
-  const nameInput = dialog.locator('input[aria-label="Character name"]')
+  const nameInput = dialog.locator('input[aria-label="Voice name"]')
   await expect(nameInput).toBeVisible({ timeout: 3_000 })
   await nameInput.fill(voiceName)
 
-  // Click Save.
-  const saveBtn = dialog.getByRole("button", { name: /^Save$/i })
+  // Click Create.
+  const saveBtn = dialog.getByRole("button", { name: /Create voice/i })
   await expect(saveBtn).toBeVisible({ timeout: 3_000 })
   await saveBtn.click()
 

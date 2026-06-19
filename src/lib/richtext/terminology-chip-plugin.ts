@@ -17,6 +17,7 @@ import type { Node as PMNode } from "@tiptap/pm/model"
 import { Extension } from "@tiptap/core"
 import type { Concept } from "@/lib/terminology/types"
 import { buildTermRegex } from "@/lib/terminology/match"
+import { buildUsfmPlainTextMap } from "@/lib/richtext/usfm-plain-text"
 
 export const terminologyChipPluginKey = new PluginKey<DecorationSet>("terminologyChipDecorations")
 
@@ -58,23 +59,9 @@ export function buildTerminologyChipDecorationSet(
   const activeConcepts = concepts.filter(c => c.status === "active")
   if (activeConcepts.length === 0) return DecorationSet.empty
 
-  // Build plain-text → PM position map (same strategy as violation-decoration-plugin)
-  const plainToPm: number[] = []
-  let plainCursor = 0
-  doc.descendants((node, pos) => {
-    if (node.isText) {
-      const len = node.text?.length ?? 0
-      for (let i = 0; i <= len; i++) plainToPm[plainCursor + i] = pos + i
-      plainCursor += len
-    }
-  })
-  if (!(plainCursor in plainToPm)) plainToPm[plainCursor] = doc.content.size
-
-  // Collect all plain text to search
-  let plainText = ""
-  doc.descendants((node) => {
-    if (node.isText) plainText += node.text ?? ""
-  })
+  // Build plain-text → PM position map (footnote nodes expand to their raw
+  // `\f...\f*` so matches stay aligned with the plain `value`).
+  const { text: plainText, plainToPm } = buildUsfmPlainTextMap(doc)
 
   const decorations: Decoration[] = []
 

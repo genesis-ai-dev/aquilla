@@ -27,6 +27,7 @@ import {
   Files,
   MessageSquare,
   Search,
+  AudioLines,
   PanelLeftOpen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -39,7 +40,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 // Types
 // ---------------------------------------------------------------------------
 
-export type DockTab = "files" | "chat" | "search"
+export type DockTab = "files" | "chat" | "search" | "voices"
 
 export interface LeftDockProps {
   /** Slot rendered when "files" tab is active */
@@ -48,6 +49,9 @@ export interface LeftDockProps {
   chatPanel: ReactNode
   /** Slot rendered when "search" tab is active */
   searchPanel: ReactNode
+  /** Slot rendered when "voices" tab is active. When omitted, the Voices tab
+   *  is hidden (e.g. a project without the Audio lens available). */
+  voicesPanel?: ReactNode
   /** Persist width / open-state per project */
   storageKey?: string
   /** Badge on the chat tab (e.g. unread) */
@@ -68,8 +72,11 @@ const MAX_WIDTH = 520
 const DEFAULT_WIDTH = 256
 const RAIL_WIDTH = 40
 
-const TAB_META: { id: DockTab; icon: typeof Files; label: string }[] = [
+type TabMeta = { id: DockTab; icon: typeof Files; label: string }
+
+const TAB_META: TabMeta[] = [
   { id: "files", icon: Files, label: "Files" },
+  { id: "voices", icon: AudioLines, label: "Voices" },
   { id: "chat", icon: MessageSquare, label: "Chat" },
   { id: "search", icon: Search, label: "Search" },
 ]
@@ -79,13 +86,14 @@ const TAB_META: { id: DockTab; icon: typeof Files; label: string }[] = [
 // ---------------------------------------------------------------------------
 
 interface TabRailProps {
+  tabs: TabMeta[]
   activeTab: DockTab | null
   chatBadge?: number
   onTabClick: (tab: DockTab) => void
   orientation: "left" | "top"
 }
 
-function TabRail({ activeTab, chatBadge, onTabClick, orientation }: TabRailProps) {
+function TabRail({ tabs, activeTab, chatBadge, onTabClick, orientation }: TabRailProps) {
   const isTop = orientation === "top"
 
   return (
@@ -96,7 +104,7 @@ function TabRail({ activeTab, chatBadge, onTabClick, orientation }: TabRailProps
           : "flex h-full w-10 shrink-0 flex-col items-center gap-1 pt-2",
       )}
     >
-      {TAB_META.map(({ id, icon: Icon, label }) => {
+      {tabs.map(({ id, icon: Icon, label }) => {
         const isActive = activeTab === id
         const button = (
           <button
@@ -109,10 +117,12 @@ function TabRail({ activeTab, chatBadge, onTabClick, orientation }: TabRailProps
               "relative flex items-center justify-center transition-colors",
               isTop
                 ? cn(
-                    "h-7 flex-1 gap-1.5 rounded-full px-2 text-xs",
+                    "h-7 gap-1.5 rounded-full px-2 text-xs",
+                    // Only the active tab shows its label (and flexes to fill);
+                    // the rest collapse to icon-only so 4+ tabs never overflow.
                     isActive
-                      ? "bg-card font-medium text-foreground shadow-neu-xs"
-                      : "text-muted-foreground hover:text-foreground",
+                      ? "min-w-0 flex-1 bg-card font-medium text-foreground shadow-neu-xs"
+                      : "shrink-0 text-muted-foreground hover:text-foreground",
                   )
                 : cn(
                     "h-8 w-8 rounded-lg",
@@ -122,8 +132,8 @@ function TabRail({ activeTab, chatBadge, onTabClick, orientation }: TabRailProps
                   ),
             )}
           >
-            <Icon className={cn(isTop ? "h-3 w-3" : "h-4 w-4")} />
-            {isTop && <span className="truncate">{label}</span>}
+            <Icon className={cn("shrink-0", isTop ? "h-3 w-3" : "h-4 w-4")} />
+            {isTop && isActive && <span className="truncate">{label}</span>}
             {id === "chat" && chatBadge != null && chatBadge > 0 && (
               <span
                 aria-label={`${chatBadge} unread`}
@@ -159,6 +169,7 @@ export function LeftDock({
   filesPanel,
   chatPanel,
   searchPanel,
+  voicesPanel,
   storageKey,
   chatBadge,
   activeTab: controlledTab,
@@ -249,7 +260,10 @@ export function LeftDock({
     files: filesPanel,
     chat: chatPanel,
     search: searchPanel,
+    voices: voicesPanel,
   }
+  // Only surface tabs whose panel slot is provided (Voices is conditional).
+  const visibleTabs = TAB_META.filter((t) => panels[t.id] != null)
 
   const dockWidth = isOpen ? width : RAIL_WIDTH
 
@@ -297,6 +311,7 @@ export function LeftDock({
           // Top-rail expanded: horizontal tab bar + panel below
           <>
             <TabRail
+              tabs={visibleTabs}
               activeTab={activeTab}
               chatBadge={chatBadge}
               onTabClick={handleRailIconClick}
@@ -313,6 +328,7 @@ export function LeftDock({
             <div className="flex h-full w-10 shrink-0 flex-col items-center">
               {!isOpen && expandButton}
               <TabRail
+                tabs={visibleTabs}
                 activeTab={activeTab}
                 chatBadge={chatBadge}
                 onTabClick={handleRailIconClick}

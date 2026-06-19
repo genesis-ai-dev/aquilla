@@ -8,6 +8,14 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view"
 import type { Node as PMNode } from "@tiptap/pm/model"
 import { Extension } from "@tiptap/core"
 import type { WordTiming } from "@/lib/codex-editor/types"
+import { FOOTNOTE_NODE_NAME } from "@/lib/richtext/usfm-plain-text"
+
+// Leaf-text serialiser for textBetween: footnote nodes expand to their raw
+// `\f...\f*` (so timing offsets computed against the plain `value` line up),
+// every other leaf (e.g. hardBreak) stays a single "\n" as before.
+function leafText(leafNode: PMNode): string {
+  return leafNode.type.name === FOOTNOTE_NODE_NAME ? ((leafNode.attrs.raw as string) ?? "") : "\n"
+}
 
 export const karaokePluginKey = new PluginKey<DecorationSet>("karaokeDecorations")
 
@@ -53,7 +61,7 @@ function buildPlainMaps(doc: PMNode): PlainMaps {
   const fromMap: number[] = []
   const toMap: number[] = []
   for (let pmPos = 0; pmPos <= totalSize; pmPos++) {
-    const plainLen = doc.textBetween(0, pmPos, "\n", "\n").length
+    const plainLen = doc.textBetween(0, pmPos, "\n", leafText).length
     if (toMap[plainLen] === undefined) toMap[plainLen] = pmPos
     if (pmPos > 0 && fromMap[plainLen] === undefined) fromMap[plainLen] = pmPos
   }
@@ -62,7 +70,7 @@ function buildPlainMaps(doc: PMNode): PlainMaps {
 
 function pmPosToPlain(doc: PMNode, pmPos: number): number | null {
   if (pmPos < 0 || pmPos > doc.content.size) return null
-  return doc.textBetween(0, pmPos, "\n", "\n").length
+  return doc.textBetween(0, pmPos, "\n", leafText).length
 }
 
 export function createKaraokeExtension(getState: () => KaraokePluginState) {

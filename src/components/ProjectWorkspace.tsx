@@ -41,6 +41,7 @@ import { EditorTable, type AudioLensContext } from "./EditorTable"
 import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
+import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue } from "@/lib/audio/play-queue"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
@@ -576,9 +577,10 @@ export function ProjectWorkspace() {
   // "make a character" dialog) and replaces each cell's SOURCE column with that
   // line's voice controls (CellVoicePanel); all other audio chrome lives there.
   const [lens, setLens] = useEditorLensPreference(projectId ?? "")
-  // ISSUE-3 fix: /project/:id/voice deep-link activates audio lens on mount.
+  // ISSUE-3 fix: /project/:id/voice deep-link activates audio lens on mount,
+  // and surfaces the Voices dock tab (where the voice controls now live).
   useEffect(() => {
-    if (location.pathname.endsWith("/voice")) setLens("audio")
+    if (location.pathname.endsWith("/voice")) { setLens("audio"); setDockTab("voices") }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname])
   // A2: "Open audio setup" CTA from the cell error popover must navigate to a
@@ -876,6 +878,7 @@ export function ProjectWorkspace() {
     const key = entries
       .map((entry) => [
         entry.cellId,
+        entry.activeFootnoteIndex ?? "",
         entry.sourceFootnotes.map((fn) => `${fn.index}:${fn.text}`).join(","),
         entry.targetFootnotes.map((fn) => `${fn.index}:${fn.text}`).join(","),
       ].join(":"))
@@ -2605,7 +2608,13 @@ export function ProjectWorkspace() {
       //             while in Audio lens = open voice settings modal.
       // See: src/components/ProjectWorkspace.tsx (this file), src/App.tsx (routes)
       { id: "voice-studio", label: "Voice", icon: Mic2,
-        onClick: () => setLens(lens === "audio" ? "text" : "audio") },
+        onClick: () => {
+          const next = lens === "audio" ? "text" : "audio"
+          setLens(next)
+          // The Voices panel now lives in its own dock tab — surface it when
+          // entering the Audio lens; fall back to Files when leaving.
+          setDockTab(next === "audio" ? "voices" : "files")
+        } },
       { id: "share", label: "Share", icon: Share2,
         onClick: () => setShareOpen(true) },
       { id: "settings", label: "Settings", icon: SettingsIcon,
@@ -2624,7 +2633,7 @@ export function ProjectWorkspace() {
         : []),
     ]
     return items
-  }, [projectId, activeFileId, navigate, openCommentCount, lens, setLens, currentRoleLevel])
+  }, [projectId, activeFileId, navigate, openCommentCount, lens, setLens, setDockTab, currentRoleLevel])
 
   // Phase 2c-gamma: countTranscribeTargets/countSynthTargets lived in bulk-audio
   // (Y.Doc-coupled). They're zeroed until the audio-attachment event grammar
@@ -3085,7 +3094,34 @@ export function ProjectWorkspace() {
           <LeftDock
             storageKey={projectId}
             activeTab={dockTab}
-            onActiveTabChange={setDockTab}
+            onActiveTabChange={(t) => {
+              setDockTab(t)
+              // Opening the Voices tab puts the editor into the Audio lens so
+              // the per-line voice controls show alongside the panel.
+              if (t === "voices" && lens !== "audio") setLens("audio")
+            }}
+            voicesPanel={
+              project ? (
+                <div className="flex h-full min-h-0 flex-col overflow-hidden p-2">
+                  <VoiceSidebar
+                    cells={cells}
+                    project={audioProject ?? project}
+                    projectId={project.id}
+                    tts={tts}
+                    session={frontierSession ?? null}
+                    username={currentUsername}
+                    targetLanguage={project.targetLanguage}
+                    fileId={activeFileId}
+                    cloneOpen={makeCharacterOpen}
+                    onCloneOpenChange={(open) => {
+                      setMakeCharacterOpen(open)
+                      if (!open) setMakeCharacterSeedCellId(null)
+                    }}
+                    cloneSeedCellId={makeCharacterSeedCellId}
+                  />
+                </div>
+              ) : undefined
+            }
             filesPanel={
               <div className="flex h-full flex-col overflow-y-auto overflow-x-hidden">
                 {lens !== "audio" && (
@@ -3114,24 +3150,6 @@ export function ProjectWorkspace() {
                   onRenameCorpus={handleRenameCorpus}
                   canExportByOrgPolicy={canExportByOrgPolicy}
                 />
-                {lens === "audio" && project && (
-                  <VoiceSidebar
-                    cells={cells}
-                    project={audioProject ?? project}
-                    projectId={project.id}
-                    tts={tts}
-                    session={frontierSession ?? null}
-                    username={currentUsername}
-                    targetLanguage={project.targetLanguage}
-                    fileId={activeFileId}
-                    cloneOpen={makeCharacterOpen}
-                    onCloneOpenChange={(open) => {
-                      setMakeCharacterOpen(open)
-                      if (!open) setMakeCharacterSeedCellId(null)
-                    }}
-                    cloneSeedCellId={makeCharacterSeedCellId}
-                  />
-                )}
                 <SidebarProjectSection items={projectNavItems} />
                 {/* FRO-192: member's per-project assignment pickup panel. */}
                 {project?.id && jwt && (
@@ -3321,7 +3339,11 @@ export function ProjectWorkspace() {
                 project && centerSurface === "editor" && activeFileId ? (
                   <EditorModeToggle
                     lens={lens}
-                    onChange={(l) => setLens(l)}
+                    onChange={(l) => {
+                      setLens(l)
+                      // Surface the Voices tab when entering the Audio lens.
+                      if (l === "audio") setDockTab("voices")
+                    }}
                     timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
                   />
                 ) : undefined
@@ -3573,6 +3595,7 @@ export function ProjectWorkspace() {
             ref={editorRef} project={project} cells={cellsWithBacktranslation}
             showFootnotesInline={footnoteViewMode === "inline"}
             footnotePanelActive={footnoteViewMode !== "off"}
+            footnoteViewMode={footnoteViewMode}
             onVisibleFootnotesChange={footnoteViewMode === "tray" ? handleVisibleFootnotesChange : undefined}
             username={currentUsername}
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
@@ -3731,6 +3754,15 @@ export function ProjectWorkspace() {
         }
         statusBar={
           <>
+            {lens === "audio" && project && (
+              <VoicePlaybackBar
+                cells={cells}
+                projectId={project.id}
+                session={frontierSession ?? null}
+                settings={tts.settings}
+                onActiveCell={jumpToCellId}
+              />
+            )}
             <WorkspaceStatusBar
               left={
                 <div className="flex items-center gap-3">

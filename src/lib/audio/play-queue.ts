@@ -40,6 +40,38 @@ export function useQueueState(): QueueState {
   return useSyncExternalStore(subscribe, () => state, () => IDLE)
 }
 
+// ── Playback progress (time/duration/rate/volume) ───────────────────────────
+// Kept in a separate store from QueueState so the ~4×/sec timeupdate ticks only
+// re-render the playback bar's scrubber, not every QueueState consumer.
+
+export interface QueueProgress {
+  currentTime: number
+  duration: number
+  /** Playback speed multiplier (persists across tracks). */
+  rate: number
+  /** 0..1 volume (persists across tracks). */
+  volume: number
+}
+
+let progress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+const progressListeners = new Set<() => void>()
+
+function notifyProgress(): void { for (const l of progressListeners) l() }
+
+function setProgress(patch: Partial<QueueProgress>): void {
+  progress = { ...progress, ...patch }
+  notifyProgress()
+}
+
+function subscribeProgress(listener: () => void): () => void {
+  progressListeners.add(listener)
+  return () => { progressListeners.delete(listener) }
+}
+
+export function useQueueProgress(): QueueProgress {
+  return useSyncExternalStore(subscribeProgress, () => progress, () => progress)
+}
+
 // ── Single owned audio element ──────────────────────────────────────────────
 
 let currentAudio: HTMLAudioElement | null = null
@@ -63,6 +95,28 @@ function disposeCurrent(): void {
     currentUrl = null
   }
   clearActiveAudioIf(coordinatorController)
+  setProgress({ currentTime: 0, duration: 0 })
+}
+
+/** Seek within the currently-playing clip (seconds). */
+export function seekQueue(seconds: number): void {
+  if (!currentAudio) return
+  const d = currentAudio.duration
+  currentAudio.currentTime = Number.isFinite(d) ? Math.max(0, Math.min(seconds, d)) : Math.max(0, seconds)
+  setProgress({ currentTime: currentAudio.currentTime })
+}
+
+/** Set playback speed for the queue (applies live + to subsequent tracks). */
+export function setQueueRate(rate: number): void {
+  if (currentAudio) currentAudio.playbackRate = rate
+  setProgress({ rate })
+}
+
+/** Set queue volume 0..1 (applies live + to subsequent tracks). */
+export function setQueueVolume(vol: number): void {
+  const v = Math.max(0, Math.min(1, vol))
+  if (currentAudio) currentAudio.volume = v
+  setProgress({ volume: v })
 }
 
 // ── Per-cell audio resolution ───────────────────────────────────────────────
@@ -173,6 +227,18 @@ async function playAt(index: number): Promise<void> {
   const audio = new Audio(url)
   currentAudio = audio
   currentUrl = url
+  audio.playbackRate = progress.rate
+  audio.volume = progress.volume
+  setProgress({ currentTime: 0, duration: 0 })
+
+  audio.ontimeupdate = () => {
+    if (seq !== currentSeq) return
+    setProgress({ currentTime: audio.currentTime })
+  }
+  audio.ondurationchange = () => {
+    if (seq !== currentSeq) return
+    if (Number.isFinite(audio.duration)) setProgress({ duration: audio.duration })
+  }
 
   audio.onplay = () => {
     if (seq !== currentSeq) return

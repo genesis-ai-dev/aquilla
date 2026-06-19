@@ -30,8 +30,13 @@ test("/project/:id/voice deep-link activates audio lens on load", async ({ alice
   await alice.goto(`/project/${projectId}/voice`)
   await alice.waitForLoadState("networkidle")
 
-  // The workspace should render the voice surface (not a 404 blank page).
-  // Empty projects have no file lens selector yet, but the Cast sidebar is active.
-  await expect(alice.getByRole("heading", { name: /^Cast$/i })).toBeVisible({ timeout: 10_000 })
-  await expect(alice.getByRole("button", { name: /New voice/i })).toBeVisible()
+  // The workspace should render (not a 404 blank page) with the audio lens
+  // active. The deep-link surfaces the Voices dock tab, so the Voices panel
+  // (its "Search voices…" box) is the reliable "audio lens active" signal —
+  // the editor's Text/Audio toggle only renders once a file is open, and this
+  // project has none.
+  const voicesTab = alice.getByRole("button", { name: "Voices" })
+  await expect(voicesTab).toBeVisible({ timeout: 10_000 })
+  await expect(voicesTab).toHaveAttribute("aria-pressed", "true", { timeout: 5_000 })
+  await expect(alice.getByPlaceholder("Search voices…")).toBeVisible({ timeout: 5_000 })
 })

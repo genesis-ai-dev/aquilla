@@ -8,23 +8,21 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * SpeakerChip — assign a character to a cell line in audio mode.
+ * Voice chip — clicking a cast chip assigns + voices a line in audio mode.
  *
- * In audio lens (EditorTable audioLens), each cell row renders a CellVoicePanel
- * which contains a SpeakerChip. The chip:
- *   - Shows the current assigned/default speaker.
- *   - Opens a Popover with a flat list of project voices on click.
- *   - Clicking a voice row calls onAssign(voiceId) and the chip updates.
+ * In audio lens (EditorTable audioLens), each translated cell renders a
+ * CellVoicePanel showing the whole cast as a scrollable chip strip. There's no
+ * dropdown: clicking a chip assigns the line to that voice (aria-pressed flips)
+ * and kicks off generation immediately.
  *
  * This spec:
  *   1. Creates a project, imports sample.md, opens the editor.
  *   2. Switches to audio mode.
- *   3. Creates a voice character "Hero" via CharacterModal.
- *   4. Finds the first SpeakerChip (title="Assign a character to this line").
- *   5. Clicks it → popover opens with "Hero" in the list.
- *   6. Clicks "Hero" → chip now shows "Hero".
+ *   3. Creates a voice "Hero" via the New voice modal.
+ *   4. Finds Hero's chip in the first cell (not yet active).
+ *   5. Clicks it → the chip becomes the active voice (aria-pressed="true").
  */
-test("SpeakerChip assigns a character to a cell line in audio mode", async ({ alice }) => {
+test("clicking a voice chip assigns a line to that voice in audio mode", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `SpeakerChip ${Date.now()}`
@@ -38,7 +36,7 @@ test("SpeakerChip assigns a character to a cell line in audio mode", async ({ al
 
   // Translate the first cell — untranslated cells render the "Translate to
   // voice this line" placeholder in audio mode (CellVoicePanel) and never
-  // show a SpeakerChip.
+  // show the cast chip strip.
   await ws.editCell(0, "Bonjour le monde")
 
   // Switch to Audio mode.
@@ -54,31 +52,19 @@ test("SpeakerChip assigns a character to a cell line in audio mode", async ({ al
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
   const voiceName = "Hero"
-  await dialog.locator('input[aria-label="Character name"]').fill(voiceName)
-  await dialog.getByRole("button", { name: /^Save$/i }).click()
+  await dialog.locator('input[aria-label="Voice name"]').fill(voiceName)
+  await dialog.getByRole("button", { name: /Create voice/i }).click()
   await expect(dialog).not.toBeVisible({ timeout: 5_000 })
   await expect(alice.getByText(voiceName)).toBeVisible({ timeout: 5_000 })
 
-  // Find the first SpeakerChip in the editor cells.
-  const chip = alice
-    .getByRole("main")
-    .locator("button")
-    .filter({ hasText: new RegExp(`^(Unassigned|Narrator|${voiceName})$`) })
-    .first()
-  await expect(chip).toBeVisible({ timeout: 8_000 })
-  await chip.click()
+  // The voice column shows the cast as chips. Scope to the editor (main) so we
+  // don't match the identically-named "Hero" row in the Voices dock panel.
+  const heroChip = alice.getByRole("main").getByRole("button", { name: voiceName, exact: true }).first()
+  await expect(heroChip).toBeVisible({ timeout: 8_000 })
+  // The line resolves to the narrator by default, so Hero isn't active yet.
+  await expect(heroChip).toHaveAttribute("aria-pressed", "false")
 
-  // Popover opens with the voice list. Scope to the popover content — the
-  // VoiceLibraryPanel cast-roster row is ALSO a button named "Hero" and
-  // precedes the portaled popover in DOM order, so an unscoped .first()
-  // would click the library row (opening CharacterModal) instead.
-  const heroOption = alice
-    .locator('[data-slot="popover-content"]')
-    .getByRole("button", { name: voiceName })
-    .first()
-  await expect(heroOption).toBeVisible({ timeout: 5_000 })
-  await heroOption.click()
-
-  // Chip now shows "Hero".
-  await expect(chip).toContainText(voiceName, { timeout: 5_000 })
+  // Clicking the chip assigns this line to Hero (and kicks off generation).
+  await heroChip.click()
+  await expect(heroChip).toHaveAttribute("aria-pressed", "true", { timeout: 5_000 })
 })

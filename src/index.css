@@ -501,11 +501,8 @@ html.dark[data-color-theme="rose"] {
   box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-red-500, oklch(0.637 0.237 25.331)) 40%, transparent);
 }
 
-.usfm-footnote-raw {
-  display: none;
-}
-
 .usfm-footnote-marker {
+  position: relative;
   display: inline-flex;
   min-width: 1.15em;
   height: 1.15em;
@@ -519,12 +516,72 @@ html.dark[data-color-theme="rose"] {
   font-weight: 700;
   line-height: 1;
   vertical-align: super;
-  pointer-events: none;
-  user-select: none;
+  pointer-events: auto;
+  cursor: pointer;
 }
 
-.usfm-footnote-marker::selection {
+/* Safari mis-paints native text-selection rectangles around our
+   contenteditable=false footnote pills (it paints the wrong/adjacent region
+   when a selection edge sits at an element offset next to the atom). So in
+   editors that contain footnotes we hide the native selection paint and draw
+   the highlight ourselves via the .usfm-text-sel decoration below, positioned
+   by document position rather than by Safari's buggy selection rects. */
+.usfm-fn-editor ::selection {
   background: transparent;
+}
+.usfm-fn-editor .usfm-text-sel,
+.usfm-fn-editor .usfm-footnote-marker.usfm-text-sel {
+  background-color: Highlight;
+  color: HighlightText;
+}
+
+/* When the footnote node is the sole selection (e.g. clicked) ProseMirror tags
+   it; match the text-selection highlight so it reads as "selected". */
+.usfm-footnote-marker.ProseMirror-selectednode {
+  background-color: color-mix(in oklch, var(--primary) 28%, transparent);
+  outline: none;
+}
+
+.usfm-footnote-marker-tooltip {
+  position: absolute;
+  z-index: 70;
+  bottom: calc(100% + 0.45rem);
+  left: 50%;
+  width: max-content;
+  max-width: min(22rem, 80vw);
+  transform: translateX(-50%) translateY(0.125rem);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--popover);
+  box-shadow: 0 14px 35px color-mix(in oklch, black 16%, transparent);
+  color: var(--popover-foreground);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.25;
+  opacity: 0;
+  padding: 0.375rem 0.625rem;
+  pointer-events: none;
+  text-align: left;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    visibility 120ms ease;
+  visibility: hidden;
+  white-space: normal;
+}
+
+.usfm-footnote-marker:hover,
+.usfm-footnote-marker:focus-visible {
+  background-color: color-mix(in oklch, var(--primary) 24%, transparent);
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--primary) 18%, transparent);
+}
+
+.usfm-footnote-marker:hover .usfm-footnote-marker-tooltip,
+.usfm-footnote-marker:focus-visible .usfm-footnote-marker-tooltip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  visibility: visible;
 }
 
 .karaoke-active {

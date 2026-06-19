@@ -223,8 +223,7 @@
 | Memory      | Add / edit / delete living memory entry               | `e2e/specs/projects/living-memory-add-entry.smoke.spec.ts` + `living-memory-edit-entry.smoke.spec.ts` + `living-memory-delete-entry.smoke.spec.ts` | ✅ |
 | Memory      | Living memory empty state                             | `e2e/specs/projects/living-memory-empty-state.smoke.spec.ts`  |   ✅   |
 | Memory      | Living memory standards section                       | `e2e/specs/projects/living-memory-standards-section.smoke.spec.ts` |   ✅   |
-| Voice       | Voice creation and engine select                      | `e2e/specs/orgs/voice-creation.smoke.spec.ts` + `voice-engine-select.smoke.spec.ts` | ✅ |
-| Voice       | Voice color picker                                    | `e2e/specs/orgs/voice-color-picker.smoke.spec.ts`             |   ✅   |
+| Voice       | Voice creation (NewVoiceModal: Gemini/Clone tabs · name · describe) | `e2e/specs/editor/voice-creation.smoke.spec.ts` | ✅ |
 | Voice       | Voice make default + save                             | `e2e/specs/orgs/voice-make-default.smoke.spec.ts` + `voice-save.smoke.spec.ts` | ✅ |
 | Voice       | Voice Gemini API key toggle                           | `e2e/specs/orgs/voice-gemini-api-key-toggle.smoke.spec.ts`    |   ✅   |
 | Voice       | Audio mode lens toggle in workspace                   | `e2e/specs/orgs/audio-mode.smoke.spec.ts`                     |   ✅   |
@@ -252,7 +251,7 @@
 | Sharing     | Invite role select changes role                       | `e2e/specs/projects/share-invite-role-select.smoke.spec.ts`   |   ✅   |
 | Sharing     | Invite @username verified chip appears                | `e2e/specs/projects/share-invite-username-verified.smoke.spec.ts` |   ✅   |
 | Rules       | Rule promote to org dialog                            | `e2e/specs/rules/rule-promote-to-org.smoke.spec.ts`           |   ✅   |
-| Voice       | SpeakerChip assigns a character to a cell line in audio mode | `e2e/specs/editor/speaker-chip-assign-character.smoke.spec.ts` | ✅ |
+| Voice       | Clicking a cast chip assigns + voices a line in audio mode | `e2e/specs/editor/speaker-chip-assign-character.smoke.spec.ts` | ✅ |
 | Rules       | project_lead requests rule promotion to org scope     | `e2e/specs/rules/rule-request-promotion.smoke.spec.ts`        |   ✅   |
 | Rules       | Org owner approves / dismisses a promotion request    | `e2e/specs/rules/rule-promotion-request-approve-dismiss.smoke.spec.ts` | ✅ |
 | Rules       | Rules page terminology link navigates                 | `e2e/specs/rules/rules-page-terminology-link.smoke.spec.ts`   |   ✅   |

@@ -24,7 +24,7 @@ export const PRESET_VOICES: readonly Voice[] = [
   {
     id: "preset-narrator",
     name: "Narrator",
-    color: "#6366f1",
+    color: "#475569",
     provider: "gemini",
     voiceName: "Charon",
     prompt: "Read this {target} passage as a steady, clear narrator. Preserve names and punctuation; do not translate.\n\n{text}",
@@ -34,9 +34,12 @@ export const PRESET_VOICES: readonly Voice[] = [
 
 export const DEFAULT_VOICE_ID = PRESET_VOICES[0].id
 
+// Voice accent colors. Leads with calm slate / steel-blue / teal / amber tones —
+// deliberately NOT purple-forward (the cliché AI-voice violet is pushed to the
+// very end and only surfaces once a project has many voices).
 export const VOICE_PALETTE: readonly string[] = [
-  "#6366f1", "#a16207", "#ec4899", "#f97316", "#14b8a6", "#475569",
-  "#0ea5e9", "#8b5cf6", "#22c55e", "#ef4444", "#eab308", "#06b6d4",
+  "#475569", "#0e7490", "#0d9488", "#2563eb", "#b45309", "#be123c",
+  "#15803d", "#0ea5e9", "#ea580c", "#a16207", "#db2777", "#7c3aed",
 ]
 
 /** The effective list of voices available to a project. */

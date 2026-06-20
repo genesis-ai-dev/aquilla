@@ -84,10 +84,9 @@ export function dedupeExamples<T extends { source: string }>(examples: T[]): T[]
  *  branching-search hit and the immediately-preceding cell, so it would render
  *  twice. Preceding-context is the stronger, exact discourse signal (D4), so we
  *  keep it and remove the redundant example. (D6) */
-export function dropPrecedingContextDuplicates<T extends { source: string }>(
+export function dropPrecedingContextDuplicates<T extends { source: string }, C extends { source: string }>(
   examples: T[],
-  // Only `source` is read for matching; callers pass full {source, target} pairs.
-  precedingContext: { source: string; target?: string }[],
+  precedingContext: C[],
 ): T[] {
   const preceding = new Set(precedingContext.map((c) => normalizeSource(c.source)))
   return examples.filter((ex) => !preceding.has(normalizeSource(ex.source)))

@@ -3,18 +3,24 @@
  *
  * Writes a 16-bit PCM WAV by computing every sample as a function of time, so
  * the bed is fully deterministic and rights-clean (no stock music). The score
- * is a small cinematic kit:
+ * is a small cinematic kit whose arrangement follows the beat grid the visual
+ * composition uses (promo.config.ts), so hits land on the cuts:
  *   - a sub heartbeat (lub-dub) that anchors the tension,
- *   - a slow swelling pad chord (the "promise"),
+ *   - a swelling pad CHORD that progresses (tension → resolution),
  *   - a noise riser into the final beat,
- *   - a low impact + shimmer on the CTA.
+ *   - a low impact, then a RESOLVE tail (chord lift + bell arpeggio + shimmer)
+ *     so the ending evolves instead of sitting on a static drone.
  *
- * The arrangement is driven by the same beat grid the visual composition uses
- * (see compose.html / promo.config.ts), so audio hits land on the cuts.
+ * `mood` lets each persona's trailer feel different from the same engine:
+ *   - "build"    confident, forward-leaning, resolves upward (e.g. the manager)
+ *   - "intimate" warm, close, gentle resolution (e.g. the translator)
+ *   - "epic"     wider, brighter pad + stronger impact (hero launch)
  */
 import { writeFileSync } from "node:fs"
 
 const SAMPLE_RATE = 48_000
+
+export type Mood = "build" | "intimate" | "epic"
 
 export interface TrailerBeat {
   /** seconds from start */
@@ -25,8 +31,8 @@ export interface TrailerBeat {
 
 export interface AudioOpts {
   durationSec: number
-  /** Beat grid shared with the visual composition. */
   beats: TrailerBeat[]
+  mood?: Mood
 }
 
 const clamp = (x: number, lo = -1, hi = 1) => Math.max(lo, Math.min(hi, x))
@@ -37,6 +43,7 @@ const ramp = (x: number, a: number, b: number) => {
   const u = (x - a) / (b - a)
   return u * u * (3 - 2 * u)
 }
+const lerp = (a: number, b: number, u: number) => a + (b - a) * u
 
 /** Deterministic value-noise in [-1,1] (no Math.random — reproducible). */
 function noise(t: number): number {
@@ -56,17 +63,36 @@ function heartbeat(dt: number): number {
   return thump(0, 1) + thump(0.18, 0.7)
 }
 
-/** A swelling chord: detuned sines on A2/E3/A3 with a slow attack. */
-function pad(t: number, dur: number): number {
-  const freqs = [110, 164.81, 220]
-  const attack = ramp(t, 0.4, dur * 0.55)
-  const release = 1 - ramp(t, dur - 1.4, dur)
+// Mood → musical character. Chords are root-frequency sets (Hz).
+const MOOD: Record<Mood, { tense: number[]; resolved: number[]; bright: number; impact: number }> = {
+  // Asus → A major lift
+  build: { tense: [110, 146.83, 220], resolved: [110, 164.81, 220, 277.18], bright: 1, impact: 0.95 },
+  // softer, closer voicing; minor-add → warm major
+  intimate: { tense: [98, 146.83, 196], resolved: [98, 164.81, 196, 246.94], bright: 0.7, impact: 0.7 },
+  // wide, cinematic
+  epic: { tense: [82.41, 123.47, 164.81], resolved: [82.41, 130.81, 196, 329.63], bright: 1.2, impact: 1.15 },
+}
+
+/** Swelling pad whose chord progresses from a "tense" voicing to a "resolved"
+ *  one over the back half — plus a gentle tremolo so it never sits dead. */
+function pad(t: number, dur: number, mood: Mood): number {
+  const m = MOOD[mood]
+  const prog = ramp(t, dur * 0.45, dur * 0.86) // tense → resolved
+  const attack = ramp(t, 0.4, dur * 0.5)
+  const release = 1 - ramp(t, dur - 1.0, dur)
+  const tremolo = 0.9 + 0.1 * Math.sin(2 * Math.PI * 0.7 * t) // subtle life
   let s = 0
-  for (const f of freqs) {
+  let n = 0
+  const voices = Math.max(m.tense.length, m.resolved.length)
+  for (let i = 0; i < voices; i++) {
+    const fa = m.tense[i] ?? m.tense[m.tense.length - 1]
+    const fb = m.resolved[i] ?? m.resolved[m.resolved.length - 1]
+    const f = lerp(fa, fb, prog)
     s += Math.sin(2 * Math.PI * f * t)
-    s += Math.sin(2 * Math.PI * f * 1.003 * t) * 0.6 // detune shimmer
+    s += Math.sin(2 * Math.PI * f * 1.003 * t) * 0.5 // detune shimmer
+    n += 1.5
   }
-  return (s / 5) * attack * release
+  return (s / n) * attack * release * tremolo
 }
 
 /** Filtered-noise riser into a target time. */
@@ -74,40 +100,66 @@ function riser(t: number, target: number): number {
   const lead = 3.2
   const u = ramp(t, target - lead, target)
   if (u <= 0) return 0
-  // brighten + load as it approaches the hit
   const tone = Math.sin(2 * Math.PI * (200 + 1400 * u) * t)
   const air = noise(t * (1 + 6 * u))
   return (tone * 0.4 + air * 0.6) * u * u
 }
 
 /** Low impact boom + bright shimmer at a beat. */
-function impact(dt: number): number {
+function impact(dt: number, gain: number): number {
   if (dt < 0) return 0
   const boom = Math.sin(2 * Math.PI * 48 * dt) * Math.exp(-dt * 6)
   const body = Math.sin(2 * Math.PI * 90 * dt) * Math.exp(-dt * 9) * 0.5
   const shimmer = noise(dt * 9000) * Math.exp(-dt * 7) * 0.4
-  return boom + body + shimmer
+  return (boom + body + shimmer) * gain
+}
+
+/** Resolve tail: a bell/celesta arpeggio over the resolved chord after the
+ *  final impact, so the last few seconds keep moving and land warm. */
+function resolveTail(t: number, impactT: number, dur: number, mood: Mood): number {
+  if (t < impactT) return 0
+  const m = MOOD[mood]
+  // arpeggiate the resolved chord, two octaves up, one note every ~0.42s
+  const notes = m.resolved.map((f) => f * 4)
+  const step = 0.42
+  let s = 0
+  for (let i = 0; i < notes.length + 2; i++) {
+    const onset = impactT + 0.12 + i * step
+    const d = t - onset
+    if (d < 0 || d > 2.2) continue
+    const f = notes[i % notes.length] * (i >= notes.length ? 1.5 : 1)
+    // bell = fundamental + inharmonic partial, fast attack, long decay
+    const env = Math.exp(-d * 2.6)
+    const bell = (Math.sin(2 * Math.PI * f * d) + 0.4 * Math.sin(2 * Math.PI * f * 2.76 * d)) * env
+    s += bell
+  }
+  const tailFade = 1 - ramp(t, dur - 0.8, dur)
+  return s * 0.16 * m.bright * tailFade
 }
 
 /** Build the stereo sample buffer for the score. */
 export function renderTrailerAudio(opts: AudioOpts): Buffer {
   const { durationSec, beats } = opts
+  const mood: Mood = opts.mood ?? "build"
+  const m = MOOD[mood]
   const n = Math.floor(durationSec * SAMPLE_RATE)
   const buf = Buffer.alloc(n * 2 * 2) // 16-bit, stereo
 
   const impactTimes = beats.filter((b) => b.kind === "impact").map((b) => b.t)
   const thumpTimes = beats.filter((b) => b.kind === "thump").map((b) => b.t)
-  const lastImpact = impactTimes.length ? impactTimes[impactTimes.length - 1] : durationSec - 0.6
+  const lastImpact = impactTimes.length ? impactTimes[impactTimes.length - 1] : durationSec - 3.0
 
   for (let i = 0; i < n; i++) {
     const t = i / SAMPLE_RATE
     let s = 0
-    s += pad(t, durationSec) * 0.5
+    s += pad(t, durationSec, mood) * 0.5
     for (const bt of thumpTimes) s += heartbeat(t - bt) * 0.6
-    // also a steady heartbeat pulse through the body for continuity
-    s += heartbeat((t % 1.5)) * 0.18 * ramp(t, 0.5, 2.5) * (1 - ramp(t, durationSec - 2, durationSec))
+    // steady heartbeat pulse through the BODY only — it stops before the
+    // resolve so the ending breathes instead of thudding mechanically.
+    s += heartbeat(t % 1.5) * 0.18 * ramp(t, 0.5, 2.5) * (1 - ramp(t, lastImpact - 1.2, lastImpact))
     s += riser(t, lastImpact) * 0.45
-    for (const it of impactTimes) s += impact(t - it) * 0.9
+    for (const it of impactTimes) s += impact(t - it, m.impact) * 0.9
+    s += resolveTail(t, lastImpact, durationSec, mood)
 
     // master: soft saturation + gentle fade in/out
     const fade = ramp(t, 0, 0.4) * (1 - ramp(t, durationSec - 0.5, durationSec))

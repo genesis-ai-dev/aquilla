@@ -174,10 +174,21 @@ export class Showcase {
   // region of interest is magnified — all as overlay/visual-only transforms
   // that never touch assertions and are stripped in save().
 
+  /**
+   * Resolve a target string to a CSS selector. A leading "@" addresses a
+   * readable showcase label, i.e. `@sidebar.file` → `[data-showcase="sidebar.file"]`
+   * (see docs/distribution/SHOWCASE-LABELS.md). Anything else is a raw selector.
+   * This is what lets a doc script read like directions — `click("@sidebar.file")`
+   * lands on a real, addressable list item rather than a guessed coordinate.
+   */
+  private toSelector(target: string): string {
+    return target.startsWith("@") ? `[data-showcase="${target.slice(1)}"]` : target
+  }
+
   /** Centre of a selector (Playwright box, so it reflects any active zoom). */
   private async resolvePoint(target: Target): Promise<{ x: number; y: number }> {
     if (typeof target !== "string") return target
-    const box = await this.page.locator(target).first().boundingBox()
+    const box = await this.page.locator(this.toSelector(target)).first().boundingBox()
     if (!box) throw new Error(`showcase: cursor target not visible: ${target}`)
     return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
   }
@@ -227,7 +238,7 @@ export class Showcase {
     await this.cursorTo(pt, { ms })
     await this.ripple(pt)
     if (!real) return
-    if (typeof target === "string") await this.page.locator(target).first().click()
+    if (typeof target === "string") await this.page.locator(this.toSelector(target)).first().click()
     else await this.page.mouse.click(pt.x, pt.y)
   }
 

@@ -2093,6 +2093,7 @@ function EditorRow({
           })()
         ) : (
           <div
+            data-showcase="editor.source"
             className={cn(
               "flex flex-col transition-opacity",
               isSynthBusy && "opacity-70",
@@ -2143,6 +2144,7 @@ function EditorRow({
             detail) lives in the expansion panel. pr-9 reserves space for the
             ever-present chevron at the right edge. */}
         <div
+          data-showcase="editor.target"
           className={cn(
             "relative flex flex-col pl-3 pr-9 transition-opacity",
             isSynthBusy && "opacity-70",
@@ -2395,6 +2397,7 @@ function EditorRow({
                     render={
                       <button
                         type="button"
+                        data-showcase="cell.health"
                         className={cn(
                           "relative flex h-6 w-6 items-center justify-center rounded-full transition-[transform,color,background-color] duration-150 ease-out",
                           "active:scale-[0.88] disabled:cursor-not-allowed disabled:opacity-30",

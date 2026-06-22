@@ -43,7 +43,7 @@ Set `mode` on the `Showcase` options (recorded in the storyboard so the assemble
   - `point(target)` — glide the big programmatic cursor to a target and pulse a ring (no click).
   - `click(target)` — glide, pulse, then perform the **real** DOM click.
   - `zoomTo(target, { scale })` — magnify the app around a target (transforms `#root` only, so captions/brand stay crisp); `zoomReset()` eases back. Always zoom from an unzoomed state.
-  - `target` is a CSS selector (resolved to its centre) **or** a `{ x, y }` point — compute a point from any Playwright locator for rows/controls without a stable selector.
+  - `target` is a **readable showcase label** (`"@sidebar.file"` → `[data-showcase="sidebar.file"]`, see [SHOWCASE-LABELS.md](../../docs/distribution/SHOWCASE-LABELS.md)), a raw CSS selector, **or** a `{ x, y }` point. Prefer `@labels` — they make scripts read like directions and land on real, addressable components instead of guessed coordinates.
   - See `specs/demo-curated-doc.showcase.ts` for the canonical doc take over the curated project.
 - **`mode: "promo"` (default) — amaze-first.** Fast cuts, big claims; the trailer pipeline. `specs/demo-curated.showcase.ts` is the populated-project promo take.
 
@@ -52,6 +52,26 @@ Both drive the **real** app via the marketing login (`auth-worker/src/routes/mar
 ## ⚠️ Don't `git push` while a recording is running
 
 The `pre-push` husky hook runs `npm run test:e2e:smoke`, which boots its **own** e2e stack on ports `8787`/`8788` — the same ports the recording stack uses. Running both at once kills one of the auth-workers (the recording then fails with `ECONNREFUSED 127.0.0.1:8787`). **Let the recording finish, confirm `e2e-up` has exited, then push.**
+
+## Promo trailer (deterministic) — `scripts/promo/`
+
+The promo cut is built by a separate, deterministic harness (not Playwright video). The whole trailer is a **pure function of time**, so it renders identically every run with zero dropped frames:
+
+```bash
+npm run promo:capture   # grab real, chrome-free app stills via the marketing login (boots the stack)
+npm run promo           # render frames + synth audio + ffmpeg → MP4 (16:9 + 9:16)
+npm run promo:all       # capture, then build
+```
+
+Pipeline:
+
+1. **`promo-capture.showcase.ts`** drives the real curated app (marketing login + `@showcase` labels) and writes hero stills to `output/promo/app/`. *Real footage, not mockups.*
+2. **`compose.html`** is a self-contained composition exposing `window.__seek(t)` — background, framed device panel (composites the captured stills, Ken-Burns crossfade), kinetic type, heartbeat pulse, CTA lockup. No `requestAnimationFrame`/CSS-transition state; everything derives from `t`.
+3. **`render.ts`** loads it in headless Chromium and seek-and-shoots every frame (`__seek(frame/fps)` → screenshot).
+4. **`synth-audio.ts`** code-synthesizes the score (heartbeat + pad + riser + impact) as raw PCM/WAV — rights-clean, beats aligned to the shared grid.
+5. **`build.ts`** muxes frames + audio with ffmpeg into a 16:9 master and a 9:16 social reformat.
+
+`promo.config.ts` is the single source of truth for duration/fps/scenes/beats — edit a number, re-run `npm run promo`. If no app stills exist yet, the composition falls back to a stylized panel so the pipeline always produces something.
 
 ## Anonymization
 

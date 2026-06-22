@@ -136,8 +136,12 @@ export class Showcase {
     await this.page.waitForTimeout(ms)
   }
 
-  /** Strip the overlay and persist the storyboard contract for assembly. */
-  async save(): Promise<string> {
+  /** Strip the overlay and persist the storyboard contract for assembly.
+   *
+   * @param verified whether the take's value/money moment actually rendered
+   *   (asserted by the spec). When false the storyboard is a partial cut —
+   *   the assembler/human must not ship it as a value claim. */
+  async save(verified = true): Promise<string> {
     if (this.overlayReady) {
       await this.page.evaluate(() => document.getElementById("__showcase_layer")?.remove())
     }
@@ -153,6 +157,7 @@ export class Showcase {
           feature: this.opts.feature,
           title: this.opts.title,
           cta: this.opts.cta,
+          verified,
           durationMs: this.now(),
           chapters: this.chapters,
           captions: this.captions,

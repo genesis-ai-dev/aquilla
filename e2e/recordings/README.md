@@ -58,10 +58,13 @@ The `pre-push` husky hook runs `npm run test:e2e:smoke`, which boots its **own**
 The promo cut is built by a separate, deterministic harness (not Playwright video). The whole trailer is a **pure function of time**, so it renders identically every run with zero dropped frames:
 
 ```bash
-npm run promo:capture   # grab real, chrome-free app stills via the marketing login (boots the stack)
-npm run promo           # render frames + synth audio + ffmpeg → MP4 (16:9 + 9:16)
-npm run promo:all       # capture, then build
+npm run promo:capture                            # real, chrome-free app stills via the marketing login (boots the stack; reused across personas)
+npm run promo -- --persona p5-org-admin          # the manager's cut
+npm run promo -- --persona p1-field-translator   # the translator's cut
+npm run promo:all                                # capture, then build the default persona
 ```
+
+Each trailer is **persona-targeted**: the emotion that lands a project manager ("Lead the work. Not the chaos.") is not the one that lands a field translator ("Your words, always kept."). A persona's **brief** (`scripts/promo/briefs/<slug>.brief.json` — the throughline, the five scenes' copy, the musical `mood`, the beats) is the only thing that changes between cuts; the renderer is shared. Briefs are authored by a **sub-agent creative process** — see [PROMO-CREATIVE-PROCESS.md](../../docs/distribution/PROMO-CREATIVE-PROCESS.md).
 
 Pipeline:
 

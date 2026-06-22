@@ -6,10 +6,10 @@
 // Anatomy (a small card):
 //   ━━●━━ ( ▶ ) 0:03   once voiced: a waveform with a centered play/pause +
 //                       running time (hover reveals crop / volume / clone).
-//   [N Narrator] [T Elder] [M Mary] →   the whole cast as a scrollable chip
-//                       strip. Clicking a chip INSTANTLY (re)generates THIS line
-//                       with that voice — no "pick then generate", no dropdown.
-//                       The active voice's chip is highlighted.
+//   [M Mary ⌄]          the cast as a single searchable combobox showing the
+//                       active voice. Opening it picks any of the (60+) voices;
+//                       picking one INSTANTLY (re)generates THIS line with it.
+//                       Recently-used voices float to the top of the list.
 //
 // Playback is driven by useCellAudio (its own element) rather than the global
 // play-queue, so each line gets an independent scrubber + volume; the app-wide
@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  Check, MoreHorizontal, Pause, Play, Search, UserPlus, Volume2, VolumeX,
+  Check, ChevronsUpDown, Pause, Play, Search, UserPlus, Volume2, VolumeX,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -59,10 +59,6 @@ interface CellVoicePanelProps {
   /** Open the character creator seeded with THIS cell's take (clone source). */
   onMakeCharacter: () => void
 }
-
-// How many voices the per-line cast strip shows inline before the rest collapse
-// into the "More" picker.
-const INLINE_VOICES = 5
 
 function fmtTime(s: number): string {
   if (!Number.isFinite(s) || s <= 0) return "0:00"
@@ -332,28 +328,18 @@ export function CellVoicePanel({
     else void play()
   }, [isVoicing, hasTake, isPlaying, pause, play])
 
-  // Surface the few voices you actually reach for. The cast strip shows the most
-  // recently used INLINE_VOICES (the active voice always kept in view); the long
-  // tail (60+ voices) lives behind a searchable "More" picker so it never clogs
-  // the row. (Hooks must run before the paratext/untranslated early-returns.)
+  // Order the cast for the combobox list: most-recently-used voices first so the
+  // ones you reach for are right at the top. The whole cast (60+ voices) lives
+  // behind one searchable trigger, so a large cast never clogs the row. (Hooks
+  // must run before the paratext/untranslated early-returns.)
   const recency = useVoiceRecency(projectId)
-  const visible = useMemo(() => {
+  const ordered = useMemo(() => {
     const rank = (id: string) => {
       const i = recency.indexOf(id)
       return i === -1 ? Number.MAX_SAFE_INTEGER : i
     }
-    const ordered = [...voices].sort((a, b) => rank(a.id) - rank(b.id))
-    const head = ordered.slice(0, INLINE_VOICES)
-    const active = voices.find((v) => v.id === resolvedVoice.id)
-    if (active && !head.some((v) => v.id === active.id)) {
-      return [active, ...head.slice(0, INLINE_VOICES - 1)]
-    }
-    return head
-  }, [voices, recency, resolvedVoice.id])
-  const overflow = useMemo(
-    () => voices.filter((v) => !visible.some((x) => x.id === v.id)),
-    [voices, visible],
-  )
+    return [...voices].sort((a, b) => rank(a.id) - rank(b.id))
+  }, [voices, recency])
 
   // Section breaks (paratext) aren't voiced — render nothing.
   if (isParatext) return null
@@ -422,77 +408,27 @@ export function CellVoicePanel({
         </div>
       )}
 
-      {/* The cast — clicking a chip instantly (re)voices this line with that
-          voice. Shows your most-recent few; the rest hide behind "More". */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
-        {visible.map((v) => (
-          <VoiceChip
-            key={v.id}
-            voice={v}
-            active={v.id === resolvedVoice.id}
-            busy={isVoicing}
-            onClick={() => generateWith(v.id)}
-          />
-        ))}
-        {overflow.length > 0 && (
-          <MoreVoicesButton
-            voices={overflow}
-            activeId={resolvedVoice.id}
-            busy={isVoicing}
-            onPick={generateWith}
-          />
-        )}
-      </div>
+      {/* The cast — a single searchable combobox showing the active voice.
+          Picking any voice instantly (re)voices this line with it. */}
+      <VoiceCombobox
+        voices={ordered}
+        active={resolvedVoice}
+        busy={isVoicing}
+        onPick={generateWith}
+      />
     </div>
   )
 }
 
-/** A cast chip: avatar + name. Clicking (re)generates the line with this voice;
- *  the active voice is highlighted and shows a spinner while voicing. */
-function VoiceChip({
-  voice, active, busy, onClick,
-}: {
-  voice: Voice
-  active: boolean
-  busy: boolean
-  onClick: () => void
-}) {
-  return (
-    <AppTooltip content={`Generate with ${voice.name}`}>
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={busy}
-        aria-pressed={active}
-        className={cn(
-          "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-1 text-xs transition-colors disabled:cursor-default disabled:opacity-60",
-          active
-            ? "border-primary bg-primary/10 font-medium text-foreground"
-            : "border-border hover:bg-accent/50",
-        )}
-      >
-        <span className="relative">
-          <VoiceAvatar voice={voice} size={18} />
-          {busy && active && (
-            <span className="absolute inset-0 grid place-items-center rounded-full bg-background/75">
-              <Spinner className="h-3 w-3" />
-            </span>
-          )}
-        </span>
-        <span className="max-w-[8rem] truncate">{voice.name}</span>
-      </button>
-    </AppTooltip>
-  )
-}
-
-/** The overflow picker: a "More" chip that opens a searchable list of the
- *  remaining voices. Clicking one (re)voices the line instantly — same one-click
- *  action as the inline chips, just for the long tail. */
-function MoreVoicesButton({
-  voices, activeId, busy, onPick,
+/** The cast combobox: a single trigger showing the active voice that opens a
+ *  searchable list of the whole cast. Picking one (re)voices the line instantly
+ *  — same one-click action as before, just collapsed so a large cast (60+
+ *  voices) stays usable. The active voice spins while voicing. */
+function VoiceCombobox({
+  voices, active, busy, onPick,
 }: {
   voices: Voice[]
-  activeId: string
+  active: Voice
   busy: boolean
   onPick: (voiceId: string) => void
 }) {
@@ -502,17 +438,31 @@ function MoreVoicesButton({
     const q = query.trim().toLowerCase()
     return q ? voices.filter((v) => v.name.toLowerCase().includes(q)) : voices
   }, [voices, query])
+  // Forget the search between openings so the next open starts on the full cast.
+  useEffect(() => {
+    if (!open) setQuery("")
+  }, [open])
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
           <button
             type="button"
-            title="More voices"
-            className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-dashed px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground data-[popup-open]:bg-accent/50"
+            disabled={busy}
+            title="Choose a voice"
+            aria-label={`Voice: ${active.name}. Choose a voice`}
+            className="flex w-full items-center gap-1.5 rounded-full border border-border px-2 py-1 text-xs transition-colors hover:bg-accent/50 disabled:cursor-default disabled:opacity-60 data-[popup-open]:bg-accent/50"
           >
-            <MoreHorizontal className="h-3.5 w-3.5" /> More
-            <span className="tabular-nums opacity-70">{voices.length}</span>
+            <span className="relative shrink-0">
+              <VoiceAvatar voice={active} size={18} />
+              {busy && (
+                <span className="absolute inset-0 grid place-items-center rounded-full bg-background/75">
+                  <Spinner className="h-3 w-3" />
+                </span>
+              )}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-left font-medium text-foreground">{active.name}</span>
+            <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           </button>
         }
       />
@@ -542,7 +492,7 @@ function MoreVoicesButton({
               >
                 <VoiceAvatar voice={v} size={20} />
                 <span className="min-w-0 flex-1 truncate">{v.name}</span>
-                {v.id === activeId && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+                {v.id === active.id && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
               </button>
             ))
           )}

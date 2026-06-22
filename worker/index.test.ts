@@ -50,6 +50,21 @@ describe("worker/index — routing", () => {
     expect(await res.text()).toBe("served:/homepage.html")
   })
 
+  it("GET /beta serves beta.html (static marketing page, no cookie)", async () => {
+    const res = await fetchWorker("/beta")
+    expect(await res.text()).toBe("served:/beta.html")
+  })
+
+  it("GET /beta serves beta.html even when signed in (aq_hint=1)", async () => {
+    const res = await fetchWorker("/beta", "aq_hint=1")
+    expect(await res.text()).toBe("served:/beta.html")
+  })
+
+  it("GET /betamax is NOT treated as the /beta page (passes through to ASSETS)", async () => {
+    const res = await fetchWorker("/betamax")
+    expect(await res.text()).toBe("served:/betamax")
+  })
+
   it("GET /project/abc passes through to ASSETS unchanged", async () => {
     const res = await fetchWorker("/project/abc")
     expect(await res.text()).toBe("served:/project/abc")

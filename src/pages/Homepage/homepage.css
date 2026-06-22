@@ -239,6 +239,72 @@
    "Start free" (primary CTA) and the theme toggle remain. */
 @media (max-width: 480px) { .aq-nav-cta .aq-btn-ghost { display: none; } }
 
+/* ── Beta strip ─────────────────────────────────────────────────────────── */
+.aq-betabar {
+  position: relative;
+  z-index: 49; /* below the sticky nav (50) so the nav overlaps it on scroll */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 48px 8px 16px; /* right padding clears the close button */
+  background: var(--aq-accent-wash);
+  border-bottom: 1px solid var(--aq-accent-line);
+}
+.aq-betabar-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  color: var(--aq-dim);
+  transition: color 0.18s ease;
+}
+.aq-betabar-link:hover { color: var(--aq-text); }
+.aq-betabar-link:hover .aq-betabar-arrow { transform: translateX(3px); }
+.aq-betabar-tag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--aq-btn-ink);
+  background: linear-gradient(180deg, var(--aq-gold-soft), var(--aq-gold));
+  padding: 2px 7px;
+  border-radius: 999px;
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.35);
+}
+.aq-betabar-text { font-weight: 500; }
+.aq-betabar-arrow {
+  color: var(--aq-gold);
+  font-weight: 600;
+  transition: transform 0.18s ease;
+}
+.aq-betabar-close {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--aq-faint);
+  background: transparent;
+  border: none;
+  transition: color 0.18s ease, background 0.18s ease;
+}
+.aq-betabar-close:hover { color: var(--aq-text); background: var(--aq-fill-2); }
+@media (max-width: 560px) {
+  .aq-betabar-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 60vw;
+  }
+}
+
 /* ── Buttons ────────────────────────────────────────────────────────────── */
 .aq-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -781,4 +847,66 @@
     transition-duration: 0.001ms !important;
   }
   .aq-load, .aq-reveal { opacity: 1 !important; transform: none !important; }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   /beta explainer page — reuses the homepage surface; these are the only
+   beta-specific blocks (the "what beta means" cards and the Now/Next/Later
+   roadmap).
+   ──────────────────────────────────────────────────────────────────────── */
+.aq-beta-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+  margin-top: 44px;
+}
+.aq-beta-card {
+  display: flex;
+  gap: 12px;
+  padding: 22px;
+  border-radius: var(--aq-radius);
+  border: 1px solid var(--aq-line);
+  background: var(--aq-fill);
+}
+.aq-beta-card > svg { color: var(--aq-gold); flex-shrink: 0; margin-top: 2px; }
+.aq-beta-card h3 { font-size: 16px; font-weight: 560; color: var(--aq-text); margin-bottom: 6px; }
+.aq-beta-card p { font-size: 14px; line-height: 1.55; color: var(--aq-dim); }
+
+.aq-roadmap {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+  margin-top: 44px;
+  align-items: start;
+}
+.aq-road-col {
+  padding: 24px;
+  border-radius: var(--aq-radius);
+  border: 1px solid var(--aq-line);
+  background: var(--aq-fill);
+}
+/* "Now" gets the accent treatment so the eye lands on what's shippable today. */
+.aq-road-col[data-phase="now"] {
+  border-color: var(--aq-accent-line);
+  background: var(--aq-accent-wash);
+}
+.aq-road-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.aq-road-phase {
+  font-family: 'Fraunces', 'Geist Variable', Georgia, serif;
+  font-size: 24px;
+  font-weight: 460;
+  letter-spacing: -0.01em;
+  color: var(--aq-text);
+}
+.aq-road-col[data-phase="now"] .aq-road-phase { color: var(--aq-gold); }
+.aq-road-tone {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--aq-faint);
+}
+.aq-road-blurb { font-size: 14px; line-height: 1.55; color: var(--aq-dim); margin-bottom: 16px; }
+
+@media (max-width: 880px) {
+  .aq-beta-cards, .aq-roadmap { grid-template-columns: 1fr; }
 }

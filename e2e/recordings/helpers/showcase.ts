@@ -26,7 +26,19 @@ export interface ShowcaseOpts {
   title: string
   /** One-line value proposition rendered as the closing card. */
   cta: string
+  /**
+   * Editorial profile, recorded in the storyboard so the assembler can pick
+   * pacing + framing:
+   *  - "doc"   → clarity-first: programmatic cursor, zoom-into-click, slow
+   *               captioned steps. The default when you use cursor()/zoom().
+   *  - "promo" → amaze-first: fast cuts, big claims (the trailer pipeline).
+   * Defaults to "promo" to preserve existing takes.
+   */
+  mode?: "doc" | "promo"
 }
+
+/** A cursor/zoom target: a CSS selector (resolved to its centre) or a point. */
+export type Target = string | { x: number; y: number }
 
 /**
  * Showcase driver — wraps a Playwright Page to produce *legible marketing
@@ -53,6 +65,7 @@ export class Showcase {
   private readonly chapters: ChapterMark[] = []
   private readonly captions: CaptionMark[] = []
   private overlayReady = false
+  private zoomed = false
 
   constructor(page: Page, opts: ShowcaseOpts) {
     this.page = page
@@ -85,13 +98,32 @@ export class Showcase {
         #__showcase_bug{position:absolute;right:28px;top:24px;color:#fff;opacity:.85;
           font-size:15px;font-weight:700;letter-spacing:.04em;
           text-shadow:0 1px 6px rgba(0,0,0,.6)}
+        #__showcase_cursor{position:absolute;left:0;top:0;width:30px;height:30px;
+          transform:translate(-120px,-120px);
+          transition:transform .7s cubic-bezier(.22,.61,.36,1);
+          will-change:transform;filter:drop-shadow(0 3px 7px rgba(0,0,0,.5))}
+        #__showcase_ring{position:absolute;left:0;top:0;width:26px;height:26px;border-radius:999px;
+          border:3px solid #6aa9ff;opacity:0;
+          transform:translate(-50%,-50%) scale(.3)}
+        #__showcase_ring.pulse{animation:__sc_ring .55s ease-out}
+        @keyframes __sc_ring{
+          0%{opacity:.85;transform:translate(-50%,-50%) scale(.3)}
+          100%{opacity:0;transform:translate(-50%,-50%) scale(2.6)}}
       `,
     })
     await this.page.evaluate(() => {
       const layer = document.createElement("div")
       layer.id = "__showcase_layer"
+      // Cursor tip sits at the element's translate origin (~3,3 inside the SVG).
       layer.innerHTML = `
         <div id="__showcase_bug">AQUILLA</div>
+        <div id="__showcase_ring"></div>
+        <div id="__showcase_cursor">
+          <svg viewBox="0 0 24 24" width="30" height="30">
+            <path d="M3 2 L3 20 L8 15 L11.5 22 L14.5 20.5 L11 13.5 L18 13.5 Z"
+              fill="#fff" stroke="#0c1018" stroke-width="1.4" stroke-linejoin="round"/>
+          </svg>
+        </div>
         <div id="__showcase_chapter"><div class="t"></div><div class="s"></div></div>
         <div id="__showcase_caption"></div>`
       document.body.appendChild(layer)
@@ -136,12 +168,125 @@ export class Showcase {
     await this.page.waitForTimeout(ms)
   }
 
+  // ───────────────────────── documentation toolkit ─────────────────────────
+  // A programmatic cursor + zoom-into-click so doc takes read clearly: the
+  // viewer's eye is led to the exact control, the click is punctuated, and the
+  // region of interest is magnified — all as overlay/visual-only transforms
+  // that never touch assertions and are stripped in save().
+
+  /** Centre of a selector (Playwright box, so it reflects any active zoom). */
+  private async resolvePoint(target: Target): Promise<{ x: number; y: number }> {
+    if (typeof target !== "string") return target
+    const box = await this.page.locator(target).first().boundingBox()
+    if (!box) throw new Error(`showcase: cursor target not visible: ${target}`)
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+  }
+
+  /** Glide the on-screen cursor to a target. Lower-level; prefer point()/click(). */
+  async cursorTo(target: Target, { ms = 700 }: { ms?: number } = {}): Promise<void> {
+    await this.ensureOverlay()
+    const { x, y } = await this.resolvePoint(target)
+    await this.page.evaluate(
+      ([x, y, ms]) => {
+        const c = document.getElementById("__showcase_cursor")
+        if (!c) return
+        c.style.transition = `transform ${ms}ms cubic-bezier(.22,.61,.36,1)`
+        c.style.transform = `translate(${x - 3}px, ${y - 3}px)`
+      },
+      [x, y, ms] as const,
+    )
+    await this.page.waitForTimeout(ms + 120)
+  }
+
+  /** Pulse a click ripple at a screen point. */
+  private async ripple(pt: { x: number; y: number }): Promise<void> {
+    await this.page.evaluate(
+      ([x, y]) => {
+        const r = document.getElementById("__showcase_ring")
+        if (!r) return
+        r.style.left = `${x}px`
+        r.style.top = `${y}px`
+        r.classList.remove("pulse")
+        void r.offsetWidth // force reflow so the animation re-fires
+        r.classList.add("pulse")
+      },
+      [pt.x, pt.y] as const,
+    )
+    await this.page.waitForTimeout(560)
+  }
+
+  /** Lead the eye: glide the cursor to a target and pulse a ring, no click. */
+  async point(target: Target, { ms = 700 }: { ms?: number } = {}): Promise<void> {
+    await this.cursorTo(target, { ms })
+    await this.ripple(await this.resolvePoint(target))
+  }
+
+  /** Glide to a target, punctuate with a ripple, then perform the real click. */
+  async click(target: Target, { ms = 700, real = true }: { ms?: number; real?: boolean } = {}): Promise<void> {
+    const pt = await this.resolvePoint(target)
+    await this.cursorTo(pt, { ms })
+    await this.ripple(pt)
+    if (!real) return
+    if (typeof target === "string") await this.page.locator(target).first().click()
+    else await this.page.mouse.click(pt.x, pt.y)
+  }
+
+  /** Magnify the app around a target (visual emphasis on #root only — the
+   * overlay stays crisp). Always zooms from the unzoomed state for correct
+   * transform-origin math. */
+  async zoomTo(
+    target: Target,
+    { scale = 1.6, ms = 650 }: { scale?: number; ms?: number } = {},
+  ): Promise<void> {
+    await this.ensureOverlay()
+    if (this.zoomed) await this.zoomReset({ ms: 280 })
+    const pt = await this.resolvePoint(target)
+    await this.page.evaluate(
+      ([x, y, scale, ms]) => {
+        const root = document.getElementById("root")
+        if (!root) return
+        const rb = root.getBoundingClientRect()
+        root.style.transition = `transform ${ms}ms cubic-bezier(.22,.61,.36,1)`
+        root.style.transformOrigin = `${x - rb.left}px ${y - rb.top}px`
+        root.style.transform = `scale(${scale})`
+      },
+      [pt.x, pt.y, scale, ms] as const,
+    )
+    this.zoomed = true
+    await this.page.waitForTimeout(ms + 120)
+  }
+
+  /** Ease the app back to 1×. */
+  async zoomReset({ ms = 520 }: { ms?: number } = {}): Promise<void> {
+    if (!this.zoomed) return
+    await this.page.evaluate((ms) => {
+      const root = document.getElementById("root")
+      if (!root) return
+      root.style.transition = `transform ${ms}ms cubic-bezier(.22,.61,.36,1)`
+      root.style.transform = "none"
+    }, ms)
+    this.zoomed = false
+    await this.page.waitForTimeout(ms + 80)
+  }
+
   /** Strip the overlay and persist the storyboard contract for assembly.
    *
    * @param verified whether the take's value/money moment actually rendered
    *   (asserted by the spec). When false the storyboard is a partial cut —
    *   the assembler/human must not ship it as a value claim. */
   async save(verified = true): Promise<string> {
+    // Clear any zoom transform so the DOM is pristine for post-take assertions.
+    await this.page
+      .evaluate(() => {
+        const root = document.getElementById("root")
+        if (root) {
+          root.style.transform = ""
+          root.style.transformOrigin = ""
+          root.style.transition = ""
+        }
+      })
+      .catch(() => {})
+    this.zoomed = false
     if (this.overlayReady) {
       await this.page.evaluate(() => document.getElementById("__showcase_layer")?.remove())
     }
@@ -157,6 +302,7 @@ export class Showcase {
           feature: this.opts.feature,
           title: this.opts.title,
           cta: this.opts.cta,
+          mode: this.opts.mode ?? "promo",
           verified,
           durationMs: this.now(),
           chapters: this.chapters,

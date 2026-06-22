@@ -9,6 +9,7 @@ import { AssignedToMe } from "@/components/org/AssignedToMe"
 import { JoinPage } from "@/components/JoinPage"
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
 import { DevLoginRoute } from "@/components/DevLoginRoute"
+import { MarketingLoginRoute } from "@/components/MarketingLoginRoute"
 import { Preferences } from "@/pages/Preferences"
 import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
 import { OrgProvider } from "@/context/OrgContext"
@@ -140,6 +141,8 @@ function AppRoutes() {
         <Route path="/onboarding" element={<OnboardingWizard />} />
         {/* Dev-only auto-login — see components/DevLoginRoute.tsx */}
         <Route path="/__dev/login" element={<DevLoginRoute />} />
+        {/* Curated marketing/demo auto-login — see components/MarketingLoginRoute.tsx */}
+        <Route path="/__marketing/login" element={<MarketingLoginRoute />} />
 
         {/* Lazy — org-level pages */}
         <Route path="/projects/archived" element={<ArchivedProjects />} />

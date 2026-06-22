@@ -67,6 +67,7 @@ import usersRoutes from "./routes/users"
 import adminRoutes from "./routes/admin"
 import testResetRoutes from "./routes/test-reset"
 import devSeedRoutes from "./routes/dev-seed"
+import marketingSeedRoutes from "./routes/marketing-seed"
 import chatRoutes from "./routes/chat"
 import parseDocumentRoutes from "./routes/parse-document"
 
@@ -169,6 +170,8 @@ app.route("/api/v2/parse-document", parseDocumentRoutes)
 app.route("/__test__", testResetRoutes)
 // Dev-only seed + login bypass (WRANGLER_LOCAL only — see routes/dev-seed.ts).
 app.route("/__dev__", devSeedRoutes)
+// Curated marketing/demo seed + login (WRANGLER_LOCAL only — see routes/marketing-seed.ts).
+app.route("/__marketing__", marketingSeedRoutes)
 
 app.notFound((c) => c.json({ error: "Not found" }, 404))
 

@@ -30,8 +30,9 @@ export default defineConfig({
   // A bad take should fail loudly, not silently retry into a different cut.
   retries: 0,
   reporter: "list",
-  // slowMo stretches every action; give specs generous headroom.
-  timeout: 180_000,
+  // slowMo + deliberate caption holds stretch a full journey; give generous
+  // headroom so a take never truncates mid-story.
+  timeout: 300_000,
 
   use: {
     baseURL: "http://127.0.0.1:5173",

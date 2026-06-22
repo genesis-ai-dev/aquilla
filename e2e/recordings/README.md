@@ -35,6 +35,24 @@ npm run record:assemble -- --slug p1-field-translator__local-first-editing --vo
 4. **Assert the value moment is real** (an `expect`). A take is only shippable if the thing you're claiming actually happened on screen — same discipline as `verify-dev-change`.
 5. If the underlying journey is currently `test.fixme` in the e2e suite, mark the showcase `test.fixme` too (don't record a broken flow) and note the blocking issue.
 
+## Two profiles: docs vs promo
+
+Set `mode` on the `Showcase` options (recorded in the storyboard so the assembler can pick pacing/framing):
+
+- **`mode: "doc"` — clarity-first.** Teaches. Use the documentation toolkit to lead the viewer's eye:
+  - `point(target)` — glide the big programmatic cursor to a target and pulse a ring (no click).
+  - `click(target)` — glide, pulse, then perform the **real** DOM click.
+  - `zoomTo(target, { scale })` — magnify the app around a target (transforms `#root` only, so captions/brand stay crisp); `zoomReset()` eases back. Always zoom from an unzoomed state.
+  - `target` is a CSS selector (resolved to its centre) **or** a `{ x, y }` point — compute a point from any Playwright locator for rows/controls without a stable selector.
+  - See `specs/demo-curated-doc.showcase.ts` for the canonical doc take over the curated project.
+- **`mode: "promo"` (default) — amaze-first.** Fast cuts, big claims; the trailer pipeline. `specs/demo-curated.showcase.ts` is the populated-project promo take.
+
+Both drive the **real** app via the marketing login (`auth-worker/src/routes/marketing-seed.ts`), which seeds curated content server-side so the browser only reads.
+
+## ⚠️ Don't `git push` while a recording is running
+
+The `pre-push` husky hook runs `npm run test:e2e:smoke`, which boots its **own** e2e stack on ports `8787`/`8788` — the same ports the recording stack uses. Running both at once kills one of the auth-workers (the recording then fails with `ECONNREFUSED 127.0.0.1:8787`). **Let the recording finish, confirm `e2e-up` has exited, then push.**
+
 ## Anonymization
 
 Always record against seeded/synthetic data (`dev-project`, `sample.md`, invented persona names). Never record real customer projects, names, or corpora.

@@ -16,6 +16,7 @@ import { PrivacyPolicy } from "@/pages/PrivacyPolicy"
 import { NotFound } from "@/pages/NotFound"
 import { DevLoginRoute } from "@/components/DevLoginRoute"
 import { DevLogoutRoute } from "@/components/DevLogoutRoute"
+import { MarketingLoginRoute } from "@/components/MarketingLoginRoute"
 import { Preferences } from "@/pages/Preferences"
 import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
 import { OrgProvider } from "@/context/OrgContext"
@@ -175,6 +176,8 @@ function AppRoutes() {
         {/* Dev-only auto-login/logout — see components/DevLoginRoute.tsx */}
         <Route path="/__dev/login" element={<DevLoginRoute />} />
         <Route path="/__dev/logout" element={<DevLogoutRoute />} />
+        {/* Curated marketing/demo auto-login — see components/MarketingLoginRoute.tsx */}
+        <Route path="/__marketing/login" element={<MarketingLoginRoute />} />
 
         {/* Lazy — org-level pages */}
         <Route path="/projects/archived" element={<ArchivedProjects />} />

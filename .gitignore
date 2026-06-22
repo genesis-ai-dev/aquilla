@@ -53,6 +53,8 @@ playwright/.cache/
 # E2E suite — local-only state
 e2e/.auth/
 .e2e-logs/
+# Showcase recording output (large binaries: webm/mp4/zip/traces + derived VO)
+e2e/recordings/output/
 
 # Local dev-stack state (wrangler local D1/R2/DO sqlite + worker logs)
 .wrangler-dev-state/

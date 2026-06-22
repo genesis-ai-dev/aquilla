@@ -1,4 +1,4 @@
-import { test, expect, request as pwRequest, type Locator } from "@playwright/test"
+import { test, expect, request as pwRequest } from "@playwright/test"
 import { injectSession, type PersistedSession } from "../../helpers/auth"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import { Showcase } from "../helpers/showcase"
@@ -41,14 +41,6 @@ test("Demo · Documentation walkthrough — read a real project, step by step", 
     mode: "doc",
   })
 
-  // Centre point of any Playwright locator, for cursor/zoom targets that aren't
-  // a single stable CSS selector (sidebar rows, in-row controls).
-  const centreOf = async (loc: Locator): Promise<{ x: number; y: number }> => {
-    const b = await loc.boundingBox()
-    if (!b) throw new Error("doc walkthrough: target not visible")
-    return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
-  }
-
   let verified = false
   try {
     await page.goto("/project/demo-john")
@@ -59,33 +51,30 @@ test("Demo · Documentation walkthrough — read a real project, step by step", 
     const ws = new Workspace(page)
 
     // 1) Lead the eye to the sidebar file, then open it with a punctuated click.
-    const fileRow = page
-      .locator("aside")
-      .locator("div")
-      .filter({ hasText: /John/i })
-      .filter({ has: page.locator('button[aria-label="File actions"]') })
-      .first()
-    await show.point(await centreOf(fileRow))
+    //    "@sidebar.file" addresses a real, populated list item by its readable
+    //    showcase label (see docs/distribution/SHOWCASE-LABELS.md) — so the
+    //    click lands on an actual file row, not a guessed coordinate.
+    await show.point("@sidebar.file")
     await show.caption("Click a file to open it.")
-    await show.click(await centreOf(fileRow))
+    await show.click("@sidebar.file")
     await ws.waitForEditor()
     await show.beat(600)
 
     // 2) Zoom into the first verse so the source↔target pairing is unmistakable.
     await show.chapter("Source ↔ target, verse by verse", "John 1 · English → French.")
-    await show.zoomTo("[data-cell-id]", { scale: 1.7 })
-    await show.point("[data-cell-id]")
-    await show.caption("Left: the source text. Right: your team's translation, cell by cell.")
+    await show.zoomTo("@editor.source", { scale: 1.7 })
+    await show.point("@editor.source")
+    await show.caption("Left: the source text…")
+    await show.point("@editor.target")
+    await show.caption("…right: your team's translation, cell by cell.")
     await show.beat(700)
     await show.zoomReset()
 
     // 3) Zoom to the health pill — the at-a-glance validation signal.
-    const firstRow = ws.cellRow(0)
-    const healthPill = firstRow.locator("button[title*='Health']").first()
-    if (await healthPill.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    if (await page.locator('[data-showcase="cell.health"]').first().isVisible({ timeout: 2_000 }).catch(() => false)) {
       await show.chapter("Validation at a glance", "Healthy cells are marked green.")
-      await show.zoomTo(await centreOf(healthPill), { scale: 2.0 })
-      await show.point(await centreOf(healthPill))
+      await show.zoomTo("@cell.health", { scale: 2.0 })
+      await show.point("@cell.health")
       await show.caption("Each cell carries a health signal — green means validated.")
       await show.beat(700)
       await show.zoomReset()

@@ -3402,6 +3402,7 @@ function EditorRow({
   const renderValidationButton = (onClick?: () => void) => (
     <button
       type="button"
+      data-showcase="cell.health"
       // FRO-297: button role + aria-pressed so screen readers announce the
       // validated/unvalidated toggle state. aria-label provides full context.
       aria-pressed={isSelfValidated}
@@ -3651,6 +3652,7 @@ function EditorRow({
           })()
         ) : (
           <div
+            data-showcase="editor.source"
             className={cn(
               "relative flex flex-col transition-opacity",
               isSynthBusy && "opacity-70",
@@ -3718,6 +3720,7 @@ function EditorRow({
             detail) lives in the expansion panel. pr-9 reserves space for the
             ever-present chevron at the right edge. */}
         <div
+          data-showcase="editor.target"
           className={cn(
             "relative flex flex-col pl-3 pr-9 transition-opacity",
             isSynthBusy && "opacity-70",

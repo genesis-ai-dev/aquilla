@@ -31,11 +31,11 @@ describe("BetaPage", () => {
     }
   })
 
-  it("links to Discord for feedback and to onboarding to start free", () => {
+  it("links to Discord for feedback and to onboarding to sign up", () => {
     render(<BetaPage />)
     const discord = screen.getByRole("link", { name: /discord/i })
     expect(discord.getAttribute("href")).toContain("discord.gg")
-    const start = screen.getAllByRole("link", { name: /start/i })
-    expect(start.some((a) => a.getAttribute("href") === "/onboarding")).toBe(true)
+    const signup = screen.getAllByRole("link", { name: /sign up/i })
+    expect(signup.some((a) => a.getAttribute("href") === "/onboarding")).toBe(true)
   })
 })

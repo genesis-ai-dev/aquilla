@@ -34,7 +34,7 @@ export function Homepage() {
 
   // Signed-in visitors (aq_hint=1 cookie — same bit the Worker reads at the
   // edge) go straight into the app at `/`; returning (unsigned-in) users go to
-  // /login; brand-new visitors use the "Start free" button → /onboarding.
+  // /login; brand-new visitors use the "Sign up free" button → /onboarding.
   // FRO-282: "Open app" is the sign-in entry for returning users — it must
   // NOT send them through the signup wizard.
   const appHref = hasAuthHintCookie() ? "/" : "/login"
@@ -76,7 +76,7 @@ export function Homepage() {
               </button>
             </AppTooltip>
             <a href={appHref} className="aq-btn aq-btn-ghost aq-btn-sm">Open app</a>
-            <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-sm">Start free</a>
+            <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-sm">Sign up free</a>
           </div>
         </div>
       </nav>
@@ -92,11 +92,11 @@ export function Homepage() {
           </h1>
           <p className="aq-hero-sub aq-load aq-d3">
             The first workspace where <b style={{ color: "var(--aq-text)" }}>text and audio</b> translation
-            live under one roof — with caption and subtitle translation for video too. Real-time guidance and a memory
+            live under one roof — with caption and subtitle translation for video coming soon. Real-time guidance and a memory
             that learns — so Scripture reaches every language, in every medium it's heard, read, and watched.
           </p>
           <div className="aq-hero-actions aq-load aq-d4">
-            <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-lg">Start translating free</a>
+            <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-lg">Sign up free</a>
             <a href="#workspace" className="aq-btn aq-btn-ghost aq-btn-lg">See how it works <IconArrow /></a>
           </div>
           <div className="aq-hero-trust aq-load aq-d5">
@@ -139,7 +139,7 @@ export function Homepage() {
             <h2 className="aq-display">Most of the world meets Scripture by listening, not reading.</h2>
             <p>
               For too long, tools forced a choice between the written word and the spoken one. Aquilla refuses it.
-              Translate text and audio, add captions and subtitles to video — all drafted against one source,
+              Translate text and audio today, with captions and subtitles for video coming soon — all drafted against one source,
               held to one project's voice, kept in sync as it grows.
             </p>
           </div>
@@ -147,7 +147,7 @@ export function Homepage() {
             {[
               { i: <IconText2 />, t: "Text" },
               { i: <IconWave2 />, t: "Audio" },
-              { i: <IconFilm2 />, t: "Video" },
+              { i: <IconFilm2 />, t: "Video", soon: true },
               { i: <IconPic2 />, t: "Images", soon: true },
               { i: <IconBook2 />, t: "Oral stories", soon: true },
             ].map((m) => (
@@ -331,13 +331,30 @@ export function Homepage() {
             </div>
           </div>
 
-          <div className="aq-reveal" style={{ textAlign: "center", marginTop: "clamp(44px,7vw,80px)", maxWidth: "27ch", marginInline: "auto" }}>
+          <div
+            className="aq-reveal"
+            style={{
+              textAlign: "center",
+              marginTop: "clamp(44px,7vw,80px)",
+              maxWidth: "min(600px, 85vw)",
+              marginInline: "auto"
+            }}
+          >
             <IconQuote />
-            <p className="aq-display" style={{ fontSize: "clamp(24px,3.4vw,38px)", lineHeight: 1.25, marginTop: 14 }}>
+            <p
+              className="aq-display"
+              style={{
+                fontSize: "clamp(22px,3.2vw,38px)",
+                lineHeight: 1.25,
+                marginTop: 14,
+                maxWidth: "100%"
+              }}
+            >
               Pilots don't fly for six hours, then ask someone to check the route. They steer, constantly.
               <span className="aq-gold-text"> Translation should too.</span>
             </p>
           </div>
+     
         </section>
 
         {/* ── Proof / stats ───────────────────────────────────────────── */}
@@ -393,7 +410,7 @@ export function Homepage() {
                 <li><IconCheck /> Cloud sync &amp; team collaboration</li>
                 <li><IconCheck /> On-device speech</li>
               </ul>
-              <a href="/onboarding" className="aq-btn aq-btn-gold">Start free</a>
+              <a href="/onboarding" className="aq-btn aq-btn-gold">Sign up free</a>
             </div>
             <div className="aq-price" data-feature="true">
               <span className="aq-chip aq-chip-gold" style={{ position: "absolute", top: 20, right: 20 }}><IconSparkS /> Mission, not margin</span>
@@ -416,7 +433,7 @@ export function Homepage() {
             <h2 className="aq-display" aria-label="Get started — Translation, lifted.">Translation, <span className="aq-gold-text aq-display-italic">lifted.</span></h2>
             <p>Open your source text, draft in any medium, and let the system steer alongside you. Start today — it's free.</p>
             <div className="aq-cta-actions">
-              <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-lg">Start translating free</a>
+              <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-lg">Sign up free</a>
               <a href="#workspace" className="aq-btn aq-btn-ghost aq-btn-lg">See the workspace</a>
             </div>
           </div>
@@ -442,7 +459,7 @@ export function Homepage() {
               <div className="aq-footer-col">
                 <h5>Get started</h5>
                 <a href={appHref}>Open app</a>
-                <a href="/onboarding">Start free</a>
+                <a href="/onboarding">Sign up free</a>
                 <a href="#pricing">Enterprise</a>
               </div>
             </div>

@@ -1,4 +1,6 @@
-import { test } from "../../helpers/multi-user"
+import { test } from "@playwright/test"
+import { resetBackend } from "../../helpers/seed"
+import { ensureAuthState, injectSession } from "../../helpers/auth"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import { Showcase } from "../helpers/showcase"
@@ -12,21 +14,28 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * P1 · The Field Translator — see docs/distribution/PERSONAS.md.
  *
  * Money moment: a translation typed into a cell survives a full reload —
- * local-first durability, the trust-builder for translators on flaky
- * connectivity (the persistence path is IndexedDB, client-side).
+ * local-first durability (IndexedDB), the trust-builder for translators on
+ * flaky connectivity.
  *
- * The take is RESILIENT by design: it always drives the real authenticated
- * app and narrates the persona story (the branded Showcase overlay renders
- * live in-frame), attempts the full money moment, records whether the value
- * actually verified into the storyboard, and ALWAYS finalizes cleanly so a
- * real .webm + storyboard are produced. In dev/CI the full money moment
- * lands; in a degraded-network/sandbox the take still captures the authentic
- * product + story up to the point connectivity allows — and marks the
- * storyboard `verified:false` so the assembler/human knows it's a partial
- * cut, never silently shipping a value claim that didn't render.
+ * Uses the DEFAULT `page` fixture (not the multi-user fixture) so Playwright's
+ * config-level `video: on` records the take — the multi-user fixture builds
+ * its context via browser.newContext() without recordVideo, so it produces no
+ * video. We authenticate by injecting alice's session with the same helpers
+ * the fixture uses.
+ *
+ * The take is RESILIENT: it always drives the real authenticated app and
+ * narrates the persona story via the in-frame branded overlay, attempts the
+ * full money moment, records whether the value actually rendered
+ * (verified flag), and ALWAYS finalizes a real .webm + storyboard — never
+ * crashing, and never silently shipping a value claim that didn't render.
  */
-test("P1 · Field Translator — local-first translation, saved the instant you type", async ({ alice }) => {
-  const show = new Showcase(alice, {
+test("P1 · Field Translator — local-first translation, saved the instant you type", async ({ page }) => {
+  await resetBackend()
+  const session = await ensureAuthState("alice")
+  await page.goto("/")
+  await injectSession(page, session)
+
+  const show = new Showcase(page, {
     persona: "p1-field-translator",
     feature: "local-first-editing",
     title: "Translate anywhere. Saved the instant you type.",
@@ -35,7 +44,7 @@ test("P1 · Field Translator — local-first translation, saved the instant you 
 
   let verified = false
   try {
-    const dash = new Dashboard(alice)
+    const dash = new Dashboard(page)
     await dash.goto()
     await show.chapter("Meet the field translator", "Limited connectivity. Zero tolerance for lost work.")
     await show.caption("This is your workspace — every project, one place.")
@@ -46,7 +55,7 @@ test("P1 · Field Translator — local-first translation, saved the instant you 
     await dash.createProject({ name, source: "en", target: "fr" })
     await dash.openProject(name)
 
-    const ws = new Workspace(alice)
+    const ws = new Workspace(page)
     await show.caption("Import your source. Aquilla segments it into cells automatically.")
     await ws.importFile(SAMPLE_MD)
     await ws.openFileBySubstring("sample")
@@ -60,13 +69,12 @@ test("P1 · Field Translator — local-first translation, saved the instant you 
 
     await show.chapter("It survives anything", "Reload, lose signal, close the laptop — still here.")
     await show.caption("Reload the page…")
-    await alice.reload()
-    await alice.waitForLoadState("networkidle")
+    await page.reload()
+    await page.waitForLoadState("networkidle")
     await ws.openFileBySubstring("sample")
     await ws.waitForEditor()
 
-    const cellText = await ws.readCell(0)
-    verified = cellText.includes(draft)
+    verified = (await ws.readCell(0)).includes(draft)
     await show.caption(
       verified
         ? "…and nothing is lost. Local-first means your work is yours."
@@ -74,8 +82,6 @@ test("P1 · Field Translator — local-first translation, saved the instant you 
     )
     await show.beat(1500)
   } catch (err) {
-    // Never crash the take — capture the authentic footage we have and mark
-    // it partial. The console note aids debugging without failing the run.
     console.log(`[showcase] P1 take ran in degraded mode: ${(err as Error).message}`)
     await show.caption("Local-first: your work lives on-device first, syncing when you reconnect.")
     await show.beat(1200)

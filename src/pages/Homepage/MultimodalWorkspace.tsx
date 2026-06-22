@@ -382,55 +382,78 @@ function Waveform({
 }: { progress: number; active: boolean; seed: string; height?: number; variant?: "gold" | "blue"; theme?: "light" | "dark" }) {
   const ref = useRef<HTMLCanvasElement | null>(null)
   const bars = useMemo(() => makeBars(seed, 96), [seed])
+  // Holds the latest draw closure so the mount-only ResizeObserver below can
+  // repaint with current props without re-subscribing every render.
+  const drawRef = useRef<() => void>(() => {})
 
   useEffect(() => {
     const canvas = ref.current
     if (!canvas) return
     const ctx = canvas.getContext("2d")
     if (!ctx) return
-    const dpr = Math.min(window.devicePixelRatio || 1, 2)
-    const w = canvas.clientWidth
-    const h = canvas.clientHeight
-    canvas.width = w * dpr
-    canvas.height = h * dpr
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    ctx.clearRect(0, 0, w, h)
+    const draw = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2)
+      const w = canvas.clientWidth
+      const h = canvas.clientHeight
+      // The canvas is width:100% — before layout settles (or while its panel is
+      // off-screen) clientWidth/Height can be 0. Drawing then yields a negative
+      // bar width and a negative arcTo radius, which throws. Skip until sized;
+      // the ResizeObserver repaints once real dimensions arrive.
+      if (w <= 0 || h <= 0) return
+      canvas.width = w * dpr
+      canvas.height = h * dpr
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      ctx.clearRect(0, 0, w, h)
 
-    const gap = 2
-    const bw = (w - gap * (bars.length - 1)) / bars.length
-    const mid = h / 2
-    const playX = progress * w
+      const gap = 2
+      const bw = Math.max(1, (w - gap * (bars.length - 1)) / bars.length)
+      const mid = h / 2
+      const playX = progress * w
 
-    const light = theme === "light"
-    const litTop = variant === "blue" ? (light ? "#2e9fd8" : "#86e0ff") : (light ? "#4a93e6" : "#bfe0ff")
-    const litBot = variant === "blue" ? (light ? "#1366b8" : "#1fa9d8") : (light ? "#1f5fc4" : "#4d97e8")
-    const trackColor = light ? "rgba(30,41,82,0.16)" : "rgba(255,255,255,0.14)"
-    const playhead = variant === "blue" ? (light ? "#1366b8" : "#bdf0ff") : (light ? "#1f5fc4" : "#cfe6ff")
+      const light = theme === "light"
+      const litTop = variant === "blue" ? (light ? "#2e9fd8" : "#86e0ff") : (light ? "#4a93e6" : "#bfe0ff")
+      const litBot = variant === "blue" ? (light ? "#1366b8" : "#1fa9d8") : (light ? "#1f5fc4" : "#4d97e8")
+      const trackColor = light ? "rgba(30,41,82,0.16)" : "rgba(255,255,255,0.14)"
+      const playhead = variant === "blue" ? (light ? "#1366b8" : "#bdf0ff") : (light ? "#1f5fc4" : "#cfe6ff")
 
-    for (let i = 0; i < bars.length; i++) {
-      const x = i * (bw + gap)
-      const bh = Math.max(2, bars[i] * (h - 6))
-      const lit = x <= playX
-      if (lit) {
-        const g = ctx.createLinearGradient(0, mid - bh / 2, 0, mid + bh / 2)
-        g.addColorStop(0, litTop)
-        g.addColorStop(1, litBot)
-        ctx.fillStyle = g
-      } else {
-        ctx.fillStyle = trackColor
+      for (let i = 0; i < bars.length; i++) {
+        const x = i * (bw + gap)
+        const bh = Math.max(2, bars[i] * (h - 6))
+        const lit = x <= playX
+        if (lit) {
+          const g = ctx.createLinearGradient(0, mid - bh / 2, 0, mid + bh / 2)
+          g.addColorStop(0, litTop)
+          g.addColorStop(1, litBot)
+          ctx.fillStyle = g
+        } else {
+          ctx.fillStyle = trackColor
+        }
+        roundRect(ctx, x, mid - bh / 2, bw, bh, Math.min(bw / 2, 2))
+        ctx.fill()
       }
-      roundRect(ctx, x, mid - bh / 2, bw, bh, Math.min(bw / 2, 2))
-      ctx.fill()
-    }
 
-    if (active && progress > 0 && progress < 1) {
-      ctx.fillStyle = playhead
-      ctx.fillRect(playX - 0.5, 4, 1.5, h - 8)
+      if (active && progress > 0 && progress < 1) {
+        ctx.fillStyle = playhead
+        ctx.fillRect(playX - 0.5, 4, 1.5, h - 8)
+      }
     }
+    drawRef.current = draw
+    draw()
     // No deps array: the draw is cheap and inputs (progress/theme/…) change via
     // re-render anyway. A fixed-length deps array is avoided so the React
     // Compiler can't trip the "deps size changed" guard.
   })
+
+  // Repaint when the canvas first gains a size (or is resized). clientWidth can
+  // be 0 on the initial effect with no follow-up render to trigger a redraw, so
+  // without this the waveform would stay blank until an unrelated re-render.
+  useEffect(() => {
+    const canvas = ref.current
+    if (!canvas || typeof ResizeObserver === "undefined") return
+    const ro = new ResizeObserver(() => drawRef.current())
+    ro.observe(canvas)
+    return () => ro.disconnect()
+  }, [])
 
   return (
     <div className="aq-wave" style={{ height }} aria-hidden="true">
@@ -453,6 +476,8 @@ function makeBars(seed: string, n: number): number[] {
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  // arcTo throws on a negative radius; clamp so a degenerate bar can never crash.
+  r = Math.max(0, Math.min(r, w / 2, h / 2))
   ctx.beginPath()
   ctx.moveTo(x + r, y)
   ctx.arcTo(x + w, y, x + w, y + h, r)

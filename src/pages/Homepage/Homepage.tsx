@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { Component, type ReactNode, useEffect, useRef, useState } from "react"
 import { useBrand } from "@/branding/use-brand"
 import { hasAuthHintCookie } from "@/lib/frontier/session-store"
 import { HealthRing } from "@/components/HealthRing"
@@ -107,7 +107,13 @@ export function Homepage() {
 
         {/* ── Centerpiece ─────────────────────────────────────────────── */}
         <section className="aq-container aq-load aq-d6" id="workspace" style={{ paddingBottom: "clamp(40px,7vh,90px)" }}>
-          <MultimodalWorkspace theme={theme} />
+          {/* The workspace mock renders a <Waveform> that touches canvas/audio-DSP
+              APIs and throws in headless/preview renderers. A local boundary keeps
+              that failure from unmounting the whole marketing page — it degrades to
+              nothing while hero, nav, and the rest of the page render normally. */}
+          <WorkspaceBoundary>
+            <MultimodalWorkspace theme={theme} />
+          </WorkspaceBoundary>
         </section>
 
         {/* ── Trust band ──────────────────────────────────────────────── */}
@@ -449,6 +455,18 @@ export function Homepage() {
       </footer>
     </div>
   )
+}
+
+/* ── Workspace error boundary ───────────────────────────────────────────────
+ * Scoped boundary for the homepage centerpiece. If <MultimodalWorkspace> (or its
+ * <Waveform>) throws during render — e.g. canvas/audio-DSP APIs unavailable in a
+ * headless/preview browser — this catches it and renders nothing, so the failure
+ * degrades the centerpiece alone instead of unmounting the entire marketing page.
+ */
+class WorkspaceBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false }
+  static getDerivedStateFromError() { return { hasError: true } }
+  render() { return this.state.hasError ? null : this.props.children }
 }
 
 /* ── Icons ──────────────────────────────────────────────────────────────── */

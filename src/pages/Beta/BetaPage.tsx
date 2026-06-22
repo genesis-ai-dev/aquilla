@@ -14,13 +14,13 @@ const ROADMAP: { phase: string; tone: string; blurb: string; items: string[] }[]
     blurb: "Everything below is live in the workspace — free, for everyone.",
     items: [
       "Text & audio translation under one roof",
-      "Video captions & subtitles",
+      "Captions & subtitles",
       "Low-resource language drafting",
       "Real-time guidance & back-translation",
       "Living Memory — fix it once, the system learns",
       "Confidence & health you can see at a glance",
       "Cloud sync & team collaboration",
-      "On-device speech",
+      "On-device speech capabilities (cloud models also available)",
     ],
   },
   {
@@ -28,9 +28,10 @@ const ROADMAP: { phase: string; tone: string; blurb: string; items: string[] }[]
     tone: "In progress",
     blurb: "What we're actively building toward.",
     items: [
+      "Video-based workflows",
       "Image translation",
       "Oral-story translation",
-      "Richer terminology tooling",
+      "Richer terminology and glossary tooling",
       "Deeper in-flow AI assistance",
     ],
   },
@@ -90,7 +91,7 @@ export function BetaPage() {
               </button>
             </AppTooltip>
             <a href="/homepage" className="aq-btn aq-btn-ghost aq-btn-sm">Home</a>
-            <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-sm">Start free</a>
+            <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-sm">Sign up free</a>
           </div>
         </div>
       </nav>
@@ -105,11 +106,10 @@ export function BetaPage() {
             Aquilla is in <span className="aq-gold-text aq-display-italic">public beta.</span>
           </h1>
           <p className="aq-hero-sub aq-load aq-d3">
-            The workspace is live and free to use today — and it's moving fast. This page is the
-            honest picture: what "beta" means for you, what's shipping now, and where we're headed.
+            The workspace is live and free to use today — and it's moving fast. Read on to learn what's shipping now, and where we're headed.
           </p>
           <div className="aq-hero-actions aq-load aq-d4">
-            <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-lg">Start translating free</a>
+            <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-lg">Sign up free</a>
             <a href="#roadmap" className="aq-btn aq-btn-ghost aq-btn-lg">See the roadmap <IconArrow /></a>
           </div>
         </section>
@@ -119,15 +119,15 @@ export function BetaPage() {
           <div className="aq-head aq-center aq-reveal">
             <span className="aq-eyebrow">No fine print</span>
             <h2 className="aq-display">What "beta" means here.</h2>
-            <p>
+            {/* <p>
               Beta isn't a paywall or a waitlist. It means the product is real and in your hands —
               and still evolving quickly. Here's the deal.
-            </p>
+            </p> */}
           </div>
           <div className="aq-beta-cards aq-reveal">
             {[
-              { t: "Free, today", d: "The whole workspace is free for everyone — no credit card, no trial clock. Our mission is to accelerate translation, not bill you for it." },
-              { t: "It's evolving fast", d: "Features may move, improve, or occasionally break. We ship often. If something looks different next week, that's the point." },
+              { t: "Free", d: "The whole workspace is free for everyone — no credit card, no trial clock. Our mission is to accelerate translation, not bill you for it. (Usage caps are in place for now by default to keep the service available for everyone.)" },
+              { t: "It's evolving fast", d: "Features may move, improve, or occasionally break. We ship often. If something looks different next week, this is why." },
               { t: "Your feedback steers it", d: "What you tell us directly shapes what ships next. The fastest way in is our community." },
             ].map((c) => (
               <div className="aq-beta-card" key={c.t}>
@@ -152,7 +152,6 @@ export function BetaPage() {
             <span className="aq-eyebrow">Roadmap</span>
             <h2 className="aq-display">Now, next, and later.</h2>
             <p>
-              Directional, not dated — we'd rather under-promise on timing and let the work speak.
               Here's the shape of where the product is going.
             </p>
           </div>
@@ -183,7 +182,7 @@ export function BetaPage() {
             <h2 className="aq-display">Translation, <span className="aq-gold-text aq-display-italic">lifted.</span></h2>
             <p>It's free, it's live, and it gets better every week. Jump in and help shape what comes next.</p>
             <div className="aq-cta-actions">
-              <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-lg">Start translating free</a>
+              <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-lg">Sign up free</a>
               <a href="/homepage" className="aq-btn aq-btn-ghost aq-btn-lg">Back to homepage</a>
             </div>
           </div>

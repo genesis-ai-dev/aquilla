@@ -145,6 +145,7 @@ export default defineConfig(({ mode }) => ({
         index: path.resolve(__dirname, "index.html"),
         homepage: path.resolve(__dirname, "homepage.html"),
         beta: path.resolve(__dirname, "beta.html"),
+        "case-study": path.resolve(__dirname, "case-study.html"),
       },
       output: {
         manualChunks: (id: string) => {

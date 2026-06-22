@@ -302,13 +302,13 @@ export function Homepage() {
               <div className="aq-flow-label">Phased · assembly line</div>
               <div className="aq-flow-stack">
                 <div className="aq-flow-box">Drafting</div>
-                <div className="aq-flow-gap"><span>handoff · wait</span></div>
+                <div className="aq-flow-gap"><span><i className="aq-flow-spin" aria-hidden="true" />handoff · wait</span></div>
                 <div className="aq-flow-box">Self-checking</div>
-                <div className="aq-flow-gap"><span>handoff · wait</span></div>
+                <div className="aq-flow-gap"><span><i className="aq-flow-spin" aria-hidden="true" />handoff · wait</span></div>
                 <div className="aq-flow-box">Team checking</div>
-                <div className="aq-flow-gap"><span>handoff · wait</span></div>
+                <div className="aq-flow-gap"><span><i className="aq-flow-spin" aria-hidden="true" />handoff · wait</span></div>
                 <div className="aq-flow-box">Consultant checking</div>
-                <div className="aq-flow-gap"><span>handoff · wait</span></div>
+                <div className="aq-flow-gap"><span><i className="aq-flow-spin" aria-hidden="true" />handoff · wait</span></div>
                 <div className="aq-flow-box">Publishing</div>
               </div>
               <div className="aq-flow-note">Quality is inspected at the end. Every bottleneck is a queue.</div>
@@ -323,6 +323,10 @@ export function Homepage() {
                   <div className="aq-flow-box">Drafting</div>
                   <span className="aq-loop-cyc"><IconCycle /></span>
                   <div className="aq-flow-box">Checking</div>
+                  <span className="aq-loop-toast" aria-hidden="true">
+                    <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="var(--aq-green)" strokeWidth="2.2"><path d="M3 8.5l3 3 7-7.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                    checked
+                  </span>
                 </div>
                 <div className="aq-loop-down"><IconUpDown /></div>
                 <div className="aq-flow-box aq-flow-publish">Publishing &amp; feedback</div>
@@ -362,30 +366,35 @@ export function Homepage() {
           <div className="aq-feature" style={{ alignItems: "start" }}>
             <div className="aq-feature-copy aq-reveal">
               <span className="aq-eyebrow">Come and See Foundation</span>
-              <h3 className="aq-display" style={{ marginTop: 14 }}>The wall came after 86 languages. Then the work kept going.</h3>
+              <h3 className="aq-display" style={{ marginTop: 14 }}>125 languages. A Guinness World Record. Twice.</h3>
               <p>
-                Traditional team models stalled at 86. With Aquilla carrying consistency and in-flow review,
-                the same effort reached 125 — adding low-resource languages where a single expert often steered the work alone.
+                Come and See is translating <em>The Chosen</em> into 600 languages to reach 95% of the world.
+                With one expert steering and the system carrying consistency and in-flow review, they reached
+                125 languages — including 39 low-resource languages where a single subject-matter expert
+                delivered what once took a full team.
               </p>
               <blockquote className="aq-quote aq-display" style={{ marginTop: 26, color: "var(--aq-text)" }}>
                 People need to hear the story of Jesus in their own language — the language they speak, dream, and pray in.
               </blockquote>
               <div className="aq-quote-cite"><b>James Barnett</b> · CEO, Come and See</div>
+              <a href="/case-studies/come-and-see" className="aq-btn aq-btn-ghost aq-btn-sm" style={{ marginTop: 24 }}>
+                Read the full story <IconArrow />
+              </a>
             </div>
             <div className="aq-reveal" style={{ alignSelf: "center" }}>
               <div className="aq-stats" style={{ gridTemplateColumns: "1fr" }}>
-                {/* SWARM-TODO(homepage-copy): Stats (125 languages, 39 low-resource, 4–16×) — verify these are current and sourced before launch */}
+                {/* Stats from the Come and See case study (codexeditor.app/case-studies/come-and-see). Verify current before launch. */}
                 <div className="aq-stat">
                   <div className="aq-stat-num aq-display aq-gold-text">125</div>
-                  <div className="aq-stat-label">languages in 5 months — up from a ceiling of 86</div>
+                  <div className="aq-stat-label">languages for Season 1 of The Chosen — reaching the languages people pray in</div>
                 </div>
                 <div className="aq-stat">
-                  <div className="aq-stat-num aq-display aq-gold-text">39</div>
-                  <div className="aq-stat-label">new low-resource languages, many with a single subject-matter expert</div>
+                  <div className="aq-stat-num aq-display aq-gold-text">2×</div>
+                  <div className="aq-stat-label">back-to-back Guinness World Records for the most translated streaming season</div>
                 </div>
                 <div className="aq-stat">
-                  <div className="aq-stat-num aq-display aq-gold-text">4–16×</div>
-                  <div className="aq-stat-label">faster than typical project timelines (ETEN Innovation Lab)</div>
+                  <div className="aq-stat-num aq-display aq-gold-text">240</div>
+                  <div className="aq-stat-label">more translations already in the pipeline</div>
                 </div>
               </div>
             </div>
@@ -455,6 +464,7 @@ export function Homepage() {
                 <a href="#multimodal">Multimodal</a>
                 <a href="#quality">Quality</a>
                 <a href="#pricing">Pricing</a>
+                <a href="/case-studies/come-and-see">Case study</a>
               </div>
               <div className="aq-footer-col">
                 <h5>Get started</h5>
@@ -492,7 +502,7 @@ function IconCheck() { return <svg aria-hidden="true" viewBox="0 0 16 16" width=
 function IconX() { return <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" /></svg> }
 function IconSun() { return <svg aria-hidden="true" viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="9" cy="9" r="3.6" /><path d="M9 1.5v2M9 14.5v2M1.5 9h2M14.5 9h2M3.7 3.7l1.4 1.4M12.9 12.9l1.4 1.4M14.3 3.7l-1.4 1.4M5.1 12.9l-1.4 1.4" strokeLinecap="round" /></svg> }
 function IconMoon() { return <svg aria-hidden="true" viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M15 10.5A6.5 6.5 0 0 1 7.5 3a6.5 6.5 0 1 0 7.5 7.5z" strokeLinejoin="round" /></svg> }
-function IconCycle() { return <svg aria-hidden="true" viewBox="0 0 20 16" width="22" height="17" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 6a6 4 0 0 1 12 0" strokeLinecap="round" /><path d="M16 10a6 4 0 0 1-12 0" strokeLinecap="round" /><path d="M15 3.5l1.4 2.6 2.6-1" strokeLinecap="round" strokeLinejoin="round" /><path d="M5 12.5l-1.4-2.6-2.6 1" strokeLinecap="round" strokeLinejoin="round" /></svg> }
+function IconCycle() { return <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></svg> }
 function IconUpDown() { return <svg aria-hidden="true" viewBox="0 0 16 20" width="16" height="20" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M5 6V3m0 0L3 5m2-2l2 2" strokeLinecap="round" strokeLinejoin="round" /><path d="M11 14v3m0 0l2-2m-2 2l-2-2" strokeLinecap="round" strokeLinejoin="round" /><path d="M5 6v8M11 14V6" strokeLinecap="round" /></svg> }
 function IconSparkS() { return <svg aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M8 1l1.3 3.9L13 6 9.3 7.4 8 11 6.7 7.4 3 6l3.7-1.1z" /></svg> }
 function IconMemory() { return <svg aria-hidden="true" viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="var(--aq-gold)" strokeWidth="1.4" style={{ flexShrink: 0, marginTop: 1 }}><path d="M8 2.5a3 3 0 0 1 3 3v.3a2.4 2.4 0 0 1-.4 4.5A2.6 2.6 0 0 1 8 13a2.6 2.6 0 0 1-2.6-2.7A2.4 2.4 0 0 1 5 5.8v-.3a3 3 0 0 1 3-3z" /></svg> }

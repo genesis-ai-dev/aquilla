@@ -1,0 +1,244 @@
+<!doctype html>
+<!--
+  compose.html — the deterministic promo composition.
+
+  The whole trailer is a pure function of time: render.ts loads this file,
+  sets window.__PROMO (timing/scenes, from promo.config.ts) and optional
+  window.__APP_FRAMES (real captured app stills), then calls window.__seek(t)
+  for each frame and screenshots. Nothing here uses requestAnimationFrame or
+  CSS transitions for state — every position/opacity/canvas pixel is derived
+  from t inside __seek, so frame N is identical on every run and never drops.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root { color-scheme: dark; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; background: #05070d; overflow: hidden;
+        font-family: Inter, system-ui, -apple-system, sans-serif; }
+      #stage { position: fixed; inset: 0; }
+      canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+      .layer { position: absolute; inset: 0; }
+      /* Device panel that frames the real app stills */
+      #device { position: absolute; border-radius: 18px; overflow: hidden;
+        box-shadow: 0 40px 120px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.06);
+        background: #0b0f17; will-change: transform, opacity; }
+      #device img, #device .mock { position: absolute; inset: 0; width: 100%; height: 100%;
+        object-fit: cover; }
+      /* Stylized fallback panel when no real stills are supplied */
+      .mock { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; background: #11161f; padding: 26px; }
+      .mock .col { display: flex; flex-direction: column; gap: 14px; padding: 14px; }
+      .mock .row { height: 16px; border-radius: 6px; background: linear-gradient(90deg,#1d2737,#28344a); }
+      .mock .row.s { background: linear-gradient(90deg,#243047,#2d3c57); }
+      .mock .row.t { background: linear-gradient(90deg,#1f3a33,#27514646); }
+      .mock .head { font-size: 12px; letter-spacing: .12em; color: #5f7a9b; text-transform: uppercase; }
+      /* Typography */
+      /* Scrim behind the title so type reads cleanly over light app stills */
+      #typescrim { position: absolute; left: 0; right: 0; height: 360px; will-change: opacity;
+        background: radial-gradient(60% 100% at 50% 50%, rgba(5,7,13,.82), rgba(5,7,13,0)); }
+      #type { position: absolute; left: 0; right: 0; text-align: center; will-change: transform, opacity; }
+      #title { font-size: 92px; font-weight: 800; letter-spacing: -.025em; color: #f4f8ff;
+        text-shadow: 0 6px 40px rgba(0,0,0,.5); }
+      #subtitle { font-size: 34px; font-weight: 500; color: #9fb6d6; margin-top: 14px; letter-spacing: -.01em; }
+      /* Heartbeat ring */
+      #pulse { position: absolute; border-radius: 999px; border: 3px solid #6aa9ff;
+        left: 50%; top: 50%; will-change: transform, opacity; }
+      /* Brand bug + CTA lockup */
+      #bug { position: absolute; right: 54px; top: 44px; font-size: 22px; font-weight: 800;
+        letter-spacing: .18em; color: #cfe0ff; opacity: .9; }
+      #cta { position: absolute; inset: 0; display: grid; place-content: center; text-align: center;
+        will-change: opacity, transform; }
+      #cta .word { font-size: 150px; font-weight: 900; letter-spacing: -.03em;
+        background: linear-gradient(90deg,#8fc0ff,#fff 60%,#c9a6ff); -webkit-background-clip: text;
+        background-clip: text; color: transparent; }
+      #cta .tag { font-size: 30px; color: #aebfdd; letter-spacing: .22em; margin-top: 10px; text-transform: uppercase; }
+      .vignette { position: absolute; inset: 0; pointer-events: none;
+        background: radial-gradient(120% 80% at 50% 45%, transparent 55%, rgba(0,0,0,.55)); }
+    </style>
+  </head>
+  <body>
+    <div id="stage">
+      <canvas id="bg"></canvas>
+      <div id="device"></div>
+      <div class="layer vignette"></div>
+      <div id="typescrim"></div>
+      <div id="type"><div id="title"></div><div id="subtitle"></div></div>
+      <div id="pulse"></div>
+      <div id="bug"></div>
+      <div id="cta" style="opacity:0"><div class="word"></div><div class="tag"></div></div>
+    </div>
+    <script>
+      // ---- config (injected by render.ts; safe defaults for standalone open) ----
+      const PROMO = window.__PROMO || {
+        durationSec: 18, fps: 30, width: 1920, height: 1080, brand: "AQUILLA",
+        scenes: [{ t: 0, id: "cold-open", title: "Aquilla", subtitle: "Translation, together." }],
+        beats: [],
+      }
+      const FRAMES = window.__APP_FRAMES || [] // array of image URLs (real app stills)
+      window.__DURATION = PROMO.durationSec
+      window.__FPS = PROMO.fps
+
+      const W = PROMO.width, H = PROMO.height
+      const stage = document.getElementById("stage")
+      stage.style.width = W + "px"; stage.style.height = H + "px"
+      const cv = document.getElementById("bg"); cv.width = W; cv.height = H
+      const ctx = cv.getContext("2d")
+
+      // ---- math helpers (deterministic) ----
+      const clamp = (x, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, x))
+      const ramp = (x, a, b) => { if (x <= a) return 0; if (x >= b) return 1; const u = (x - a) / (b - a); return u * u * (3 - 2 * u) }
+      const lerp = (a, b, u) => a + (b - a) * u
+      const easeOut = (u) => 1 - Math.pow(1 - clamp(u), 3)
+      const rnd = (i) => { const s = Math.sin(i * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s) }
+
+      // ---- build DOM bits ----
+      document.getElementById("bug").textContent = PROMO.brand
+      const titleEl = document.getElementById("title")
+      const subEl = document.getElementById("subtitle")
+      const typeEl = document.getElementById("type")
+      const deviceEl = document.getElementById("device")
+      const pulseEl = document.getElementById("pulse")
+      const ctaEl = document.getElementById("cta")
+      ctaEl.querySelector(".word").textContent = PROMO.brand.charAt(0) + PROMO.brand.slice(1).toLowerCase()
+      ctaEl.querySelector(".tag").textContent = (PROMO.scenes.find(s => s.id === "cta")?.subtitle) || "Translation, together."
+
+      // Device images (real app stills) or a stylized fallback panel.
+      const imgs = []
+      if (FRAMES.length) {
+        for (const src of FRAMES) {
+          const im = document.createElement("img"); im.src = src; im.style.opacity = "0"
+          deviceEl.appendChild(im); imgs.push(im)
+        }
+      } else {
+        const mock = document.createElement("div"); mock.className = "mock"
+        const mkCol = (label, cls) => {
+          const c = document.createElement("div"); c.className = "col"
+          const h = document.createElement("div"); h.className = "head"; h.textContent = label; c.appendChild(h)
+          for (let i = 0; i < 6; i++) { const r = document.createElement("div"); r.className = "row " + cls; r.style.width = (55 + rnd(i + (cls === "t" ? 9 : 0)) * 40) + "%"; c.appendChild(r) }
+          return c
+        }
+        mock.appendChild(mkCol("Source", "s")); mock.appendChild(mkCol("Target", "t"))
+        deviceEl.appendChild(mock)
+      }
+
+      // ---- scene lookup ----
+      const scenes = PROMO.scenes
+      function sceneAt(t) {
+        let idx = 0
+        for (let i = 0; i < scenes.length; i++) if (t >= scenes[i].t) idx = i
+        const cur = scenes[idx]
+        const next = scenes[idx + 1]
+        const end = next ? next.t : PROMO.durationSec
+        return { idx, cur, start: cur.t, end, dur: end - cur.t }
+      }
+
+      // ---- background: animated gradient + drifting particles (pure f(t)) ----
+      function drawBg(t) {
+        const g = ctx.createLinearGradient(0, 0, W, H)
+        const hue = 218 + 10 * Math.sin(t * 0.5)
+        g.addColorStop(0, `hsl(${hue},45%,7%)`)
+        g.addColorStop(0.5, `hsl(${hue + 8},55%,5%)`)
+        g.addColorStop(1, `hsl(${hue - 14},50%,4%)`)
+        ctx.fillStyle = g; ctx.fillRect(0, 0, W, H)
+        // soft moving glow
+        const gx = W * (0.5 + 0.18 * Math.sin(t * 0.4))
+        const gy = H * (0.42 + 0.1 * Math.cos(t * 0.33))
+        const rg = ctx.createRadialGradient(gx, gy, 0, gx, gy, W * 0.5)
+        rg.addColorStop(0, "rgba(80,130,255,0.18)"); rg.addColorStop(1, "rgba(80,130,255,0)")
+        ctx.fillStyle = rg; ctx.fillRect(0, 0, W, H)
+        // drifting particles
+        ctx.save()
+        for (let i = 0; i < 90; i++) {
+          const seed = rnd(i)
+          const speed = 18 + rnd(i + 50) * 40
+          const x = (rnd(i + 7) * W + t * speed) % W
+          const y = (rnd(i + 99) * H + t * speed * 0.3) % H
+          const r = 0.6 + rnd(i + 3) * 2.2
+          ctx.globalAlpha = 0.12 + seed * 0.25
+          ctx.fillStyle = "#9cc2ff"
+          ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.fill()
+        }
+        ctx.restore()
+      }
+
+      // ---- the seek function: set the whole frame from t ----
+      function seek(t) {
+        t = clamp(t, 0, PROMO.durationSec)
+        drawBg(t)
+        const { cur, start, end, dur } = sceneAt(t)
+        const local = t - start
+        const isCta = cur.id === "cta"
+
+        // Typography: rise + fade in, hold, fade + drift out.
+        const inP = easeOut(local / 0.6)
+        const outP = ramp(t, end - 0.5, end)
+        const typeOpacity = isCta ? 0 : clamp(inP) * (1 - outP)
+        const ty = lerp(40, 0, inP) + outP * -30
+        typeEl.style.opacity = String(typeOpacity)
+        typeEl.style.top = (H * 0.5 - 70) + "px"
+        typeEl.style.transform = `translateY(${ty}px)`
+        const scrim = document.getElementById("typescrim")
+        scrim.style.opacity = String(typeOpacity)
+        scrim.style.top = (H * 0.5 - 150) + "px"
+        // letter-spacing settle for a kinetic feel
+        titleEl.textContent = cur.title
+        subEl.textContent = cur.subtitle || ""
+        titleEl.style.letterSpacing = lerp(0.06, -0.025, inP) + "em"
+
+        // Device panel: present (and Ken-Burns) during showcase + proof.
+        const showDevice = cur.id === "showcase" || cur.id === "proof" || cur.id === "reveal"
+        const devAppear = ramp(t, 2.6, 3.4) * (1 - ramp(t, 13.6, 14.4))
+        const dW = W * 0.52, dH = dW * 0.62
+        const kb = 1 + 0.06 * Math.sin(t * 0.5) // gentle breathing zoom
+        deviceEl.style.opacity = String(showDevice ? devAppear : devAppear * 0.0 + 0)
+        deviceEl.style.width = dW + "px"; deviceEl.style.height = dH + "px"
+        deviceEl.style.left = (W * 0.5 - dW / 2) + "px"
+        deviceEl.style.top = (H * 0.5 - dH / 2 + 40) + "px"
+        deviceEl.style.transform = `scale(${devAppear ? lerp(0.92, kb, easeOut(devAppear)) : 0.92})`
+
+        // Crossfade across the real app stills over the device's lifetime.
+        if (imgs.length) {
+          const span = [2.8, 14.0]
+          const u = clamp((t - span[0]) / (span[1] - span[0]))
+          const pos = u * (imgs.length - 1)
+          imgs.forEach((im, i) => {
+            const d = Math.abs(i - pos)
+            im.style.opacity = String(clamp(1 - d) * deviceEl.style.opacity)
+            im.style.transform = `scale(${1 + 0.04 * (i - pos)})`
+          })
+        }
+
+        // Heartbeat pulse rings on beats.
+        let pulse = 0
+        for (const b of PROMO.beats) {
+          if (b.kind === "thump" || b.kind === "impact") {
+            const d = t - b.t
+            if (d >= 0 && d < 0.9) pulse = Math.max(pulse, (1 - d / 0.9))
+          }
+        }
+        const pr = lerp(40, 260, 1 - pulse)
+        pulseEl.style.width = pr * 2 + "px"; pulseEl.style.height = pr * 2 + "px"
+        pulseEl.style.marginLeft = -pr + "px"; pulseEl.style.marginTop = -pr + "px"
+        pulseEl.style.opacity = String(pulse * 0.5)
+        pulseEl.style.borderWidth = lerp(1, 6, pulse) + "px"
+
+        // CTA lockup: scale-in on the final impact.
+        if (isCta) {
+          const u = easeOut((t - start) / 0.7)
+          ctaEl.style.opacity = String(clamp(u))
+          ctaEl.style.transform = `scale(${lerp(0.86, 1, u)})`
+        } else {
+          ctaEl.style.opacity = "0"
+        }
+
+        // Brand bug fades for the CTA (it becomes the hero).
+        document.getElementById("bug").style.opacity = String((isCta ? 0 : 0.9) * ramp(t, 0.3, 1.2))
+      }
+
+      window.__seek = seek
+      window.__ready = true
+      seek(0)
+    </script>
+  </body>
+</html>

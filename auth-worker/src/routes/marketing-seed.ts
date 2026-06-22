@@ -122,31 +122,50 @@ async function seedMarketing(db: D1Database): Promise<{
     .run()
 
   // Idempotent content reseed: drop any prior demo file/cells/events first.
+  // Order matters: cells.event_id FKs events(id), so cells before events.
   await db.prepare("DELETE FROM cells WHERE project_id = ? AND file_id = ?").bind(M_PROJECT_ID, M_FILE_ID).run()
   await db.prepare("DELETE FROM events WHERE project_id = ? AND file_id = ?").bind(M_PROJECT_ID, M_FILE_ID).run()
   await db.prepare("DELETE FROM files WHERE id = ? AND project_id = ?").bind(M_FILE_ID, M_PROJECT_ID).run()
 
   const now = Date.now()
+
+  // server_seq is NOT NULL + UNIQUE(project_id, server_seq) — assign a
+  // monotonic per-project sequence. Start past any existing max so re-seeds
+  // never collide.
+  const seqRow = await db
+    .prepare("SELECT COALESCE(MAX(server_seq), 0) AS m FROM events WHERE project_id = ?")
+    .bind(M_PROJECT_ID)
+    .first<{ m: number }>()
+  let seq = Number(seqRow?.m ?? 0)
+
+  async function insertEvent(opts: { id: string; cellId: string | null; kind: string; payload: unknown }): Promise<void> {
+    seq += 1
+    await db
+      .prepare(
+        `INSERT INTO events (id, schema_version, project_id, file_id, cell_id, kind, author, payload, client_ts, server_ts, parent_id, server_seq)
+         VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+      )
+      .bind(opts.id, M_PROJECT_ID, M_FILE_ID, opts.cellId, opts.kind, M_USERNAME, JSON.stringify(opts.payload), now, now, seq)
+      .run()
+  }
+
+  // File-level genesis event — files.event_id is NOT NULL (AD-2 chain head).
+  const fileEventId = crypto.randomUUID()
+  await insertEvent({ id: fileEventId, cellId: null, kind: "file.create", payload: { name: M_FILE_NAME, book: "JHN" } })
+
   let totalWords = 0
   let filled = 0
   let approved = 0
   let prevCellId: string | null = null
 
-  // Insert paired source/target rows. cells.event_id is a NOT NULL FK to
-  // events(id), so each row gets a backing event; target rows pin the source
-  // event_id (AD-9 staleness basis). Column order matches the sync-worker's
-  // cells read/write contract.
+  // Paired source/target rows. Each cell row gets a backing event (FK), and
+  // target rows pin the source event_id (AD-9 staleness basis). Column order
+  // matches the sync-worker's cells read/write contract.
   for (const [ref, source, target] of VERSES) {
     const cellId = crypto.randomUUID()
 
     const srcEventId = crypto.randomUUID()
-    await db
-      .prepare(
-        `INSERT INTO events (id, schema_version, project_id, file_id, cell_id, kind, author, payload, client_ts, server_ts)
-         VALUES (?, 1, ?, ?, ?, 'source.cell.commit', ?, ?, ?, ?)`,
-      )
-      .bind(srcEventId, M_PROJECT_ID, M_FILE_ID, cellId, M_USERNAME, JSON.stringify({ value: source, ref }), now, now)
-      .run()
+    await insertEvent({ id: srcEventId, cellId, kind: "source.cell.commit", payload: { value: source, ref } })
     await db
       .prepare(
         `INSERT INTO cells (project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash)
@@ -157,20 +176,13 @@ async function seedMarketing(db: D1Database): Promise<{
 
     const hasTarget = target.trim().length > 0
     const tgtEventId = crypto.randomUUID()
-    const validated = hasTarget ? 1 : 0
-    await db
-      .prepare(
-        `INSERT INTO events (id, schema_version, project_id, file_id, cell_id, kind, author, payload, client_ts, server_ts)
-         VALUES (?, 1, ?, ?, ?, 'target.cell.commit', ?, ?, ?, ?)`,
-      )
-      .bind(tgtEventId, M_PROJECT_ID, M_FILE_ID, cellId, M_USERNAME, JSON.stringify({ value: target, ref }), now, now)
-      .run()
+    await insertEvent({ id: tgtEventId, cellId, kind: "target.cell.commit", payload: { value: target, ref } })
     await db
       .prepare(
         `INSERT INTO cells (project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash)
          VALUES (?, ?, ?, 'target', ?, NULL, 'verse', ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
       )
-      .bind(M_PROJECT_ID, M_FILE_ID, cellId, target, ref, prevCellId, tgtEventId, srcEventId, M_USERNAME, now, validated, words(target))
+      .bind(M_PROJECT_ID, M_FILE_ID, cellId, target, ref, prevCellId, tgtEventId, srcEventId, M_USERNAME, now, hasTarget ? 1 : 0, words(target))
       .run()
 
     totalWords += words(source) + words(target)
@@ -178,13 +190,17 @@ async function seedMarketing(db: D1Database): Promise<{
     prevCellId = cellId
   }
 
+  // files: 0012 shape — no file_type/source_language columns (those live in
+  // `meta`); event_id NOT NULL; meta NOT NULL. fileType is derived by the
+  // read route as kind ?? role ?? 'codex'.
+  const meta = JSON.stringify({ source_language: SOURCE_LANG, target_language: TARGET_LANG, import_format: "usfm" })
   await db
     .prepare(
-      `INSERT INTO files (id, project_id, name, file_type, source_language, target_language,
-         cell_count, approved_count, word_count, last_edit_at, filled_count, book_code, kind, import_format, updated_at)
-       VALUES (?, ?, ?, 'usfm', ?, ?, ?, ?, ?, ?, ?, 'JHN', 'scripture', 'usfm', CURRENT_TIMESTAMP)`,
+      `INSERT INTO files (id, project_id, name, role, kind, book_code, event_id,
+         cell_count, approved_count, word_count, last_edit_at, created_by, created_at, updated_at, meta, filled_count)
+       VALUES (?, ?, ?, 'target', 'scripture', 'JHN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(M_FILE_ID, M_PROJECT_ID, M_FILE_NAME, SOURCE_LANG, TARGET_LANG, VERSES.length, approved, totalWords, now, filled)
+    .bind(M_FILE_ID, M_PROJECT_ID, M_FILE_NAME, fileEventId, VERSES.length, approved, totalWords, now, M_USERNAME, now, now, meta, filled)
     .run()
 
   return { userId, orgId, projectId: M_PROJECT_ID }

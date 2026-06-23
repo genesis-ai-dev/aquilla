@@ -6,6 +6,8 @@ import {
   fileCreateEventId,
   sourceCellCreateEventId,
   targetCommitEventId,
+  audioAttachEventId,
+  audioSelectEventId,
 } from "./ids"
 
 // WHY these tests matter: deterministic ids ARE the idempotency guarantee. If
@@ -50,5 +52,22 @@ describe("migrate deterministic ids", () => {
   it("emits valid v5 UUIDs", () => {
     expect(projectIdFor("k", "local")).toMatch(UUID_RE)
     expect(targetCommitEventId("p", "f", "c", 0)).toMatch(UUID_RE)
+  })
+
+  it("audio-select ids are stable, valid, and never collide with audio-attach for the same take", () => {
+    // The all-takes import emits one attach per take plus one select to pin the
+    // active take. The select id must be deterministic (idempotent re-runs) and
+    // must NOT collide with that take's attach id (both reference the same
+    // project/file/cell/audioId but are distinct events).
+    expect(audioSelectEventId("p", "f", "c", "a1.webm")).toBe(
+      audioSelectEventId("p", "f", "c", "a1.webm"),
+    )
+    expect(audioSelectEventId("p", "f", "c", "a1.webm")).toMatch(UUID_RE)
+    expect(audioSelectEventId("p", "f", "c", "a1.webm")).not.toBe(
+      audioAttachEventId("p", "f", "c", "a1.webm"),
+    )
+    expect(audioSelectEventId("p", "f", "c", "a1.webm")).not.toBe(
+      audioSelectEventId("p", "f", "c", "a2.webm"),
+    )
   })
 })

@@ -32,6 +32,7 @@ import { handleMigrateProjectRequest } from "./events/migrate-project-route"
 import { handleMigrateEventIdsRequest } from "./events/migrate-event-ids-route"
 import { handleMigrateFinalizeRequest } from "./events/migrate-finalize-route"
 import { handleMigrateAudioRequest } from "./events/migrate-audio-route"
+import { handleMigrateAudioCopyRequest } from "./events/migrate-audio-copy-route"
 import { handleExportSourceRequest } from "./events/export-route"
 import { handleExportBundleRequest } from "./events/export-bundle-route"
 import { handleRebuildProjectionRequest } from "./events/rebuild"
@@ -60,6 +61,11 @@ declare global {
       ProjectSync?: DurableObjectNamespace
       /** R2 media/original-import blob bucket. Not used for Y.Doc state. */
       SNAPSHOTS: R2Bucket
+      /** Read-only binding to GitLab's LFS object-storage bucket
+       *  (codex-attachments-v1-1), used only by /migrate/audio-copy to copy
+       *  legacy audio bytes bucket→bucket without leaving Cloudflare. Absent in
+       *  envs that don't run the audio import. */
+      LFS_SRC?: R2Bucket
       /** The events + projections store. NOT a D1 binding — it is the
        *  D1-compatible Postgres (Neon) shim, injected per-request at the top of
        *  `fetch` from HYPERDRIVE. Typed as `AquillaDb` only because the ~80
@@ -252,6 +258,8 @@ export default {
     if (migrateFinalizeResponse) return migrateFinalizeResponse
     const migrateAudioResponse = await handleMigrateAudioRequest(request, env)
     if (migrateAudioResponse) return migrateAudioResponse
+    const migrateAudioCopyResponse = await handleMigrateAudioCopyRequest(request, env)
+    if (migrateAudioCopyResponse) return migrateAudioCopyResponse
     const exportSourceResponse = await handleExportSourceRequest(request, env)
     if (exportSourceResponse) return exportSourceResponse
     const exportBundleResponse = await handleExportBundleRequest(request, env)

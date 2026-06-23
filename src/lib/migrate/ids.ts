@@ -93,3 +93,14 @@ export const audioAttachEventId = (
   cellId: string,
   audioId: string,
 ): string => u5(`audio-attach:${projectId}:${fileId}:${cellId}:${audioId}`)
+
+/** event id for a `cell.audio.select`, keyed by (cell, audioId). The all-takes
+ *  import emits one of these to pin the legacy active take after attaching every
+ *  take in the cell (each attach auto-selects, so an explicit final select wins).
+ *  Distinct seed prefix from audio-attach so the two never collide. */
+export const audioSelectEventId = (
+  projectId: string,
+  fileId: string,
+  cellId: string,
+  audioId: string,
+): string => u5(`audio-select:${projectId}:${fileId}:${cellId}:${audioId}`)

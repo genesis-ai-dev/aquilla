@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import type { CodexCell } from "../codex-editor/types"
-import { collectCellAudio, audioAttachEvent } from "./audio"
-import { audioAttachEventId } from "./ids"
+import { collectCellAudio, collectAllCellAudio, audioAttachEvent, audioSelectEvent } from "./audio"
+import { audioAttachEventId, audioSelectEventId } from "./ids"
 
 function cell(metadata: Record<string, unknown>): CodexCell {
   return { kind: 2, languageId: "html", value: "", metadata: metadata as never }
@@ -59,6 +59,57 @@ describe("collectCellAudio", () => {
     })
     const got = collectCellAudio(c)
     expect(got[0].slot).toBe("generatedVoice")
+  })
+})
+
+describe("collectAllCellAudio", () => {
+  it("imports EVERY non-deleted take (not just the selected one), all as recordings", () => {
+    // WHY: the fast-import goal is full take history. The active-only
+    // collectCellAudio would lose superseded takes; this must keep them.
+    const c = cell({
+      id: "x",
+      type: "text",
+      selectedAudioId: "a2",
+      attachments: {
+        a1: { url: ".project/attachments/files/seg/a1.webm", type: "audio", isDeleted: false, createdAt: 10 },
+        a2: { url: ".project/attachments/files/seg/a2.webm", type: "audio", isDeleted: false, createdAt: 20 },
+        a3: { url: ".project/attachments/files/seg/a3.webm", type: "audio", isDeleted: false, createdAt: 30 },
+      },
+    })
+    const got = collectAllCellAudio(c)
+    expect(got).toHaveLength(3)
+    expect(got.map((t) => t.aquillaAudioId).sort()).toEqual(["a1.webm", "a2.webm", "a3.webm"])
+    expect(got.every((t) => t.slot === "recording")).toBe(true)
+    // legacyAudioId is preserved so the driver can match selectedAudioId → take.
+    expect(got.map((t) => t.legacyAudioId).sort()).toEqual(["a1", "a2", "a3"])
+  })
+
+  it("excludes soft-deleted takes", () => {
+    const c = cell({
+      id: "x",
+      attachments: {
+        a1: { url: "x/a1.webm", type: "audio", isDeleted: false },
+        a2: { url: "x/a2.webm", type: "audio", isDeleted: true },
+      },
+    })
+    const got = collectAllCellAudio(c)
+    expect(got).toHaveLength(1)
+    expect(got[0].aquillaAudioId).toBe("a1.webm")
+  })
+
+  it("returns nothing when there are no attachments", () => {
+    expect(collectAllCellAudio(cell({ id: "x" }))).toHaveLength(0)
+  })
+})
+
+describe("audioSelectEvent", () => {
+  it("builds a deterministic cell.audio.select pinning the active take", () => {
+    const opts = { projectId: "p", fileId: "f", fallbackAuthor: "x", fallbackTs: 1 }
+    const ev = audioSelectEvent("cue1", "a2.webm", opts)
+    expect(ev.id).toBe(audioSelectEventId("p", "f", "cue1", "a2.webm"))
+    expect(ev.kind).toBe("cell.audio.select")
+    expect(ev.cellId).toBe("cue1")
+    expect(ev.payload).toMatchObject({ audioId: "a2.webm", slot: "recording" })
   })
 })
 

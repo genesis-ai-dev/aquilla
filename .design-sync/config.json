@@ -6,5 +6,9 @@
   "srcDir": "src/components/ui",
   "tsconfig": "./tsconfig.json",
   "cssEntry": ".design-sync/.cache/compiled.css",
-  "buildCmd": "pnpm exec vite build && cp \"$(ls -t dist/assets/BrandProvider-*.css | head -1)\" .design-sync/.cache/compiled.css"
+  "buildCmd": "pnpm exec vite build && cp \"$(ls -t dist/assets/BrandProvider-*.css | head -1)\" .design-sync/.cache/compiled.css",
+  "extraFonts": "node_modules/.pnpm/@fontsource-variable+geist@5.2.8/node_modules/@fontsource-variable/geist/index.css",
+  "libOverrides": {
+    "source-kit.mjs": "5-group pane categorization (Actions/Forms/Overlays/Layout/Feedback) — config keys are strictly validated, no group knob"
+  }
 }

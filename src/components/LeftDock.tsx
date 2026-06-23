@@ -52,6 +52,10 @@ export interface LeftDockProps {
   /** Slot rendered when "voices" tab is active. When omitted, the Voices tab
    *  is hidden (e.g. a project without the Audio lens available). */
   voicesPanel?: ReactNode
+  /** Persistent footer rendered below the active panel on EVERY tab (full
+   *  sidebar width). Used for the account switcher / onboarding chip so they
+   *  don't vanish when switching away from Files. Only shown when expanded. */
+  footer?: ReactNode
   /** Persist width / open-state per project */
   storageKey?: string
   /** Badge on the chat tab (e.g. unread) */
@@ -170,6 +174,7 @@ export function LeftDock({
   chatPanel,
   searchPanel,
   voicesPanel,
+  footer,
   storageKey,
   chatBadge,
   activeTab: controlledTab,
@@ -346,6 +351,10 @@ export function LeftDock({
           </>
         )}
       </div>
+
+      {/* Persistent footer — shows on every tab (full sidebar width), not just
+          Files. Only when expanded; the collapsed rail has no room for it. */}
+      {isOpen && footer && <div className="shrink-0">{footer}</div>}
 
       <div className="flex shrink-0 items-center">
         <div className="min-w-0 flex-1">

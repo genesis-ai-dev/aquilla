@@ -3160,32 +3160,34 @@ export function ProjectWorkspace() {
                     refreshKey={assignmentsRefreshKey}
                   />
                 )}
-                <div className="mt-auto border-t px-2 pb-2 pt-2">
-                  {/* Contextual onboarding status — self-removes once setup
-                      completes. Sidebar-footer placement (Linear-style) keeps
-                      transient onboarding state out of the action header. */}
-                  {checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
-                    <TooltipProvider delay={0}>
-                      <Tooltip open={showChipTooltip} onOpenChange={setShowChipTooltip}>
-                        <TooltipTrigger
-                          render={
-                            <button
-                              onClick={() => { setShowChipTooltip(false); setChecklistOpen(true) }}
-                              className="mb-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-                            />
-                          }
-                        >
-                          <ClipboardList className="h-3 w-3" />
-                          Setup: {checklistState.completedCount}/{checklistState.totalCount}
-                        </TooltipTrigger>
-                        <TooltipContent side="right">
-                          Reopen the setup checklist anytime from here.
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  )}
-                  <AccountSwitcher variant="sidebar" />
-                </div>
+              </div>
+            }
+            footer={
+              <div className="border-t px-2 pb-2 pt-2">
+                {/* Contextual onboarding status — self-removes once setup
+                    completes. Sidebar-footer placement (Linear-style) keeps
+                    transient onboarding state out of the action header. */}
+                {checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
+                  <TooltipProvider delay={0}>
+                    <Tooltip open={showChipTooltip} onOpenChange={setShowChipTooltip}>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            onClick={() => { setShowChipTooltip(false); setChecklistOpen(true) }}
+                            className="mb-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                          />
+                        }
+                      >
+                        <ClipboardList className="h-3 w-3" />
+                        Setup: {checklistState.completedCount}/{checklistState.totalCount}
+                      </TooltipTrigger>
+                      <TooltipContent side="right">
+                        Reopen the setup checklist anytime from here.
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
+                <AccountSwitcher variant="sidebar" />
               </div>
             }
             chatPanel={

@@ -75,8 +75,17 @@ function req(body: unknown, auth = `Bearer ${SECRET}`): Request {
 }
 
 describe("gitlabLfsKey", () => {
-  it("derives GitLab's oid-sharded object-storage key", () => {
-    expect(gitlabLfsKey(OID)).toBe(`${OID.slice(0, 2)}/${OID.slice(2, 4)}/${OID}`)
+  it("derives GitLab's oid-sharded object-storage key (oid[0:2]/oid[2:4]/oid[4:])", () => {
+    // WHY oid[4:] and not the full oid: verified against the live LFS bucket
+    // (codex-attachments-v1-1) — the third segment is the oid with the first 4
+    // hex stripped, NOT the full oid. A real object confirmed this:
+    //   oid 6adbf08b815108caa53f9bb8a014dc499f454ee7c15201405d12cf7d6533d8b5
+    //   key 6a/db/f08b815108caa53f9bb8a014dc499f454ee7c15201405d12cf7d6533d8b5 (87252 B)
+    // Putting the full oid in the third segment makes every copy an lfs-miss.
+    expect(gitlabLfsKey(OID)).toBe(`${OID.slice(0, 2)}/${OID.slice(2, 4)}/${OID.slice(4)}`)
+    expect(gitlabLfsKey("6adbf08b815108caa53f9bb8a014dc499f454ee7c15201405d12cf7d6533d8b5")).toBe(
+      "6a/db/f08b815108caa53f9bb8a014dc499f454ee7c15201405d12cf7d6533d8b5",
+    )
   })
 })
 

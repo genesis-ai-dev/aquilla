@@ -292,23 +292,54 @@ async function fetchProject(gitlabId: number, noLfs: boolean): Promise<string> {
   return m[1].trim()
 }
 
-async function ingest(projectId: string, events: IngestEvent[], eventsOnly = false): Promise<void> {
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+async function ingest(
+  projectId: string,
+  events: IngestEvent[],
+  eventsOnly = false,
+  chunkSize = INGEST_CHUNK,
+): Promise<void> {
   const secret = process.env.SYNC_SECRET_KEY
   if (!secret) throw new Error("SYNC_SECRET_KEY not set (load .env: `set -a; . ./.env; set +a`)")
-  for (let i = 0; i < events.length; i += INGEST_CHUNK) {
-    const res = await fetch(`${SYNC}/migrate/ingest`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
-      body: JSON.stringify({
-        projectId,
-        events: events.slice(i, i + INGEST_CHUNK),
-        eventsOnly,
-        // Skip the O(N²) per-cell file-counter recompute; finalizeCounters() runs
-        // it once per project after ingest (the single biggest throughput win).
-        deferFileCounters: true,
-      }),
+  for (let i = 0; i < events.length; i += chunkSize) {
+    const body = JSON.stringify({
+      projectId,
+      events: events.slice(i, i + chunkSize),
+      eventsOnly,
+      // Skip the O(N²) per-cell file-counter recompute; finalizeCounters() runs
+      // it once per project after ingest (the single biggest throughput win).
+      deferFileCounters: true,
     })
-    if (!res.ok) throw new Error(`ingest HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`)
+    // Retry transient failures: a single heavy ingest POST can have its
+    // connection dropped at the edge ("fetch failed", no HTTP status) or hit a
+    // 5xx/429. Ingest is idempotent (INSERT OR IGNORE on deterministic ids), so
+    // a retried chunk is safe. A non-429 4xx is a real client error → fatal.
+    let ok = false
+    let lastErr = ""
+    for (let attempt = 1; attempt <= 4 && !ok; attempt++) {
+      try {
+        const res = await fetch(`${SYNC}/migrate/ingest`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
+          body,
+        })
+        if (res.ok) {
+          ok = true
+          break
+        }
+        const detail = (await res.text().catch(() => "")).slice(0, 300)
+        if (res.status < 500 && res.status !== 429) {
+          throw new Error(`ingest HTTP ${res.status}: ${detail}`)
+        }
+        lastErr = `HTTP ${res.status}: ${detail}`
+      } catch (e) {
+        if (e instanceof Error && /^ingest HTTP [4]/.test(e.message)) throw e
+        lastErr = e instanceof Error ? e.message : String(e)
+      }
+      if (!ok && attempt < 4) await sleep(750 * attempt)
+    }
+    if (!ok) throw new Error(`ingest failed after retries: ${lastErr}`)
   }
 }
 
@@ -577,7 +608,9 @@ async function doProjectAudioFast(p: CodexProjectMatch, args: Args) {
     const existing = await fetchExistingEventIds(projectId)
     const newEvents = existing.size ? events.filter((e) => !existing.has(e.id)) : events
     if (existing.size) console.log(`  ↳ delta: ${newEvents.length} new / ${events.length} total`)
-    if (newEvents.length) await ingest(projectId, newEvents)
+    // Smaller chunks than the content pass: each audio event's projection does a
+    // deselect + upsert, so a big single POST can exceed the edge timeout.
+    if (newEvents.length) await ingest(projectId, newEvents, false, 300)
   }
   console.log(`  ✓ audio-fast${args.apply ? "" : " (dry-run)"}`)
   // Only mark the project complete when nothing transient failed. lfs-miss /

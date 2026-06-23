@@ -65,6 +65,16 @@ describe("worker/index — routing", () => {
     expect(await res.text()).toBe("served:/betamax")
   })
 
+  it("GET /case-studies/come-and-see serves case-study.html (static marketing page)", async () => {
+    const res = await fetchWorker("/case-studies/come-and-see")
+    expect(await res.text()).toBe("served:/case-study.html")
+  })
+
+  it("GET /case-studies/come-and-see serves case-study.html even when signed in", async () => {
+    const res = await fetchWorker("/case-studies/come-and-see", "aq_hint=1")
+    expect(await res.text()).toBe("served:/case-study.html")
+  })
+
   it("GET /project/abc passes through to ASSETS unchanged", async () => {
     const res = await fetchWorker("/project/abc")
     expect(await res.text()).toBe("served:/project/abc")

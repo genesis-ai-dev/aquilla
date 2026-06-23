@@ -102,7 +102,6 @@ import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { PrimaryActionButton } from "./PrimaryActionButton"
-import { AccountSwitcher } from "./AccountSwitcher"
 import { ExpandableFileList } from "./ExpandableFileList"
 import { SidebarProjectSection } from "./SidebarProjectSection"
 import { SuggestionBanner } from "./SuggestionBanner"
@@ -142,6 +141,7 @@ import { generateBacktranslation } from "@/lib/completion/backtranslation-servic
 import { addConcept } from "@/lib/terminology/store"
 import type { Concept } from "@/lib/terminology/types"
 import { buildGlosser, type BtSeed } from "@/lib/completion/bt-glosser"
+import { memMark } from "@/lib/perf-log"
 import { buildAlignmentModel } from "@/lib/completion/interlinear"
 import { buildStatisticalBt, resolveBtTargetEventId } from "@/lib/completion/bt-auto"
 // FRO-192: assignment work-pickup UI
@@ -1462,7 +1462,9 @@ export function ProjectWorkspace() {
         seeds.push({ source: concept.sourceTerm, target: rendering.rendering, weight })
       }
     }
-    return buildGlosser(pairs, seeds)
+    const g = buildGlosser(pairs, seeds)
+    memMark(`glosser.build(${pairs.length}p)`)
+    return g
   }, [allProjectCells, backtranslationCache, project?.terminology])
 
   // Build the interlinear alignment model from the same corpus, seeded with the
@@ -1472,7 +1474,9 @@ export function ProjectWorkspace() {
     const pairs = allProjectCells
       .filter((c) => c.original?.trim() && c.translated?.trim())
       .map((c) => ({ source: c.original!, target: c.translated }))
-    return buildAlignmentModel(pairs, project?.alignmentSeeds ?? [])
+    const m = buildAlignmentModel(pairs, project?.alignmentSeeds ?? [])
+    memMark(`alignmentModel.build(${pairs.length}p)`)
+    return m
   }, [allProjectCells, project?.alignmentSeeds])
 
   // Persist a confirmed/invalidated alignment as an additive seed via the same
@@ -3076,6 +3080,7 @@ export function ProjectWorkspace() {
       <ScrollToGroupHandler cells={cells} editorRef={editorRef} />
       {/* FRO-308: currentCell for chat panel — derived from focusedCellId */}
       <AppShell
+        railCollapsed={dockTab === null}
         logoAccessory={
           dockTab !== null ? (
             <AppTooltip content="Collapse sidebar" side="right">
@@ -3160,34 +3165,33 @@ export function ProjectWorkspace() {
                     refreshKey={assignmentsRefreshKey}
                   />
                 )}
-              </div>
-            }
-            footer={
-              <div className="border-t px-2 pb-2 pt-2">
                 {/* Contextual onboarding status — self-removes once setup
                     completes. Sidebar-footer placement (Linear-style) keeps
-                    transient onboarding state out of the action header. */}
+                    transient onboarding state out of the action header. The
+                    account switcher now lives in the dock footer (LeftDock) so
+                    it's present in every tab, not just this Files panel. */}
                 {checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
-                  <TooltipProvider delay={0}>
-                    <Tooltip open={showChipTooltip} onOpenChange={setShowChipTooltip}>
-                      <TooltipTrigger
-                        render={
-                          <button
-                            onClick={() => { setShowChipTooltip(false); setChecklistOpen(true) }}
-                            className="mb-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-                          />
-                        }
-                      >
-                        <ClipboardList className="h-3 w-3" />
-                        Setup: {checklistState.completedCount}/{checklistState.totalCount}
-                      </TooltipTrigger>
-                      <TooltipContent side="right">
-                        Reopen the setup checklist anytime from here.
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                  <div className="mt-auto border-t px-2 pb-2 pt-2">
+                    <TooltipProvider delay={0}>
+                      <Tooltip open={showChipTooltip} onOpenChange={setShowChipTooltip}>
+                        <TooltipTrigger
+                          render={
+                            <button
+                              onClick={() => { setShowChipTooltip(false); setChecklistOpen(true) }}
+                              className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                            />
+                          }
+                        >
+                          <ClipboardList className="h-3 w-3" />
+                          Setup: {checklistState.completedCount}/{checklistState.totalCount}
+                        </TooltipTrigger>
+                        <TooltipContent side="right">
+                          Reopen the setup checklist anytime from here.
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
                 )}
-                <AccountSwitcher variant="sidebar" />
               </div>
             }
             chatPanel={

@@ -110,6 +110,39 @@ describe("JoinPage inline auth", () => {
   })
 })
 
+/** Build a fake JWT whose `exp` claim is `secondsFromNow` seconds out. */
+function fakeJwt(secondsFromNow: number): string {
+  const exp = Math.floor(Date.now() / 1000) + secondsFromNow
+  return `h.${btoa(JSON.stringify({ exp }))}.s`
+}
+
+describe("JoinPage expired session", () => {
+  // Regression: an expired stored JWT used to land the user on the confirm
+  // card; clicking Accept 401'd and surfaced as "this invite link is no longer
+  // valid" — a dead-invite error for what was really an auth-expiry, with no
+  // way to recover. An expired session must instead re-prompt login while
+  // making clear the invitation itself is still good.
+  it("shows inline login (not Accept, not a dead-invite error) when the session JWT is expired", async () => {
+    sessionValue = { session: { jwt: fakeJwt(-60) }, loading: false }
+    renderJoin()
+    expect(await screen.findByText("John")).toBeInTheDocument() // preview still loads
+    expect(screen.getByText("do-login")).toBeInTheDocument()
+    expect(screen.getByText(/your session expired/i)).toBeInTheDocument()
+    expect(screen.getByText(/invitation is still valid/i)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /accept invitation/i })).not.toBeInTheDocument()
+    expect(screen.queryByText("This invite link is no longer valid")).not.toBeInTheDocument()
+    expect(acceptServerInvite).not.toHaveBeenCalled()
+  })
+
+  it("shows the confirm card (not login) when the session JWT is still valid", async () => {
+    sessionValue = { session: { jwt: fakeJwt(3600) }, loading: false }
+    renderJoin()
+    expect(await screen.findByRole("button", { name: /accept invitation/i })).toBeInTheDocument()
+    expect(screen.queryByText("do-login")).not.toBeInTheDocument()
+    expect(screen.queryByText(/your session expired/i)).not.toBeInTheDocument()
+  })
+})
+
 describe("JoinPage preview error states (signed-out)", () => {
   it("shows 'no longer valid' error and no signup form when preview returns expired", async () => {
     vi.mocked(previewMultiInvite).mockResolvedValueOnce({ ok: false, reason: "expired" })

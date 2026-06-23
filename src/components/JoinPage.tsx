@@ -14,6 +14,7 @@ import {
   type MultiInvitePreview,
 } from "@/lib/sync/invites"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { isJwtExpired } from "@/lib/frontier/auth"
 import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
 import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
@@ -123,16 +124,29 @@ export function JoinPage() {
       navigate(`/project/${single.projectId}`)
       return
     }
+    // Both accepts failed. If the session lapsed mid-flow, the failure was a
+    // 401 on an expired token, not a dead invite — fall back to the sign-in
+    // card (which renders because hasValidSession is now false) so the user
+    // can re-auth and accept, instead of seeing a misleading dead-link error.
+    if (isJwtExpired(jwt)) {
+      setPhase("initial")
+      return
+    }
     setPhase("error")
     setError(
       "This invite link is no longer valid. Ask the project owner for a fresh link."
     )
   }
 
-  const isSignedOut = !sessionLoading && !session?.jwt
+  // An expired stored JWT is treated as signed-out: the accept endpoint would
+  // 401 on it, so we re-prompt login (preserving this /join URL) rather than
+  // letting the user click Accept and hit a misleading "invite invalid" error.
+  const sessionExpired = !!session?.jwt && isJwtExpired(session.jwt)
+  const hasValidSession = !!session?.jwt && !sessionExpired
+  const isSignedOut = !sessionLoading && !hasValidSession
   const showPreviewCard = isSignedOut && phase === "initial"
   // FRO-335: signed-in users confirm explicitly instead of auto-accepting.
-  const showConfirmCard = !sessionLoading && !!session?.jwt && phase === "initial"
+  const showConfirmCard = !sessionLoading && hasValidSession && phase === "initial"
   // Preview failed — show error instead of auth form / accept button. A
   // network failure only blocks the signed-out card (signed-in users can
   // still accept; the accept endpoint is the authority on token validity).
@@ -274,6 +288,14 @@ export function JoinPage() {
           ) : showPreviewCard ? (
             <div className="space-y-3">
               {previewSummary}
+              {/* Expired session: tell the user why they're seeing login again
+                  so an expired JWT doesn't read as a broken invite link. */}
+              {sessionExpired && (
+                <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                  Your session expired — sign in again to join. Your invitation
+                  is still valid.
+                </p>
+              )}
               {/* Inline auth — on success the session updates and the page
                   swaps to the confirmation card so the user accepts explicitly. */}
               <div className="rounded-md border p-3">

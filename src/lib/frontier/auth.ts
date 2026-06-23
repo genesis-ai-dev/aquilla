@@ -191,6 +191,33 @@ function jwtClaims(token: string): { sub?: string; email?: string } {
   }
 }
 
+/**
+ * True only when a JWT's `exp` claim is provably in the past. Lets the client
+ * detect an expired session WITHOUT a network round-trip so flows like the
+ * invite JoinPage can re-prompt login instead of mistaking an auth-expiry for
+ * an invalid invite (the accept endpoint 401s on an expired token, which the
+ * old code surfaced as "this invite link is no longer valid").
+ *
+ * Conservative by design: returns false whenever expiry can't be determined
+ * (no token, malformed, missing/non-numeric `exp`) so a currently-working
+ * session is never forced to re-login on a decode hiccup. A small skew avoids
+ * accepting a token that's about to lapse mid-request.
+ */
+export function isJwtExpired(token: string | null | undefined, skewSeconds = 30): boolean {
+  if (!token) return false;
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return false;
+    // atob requires standard base64; JWT uses base64url — swap - and _
+    const padded = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(padded)) as { exp?: unknown };
+    if (typeof payload.exp !== "number") return false;
+    return Date.now() >= (payload.exp - skewSeconds) * 1000;
+  } catch {
+    return false;
+  }
+}
+
 async function finalizeSession(loginIdentifier: string, data: AuthResponse): Promise<FrontierSession> {
   // Resolve the canonical username from the JWT's `sub` claim.
   // The server always mints the token with the user record's username (not

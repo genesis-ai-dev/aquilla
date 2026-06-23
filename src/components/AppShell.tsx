@@ -41,9 +41,13 @@ interface Props {
   /** Rendered to the right of the logo (e.g. the workspace's collapse-sidebar
    * toggle) so rail controls live in the logo row, not the dock footer. */
   logoAccessory?: ReactNode
+  /** When the left dock is collapsed to its icon rail, stack the top chrome
+   * (logo, nav history, beta badge) vertically so the rail can stay narrow
+   * instead of being stretched by the horizontal logo row. */
+  railCollapsed?: boolean
 }
 
-export function AppShell({ leftDock, sidebar, logoSlot, logoAccessory, header, statusBar, beforeMain, main, aside }: Props) {
+export function AppShell({ leftDock, sidebar, logoSlot, logoAccessory, header, statusBar, beforeMain, main, aside, railCollapsed }: Props) {
   const dockContent = leftDock ?? sidebar
   // Optional read (not useBrand) — the shell is rendered by page tests that
   // don't mount BrandProvider; the logo link is chrome, not a hard dependency.
@@ -76,8 +80,13 @@ export function AppShell({ leftDock, sidebar, logoSlot, logoAccessory, header, s
         )}
       >
         {(resolvedLogo || logoAccessory) && (
-          <div className="flex shrink-0 items-center justify-between">
-            <div className="flex items-center gap-0.5">
+          <div
+            className={cn(
+              "flex shrink-0",
+              railCollapsed ? "flex-col items-center gap-1" : "items-center justify-between",
+            )}
+          >
+            <div className={cn("flex gap-0.5", railCollapsed ? "flex-col items-center" : "items-center")}>
               {resolvedLogo}
               {/* Browser-style back/forward + history popover, top-left chrome. */}
               <NavHistoryControls />

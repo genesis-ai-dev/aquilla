@@ -88,7 +88,7 @@ export function Homepage() {
             <span className="aq-dot" aria-hidden="true" /> One workspace for Bible &amp; ministry translation
           </div>
           <h1 className="aq-display aq-load aq-d2">
-            Translation, <span className="aq-gold-text aq-display-italic">lifted.</span>
+            Translators, <span className="aq-gold-text aq-display-italic">lifted.</span>
           </h1>
           <p className="aq-hero-sub aq-load aq-d3">
             The first workspace where <b style={{ color: "var(--aq-text)" }}>text and audio</b> translation
@@ -120,7 +120,7 @@ export function Homepage() {
         <section className="aq-container" style={{ paddingBottom: 24 }}>
           <div className="aq-reveal" style={{ textAlign: "center" }}>
             <p style={{ fontSize: 13, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--aq-faint)" }}>
-              Proven in the highest-stakes, lowest-resource translation on earth
+              Proven in some of the highest-stakes, lowest-resource translation there is
             </p>
             <div style={{ display: "flex", gap: 32, justifyContent: "center", flexWrap: "wrap", marginTop: 20, color: "var(--aq-dim)", fontWeight: 540, fontSize: 17 }}>
               <span>Come&nbsp;and&nbsp;See</span>
@@ -183,7 +183,7 @@ export function Homepage() {
             <div className="aq-mtpe">
               <div className="aq-mtpe-side aq-mtpe-x">
                 <IconX />
-                <span>This isn't <b>machine-translation post-editing</b>. We don't believe the path to quality is making an expert trail behind a model that has already decided every word.</span>
+                <span>This isn't <b>post-editing a machine's output</b>. We don't believe the path to quality is making an expert trail behind a model that has already decided every word.</span>
               </div>
               <div className="aq-mtpe-vs" />
               <div className="aq-mtpe-side aq-mtpe-check">
@@ -243,13 +243,13 @@ export function Homepage() {
               <h3 className="aq-display" style={{ marginTop: 14 }}>Quality you can see at a glance.</h3>
               <p>
                 Every cell carries a confidence score that reflects how well it lines up with validated, trusted work
-                around it. The system surfaces what needs a human's attention — so one expert can steer a whole project
-                instead of re-reading it.
+                around it. The system surfaces what needs a human's attention — so an expert's time goes where it matters
+                instead of re-reading every line.
               </p>
               <ul className="aq-feature-list">
-                <li><IconCheck /> Confidence derived on read — text <em>and</em> audio</li>
+                <li><IconCheck /> A live confidence score on every cell — text <em>and</em> audio</li>
                 <li><IconCheck /> The biggest drags, ranked and one click away</li>
-                <li><IconCheck /> Built for a single subject-matter expert with no fixed review pipeline</li>
+                <li><IconCheck /> Works whether one expert is steering or a whole team is — no fixed review pipeline</li>
               </ul>
             </div>
             <div className="aq-demo-card aq-reveal">
@@ -292,7 +292,7 @@ export function Homepage() {
             <span className="aq-eyebrow">Coordination compression</span>
             <h2 className="aq-display">Drafting and checking aren't phases. They're one loop.</h2>
             <p>
-              The hidden cost in translation isn't drafting — it's coordination latency: the handoffs, queues, and
+              The hidden cost in translation isn't drafting — it's the waiting between steps: the handoffs, queues, and
               "waiting for review" states between every phase. Aquilla collapses them into one continuous flow, where
               every pass compounds quality instead of waiting on the next.
             </p>
@@ -369,9 +369,9 @@ export function Homepage() {
               <h3 className="aq-display" style={{ marginTop: 14 }}>125 languages. A Guinness World Record. Twice.</h3>
               <p>
                 Come and See is translating <em>The Chosen</em> into 600 languages to reach 95% of the world.
-                With one expert steering and the system carrying consistency and in-flow review, they reached
-                125 languages — including 39 low-resource languages where a single subject-matter expert
-                delivered what once took a full team.
+                With experts steering and the system carrying consistency and in-flow review, they reached
+                125 languages — including 39 low-resource languages a subject-matter expert could finally
+                carry — reaching communities that would otherwise still be waiting for a team to free up.
               </p>
               <blockquote className="aq-quote aq-display" style={{ marginTop: 26, color: "var(--aq-text)" }}>
                 People need to hear the story of Jesus in their own language — the language they speak, dream, and pray in.
@@ -439,7 +439,7 @@ export function Homepage() {
         {/* ── Final CTA ───────────────────────────────────────────────── */}
         <section className="aq-container aq-section" style={{ paddingTop: 0 }}>
           <div className="aq-cta-band aq-reveal">
-            <h2 className="aq-display" aria-label="Get started — Translation, lifted.">Translation, <span className="aq-gold-text aq-display-italic">lifted.</span></h2>
+            <h2 className="aq-display" aria-label="Get started — Translators, lifted.">Translators, <span className="aq-gold-text aq-display-italic">lifted.</span></h2>
             <p>Open your source text, draft in any medium, and let the system steer alongside you. Start today — it's free.</p>
             <div className="aq-cta-actions">
               <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-lg">Sign up free</a>

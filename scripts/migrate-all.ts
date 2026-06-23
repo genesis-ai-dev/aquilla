@@ -580,9 +580,15 @@ async function doProjectAudioFast(p: CodexProjectMatch, args: Args) {
     if (newEvents.length) await ingest(projectId, newEvents)
   }
   console.log(`  ✓ audio-fast${args.apply ? "" : " (dry-run)"}`)
-  if (args.apply) {
+  // Only mark the project complete when nothing transient failed. lfs-miss /
+  // copy failures are retryable (a deploy fix, a flake), so leaving audioFastSha
+  // unset means the next run retries instead of skipping "unchanged". no-oid is
+  // a permanent data gap (attachment with no LFS pointer), so it doesn't block.
+  if (args.apply && lfsMiss === 0 && failed === 0) {
     STATE[String(p.id)] = { ...STATE[String(p.id)], audioFastSha: sha ?? undefined }
     saveState()
+  } else if (args.apply) {
+    console.log(`  ⚠ not marking complete (${lfsMiss} lfs-miss, ${failed} failed) — will retry next run`)
   }
 }
 

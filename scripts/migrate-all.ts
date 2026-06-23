@@ -598,9 +598,13 @@ async function doProjectAudioFast(p: CodexProjectMatch, args: Args) {
     return
   }
   if (args.apply && !process.env.SYNC_SECRET_KEY) throw new Error("SYNC_SECRET_KEY not set")
+  const tFetch = Date.now()
   const dir = await fetchProject(p.id, true) // --no-lfs: pointers + metadata only
+  const tParse = Date.now()
   const oidIndex = buildOidIndex(discoverPointers(dir).pointers)
   const pairs = buildPairs(dir)
+  const secs = (from: number, to: number) => `${((to - from) / 1000).toFixed(1)}s`
+  console.log(`  ⏱ fetch ${secs(tFetch, tParse)}`)
 
   // 1) Flatten the whole project to a stream of independent copy units. Each
   //    carries its source LFS key + destination app key; per-cell we remember
@@ -640,6 +644,7 @@ async function doProjectAudioFast(p: CodexProjectMatch, args: Args) {
   let lfsMiss = 0
   let failed = 0
   const landedByCell = new Map<string, AudioImport[]>()
+  const tCopy = Date.now()
   await Promise.all(
     units.map((u) =>
       copyLimit(async () => {
@@ -660,12 +665,13 @@ async function doProjectAudioFast(p: CodexProjectMatch, args: Args) {
       }),
     ),
   )
+  const tEvents = Date.now()
   process.stdout.write(
     `\r    copied ${copied}/${units.length}` +
       (lfsMiss ? ` / lfs-miss ${lfsMiss}` : "") +
       (noOid ? ` / no-oid ${noOid}` : "") +
       (failed ? ` / failed ${failed}` : "") +
-      "\n",
+      ` (${secs(tCopy, tEvents)})\n`,
   )
 
   // 3) Events: attach per landed take + select per cell (only if its active take
@@ -687,12 +693,15 @@ async function doProjectAudioFast(p: CodexProjectMatch, args: Args) {
   }
 
   if (events.length) {
+    const tDelta = Date.now()
     const existing = await fetchExistingEventIds(projectId)
     const newEvents = existing.size ? events.filter((e) => !existing.has(e.id)) : events
-    if (existing.size) console.log(`  ↳ delta: ${newEvents.length} new / ${events.length} total`)
+    const tIngest = Date.now()
+    if (existing.size) console.log(`  ↳ delta: ${newEvents.length} new / ${events.length} total (event-ids ${secs(tDelta, tIngest)})`)
     // Smaller chunks than the content pass: each audio event's projection does a
     // deselect + upsert, so a big single POST can exceed the edge timeout.
     if (newEvents.length) await ingest(projectId, newEvents, false, 300)
+    console.log(`  ⏱ ingest ${secs(tIngest, Date.now())}`)
   }
   console.log(`  ✓ audio-fast`)
   // Only mark complete when nothing transient failed (lfs-miss / copy failures

@@ -64,3 +64,61 @@ describe("MemberAccessRow", () => {
     expect(screen.getAllByText(/Also via team/).length).toBeGreaterThan(0)
   })
 })
+
+describe("MemberAccessRow — FRO-427 permission denial on Revoke button", () => {
+  function renderRowWithRole(callerOrgRoleLevel: number) {
+    return render(
+      <ul>
+        <MemberAccessRow orgId={1} userId={2} username="anna" callerOrgRoleLevel={callerOrgRoleLevel} />
+      </ul>,
+    )
+  }
+
+  it("revoke button is enabled for PROJECT_LEAD (500)", async () => {
+    vi.mocked(getMemberAccess).mockResolvedValue(ACCESS)
+    renderRowWithRole(500)
+    fireEvent.click(screen.getByRole("button", { name: /anna/ }))
+    await screen.findByText("John")
+
+    const revokeBtn = screen.getByTestId("revoke-direct-grant")
+    expect(revokeBtn).not.toBeDisabled()
+    expect(revokeBtn.getAttribute("title")).toBeNull()
+  })
+
+  it("revoke button is disabled with a denial tooltip for CONTRIBUTOR (400)", async () => {
+    vi.mocked(getMemberAccess).mockResolvedValue(ACCESS)
+    renderRowWithRole(400)
+    fireEvent.click(screen.getByRole("button", { name: /anna/ }))
+    await screen.findByText("John")
+
+    const revokeBtn = screen.getByTestId("revoke-direct-grant")
+    expect(revokeBtn).toBeDisabled()
+    // Tooltip must mention the required role so the user understands why
+    expect(revokeBtn.getAttribute("title")).toMatch(/project_lead/i)
+  })
+
+  it("revoke button is disabled with a denial tooltip for VIEWER (100)", async () => {
+    vi.mocked(getMemberAccess).mockResolvedValue(ACCESS)
+    renderRowWithRole(100)
+    fireEvent.click(screen.getByRole("button", { name: /anna/ }))
+    await screen.findByText("John")
+
+    const revokeBtn = screen.getByTestId("revoke-direct-grant")
+    expect(revokeBtn).toBeDisabled()
+    expect(revokeBtn.getAttribute("title")).toMatch(/project_lead/i)
+  })
+
+  it("revoke button is enabled when callerOrgRoleLevel is not provided (fail-open)", async () => {
+    vi.mocked(getMemberAccess).mockResolvedValue(ACCESS)
+    render(
+      <ul>
+        <MemberAccessRow orgId={1} userId={2} username="anna" />
+      </ul>,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /anna/ }))
+    await screen.findByText("John")
+
+    const revokeBtn = screen.getByTestId("revoke-direct-grant")
+    expect(revokeBtn).not.toBeDisabled()
+  })
+})

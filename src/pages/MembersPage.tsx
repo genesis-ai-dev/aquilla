@@ -204,6 +204,7 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
             add={add}
             remove={remove}
             callerUserId={callerUserId}
+            callerOrgRoleLevel={activeOrg?.role.level ?? null}
             onRequestRemove={(userId, username) =>
               setRemoveTarget({ userId, username })
             }
@@ -264,6 +265,9 @@ interface RosterProps {
   add: (username: string, role: number) => Promise<unknown>
   remove: (userId: number) => Promise<void>
   callerUserId: number | null
+  /** FRO-427: the current user's org-level role, forwarded to MemberAccessRow
+   *  so the Revoke button can be disabled-with-explanation for low roles. */
+  callerOrgRoleLevel: number | null
   onRequestRemove: (userId: number, username: string) => void
 }
 
@@ -272,6 +276,7 @@ function RosterWithProjectChips({
   panelMembers,
   add,
   callerUserId,
+  callerOrgRoleLevel,
   onRequestRemove,
 }: RosterProps) {
   return (
@@ -310,6 +315,7 @@ function RosterWithProjectChips({
               orgId={orgId}
               userId={m.userId}
               username={m.username}
+              callerOrgRoleLevel={callerOrgRoleLevel}
             />
           ))}
         </ul>

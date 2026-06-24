@@ -194,7 +194,14 @@ export async function handleExportSourceRequest(
     overrides.set(row.canonical_ref, row.value)
   }
 
-  const doc = parseUsfmLossless(blob.raw_source)
+  const rawSource = blob.raw_source
+  if (!rawSource) {
+    return withCors(
+      new Response("no source text recorded — re-import to enable export", { status: 404 }),
+      request,
+    )
+  }
+  const doc = parseUsfmLossless(rawSource)
   const lossyVerseCount = countLossyVerses(doc, overrides)
   const out = serializeUsfmLossless(doc, overrides)
 

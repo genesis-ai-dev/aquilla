@@ -19,7 +19,7 @@ const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/source$/
 
 export interface SourceUploadEnv extends Pick<AudioEnv, "R2_KEY_PREFIX"> {
   SNAPSHOTS: R2Bucket
-  AQUILLA_PG: AquillaDb
+  AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
 }
 
@@ -41,6 +41,11 @@ export async function handleSourceUploadRequest(
   const match = PATH_RE.exec(url.pathname)
   if (!match) return null
   if (request.method !== "PUT") return null
+
+  if (!env.AQUILLA_PG) {
+    return withCors(new Response("AQUILLA_PG binding not configured", { status: 500 }), request)
+  }
+  const db = env.AQUILLA_PG
 
   const projectId = decodeURIComponent(match[1])
   const fileId = decodeURIComponent(match[2])
@@ -79,7 +84,7 @@ export async function handleSourceUploadRequest(
 
   await env.SNAPSHOTS.put(key, body, { httpMetadata: { contentType } })
 
-  await env.AQUILLA_PG.prepare(
+  await db.prepare(
     `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
      VALUES (?, ?, ?, NULL, ?, ?, ?)
      ON CONFLICT (file_id) DO UPDATE SET

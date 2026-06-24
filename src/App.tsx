@@ -7,6 +7,7 @@ import { ArchivedProjects } from "@/components/org/ArchivedProjects"
 import { ProjectOverview } from "@/components/org/ProjectOverview"
 import { AssignedToMe } from "@/components/org/AssignedToMe"
 import { JoinPage } from "@/components/JoinPage"
+import { JoinOrgPage } from "@/components/JoinOrgPage"
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
 import { ResetPassword } from "@/pages/ResetPassword"
 import { Login } from "@/pages/Login"
@@ -154,6 +155,7 @@ function AppRoutes() {
         <Route path="/projects/:id" element={<ProjectOverview />} />
         <Route path="/assigned" element={<AssignedToMe />} />
         <Route path="/join/:token" element={<JoinPage />} />
+        <Route path="/join-org/:token" element={<JoinOrgPage />} />
         <Route path="/onboarding" element={<OnboardingWizard />} />
         {/* FRO-282: dedicated login — eagerly loaded (public, no auth required) */}
         <Route path="/login" element={<Login />} />

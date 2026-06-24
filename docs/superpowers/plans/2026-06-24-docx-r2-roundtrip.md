@@ -654,145 +654,275 @@ git commit -m "feat(export): pure html->spans->w:r run builders for docx"
 
 ---
 
-## Task 7: Rewrite `exportDocx` — run-level reinsertion + blockPath matching
+## Task 7: Rewrite `exportDocx` — surgical run-level reinsertion (codex-editor parity)
+
+> **APPROACH (revised after reviewing codex-editor's mature DOCX round-trip):** Do NOT parse `word/document.xml` with `DOMParser` and reserialize the whole document with `XMLSerializer`. codex-editor (`/Users/ryderwishart/frontierrnd/codex-editor`, `webviews/.../importers/docx/docxExporter.ts`) deliberately avoids whole-document reparse/reserialize because it produces blank rendering in Apple Pages, and instead does **surgical string-level replacement** of paragraph content, leaving the rest of the XML byte-for-byte identical. We mirror that: locate each target `<w:p>` in the raw XML string, replace only its run region (keeping `<w:pPr>`), and splice the modified string back. We EXCEED codex-editor by rebuilding the runs from the translator's own `translatedHtml` (codex-editor keeps source-run formatting); the contract is "translator's inline styling wins."
+>
+> **Matching:** `source_location`/`blockPath` persistence was deferred (Task 5), so matching is POSITIONAL — the Nth non-empty `<w:p>` in document order maps to the Nth unique cell `group` in document order. This is the existing, working behavior.
+>
+> **Document the alternative:** add a top-of-file doc comment in `docx.ts` recording that a full-DOM-rebuild approach (parse → rebuild → `XMLSerializer`) is possible and simpler to write, but was rejected to preserve byte fidelity and avoid the Apple Pages blank-render bug — and that the Element-based `spansToRuns` is retained in `docx-runs.ts` as the primitive that approach would use.
 
 **Files:**
-- Modify: `src/lib/export/exporters/docx.ts` (replace `injectTranslationIntoParagraph`, change matching, consume `translatedHtml`)
-- Test: `src/lib/export/exporters/docx.test.ts` (extend existing)
+- Modify: `src/lib/export/exporters/docx-runs.ts` (ADD a string-based `spansToRunXml`; keep `htmlToSpans` and the Element-based `spansToRuns`)
+- Modify: `src/lib/export/exporters/docx.ts` (rewrite `exportDocx` + `injectTranslationIntoParagraph` to string-surgical; keep `extractDominantRpr` logic but string-based)
+- Test: `src/lib/export/exporters/docx-runs.test.ts` (add `spansToRunXml` cases), `src/lib/export/exporters/docx.test.ts` (extend)
 
 **Interfaces:**
-- Consumes: `htmlToSpans`, `spansToRuns` from `./docx-runs`; `CellData.translatedHtml`, `CellData.translated`, `CellData.group`, `CellData.sourceLocation?.blockPath`.
-- Produces: `exportDocx(rawDocxBytes, cells)` unchanged signature/return (`{ blob, injected, untouched }`), but: (a) each translated paragraph's runs are rebuilt from the translator's `translatedHtml` (fallback to plain `translated` when no html), honoring the translator's marks; (b) paragraph selection prefers `blockPath` (`w:p[N]` → the Nth `w:p` in document order, 1-based) and falls back to positional non-empty matching when no cell carries a `blockPath`.
+- Consumes: `htmlToSpans` from `./docx-runs`; `CellData.translatedHtml`, `CellData.translated`, `CellData.group`.
+- Produces:
+  - `spansToRunXml(spans: Span[], baseRprXml: string | null): string` — returns clean OOXML run markup as a STRING (one `<w:r>…</w:r>` per span), with NO `xmlns` pollution (we build strings, not namespaced DOM nodes, precisely to avoid `XMLSerializer` emitting `xmlns:w="…"` on spliced fragments). `baseRprXml` is the verbatim `<w:rPr>…</w:rPr>` string of the paragraph's first text run (or `null`); each run = `<w:r>` + (baseRprXml with the translator's toggles spliced in before `</w:rPr>`, or a fresh `<w:rPr>` when there are toggles but no base, or no rPr at all when neither) + `<w:t xml:space="preserve">{escaped text}</w:t></w:r>`. XML-escape `&<>` in the text.
+  - `exportDocx(rawDocxBytes, cells)` — unchanged signature/return (`{ blob, injected, untouched }`). Surgical: only translated paragraphs' run regions change in `word/document.xml`; every other byte (XML declaration, namespaces, untranslated paragraphs, all other zip parts) is identical.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the failing `spansToRunXml` tests**
 
-Add to `src/lib/export/exporters/docx.test.ts` (build a minimal docx zip fixture in-test with JSZip, as the existing tests do):
+Add to `src/lib/export/exporters/docx-runs.test.ts`:
 
 ```ts
-it("honors the translator's bold, not the source's", async () => {
-  // source paragraph: plain "alpha"; translation html: "a<strong>B</strong>"
-  const bytes = await makeDocxFixture(["alpha"]) // helper in this test file
-  const cells = [{ group: "g0", translated: "aB", translatedHtml: "a<strong>B</strong>",
-                   sourceLocation: { file: "word/document.xml", blockPath: "w:p[1]" } }] as any
-  const { blob, injected } = await exportDocx(await bytes.arrayBuffer(), cells)
-  expect(injected).toBe(1)
-  const xml = await readDocumentXml(blob) // helper
-  expect(xml).toMatch(/<w:r>(?:(?!<\/w:r>).)*<w:b\/?>[^]*?<w:t[^>]*>B<\/w:t>/)
-  // the "a" run must NOT be bold
+import { spansToRunXml } from "./docx-runs"
+
+it("builds clean run XML with no xmlns pollution", () => {
+  const xml = spansToRunXml(htmlToSpans("a<strong>B</strong>"), null)
+  expect(xml).not.toMatch(/xmlns/)                       // critical: no namespace decls in spliced fragment
+  expect(xml).toMatch(/<w:r><w:t xml:space="preserve">a<\/w:t><\/w:r>/)
+  expect(xml).toMatch(/<w:r><w:rPr><w:b\/><\/w:rPr><w:t xml:space="preserve">B<\/w:t><\/w:r>/)
 })
 
-it("leaves untranslated paragraphs byte-identical", async () => {
-  const bytes = await makeDocxFixture(["keep me", "translate me"])
-  const cells = [
-    { group: "g0", translated: "", translatedHtml: "", sourceLocation: { file: "word/document.xml", blockPath: "w:p[1]" } },
-    { group: "g1", translated: "DONE", translatedHtml: "DONE", sourceLocation: { file: "word/document.xml", blockPath: "w:p[2]" } },
-  ] as any
-  const { injected, untouched } = await exportDocx(await bytes.arrayBuffer(), cells)
-  expect(injected).toBe(1)
-  expect(untouched).toBe(1)
-  // assert paragraph 1 still contains "keep me"
+it("splices translator toggles into a cloned baseRpr", () => {
+  const xml = spansToRunXml(htmlToSpans("<em>x</em>"), "<w:rPr><w:sz w:val=\"24\"/></w:rPr>")
+  // base font size kept AND italic added
+  expect(xml).toContain("<w:sz w:val=\"24\"/>")
+  expect(xml).toContain("<w:i/>")
 })
 
-it("matches by blockPath when present", async () => {
-  // A doc whose w:p[2] is the only translated target; positional index would
-  // also pick para 0 first — blockPath forces the right paragraph.
-  // ...assert the translation landed on w:p[2], not w:p[1].
+it("escapes XML special chars in text", () => {
+  expect(spansToRunXml(htmlToSpans("a & b < c"), null)).toContain("a &amp; b &lt; c")
 })
 ```
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `pnpm vitest run src/lib/export/exporters/docx.test.ts`
-Expected: FAIL — current code uses source rPr / plain text / positional only.
+Run: `pnpm vitest run src/lib/export/exporters/docx-runs.test.ts`
+Expected: FAIL — `spansToRunXml` not exported.
 
-- [ ] **Step 3: Implement run-level injection**
+- [ ] **Step 3: Implement `spansToRunXml`**
 
-In `docx.ts`, replace `injectTranslationIntoParagraph(p, text)` with one that takes the cell's html:
+In `docx-runs.ts` add (reuse the existing `Mark`/`Span`; do NOT remove `spansToRuns`):
 
 ```ts
-import { htmlToSpans, spansToRuns } from "./docx-runs"
+function escapeXml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+}
 
-function injectTranslationIntoParagraph(p: Element, html: string, plain: string): void {
-  const doc = p.ownerDocument!
-  const baseRpr = extractDominantRpr(p) // keep: font/size base only
-  // Remove every child except <w:pPr>.
-  for (const el of Array.from(p.childNodes)) {
-    if (el.nodeType === Node.ELEMENT_NODE) {
-      const ln = (el as Element).localName || (el as Element).tagName.replace(/^.*:/, "")
-      if (ln !== "pPr") (el as Element).remove()
+const MARK_TO_TAG: Partial<Record<Mark, string>> = {
+  b: "<w:b/>", i: "<w:i/>", u: "<w:u w:val=\"single\"/>", s: "<w:strike/>", // code → none
+}
+
+export function spansToRunXml(spans: Span[], baseRprXml: string | null): string {
+  return spans.map((span) => {
+    const toggles = (["b", "i", "u", "s"] as Mark[])
+      .filter((m) => span.marks.has(m)).map((m) => MARK_TO_TAG[m]).join("")
+    let rPr = ""
+    if (baseRprXml) {
+      // splice toggles in just before the closing </w:rPr> (or expand a self-closed base)
+      rPr = baseRprXml.includes("</w:rPr>")
+        ? baseRprXml.replace("</w:rPr>", `${toggles}</w:rPr>`)
+        : `<w:rPr>${toggles}</w:rPr>`           // base was <w:rPr/> or empty
+    } else if (toggles) {
+      rPr = `<w:rPr>${toggles}</w:rPr>`
     }
-  }
-  const spans = htmlToSpans(html) 
-  const finalSpans = spans.length > 0 ? spans : [{ text: plain, marks: new Set<never>() }]
-  for (const run of spansToRuns(doc, finalSpans as any, baseRpr)) p.appendChild(run)
+    return `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(span.text)}</w:t></w:r>`
+  }).join("")
 }
 ```
 
-- [ ] **Step 4: Change matching to prefer blockPath**
+- [ ] **Step 4: Run to verify they pass**
 
-In `exportDocx`, build a `blockPath → { html, plain }` map from cells (joining same-`group` segments with a space, using `translatedHtml` when present else `translated`). If any cell has a `sourceLocation.blockPath`, resolve targets by indexing `paragraphs` (the full `w:p` list, 1-based `w:p[N]`); otherwise keep the existing positional non-empty matching. For each resolved paragraph with a non-empty translation, call the new `injectTranslationIntoParagraph(p, html, plain)`; count `injected`/`untouched` as before. Empty translations leave the paragraph untouched.
+Run: `pnpm vitest run src/lib/export/exporters/docx-runs.test.ts`
+Expected: PASS.
 
-- [ ] **Step 5: Run to verify they pass**
+- [ ] **Step 5: Write the failing `exportDocx` tests**
+
+Extend `src/lib/export/exporters/docx.test.ts`. Reuse the existing in-test `makeDocxFixture`/`readDocumentXml` helpers (or build a minimal zip with JSZip as the existing tests do). NOTE: cells now have NO `sourceLocation` (Task 5 deferred) — matching is positional.
+
+```ts
+it("honors the translator's bold, not the source's", async () => {
+  const bytes = await makeDocxFixture(["alpha"])           // source paragraph plain "alpha"
+  const cells = [{ group: "g0", translated: "aB", translatedHtml: "a<strong>B</strong>" }] as any
+  const { blob, injected } = await exportDocx(await bytes.arrayBuffer(), cells)
+  expect(injected).toBe(1)
+  const xml = await readDocumentXml(blob)
+  // "B" run is bold; "a" run is not
+  expect(xml).toMatch(/<w:r><w:rPr>(?:(?!<\/w:rPr>).)*<w:b\/>[^]*?<w:t[^>]*>B<\/w:t>/)
+  expect(xml).toMatch(/<w:r><w:t xml:space="preserve">a<\/w:t><\/w:r>/)
+})
+
+it("leaves untranslated paragraphs byte-identical and preserves non-document parts", async () => {
+  const bytes = await makeDocxFixture(["keep me", "translate me"])
+  const original = await JSZip.loadAsync(await bytes.arrayBuffer())
+  const cells = [
+    { group: "g0", translated: "", translatedHtml: "" },        // untranslated
+    { group: "g1", translated: "DONE", translatedHtml: "DONE" },
+  ] as any
+  const { blob, injected, untouched } = await exportDocx(await bytes.arrayBuffer(), cells)
+  expect(injected).toBe(1)
+  expect(untouched).toBe(1)
+  const out = await JSZip.loadAsync(await blob.arrayBuffer())
+  const xml = await out.file("word/document.xml")!.async("string")
+  expect(xml).toContain("keep me")                              // untranslated text retained
+  expect(xml).toContain("DONE")
+  // styles.xml (and every non-document.xml part) byte-identical
+  for (const name of Object.keys(original.files)) {
+    if (name === "word/document.xml" || original.files[name].dir) continue
+    expect(await out.file(name)!.async("string")).toBe(await original.file(name)!.async("string"))
+  }
+})
+
+it("does not change the XML declaration / namespaces of document.xml", async () => {
+  const bytes = await makeDocxFixture(["x"])
+  const before = await (await JSZip.loadAsync(await bytes.arrayBuffer())).file("word/document.xml")!.async("string")
+  const { blob } = await exportDocx(await bytes.arrayBuffer(), [{ group: "g0", translated: "y", translatedHtml: "y" }] as any)
+  const after = await (await JSZip.loadAsync(await blob.arrayBuffer())).file("word/document.xml")!.async("string")
+  // first 120 chars (decl + <w:document … namespaces>) are identical — we never reserialized the doc
+  expect(after.slice(0, 120)).toBe(before.slice(0, 120))
+})
+```
+
+- [ ] **Step 6: Run to verify they fail**
 
 Run: `pnpm vitest run src/lib/export/exporters/docx.test.ts`
-Expected: PASS (all cases, including the existing structure-preservation tests).
+Expected: FAIL — current code uses DOM rebuild / source rPr / plain text.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Implement surgical `exportDocx`**
+
+Rewrite `docx.ts` so `exportDocx`:
+1. `const zip = await JSZip.loadAsync(rawDocxBytes)` and `let xml = await zip.file("word/document.xml")!.async("string")`.
+2. Build the ordered `groups: string[]` and `groupToHtml: Map<string,{html,plain}>` from `cells` in document order (join same-`group` segments with a space; `html` = `translatedHtml ?? ""`, `plain` = `translated`).
+3. Scan `xml` for paragraph blocks with a single regex over non-nested `<w:p>`: match BOTH `<w:p\b[^>]*\/>` (self-closing, empty) and `<w:p\b[^>]*>([\s\S]*?)<\/w:p>`. Use a `RegExp` with `g` flag and an `exec` loop so you have each match's index/length. Rebuild the output string by copying the slice before each match, then emitting either the original match (untouched) or a replacement.
+4. A paragraph is "non-empty" iff its inner contains a `<w:t…>…</w:t>` with non-whitespace text. Maintain a counter `nonEmptyIdx`; the Nth non-empty paragraph maps to `groups[N]`.
+5. For a non-empty paragraph whose mapped group has a non-empty translation:
+   - Extract the leading `<w:pPr>…</w:pPr>` (regex `/^[\s]*<w:pPr\b[^>]*>[\s\S]*?<\/w:pPr>|^[\s]*<w:pPr\b[^>]*\/>/`) from the inner — keep it verbatim.
+   - Extract `baseRprXml`: from the inner AFTER the pPr block, find the first `<w:r\b[^>]*>` and within it the first `<w:rPr>…</w:rPr>` (regex). `null` if none. (This is the first text run's run-properties — NOT the pPr's mark `<w:rPr>`.)
+   - `const runsXml = spansToRunXml(htmlToSpans(html) .length ? htmlToSpans(html) : [{text: plain, marks: new Set()}], baseRprXml)`.
+   - Replacement = the original `<w:p …>` open tag + `pPrXml` + `runsXml` + `</w:p>`.
+   - `injected++`.
+6. Non-empty paragraphs with no/empty translation, and all empty paragraphs: emit the original match unchanged; non-empty-but-untranslated → `untouched++`.
+7. After the loop append the trailing slice. `zip.file("word/document.xml", rebuilt)`. `const blob = await zip.generateAsync({ type: "blob", mimeType: DOCX_MIME })`. Return `{ blob, injected, untouched }`.
+8. Add the top-of-file doc comment described in the APPROACH note (surgical-vs-DOM rationale, Apple Pages, codex-editor reference, `spansToRuns` retained as the DOM-approach primitive).
+
+Keep the existing structure-preservation tests green. If a regex boundary case (self-closing paragraph, paragraph with no runs, nested-looking content) makes the string scan unsafe, STOP and report DONE_WITH_CONCERNS with the specific case rather than shipping a fragile scan.
+
+- [ ] **Step 8: Run to verify they pass**
+
+Run: `pnpm vitest run src/lib/export/exporters/docx.test.ts src/lib/export/exporters/docx-runs.test.ts`
+Expected: PASS (all cases incl. existing structure-preservation tests).
+
+- [ ] **Step 9: Commit**
 
 ```bash
-git add src/lib/export/exporters/docx.ts src/lib/export/exporters/docx.test.ts
-git commit -m "feat(export): reinsert translator runs in-place, match by blockPath"
+git add src/lib/export/exporters/docx.ts src/lib/export/exporters/docx-runs.ts src/lib/export/exporters/docx.test.ts src/lib/export/exporters/docx-runs.test.ts
+git commit -m "feat(export): surgical in-place run reinsertion (codex-editor parity, translator formatting)"
 ```
 
 ---
 
-## Task 8: End-to-end fidelity test + over-cap test
+## Task 8: End-to-end fidelity test (rich fixture, built in-code)
 
 **Files:**
 - Test: `src/lib/export/exporters/docx.roundtrip.test.ts` (create)
 
 **Interfaces:**
-- Consumes: `exportDocx` + a realistic fixture `.docx` checked into `src/lib/export/exporters/__fixtures__/` containing a heading, a bulleted list, a table, an embedded image, and a mixed-bold paragraph.
+- Consumes: `exportDocx`. The fixture is built PROGRAMMATICALLY with JSZip inside the test (a subagent cannot author a real binary Word file). It contains a heading paragraph, a bulleted list (`<w:numPr>`), a 2-cell table (`<w:tbl>`), an embedded image part (`word/media/image1.png`), and a mixed-formatting paragraph — exercising codex-editor's fidelity bar.
 
-- [ ] **Step 1: Add the fixture**
+This task asserts the codex-editor parity bar: after translating a SUBSET of paragraphs, ONLY those paragraphs change; the table, list, image, and every non-`document.xml` part are byte-identical, and untranslated paragraphs are byte-identical.
 
-Create `src/lib/export/exporters/__fixtures__/roundtrip.docx` (a small real Word doc with: H1 heading, 2-item bullet list, 1 table with 2 cells, 1 inline PNG, and a paragraph "the **LORD** said"). Document its structure in a sibling `roundtrip.fixture.md`.
+- [ ] **Step 1: Write the fixture builder + failing test**
 
-- [ ] **Step 2: Write the fidelity test**
+Create `src/lib/export/exporters/docx.roundtrip.test.ts`. Build the fixture in-code so the document.xml has, in order: (1) a heading `<w:p>` ("Title"), (2) two list paragraphs each with `<w:pPr><w:numPr>…</w:numPr></w:pPr>` ("First item"/"Second item"), (3) a `<w:tbl>` with two `<w:tc>` cells each holding a `<w:p>` ("Cell A"/"Cell B"), (4) a mixed-format paragraph with two runs ("the " + bold "LORD"). Include a tiny `word/media/image1.png` (a few bytes) and the minimal `[Content_Types].xml`, `_rels/.rels`, `word/_rels/document.xml.rels`.
 
 ```ts
 import { describe, it, expect } from "vitest"
 import JSZip from "jszip"
-import { readFileSync } from "node:fs"
 import { exportDocx } from "./docx"
 
-const raw = readFileSync(new URL("./__fixtures__/roundtrip.docx", import.meta.url))
+const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+function p(inner: string, pPr = "") { return `<w:p>${pPr}${inner}</w:p>` }
+function run(text: string, rPr = "") { return `<w:r>${rPr}<w:t xml:space="preserve">${text}</w:t></w:r>` }
 
-it("preserves structure, image, and untranslated content; honors translator marks", async () => {
-  const cells = [/* translate only the heading + mixed-bold paragraph; leave the list untranslated */] as any
-  const { blob } = await exportDocx(raw.buffer, cells)
-  const zip = await JSZip.loadAsync(await blob.arrayBuffer())
-  // (a) image part still present
-  expect(Object.keys(zip.files).some(k => /^word\/media\//.test(k))).toBe(true)
-  const xml = await zip.file("word/document.xml")!.async("string")
-  // (b) table + list markup survives
+async function buildRichFixture(): Promise<ArrayBuffer> {
+  const body =
+    p(run("Title"), "<w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr>") +                 // 1 heading
+    p(run("First item"), "<w:pPr><w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"1\"/></w:numPr></w:pPr>") +
+    p(run("Second item"), "<w:pPr><w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"1\"/></w:numPr></w:pPr>") +
+    `<w:tbl><w:tr><w:tc>${p(run("Cell A"))}</w:tc><w:tc>${p(run("Cell B"))}</w:tc></w:tr></w:tbl>` +
+    p(run("the ") + run("LORD", "<w:rPr><w:b/></w:rPr>"))                              // mixed-format
+  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:document ${W}><w:body>${body}</w:body></w:document>`
+  const zip = new JSZip()
+  zip.file("[Content_Types].xml", `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="png" ContentType="image/png"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`)
+  zip.file("_rels/.rels", `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`)
+  zip.file("word/_rels/document.xml.rels", `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/></Relationships>`)
+  zip.file("word/media/image1.png", new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  zip.file("word/document.xml", documentXml)
+  return zip.generateAsync({ type: "arraybuffer" })
+}
+
+it("preserves table/list/image + untranslated paragraphs; honors translator marks", async () => {
+  const raw = await buildRichFixture()
+  const original = await JSZip.loadAsync(raw)
+  const originalXml = await original.file("word/document.xml")!.async("string")
+
+  // Translate ONLY the heading and the mixed-format paragraph (positions 0 and 5 of the
+  // non-empty paragraph sequence: heading, item1, item2, cellA, cellB, mixed).
+  // Leave list items + table cells untranslated (empty translation).
+  const G = (i: number) => ({ group: `g${i}` })
+  const cells = [
+    { ...G(0), translated: "Titre", translatedHtml: "Titre" },                 // heading
+    { ...G(1), translated: "", translatedHtml: "" },                            // list item 1
+    { ...G(2), translated: "", translatedHtml: "" },                            // list item 2
+    { ...G(3), translated: "", translatedHtml: "" },                            // cell A
+    { ...G(4), translated: "", translatedHtml: "" },                            // cell B
+    { ...G(5), translated: "le SEIGNEUR", translatedHtml: "le <strong>SEIGNEUR</strong>" }, // mixed
+  ] as any
+
+  const { blob, injected } = await exportDocx(raw, cells)
+  expect(injected).toBe(2)
+  const out = await JSZip.loadAsync(await blob.arrayBuffer())
+  const xml = await out.file("word/document.xml")!.async("string")
+
+  // (a) image part byte-identical
+  const imgBefore = await original.file("word/media/image1.png")!.async("uint8array")
+  const imgAfter = await out.file("word/media/image1.png")!.async("uint8array")
+  expect(Array.from(imgAfter)).toEqual(Array.from(imgBefore))
+  // (b) every non-document.xml part byte-identical
+  for (const name of Object.keys(original.files)) {
+    if (name === "word/document.xml" || original.files[name].dir) continue
+    expect(await out.file(name)!.async("string")).toBe(await original.file(name)!.async("string"))
+  }
+  // (c) table + list markup intact, and their text untouched
   expect(xml).toContain("<w:tbl>")
   expect(xml).toContain("<w:numPr>")
-  // (c) untranslated list items unchanged (assert original text still there)
-  // (d) translated heading carries translator text
+  expect(xml).toContain("Cell A"); expect(xml).toContain("Cell B")
+  expect(xml).toContain("First item"); expect(xml).toContain("Second item")
+  // (d) untranslated list-item paragraph byte-identical (extract from original, assert verbatim)
+  const item1 = originalXml.match(/<w:p>(?:(?!<\/w:p>)[\s\S])*First item[\s\S]*?<\/w:p>/)![0]
+  expect(xml).toContain(item1)
+  // (e) heading translated; XML declaration unchanged (no whole-doc reserialize)
+  expect(xml).toContain("Titre")
+  expect(xml.slice(0, 60)).toBe(originalXml.slice(0, 60))
+  // (f) translator's bold honored on the mixed paragraph; source "the " stays plain
+  expect(xml).toMatch(/<w:r><w:rPr>(?:(?!<\/w:rPr>).)*<w:b\/>[^]*?<w:t[^>]*>SEIGNEUR<\/w:t>/)
 })
 ```
 
-- [ ] **Step 3: Run it**
+- [ ] **Step 2: Run to verify it fails, then passes**
 
 Run: `pnpm vitest run src/lib/export/exporters/docx.roundtrip.test.ts`
-Expected: PASS.
+If `injected`/assertions reveal a real exporter gap (e.g. table-cell paragraphs shift the positional count), STOP and report it — that is a genuine finding about table handling, not a test bug. Otherwise, once green, proceed.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add src/lib/export/exporters/__fixtures__ src/lib/export/exporters/docx.roundtrip.test.ts
-git commit -m "test(export): end-to-end docx round-trip fidelity fixture"
+git add src/lib/export/exporters/docx.roundtrip.test.ts
+git commit -m "test(export): end-to-end docx round-trip fidelity (table/list/image/marks)"
 ```
 
 ---

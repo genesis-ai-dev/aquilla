@@ -230,13 +230,13 @@ invites.get("/:token/preview", async (c) => {
   if (first.expires_at) {
     const expiresAt = new Date(first.expires_at)
     if (expiresAt < new Date()) {
-      return c.json({ error: "Invite expired" }, 410)
+      return c.json({ error: "Invite expired", code: "time_expired" }, 410)
     }
   }
   // For multi-invites we DO allow re-preview if some rows are unused.
   const allUsed = invitesForToken.every((r) => r.used_at != null)
   if (allUsed) {
-    return c.json({ error: "Invite already used" }, 410)
+    return c.json({ error: "Invite already used", code: "used" }, 410)
   }
 
   // Pull project rows in one shot.
@@ -303,7 +303,7 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
   if (first.expires_at) {
     const expiresAt = new Date(first.expires_at)
     if (expiresAt < new Date()) {
-      return c.json({ error: "Invite expired" }, 410)
+      return c.json({ error: "Invite expired", code: "time_expired" }, 410)
     }
   }
 
@@ -411,7 +411,7 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
     if (invitesForToken.every((r) => archivedIds.has(r.project_id))) {
       return c.json({ error: "This project has been archived." }, 410)
     }
-    return c.json({ error: "Invite already used" }, 410)
+    return c.json({ error: "Invite already used", code: "used" }, 410)
   }
 
   return c.json({ token, accepted })

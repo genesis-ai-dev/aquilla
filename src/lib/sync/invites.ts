@@ -28,8 +28,17 @@
 import { AUTH_API_URL } from "./sync-token"
 import { ROLE } from "@/lib/frontier/roles"
 
-/** Reason codes for a failed invite preview. */
-export type InvitePreviewFailReason = "expired" | "invalid" | "network"
+/**
+ * Reason codes for a failed invite preview.
+ *
+ * - "used"         — the link was already redeemed by someone else (single-use)
+ * - "time_expired" — the link's expiry date has passed
+ * - "expired"      — legacy catch-all for any 410 response without a server
+ *                    code field (servers before FRO-429 fix, or unknown 410)
+ * - "invalid"      — 404: the token doesn't exist
+ * - "network"      — fetch threw (offline, DNS failure, etc.)
+ */
+export type InvitePreviewFailReason = "used" | "time_expired" | "expired" | "invalid" | "network"
 
 /** Discriminated result returned by preview functions. */
 export type InvitePreviewResult<T> =
@@ -133,8 +142,18 @@ export async function previewServerInvite(
       `${apiUrl}/api/v2/projects/invite-preview/${encodeURIComponent(token)}`
     )
     if (!res.ok) {
-      const reason: InvitePreviewFailReason =
-        res.status === 410 ? "expired" : "invalid"
+      let reason: InvitePreviewFailReason
+      if (res.status === 410) {
+        // Parse the server's code field to distinguish used vs time-expired.
+        try {
+          const body = (await res.json()) as { code?: string }
+          reason = body.code === "used" ? "used" : body.code === "time_expired" ? "time_expired" : "expired"
+        } catch {
+          reason = "expired"
+        }
+      } else {
+        reason = "invalid"
+      }
       console.warn(`[invites] previewServerInvite → HTTP ${res.status} (${reason})`)
       return { ok: false, reason }
     }
@@ -280,8 +299,18 @@ export async function previewMultiInvite(
   try {
     const res = await fetch(`${apiUrl}/api/v2/invites/${encodeURIComponent(token)}/preview`)
     if (!res.ok) {
-      const reason: InvitePreviewFailReason =
-        res.status === 410 ? "expired" : "invalid"
+      let reason: InvitePreviewFailReason
+      if (res.status === 410) {
+        // Parse the server's code field to distinguish used vs time-expired.
+        try {
+          const body = (await res.json()) as { code?: string }
+          reason = body.code === "used" ? "used" : body.code === "time_expired" ? "time_expired" : "expired"
+        } catch {
+          reason = "expired"
+        }
+      } else {
+        reason = "invalid"
+      }
       console.warn(`[invites] previewMultiInvite → HTTP ${res.status} (${reason})`)
       return { ok: false, reason }
     }

@@ -240,6 +240,22 @@ export function JoinPage() {
                         Check your connection and try again.
                       </p>
                     </>
+                  ) : previewLoadState === "used" ? (
+                    <>
+                      <p className="text-sm font-medium">This link has already been used</p>
+                      <p className="text-xs text-muted-foreground">
+                        This invite link is single-use and has already been redeemed.
+                        Ask the project owner to send you a new invite link.
+                      </p>
+                    </>
+                  ) : previewLoadState === "time_expired" ? (
+                    <>
+                      <p className="text-sm font-medium">This link has expired</p>
+                      <p className="text-xs text-muted-foreground">
+                        This invite link is no longer valid because it has passed its
+                        expiry date. Ask the project owner for a new invite link.
+                      </p>
+                    </>
                   ) : (
                     <>
                       <p className="text-sm font-medium">This invite link is no longer valid</p>

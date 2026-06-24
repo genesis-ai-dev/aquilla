@@ -53,3 +53,47 @@ export function useAccessibleProjects(): UseAccessibleProjects {
 
   return { projects, isLoading, refresh };
 }
+
+/**
+ * FRO-428: All projects the current user can access (viewer 100+), including
+ * projects where the user has a direct project_members grant but is NOT a
+ * member of the project's org.
+ *
+ * Used for navigation listing (Dashboard / "Shared with you") so project-only
+ * invitees can discover their projects without needing org membership.
+ *
+ * Unlike `useAccessibleProjects` (minRole=600, invite picker only), this hook
+ * fetches with no minRole filter so viewers and contributors appear too.
+ */
+export function useProjectsForNavigation(): UseAccessibleProjects {
+  const { session } = useFrontierSession();
+  const jwt = session?.jwt ?? null;
+  const [projects, setProjects] = useState<CloudProjectSummary[]>([]);
+  const [isLoading, setLoading] = useState(false);
+  const aliveRef = useRef(true);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => { aliveRef.current = false; };
+  }, []);
+
+  const refresh = async () => {
+    if (!jwt) {
+      if (aliveRef.current) setProjects([]);
+      return;
+    }
+    setLoading(true);
+    try {
+      // No minRole — include every project the caller can access (viewer+),
+      // including direct project_members grants with no org-level membership.
+      const next = await fetchAccessibleProjects(jwt);
+      if (aliveRef.current) setProjects(next);
+    } finally {
+      if (aliveRef.current) setLoading(false);
+    }
+  };
+
+  useEffect(() => { void refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [jwt]);
+
+  return { projects, isLoading, refresh };
+}

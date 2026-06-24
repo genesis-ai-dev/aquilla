@@ -16,6 +16,7 @@ import { CreditsPanel } from "./CreditsPanel"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
+import { OrgSetupChecklist } from "./OrgSetupChecklist"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import {
   Select,
@@ -449,6 +450,14 @@ export function OrgHome() {
                     ))}
                   </div>
                 </section>
+              )}
+
+              {!isAllOrgs && activeOrgId != null && (
+                <OrgSetupChecklist
+                  orgId={activeOrgId}
+                  projectCount={projects.length}
+                  onProjectCreated={handleCreated}
+                />
               )}
 
               {isAllOrgs ? (

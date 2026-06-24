@@ -13,11 +13,14 @@ export function ProjectStep({
   onCreated,
   onBack,
   onSkip,
+  orgId,
 }: {
   displayName: string
   onCreated: (p: ProjectRecord) => void
   onBack: () => void
   onSkip: () => void
+  /** When set (Team onboarding), the project is created inside this org. */
+  orgId?: number
 }) {
   const [name, setName] = useState("")
   const [sourceLanguage, setSourceLanguage] = useState("")
@@ -70,6 +73,7 @@ export function ProjectStep({
       const created = await createRemoteProject(
         { id: uuid(), name: name.trim() },
         sessionJwt,
+        orgId,
       )
       const project: ProjectRecord = {
         id: created.id,

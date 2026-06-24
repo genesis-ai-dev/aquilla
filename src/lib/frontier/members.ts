@@ -205,6 +205,7 @@ export interface RemoteProjectCreateResult {
 export async function createRemoteProject(
   project: { id: string; name: string },
   jwt: string,
+  orgId?: number,
 ): Promise<RemoteProjectCreateResult> {
   const res = await fetch(`${AUTH_BASE}/api/v2/projects`, {
     method: "POST",
@@ -212,7 +213,11 @@ export async function createRemoteProject(
       "Content-Type": "application/json",
       Authorization: `Bearer ${jwt}`,
     },
-    body: JSON.stringify({ id: project.id, name: project.name }),
+    body: JSON.stringify({
+      id: project.id,
+      name: project.name,
+      ...(orgId != null ? { orgId } : {}),
+    }),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");

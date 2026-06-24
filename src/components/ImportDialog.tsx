@@ -162,6 +162,11 @@ export function ImportDialog({
     /** Commits the parsed results to the server once user confirms. */
     commit: () => void | Promise<void>
   } | null>(null)
+  // FRO-430: upload progress surfaced from UploadPanel's doCommit while the
+  // preview screen is active (UploadPanel is unmounted; these live here so
+  // PreviewPanel can render an in-flight indicator).
+  const [previewUploadPhase, setPreviewUploadPhase] = useState("")
+  const [previewUploadProgress, setPreviewUploadProgress] = useState<{ count: number; total: number } | null>(null)
   // FRO-249 fix (Fix 3): guard against Radix delivering onOpenChange(false) twice
   // in the same macrotask (closure-captured pendingImport stays non-null until
   // the re-render). Consumed synchronously so the second call is a no-op.
@@ -175,6 +180,8 @@ export function ImportDialog({
       setImportResult(null)
       setCollisionState(null)
       setPreviewState(null)
+      setPreviewUploadPhase("")
+      setPreviewUploadProgress(null)
       setConfirming(false)
       setConfirmError(null)
       flushingRef.current = false
@@ -416,9 +423,13 @@ export function ImportDialog({
               setScreen("collision")
             }}
             onPreview={(results, commit) => {
+              setPreviewUploadPhase("")
+              setPreviewUploadProgress(null)
               setPreviewState({ results, commit })
               setScreen("preview")
             }}
+            onCommitPhase={setPreviewUploadPhase}
+            onCommitProgress={setPreviewUploadProgress}
             onImported={handleChildImported}
           />
         )}
@@ -561,6 +572,7 @@ export function ImportDialog({
         )}
 
         {/* FRO-310: preview — parsed cells waiting for user confirmation before upload */}
+        {/* FRO-430: uploadPhase/uploadProgress surfaced from UploadPanel.doCommit */}
         {screen === "preview" && previewState && (
           <PreviewPanel
             results={previewState.results}
@@ -571,6 +583,8 @@ export function ImportDialog({
               setPreviewState(null)
               setScreen("upload")
             }}
+            uploadPhase={previewUploadPhase}
+            uploadProgress={previewUploadProgress}
           />
         )}
 
@@ -639,7 +653,7 @@ type ImportOption = {
 
 const POPULAR_OPTIONS: ImportOption[] = [
   { id: "upload", title: "Upload files", icon: Upload,
-    description: "USFM, DOCX, TXT, subtitles, spreadsheets, audio/video, or a Paratext project." },
+    description: "USFM, DOC, DOCX, TXT, subtitles, spreadsheets, audio/video, or a Paratext project." },
   { id: "ebible", title: "eBible Corpus", hint: "public library", icon: Library,
     description: "Openly-licensed Bible translations, imported directly — no download." },
   { id: "helloao", title: "Bible API", hint: "helloao.org", icon: Globe,
@@ -774,9 +788,16 @@ interface UploadPanelProps {
    * Parent shows a preview screen; commit() triggers the actual bulk upload.
    */
   onPreview?: (results: ImportResult[], commit: () => Promise<void>) => void
+  /**
+   * FRO-430: callbacks for the parent to receive upload progress while the
+   * preview screen is shown (UploadPanel is unmounted during preview). The
+   * parent forwards these to PreviewPanel so an in-flight indicator is visible.
+   */
+  onCommitPhase?: (phase: string) => void
+  onCommitProgress?: (progress: { count: number; total: number } | null) => void
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress }: UploadPanelProps) {
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -889,13 +910,18 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
       setImporting(true)
       setProgress(null)
       setPhase("")
+      onCommitProgress?.(null)
       const allRefs: FileReference[] = []
       // Accumulate speaker pairs across all subtitle files in this batch.
       const allSpeakerPairs: { cellId: string; speaker: string | undefined }[] = []
       try {
         for (const file of list) {
-          setPhase(`Uploading ${file.name}…`)
+          const filePhase = `Uploading ${file.name}…`
+          setPhase(filePhase)
+          // FRO-430: surface phase to parent so PreviewPanel can show progress.
+          onCommitPhase?.(filePhase)
           setProgress(null)
+          onCommitProgress?.(null)
           // importFile returns speakerPairs from the SAME buildBulkCellsWithSpeakers
           // call that minted the uploaded cells — cellIds are guaranteed to match.
           const { refs, speakerPairs } = await importFile(file, {
@@ -905,8 +931,11 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
             targetLanguage,
             getToken,
             onCellEnqueued: (count, total) => {
-              setPhase(`Uploading ${file.name}`)
+              const p = `Uploading ${file.name}`
+              setPhase(p)
+              onCommitPhase?.(p)
               setProgress({ count, total })
+              onCommitProgress?.({ count, total })
             },
           })
           allRefs.push(...refs)
@@ -923,17 +952,21 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
             },
           })
         }
-        setPhase("Finishing up…")
+        const finishPhase = "Finishing up…"
+        setPhase(finishPhase)
+        onCommitPhase?.(finishPhase)
         await onImported(allRefs)
       } catch (err) {
         setError(err instanceof Error ? err.message : "Import failed")
       } finally {
         setImporting(false)
         setProgress(null)
+        onCommitProgress?.(null)
         setPhase("")
+        onCommitPhase?.("")
       }
     },
-    [projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated]
+    [projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress]
   )
 
   function handleDrop(e: React.DragEvent) {
@@ -1012,7 +1045,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
                 type="file"
                 multiple
                 className="hidden"
-                accept=".md,.markdown,.docx,.pptx,.txt,.vtt,.srt,.usfm,.sfm,.usx,.zip,.xlf,.xliff,.tmx,.csv,.tsv,.mp3,.wav,.m4a,.aac,.flac,.ogg,.oga,.opus,.mp4,.m4v,.mov,.webm,.mkv"
+                accept=".md,.markdown,.doc,.docx,.pptx,.txt,.vtt,.srt,.usfm,.sfm,.usx,.zip,.xlf,.xliff,.tmx,.csv,.tsv,.mp3,.wav,.m4a,.aac,.flac,.ogg,.oga,.opus,.mp4,.m4v,.mov,.webm,.mkv"
                 onChange={handleFileInput}
               />
             </Button>
@@ -1032,7 +1065,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
           <div className="mt-3 space-y-1 text-xs text-muted-foreground">
             <p><span className="font-medium text-foreground/70">Scripture</span> — USFM, USX, SFM</p>
             <p><span className="font-medium text-foreground/70">Translation</span> — XLIFF/XLF, TMX, CSV/TSV</p>
-            <p><span className="font-medium text-foreground/70">Documents</span> — DOCX, TXT, MD, PPTX</p>
+            <p><span className="font-medium text-foreground/70">Documents</span> — DOC, DOCX, TXT, MD, PPTX</p>
             <p><span className="font-medium text-foreground/70">Subtitles</span> — VTT, SRT</p>
             <p><span className="font-medium text-foreground/70">Paratext project</span> — .zip or folder</p>
           </div>

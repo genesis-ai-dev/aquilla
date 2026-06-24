@@ -6,11 +6,11 @@ import { injectInviteMeta } from "./index"
 const SPA_HTML = `<!doctype html><html><head>
   <title>Aquilla</title>
   <meta property="og:title" content="Aquilla" />
-  <meta property="og:description" content="Aquilla — translation, lifted." />
+  <meta property="og:description" content="Aquilla — translators, lifted." />
   <meta property="og:image" content="https://aquilla.app/aquilla-og.png" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Aquilla" />
-  <meta name="twitter:description" content="Aquilla — translation, lifted." />
+  <meta name="twitter:description" content="Aquilla — translators, lifted." />
 </head><body></body></html>`
 
 // Minimal mock for the ASSETS binding: returns a Response whose body is the
@@ -111,7 +111,7 @@ describe("worker/index — routing", () => {
     expect(html).toContain(`<meta property="og:title" content="You're invited to collaborate on Aquilla" />`)
     expect(html).toContain(`<meta name="twitter:title" content="You're invited to collaborate on Aquilla" />`)
     expect(html).toContain(`<title>You're invited to collaborate on Aquilla</title>`)
-    expect(html).toContain(`content="Join your team's translation project on Aquilla — translation, lifted."`)
+    expect(html).toContain(`content="Join your team's translation project on Aquilla — translators, lifted."`)
     // Image is left untouched — only the brand OG image exists.
     expect(html).toContain(`<meta property="og:image" content="https://aquilla.app/aquilla-og.png" />`)
   })

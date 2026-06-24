@@ -39,7 +39,7 @@ export interface Env {
 // previews. The image stays the brand OG image already baked into the HTML.
 const INVITE_TITLE = "You're invited to collaborate on Aquilla"
 const INVITE_DESCRIPTION =
-  "Join your team's translation project on Aquilla — translation, lifted."
+  "Join your team's translation project on Aquilla — translators, lifted."
 
 // Rewrite the built index.html's social-meta tags to invite copy. The markup is
 // machine-generated (stable attribute order/quoting), so targeted regexes are

@@ -12,15 +12,15 @@ export const aquillaData: BrandData = {
   app: {
     name: "Aquilla",
     shortName: "Aquilla",
-    tagline: "Translation, lifted.",
-    description: "Aquilla — translation, lifted.",
+    tagline: "Translators, lifted.",
+    description: "Aquilla — translators, lifted.",
     htmlTitle: "Aquilla",
   },
   logo: { faviconHref: "/favicon-aquilla.svg" },
   deploy: { domain: "aquilla.app", ogImage: "/aquilla-og.png", ogImageWidth: 1536, ogImageHeight: 1024 },
   marketing: {
     onboardingHeadline: "Welcome to Aquilla",
-    onboardingSubhead: "Translation, lifted — the steering system your team can live in.",
+    onboardingSubhead: "Translators, lifted — the steering system your team can live in.",
   },
   theme: {
     light: {

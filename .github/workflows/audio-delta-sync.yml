@@ -1,0 +1,151 @@
+name: Audio delta sync
+
+# Scheduled delta import of legacy-Codex audio (GitLab LFS → R2 + cell_audio
+# events in Neon). Only NEW/changed projects are touched: per-project HEAD sha is
+# compared against the persisted state in R2, so unchanged projects are skipped
+# without cloning. Bytes are copied R2→R2 with server-side CopyObject (no egress),
+# events ingested via the pipelined /migrate/ingest path.
+#
+# Scope: AUDIO ONLY. The content/org-team pass still reads org maps from the
+# legacy D1 (pre-Neon-cutover) and must be reworked before it can be scheduled.
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   FRONTIER_USERNAME, FRONTIER_PASSWORD   GitLab creds (Frontier password grant)
+#   SYNC_SECRET_KEY                        trusted ingest auth (prod sync-worker)
+#   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY R2 S3 token (read LFS bucket, write snapshots)
+#   DISCORD_WEBHOOK_URL                    channel webhook for the run report
+# Optional:
+#   R2_ACCOUNT_ID (defaults to the Frontier R&D account baked into the script)
+
+on:
+  schedule:
+    - cron: "0 7 * * *" # daily 07:00 UTC
+  workflow_dispatch: {} # manual "Run workflow" button
+
+concurrency:
+  group: audio-delta-sync
+  cancel-in-progress: false # never interrupt an in-flight sync (corrupts the delta state)
+
+permissions:
+  contents: read
+
+env:
+  R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID || '6a80496d1e59948a9cbaa3c643ba81d7' }}
+  R2_BUCKET: aquilla-snapshots
+  STATE_KEY: _migrate/audio-migrate-state.json
+  R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID || '6a80496d1e59948a9cbaa3c643ba81d7' }}.r2.cloudflarestorage.com
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Restore the delta state (HEAD-sha-per-project) so we skip unchanged
+      # projects without cloning. Missing object → first run → full sweep.
+      - name: Restore migrate state from R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          aws s3 cp "s3://${R2_BUCKET}/${STATE_KEY}" .migrate-state.json \
+            --endpoint-url "$R2_ENDPOINT" || echo "no prior state — full sweep"
+          echo "state entries: $(grep -c audioFastSha .migrate-state.json 2>/dev/null || echo 0)"
+
+      - name: Run audio delta sync
+        id: sync
+        env:
+          FRONTIER_USERNAME: ${{ secrets.FRONTIER_USERNAME }}
+          FRONTIER_PASSWORD: ${{ secrets.FRONTIER_PASSWORD }}
+          SYNC_SECRET_KEY: ${{ secrets.SYNC_SECRET_KEY }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -o pipefail
+          # Drop noisy per-100 copy-progress lines; keep per-project results.
+          npx tsx scripts/migrate-all.ts --audio-fast --apply 2>&1 \
+            | grep -vE "copied [0-9]+/[0-9]+ +copied" | tee sweep.log
+
+      # Always push state back (even on failure) so partial progress isn't lost
+      # and the next run resumes — the sync is idempotent.
+      - name: Persist migrate state to R2
+        if: always()
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          if [ -f .migrate-state.json ]; then
+            aws s3 cp .migrate-state.json "s3://${R2_BUCKET}/${STATE_KEY}" \
+              --endpoint-url "$R2_ENDPOINT"
+          fi
+
+      - name: Build report
+        if: always()
+        id: report
+        run: |
+          f=sweep.log
+          [ -f "$f" ] || { echo "sweep.log missing — the run failed before producing output" > sweep.log; }
+          applied=$(grep -oE "Applied [0-9]+/[0-9]+ projects" "$f" | tail -1)
+          [ -z "$applied" ] && applied="Applied ?/? projects (run failed early)"
+          # grep -c already prints 0 when there are no matches — no `|| echo 0`.
+          skipped=$(grep -c "↩ audio unchanged" "$f")
+          # Per-project FINAL copy lines carry a "(Ns)" timing; progress lines don't.
+          changed=$(grep -cE "copied [0-9]+/[0-9]+.*\([0-9.]+s\)" "$f")
+          copied=$(grep -oE "copied [0-9]+/[0-9]+.*\([0-9.]+s\)" "$f" | grep -oE "copied [0-9]+" | awk '{s+=$2} END{print s+0}')
+          errors=$(grep -cE "✗ " "$f")
+          lfsmiss=$(grep -oE "lfs-miss [0-9]+" "$f" | awk '{s+=$2} END{print s+0}')
+          nooid=$(grep -oE "no-oid [0-9]+" "$f" | awk '{s+=$2} END{print s+0}')
+          status="✅ ok"; [ "$errors" -gt 0 ] && status="⚠️ ${errors} errors"
+          {
+            echo "## Audio delta sync — ${status}"
+            echo ""
+            echo "| metric | value |"
+            echo "|---|---|"
+            echo "| ${applied} | |"
+            echo "| projects with new audio | ${changed} |"
+            echo "| takes copied | ${copied} |"
+            echo "| unchanged (skipped) | ${skipped} |"
+            echo "| lfs-miss | ${lfsmiss} |"
+            echo "| no-oid (no pointer) | ${nooid} |"
+            echo "| hard errors | ${errors} |"
+          } | tee "$GITHUB_STEP_SUMMARY"
+          {
+            echo "applied=${applied}"
+            echo "changed=${changed}"
+            echo "copied=${copied}"
+            echo "errors=${errors}"
+            echo "status=${status}"
+          } >> "$GITHUB_OUTPUT"
+
+      # `secrets` can't be used in an `if:` — pass the webhook as env and guard in
+      # the shell. All interpolated values are trusted (our own numeric outputs +
+      # github.run_id), never event data.
+      - name: Post to Discord
+        if: always()
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          R_STATUS: ${{ steps.report.outputs.status }}
+          R_APPLIED: ${{ steps.report.outputs.applied }}
+          R_CHANGED: ${{ steps.report.outputs.changed }}
+          R_COPIED: ${{ steps.report.outputs.copied }}
+          R_ERRORS: ${{ steps.report.outputs.errors }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then echo "no DISCORD_WEBHOOK_URL secret — skipping"; exit 0; fi
+          msg=$(printf '**Audio delta sync** — %s\n%s · new-audio projects: %s · takes copied: %s · errors: %s\n<%s>' \
+            "$R_STATUS" "$R_APPLIED" "$R_CHANGED" "$R_COPIED" "$R_ERRORS" "$RUN_URL")
+          curl -fsS -H "Content-Type: application/json" \
+            -d "$(jq -n --arg c "$msg" '{content:$c}')" \
+            "$WEBHOOK" || echo "discord post failed (non-fatal)"

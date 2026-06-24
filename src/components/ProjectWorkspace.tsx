@@ -3269,6 +3269,7 @@ export function ProjectWorkspace() {
             project={project}
             onBack={goToProjects}
             extraMenuItems={workspaceHeaderMenuItems}
+            overviewHref={projectId ? `/projects/${projectId}` : undefined}
           >
             {project && centerSurface === "rules" && (
               <>

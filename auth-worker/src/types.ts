@@ -51,6 +51,11 @@ export interface Env {
   EMAIL_FROM?: string
   BASE_URL?: string
 
+  /** Public invite link to the community (Discord). When set, the welcome
+   *  email includes a "join the community" CTA; when absent the email simply
+   *  omits it (no dead link). Plain config var, not a secret. */
+  DISCORD_INVITE_URL?: string
+
   ENVIRONMENT?: string
 
   /**

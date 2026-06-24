@@ -61,6 +61,85 @@ function buildProjectInviteHtml(joinUrl: string, projectName: string): string {
   `.trim()
 }
 
+function buildWelcomeHtml(
+  username: string,
+  appUrl: string,
+  discordUrl?: string,
+): string {
+  const communityBlock = discordUrl
+    ? `
+          <p style="margin: 16px 0;">
+            Translation is a team effort — and so is building Aquilla. Come say
+            hello, ask questions, and meet other teams in our community:
+          </p>
+          <p style="margin: 16px 0; text-align: center;">
+            <a href="${discordUrl}"
+               style="display: inline-block; padding: 10px 20px; background-color: #5865f2; color: white; text-decoration: none; border-radius: 6px;">
+              Join the community
+            </a>
+          </p>`
+    : ""
+  return `
+    <html>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #111;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #2563eb; margin-bottom: 16px;">Welcome to Aquilla, ${username} 👋</h2>
+          <p>You're all set. Aquilla is where translation teams draft, review, and
+             keep quality visible — together, without losing trust as you scale.</p>
+          <p style="margin: 20px 0; text-align: center;">
+            <a href="${appUrl}"
+               style="display: inline-block; padding: 12px 24px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 6px;">
+              Open Aquilla
+            </a>
+          </p>
+          <p>A good first step: create a project and import a source text, or invite
+             your team if you're starting a project together.</p>
+          ${communityBlock}
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+          <p style="color: #6b7280; font-size: 0.875rem;">
+            Got a question or stuck on something? Just reply to this email — a
+            real person reads it.
+          </p>
+        </div>
+      </body>
+    </html>
+  `.trim()
+}
+
+/**
+ * Send a welcome email after successful registration. Purely best-effort:
+ * no-op without the EMAIL binding (local/e2e), and it swallows its own errors
+ * so a flaky mail send can never affect the registration response. Callers
+ * still fire-and-forget (waitUntil) so a slow send doesn't delay the response.
+ */
+export async function sendWelcomeEmail(
+  env: Env,
+  toEmail: string,
+  username: string,
+): Promise<void> {
+  if (!env.EMAIL) return
+  const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
+  const appUrl = env.BASE_URL || "https://aquilla.app"
+  const discordUrl = env.DISCORD_INVITE_URL
+  const html = buildWelcomeHtml(username, appUrl, discordUrl)
+  const text =
+    `Welcome to Aquilla, ${username}! Open the app: ${appUrl}` +
+    (discordUrl ? `\nJoin our community: ${discordUrl}` : "") +
+    `\n\nGot a question? Just reply to this email.`
+  try {
+    await env.EMAIL.send({
+      from,
+      to: [toEmail],
+      subject: "Welcome to Aquilla",
+      html,
+      text,
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn("[welcome] welcome email failed:", message)
+  }
+}
+
 /**
  * Deliver a share-link invitation. Best-effort — callers fire-and-forget via
  * waitUntil; a missing EMAIL binding (local/e2e profiles) makes this a no-op

@@ -16,7 +16,7 @@ import type {
 } from "../middleware/auth"
 import { authMiddleware } from "../middleware/auth"
 import { JWTService } from "../auth/jwt"
-import { sendPasswordResetEmail } from "../services/email"
+import { sendPasswordResetEmail, sendWelcomeEmail } from "../services/email"
 import {
   hashPasswordWerkzeugScrypt,
   verifyPassword,
@@ -96,6 +96,18 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
       .run()
     if (!result.success) {
       throw new Error("Failed to create user in database")
+    }
+
+    // Best-effort welcome email. sendWelcomeEmail no-ops without the EMAIL
+    // binding and swallows its own errors, so this can never fail or delay
+    // registration. waitUntil keeps a slow send off the response path in prod;
+    // the test harness has no ExecutionContext (the getter throws), so we let
+    // the promise settle on its own there.
+    const welcomePromise = sendWelcomeEmail(c.env, email, username)
+    try {
+      c.executionCtx.waitUntil(welcomePromise)
+    } catch {
+      void welcomePromise
     }
 
     const jwtService = new JWTService(c.env)

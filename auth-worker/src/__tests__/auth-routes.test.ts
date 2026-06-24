@@ -187,6 +187,62 @@ describe("POST /api/v2/auth/register", () => {
     expect(body.gitlab_token).toBeUndefined()
   })
 
+  it("sends a welcome email on successful registration", async () => {
+    const send = vi.fn(
+      async (_message: {
+        from: string
+        to: string[]
+        subject: string
+        html?: string
+        text?: string
+      }) => ({ messageId: "msg-1" }),
+    )
+    const envWithEmail = { ...env, EMAIL: { send } }
+    const res = await app.request(
+      "/api/v2/auth/register",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: "welcomed",
+          email: "welcomed@example.com",
+          password: "very-secure",
+        }),
+      },
+      envWithEmail,
+    )
+    expect(res.status).toBe(200)
+    // The send is invoked synchronously up to its first await inside the
+    // handler, so by the time the response resolves it has been called.
+    expect(send).toHaveBeenCalledOnce()
+    const message = send.mock.calls[0][0]
+    expect(message.to).toEqual(["welcomed@example.com"])
+    expect(message.subject).toMatch(/welcome/i)
+  })
+
+  it("registers successfully even when the welcome email throws", async () => {
+    const send = vi.fn(async () => {
+      throw new Error("mail provider down")
+    })
+    const envWithEmail = { ...env, EMAIL: { send } }
+    const res = await app.request(
+      "/api/v2/auth/register",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: "resilient",
+          email: "resilient@example.com",
+          password: "very-secure",
+        }),
+      },
+      envWithEmail,
+    )
+    // Registration must not depend on email delivery.
+    expect(res.status).toBe(200)
+    expect(send).toHaveBeenCalledOnce()
+  })
+
   it("returns 409 when the username already exists", async () => {
     const first = await app.request(
       "/api/v2/auth/register",

@@ -336,9 +336,19 @@ describe("exportDocx — surgical approach (translator formatting wins, byte-fid
   })
 
   it("leaves untranslated paragraphs byte-identical", async () => {
-    const buffer = await makeDocx(para("keep me") + para("translate me"))
+    // Build the fixture and capture the EXACT untranslated paragraph XML up front.
+    // We then assert that exact substring appears verbatim in the output — a mutation
+    // to its attributes or rPr would fail this test (unlike a plain toContain("keep me")).
+    const untranslatedPara = paraWithRpr("keep me", "<w:b/>")
+    const buffer = await makeDocx(untranslatedPara + para("translate me"))
     const originalZip = await JSZip.loadAsync(buffer)
     const originalXml = await originalZip.file("word/document.xml")!.async("string")
+    // Extract the exact paragraph block from the original XML so the assertion is
+    // structural, not just a text-content check.
+    const paraBlockMatch = originalXml.match(/<w:p\b[^>]*>(?:(?!<\/w:p>)[\s\S])*keep me[\s\S]*?<\/w:p>/)
+    expect(paraBlockMatch).not.toBeNull()
+    const exactParaBlock = paraBlockMatch![0]
+
     const cells = [
       makeCell("c1", "keep me", "", "g0"),      // untranslated
       makeCell("c2", "translate me", "DONE", "g1"),
@@ -347,10 +357,9 @@ describe("exportDocx — surgical approach (translator formatting wins, byte-fid
     expect(injected).toBe(1)
     expect(untouched).toBe(1)
     const xml = await readDocumentXml(blob)
-    expect(xml).toContain("keep me")   // untranslated text retained verbatim
     expect(xml).toContain("DONE")
-    // The "keep me" paragraph text should be unchanged in the raw XML
-    expect(xml).toContain(">keep me<")
+    // The exact paragraph block (including attributes, rPr, etc.) must be verbatim in output.
+    expect(xml).toContain(exactParaBlock)
   })
 
   it("does not change the XML declaration or namespaces of document.xml", async () => {
@@ -393,5 +402,77 @@ describe("exportDocx — surgical approach (translator formatting wins, byte-fid
     expect(injected).toBe(1)
     const xml = await readDocumentXml(blob)
     expect(xml).toContain('<w:u w:val="single"/>')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Self-closing <w:p/> adjacency — Critical regression guard (Finding 1)
+// ---------------------------------------------------------------------------
+
+describe("exportDocx — self-closing <w:p/> adjacency (Finding 1)", () => {
+  it("self-closing <w:p/> immediately before a content paragraph: no fusion, no drop", async () => {
+    // The old greedy regex fused <w:p/> with the next </w:p>, dropping "Real".
+    // The new mutually-exclusive regex must keep them as separate matches.
+    const selfClosing = `<w:p/>`
+    const content = para("Real")
+    const buffer = await makeDocx(selfClosing + content)
+    const cells = [makeCell("c1", "Real", "Translated", "g1")]
+    const { blob, injected, untouched } = await exportDocx(buffer, cells)
+
+    // The self-closing para is empty → skipped; the content para is translated → injected=1.
+    expect(injected).toBe(1)
+    expect(untouched).toBe(0)
+
+    const xml = await readDocumentXml(blob)
+    // Self-closing survives intact.
+    expect(xml).toContain("<w:p/>")
+    // Content paragraph was translated, not dropped.
+    expect(xml).toContain("Translated")
+    expect(xml).not.toContain(">Real<")
+    // The self-closing must remain a standalone token — it must NOT absorb the next
+    // paragraph's content (no run XML should appear inside what used to be <w:p/>).
+    // Verified indirectly: injected=1 and self-closing is still an empty <w:p/> element.
+    expect(xml).toMatch(/<w:p\/>/)                       // self-closing untouched
+    expect(xml).toMatch(/<w:p>[\s\S]*?Translated[\s\S]*?<\/w:p>/)
+  })
+
+  it("two consecutive <w:p/> before a content paragraph: all survive, content translated", async () => {
+    const buffer = await makeDocx(`<w:p/><w:p/>` + para("Content"))
+    const cells = [makeCell("c1", "Content", "Contenido", "g1")]
+    const { blob, injected, untouched } = await exportDocx(buffer, cells)
+
+    expect(injected).toBe(1)
+    expect(untouched).toBe(0)
+
+    const xml = await readDocumentXml(blob)
+    // Both self-closing paras survive.
+    const selfClosingCount = (xml.match(/<w:p\/>/g) ?? []).length
+    expect(selfClosingCount).toBe(2)
+    expect(xml).toContain("Contenido")
+    expect(xml).not.toContain(">Content<")
+  })
+
+  it("self-closing <w:p/> does not increment the non-empty paragraph counter", async () => {
+    // Three content paragraphs with one self-closing in the middle.
+    // The cell ordering must still be positional over non-empty paras only.
+    const buffer = await makeDocx(
+      para("First") + `<w:p/>` + para("Second") + para("Third"),
+    )
+    const cells = [
+      makeCell("c1", "First", "Primero", "g1"),
+      makeCell("c2", "Second", "Segundo", "g2"),
+      makeCell("c3", "Third", "Tercero", "g3"),
+    ]
+    const { blob, injected, untouched } = await exportDocx(buffer, cells)
+
+    expect(injected).toBe(3)
+    expect(untouched).toBe(0)
+
+    const xml = await readDocumentXml(blob)
+    expect(xml).toContain("Primero")
+    expect(xml).toContain("Segundo")
+    expect(xml).toContain("Tercero")
+    // The self-closing must survive in output.
+    expect(xml).toContain("<w:p/>")
   })
 })

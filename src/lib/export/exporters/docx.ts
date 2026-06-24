@@ -112,7 +112,12 @@ export async function exportDocx(
 
   // Surgical paragraph scan: match both full <w:p …>…</w:p> and self-closing <w:p …/>.
   // We do NOT use DOMParser/XMLSerializer — raw string splice only.
-  const paraRegex = /<w:p\b[^>]*\/?>(?:[\s\S]*?<\/w:p>)?/g
+  //
+  // CRITICAL: the two forms are MUTUALLY EXCLUSIVE alternatives; self-closing MUST come
+  // first. The previous combined form `<w:p\b[^>]*\/?>(?:…</w:p>)?` was broken: for
+  // `<w:p/><w:p>Real</w:p>` the optional group would match forward to the NEXT </w:p>,
+  // fusing both paragraphs into one token and dropping "Real".
+  const paraRegex = /<w:p\b[^>]*\/>|<w:p\b[^>]*>[\s\S]*?<\/w:p>/g
 
   let rebuilt = ""
   let lastIndex = 0
@@ -131,7 +136,8 @@ export async function exportDocx(
     lastIndex = matchStart + full.length
 
     // Determine if this is a self-closing paragraph (no inner content).
-    const isSelfClosing = /^<w:p\b[^>]*\/>$/.test(full.trim())
+    // With the mutually-exclusive regex, self-closing matches never contain </w:p>.
+    const isSelfClosing = !full.includes("</w:p>")
     const inner = isSelfClosing ? "" : extractInner(full)
 
     // A paragraph is non-empty iff it has a <w:t …>…</w:t> with non-whitespace text.
@@ -238,32 +244,36 @@ function extractPPr(inner: string): string {
 }
 
 /**
- * Extract the <w:rPr>…</w:rPr> from the FIRST <w:r> element in `innerAfterPPr`.
+ * Extract the <w:rPr>…</w:rPr> from the FIRST text-bearing <w:r> element in
+ * `innerAfterPPr`. A run is "text-bearing" iff it contains a <w:t> with
+ * non-whitespace text. Runs that contain only bookmarks, <w:br/>, or other
+ * non-text elements are skipped so their (often absent) rPr does not falsely
+ * become the dominant character format.
  *
- * This is the dominant run's character properties (the formatting the translator's
- * runs will inherit as their base). Returns null if the first text run has no rPr,
- * or if there are no runs.
- *
- * SAFETY: We only scan the first run. Paragraphs with no runs return null cleanly.
+ * Returns null if no text-bearing run is found, or if the first such run has no rPr.
  */
 function extractFirstRunRpr(innerAfterPPr: string): string | null {
-  // Find the first <w:r …> open tag.
-  const runStart = innerAfterPPr.search(/<w:r\b/)
-  if (runStart === -1) return null
+  // Iterate over all <w:r …>…</w:r> runs in order.
+  const runRegex = /<w:r\b[^>]*>[\s\S]*?<\/w:r>/g
+  let runMatch: RegExpExecArray | null
+  while ((runMatch = runRegex.exec(innerAfterPPr)) !== null) {
+    const runContent = runMatch[0]
 
-  // Find the end of this run: the first </w:r> after runStart.
-  const runEnd = innerAfterPPr.indexOf("</w:r>", runStart)
-  const runContent = runEnd !== -1
-    ? innerAfterPPr.slice(runStart, runEnd + 6)
-    : innerAfterPPr.slice(runStart)
+    // Skip runs without non-whitespace text content.
+    const tMatch = runContent.match(/<w:t[^>]*>([^<]*)<\/w:t>/)
+    if (!tMatch || !tMatch[1].trim()) continue
 
-  // Within this run, look for <w:rPr>…</w:rPr> (full form).
-  const rPrMatch = runContent.match(/<w:rPr\b[^>]*>[\s\S]*?<\/w:rPr>/)
-  if (rPrMatch) return rPrMatch[0]
+    // This is the first text-bearing run — extract its rPr.
+    const rPrMatch = runContent.match(/<w:rPr\b[^>]*>[\s\S]*?<\/w:rPr>/)
+    if (rPrMatch) return rPrMatch[0]
 
-  // Also handle self-closing <w:rPr/>.
-  const rPrSelf = runContent.match(/<w:rPr\b[^>]*\/>/)
-  if (rPrSelf) return rPrSelf[0]
+    // Also handle self-closing <w:rPr/>.
+    const rPrSelf = runContent.match(/<w:rPr\b[^>]*\/>/)
+    if (rPrSelf) return rPrSelf[0]
+
+    // First text-bearing run has no rPr.
+    return null
+  }
 
   return null
 }

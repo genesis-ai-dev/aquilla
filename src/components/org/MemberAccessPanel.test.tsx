@@ -74,15 +74,28 @@ describe("MemberAccessRow — FRO-427 permission denial on Revoke button", () =>
     )
   }
 
-  it("revoke button is enabled for PROJECT_LEAD (500)", async () => {
+  it("revoke button is enabled for MAINTAINER (600)", async () => {
     vi.mocked(getMemberAccess).mockResolvedValue(ACCESS)
-    renderRowWithRole(500)
+    renderRowWithRole(600)
     fireEvent.click(screen.getByRole("button", { name: /anna/ }))
     await screen.findByText("John")
 
     const revokeBtn = screen.getByTestId("revoke-direct-grant")
     expect(revokeBtn).not.toBeDisabled()
     expect(revokeBtn.getAttribute("title")).toBeNull()
+  })
+
+  it("revoke button is disabled for PROJECT_LEAD (500) — server requires MAINTAINER", async () => {
+    // FRO-427: the server gate for removing a member is MAINTAINER (600); a
+    // PROJECT_LEAD must NOT see an enabled button that would 403 server-side.
+    vi.mocked(getMemberAccess).mockResolvedValue(ACCESS)
+    renderRowWithRole(500)
+    fireEvent.click(screen.getByRole("button", { name: /anna/ }))
+    await screen.findByText("John")
+
+    const revokeBtn = screen.getByTestId("revoke-direct-grant")
+    expect(revokeBtn).toBeDisabled()
+    expect(revokeBtn.getAttribute("title")).toMatch(/maintainer/i)
   })
 
   it("revoke button is disabled with a denial tooltip for CONTRIBUTOR (400)", async () => {
@@ -94,7 +107,7 @@ describe("MemberAccessRow — FRO-427 permission denial on Revoke button", () =>
     const revokeBtn = screen.getByTestId("revoke-direct-grant")
     expect(revokeBtn).toBeDisabled()
     // Tooltip must mention the required role so the user understands why
-    expect(revokeBtn.getAttribute("title")).toMatch(/project_lead/i)
+    expect(revokeBtn.getAttribute("title")).toMatch(/maintainer/i)
   })
 
   it("revoke button is disabled with a denial tooltip for VIEWER (100)", async () => {
@@ -105,7 +118,7 @@ describe("MemberAccessRow — FRO-427 permission denial on Revoke button", () =>
 
     const revokeBtn = screen.getByTestId("revoke-direct-grant")
     expect(revokeBtn).toBeDisabled()
-    expect(revokeBtn.getAttribute("title")).toMatch(/project_lead/i)
+    expect(revokeBtn.getAttribute("title")).toMatch(/maintainer/i)
   })
 
   it("revoke button is enabled when callerOrgRoleLevel is not provided (fail-open)", async () => {

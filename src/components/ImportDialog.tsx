@@ -167,6 +167,10 @@ export function ImportDialog({
   // PreviewPanel can render an in-flight indicator).
   const [previewUploadPhase, setPreviewUploadPhase] = useState("")
   const [previewUploadProgress, setPreviewUploadProgress] = useState<{ count: number; total: number } | null>(null)
+  // FRO-430 (fix): a commit failure must be visible during the preview screen.
+  // UploadPanel is unmounted here, so its local error never shows — surface it
+  // up to this level and pass it to PreviewPanel instead of failing silently.
+  const [previewCommitError, setPreviewCommitError] = useState<string | null>(null)
   // FRO-249 fix (Fix 3): guard against Radix delivering onOpenChange(false) twice
   // in the same macrotask (closure-captured pendingImport stays non-null until
   // the re-render). Consumed synchronously so the second call is a no-op.
@@ -425,11 +429,13 @@ export function ImportDialog({
             onPreview={(results, commit) => {
               setPreviewUploadPhase("")
               setPreviewUploadProgress(null)
+              setPreviewCommitError(null)
               setPreviewState({ results, commit })
               setScreen("preview")
             }}
             onCommitPhase={setPreviewUploadPhase}
             onCommitProgress={setPreviewUploadProgress}
+            onCommitError={setPreviewCommitError}
             onImported={handleChildImported}
           />
         )}
@@ -577,14 +583,17 @@ export function ImportDialog({
           <PreviewPanel
             results={previewState.results}
             onConfirm={async () => {
+              setPreviewCommitError(null)
               await previewState.commit()
             }}
             onCancel={() => {
               setPreviewState(null)
+              setPreviewCommitError(null)
               setScreen("upload")
             }}
             uploadPhase={previewUploadPhase}
             uploadProgress={previewUploadProgress}
+            error={previewCommitError}
           />
         )}
 
@@ -795,9 +804,12 @@ interface UploadPanelProps {
    */
   onCommitPhase?: (phase: string) => void
   onCommitProgress?: (progress: { count: number; total: number } | null) => void
+  /** FRO-430 (fix): surface a commit failure to the parent so the unmounted
+   *  UploadPanel's local error is still shown on the preview screen. */
+  onCommitError?: (message: string | null) => void
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError }: UploadPanelProps) {
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -911,6 +923,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
       setProgress(null)
       setPhase("")
       onCommitProgress?.(null)
+      onCommitError?.(null)
       const allRefs: FileReference[] = []
       // Accumulate speaker pairs across all subtitle files in this batch.
       const allSpeakerPairs: { cellId: string; speaker: string | undefined }[] = []
@@ -957,7 +970,11 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
         onCommitPhase?.(finishPhase)
         await onImported(allRefs)
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Import failed")
+        const message = err instanceof Error ? err.message : "Import failed"
+        setError(message)
+        // FRO-430 (fix): also surface to the parent — during the preview screen
+        // this UploadPanel is unmounted, so its local error would never show.
+        onCommitError?.(message)
       } finally {
         setImporting(false)
         setProgress(null)
@@ -966,7 +983,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
         onCommitPhase?.("")
       }
     },
-    [projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress]
+    [projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError]
   )
 
   function handleDrop(e: React.DragEvent) {

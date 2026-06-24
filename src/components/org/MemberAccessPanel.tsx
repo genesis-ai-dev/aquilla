@@ -27,7 +27,9 @@ export function MemberAccessRow({
   /**
    * FRO-427: The current user's org-level role. When provided, the "Revoke
    * direct grant" button is disabled with an explanation for callers who lack
-   * PROJECT_LEAD (500) — instead of a silent no-op or a raw server 403.
+   * MAINTAINER (600) — instead of a silent no-op or a raw server 403. The
+   * server requires MAINTAINER (600) to remove a project member
+   * (projects.ts DELETE /members), so the client gate must match.
    * When omitted the button remains enabled (fail-open; server is still
    * authoritative).
    */
@@ -41,9 +43,10 @@ export function MemberAccessRow({
   const [error, setError] = useState<string | null>(null)
   const [revoking, setRevoking] = useState<string | null>(null)
 
-  // FRO-427: callers with role < PROJECT_LEAD (500) cannot revoke direct grants.
+  // FRO-427: callers with role < MAINTAINER (600) cannot revoke direct grants
+  // (matches the server gate in projects.ts DELETE /members).
   const canRevoke =
-    callerOrgRoleLevel == null ? true : callerOrgRoleLevel >= ROLE.PROJECT_LEAD
+    callerOrgRoleLevel == null ? true : callerOrgRoleLevel >= ROLE.MAINTAINER
 
   const fetchAccess = useCallback(async () => {
     if (!jwt) return
@@ -188,7 +191,7 @@ function AccessProjectRow({
             disabled={revoking || !canRevoke}
             title={
               !canRevoke
-                ? denialMessage(ROLE.PROJECT_LEAD, callerOrgRoleLevel)
+                ? denialMessage(ROLE.MAINTAINER, callerOrgRoleLevel)
                 : undefined
             }
             data-testid="revoke-direct-grant"

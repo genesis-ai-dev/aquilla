@@ -34,12 +34,18 @@ export interface PreviewPanelProps {
    * When provided alongside a non-zero total, a determinate bar is rendered.
    */
   uploadProgress?: { count: number; total: number } | null
+  /**
+   * FRO-430 (fix): a commit error surfaced from the parent. When set, it is shown
+   * above the actions so a failed import is never mistaken for success or a hang —
+   * the Confirm/Cancel buttons remain so the user can retry or back out.
+   */
+  error?: string | null
 }
 
 /** Max cells to show in the snippet list per result. */
 const PREVIEW_LIMIT = 20
 
-export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, uploadProgress }: PreviewPanelProps) {
+export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, uploadProgress, error }: PreviewPanelProps) {
   const [confirming, setConfirming] = useState(false)
 
   const totalCells = results.reduce((n, r) => n + r.strings.length, 0)
@@ -133,6 +139,16 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
           ))}
         </div>
       </div>
+
+      {error && (
+        <p
+          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+          role="alert"
+          data-testid="preview-commit-error"
+        >
+          Import failed: {error}
+        </p>
+      )}
 
       <div className="flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onCancel} disabled={confirming}>

@@ -1,5 +1,8 @@
+import { useEffect, useRef } from "react"
 import { CheckCircle2, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import posthog from "@/lib/posthog"
+import { SETUP_CHECKLIST_COMPLETED } from "@/lib/analytics-events"
 import {
   Sheet,
   SheetContent,
@@ -42,6 +45,16 @@ export function SetupChecklistDrawer({
 }: SetupChecklistDrawerProps) {
   const allDone = state.completedCount === state.totalCount && state.totalCount > 0
   const progress = state.totalCount === 0 ? 0 : state.completedCount / state.totalCount
+
+  // Activation milestone: fire once when the checklist first reaches 100%.
+  // Consent-gated at the posthog module level.
+  const completionFired = useRef(false)
+  useEffect(() => {
+    if (allDone && !completionFired.current) {
+      completionFired.current = true
+      posthog.capture(SETUP_CHECKLIST_COMPLETED, { project_id: project.id })
+    }
+  }, [allDone, project.id])
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>

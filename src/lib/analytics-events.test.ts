@@ -52,6 +52,9 @@ import {
   FIRST_CELL_VALIDATE,
   INVITE_REDEEMED,
   OUTBOX_QUARANTINED,
+  ORG_CREATED,
+  INVITE_SENT,
+  SETUP_CHECKLIST_COMPLETED,
 } from "./analytics-events"
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -80,6 +83,9 @@ describe("analytics-events constants", () => {
     FIRST_CELL_VALIDATE,
     INVITE_REDEEMED,
     OUTBOX_QUARANTINED,
+    ORG_CREATED,
+    INVITE_SENT,
+    SETUP_CHECKLIST_COMPLETED,
   ]
 
   it("all event name constants are non-empty strings", () => {

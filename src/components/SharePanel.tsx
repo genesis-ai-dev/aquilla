@@ -16,6 +16,8 @@ import {
   revokeProjectInvite,
   type ActiveProjectInvite,
 } from "@/lib/sync/invites"
+import posthog from "@/lib/posthog"
+import { INVITE_SENT } from "@/lib/analytics-events"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { MembersPanel, type MembersPanelMember } from "./MembersPanel"
@@ -209,6 +211,11 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
       }
       const url = `${window.location.origin}/join/${serverInvite.token}`
       setIssuedUrl(url)
+      posthog.capture(INVITE_SENT, {
+        project_id: projectId,
+        role: inviteRole,
+        has_email: Boolean(trimmedEmail),
+      })
       setInviteListVersion((v) => v + 1)
       onSharesChanged?.()
     } finally {

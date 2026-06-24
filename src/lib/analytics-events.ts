@@ -56,6 +56,25 @@ export const FIRST_CELL_COMMIT = "first cell commit"
  */
 export const FIRST_CELL_VALIDATE = "first cell validate"
 
+// ── Org creation (high-value team signal) ─────────────────────────────────
+
+/**
+ * User created a NON-personal organization. Creating an org (beyond the
+ * auto-provisioned personal workspace) signals an incoming multi-person
+ * translation project — the cohort we most want to support and measure.
+ */
+export const ORG_CREATED = "org created"
+
+// ── Sharing / invitations ─────────────────────────────────────────────────
+
+/** User minted a project share/invite link (sharing velocity). */
+export const INVITE_SENT = "invite sent"
+
+// ── Activation: setup checklist ───────────────────────────────────────────
+
+/** A project's setup checklist reached 100% (all actionable items done). */
+export const SETUP_CHECKLIST_COMPLETED = "setup checklist completed"
+
 // ── Invite redemption ─────────────────────────────────────────────────────
 
 /** User successfully redeemed an invite link and joined a project. */

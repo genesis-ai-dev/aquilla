@@ -5,6 +5,8 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { createOrg, renameOrg } from "@/lib/frontier/orgs"
 import { isOrgScopedRoute } from "./org-route-scope"
+import posthog from "@/lib/posthog"
+import { ORG_CREATED } from "@/lib/analytics-events"
 
 export function OrgSwitcher() {
   const { orgs, activeOrg, activeOrgId, isAllOrgs, setActiveOrg, setAllOrgs, refresh } = useActiveOrg()
@@ -51,6 +53,9 @@ export function OrgSwitcher() {
     setCreating(true)
     try {
       const o = await createOrg(jwt, createName.trim())
+      // High-value funnel signal: a non-personal org means an incoming
+      // multi-person project. Consent-gated at the posthog module level.
+      posthog.capture(ORG_CREATED, { org_id: o.id })
       await refresh()
       setActiveOrg(o.id)
       setOpen(false)

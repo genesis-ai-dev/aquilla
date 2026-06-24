@@ -28,11 +28,12 @@ export interface MigrateAudioCopyEnv {
 }
 
 /** GitLab stores LFS objects in object storage under an oid-sharded key:
- *  `<oid[0:2]>/<oid[2:4]>/<oid>` (relative to the configured remote_directory,
- *  which IS the bucket). Isolated here so a single edit re-keys every copy if a
- *  trial run reveals a different layout. */
+ *  `<oid[0:2]>/<oid[2:4]>/<oid[4:]>` — the two shard dirs use the first 4 hex,
+ *  and the object name is the REMAINDER of the oid (not the full oid). Verified
+ *  against the live bucket (codex-attachments-v1-1): oid 6adb…d8b5 lives at
+ *  6a/db/f08b…d8b5. Isolated here so the layout lives in one place. */
 export function gitlabLfsKey(oid: string): string {
-  return `${oid.slice(0, 2)}/${oid.slice(2, 4)}/${oid}`
+  return `${oid.slice(0, 2)}/${oid.slice(2, 4)}/${oid.slice(4)}`
 }
 
 interface CopyBody {

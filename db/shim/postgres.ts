@@ -78,6 +78,10 @@ export interface AquillaStatement {
 export interface AquillaDb {
   prepare(query: string): AquillaStatement
   batch<T = Record<string, unknown>>(stmts: AquillaStatement[]): Promise<AquillaResult<T>[]>
+  /** Pipelined variant of batch() — same atomicity + order, far fewer network
+   *  round-trips. Optional: only the postgres.js-backed shim implements it;
+   *  callers must fall back to batch() when absent. */
+  batchPipelined?<T = Record<string, unknown>>(stmts: AquillaStatement[]): Promise<AquillaResult<T>[]>
   exec(query: string): Promise<{ count: number; duration: number }>
   close(): Promise<void>
 }
@@ -232,6 +236,23 @@ export class PostgresDb implements AquillaDb {
       for (const s of stmts) out.push(await (s as PgStatement)._on(tx).all<T>())
       return out
     }
+    if (this.mode.kind === "none") {
+      return this.executor.begin(run)
+    }
+    return withIdentity(this.executor, this.mode, run)
+  }
+
+  /** Like batch(), but PIPELINED: every statement is dispatched on the
+   *  transaction connection before any response is awaited, so postgres.js
+   *  streams them back-to-back and N per-statement network round-trips collapse
+   *  toward 1. Order is preserved — the statements are sent in array order on a
+   *  single connection, so Postgres still executes them sequentially (a
+   *  deselect before its upsert stays before it). Used by the bulk migration
+   *  ingest, where ~140ms-per-statement Hyperdrive↔Neon latency, not server
+   *  work, dominated. Same atomicity as batch(): any failure rolls the lot back. */
+  async batchPipelined<T = Record<string, unknown>>(stmts: AquillaStatement[]): Promise<AquillaResult<T>[]> {
+    const run = (tx: PgExecutor): Promise<AquillaResult<T>[]> =>
+      Promise.all(stmts.map((s) => (s as PgStatement)._on(tx).all<T>()))
     if (this.mode.kind === "none") {
       return this.executor.begin(run)
     }

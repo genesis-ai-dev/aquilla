@@ -48,6 +48,7 @@ import { collectCellAudio, audioAttachEvent } from "../src/lib/migrate/audio"
 import type { AudioImport } from "../src/lib/migrate/audio"
 import { buildOidIndex, planCellAudio, buildCellAudioEvents } from "../src/lib/migrate/audio-copy"
 import { discoverPointers } from "../src/lib/migrate/gitlab/lfs"
+import { R2Client, gitlabLfsKey, audioDestKey } from "../src/lib/migrate/r2-s3"
 import { mapComments } from "../src/lib/migrate/comments"
 import { buildCastAdditions } from "../src/lib/import/cast-from-speakers"
 import type { ProjectTtsSettings } from "../src/lib/parsers/types"
@@ -60,6 +61,54 @@ const PERSIST = ".wrangler-dev-state"
 const INGEST_CHUNK = 2500
 const FALLBACK_AUTHOR = "legacy-import"
 const execFileP = promisify(execFile)
+
+// ── fast asset copy (--audio-fast): server-side R2 CopyObject (no bytes move,
+// no worker hop), globally bounded concurrency. The LFS bucket + the destination
+// media bucket are the SAME account, so CopyObject is a metadata op. ──────────
+const LFS_BUCKET = process.env.R2_LFS_BUCKET ?? "codex-attachments-v1-1"
+const DEST_BUCKET = process.env.R2_DEST_BUCKET ?? "aquilla-snapshots"
+const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID ?? "6a80496d1e59948a9cbaa3c643ba81d7"
+const COPY_CONCURRENCY = Number(process.env.COPY_CONCURRENCY ?? 200)
+let R2: R2Client | null = null
+const r2 = (): R2Client => {
+  if (!R2) throw new Error("R2 client not initialized (set R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY)")
+  return R2
+}
+
+// Bounded async concurrency: at most `max` copies in flight at once across ALL
+// projects (the streaming sink). Keeps us at the latency ceiling without
+// unbounded socket fan-out.
+function createLimiter(max: number) {
+  let active = 0
+  const queue: Array<() => void> = []
+  return async function run<T>(fn: () => Promise<T>): Promise<T> {
+    if (active >= max) await new Promise<void>((resolve) => queue.push(resolve))
+    active++
+    try {
+      return await fn()
+    } finally {
+      active--
+      queue.shift()?.()
+    }
+  }
+}
+const copyLimit = createLimiter(COPY_CONCURRENCY)
+
+// One CopyObject with a small retry. 404 ⇒ the LFS object isn't in the bucket
+// (lfs-miss, surfaced not dropped); other errors retry then give up.
+async function copyAsset(srcKey: string, destKey: string): Promise<"copied" | "lfs-miss" | "failed"> {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await r2().copyObject(LFS_BUCKET, srcKey, DEST_BUCKET, destKey)
+      return "copied"
+    } catch (e) {
+      if ((e as { status?: number }).status === 404) return "lfs-miss"
+      if (attempt === 3) return "failed"
+      await sleep(300 * attempt)
+    }
+  }
+  return "failed"
+}
 
 // ── change-detection: skip a project whose GitLab HEAD is unchanged since the
 // last successful pass (separate markers for content vs audio). State persists
@@ -292,23 +341,54 @@ async function fetchProject(gitlabId: number, noLfs: boolean): Promise<string> {
   return m[1].trim()
 }
 
-async function ingest(projectId: string, events: IngestEvent[], eventsOnly = false): Promise<void> {
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+async function ingest(
+  projectId: string,
+  events: IngestEvent[],
+  eventsOnly = false,
+  chunkSize = INGEST_CHUNK,
+): Promise<void> {
   const secret = process.env.SYNC_SECRET_KEY
   if (!secret) throw new Error("SYNC_SECRET_KEY not set (load .env: `set -a; . ./.env; set +a`)")
-  for (let i = 0; i < events.length; i += INGEST_CHUNK) {
-    const res = await fetch(`${SYNC}/migrate/ingest`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
-      body: JSON.stringify({
-        projectId,
-        events: events.slice(i, i + INGEST_CHUNK),
-        eventsOnly,
-        // Skip the O(N²) per-cell file-counter recompute; finalizeCounters() runs
-        // it once per project after ingest (the single biggest throughput win).
-        deferFileCounters: true,
-      }),
+  for (let i = 0; i < events.length; i += chunkSize) {
+    const body = JSON.stringify({
+      projectId,
+      events: events.slice(i, i + chunkSize),
+      eventsOnly,
+      // Skip the O(N²) per-cell file-counter recompute; finalizeCounters() runs
+      // it once per project after ingest (the single biggest throughput win).
+      deferFileCounters: true,
     })
-    if (!res.ok) throw new Error(`ingest HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`)
+    // Retry transient failures: a single heavy ingest POST can have its
+    // connection dropped at the edge ("fetch failed", no HTTP status) or hit a
+    // 5xx/429. Ingest is idempotent (INSERT OR IGNORE on deterministic ids), so
+    // a retried chunk is safe. A non-429 4xx is a real client error → fatal.
+    let ok = false
+    let lastErr = ""
+    for (let attempt = 1; attempt <= 4 && !ok; attempt++) {
+      try {
+        const res = await fetch(`${SYNC}/migrate/ingest`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
+          body,
+        })
+        if (res.ok) {
+          ok = true
+          break
+        }
+        const detail = (await res.text().catch(() => "")).slice(0, 300)
+        if (res.status < 500 && res.status !== 429) {
+          throw new Error(`ingest HTTP ${res.status}: ${detail}`)
+        }
+        lastErr = `HTTP ${res.status}: ${detail}`
+      } catch (e) {
+        if (e instanceof Error && /^ingest HTTP [4]/.test(e.message)) throw e
+        lastErr = e instanceof Error ? e.message : String(e)
+      }
+      if (!ok && attempt < 4) await sleep(750 * attempt)
+    }
+    if (!ok) throw new Error(`ingest failed after retries: ${lastErr}`)
   }
 }
 
@@ -502,12 +582,13 @@ async function doProjectAudio(p: CodexProjectMatch, args: Args) {
   }
 }
 
-// Fast audio pass (--audio-fast): imports EVERY historical take by copying its
-// bytes bucket→bucket inside Cloudflare (POST /migrate/audio-copy) instead of
-// pulling them out of GitLab and re-uploading. Fetches with --no-lfs (pointers +
-// metadata only, no GBs); the oid in each pointer locates the bytes already in
-// R2. Emits cell.audio.attach per copied take + a cell.audio.select to pin the
-// legacy active take. Delta-filtered, idempotent, state-tracked under audioFastSha.
+// Fast asset pass (--audio-fast): imports EVERY historical take by copying its
+// bytes bucket→bucket with direct server-side R2 CopyObject (a metadata op — no
+// bytes move, no worker hop), streamed through a globally-bounded concurrent
+// sink. Fetches with --no-lfs (pointers + metadata only); the oid in each
+// pointer is the LFS key. Emits cell.audio.attach per landed take + a
+// cell.audio.select to pin the legacy active take. Delta-filtered, idempotent
+// (CopyObject overwrites), state-tracked under audioFastSha.
 async function doProjectAudioFast(p: CodexProjectMatch, args: Args) {
   const projectId = projectIdFor(String(p.id), "gitlab")
   console.log(`\n• [audio-fast] ${p.name} (gitlab ${p.id}) → ${projectId}`)
@@ -517,72 +598,119 @@ async function doProjectAudioFast(p: CodexProjectMatch, args: Args) {
     return
   }
   if (args.apply && !process.env.SYNC_SECRET_KEY) throw new Error("SYNC_SECRET_KEY not set")
+  const tFetch = Date.now()
   const dir = await fetchProject(p.id, true) // --no-lfs: pointers + metadata only
+  const tParse = Date.now()
   const oidIndex = buildOidIndex(discoverPointers(dir).pointers)
   const pairs = buildPairs(dir)
+  const secs = (from: number, to: number) => `${((to - from) / 1000).toFixed(1)}s`
+  console.log(`  ⏱ fetch ${secs(tFetch, tParse)}`)
 
-  const events: IngestEvent[] = []
-  let copied = 0
-  let already = 0
-  let lfsMiss = 0
+  // 1) Flatten the whole project to a stream of independent copy units. Each
+  //    carries its source LFS key + destination app key; per-cell we remember
+  //    the active take so we can pin it once its bytes land.
+  interface Unit { cellId: string; take: AudioImport; srcKey: string; destKey: string }
+  interface CellInfo { fileId: string; cellId: string; selected: string | null }
+  const units: Unit[] = []
+  const cells: CellInfo[] = []
   let noOid = 0
-  let failed = 0
   for (const pair of pairs) {
     if (!pair.target) continue
     const fileId = fileIdFor(String(p.id), pair.relPath)
-    const opts = { projectId, fileId, fallbackAuthor: FALLBACK_AUTHOR, fallbackTs: Date.now() }
     for (const cell of pair.target.cells) {
       const plan = planCellAudio(cell, oidIndex)
       noOid += plan.missingOid.length
-      if (!args.apply) {
-        copied += plan.copies.length
-        continue
-      }
-      const present: AudioImport[] = []
+      if (plan.copies.length === 0 && !plan.selectedAquillaAudioId) continue
+      cells.push({ fileId, cellId: cell.metadata.id, selected: plan.selectedAquillaAudioId })
       for (const c of plan.copies) {
-        const res = await fetch(`${SYNC}/migrate/audio-copy`, {
-          method: "POST",
-          headers: authHeaders(),
-          body: JSON.stringify({ projectId, fileId, audioId: c.take.aquillaAudioId, oid: c.oid }),
+        units.push({
+          cellId: cell.metadata.id,
+          take: c.take,
+          srcKey: gitlabLfsKey(c.oid),
+          destKey: audioDestKey(projectId, fileId, c.take.aquillaAudioId),
         })
-        if (res.ok) {
-          const body = (await res.json()) as { copied?: boolean; reason?: string }
-          if (body.copied) copied++
-          else if (body.reason === "exists") already++
-          present.push(c.take) // bytes are in place either way → attach it
-        } else if (res.status === 404) {
-          lfsMiss++
-          console.warn(`\n  ! lfs-miss ${c.take.aquillaAudioId} (oid ${c.oid.slice(0, 12)})`)
-        } else {
-          failed++
-          console.warn(`\n  ! audio-copy ${res.status} ${c.take.aquillaAudioId}`)
-        }
-        if ((copied + already) % 50 === 0 && copied + already > 0) {
-          process.stdout.write(`\r    copied ${copied} / existing ${already}`)
-        }
       }
-      events.push(...buildCellAudioEvents(cell.metadata.id, present, plan.selectedAquillaAudioId, opts))
     }
   }
+
+  if (!args.apply) {
+    console.log(`    would copy ${units.length}${noOid ? ` / no-oid ${noOid}` : ""} (dry-run)`)
+    return
+  }
+
+  // 2) Copy phase: fire every unit through the global CopyObject sink. JS is
+  //    single-threaded so the per-success bookkeeping is race-free.
+  let copied = 0
+  let lfsMiss = 0
+  let failed = 0
+  const landedByCell = new Map<string, AudioImport[]>()
+  const tCopy = Date.now()
+  await Promise.all(
+    units.map((u) =>
+      copyLimit(async () => {
+        const r = await copyAsset(u.srcKey, u.destKey)
+        if (r === "copied") {
+          copied++
+          const arr = landedByCell.get(u.cellId) ?? []
+          arr.push(u.take)
+          landedByCell.set(u.cellId, arr)
+          if (copied % 100 === 0) process.stdout.write(`\r    copied ${copied}/${units.length}`)
+        } else if (r === "lfs-miss") {
+          lfsMiss++
+          if (lfsMiss <= 5) console.warn(`\n  ! lfs-miss ${u.take.aquillaAudioId} (oid key ${u.srcKey})`)
+        } else {
+          failed++
+          if (failed <= 5) console.warn(`\n  ! copy failed ${u.take.aquillaAudioId}`)
+        }
+      }),
+    ),
+  )
+  const tEvents = Date.now()
   process.stdout.write(
-    `\r    ${args.apply ? "copied" : "would copy"} ${copied}` +
-      (already ? ` / existing ${already}` : "") +
+    `\r    copied ${copied}/${units.length}` +
       (lfsMiss ? ` / lfs-miss ${lfsMiss}` : "") +
       (noOid ? ` / no-oid ${noOid}` : "") +
       (failed ? ` / failed ${failed}` : "") +
-      "\n",
+      ` (${secs(tCopy, tEvents)})\n`,
   )
 
-  if (args.apply && events.length) {
+  // 3) Events: attach per landed take + select per cell (only if its active take
+  //    actually landed). Built from the in-place set, so we never reference bytes
+  //    that didn't copy.
+  const events: IngestEvent[] = []
+  const fallbackTs = Date.now()
+  for (const ci of cells) {
+    const landed = landedByCell.get(ci.cellId) ?? []
+    if (landed.length === 0) continue
+    events.push(
+      ...buildCellAudioEvents(ci.cellId, landed, ci.selected, {
+        projectId,
+        fileId: ci.fileId,
+        fallbackAuthor: FALLBACK_AUTHOR,
+        fallbackTs,
+      }),
+    )
+  }
+
+  if (events.length) {
+    const tDelta = Date.now()
     const existing = await fetchExistingEventIds(projectId)
     const newEvents = existing.size ? events.filter((e) => !existing.has(e.id)) : events
-    if (existing.size) console.log(`  ↳ delta: ${newEvents.length} new / ${events.length} total`)
-    if (newEvents.length) await ingest(projectId, newEvents)
+    const tIngest = Date.now()
+    if (existing.size) console.log(`  ↳ delta: ${newEvents.length} new / ${events.length} total (event-ids ${secs(tDelta, tIngest)})`)
+    // Smaller chunks than the content pass: each audio event's projection does a
+    // deselect + upsert, so a big single POST can exceed the edge timeout.
+    if (newEvents.length) await ingest(projectId, newEvents, false, 300)
+    console.log(`  ⏱ ingest ${secs(tIngest, Date.now())}`)
   }
-  console.log(`  ✓ audio-fast${args.apply ? "" : " (dry-run)"}`)
-  if (args.apply) {
+  console.log(`  ✓ audio-fast`)
+  // Only mark complete when nothing transient failed (lfs-miss / copy failures
+  // retry next run; no-oid is a permanent data gap and doesn't block).
+  if (lfsMiss === 0 && failed === 0) {
     STATE[String(p.id)] = { ...STATE[String(p.id)], audioFastSha: sha ?? undefined }
     saveState()
+  } else {
+    console.log(`  ⚠ not marking complete (${lfsMiss} lfs-miss, ${failed} failed) — will retry next run`)
   }
 }
 
@@ -591,6 +719,18 @@ async function main() {
   if (args.apply && !process.env.SYNC_SECRET_KEY) {
     console.error("SYNC_SECRET_KEY not set. Run: set -a; . ./.env; set +a")
     process.exit(1)
+  }
+  if (args.audioFast && args.apply) {
+    const ak = process.env.R2_ACCESS_KEY_ID
+    const sk = process.env.R2_SECRET_ACCESS_KEY
+    if (!ak || !sk) {
+      console.error("R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY required for --audio-fast (add to .env).")
+      process.exit(1)
+    }
+    R2 = new R2Client({ accountId: R2_ACCOUNT_ID, accessKeyId: ak, secretAccessKey: sk })
+    console.log(
+      `R2 CopyObject: ${LFS_BUCKET} → ${DEST_BUCKET}  (concurrency ${COPY_CONCURRENCY}, account ${R2_ACCOUNT_ID.slice(0, 8)}…)`,
+    )
   }
   const creds = await resolveCredentialsFromEnv(process.env)
   CREDS = creds

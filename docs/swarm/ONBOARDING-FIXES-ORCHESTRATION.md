@@ -30,4 +30,8 @@
 | WS-F | FRO-433 | Org-level API key management (full impl) | dispatched | pages/Settings.tsx, lib/sync/org-settings.ts, lib/store/user-api-keys.ts, lib/audio/tts.ts, new OrgProviderSection, auth-worker org-settings route | ProjectSettings.tsx structure (read-only), permissions (WS-A) |
 
 ## §3 Merge log
-<!-- date · WS · branch · sha · tsc · vitest · notes -->
+- 2026-06-24 · WS-A..F · all 6 agent branches → swarm/onboarding-fixes · merged clean (no file overlaps) · tsc 0 · vitest green
+- 2026-06-24 · review fixes · 3fa28a7f3 (FRO-427 gate→MAINTAINER, FRO-430 commit-error surface) · a36379810 (FRO-433 harden + Settings.test repair)
+- GATE @ a36379810: tsc -b 0 errors (root+auth-worker) · build ✓ (37.9s) · frontend vitest 3130 passed / 34 failed (all 34 pre-existing on main, 0 net-new) · auth-worker vitest 59 passed
+- Pre-existing main failures (NOT this swarm): Login, OrgContext, OrgSwitcher, CreditsPanel, InterlinearAlignmentPanel, OrgHome, ProjectMembersPage, ImportDialog.collision, ImportDialog.partial-import
+- NOT YET: live UI walkthrough; promotion to main; push to dev/staging (HITL)

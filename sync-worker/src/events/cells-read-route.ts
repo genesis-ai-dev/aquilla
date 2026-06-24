@@ -74,6 +74,9 @@ interface CellRowRaw {
   sequence_index: number | null
   transcription: string | null
   camera_state: string | null
+  /** JSONB — the driver hands back a parsed object, but a text executor may
+   *  surface it as a string (parsed defensively in mapRow). */
+  metadata: Record<string, unknown> | string | null
 }
 
 interface CellRowOut {
@@ -97,6 +100,25 @@ interface CellRowOut {
   sequenceIndex: number | null
   transcription: string | null
   cameraState: string | null
+  metadata: Record<string, unknown> | null
+}
+
+/** JSONB comes back as a parsed object from the Postgres driver; a text
+ *  executor (or a JSON-as-text shim) may hand back a string instead — parse
+ *  it defensively so the client always sees `metadata?: object | null`. */
+function parseMetadata(
+  raw: Record<string, unknown> | string | null,
+): Record<string, unknown> | null {
+  if (raw == null) return null
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw)
+      return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null
+    } catch {
+      return null
+    }
+  }
+  return raw
 }
 
 function mapRow(row: CellRowRaw): CellRowOut {
@@ -121,6 +143,7 @@ function mapRow(row: CellRowRaw): CellRowOut {
     sequenceIndex: row.sequence_index,
     transcription: row.transcription,
     cameraState: row.camera_state,
+    metadata: parseMetadata(row.metadata),
   }
 }
 
@@ -366,7 +389,7 @@ export async function handleCellsReadRequest(
     "cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, " +
     "event_id, source_event_id, last_editor, last_edit_at, validated, word_count, " +
     "endorsement_count, start_ms, end_ms, " +
-    "medium, sequence_index, transcription, camera_state"
+    "medium, sequence_index, transcription, camera_state, metadata"
 
   // Per-cell fast path: when `cellIds=a,b,c` is present we skip chain walking
   // and just return matching rows. Used by the WS-triggered single-cell

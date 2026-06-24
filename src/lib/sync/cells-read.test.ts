@@ -10,7 +10,7 @@
 // the lost cell forever.
 
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { streamFileCells } from "./cells-read"
+import { streamFileCells, fetchFileCells } from "./cells-read"
 import type { CellRow } from "./cells-read-types"
 
 function makeRow(cellId: string): CellRow {
@@ -96,5 +96,45 @@ describe("streamFileCells onMeta (B2)", () => {
       },
     )
     expect(metas).toEqual([undefined, undefined])
+  })
+})
+
+describe("cells-read metadata passthrough (OBS attachments)", () => {
+  it("surfaces an object `metadata` (attachments) on the parsed CellRow", async () => {
+    const attachments = [{ type: "image", url: "https://x/01.jpg" }]
+    const row = { ...makeRow("frame-01"), metadata: { attachments } }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(pageResponse({ cells: [row], nextCursor: null, total: 1 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    const page = await fetchFileCells("proj", "file", {}, "jwt")
+    // The metadata bucket must pass through unchanged so EditorRow can render
+    // OBS frame thumbnails from `metadata.attachments`.
+    expect(page.cells[0].metadata).toEqual({ attachments })
+  })
+
+  it("parses a `metadata` that arrives as a JSON string into an object", async () => {
+    const attachments = [{ type: "image", url: "https://x/01.jpg", alt: "frame 1" }]
+    // Some projection paths may not parse the JSONB column — defensively the
+    // client must JSON.parse a string-shaped metadata into an object.
+    const row = { ...makeRow("frame-02"), metadata: JSON.stringify({ attachments }) }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(pageResponse({ cells: [row], nextCursor: null, total: 1 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    const page = await fetchFileCells("proj", "file", {}, "jwt")
+    expect(page.cells[0].metadata).toEqual({ attachments })
+  })
+
+  it("leaves a missing `metadata` untouched (legacy rows)", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(pageResponse({ cells: [makeRow("plain")], nextCursor: null, total: 1 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    const page = await fetchFileCells("proj", "file", {}, "jwt")
+    expect(page.cells[0].metadata).toBeUndefined()
   })
 })

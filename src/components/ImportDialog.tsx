@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   Upload, Library, Globe, Table2, Languages, ArrowLeftRight, Tags, StickyNote, Database,
+  BookImage,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -20,6 +21,7 @@ import { cn } from "@/lib/utils"
 import {
   importFile,
   importEBible,
+  importObs,
   importHelloao,
   importMacula,
   importTranslationNotes,
@@ -76,7 +78,7 @@ import { SpreadsheetImportPanel } from "@/components/import/SpreadsheetImportPan
 import { LabelImportPanel } from "@/components/import/LabelImportPanel"
 import { PairedImportPanel } from "@/components/import/PairedImportPanel"
 
-type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "macula" | "tn" | "direction" | "result" | "collision" | "spreadsheet" | "labels" | "paired"
+type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "direction" | "result" | "collision" | "spreadsheet" | "labels" | "paired"
 
 interface ImportDialogProps {
   open: boolean
@@ -375,6 +377,7 @@ export function ImportDialog({
                 </button>
                 {screen === "upload" ? "Upload Files"
                   : screen === "helloao" ? "Bible API (helloao.org)"
+                  : screen === "obs" ? "Open Bible Stories"
                   : screen === "macula" ? "Macula Hebrew + Greek"
                   : screen === "tn" ? "Translation Notes (TSV)"
                   : screen === "spreadsheet" ? "Spreadsheet (CSV / XLSX)"
@@ -442,6 +445,19 @@ export function ImportDialog({
 
         {screen === "helloao" && (
           <HelloaoPanel
+            projectId={projectId}
+            username={username}
+            sourceLanguage={sourceLanguage}
+            targetLanguage={targetLanguage}
+            getToken={getToken}
+            onImported={async (ref, inferredLanguages) => {
+              await handleChildImported([ref], inferredLanguages)
+            }}
+          />
+        )}
+
+        {screen === "obs" && (
+          <ObsPanel
             projectId={projectId}
             username={username}
             sourceLanguage={sourceLanguage}
@@ -657,6 +673,8 @@ const SPECIALIZED_OPTIONS: ImportOption[] = [
     description: "Re-upload a template to label existing cells with cast names." },
   { id: "tn", title: "Translation Notes", hint: "TSV", icon: StickyNote, badge: "beta",
     description: "unfoldingWord notes, shown beside the matching verse as you translate." },
+  { id: "obs", title: "Open Bible Stories", hint: "door43", icon: BookImage, badge: "beta",
+    description: "Narrative stories with reference images, from unfoldingWord/door43." },
   { title: "Translation Memory", hint: "TMX", icon: Database, badge: "soon", disabled: true,
     description: "Reuse prior translations from TMX memory files." },
 ]
@@ -2326,6 +2344,109 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
         </Button>
         <Button size="sm" onClick={handleConfirm} disabled={resolving}>
           {resolving ? "Continuing…" : "Continue"}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Open Bible Stories (OBS) panel — one-click download of English OBS from
+// unfoldingWord/door43. Each frame becomes a cell carrying its reference image
+// in metadata.attachments. Flows through the SAME bulk path as importEBible.
+// ---------------------------------------------------------------------------
+
+interface ObsPanelProps {
+  projectId: string
+  username: string
+  sourceLanguage: string
+  targetLanguage: string
+  getToken: (fileId: string) => Promise<string | null>
+  onImported: (ref: FileReference, inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
+}
+
+function ObsPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported }: ObsPanelProps) {
+  const [progress, setProgress] = useState<EBibleProgress | null>(null)
+  const [importing, setImporting] = useState(false)
+  const [importErr, setImportErr] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  // Cancel any in-flight download when panel unmounts (e.g. dialog closed)
+  useEffect(() => {
+    return () => abortRef.current?.abort()
+  }, [])
+
+  async function handleImport() {
+    if (importing) return
+    setImporting(true)
+    setImportErr(null)
+    setProgress({ phase: "download", received: 0, total: 0 })
+    abortRef.current = new AbortController()
+
+    try {
+      // Mirrors importEBible's call: same ImportContext, progress, and signal.
+      const ref = await importObs(
+        {
+          projectId,
+          author: username,
+          sourceLanguage,
+          targetLanguage,
+          getToken,
+        },
+        undefined,
+        setProgress,
+        abortRef.current.signal,
+      )
+      // English OBS — seed the project source language when unset.
+      await onImported(ref, { sourceLanguage: "en" })
+    } catch (err) {
+      setImportErr(err instanceof Error ? err.message : "Import failed")
+    } finally {
+      setImporting(false)
+      abortRef.current = null
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-xs text-muted-foreground">
+        Narrative stories with reference images, from{" "}
+        <a href="https://git.door43.org/unfoldingWord/en_obs" target="_blank" rel="noreferrer" className="underline">
+          unfoldingWord/door43
+        </a>
+        . 50 stories are imported as one source file; each frame becomes a cell
+        carrying its reference image.
+      </p>
+
+      {progress && (
+        <div className="text-xs text-muted-foreground">
+          <p>
+            {progress.phase === "download"
+              ? `Downloading stories… ${formatProgress(progress.received, progress.total)}`
+              : progress.phase === "parse"
+                ? "Parsing frames…"
+                : progress.cellsTotal
+                  ? `Uploading frames: ${(progress.cellsEnqueued ?? 0).toLocaleString()} / ${progress.cellsTotal.toLocaleString()}`
+                  : "Uploading to project…"}
+          </p>
+          {progress.phase === "save" && progress.cellsTotal ? (
+            <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full bg-primary transition-all"
+                style={{
+                  width: `${Math.round(((progress.cellsEnqueued ?? 0) / progress.cellsTotal) * 100)}%`,
+                }}
+              />
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      {importErr && <p className="text-sm text-destructive">{importErr}</p>}
+
+      <div className="flex justify-end">
+        <Button onClick={handleImport} disabled={importing}>
+          {importing ? "Importing…" : "Download & Import"}
         </Button>
       </div>
     </div>

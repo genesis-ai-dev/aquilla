@@ -39,6 +39,11 @@ export interface BulkImportCell {
   /** D1: true on the first cell of a paragraph block. Absent/false = continuation.
    *  Drives paragraph grouping for multi-cell draft operations. */
   paragraphStart?: boolean
+  /** Extensible per-cell metadata bucket (e.g. `{ attachments: [...] }` for OBS
+   *  frame images). Serialized verbatim into the chunk POST body below, which
+   *  the server's `/import` route projects to the `cells.metadata` JSONB column.
+   *  The `source.cell.create` event payload type already allows `metadata`. */
+  metadata?: Record<string, unknown>
 }
 
 export interface BulkImportFileMeta {

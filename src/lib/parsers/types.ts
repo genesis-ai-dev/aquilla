@@ -1,4 +1,4 @@
-export type FileType = "md" | "docx" | "pptx" | "txt" | "vtt" | "srt" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video"
+export type FileType = "md" | "docx" | "pptx" | "txt" | "vtt" | "srt" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs"
 
 export type CellType =
   | "text"
@@ -44,6 +44,15 @@ export interface TranslatableString {
   /** D1: true on the first cell of a paragraph block. Absent/false = continuation.
    *  Drives paragraph grouping for multi-cell draft operations. */
   paragraphStart?: boolean
+  /**
+   * Extensible per-cell metadata bucket, mirrored through the import path into
+   * `BulkImportCell.metadata` → `source.cell.create` payload → `cells.metadata`
+   * (JSONB). OBS populates `{ attachments: [{ type: "image", url, alt }] }` —
+   * one frame's reference image per cell. Future attachment kinds (gif/video/
+   * audio) reuse the same bucket without a schema change. Absent for content
+   * with no attachments.
+   */
+  metadata?: Record<string, unknown>
   type: CellType
   sourceLocation?: SourceLocation
 }

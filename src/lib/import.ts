@@ -53,6 +53,7 @@ import { parseTmx } from "./parsers/tmx"
 import { parseCsvBilingual } from "./parsers/csv-bilingual"
 import { parseMaculaTsv } from "./parsers/macula"
 import { parseTnTsv } from "./parsers/translation-notes"
+import { parseObsStories } from "./parsers/obs"
 
 export type EBibleImportPhase = "download" | "parse" | "save"
 export interface EBibleProgress {
@@ -516,6 +517,129 @@ export async function importEBible(
   return ref
 }
 
+// ---------------------------------------------------------------------------
+// Open Bible Stories (OBS) → source file
+// ---------------------------------------------------------------------------
+
+/** door43 (Gitea) repo coordinates for the English OBS source, mirroring the
+ *  codex-editor extension's downloadObsRepository. */
+const OBS_REPO = {
+  baseUrl: "https://git.door43.org",
+  owner: "unfoldingWord",
+  repo: "en_obs",
+  branch: "master",
+  contentPath: "content",
+} as const
+
+/** One OBS story markdown file (name + raw content). */
+export interface ObsStoryFile {
+  name: string
+  content: string
+}
+
+/**
+ * List the story `.md` files in the OBS repo's content directory via the Gitea
+ * contents API, then fetch each one's raw markdown. Mirrors the editor's
+ * fetchRepositoryContents + fetchRawFileContent. Only the numbered story files
+ * (`NN.md`) are kept, sorted by story number.
+ */
+async function downloadObsStoryFiles(
+  onProgress?: (received: number, total: number) => void,
+  signal?: AbortSignal,
+): Promise<ObsStoryFile[]> {
+  const apiUrl = `${OBS_REPO.baseUrl}/api/v1/repos/${OBS_REPO.owner}/${OBS_REPO.repo}/contents/${OBS_REPO.contentPath}?ref=${OBS_REPO.branch}`
+  const listRes = await fetch(apiUrl, { signal })
+  if (!listRes.ok) {
+    throw new Error(`Failed to list OBS content: ${listRes.status} ${listRes.statusText}`)
+  }
+  const contents = (await listRes.json()) as Array<{ type: string; name: string; path: string }>
+  const mdFiles = contents
+    .filter((item) => item.type === "file" && /^\d{2}\.md$/.test(item.name))
+    .sort((a, b) => parseInt(a.name, 10) - parseInt(b.name, 10))
+
+  const out: ObsStoryFile[] = []
+  for (let i = 0; i < mdFiles.length; i++) {
+    if (signal?.aborted) throw new Error("Import cancelled")
+    const item = mdFiles[i]
+    const rawUrl = `${OBS_REPO.baseUrl}/${OBS_REPO.owner}/${OBS_REPO.repo}/raw/branch/${OBS_REPO.branch}/${item.path}`
+    const fileRes = await fetch(rawUrl, { signal })
+    if (!fileRes.ok) {
+      // Skip an individual file rather than failing the whole import.
+      console.warn(`[obs import] failed to fetch ${item.name}: ${fileRes.status}`)
+      continue
+    }
+    out.push({ name: item.name, content: await fileRes.text() })
+    onProgress?.(i + 1, mdFiles.length)
+  }
+  if (out.length === 0) throw new Error("No OBS story files could be downloaded")
+  return out
+}
+
+/**
+ * Import English Open Bible Stories as a single source file.
+ *
+ * Each OBS frame (image line + following paragraph) becomes ONE cell carrying
+ * its reference image in `metadata.attachments` — same model as the
+ * codex-editor extension. The cells flow through the SAME bulk path as
+ * importEBible (`emitParsedFile` → `bulkUploadSource` → `source.cell.create`
+ * with `metadata`), so the frame images persist to `cells.metadata`.
+ *
+ * IMPLEMENTED: the parse + emit path is complete and identical in shape to
+ * importEBible. The door43 fetch is implemented (Gitea contents API +
+ * raw-file fetch, mirroring the editor's downloadObsRepository). Callers may
+ * also pass pre-fetched story files via `storyFiles` to skip the network entirely
+ * (used by tests / offline imports). All 50 stories are concatenated into one
+ * file named "Open Bible Stories"; frame refs are `OBS <story>:<frame>`.
+ */
+export async function importObs(
+  ctx: ImportContext,
+  opts?: {
+    /** Pre-fetched OBS story markdown files. When provided, no network is used. */
+    storyFiles?: ObsStoryFile[]
+    fileName?: string
+  },
+  onProgress?: (p: EBibleProgress) => void,
+  signal?: AbortSignal,
+): Promise<FileReference> {
+  onProgress?.({ phase: "download", received: 0, total: 0 })
+
+  const storyFiles =
+    opts?.storyFiles ??
+    (await downloadObsStoryFiles(
+      (received, total) => onProgress?.({ phase: "download", received, total }),
+      signal ?? ctx.signal,
+    ))
+
+  onProgress?.({ phase: "parse" })
+
+  // One flat cell list across all stories, in story/frame order.
+  const strings: TranslatableString[] = []
+  for (const story of storyFiles) {
+    strings.push(...parseObsStories(story.content, story.name))
+  }
+  if (strings.length === 0) {
+    throw new Error("Open Bible Stories downloaded but produced no frames — check the source.")
+  }
+
+  onProgress?.({ phase: "save", cellsEnqueued: 0, cellsTotal: strings.length })
+
+  const fileName = opts?.fileName ?? "Open Bible Stories"
+
+  const { ref } = await emitParsedFile(
+    { name: fileName, strings },
+    "obs",
+    {
+      ...ctx,
+      signal: signal ?? ctx.signal,
+      onCellEnqueued: (count, total) => {
+        onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total })
+        ctx.onCellEnqueued?.(count, total)
+      },
+    },
+  )
+  return ref
+}
+
 /**
  * Import a Hello AO (bible.helloao.org) translation as a source file.
  *
@@ -776,6 +900,9 @@ export function buildBulkCellsWithSpeakers(strings: TranslatableString[]): {
       sequenceIndex: seq,
       ...(str.medium ? { medium: str.medium } : {}),
       ...(str.paragraphStart ? { paragraphStart: true } : {}),
+      // Extensible per-cell metadata (OBS frame attachments today). Threaded
+      // into the bulk POST body verbatim → cells.metadata JSONB on the server.
+      ...(str.metadata ? { metadata: str.metadata } : {}),
     })
     speakerPairs.push({ cellId, speaker: str.speaker })
     prevCellId = cellId
@@ -1342,6 +1469,10 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
     case "md": {
       const text = await file.text()
       return [{ name: file.name, strings: extractMarkdownStrings(text) }]
+    }
+    case "obs": {
+      const text = await file.text()
+      return [{ name: file.name, strings: parseObsStories(text, file.name) }]
     }
     case "vtt": {
       const text = await file.text()

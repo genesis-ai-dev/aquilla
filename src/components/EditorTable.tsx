@@ -2063,6 +2063,50 @@ function UsfmSourceText(props: SourceWithTermLookupProps) {
   return <div>{parts}</div>
 }
 
+// ---------------------------------------------------------------------------
+// SourceReferenceAttachments — read-only source-side reference media (OBS frame
+// images, etc.) drawn from the extensible `cell.metadata.attachments` bucket.
+// Renders ABOVE the source text; it is reference context only and is NOT part
+// of the editable target. Cheap conditional JSX (no effects/state) so the
+// virtualized row stays light.
+// ---------------------------------------------------------------------------
+function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, unknown> | null }) {
+  const attachments = (metadata as { attachments?: unknown } | null | undefined)?.attachments as
+    | Array<{ type?: string; url?: string; alt?: string; title?: string }>
+    | undefined
+  if (!Array.isArray(attachments) || attachments.length === 0) return null
+
+  const renderable = attachments.filter(
+    (a) => a && typeof a.url === "string" && (a.type === "image" || a.type === "gif" || a.type === "video"),
+  )
+  if (renderable.length === 0) return null
+
+  return (
+    <div className="mb-2 flex flex-col gap-2" dir="ltr">
+      {renderable.map((att, i) =>
+        att.type === "video" ? (
+          <video
+            key={i}
+            src={att.url}
+            controls
+            title={att.title}
+            className="max-h-32 rounded border object-contain"
+          />
+        ) : (
+          <img
+            key={i}
+            src={att.url}
+            alt={att.alt}
+            title={att.title}
+            loading="lazy"
+            className="block max-h-32 rounded border object-contain"
+          />
+        ),
+      )}
+    </div>
+  )
+}
+
 function EditorRow({
   project, cell, username, editable, canValidate, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
@@ -3190,6 +3234,7 @@ function EditorRow({
                 </AppTooltip>
               )}
             </div>
+            <SourceReferenceAttachments metadata={cell.metadata} />
             {cell.originalHtml ? (
               <div
                 // Font size inherits from the column wrapper's inline style —

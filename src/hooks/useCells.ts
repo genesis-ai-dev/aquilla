@@ -99,6 +99,13 @@ export interface CellData {
   transcription?: string
   /** Lip-sync camera constraint for a media segment. */
   cameraState?: import("@/lib/sync/cells-read-types").CameraState
+  /**
+   * Extensible per-cell metadata bucket forwarded from the CellRow projection
+   * (e.g. `{ attachments: [{ type:"image", url, alt }] }` for OBS frames). The
+   * bucket is side-independent for our use — OBS image attachments live on the
+   * source row — so `buildCellData` prefers the source row's metadata and falls
+   * back to the target's. Undefined on legacy/plain cells. */
+  metadata?: Record<string, unknown> | null
   waivers?: import("@/lib/parsers/types").RuleWaiver[]
   /** Most-recent edit timestamp on the target row (ms epoch). Forwarded from
    *  the CellRow projection so consumers like useLivingMemory can sort by
@@ -185,6 +192,11 @@ export function buildCellData(
   const transcription = target?.transcription ?? source?.transcription ?? undefined
   const cameraState = (target?.cameraState ?? source?.cameraState ?? undefined) as CellData["cameraState"]
 
+  // Extensible per-cell metadata: OBS image attachments live on the source
+  // row, so prefer it; fall back to the target row when only it carries the
+  // bucket. Undefined when neither side has metadata.
+  const metadata = source?.metadata ?? target?.metadata ?? undefined
+
   return {
     id: cellId,
     fileId,
@@ -214,6 +226,7 @@ export function buildCellData(
     medium,
     transcription,
     cameraState,
+    metadata,
   }
 }
 

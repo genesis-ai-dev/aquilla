@@ -30,6 +30,7 @@ import {
 export interface ExportRouteEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  SNAPSHOTS?: R2Bucket
 }
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/source$/
@@ -73,11 +74,11 @@ export async function handleExportSourceRequest(
 
   const blob = await db
     .prepare(
-      `SELECT format, raw_source FROM file_source_blobs
+      `SELECT format, raw_source, r2_key FROM file_source_blobs
         WHERE file_id = ? AND project_id = ?`,
     )
     .bind(fileId, projectId)
-    .first<{ format: string; raw_source: string }>()
+    .first<{ format: string; raw_source: string | null; r2_key: string | null }>()
   if (!blob) {
     return withCors(
       new Response(
@@ -113,16 +114,33 @@ export async function handleExportSourceRequest(
     const ext = blob.format === "docx" ? ".docx" : ".pptx"
     const downloadName = fileName.endsWith(ext) ? fileName : `${fileName}${ext}`
 
-    // Decode base64 side-car back to binary.
+    // Resolve binary bytes: prefer R2 (r2_key), fall back to legacy base64 raw_source.
     let binary: Uint8Array
-    try {
-      const cleaned = blob.raw_source.replace(/\s/g, "")
-      const b64 = atob(cleaned)
-      binary = new Uint8Array(b64.length)
-      for (let i = 0; i < b64.length; i++) binary[i] = b64.charCodeAt(i)
-    } catch {
+    if (blob.r2_key) {
+      const obj = await env.SNAPSHOTS?.get(blob.r2_key)
+      if (!obj) {
+        return withCors(
+          new Response("source bytes missing from storage — re-import", { status: 404 }),
+          request,
+        )
+      }
+      binary = new Uint8Array(await obj.arrayBuffer())
+    } else if (blob.raw_source) {
+      // Legacy path: base64-encoded bytes stored inline in file_source_blobs.
+      try {
+        const cleaned = blob.raw_source.replace(/\s/g, "")
+        const b64 = atob(cleaned)
+        binary = new Uint8Array(b64.length)
+        for (let i = 0; i < b64.length; i++) binary[i] = b64.charCodeAt(i)
+      } catch {
+        return withCors(
+          new Response("side-car bytes corrupted — re-import to restore", { status: 500 }),
+          request,
+        )
+      }
+    } else {
       return withCors(
-        new Response("side-car bytes corrupted — re-import to restore", { status: 500 }),
+        new Response("no source bytes recorded — re-import to enable export", { status: 404 }),
         request,
       )
     }

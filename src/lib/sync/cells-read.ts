@@ -39,6 +39,31 @@ function authHeaders(jwt: string): Record<string, string> {
   return { Authorization: `Bearer ${jwt}` }
 }
 
+// The server stores `cells.metadata` as JSONB and normally returns it parsed
+// (an object). Defensively handle the case where a row arrives with `metadata`
+// still serialized as a JSON string (e.g. a projection path that didn't parse
+// the column): parse it through to an object so consumers see a uniform shape.
+// A non-string, non-object value (or unparsable string) is coerced to null so
+// the field never carries a surprise primitive downstream.
+function normalizeRowMetadata(row: CellRow): CellRow {
+  const m = row.metadata as unknown
+  if (m == null) return row
+  if (typeof m === "string") {
+    try {
+      const parsed = JSON.parse(m) as unknown
+      return { ...row, metadata: parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null }
+    } catch {
+      return { ...row, metadata: null }
+    }
+  }
+  if (typeof m === "object") return row
+  return { ...row, metadata: null }
+}
+
+function normalizeRowsMetadata(rows: CellRow[]): CellRow[] {
+  return rows.map(normalizeRowMetadata)
+}
+
 // RES-6: a hung connection must not strand the editor skeleton until the
 // browser's multi-minute socket timeout — soft refetches are dropped while a
 // fetch is in flight, so one wedged request blocks every later trigger. A
@@ -141,7 +166,8 @@ export async function fetchFileCells(
     `/files/${encodeURIComponent(fileId)}/cells` +
     (qs ? `?${qs}` : "")
   const res = await fetch(url, fetchInit(jwt))
-  return await readJson<CellsPageWithMeta>(res)
+  const page = await readJson<CellsPageWithMeta>(res)
+  return { ...page, cells: normalizeRowsMetadata(page.cells) }
 }
 
 /** Outcome of a `?since=` conditional read (audit M2-1). */
@@ -184,7 +210,7 @@ export async function fetchCellsDelta(
     return {
       kind: "delta",
       changedCellIds: body.changedCellIds ?? [],
-      cells: body.cells ?? [],
+      cells: normalizeRowsMetadata(body.cells ?? []),
       maxServerSeq: body.maxServerSeq,
     }
   }
@@ -212,7 +238,7 @@ export async function fetchCellsByIds(
     `/files/${encodeURIComponent(fileId)}/cells?${params.toString()}`
   const res = await fetch(url, fetchInit(jwt))
   const page = await readJson<CellsPage>(res)
-  return page.cells
+  return normalizeRowsMetadata(page.cells)
 }
 
 /**

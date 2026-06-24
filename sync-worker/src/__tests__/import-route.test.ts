@@ -285,6 +285,48 @@ describe('POST /import — cells land in Postgres projection (FRO-135)', () => {
     expect((cellRows[0] as any).content_hash).toHaveLength(8)
   })
 
+  it('carries per-cell metadata through the import route into cells.metadata (OBS frame images)', async () => {
+    // Regression: the bulk import route builds its own source.cell.create
+    // payloads from body.cells. It must forward `metadata` to the projection,
+    // or per-row attachments (OBS frame images) silently vanish even though the
+    // single-event dispatcher persists them. Found via live OBS import QA.
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+
+    const attachments = [
+      { type: 'image', url: 'https://cdn.door43.org/obs/jpg/360px/obs-en-01-01.jpg', alt: 'OBS Image' },
+    ]
+    const body = {
+      projectId: PROJECT_ID,
+      fileId: FILE_ID,
+      file: { id: 'f-obs', name: 'Open Bible Stories', fileType: 'obs' },
+      cells: [
+        {
+          id: 'obs-evt-1',
+          cellId: 'OBS 1:1',
+          value: 'This is how God made everything in the beginning.',
+          canonicalRef: 'OBS 1:1',
+          type: 'text',
+          metadata: { attachments },
+        },
+      ],
+    }
+    const req = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(200)
+
+    const cellRows = await rows('cells')
+    expect(cellRows).toHaveLength(1)
+    const meta = cellRows[0].metadata
+    // Postgres JSONB may surface as an object or a JSON string depending on driver.
+    const parsed = typeof meta === 'string' ? JSON.parse(meta) : meta
+    expect(parsed).toEqual({ attachments })
+  })
+
   it('duplicate cellIds within one chunk dedupe last-wins (multi-row ON CONFLICT safety)', async () => {
     // Postgres rejects a multi-row INSERT … ON CONFLICT DO UPDATE that touches
     // the same row twice; the bulk builder dedupes by cellId keeping the LAST

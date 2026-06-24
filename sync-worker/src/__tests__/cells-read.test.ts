@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { handleCellsReadRequest } from "../events/cells-read-route"
 import { handleRebuildProjectionRequest } from "../events/rebuild"
+import { buildEventProjectionStmts, type PersistedEvent } from "../events/event-projection"
 import { type CellRow } from "./helpers/in-memory-db"
 import { makeTestDb, type Seed } from "./helpers/pg-test-db"
 import { makeTestToken } from "./helpers/auth"
@@ -97,6 +98,86 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells", () => {
     const targetBody = (await targetRes.json()) as { cells: Array<{ side: string }> }
     expect(targetBody.cells).toHaveLength(1)
     expect(targetBody.cells[0].side).toBe("target")
+  })
+
+  it("round-trips source.cell.create payload.metadata through the JSONB column to the read route (OBS parity)", async () => {
+    // Drive the REAL projection write path (source.cell.create → cells.metadata
+    // JSONB) against real Postgres, then read it back through the route. This is
+    // the whole point of the metadata bucket: an extensible per-cell object that
+    // OBS populates with frame images and survives write → JSONB → read intact.
+    const { db } = await makeTestDb({})
+    const attachments = [{ type: "image", url: "https://x/01.jpg", alt: "frame 1" }]
+    const createEvent = {
+      id: "ev-obs-1",
+      schemaVersion: 1,
+      projectId: "proj-a",
+      fileId: "file-x",
+      cellId: "obs-c1",
+      parentId: null,
+      kind: "source.cell.create",
+      author: "importer",
+      payload: {
+        cellId: "obs-c1",
+        anchorCellId: null,
+        value: "Once upon a time…",
+        metadata: { attachments },
+      },
+      clientTs: 1,
+      serverTs: 1700000000000,
+    } as unknown as PersistedEvent
+
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(db, createEvent, stmts)
+    await db.batch(stmts)
+
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const req = new Request(
+      "https://w/api/v1/projects/proj-a/files/file-x/cells?side=source",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const res = (await handleCellsReadRequest(req, envWith(db)))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      cells: Array<{ cellId: string; metadata: { attachments?: unknown } | null }>
+    }
+    expect(body.cells).toHaveLength(1)
+    // The bucket round-trips as a parsed object (not a JSON string), exactly
+    // matching what was written on the create event.
+    expect(body.cells[0].cellId).toBe("obs-c1")
+    expect(body.cells[0].metadata).toEqual({ attachments })
+  })
+
+  it("returns null metadata for a cell created without a metadata payload", async () => {
+    // Absent metadata must bind NULL, not 'null'/'{}' — the client distinguishes
+    // "no attachments" (null) from an empty bucket.
+    const { db } = await makeTestDb({})
+    const createEvent = {
+      id: "ev-plain-1",
+      schemaVersion: 1,
+      projectId: "proj-a",
+      fileId: "file-x",
+      cellId: "plain-c1",
+      parentId: null,
+      kind: "source.cell.create",
+      author: "importer",
+      payload: { cellId: "plain-c1", anchorCellId: null, value: "no images here" },
+      clientTs: 1,
+      serverTs: 1700000000000,
+    } as unknown as PersistedEvent
+
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(db, createEvent, stmts)
+    await db.batch(stmts)
+
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const req = new Request(
+      "https://w/api/v1/projects/proj-a/files/file-x/cells?side=source",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const res = (await handleCellsReadRequest(req, envWith(db)))!
+    const body = (await res.json()) as { cells: Array<{ metadata: unknown }> }
+    expect(body.cells).toHaveLength(1)
+    expect(body.cells[0].metadata).toBeNull()
   })
 
   it("returns both sides when side is omitted, source-rows first then target-rows", async () => {

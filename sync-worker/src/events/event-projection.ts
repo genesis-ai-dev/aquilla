@@ -175,10 +175,12 @@ export function buildBulkSourceCellCreateStmt(
       p.sequenceIndex ?? null,
       p.transcription ?? null,
       p.cameraState ?? null,
+      // OBS parity: extensible per-cell metadata bucket, JSON-encoded for JSONB.
+      p.metadata != null ? JSON.stringify(p.metadata) : null,
     )
   }
   const placeholders = Array(rows.length)
-    .fill('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .fill('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .join(',\n')
   return db
     .prepare(
@@ -187,7 +189,7 @@ export function buildBulkSourceCellCreateStmt(
         canonical_ref, anchor_cell_id, event_id, source_event_id,
         last_editor, last_edit_at, validated, word_count, content_hash,
         start_ms, end_ms,
-        medium, sequence_index, transcription, camera_state
+        medium, sequence_index, transcription, camera_state, metadata
       ) VALUES ${placeholders}
       ON CONFLICT(project_id, file_id, cell_id, side) DO UPDATE SET
         side           = excluded.side,
@@ -207,7 +209,8 @@ export function buildBulkSourceCellCreateStmt(
         medium         = excluded.medium,
         sequence_index = excluded.sequence_index,
         transcription  = excluded.transcription,
-        camera_state   = excluded.camera_state`,
+        camera_state   = excluded.camera_state,
+        metadata       = excluded.metadata`,
     )
     .bind(...binds)
 }
@@ -289,6 +292,11 @@ export function buildEventProjectionStmts(
       const sequenceIndex = p.sequenceIndex ?? null
       const transcription = p.transcription ?? null
       const cameraState = p.cameraState ?? null
+      // OBS parity: extensible per-cell metadata bucket. JSON-encode for the
+      // JSONB column (the driver binds a text param; Postgres casts it into
+      // JSONB). NULL when the create event carries no metadata.
+      const metadata =
+        'metadata' in p && p.metadata != null ? JSON.stringify(p.metadata) : null
 
       // Both create kinds are genesis events on the cell's chain — their
       // event_id IS the new row's chain head. source_event_id is null on
@@ -309,8 +317,8 @@ export function buildEventProjectionStmts(
               canonical_ref, anchor_cell_id, event_id, source_event_id,
               last_editor, last_edit_at, validated, word_count, content_hash,
               start_ms, end_ms,
-              medium, sequence_index, transcription, camera_state
-            ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?${gateWhere}
+              medium, sequence_index, transcription, camera_state, metadata
+            ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?${gateWhere}
             ON CONFLICT(project_id, file_id, cell_id, side) DO UPDATE SET
               side           = excluded.side,
               value          = excluded.value,
@@ -329,7 +337,8 @@ export function buildEventProjectionStmts(
               medium         = excluded.medium,
               sequence_index = excluded.sequence_index,
               transcription  = excluded.transcription,
-              camera_state   = excluded.camera_state`,
+              camera_state   = excluded.camera_state,
+              metadata       = excluded.metadata`,
           )
           .bind(
             event.projectId,
@@ -352,6 +361,7 @@ export function buildEventProjectionStmts(
             sequenceIndex,
             transcription,
             cameraState,
+            metadata,
             ...gateBinds,
           ),
       )

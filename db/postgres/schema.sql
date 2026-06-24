@@ -313,6 +313,11 @@ CREATE TABLE cells (
     sequence_index    DOUBLE PRECISION,
     transcription     TEXT,
     camera_state      TEXT,
+    -- OBS parity (0045): extensible per-cell metadata bucket. Mirrors the
+    -- extensible source.cell.create payload.metadata. Holds e.g.
+    -- { "attachments": [{ "type": "image", "url": "…", "alt": "…" }] };
+    -- future keys (gif/video/audio attachments, etc.) need no schema change.
+    metadata          JSONB,
     -- Replaces SQLite FTS5. Maintained automatically; no triggers needed.
     value_tsv         tsvector GENERATED ALWAYS AS (to_tsvector('simple', value)) STORED,
     PRIMARY KEY (project_id, file_id, cell_id, side)

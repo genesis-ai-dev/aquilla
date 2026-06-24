@@ -75,6 +75,14 @@ export interface CellRow {
   medium?: SegmentMedium | null
   transcription?: string | null
   cameraState?: CameraState | null
+  /**
+   * Extensible per-cell metadata bucket (mirrors the event-log payload's
+   * extensibility). OBS populates `attachments: [{ type:"image", url, alt }]`
+   * per frame; future localization workflows add gif/video/audio without a
+   * schema change. Absent on legacy rows. Stored as JSONB server-side;
+   * arrives parsed as an object (cells-read.ts normalizes a JSON string).
+   */
+  metadata?: Record<string, unknown> | null
 }
 
 /** Primary content kind of a segment. */

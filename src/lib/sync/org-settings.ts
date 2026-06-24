@@ -2,6 +2,20 @@ import { FRONTIER_API_URL } from "./sync-token"
 import type { TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 
 /**
+ * Provider-keyed map of org-scoped API keys. Keys are provider identifiers
+ * (e.g. "gemini-tts") and values are the raw API key strings. These are set
+ * once by an org owner/maintainer and apply as the baseline for all members
+ * and projects in the org. Precedence at resolution time:
+ *   project key > user (browser-local) key > org key
+ *
+ * FRO-433: extend to new providers by adding more entries here.
+ */
+export interface OrgProviderKeys {
+  "gemini-tts"?: string
+  [provider: string]: string | undefined
+}
+
+/**
  * The synced subset of org-wide settings. Shape is intentionally open (server
  * is a dumb store) but we type the known keys.
  */
@@ -15,6 +29,12 @@ export interface OrgWideSettings {
    * Matched against the sync-token role on every export/download request.
    */
   exportMinRole?: number
+  /**
+   * FRO-433: Org-scoped provider API keys. Set once by an org owner/maintainer;
+   * used as the baseline for all members and projects in the org.
+   * Precedence: project key > user (localStorage) key > org key.
+   */
+  orgProviderKeys?: OrgProviderKeys
 }
 
 export interface OrgSettingsResponse {

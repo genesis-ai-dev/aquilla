@@ -222,6 +222,8 @@ export async function synthesizeForCell(
     speed?: number
     geminiContext?: GeminiTtsContext
     onProgress?: SynthOptions["onProgress"]
+    /** FRO-433: Org-level baseline key; used when neither project nor user key is set. */
+    orgApiKey?: string
   },
 ): Promise<Blob> {
   const voice = resolveVoice(args.projectTtsSettings, args.cellVoiceId)
@@ -231,7 +233,7 @@ export async function synthesizeForCell(
   return synthesizeToWavBlob(text, {
     voice,
     projectProvider: provider,
-    apiKey: resolveApiKey("gemini-tts", args.projectTtsSettings?.apiKey),
+    apiKey: resolveApiKey("gemini-tts", args.projectTtsSettings?.apiKey, args.orgApiKey),
     speed: args.speed,
     geminiContext: args.geminiContext,
     onProgress: args.onProgress,

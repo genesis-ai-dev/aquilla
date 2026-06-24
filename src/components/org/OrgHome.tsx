@@ -25,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Button } from "@/components/ui/button"
 import { X } from "lucide-react"
 
 const STALE_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000
@@ -810,7 +811,21 @@ export function OrgHome() {
 
                   {/* Project directory */}
                   {projects.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No projects in this org yet.</p>
+                    <div className="rounded-lg border border-dashed p-6 text-center">
+                      <h3 className="text-base font-medium">Your organization is ready 🎉</h3>
+                      <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+                        Start a translation project, or bring your team in first —
+                        Aquilla is built for people working together.
+                      </p>
+                      <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                        {activeOrgId != null && (
+                          <ProjectCreateDialog orgId={activeOrgId} onCreated={handleCreated} />
+                        )}
+                        <Button variant="outline" onClick={() => navigate("/members")}>
+                          Invite your team
+                        </Button>
+                      </div>
+                    </div>
                   ) : visible.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No matching projects.</p>
                   ) : (

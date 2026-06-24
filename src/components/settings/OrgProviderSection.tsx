@@ -21,7 +21,9 @@ interface OrgProviderSectionProps {
 export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
   const { orgProviderKeys, canEditOrgKeys, patch, hasFetched } = orgSettings
 
-  const currentGeminiKey = orgProviderKeys["gemini-tts"] ?? ""
+  // Defensive: an org with no keys yet (or a partial hook contract) yields no map.
+  const keys = orgProviderKeys ?? {}
+  const currentGeminiKey = keys["gemini-tts"] ?? ""
   const [draft, setDraft] = useState<string | null>(null)
   const [show, setShow] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -38,7 +40,7 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
     setSaved(false)
     const result = await patch({
       orgProviderKeys: {
-        ...orgProviderKeys,
+        ...keys,
         "gemini-tts": trimmed || undefined,
       },
     })
@@ -124,7 +126,7 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
                 onClick={handleSave}
                 disabled={busy || draft === null}
               >
-                {busy ? "Saving…" : "Save"}
+                {busy ? "Saving…" : "Save key"}
               </Button>
               {currentGeminiKey && (
                 <Button

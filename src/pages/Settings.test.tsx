@@ -34,6 +34,9 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     hasFetched: true,
     canEdit: true,
     canExport: true,
+    // FRO-433: OrgProviderSection consumes these from the hook contract.
+    orgProviderKeys: {},
+    canEditOrgKeys: true,
     refresh: vi.fn(async () => null),
     requestPromotion: vi.fn(async () => ({ kind: "blocked" })),
   }),
@@ -70,7 +73,8 @@ describe("Org Settings", () => {
     fireEvent.click(screen.getByRole("button", { name: /rename/i }))
     const input = screen.getByLabelText(/organization name/i)
     fireEvent.change(input, { target: { value: "CAS" } })
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    // Exact "Save" targets the rename control (OrgProviderSection adds a "Save key").
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(renameOrg).toHaveBeenCalledWith("jwt", 1, "CAS"))
   })
 

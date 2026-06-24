@@ -1,4 +1,17 @@
 import { describe, it, expect } from "vitest"
+import { injectInviteMeta } from "./index"
+
+// A trimmed copy of the built index.html social-meta block, used to assert the
+// invite-link rewrite hits the real markup shape.
+const SPA_HTML = `<!doctype html><html><head>
+  <title>Aquilla</title>
+  <meta property="og:title" content="Aquilla" />
+  <meta property="og:description" content="Aquilla — translation, lifted." />
+  <meta property="og:image" content="https://aquilla.app/aquilla-og.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Aquilla" />
+  <meta name="twitter:description" content="Aquilla — translation, lifted." />
+</head><body></body></html>`
 
 // Minimal mock for the ASSETS binding: returns a Response whose body is the
 // resolved pathname so tests can assert which file was requested.
@@ -80,9 +93,42 @@ describe("worker/index — routing", () => {
     expect(await res.text()).toBe("served:/project/abc")
   })
 
-  it("GET /join/xyz passes through to ASSETS unchanged", async () => {
+  it("GET /join/xyz passes through to ASSETS (non-HTML body unchanged)", async () => {
     const res = await fetchWorker("/join/xyz")
     expect(await res.text()).toBe("served:/join/xyz")
+  })
+
+  it("GET /join/:token rewrites social meta to invite copy when ASSETS returns HTML", async () => {
+    const { default: worker } = await import("./index")
+    const env = {
+      ASSETS: {
+        fetch: async (): Promise<Response> =>
+          new Response(SPA_HTML, { status: 200, headers: { "Content-Type": "text/html" } }),
+      },
+    }
+    const res = await worker.fetch(new Request("https://aquilla.app/join/abc123"), env)
+    const html = await res.text()
+    expect(html).toContain(`<meta property="og:title" content="You're invited to collaborate on Aquilla" />`)
+    expect(html).toContain(`<meta name="twitter:title" content="You're invited to collaborate on Aquilla" />`)
+    expect(html).toContain(`<title>You're invited to collaborate on Aquilla</title>`)
+    expect(html).toContain(`content="Join your team's translation project on Aquilla — translation, lifted."`)
+    // Image is left untouched — only the brand OG image exists.
+    expect(html).toContain(`<meta property="og:image" content="https://aquilla.app/aquilla-og.png" />`)
+  })
+
+  it("GET /join/:token leaves a non-HTML asset (e.g. hashed JS) untouched", async () => {
+    const { default: worker } = await import("./index")
+    const env = {
+      ASSETS: {
+        fetch: async (): Promise<Response> =>
+          new Response("console.log(1)", {
+            status: 200,
+            headers: { "Content-Type": "application/javascript" },
+          }),
+      },
+    }
+    const res = await worker.fetch(new Request("https://aquilla.app/join/app.js"), env)
+    expect(await res.text()).toBe("console.log(1)")
   })
 
   it("GET /__dev/login passes through to ASSETS unchanged", async () => {

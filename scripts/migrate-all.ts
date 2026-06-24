@@ -30,7 +30,7 @@
 
 import fs from "node:fs"
 import path from "node:path"
-import { execFileSync, execFile } from "node:child_process"
+import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { randomUUID } from "node:crypto"
 import { resolveCredentialsFromEnv, type GitLabCredentials } from "../src/lib/migrate/gitlab/auth"
@@ -56,8 +56,6 @@ import type { IngestEvent } from "../src/lib/migrate/types"
 import type { CodexNotebookFile } from "../src/lib/codex-editor/types"
 
 const SYNC = process.env.SYNC_BASE ?? "https://api.aquilla.app/sync"
-const AQUILLA_PG = "aquilla-db"
-const PERSIST = ".wrangler-dev-state"
 const INGEST_CHUNK = 2500
 const FALLBACK_AUTHOR = "legacy-import"
 const execFileP = promisify(execFile)
@@ -173,15 +171,6 @@ function parseArgs(): Args {
   }
 }
 
-function d1<T>(sql: string, remote: boolean): T[] {
-  const args = ["d1", "execute", AQUILLA_PG, remote ? "--remote" : "--local", "--json"]
-  if (!remote) args.push("--persist-to", PERSIST)
-  args.push("--command", sql)
-  const out = execFileSync("wrangler", args, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 })
-  const start = out.indexOf("[")
-  if (start < 0) throw new Error(`unexpected wrangler output: ${out.slice(0, 200)}`)
-  return (JSON.parse(out.slice(start)) as Array<{ results: T[] }>)[0]?.results ?? []
-}
 // Bounded worker pool: pulls many projects in parallel but caps in-flight work
 // so we never overwhelm D1 / the GitLab box. Each project's *internal* ingest
 // stays serial (server_seq is per-project); only different projects overlap.
@@ -198,22 +187,22 @@ async function pool<T>(items: T[], n: number, fn: (item: T, idx: number) => Prom
   )
 }
 
-// Preload all orgs + teams once (by legacy_uuid) so the hot loop does in-memory
-// lookups instead of a `wrangler d1 execute --remote` subprocess per project.
+// Preload all orgs + teams once (by legacy_uuid) from NEON via the trusted
+// /migrate/org-team-maps endpoint, so the hot loop does in-memory lookups. (Was
+// `wrangler d1 execute aquilla-db` — stale after the D1→Neon cutover; the maps
+// now come from the same datastore the writes land in.)
 type OrgRow = { id: number; owner_user_id: number }
-function loadOrgMap(remote: boolean): Map<string, OrgRow> {
-  const rows = d1<{ legacy_uuid: string; id: number; owner_user_id: number }>(
-    `SELECT legacy_uuid, id, owner_user_id FROM organizations WHERE legacy_uuid IS NOT NULL`,
-    remote,
-  )
-  return new Map(rows.map((r) => [r.legacy_uuid, { id: r.id, owner_user_id: r.owner_user_id }]))
-}
-function loadTeamMap(remote: boolean): Map<string, number> {
-  const rows = d1<{ legacy_uuid: string; id: number }>(
-    `SELECT legacy_uuid, id FROM groups WHERE legacy_uuid IS NOT NULL`,
-    remote,
-  )
-  return new Map(rows.map((r) => [r.legacy_uuid, r.id]))
+async function fetchOrgTeamMaps(): Promise<{ orgMap: Map<string, OrgRow>; teamMap: Map<string, number> }> {
+  const res = await fetch(`${SYNC}/migrate/org-team-maps`, { headers: authHeaders() })
+  if (!res.ok) throw new Error(`org-team-maps HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
+  const body = (await res.json()) as {
+    orgs: { legacyUuid: string; id: number; ownerUserId: number }[]
+    groups: { legacyUuid: string; id: number }[]
+  }
+  return {
+    orgMap: new Map(body.orgs.map((o) => [o.legacyUuid, { id: o.id, owner_user_id: o.ownerUserId }])),
+    teamMap: new Map(body.groups.map((g) => [g.legacyUuid, g.id])),
+  }
 }
 
 // Trusted HTTP writes (no wrangler subprocess → safe to fan out under concurrency).
@@ -745,9 +734,10 @@ async function main() {
   if (!args.audio && !args.audioFast) {
     console.log("Building org/team placement index from group tree…")
     placeIdx = await buildPlacementIndex(creds)
-    orgMap = loadOrgMap(args.remote)
-    teamMap = loadTeamMap(args.remote)
-    console.log(`  ${placeIdx.size} groups indexed; ${orgMap.size} orgs, ${teamMap.size} teams preloaded`)
+    const maps = await fetchOrgTeamMaps()
+    orgMap = maps.orgMap
+    teamMap = maps.teamMap
+    console.log(`  ${placeIdx.size} groups indexed; ${orgMap.size} orgs, ${teamMap.size} teams preloaded (from Neon)`)
   }
 
   let projects: CodexProjectMatch[]

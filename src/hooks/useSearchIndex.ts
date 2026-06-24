@@ -8,6 +8,7 @@
 
 import { useEffect, useRef, useCallback } from "react"
 import { DualIndex, type ScoredPair } from "@/lib/search/dual-index"
+import { memMark } from "@/lib/perf-log"
 import type { FileReference } from "@/lib/parsers/types"
 import type { CellData } from "./useCells"
 
@@ -52,6 +53,7 @@ export function useSearchIndex(_files: FileReference[], allProjectCells: CellDat
     }
     fileOrderRef.current = order
     lookupRef.current = lookup
+    memMark("useSearchIndex.build")
   }, [allProjectCells])
 
   // `excludeId` skips a specific cell from the result — used by completion to

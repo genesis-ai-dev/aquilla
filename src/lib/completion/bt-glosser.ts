@@ -100,7 +100,14 @@ function buildAlignmentModel(
 
     if (srcTokens.length === 0 || tgtTokens.length === 0) continue
 
-    const srcNgrams = ngrams(srcTokens, MAX_NGRAM)
+    // Precompute each source n-gram's phrase + length ONCE per pair. Previously
+    // `srcNg.join(" ")` ran inside the target loop, recomputing the same ~3·S
+    // strings 3·T times each (9·S·T redundant joins per pair) — a major source
+    // of transient garbage during batch completion's rebuild storm.
+    const srcPhrases = ngrams(srcTokens, MAX_NGRAM).map((ng) => ({
+      phrase: ng.join(" "),
+      len: ng.length,
+    }))
     const tgtNgrams = ngrams(tgtTokens, MAX_NGRAM)
 
     // For each (source ngram, target ngram) co-occurrence, emit an alignment
@@ -109,12 +116,10 @@ function buildAlignmentModel(
     for (const tgNg of tgtNgrams) {
       const tgtPhrase = tgNg.join(" ")
       const tgtLen = tgNg.length
-      for (const srcNg of srcNgrams) {
-        const srcPhrase = srcNg.join(" ")
-        const srcLen = srcNg.length
+      for (const sp of srcPhrases) {
         // Weight is geometric: single-word ×1, bigram ×2, trigram ×3
-        const w = Math.min(tgtLen, srcLen)
-        addAlignment(map, tgtPhrase, srcPhrase, w)
+        const w = Math.min(tgtLen, sp.len)
+        addAlignment(map, tgtPhrase, sp.phrase, w)
       }
     }
   }
@@ -131,6 +136,28 @@ function buildAlignmentModel(
       ? seed.weight * SEED_MULTIPLIER
       : seed.weight * SEED_MULTIPLIER // same formula, sign carries through
     addAlignment(map, tgtPhrase, srcPhrase, w)
+  }
+
+  // ── Collapse to argmax ────────────────────────────────────────────────────
+  // `glossTokens` only ever reads the single highest-scoring source phrase for
+  // a given target phrase, so RETAINING the full source×target n-gram cross-
+  // product (~45× more entries) is pure waste — the dominant contributor to the
+  // glosser's memory footprint. Collapse each inner map to its argmax now that
+  // all corpus + seed observations are accumulated. Output is identical: this
+  // mirrors the decoder's tie-break (strict `>`, first-inserted wins).
+  for (const [tgtPhrase, inner] of map) {
+    if (inner.size <= 1) continue
+    let bestSrc = ""
+    let best: Alignment | undefined
+    for (const [src, alignment] of inner) {
+      if (best === undefined || alignment.score > best.score) {
+        best = alignment
+        bestSrc = src
+      }
+    }
+    const collapsed = new Map<string, Alignment>()
+    collapsed.set(bestSrc, best!)
+    map.set(tgtPhrase, collapsed)
   }
 
   return map

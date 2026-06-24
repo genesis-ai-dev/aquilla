@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useRef } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { Link, useLocation } from "react-router-dom"
 import { ChevronsUpDown, LogIn, LogOut, UserPlus, Check, Settings2 } from "lucide-react"
@@ -9,6 +9,7 @@ import { outboxPendingCount } from "@/lib/sync/outbox"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog"
+import { Popover, PopoverContent } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
 import { FrontierLoginForm } from "./git-import/FrontierLoginForm"
 import { FrontierSignupForm } from "./git-import/FrontierSignupForm"
@@ -96,26 +97,22 @@ function colorFor(name: string): string {
 
 type LogoutScope = "single" | "all"
 
-export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" | "header" } = {}) {
+export function AccountSwitcher({
+  variant = "sidebar",
+  compact = false,
+}: { variant?: "sidebar" | "header"; compact?: boolean } = {}) {
   const { active, sessions, activate, remove } = useAccounts()
   const qc = useQueryClient()
   const location = useLocation()
   const [open, setOpen] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
   const [pendingLogout, setPendingLogout] = useState<{ count: number; scope: LogoutScope } | null>(null)
-  const rootRef = useRef<HTMLDivElement>(null)
+  // Anchor the (portaled) dropdown to the trigger button. Portaling escapes the
+  // sidebar's overflow-hidden so the menu isn't clipped to the collapsed rail.
+  const btnRef = useRef<HTMLButtonElement>(null)
   // Capture the destination before showing the login dialog so the user
   // returns to the same page after reset → login.
   const returnTo = location.pathname !== "/" ? location.pathname + location.search : undefined
-
-  useEffect(() => {
-    if (!open) return
-    function onClick(e: MouseEvent) {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener("mousedown", onClick)
-    return () => document.removeEventListener("mousedown", onClick)
-  }, [open])
 
   const isHeader = variant === "header"
 
@@ -148,14 +145,16 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
       <>
         <button
           className={cn(
-            "flex items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow hover:shadow-neu-xs",
-            !isHeader && "w-full",
+            "flex items-center gap-2 rounded-xl bg-card text-sm transition-shadow hover:shadow-neu-xs",
+            compact ? "h-8 w-8 justify-center p-0" : "px-2 py-1.5",
+            !isHeader && !compact && "w-full",
             isHeader && "shadow-neu-sm h-9",
           )}
+          aria-label="Log in"
           onClick={() => setLoginOpen(true)}
         >
           <LogIn className="h-4 w-4" />
-          <span>Log in</span>
+          {!compact && <span>Log in</span>}
         </button>
         <Dialog open={loginOpen} onOpenChange={setLoginOpen}>
           <DialogContent className="max-w-sm">
@@ -170,11 +169,13 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
   const activeSummary = sessions.find((s) => s.active)
 
   return (
-    <div ref={rootRef} className="relative">
+    <div className="relative">
       <button
+        ref={btnRef}
         className={cn(
-          "flex items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow hover:shadow-neu-xs",
-          !isHeader && "w-full",
+          "flex items-center gap-2 rounded-xl bg-card text-sm transition-shadow hover:shadow-neu-xs",
+          compact ? "h-8 w-8 justify-center p-0" : "px-2 py-1.5",
+          !isHeader && !compact && "w-full",
           isHeader && "h-9",
         )}
         aria-label={`Account menu: ${active.username}`}
@@ -186,15 +187,20 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
         >
           {initials(active.username)}
         </div>
-        <span className={cn("truncate text-left", !isHeader && "flex-1")}>{active.username}</span>
-        <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+        {!compact && (
+          <>
+            <span className={cn("truncate text-left", !isHeader && "flex-1")}>{active.username}</span>
+            <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+          </>
+        )}
       </button>
-      {open && (
-        <div
-          className={cn(
-            "neu-raised absolute z-40 w-60 rounded-2xl p-1.5",
-            isHeader ? "top-full mt-2 right-0" : "bottom-full mb-2 left-0",
-          )}
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverContent
+          anchor={btnRef}
+          side={isHeader ? "bottom" : "top"}
+          align={isHeader ? "end" : "start"}
+          sideOffset={8}
+          className="neu-raised w-60 p-1.5"
         >
           <div className="px-2 py-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
             Signed in
@@ -247,8 +253,8 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
               <span>Sign out of all accounts</span>
             </button>
           )}
-        </div>
-      )}
+        </PopoverContent>
+      </Popover>
       <Dialog open={loginOpen} onOpenChange={setLoginOpen}>
         <DialogContent className="max-w-sm">
           <AuthDialogBody isAdditional onDone={() => setLoginOpen(false)} returnTo={returnTo} />

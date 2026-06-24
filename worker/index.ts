@@ -31,6 +31,28 @@ export interface Env {
   ASSETS: { fetch(req: Request | string): Promise<Response> }
 }
 
+// Shared invite links (/join/:token) carry the SPA's generic social meta, so in
+// chats they unfurl as the app rather than an invitation. We rewrite the meta to
+// invite-specific copy server-side (unfurlers don't run the SPA's JS, so the
+// client-fetched invite preview never reaches them). Copy is deliberately static
+// — no token or project name — so private invite targets don't leak into link
+// previews. The image stays the brand OG image already baked into the HTML.
+const INVITE_TITLE = "You're invited to collaborate on Aquilla"
+const INVITE_DESCRIPTION =
+  "Join your team's translation project on Aquilla — translation, lifted."
+
+// Rewrite the built index.html's social-meta tags to invite copy. The markup is
+// machine-generated (stable attribute order/quoting), so targeted regexes are
+// safe and keep this testable without the Workers-only HTMLRewriter.
+export function injectInviteMeta(html: string): string {
+  return html
+    .replace(/(<meta property="og:title" content=")[^"]*(")/, `$1${INVITE_TITLE}$2`)
+    .replace(/(<meta name="twitter:title" content=")[^"]*(")/, `$1${INVITE_TITLE}$2`)
+    .replace(/(<meta property="og:description" content=")[^"]*(")/, `$1${INVITE_DESCRIPTION}$2`)
+    .replace(/(<meta name="twitter:description" content=")[^"]*(")/, `$1${INVITE_DESCRIPTION}$2`)
+    .replace(/(<title>)[^<]*(<\/title>)/, `$1${INVITE_TITLE}$2`)
+}
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url)
@@ -51,6 +73,19 @@ export default {
       const asset = await env.ASSETS.fetch(target.toString())
       const res = new Response(asset.body, asset)
       res.headers.set("Cache-Control", "private, no-store")
+      return res
+    }
+
+    // Shared invite links: serve the SPA shell but rewrite its social meta so
+    // the link unfurls as an invitation. Only HTML responses are rewritten;
+    // hashed assets that happen to live under /join/ pass through untouched.
+    if (url.pathname.startsWith("/join/")) {
+      const asset = await env.ASSETS.fetch(req)
+      const contentType = asset.headers.get("Content-Type") ?? ""
+      if (!contentType.includes("text/html")) return asset
+      const html = await asset.text()
+      const res = new Response(injectInviteMeta(html), asset)
+      res.headers.delete("Content-Length") // body length changed after rewrite
       return res
     }
 

@@ -3,7 +3,7 @@ import { computeDecayHealth, resolveDecayConfig, type HealthStats } from "@/lib/
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
 import type { CellData } from "./useCells"
 import type { TranslationRule, RuleInfraction, DecaySettings } from "@/lib/parsers/types"
-import { perfMark } from "@/lib/perf-log"
+import { perfMark, memMark } from "@/lib/perf-log"
 
 interface HealthDispatchOptions {
   /**
@@ -156,6 +156,7 @@ export function useHealth(
     const settings = resolveDecayConfig(options.decaySettings, requiredValidations)
     const r = computeDecayHealth(fileCells, settings)
     end()
+    memMark("useHealth.decay")
     return r
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileCells, decaySettingsKey])
@@ -202,6 +203,7 @@ export function useHealth(
 
     infractionsCacheRef.current = { rulesSig, byCell: nextByCell }
     end()
+    memMark("useHealth.checkRules")
     return result
   }, [fileCells, rules])
 

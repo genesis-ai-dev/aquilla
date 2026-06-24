@@ -14,6 +14,7 @@ import { languagesEqual } from "@/lib/language-normalize"
 import { useCells } from "@/hooks/useCells"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { useSearchIndex } from "@/hooks/useSearchIndex"
+import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useCompletion } from "@/hooks/useCompletion"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { fetchBranchingSearch } from "@/lib/sync/branching-search-read"
@@ -102,7 +103,6 @@ import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { PrimaryActionButton } from "./PrimaryActionButton"
-import { AccountSwitcher } from "./AccountSwitcher"
 import { ExpandableFileList } from "./ExpandableFileList"
 import { SidebarProjectSection } from "./SidebarProjectSection"
 import { SuggestionBanner } from "./SuggestionBanner"
@@ -142,6 +142,7 @@ import { generateBacktranslation } from "@/lib/completion/backtranslation-servic
 import { addConcept } from "@/lib/terminology/store"
 import type { Concept } from "@/lib/terminology/types"
 import { buildGlosser, type BtSeed } from "@/lib/completion/bt-glosser"
+import { memMark } from "@/lib/perf-log"
 import { buildAlignmentModel } from "@/lib/completion/interlinear"
 import { buildStatisticalBt, resolveBtTargetEventId } from "@/lib/completion/bt-auto"
 // FRO-192: assignment work-pickup UI
@@ -1140,6 +1141,16 @@ export function ProjectWorkspace() {
     return all
   }, [fileCells])
 
+  // Debounced corpus for the heavy whole-project derivations only (glosser,
+  // interlinear alignment model, few-shot search index). During "complete all"
+  // every committed cell mutates allProjectCells, which would otherwise rebuild
+  // all three ~twice per cell — a GB/s allocation storm that OOM-crashes the tab
+  // (see useDebouncedValue). These derivations feed BT/interlinear display +
+  // example retrieval, none of which must be live mid-batch, so coalescing the
+  // rebuild to once the batch pauses removes the storm. Health, progress, and
+  // the edit/commit path keep the live `allProjectCells`.
+  const corpusCells = useDebouncedValue(allProjectCells, 600)
+
   // FRO-191 (orchestrator glue): existing-cell refs for the eBible "into target
   // column" import mode. CellData.group carries the canonical ref.
   const importSourceCells = useMemo(() => allProjectCells.map((c) => ({
@@ -1163,7 +1174,7 @@ export function ProjectWorkspace() {
     original: c.original,
   })), [cells])
 
-  const { search, searchPassages } = useSearchIndex(project?.files || [], allProjectCells)
+  const { search, searchPassages } = useSearchIndex(project?.files || [], corpusCells)
 
   // AD-13 branching-search adapters — single-cell completion's few-shot
   // retrieval (`branchingSearch`) and the batch completion's passage
@@ -1434,10 +1445,11 @@ export function ProjectWorkspace() {
 
   const isBacktranslationConfigured = Boolean(project?.completionSettings && isConfigured)
 
-  // Build the glosser from ALL translated pairs in the project. Memoized on
-  // allProjectCells so it only rebuilds when the corpus changes.
+  // Build the glosser from ALL translated pairs in the project. Memoized on the
+  // DEBOUNCED corpus (corpusCells) so a "complete all" batch rebuilds it once on
+  // pause instead of ~twice per committed cell.
   const glosser = useMemo(() => {
-    const pairs = allProjectCells
+    const pairs = corpusCells
       .filter((c) => c.original?.trim() && c.translated?.trim())
       .map((c) => ({ source: c.original!, target: c.translated }))
     // High-weight seeds from previous user-corrected BTs stored in the cache.
@@ -1445,7 +1457,7 @@ export function ProjectWorkspace() {
     // future glosses reflect the reviewer's intent.
     const seeds: BtSeed[] = []
     for (const [cellId, btText] of backtranslationCache) {
-      const cell = allProjectCells.find((c) => c.id === cellId)
+      const cell = corpusCells.find((c) => c.id === cellId)
       if (cell?.translated) {
         seeds.push({ source: btText, target: cell.translated, weight: 3 })
       }
@@ -1462,18 +1474,22 @@ export function ProjectWorkspace() {
         seeds.push({ source: concept.sourceTerm, target: rendering.rendering, weight })
       }
     }
-    return buildGlosser(pairs, seeds)
-  }, [allProjectCells, backtranslationCache, project?.terminology])
+    const g = buildGlosser(pairs, seeds)
+    memMark(`glosser.build(${pairs.length}p)`)
+    return g
+  }, [corpusCells, backtranslationCache, project?.terminology])
 
   // Build the interlinear alignment model from the same corpus, seeded with the
   // user's confirmed/invalidated alignments (FRO-207). Memoized on the corpus +
   // persisted alignmentSeeds so it only rebuilds when either changes.
   const alignmentModel = useMemo(() => {
-    const pairs = allProjectCells
+    const pairs = corpusCells
       .filter((c) => c.original?.trim() && c.translated?.trim())
       .map((c) => ({ source: c.original!, target: c.translated }))
-    return buildAlignmentModel(pairs, project?.alignmentSeeds ?? [])
-  }, [allProjectCells, project?.alignmentSeeds])
+    const m = buildAlignmentModel(pairs, project?.alignmentSeeds ?? [])
+    memMark(`alignmentModel.build(${pairs.length}p)`)
+    return m
+  }, [corpusCells, project?.alignmentSeeds])
 
   // Persist a confirmed/invalidated alignment as an additive seed via the same
   // project-settings sync path used for terminology.
@@ -3076,6 +3092,7 @@ export function ProjectWorkspace() {
       <ScrollToGroupHandler cells={cells} editorRef={editorRef} />
       {/* FRO-308: currentCell for chat panel — derived from focusedCellId */}
       <AppShell
+        railCollapsed={dockTab === null}
         logoAccessory={
           dockTab !== null ? (
             <AppTooltip content="Collapse sidebar" side="right">
@@ -3160,18 +3177,20 @@ export function ProjectWorkspace() {
                     refreshKey={assignmentsRefreshKey}
                   />
                 )}
-                <div className="mt-auto border-t px-2 pb-2 pt-2">
-                  {/* Contextual onboarding status — self-removes once setup
-                      completes. Sidebar-footer placement (Linear-style) keeps
-                      transient onboarding state out of the action header. */}
-                  {checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
+                {/* Contextual onboarding status — self-removes once setup
+                    completes. Sidebar-footer placement (Linear-style) keeps
+                    transient onboarding state out of the action header. The
+                    account switcher now lives in the dock footer (LeftDock) so
+                    it's present in every tab, not just this Files panel. */}
+                {checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
+                  <div className="mt-auto border-t px-2 pb-2 pt-2">
                     <TooltipProvider delay={0}>
                       <Tooltip open={showChipTooltip} onOpenChange={setShowChipTooltip}>
                         <TooltipTrigger
                           render={
                             <button
                               onClick={() => { setShowChipTooltip(false); setChecklistOpen(true) }}
-                              className="mb-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                              className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
                             />
                           }
                         >
@@ -3183,9 +3202,8 @@ export function ProjectWorkspace() {
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
-                  )}
-                  <AccountSwitcher variant="sidebar" />
-                </div>
+                  </div>
+                )}
               </div>
             }
             chatPanel={

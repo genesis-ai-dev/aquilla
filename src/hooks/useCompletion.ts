@@ -41,6 +41,7 @@ import type { TranslationRule } from "@/lib/parsers/types"
 import type { PassageHit } from "./useSearchIndex"
 import { useFrontierHealth } from "@/lib/completion/frontier-health"
 import posthog from "@/lib/posthog"
+import { memMark } from "@/lib/perf-log"
 import { compressExampleSource, dedupeExamples, dropPrecedingContextDuplicates } from "@/lib/completion/compress-examples"
 import { gatherPrecedingContext, gatherFollowingSource, DEFAULT_DRAFT_CONTEXT, type DraftContextSettings } from "@/lib/completion/draft-context"
 
@@ -266,6 +267,7 @@ export function useCompletion(
     // and returns a fresh run ID. Every flag check, increment, and the
     // finally-clear pass this ID so a stale run cannot affect us.
     const runId = resetBatchCompletionState(cells.length)
+    memMark(`completeBatch.start(${cells.length}c)`)
 
     let priorBatch: { source: string; target: string }[] = []
     const fallbackQueue: CellData[] = []
@@ -469,6 +471,7 @@ export function useCompletion(
       // FRO-235 fix: clearBatchCompletionProgress(runId) is a no-op when runId
       // !== _currentRunId — a finishing run A cannot null run B's banner.
       clearBatchCompletionProgress(runId)
+      memMark(`completeBatch.end(${cells.length}c)`)
     }
   }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, completeSingle, commitCompletedCell, rules, allCells, briefSummary])
 

@@ -17,7 +17,7 @@ export const aquillaData: BrandData = {
     htmlTitle: "Aquilla",
   },
   logo: { faviconHref: "/favicon-aquilla.svg" },
-  deploy: { domain: "aquilla.app", ogImage: "/aquilla-og.png" },
+  deploy: { domain: "aquilla.app", ogImage: "/aquilla-og.png", ogImageWidth: 1536, ogImageHeight: 1024 },
   marketing: {
     onboardingHeadline: "Welcome to Aquilla",
     onboardingSubhead: "Translation, lifted — the steering system your team can live in.",

@@ -213,3 +213,34 @@ describe("buildGlosser — repetition guard (BUG-BT-5)", () => {
     expect(outputTokens.length).toBeLessThanOrEqual(inputTokenCount * 2 + 10)
   })
 })
+
+// The model collapses each target phrase's candidates to its single argmax for
+// memory (the decoder only ever reads the best-scoring source). These guard
+// that the argmax actually survives the collapse — i.e. the WINNER is kept, not
+// an arbitrary or last-seen candidate. A regression here = collapse keeping the
+// wrong entry, which single-candidate corpora wouldn't catch.
+describe("buildGlosser — argmax survives candidate collapse", () => {
+  it("keeps the most-reinforced source when a target word has competing candidates", () => {
+    // "casa" co-occurs with "house" in 3 pairs but with "home" in only 1.
+    // After collapse, glossing "casa" must yield the argmax ("house").
+    const pairs = [
+      { source: "house", target: "casa" },
+      { source: "house", target: "casa" },
+      { source: "house", target: "casa" },
+      { source: "home", target: "casa" },
+    ]
+    const glosser = buildGlosser(pairs)
+    expect(glosser.gloss("casa")).toBe("house")
+  })
+
+  it("a positive seed can flip the surviving argmax", () => {
+    // Corpus favors "house"; a strong positive seed for "home" should win.
+    const pairs = [
+      { source: "house", target: "casa" },
+      { source: "house", target: "casa" },
+    ]
+    const seeds: BtSeed[] = [{ source: "home", target: "casa", weight: 5 }]
+    const glosser = buildGlosser(pairs, seeds)
+    expect(glosser.gloss("casa")).toBe("home")
+  })
+})

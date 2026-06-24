@@ -33,6 +33,7 @@ import {
 import { cn } from "@/lib/utils"
 import { ReportProblemButton } from "@/components/ReportProblemButton/ReportProblemButton"
 import { VersionTag } from "@/components/VersionBadge"
+import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
 import { AppTooltip } from "@/components/ui/tooltip"
 
@@ -345,6 +346,18 @@ export function LeftDock({
             )}
           </>
         )}
+      </div>
+
+      {/* Account picker lives at the dock root so it's present in every tab
+          and even when collapsed (compact avatar on the 40px rail). */}
+      <div
+        className={cn(
+          "shrink-0 border-t pt-2",
+          isOpen ? "px-2 pb-1" : "flex flex-col items-center pb-1",
+        )}
+        data-tour="account-switcher"
+      >
+        <AccountSwitcher variant="sidebar" compact={!isOpen} />
       </div>
 
       <div className="flex shrink-0 items-center">

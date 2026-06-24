@@ -7,18 +7,47 @@ export function brandingHtmlPlugin(brand: BrandData): Plugin {
     name: "branding-html",
     transformIndexHtml(html: string) {
       const styleTag = `<style id="brand-theme">${buildBrandThemeStyle(brand.theme)}</style>`
-      const ogImagePath = brand.deploy?.ogImage ?? brand.logo.faviconHref
-      const ogImage = absolutize(ogImagePath, brand.deploy?.domain)
       const ogUrl = brand.deploy?.domain ? `https://${brand.deploy.domain}/` : ""
+      // Only emit social-image tags when the brand ships a real raster image.
+      // SVG favicons (the old fallback) are rejected by most link unfurlers, so
+      // a brand without an ogImage gets no og:image and the lighter summary card.
+      const ogImagePath = brand.deploy?.ogImage
+      const socialImageTags = ogImagePath ? buildSocialImageTags(brand, ogImagePath) : ""
+      const twitterCard = ogImagePath ? "summary_large_image" : "summary"
+      // Bare %BRAND_OG_IMAGE% is still used by the standalone marketing pages
+      // (homepage/beta/case-study), which only ship for image-bearing brands.
+      const ogImage = ogImagePath ? absolutize(ogImagePath, brand.deploy?.domain) : ""
       return html
         .replace(/%BRAND_TITLE%/g, escapeHtml(brand.app.htmlTitle))
+        .replace(/%BRAND_NAME%/g, escapeHtml(brand.app.name))
         .replace(/%BRAND_DESCRIPTION%/g, escapeHtml(brand.app.description))
         .replace(/%BRAND_FAVICON%/g, escapeHtml(brand.logo.faviconHref))
-        .replace(/%BRAND_OG_IMAGE%/g, escapeHtml(ogImage))
         .replace(/%BRAND_OG_URL%/g, escapeHtml(ogUrl))
+        .replace(/%BRAND_OG_IMAGE%/g, escapeHtml(ogImage))
+        .replace(/%BRAND_TWITTER_CARD%/g, twitterCard)
+        .replace(/%BRAND_SOCIAL_IMAGE_TAGS%/g, socialImageTags)
         .replace(/%BRAND_THEME_STYLE%/g, styleTag)
     },
   }
+}
+
+function buildSocialImageTags(brand: BrandData, ogImagePath: string): string {
+  const url = escapeHtml(absolutize(ogImagePath, brand.deploy?.domain))
+  const alt = escapeHtml(brand.deploy?.ogImageAlt ?? brand.app.description)
+  const w = brand.deploy?.ogImageWidth
+  const h = brand.deploy?.ogImageHeight
+  const dims =
+    w && h
+      ? `    <meta property="og:image:width" content="${w}" />\n` +
+        `    <meta property="og:image:height" content="${h}" />\n`
+      : ""
+  return (
+    `<meta property="og:image" content="${url}" />\n` +
+    dims +
+    `    <meta property="og:image:alt" content="${alt}" />\n` +
+    `    <meta name="twitter:image" content="${url}" />\n` +
+    `    <meta name="twitter:image:alt" content="${alt}" />`
+  )
 }
 
 function absolutize(path: string, domain: string | undefined): string {

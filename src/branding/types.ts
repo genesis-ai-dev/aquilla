@@ -65,6 +65,9 @@ export interface BrandData {
   deploy?: {
     domain?: string
     ogImage?: string
+    ogImageWidth?: number
+    ogImageHeight?: number
+    ogImageAlt?: string
   }
 }
 

@@ -4,7 +4,7 @@
  * Collapsible, resizable left dock that replaces the fixed-width sidebar.
  * Hosts multiple surfaces as icon-tab switchers (like Claude's sidebar):
  *   - files   : project file list (was the old sidebar content)
- *   - chat    : AI chat (was a right-side Sheet drawer — FRO-320)
+ *   - agent   : AI agent (was a right-side Sheet drawer — FRO-320)
  *   - search  : search / parallel passages / find-replace panel
  *
  * Collapsed: renders a narrow rail of icon buttons only (no labels).
@@ -25,7 +25,7 @@ import {
 } from "react"
 import {
   Files,
-  MessageSquare,
+  Bot,
   Search,
   AudioLines,
   PanelLeftOpen,
@@ -41,13 +41,13 @@ import { AppTooltip } from "@/components/ui/tooltip"
 // Types
 // ---------------------------------------------------------------------------
 
-export type DockTab = "files" | "chat" | "search" | "voices"
+export type DockTab = "files" | "agent" | "search" | "voices"
 
 export interface LeftDockProps {
   /** Slot rendered when "files" tab is active */
   filesPanel: ReactNode
-  /** Slot rendered when "chat" tab is active */
-  chatPanel: ReactNode
+  /** Slot rendered when "agent" tab is active */
+  agentPanel: ReactNode
   /** Slot rendered when "search" tab is active */
   searchPanel: ReactNode
   /** Slot rendered when "voices" tab is active. When omitted, the Voices tab
@@ -55,8 +55,8 @@ export interface LeftDockProps {
   voicesPanel?: ReactNode
   /** Persist width / open-state per project */
   storageKey?: string
-  /** Badge on the chat tab (e.g. unread) */
-  chatBadge?: number
+  /** Badge on the agent tab (e.g. unread) */
+  agentBadge?: number
   /** Default tab to show when dock opens */
   defaultTab?: DockTab
   /** Externally controlled active tab (useful for "open chat" button in header) */
@@ -78,7 +78,7 @@ type TabMeta = { id: DockTab; icon: typeof Files; label: string }
 const TAB_META: TabMeta[] = [
   { id: "files", icon: Files, label: "Files" },
   { id: "voices", icon: AudioLines, label: "Voices" },
-  { id: "chat", icon: MessageSquare, label: "Chat" },
+  { id: "agent", icon: Bot, label: "Agent" },
   { id: "search", icon: Search, label: "Search" },
 ]
 
@@ -89,12 +89,12 @@ const TAB_META: TabMeta[] = [
 interface TabRailProps {
   tabs: TabMeta[]
   activeTab: DockTab | null
-  chatBadge?: number
+  agentBadge?: number
   onTabClick: (tab: DockTab) => void
   orientation: "left" | "top"
 }
 
-function TabRail({ tabs, activeTab, chatBadge, onTabClick, orientation }: TabRailProps) {
+function TabRail({ tabs, activeTab, agentBadge, onTabClick, orientation }: TabRailProps) {
   const isTop = orientation === "top"
 
   return (
@@ -135,9 +135,9 @@ function TabRail({ tabs, activeTab, chatBadge, onTabClick, orientation }: TabRai
           >
             <Icon className={cn("shrink-0", isTop ? "h-3 w-3" : "h-4 w-4")} />
             {isTop && isActive && <span className="truncate">{label}</span>}
-            {id === "chat" && chatBadge != null && chatBadge > 0 && (
+            {id === "agent" && agentBadge != null && agentBadge > 0 && (
               <span
-                aria-label={`${chatBadge} unread`}
+                aria-label={`${agentBadge} unread`}
                 className={cn(
                   "flex items-center justify-center rounded-full bg-primary text-primary-foreground",
                   isTop
@@ -145,7 +145,7 @@ function TabRail({ tabs, activeTab, chatBadge, onTabClick, orientation }: TabRai
                     : "absolute -right-0.5 -top-0.5 h-3.5 w-3.5 text-[9px]",
                 )}
               >
-                {chatBadge > 9 ? "9+" : chatBadge}
+                {agentBadge > 9 ? "9+" : agentBadge}
               </span>
             )}
           </button>
@@ -168,11 +168,11 @@ function TabRail({ tabs, activeTab, chatBadge, onTabClick, orientation }: TabRai
 
 export function LeftDock({
   filesPanel,
-  chatPanel,
+  agentPanel,
   searchPanel,
   voicesPanel,
   storageKey,
-  chatBadge,
+  agentBadge,
   activeTab: controlledTab,
   onActiveTabChange,
 }: LeftDockProps) {
@@ -259,7 +259,7 @@ export function LeftDock({
   // ---- content map ---------------------------------------------------------
   const panels: Record<DockTab, ReactNode> = {
     files: filesPanel,
-    chat: chatPanel,
+    agent: agentPanel,
     search: searchPanel,
     voices: voicesPanel,
   }
@@ -314,7 +314,7 @@ export function LeftDock({
             <TabRail
               tabs={visibleTabs}
               activeTab={activeTab}
-              chatBadge={chatBadge}
+              agentBadge={agentBadge}
               onTabClick={handleRailIconClick}
               orientation="top"
             />
@@ -331,7 +331,7 @@ export function LeftDock({
               <TabRail
                 tabs={visibleTabs}
                 activeTab={activeTab}
-                chatBadge={chatBadge}
+                agentBadge={agentBadge}
                 onTabClick={handleRailIconClick}
                 orientation="left"
               />

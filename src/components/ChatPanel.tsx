@@ -3,8 +3,9 @@
  *
  * Right-side chat drawer for the workspace AI copilot.
  *
- * Composes the shared chat components (src/components/chat/) — the Sheet
- * shell stays distinct from ChatDockPanel's dock layout.
+ * Composes the shared chat components (src/components/chat/). The left dock
+ * hosts the AI agent (AgentDockPanel); this Sheet is the only remaining chat
+ * surface and currently has no UI entry point.
  *
  * UI: shadcn Sheet + base-nova primitives, lucide icons, no toast lib.
  */

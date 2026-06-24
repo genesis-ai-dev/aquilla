@@ -4,6 +4,7 @@
 
 /// <reference lib="webworker" />
 import { KokoroTTS } from "kokoro-js"
+import { throttleModelProgress } from "./progress-throttle"
 
 // Same ONNX warning suppression as whisper-worker — Kokoro's bundled ORT
 // emits the same node-assignment warnings every synth call. Worker-scoped
@@ -88,7 +89,7 @@ let ttsPromise: Promise<KokoroTTS> | null = null
 
 async function getTts(requestId: string): Promise<KokoroTTS> {
   if (ttsPromise) return ttsPromise
-  const progressCb = (info: unknown) => {
+  const progressCb = throttleModelProgress((info: unknown) => {
     const i = info as { status?: string; file?: string; loaded?: number; total?: number }
     const file = i.file ?? ""
     const reportedTotal = i.total ?? 0
@@ -102,7 +103,7 @@ async function getTts(requestId: string): Promise<KokoroTTS> {
       status: i.status ?? "",
     }
     ;(self as unknown as Worker).postMessage(msg)
-  }
+  })
   // Try WebGPU first; fall back to WASM if the GPU adapter isn't usable.
   ttsPromise = (async () => {
     try {

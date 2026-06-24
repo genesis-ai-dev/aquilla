@@ -4,6 +4,7 @@
 
 /// <reference lib="webworker" />
 import { pipeline, env, type AutomaticSpeechRecognitionPipeline } from "@huggingface/transformers"
+import { throttleModelProgress } from "./progress-throttle"
 
 env.allowLocalModels = false
 env.allowRemoteModels = true
@@ -82,7 +83,7 @@ let activeModel: string | null = null
 async function getPipe(model: string, requestId: string): Promise<AutomaticSpeechRecognitionPipeline> {
   if (pipePromise && activeModel === model) return pipePromise
   activeModel = model
-  const progressCb = (info: unknown) => {
+  const progressCb = throttleModelProgress((info: unknown) => {
     const i = info as { status?: string; file?: string; loaded?: number; total?: number }
     const msg: ProgressMessage = {
       type: "progress",
@@ -93,7 +94,7 @@ async function getPipe(model: string, requestId: string): Promise<AutomaticSpeec
       status: i.status ?? "",
     }
     ;(self as unknown as Worker).postMessage(msg)
-  }
+  })
   // Prefer WebGPU; fall back to WASM if the GPU adapter fails (Safari, some
   // Firefox builds, machines without compatible discrete/integrated GPUs).
   pipePromise = (async () => {

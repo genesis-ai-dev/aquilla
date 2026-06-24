@@ -18,6 +18,7 @@ import {
   mmsSherpaModelUrlsForLanguage,
   supportedMmsLanguageSummary,
 } from "./mms-languages"
+import { throttleModelProgress } from "./progress-throttle"
 
 export interface SynthRequest {
   type: "synth"
@@ -118,10 +119,10 @@ async function getTransformersPipeline(lang: string, requestId: string): Promise
   const existing = transformerPipelines.get(key)
   if (existing) return existing
 
-  const progressCb = (info: unknown) => {
+  const progressCb = throttleModelProgress((info: unknown) => {
     const i = info as { status?: string; file?: string; loaded?: number; total?: number }
     postProgress(requestId, i.file ?? "", i.loaded ?? 0, i.total ?? 0, i.status ?? "")
-  }
+  })
 
   const created = (async () => {
     return (await pipeline("text-to-speech", transformersModelIdFor(key), {
@@ -171,13 +172,19 @@ async function fetchBytes(url: string, requestId: string, file: string): Promise
 
   const chunks: Uint8Array[] = []
   let loaded = 0
+  // Throttle per-chunk progress: a fast connection reads hundreds of chunks/sec,
+  // and each postMessage fans out to every cell row's progress subscription.
+  const emitDownloading = throttleModelProgress((info) => {
+    const i = info as { loaded: number; total: number }
+    postProgress(requestId, file, i.loaded, i.total, "downloading")
+  })
   for (;;) {
     const { done, value } = await reader.read()
     if (done) break
     if (!value) continue
     chunks.push(value)
     loaded += value.byteLength
-    postProgress(requestId, file, loaded, total, "downloading")
+    emitDownloading({ status: "downloading", loaded, total })
   }
 
   const bytes = new Uint8Array(loaded)

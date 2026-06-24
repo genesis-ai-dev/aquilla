@@ -11,6 +11,7 @@ import {
   type PromotionRequestResult,
 } from "@/lib/sync/org-settings"
 import type { TranslationRule, PromotionRequest } from "@/lib/parsers/types"
+import type { OrgProviderKeys } from "@/lib/sync/org-settings"
 
 // Floor aligned with the server's SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER (600)
 // in auth-worker/src/routes/org-settings.ts. Lowering this to PROJECT_LEAD (500)
@@ -37,6 +38,16 @@ export interface UseOrgSettings {
   hasFetched: boolean
   /** True when the caller's org role is >= MAINTAINER. */
   canEdit: boolean
+  /**
+   * FRO-433: True when the caller's org role is >= MAINTAINER.
+   * Org-level provider keys are set/edited by maintainer+, same gate as general settings.
+   */
+  canEditOrgKeys: boolean
+  /**
+   * FRO-433: The current org-level provider key map, or empty object when unset.
+   * Key is a provider identifier (e.g. "gemini-tts"); value is the raw key string.
+   */
+  orgProviderKeys: OrgProviderKeys
   /**
    * FRO-253: True when the caller's project-resolved role meets the org's exportMinRole floor.
    *
@@ -201,6 +212,10 @@ export function useOrgSettings(
   const settings = server?.settings ?? {}
   const orgRules: TranslationRule[] = settings.rules ?? []
   const promotionRequests: PromotionRequest[] = (settings.promotionRequests as PromotionRequest[] | undefined) ?? []
+  // FRO-433: org-level provider keys; default to empty object when unset.
+  const orgProviderKeys: OrgProviderKeys = settings.orgProviderKeys ?? {}
+  // canEditOrgKeys: same gate as general settings write (maintainer+).
+  const canEditOrgKeys = canEdit
 
   // FRO-253 (corrected): canExport logic:
   //   • Before settings are fetched (hasFetched=false): optimistically allow so the
@@ -224,6 +239,8 @@ export function useOrgSettings(
     version: server ? server.version : null,
     hasFetched,
     canEdit,
+    canEditOrgKeys,
+    orgProviderKeys,
     canExport,
     exportMinRole,
     refresh,

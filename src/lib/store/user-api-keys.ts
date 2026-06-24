@@ -50,15 +50,25 @@ export function hasUserApiKey(purpose: ApiKeyPurpose): boolean {
 
 /**
  * Resolve an API key with project-takes-precedence semantics.
- * Returns undefined if neither exists.
+ *
+ * Precedence (FRO-433):
+ *   1. project key  — per-project override (highest priority)
+ *   2. user key     — browser-local key saved by this user
+ *   3. org key      — synced org-level baseline (lowest priority)
+ *
+ * Returns undefined if none exists.
  */
 export function resolveApiKey(
   purpose: ApiKeyPurpose,
   projectValue: string | undefined,
+  orgValue?: string | undefined,
 ): string | undefined {
   const project = projectValue?.trim()
   if (project) return project
-  return getUserApiKey(purpose)
+  const user = getUserApiKey(purpose)
+  if (user) return user
+  const org = orgValue?.trim()
+  return org || undefined
 }
 
 // ── React subscription ─────────────────────────────────────────────────────

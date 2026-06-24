@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { OrgProviderSection } from "@/components/settings/OrgProviderSection"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useOrgMembers } from "@/hooks/useOrg"
@@ -50,11 +51,12 @@ export function Settings() {
     return () => { cancelled = true }
   }, [jwt, activeOrgId])
 
-  // FRO-253: org export floor setting
+  // FRO-253/FRO-433: org settings (export floor + provider keys)
+  const orgSettings = useOrgSettings(activeOrgId, activeOrg?.role?.level)
   const {
     exportMinRole,
     patch: patchOrgSettings,
-  } = useOrgSettings(activeOrgId, activeOrg?.role?.level)
+  } = orgSettings
   const [exportRoleBusy, setExportRoleBusy] = useState(false)
   const [exportRoleError, setExportRoleError] = useState<string | null>(null)
   const [exportRoleSaved, setExportRoleSaved] = useState(false)
@@ -235,6 +237,9 @@ export function Settings() {
                     )}
                   </div>
                 </section>
+
+                {/* FRO-433: Org-level provider API keys */}
+                <OrgProviderSection orgSettings={orgSettings} />
 
                 <div className="flex flex-wrap gap-2 text-sm">
                   <Link to="/members" className="rounded-md border px-3 py-1.5 hover:bg-accent/40">Members</Link>

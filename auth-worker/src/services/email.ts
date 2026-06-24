@@ -65,7 +65,21 @@ function buildWelcomeHtml(
   username: string,
   appUrl: string,
   discordUrl?: string,
+  verifyUrl?: string,
 ): string {
+  const verifyBlock = verifyUrl
+    ? `
+          <p style="margin: 16px 0;">
+            One quick thing — confirm your email so you don't lose access to your
+            account:
+          </p>
+          <p style="margin: 16px 0; text-align: center;">
+            <a href="${verifyUrl}"
+               style="display: inline-block; padding: 10px 20px; background-color: #16a34a; color: white; text-decoration: none; border-radius: 6px;">
+              Verify my email
+            </a>
+          </p>`
+    : ""
   const communityBlock = discordUrl
     ? `
           <p style="margin: 16px 0;">
@@ -94,6 +108,7 @@ function buildWelcomeHtml(
           </p>
           <p>A good first step: create a project and import a source text, or invite
              your team if you're starting a project together.</p>
+          ${verifyBlock}
           ${communityBlock}
           <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
           <p style="color: #6b7280; font-size: 0.875rem;">
@@ -116,14 +131,16 @@ export async function sendWelcomeEmail(
   env: Env,
   toEmail: string,
   username: string,
+  verifyUrl?: string,
 ): Promise<void> {
   if (!env.EMAIL) return
   const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
   const appUrl = env.BASE_URL || "https://aquilla.app"
   const discordUrl = env.DISCORD_INVITE_URL
-  const html = buildWelcomeHtml(username, appUrl, discordUrl)
+  const html = buildWelcomeHtml(username, appUrl, discordUrl, verifyUrl)
   const text =
     `Welcome to Aquilla, ${username}! Open the app: ${appUrl}` +
+    (verifyUrl ? `\nVerify your email: ${verifyUrl}` : "") +
     (discordUrl ? `\nJoin our community: ${discordUrl}` : "") +
     `\n\nGot a question? Just reply to this email.`
   try {

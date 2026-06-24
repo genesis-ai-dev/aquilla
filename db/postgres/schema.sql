@@ -146,6 +146,21 @@ CREATE TABLE project_invites (
     PRIMARY KEY (token, project_id)
 );
 
+-- Email-based organization invitations (see migrations/0043_org_invites.sql).
+CREATE TABLE org_invites (
+    token      TEXT PRIMARY KEY,
+    org_id     BIGINT NOT NULL,
+    role_level INTEGER NOT NULL,
+    created_by BIGINT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    expires_at TIMESTAMPTZ,
+    used_by    BIGINT,
+    used_at    TIMESTAMPTZ,
+    email      TEXT
+);
+CREATE INDEX idx_org_invites_org ON org_invites(org_id);
+CREATE INDEX idx_org_invites_unused ON org_invites(org_id, used_by) WHERE used_by IS NULL;
+
 CREATE TABLE project_settings (
     project_id TEXT PRIMARY KEY,
     settings   TEXT NOT NULL DEFAULT '{}',

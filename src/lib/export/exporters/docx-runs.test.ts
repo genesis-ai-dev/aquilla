@@ -19,6 +19,13 @@ describe("htmlToSpans", () => {
     expect(htmlToSpans("")).toEqual([])
     expect(htmlToSpans("   ")).toEqual([])
   })
+  it("mixed leading-text, element, trailing-text → three spans with correct marks", () => {
+    const spans = htmlToSpans("a<b>B</b>c")
+    expect(spans.map(s => s.text)).toEqual(["a", "B", "c"])
+    expect(spans[0].marks.size).toBe(0)
+    expect([...spans[1].marks]).toEqual(["b"])
+    expect(spans[2].marks.size).toBe(0)
+  })
 })
 
 describe("spansToRuns", () => {
@@ -29,5 +36,16 @@ describe("spansToRuns", () => {
     expect(runs[1].getElementsByTagName("w:b").length).toBe(1)
     expect(runs[0].getElementsByTagName("w:b").length).toBe(0)
     expect(runs[1].getElementsByTagName("w:t")[0].textContent).toBe("b")
+  })
+  it("appends rPr even when baseRpr has zero children (baseRpr inheritance not dropped)", () => {
+    const xmlDoc = new DOMParser().parseFromString("<root/>", "application/xml")
+    const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    const emptyRpr = xmlDoc.createElementNS(W_NS, "w:rPr")
+    const runs = spansToRuns(xmlDoc, [{ text: "x", marks: new Set() }], emptyRpr)
+    expect(runs.length).toBe(1)
+    // run should have two children: rPr (baseRpr clone) + w:t
+    const children = Array.from(runs[0].childNodes)
+    expect(children.length).toBe(2)
+    expect((children[0] as Element).localName).toBe("rPr")
   })
 })

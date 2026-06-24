@@ -9,8 +9,8 @@ const TAG_TO_MARK: Record<string, Mark> = {
 
 export function htmlToSpans(html: string): Span[] {
   if (!html || !html.trim()) return []
-  const doc = new DOMParser().parseFromString(`<root>${html}</root>`, "text/html")
-  const root = doc.body.firstChild ?? doc.body
+  const doc = new DOMParser().parseFromString(html, "text/html")
+  const root = doc.body
   const spans: Span[] = []
   const walk = (node: Node, marks: Set<Mark>) => {
     for (const child of Array.from(node.childNodes)) {
@@ -45,7 +45,7 @@ export function spansToRuns(doc: Document, spans: Span[], baseRpr: Element | nul
     if (span.marks.has("i")) addToggle("i")
     if (span.marks.has("u")) addToggle("u", { "w:val": "single" })
     if (span.marks.has("s")) addToggle("strike")
-    if (rPr.childNodes.length > 0) run.appendChild(rPr)
+    if (baseRpr !== null || rPr.childNodes.length > 0) run.appendChild(rPr)
     const t = doc.createElementNS(W_NS, "w:t")
     t.setAttribute("xml:space", "preserve")
     t.textContent = span.text

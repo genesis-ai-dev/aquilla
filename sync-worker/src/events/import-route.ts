@@ -77,6 +77,9 @@ interface ImportCell {
   // Timeline-segment-model (Scope A) — projected create-time onto the cell.
   sequenceIndex?: number
   medium?: string
+  // Extensible per-cell metadata bucket (OBS frame attachments today),
+  // persisted to cells.metadata JSONB by buildBulkSourceCellCreateStmt.
+  metadata?: Record<string, unknown>
 }
 
 interface ImportBody {
@@ -251,6 +254,7 @@ export async function handleBulkImportRequest(
         ...(cell.endMs !== undefined ? { endMs: cell.endMs } : {}),
         ...(cell.sequenceIndex !== undefined ? { sequenceIndex: cell.sequenceIndex } : {}),
         ...(cell.medium !== undefined ? { medium: cell.medium } : {}),
+        ...(cell.metadata !== undefined ? { metadata: cell.metadata } : {}),
       },
       clientTs,
       serverTs: serverTs++,

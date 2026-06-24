@@ -87,7 +87,8 @@ async function confirmPreview() {
 
 /** Navigate to the Upload panel and drop the colliding file. */
 async function dropCollidingFile() {
-  fireEvent.click(screen.getByText("Upload Files"))
+  // Landing-screen card title (the upload-screen header keeps the "Upload Files" casing).
+  fireEvent.click(screen.getByText("Upload files"))
 
   const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
   await act(async () => {

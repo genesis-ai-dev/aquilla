@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, act, fireEvent } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { OrgSwitcher } from "./OrgSwitcher"
 
@@ -24,10 +25,14 @@ describe("OrgSwitcher", () => {
       { id: 1, name: "Come and See", role: { level: 600, name: "maintainer" } },
       { id: 2, name: "Side Org", role: { level: 700, name: "owner" } },
     ])
-    render(<OrgProvider><OrgSwitcher /></OrgProvider>)
-    await waitFor(() => expect(screen.getByText("Come and See")).toBeInTheDocument())
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+    // Multiple orgs → the switcher defaults to the all-organizations scope.
+    await waitFor(() => expect(screen.getByText("All organizations")).toBeInTheDocument())
+    // Open the switcher; each org is listed with its role.
+    await act(async () => { screen.getByRole("button", { name: /all organizations/i }).click() })
+    expect(screen.getByText("Come and See")).toBeInTheDocument()
     expect(screen.getByText(/maintainer/i)).toBeInTheDocument()
-    await act(async () => { screen.getByRole("button", { name: /come and see/i }).click() })
+    // Selecting an org makes it the active scope and persists it.
     await act(async () => { screen.getByText("Side Org").click() })
     await waitFor(() => expect(localStorage.getItem("org:active")).toBe("2"))
   })
@@ -41,7 +46,7 @@ describe("OrgSwitcher", () => {
       ])
     createOrg.mockResolvedValue({ id: 99, name: "New Org", role: { level: 700, name: "owner" } })
 
-    render(<OrgProvider><OrgSwitcher /></OrgProvider>)
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
 
     // Open the switcher
@@ -66,7 +71,7 @@ describe("OrgSwitcher", () => {
     ])
     renameOrg.mockResolvedValue(undefined)
 
-    render(<OrgProvider><OrgSwitcher /></OrgProvider>)
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
 
     // Open the switcher

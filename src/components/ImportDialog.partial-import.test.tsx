@@ -106,8 +106,8 @@ function setupParatextMocks(skipped: { book: string; reason: string }[]) {
 
 /** Navigate: open → Upload Files → (mocked) Paratext choice → Source text */
 async function navigateToRunSource() {
-  // Click "Upload Files" card
-  fireEvent.click(screen.getByText("Upload Files"))
+  // Click the "Upload files" landing card
+  fireEvent.click(screen.getByText("Upload files"))
 
   // Trigger file input change → handleFiles → detectParatextProject returns a project
   const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
@@ -211,7 +211,7 @@ describe("FRO-277 — partial import holds dialog open", () => {
     setupParatextMocks([])
     render(<ImportDialog {...baseProps} />)
 
-    fireEvent.click(screen.getByText("Upload Files"))
+    fireEvent.click(screen.getByText("Upload files"))
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
     await act(async () => {
       Object.defineProperty(fileInput, "files", { value: [mockFile], configurable: true })

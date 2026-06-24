@@ -82,16 +82,9 @@ describe("CreditsPanel — renders for maintainer when data is present", () => {
     expect(screen.getByText("400 cr")).toBeInTheDocument()
   })
 
-  it("shows enforcement-off notice when enforce=false", async () => {
-    const data: OrgCredits = {
-      ...SAMPLE_DATA,
-      config: { ...SAMPLE_DATA.config, enforce: false },
-    }
-    mockGetOrgCredits.mockResolvedValue(data)
-    render(<CreditsPanel jwt="mgr-jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
-    await waitFor(() => expect(screen.getByTestId("credits-panel")).toBeInTheDocument())
-    expect(screen.getByText(/enforcement is off/i)).toBeInTheDocument()
-  })
+  // NOTE: the "Caps are display-only — enforcement is off" notice was intentionally
+  // removed in e92aacc49. The enforce=false state now renders no extra notice, so the
+  // former "shows enforcement-off notice" test was dropped rather than weakened.
 })
 
 describe("CreditsPanel — translator-never-sees-it invariant", () => {

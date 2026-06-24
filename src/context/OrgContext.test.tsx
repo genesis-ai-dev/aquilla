@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, act } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { OrgProvider, useActiveOrg } from "./OrgContext"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -27,14 +28,14 @@ afterEach(() => vi.restoreAllMocks())
 describe("OrgProvider", () => {
   it("loads multiple orgs and defaults to all organizations", async () => {
     listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }, { id: 2, name: "B", role: { level: 600, name: "maintainer" } }])
-    render(<OrgProvider><Probe /></OrgProvider>)
+    render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("2"))
     expect(screen.getByTestId("active").textContent).toBe("none")
     expect(screen.getByTestId("all").textContent).toBe("yes")
   })
   it("loads one org and defaults active to that org", async () => {
     listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
-    render(<OrgProvider><Probe /></OrgProvider>)
+    render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"))
     expect(screen.getByTestId("active").textContent).toBe("1")
     expect(screen.getByTestId("all").textContent).toBe("no")
@@ -42,7 +43,7 @@ describe("OrgProvider", () => {
   it("honors a persisted activeOrgId and re-persists on switch", async () => {
     localStorage.setItem("org:active", "2")
     listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }, { id: 2, name: "B", role: { level: 600, name: "maintainer" } }])
-    render(<OrgProvider><Probe /></OrgProvider>)
+    render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByTestId("active").textContent).toBe("2"))
     await act(async () => { screen.getByText("switch").click() })
     expect(localStorage.getItem("org:active")).toBe("2")
@@ -50,7 +51,7 @@ describe("OrgProvider", () => {
   it("persists all organizations as the active scope", async () => {
     localStorage.setItem("org:active", "2")
     listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }, { id: 2, name: "B", role: { level: 600, name: "maintainer" } }])
-    render(<OrgProvider><Probe /></OrgProvider>)
+    render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByTestId("active").textContent).toBe("2"))
     await act(async () => { screen.getByText("all").click() })
     expect(localStorage.getItem("org:active")).toBe("all")
@@ -59,7 +60,7 @@ describe("OrgProvider", () => {
   it("falls back to first org when the persisted id is stale", async () => {
     localStorage.setItem("org:active", "999")
     listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
-    render(<OrgProvider><Probe /></OrgProvider>)
+    render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByTestId("active").textContent).toBe("1"))
   })
 })

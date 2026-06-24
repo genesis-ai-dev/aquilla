@@ -132,7 +132,7 @@ describe("ProjectMembersPage", () => {
 
   it("shows 'Revoke all' button for members the caller can manage", () => {
     renderPage()
-    const revokeButtons = screen.getAllByTitle("Revoke all access to this project")
+    const revokeButtons = screen.getAllByRole("button", { name: /^revoke all$/i })
     // alice (self), bob, carol — but alice is the logged-in user and is
     // skipped for self. That check is null in mock (callerUserId=null),
     // so all members get the button in tests.
@@ -141,7 +141,7 @@ describe("ProjectMembersPage", () => {
 
   it("opens the revoke-all dialog when Revoke all is clicked", async () => {
     renderPage()
-    const revokeButtons = screen.getAllByTitle("Revoke all access to this project")
+    const revokeButtons = screen.getAllByRole("button", { name: /^revoke all$/i })
     fireEvent.click(revokeButtons[0])
     await waitFor(() => {
       expect(screen.getByText("Revoke all access")).toBeInTheDocument()
@@ -151,7 +151,7 @@ describe("ProjectMembersPage", () => {
   it("disables the confirm button until the username is typed", async () => {
     renderPage()
     // Open dialog for alice
-    const revokeButtons = screen.getAllByTitle("Revoke all access to this project")
+    const revokeButtons = screen.getAllByRole("button", { name: /^revoke all$/i })
     fireEvent.click(revokeButtons[0]) // opens dialog for alice
 
     await waitFor(() => {
@@ -175,7 +175,7 @@ describe("ProjectMembersPage", () => {
     const { revokeAllProjectAccess } = await import("@/lib/frontier/members")
     renderPage()
 
-    const revokeButtons = screen.getAllByTitle("Revoke all access to this project")
+    const revokeButtons = screen.getAllByRole("button", { name: /^revoke all$/i })
     fireEvent.click(revokeButtons[0])
 
     await waitFor(() => screen.getByText("Revoke all access"))

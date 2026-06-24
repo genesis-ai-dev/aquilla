@@ -75,7 +75,7 @@ beforeEach(() => {
 describe("Login page — rendering", () => {
   it("renders username/email and password fields", () => {
     renderLogin()
-    expect(screen.getByLabelText(/aquilla username or email/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/username or email/i)).toBeInTheDocument()
     // Use exact label text to avoid matching the 'Show password' aria-label button.
     expect(screen.getByLabelText("Password")).toBeInTheDocument()
   })
@@ -97,7 +97,7 @@ describe("Login page — success path", () => {
     mockLogin.mockResolvedValue({ username: "alice", jwt: "tok" })
     renderLogin()
 
-    fireEvent.change(screen.getByLabelText(/aquilla username or email/i), {
+    fireEvent.change(screen.getByLabelText(/username or email/i), {
       target: { value: "alice" },
     })
     fireEvent.change(screen.getByLabelText("Password"), {
@@ -121,7 +121,7 @@ describe("Login page — error handling", () => {
     mockLogin.mockRejectedValue(new FrontierAuthError("Invalid credentials", 401))
     renderLogin()
 
-    fireEvent.change(screen.getByLabelText(/aquilla username or email/i), {
+    fireEvent.change(screen.getByLabelText(/username or email/i), {
       target: { value: "alice" },
     })
     fireEvent.change(screen.getByLabelText("Password"), {
@@ -149,7 +149,7 @@ describe("Login page — forgot password flow", () => {
     expect(screen.getByText("Forgot password form")).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: /back to login/i }))
-    expect(screen.getByLabelText(/aquilla username or email/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/username or email/i)).toBeInTheDocument()
   })
 })
 
@@ -166,7 +166,7 @@ describe("Login page — next param", () => {
       </MemoryRouter>,
     )
 
-    fireEvent.change(screen.getByLabelText(/aquilla username or email/i), {
+    fireEvent.change(screen.getByLabelText(/username or email/i), {
       target: { value: "alice" },
     })
     fireEvent.change(screen.getByLabelText("Password"), {
@@ -183,7 +183,7 @@ describe("Login page — next param", () => {
     mockLogin.mockResolvedValue({ username: "alice", jwt: "tok" })
     renderLogin() // uses /login with no search params
 
-    fireEvent.change(screen.getByLabelText(/aquilla username or email/i), {
+    fireEvent.change(screen.getByLabelText(/username or email/i), {
       target: { value: "alice" },
     })
     fireEvent.change(screen.getByLabelText("Password"), {
@@ -206,7 +206,7 @@ describe("Login page — next param", () => {
       </MemoryRouter>,
     )
 
-    fireEvent.change(screen.getByLabelText(/aquilla username or email/i), {
+    fireEvent.change(screen.getByLabelText(/username or email/i), {
       target: { value: "alice" },
     })
     fireEvent.change(screen.getByLabelText("Password"), {

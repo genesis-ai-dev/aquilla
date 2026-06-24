@@ -200,9 +200,12 @@ describe("InterlinearAlignmentPanel — section header tooltip (FRO-241)", () =>
         onSeedChange={noop}
       />,
     )
-    // The span wrapping HelpCircle carries the tooltip in `title`.
+    // AppTooltip exposes its content via a `data-tooltip` attribute in test mode
+    // (tooltip.tsx) rather than a real `title` — the popup itself is portalled on hover.
     // The text must mention both confirm and reject/invalidate to satisfy FRO-240.
-    const helpSpan = screen.getByTitle(/confirm.*reject|reject.*confirm/i)
-    expect(helpSpan).toBeInTheDocument()
+    const helpSpan = Array.from(document.querySelectorAll("[data-tooltip]")).find((el) =>
+      /confirm.*reject|reject.*confirm/i.test(el.getAttribute("data-tooltip") ?? ""),
+    )
+    expect(helpSpan).toBeTruthy()
   })
 })

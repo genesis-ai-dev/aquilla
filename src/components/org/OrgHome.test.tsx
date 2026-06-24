@@ -59,6 +59,10 @@ vi.mock("@/lib/sync/invites", () => ({
 beforeEach(() => {
   localStorage.clear()
   mockUseFrontierSession.mockReturnValue({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false })
+  // Reset to the default (no invites); the pending-invites test overrides this.
+  // restoreAllMocks does not reset vi.fn implementations, so without this a
+  // mockResolvedValue set in one test would leak into the next.
+  listMyPendingInvitesMock.mockResolvedValue([])
 })
 afterEach(() => vi.restoreAllMocks())
 
@@ -81,7 +85,10 @@ describe("OrgHome", () => {
   // in-app — the email/link may never have arrived. Review & accept routes
   // to the /join/:token confirmation page (explicit accept per FRO-335).
   it("renders the Pending invitations card with a Review & accept link", async () => {
-    listMyPendingInvitesMock.mockResolvedValueOnce([
+    // mockResolvedValue (not ...Once): OrgHome's invite effect can run more than
+    // once (e.g. once before orgs load, once after), and a second call returning
+    // the default [] would unmount the card mid-assertion.
+    listMyPendingInvitesMock.mockResolvedValue([
       {
         token: "tok-pending-1",
         role: { level: 400, name: "contributor" },
@@ -92,11 +99,17 @@ describe("OrgHome", () => {
       },
     ])
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
-    const card = await screen.findByTestId("pending-invitations")
-    expect(card).toHaveTextContent("Ruth Translation")
-    expect(card).toHaveTextContent(/invited by wendi/i)
-    const link = screen.getByRole("link", { name: /review & accept/i })
-    expect(link.getAttribute("href")).toBe("/join/tok-pending-1")
+    // The page flashes "Loading…" while the portfolio effect settles, so the card
+    // and its link flicker on mount. Assert them together inside one waitFor so the
+    // checks all run against a single settled frame (a sync getByRole can otherwise
+    // catch a transient frame where the card is unmounted).
+    await waitFor(() => {
+      const card = screen.getByTestId("pending-invitations")
+      expect(card).toHaveTextContent("Ruth Translation")
+      expect(card).toHaveTextContent(/invited by wendi/i)
+      const link = screen.getByRole("link", { name: /review & accept/i })
+      expect(link.getAttribute("href")).toBe("/join/tok-pending-1")
+    })
   })
 
   it("renders no Pending invitations card when there are none", async () => {
@@ -128,6 +141,9 @@ describe("OrgHome", () => {
   })
 
   it("renders the stalled project before the fresh project (attention rank order)", async () => {
+    // The default lens is now "recent" (most-recently-edited first); this test
+    // specifically verifies the attention-rank ordering, so select that lens.
+    localStorage.setItem("org:all-projects:view", "attention")
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
 

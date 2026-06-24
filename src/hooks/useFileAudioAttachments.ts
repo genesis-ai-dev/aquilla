@@ -9,6 +9,8 @@ import { makeAudioSyncTokenFetcher } from "@/lib/audio/sync-token-fetcher"
 import { subscribeAudioAttachments, subscribeOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
 import { fetchFileAudioAttachments } from "@/lib/sync/cell-audio-read"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
+import type { CellData } from "@/hooks/useCells"
+import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
 
 export interface UseFileAudioAttachmentsResult {
   byCellId: Map<string, CellAudioEntry>
@@ -110,4 +112,36 @@ export function useFileAudioAttachments(
   }, [fileId])
 
   return { byCellId, isLoading, revalidate: doFetch }
+}
+
+// Fold the per-file audio read (`byCellId`) into a cell list, populating the
+// audio fields play-queue / the editor read off `CellData` (attachments,
+// selected slots, timings). Both the editor table and the playback bar hydrate
+// from this single source so their notion of "what's voiced" can't drift.
+export function mergeCellsWithAudio(
+  cells: CellData[],
+  byCellId: Map<string, CellAudioEntry>,
+): CellData[] {
+  if (byCellId.size === 0) return cells
+  return cells.map((c) => {
+    const entry = byCellId.get(c.id)
+    if (!entry) return c
+    const attachments: Record<string, CodexCellAttachment> = {}
+    for (const [audioId, a] of Object.entries(entry.attachments)) {
+      attachments[audioId] = {
+        url: a.url,
+        type: "audio",
+        ...(a.voiceId ? { voiceId: a.voiceId } : {}),
+        ...(a.referenceAudioId ? { referenceAudioId: a.referenceAudioId } : {}),
+        ...(a.durationMs != null ? { durationMs: a.durationMs } : {}),
+      }
+    }
+    return {
+      ...c,
+      attachments,
+      selectedAudioId: entry.selectedAudioId ?? undefined,
+      selectedGeneratedVoiceAudioId: entry.selectedGeneratedVoiceAudioId ?? undefined,
+      audioTimings: entry.audioTimings as Record<string, WordTiming[]>,
+    }
+  })
 }

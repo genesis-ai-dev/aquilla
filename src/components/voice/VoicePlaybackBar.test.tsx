@@ -5,8 +5,17 @@
  * volume) and that play-all is disabled when no line has voiced audio.
  */
 
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
+
+// No session → useFileAudioAttachments bails before any network read and
+// returns an empty map, so the player hydrates purely from the `cells` prop.
+// This isolates the transport/canPlay assertions from the audio-read hook
+// (which otherwise pulls in useFrontierSession → react-query).
+vi.mock("@/hooks/useFrontierSession", () => ({
+  useFrontierSession: () => ({ session: null, loading: false }),
+}))
+
 import { VoicePlaybackBar } from "./VoicePlaybackBar"
 import type { CellData } from "@/hooks/useCells"
 

@@ -17,6 +17,7 @@ import {
   skipBack, skipForward, startQueue, updateQueueCells, useQueueProgress, useQueueState,
 } from "@/lib/audio/play-queue"
 import { resolveCastVoice } from "@/lib/audio/voices"
+import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -39,9 +40,21 @@ function fmtTime(s: number): string {
   return `${m}:${sec.toString().padStart(2, "0")}`
 }
 
-export function VoicePlaybackBar({ cells, projectId, session, settings, onActiveCell }: Props) {
+export function VoicePlaybackBar({ cells: rawCells, projectId, session, settings, onActiveCell }: Props) {
   const queue = useQueueState()
   const { currentTime, duration, rate, volume } = useQueueProgress()
+
+  // The cells handed down from useCells carry no audio attachments — those are
+  // read per-file by useFileAudioAttachments and merged in (the editor table
+  // does the same). Hydrating here keeps the player subscribed to the audio
+  // bus, so generating/recording a take flips "No voiced lines yet" at once
+  // instead of staying stale until reload.
+  const fileId = rawCells[0]?.fileId ?? null
+  const { byCellId: audioByCellId } = useFileAudioAttachments(projectId, fileId)
+  const cells = useMemo(
+    () => mergeCellsWithAudio(rawCells, audioByCellId),
+    [rawCells, audioByCellId],
+  )
 
   const canPlay = useMemo(() => hasAnyPlayableAudio(cells), [cells])
   const activeIndex =

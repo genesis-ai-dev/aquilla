@@ -8,8 +8,7 @@ import {
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
-import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
-import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
+import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { getCellPref, setCellPref } from "@/lib/store/audio-cell-prefs"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy } from "@/lib/parsers/types"
@@ -550,30 +549,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // controllers (which read cell.attachments / selectedAudioId) light up.
   const audioFileId = cells[0]?.fileId ?? null
   const { byCellId: audioByCellId } = useFileAudioAttachments(project.id, audioFileId)
-  const cellsWithAudio = useMemo(() => {
-    if (audioByCellId.size === 0) return cells
-    return cells.map((c) => {
-      const entry = audioByCellId.get(c.id)
-      if (!entry) return c
-      const attachments: Record<string, CodexCellAttachment> = {}
-      for (const [audioId, a] of Object.entries(entry.attachments)) {
-        attachments[audioId] = {
-          url: a.url,
-          type: "audio",
-          ...(a.voiceId ? { voiceId: a.voiceId } : {}),
-          ...(a.referenceAudioId ? { referenceAudioId: a.referenceAudioId } : {}),
-          ...(a.durationMs != null ? { durationMs: a.durationMs } : {}),
-        }
-      }
-      return {
-        ...c,
-        attachments,
-        selectedAudioId: entry.selectedAudioId ?? undefined,
-        selectedGeneratedVoiceAudioId: entry.selectedGeneratedVoiceAudioId ?? undefined,
-        audioTimings: entry.audioTimings as Record<string, WordTiming[]>,
-      }
-    })
-  }, [cells, audioByCellId])
+  const cellsWithAudio = useMemo(
+    () => mergeCellsWithAudio(cells, audioByCellId),
+    [cells, audioByCellId],
+  )
 
   // Timeline-segment-model (Scope A): the rendered row list. For a `'time'`-
   // ordered file the Text/Audio toggle is a medium-LAYER switch — Text layer

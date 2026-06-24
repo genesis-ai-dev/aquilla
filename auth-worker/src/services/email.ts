@@ -65,7 +65,21 @@ function buildWelcomeHtml(
   username: string,
   appUrl: string,
   discordUrl?: string,
+  verifyUrl?: string,
 ): string {
+  const verifyBlock = verifyUrl
+    ? `
+          <p style="margin: 16px 0;">
+            One quick thing — confirm your email so you don't lose access to your
+            account:
+          </p>
+          <p style="margin: 16px 0; text-align: center;">
+            <a href="${verifyUrl}"
+               style="display: inline-block; padding: 10px 20px; background-color: #16a34a; color: white; text-decoration: none; border-radius: 6px;">
+              Verify my email
+            </a>
+          </p>`
+    : ""
   const communityBlock = discordUrl
     ? `
           <p style="margin: 16px 0;">
@@ -94,6 +108,7 @@ function buildWelcomeHtml(
           </p>
           <p>A good first step: create a project and import a source text, or invite
              your team if you're starting a project together.</p>
+          ${verifyBlock}
           ${communityBlock}
           <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
           <p style="color: #6b7280; font-size: 0.875rem;">
@@ -116,14 +131,16 @@ export async function sendWelcomeEmail(
   env: Env,
   toEmail: string,
   username: string,
+  verifyUrl?: string,
 ): Promise<void> {
   if (!env.EMAIL) return
   const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
   const appUrl = env.BASE_URL || "https://aquilla.app"
   const discordUrl = env.DISCORD_INVITE_URL
-  const html = buildWelcomeHtml(username, appUrl, discordUrl)
+  const html = buildWelcomeHtml(username, appUrl, discordUrl, verifyUrl)
   const text =
     `Welcome to Aquilla, ${username}! Open the app: ${appUrl}` +
+    (verifyUrl ? `\nVerify your email: ${verifyUrl}` : "") +
     (discordUrl ? `\nJoin our community: ${discordUrl}` : "") +
     `\n\nGot a question? Just reply to this email.`
   try {
@@ -166,6 +183,63 @@ export async function sendProjectInviteEmail(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     throw new Error(`Failed to send invite email: ${message}`)
+  }
+}
+
+function buildOrgInviteHtml(joinUrl: string, orgName: string): string {
+  return `
+    <html>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #111;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #2563eb; margin-bottom: 16px;">You've been invited to join ${orgName}</h2>
+          <p>You've been invited to join the <strong>${orgName}</strong> organization on Aquilla,
+             where translation teams work together.</p>
+          <p style="margin: 20px 0; text-align: center;">
+            <a href="${joinUrl}"
+               style="display: inline-block; padding: 12px 24px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 6px;">
+              Join ${orgName}
+            </a>
+          </p>
+          <p>Or copy and paste this link into your browser:</p>
+          <p style="background-color: #f3f4f6; padding: 10px; word-break: break-all;">
+            ${joinUrl}
+          </p>
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+          <p style="color: #6b7280; font-size: 0.875rem;">
+            If you weren't expecting this invitation, you can safely ignore this email.
+          </p>
+        </div>
+      </body>
+    </html>
+  `.trim()
+}
+
+/**
+ * Deliver an organization invitation. Best-effort — callers fire-and-forget via
+ * waitUntil; a missing EMAIL binding (local/e2e profiles) makes this a no-op so
+ * dev/test don't require email config.
+ */
+export async function sendOrgInviteEmail(
+  env: Env,
+  toEmail: string,
+  joinUrl: string,
+  orgName: string,
+): Promise<void> {
+  if (!env.EMAIL) return
+  const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
+  const html = buildOrgInviteHtml(joinUrl, orgName)
+  const text = `You've been invited to join ${orgName} on Aquilla. Join: ${joinUrl}`
+  try {
+    await env.EMAIL.send({
+      from,
+      to: [toEmail],
+      subject: `You've been invited to join ${orgName}`,
+      html,
+      text,
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    throw new Error(`Failed to send org invite email: ${message}`)
   }
 }
 

@@ -85,7 +85,7 @@ import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOve
 import { useComments } from "@/hooks/useComments"
 import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, Mic2, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose } from "lucide-react"
 import { ChatPanel } from "./ChatPanel"
-import { ChatDockPanel } from "./ChatDockPanel"
+import { AgentDockPanel } from "./AgentDockPanel"
 import { SearchDockPanel } from "./SearchDockPanel"
 import { SearchResultsView } from "./search/SearchResultsView"
 import { LeftDock, type DockTab } from "./LeftDock"
@@ -3206,10 +3206,8 @@ export function ProjectWorkspace() {
                 )}
               </div>
             }
-            chatPanel={
-              <ChatDockPanel
-                chat={chat}
-                onInsertIntoCell={handleChatInsertIntoCell}
+            agentPanel={
+              <AgentDockPanel
                 currentCell={(() => {
                   if (!focusedCellId) return null
                   const cell = cells.find((c) => c.id === focusedCellId)

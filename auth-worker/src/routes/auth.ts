@@ -98,12 +98,39 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
       throw new Error("Failed to create user in database")
     }
 
-    // Best-effort welcome email. sendWelcomeEmail no-ops without the EMAIL
-    // binding and swallows its own errors, so this can never fail or delay
-    // registration. waitUntil keeps a slow send off the response path in prod;
-    // the test harness has no ExecutionContext (the getter throws), so we let
-    // the promise settle on its own there.
-    const welcomePromise = sendWelcomeEmail(c.env, email, username)
+    // Mint a soft email-verification token and fold the verify link into the
+    // welcome email. Best-effort: a failure here must never break registration.
+    let verifyUrl: string | undefined
+    try {
+      const created = await c.env.AQUILLA_PG.prepare(
+        "SELECT id FROM users WHERE username = ?",
+      )
+        .bind(username)
+        .first<{ id: number }>()
+      if (created) {
+        const verifyToken = crypto.randomUUID().replace(/-/g, "")
+        const expiresAt = new Date(
+          Date.now() + 7 * 24 * 60 * 60 * 1000,
+        ).toISOString()
+        await c.env.AQUILLA_PG.prepare(
+          `INSERT INTO email_verification_tokens (user_id, token, expires_at)
+           VALUES (?, ?, ?)`,
+        )
+          .bind(created.id, verifyToken, expiresAt)
+          .run()
+        const baseUrl = c.env.BASE_URL || "https://aquilla.app"
+        verifyUrl = `${baseUrl}/verify-email?token=${verifyToken}`
+      }
+    } catch (err) {
+      console.warn("[verify] failed to mint verification token:", err)
+    }
+
+    // Best-effort welcome email (now carrying the verify link). sendWelcomeEmail
+    // no-ops without the EMAIL binding and swallows its own errors, so this can
+    // never fail or delay registration. waitUntil keeps a slow send off the
+    // response path in prod; the test harness has no ExecutionContext (the
+    // getter throws), so we let the promise settle on its own there.
+    const welcomePromise = sendWelcomeEmail(c.env, email, username, verifyUrl)
     try {
       c.executionCtx.waitUntil(welcomePromise)
     } catch {
@@ -238,6 +265,43 @@ auth.get("/me", authMiddleware, async (c) => {
     email: user.email,
     preferences: user.preferences,
   })
+})
+
+const verifyEmailSchema = z.object({ token: z.string().min(8) })
+
+// POST /api/v2/auth/verify-email — public; the token is the authorization.
+// Soft verification: stamps users.email_verified_at. The token is single-use
+// (deleted on success), so a second click returns 404 ("already used").
+auth.post("/verify-email", zValidator("json", verifyEmailSchema), async (c) => {
+  const { token } = c.req.valid("json")
+  const row = await c.env.AQUILLA_PG.prepare(
+    "SELECT user_id, expires_at FROM email_verification_tokens WHERE token = ?",
+  )
+    .bind(token)
+    .first<{ user_id: number; expires_at: string }>()
+  if (!row) {
+    return c.json({ error: "Invalid or already-used verification link" }, 404)
+  }
+  if (new Date(row.expires_at) < new Date()) {
+    await c.env.AQUILLA_PG.prepare(
+      "DELETE FROM email_verification_tokens WHERE token = ?",
+    )
+      .bind(token)
+      .run()
+    return c.json({ error: "Verification link expired" }, 410)
+  }
+  await c.env.AQUILLA_PG.prepare(
+    "UPDATE users SET email_verified_at = CURRENT_TIMESTAMP WHERE id = ?",
+  )
+    .bind(row.user_id)
+    .run()
+  // Clear all of this user's verification tokens — single-use + cleanup.
+  await c.env.AQUILLA_PG.prepare(
+    "DELETE FROM email_verification_tokens WHERE user_id = ?",
+  )
+    .bind(row.user_id)
+    .run()
+  return c.json({ verified: true })
 })
 
 interface ActivityLogRow {

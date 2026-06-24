@@ -123,6 +123,70 @@ export async function renameOrg(jwt: string, orgId: number, name: string): Promi
   if (!res.ok) throw new UserError(res.status, "", "org")
 }
 
+// ── Email-based org invitations (owner-only; backend: routes/orgs.ts) ──────
+
+export interface OrgInviteResult {
+  token: string;
+  orgId: number;
+  role: OrgRole;
+  expiresAt: string | null;
+  email?: string;
+}
+
+/** Mint an org invite. Pass an email to email-bind the invite and deliver it. */
+export async function createOrgInvite(
+  jwt: string,
+  orgId: number,
+  opts: { email?: string; role?: number; expiresInDays?: number | null } = {},
+): Promise<OrgInviteResult> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/invites`, {
+    method: "POST",
+    headers: authHeaders(jwt),
+    body: JSON.stringify({
+      ...(opts.email ? { email: opts.email } : {}),
+      ...(opts.role != null ? { role: opts.role } : {}),
+      ...(opts.expiresInDays !== undefined ? { expires_in_days: opts.expiresInDays } : {}),
+    }),
+  });
+  if (!res.ok) throw new UserError(res.status, "", "org");
+  return (await res.json()) as OrgInviteResult;
+}
+
+export interface ActiveOrgInvite {
+  token: string;
+  role: OrgRole;
+  email: string | null;
+  createdAt: string;
+  expiresAt: string | null;
+}
+
+export async function listOrgInvites(jwt: string, orgId: number): Promise<ActiveOrgInvite[]> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/invites`, { headers: authHeaders(jwt) });
+  if (!res.ok) throw new UserError(res.status, "", "org");
+  return ((await res.json()) as { invites: ActiveOrgInvite[] }).invites;
+}
+
+export async function revokeOrgInvite(jwt: string, orgId: number, token: string): Promise<void> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/invites/${token}`, { method: "DELETE", headers: authHeaders(jwt) });
+  if (!res.ok) throw new UserError(res.status, "", "org");
+}
+
+export interface AcceptOrgInviteResult {
+  orgId: number;
+  orgName: string | null;
+  role: OrgRole;
+}
+
+export async function acceptOrgInvite(jwt: string, token: string): Promise<AcceptOrgInviteResult> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/accept-invite`, {
+    method: "POST",
+    headers: authHeaders(jwt),
+    body: JSON.stringify({ token }),
+  });
+  if (!res.ok) throw new UserError(res.status, "", "org");
+  return (await res.json()) as AcceptOrgInviteResult;
+}
+
 export interface ProjectAccessBreakdown {
   projectId: string
   projectName: string

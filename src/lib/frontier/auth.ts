@@ -141,6 +141,30 @@ export async function verifyResetToken(token: string, username: string): Promise
 }
 
 /**
+ * Verify an email-verification token (soft verification).
+ * Server contract: POST /api/v2/auth/verify-email { token }
+ *   200 → { verified: true }
+ *   404 → invalid / already-used · 410 → expired
+ */
+export async function verifyEmail(token: string): Promise<void> {
+  const res = await fetch(`${AUTH_BASE}/api/v2/auth/verify-email`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  if (!res.ok) {
+    let message = "This verification link is invalid or has expired.";
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body.error) message = body.error;
+    } catch {
+      // keep generic
+    }
+    throw new FrontierAuthError(message, res.status);
+  }
+}
+
+/**
  * Perform the actual password reset.
  * Server contract: POST /api/v2/auth/password-reset/reset { token, username, new_password }
  *   200 → { message: "Password reset successful" }

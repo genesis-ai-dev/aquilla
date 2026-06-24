@@ -1,15 +1,15 @@
 /**
  * ChatPanel.test.tsx — chat UX improvements
  *
- * Both chat shells (Sheet + dock) must render assistant markdown and the
- * message actions through the shared chat components. The Sheet variant has
- * no UI entry point on main right now, so this test is its only coverage.
+ * The Sheet chat shell must render assistant markdown and the message actions
+ * through the shared chat components. The Sheet variant has no UI entry point
+ * on main right now (the left dock hosts the AI agent, not chat), so this test
+ * is its only coverage.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { ChatPanel } from "./ChatPanel"
-import { ChatDockPanel } from "./ChatDockPanel"
 import type { UseChatReturn, UiChatMessage, CellContext } from "@/hooks/useChat"
 
 const MD_REPLY = "## Notes\n\n- **bold** point\n\n```text\ncode line\n```"
@@ -85,33 +85,5 @@ describe("ChatPanel (sheet)", () => {
     expect(chat.sendMessage).not.toHaveBeenCalled()
     fireEvent.keyDown(ta, { key: "Enter" })
     expect(chat.sendMessage).toHaveBeenCalledWith("hello", null)
-  })
-})
-
-describe("ChatDockPanel (dock)", () => {
-  it("renders assistant markdown through the same shared components", () => {
-    render(<ChatDockPanel chat={makeChat()} currentCell={CELL} onInsertIntoCell={vi.fn()} />)
-    expect(screen.getByRole("heading", { name: "Notes" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Insert into cell" })).toBeInTheDocument()
-  })
-
-  it("shows failed messages with Retry and Dismiss", () => {
-    const failed: UiChatMessage = {
-      id: "f1",
-      role: "user",
-      content: "lost message",
-      ts: Date.now(),
-      status: "failed",
-      errorMessage: "Connection lost — retry?",
-      errorDetail: "Failed to fetch",
-    }
-    const chat = makeChat({ messages: [failed] })
-    render(<ChatDockPanel chat={chat} currentCell={null} />)
-    expect(screen.getByText("lost message")).toBeInTheDocument()
-    expect(screen.getByText("Connection lost — retry?")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: /Retry/ }))
-    expect(chat.retryMessage).toHaveBeenCalledWith("f1", null)
-    fireEvent.click(screen.getByRole("button", { name: /Dismiss/ }))
-    expect(chat.dismissMessage).toHaveBeenCalledWith("f1")
   })
 })

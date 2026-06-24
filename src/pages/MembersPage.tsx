@@ -18,6 +18,7 @@ import { useOrgInvites } from "@/hooks/useOrgInvites"
 import { MembersPanel, type MembersPanelMember } from "@/components/MembersPanel"
 import { MultiProjectInviteDialog } from "@/components/MultiProjectInviteDialog"
 import { RemoveOrgMemberDialog } from "@/components/RemoveOrgMemberDialog"
+import { OrgInviteByEmail } from "@/components/org/OrgInviteByEmail"
 import { MemberAccessRow } from "@/components/org/MemberAccessPanel"
 import { ExternalCollaboratorsSection } from "@/components/org/ExternalCollaboratorsSection"
 import { ROLE, ORG_ROLE_PICKER, roleName } from "@/lib/frontier/roles"
@@ -163,6 +164,10 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
         project; per-project access can be granted separately via the
         Invite-to-projects flow.
       </p>
+
+      {(activeOrg?.role.level ?? 0) >= ROLE.OWNER && (
+        <OrgInviteByEmail orgId={orgId} />
+      )}
 
       {/* Operational shortcuts */}
       <div className="mb-5 flex flex-wrap items-center gap-2">

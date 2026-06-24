@@ -41,6 +41,7 @@ import {
 } from "../services/project-permissions"
 import { lookupUserByUsername } from "../services/user-lookup"
 import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services/assignments"
+import { sendOrgInviteEmail } from "../services/email"
 
 const orgs = new Hono<AuthHonoEnv>()
 
@@ -423,6 +424,233 @@ orgs.post(
     })
   },
 )
+
+// ── Email-based organization invitations ──────────────────────────────────
+//   POST   /:orgId/invites          owner mints a tokenized (optionally
+//                                    email-bound) invite, best-effort email
+//   GET    /:orgId/invites          owner lists active (unused + unexpired)
+//   DELETE /:orgId/invites/:token   owner revokes an unused invite
+//   POST   /accept-invite           invitee redeems → org_members grant
+//
+// Mirrors the project-invite flow (routes/projects.ts) but org-scoped. Granted
+// role is capped below OWNER so an org can't be handed over via a leaked link.
+
+interface OrgInviteRow {
+  token: string
+  org_id: number
+  role_level: number
+  created_by: number
+  created_at: string
+  expires_at: string | null
+  used_by: number | null
+  used_at: string | null
+  email: string | null
+}
+
+const createOrgInviteBody = z.object({
+  // Org-grantable levels only; OWNER (700) is never grantable via link.
+  role: z.number().int().min(100).max(600).optional(),
+  email: z.string().email().optional(),
+  // null = no expiry; undefined = server default (30 days).
+  expires_in_days: z.number().int().min(1).max(365).nullable().optional(),
+})
+
+const acceptOrgInviteBody = z.object({ token: z.string().min(8) })
+
+orgs.post("/:orgId/invites", zValidator("json", createOrgInviteBody), async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+
+  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
+  if (callerRole == null || callerRole < ROLE.OWNER) {
+    return c.json({ error: "only org owners can invite members" }, 403)
+  }
+
+  const { role, email, expires_in_days } = c.req.valid("json")
+  let grantedRole = role ?? ROLE.CONTRIBUTOR
+  if (grantedRole >= ROLE.OWNER) grantedRole = ROLE.MAINTAINER
+  if (grantedRole < ROLE.VIEWER) grantedRole = ROLE.VIEWER
+
+  const token = crypto.randomUUID().replace(/-/g, "")
+  const expiresAt =
+    expires_in_days === null
+      ? null
+      : new Date(
+          Date.now() + (expires_in_days !== undefined ? expires_in_days : 30) * 24 * 60 * 60 * 1000,
+        ).toISOString()
+
+  try {
+    await c.env.AQUILLA_PG.prepare(
+      `INSERT INTO org_invites
+         (token, org_id, role_level, created_by, expires_at, email)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(token, orgId, grantedRole, user.id, expiresAt, email ?? null)
+      .run()
+  } catch (err) {
+    console.error("[org-invites] create failed:", err)
+    return c.json({ error: "Failed to create invite" }, 500)
+  }
+
+  if (email) {
+    const baseUrl = c.env.BASE_URL || "https://aquilla.app"
+    const joinUrl = `${baseUrl}/join-org/${token}`
+    const org = await c.env.AQUILLA_PG.prepare(
+      "SELECT name FROM organizations WHERE id = ?",
+    )
+      .bind(orgId)
+      .first<{ name: string | null }>()
+    const emailPromise = sendOrgInviteEmail(
+      c.env,
+      email,
+      joinUrl,
+      org?.name ?? "an organization",
+    ).catch((err) => console.warn("[org-invites] invite email failed:", err))
+    try {
+      c.executionCtx.waitUntil(emailPromise)
+    } catch {
+      void emailPromise
+    }
+  }
+
+  return c.json({
+    token,
+    orgId,
+    role: { level: grantedRole, name: ROLE_NAMES[grantedRole] ?? "unknown" },
+    expiresAt,
+    ...(email ? { email } : {}),
+  })
+})
+
+orgs.get("/:orgId/invites", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+
+  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
+  if (callerRole == null || callerRole < ROLE.OWNER) {
+    return c.json({ error: "only org owners can view invites" }, 403)
+  }
+
+  const rows = await c.env.AQUILLA_PG.prepare(
+    `SELECT token, role_level, created_at, expires_at, email
+     FROM org_invites
+     WHERE org_id = ?
+       AND used_at IS NULL
+       AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+     ORDER BY created_at DESC`,
+  )
+    .bind(orgId)
+    .all<{
+      token: string
+      role_level: number
+      created_at: string
+      expires_at: string | null
+      email: string | null
+    }>()
+
+  return c.json({
+    invites: (rows.results ?? []).map((r) => ({
+      token: r.token,
+      role: { level: r.role_level, name: ROLE_NAMES[r.role_level] ?? "unknown" },
+      createdAt: r.created_at,
+      expiresAt: r.expires_at,
+      email: r.email ?? null,
+    })),
+  })
+})
+
+orgs.delete("/:orgId/invites/:token", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+  const token = c.req.param("token")
+
+  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
+  if (callerRole == null || callerRole < ROLE.OWNER) {
+    return c.json({ error: "only org owners can revoke invites" }, 403)
+  }
+
+  await c.env.AQUILLA_PG.prepare(
+    `DELETE FROM org_invites WHERE token = ? AND org_id = ? AND used_at IS NULL`,
+  )
+    .bind(token, orgId)
+    .run()
+  return c.json({ ok: true })
+})
+
+orgs.post("/accept-invite", zValidator("json", acceptOrgInviteBody), async (c) => {
+  const user = c.get("user")
+  const { token } = c.req.valid("json")
+
+  const invite = await c.env.AQUILLA_PG.prepare(
+    `SELECT token, org_id, role_level, created_by, created_at,
+            expires_at, used_by, used_at, email
+     FROM org_invites WHERE token = ?`,
+  )
+    .bind(token)
+    .first<OrgInviteRow>()
+  if (!invite) return c.json({ error: "Invite not found" }, 404)
+  if (invite.expires_at && new Date(invite.expires_at) < new Date()) {
+    return c.json({ error: "Invite expired" }, 410)
+  }
+  if (invite.used_at && invite.used_by !== user.id) {
+    return c.json({ error: "Invite already used" }, 410)
+  }
+  // Email-bound invites: the redeemer's account email must match (case-insensitive).
+  if (invite.email && invite.email.toLowerCase() !== user.email.toLowerCase()) {
+    return c.json(
+      { error: "This invite was sent to a different email address." },
+      403,
+    )
+  }
+
+  const org = await c.env.AQUILLA_PG.prepare(
+    "SELECT id, name FROM organizations WHERE id = ?",
+  )
+    .bind(invite.org_id)
+    .first<{ id: number; name: string | null }>()
+  if (!org) return c.json({ error: "Organization not found" }, 404)
+
+  const existing = await c.env.AQUILLA_PG.prepare(
+    "SELECT role_level FROM org_members WHERE org_id = ? AND user_id = ?",
+  )
+    .bind(invite.org_id, user.id)
+    .first<{ role_level: number }>()
+  const finalRole = existing
+    ? Math.max(existing.role_level, invite.role_level)
+    : invite.role_level
+
+  try {
+    await c.env.AQUILLA_PG.prepare(
+      `INSERT INTO org_members (org_id, user_id, role_level, granted_by)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(org_id, user_id) DO UPDATE SET
+         role_level = excluded.role_level,
+         granted_by = excluded.granted_by,
+         granted_at = CURRENT_TIMESTAMP`,
+    )
+      .bind(invite.org_id, user.id, finalRole, invite.created_by)
+      .run()
+    // Atomic stamp: only the first concurrent redeemer wins.
+    await c.env.AQUILLA_PG.prepare(
+      `UPDATE org_invites SET used_by = ?, used_at = CURRENT_TIMESTAMP
+       WHERE token = ? AND used_at IS NULL`,
+    )
+      .bind(user.id, token)
+      .run()
+  } catch (err) {
+    console.error("[org-invites] accept failed:", err)
+    return c.json({ error: "Failed to accept invite" }, 500)
+  }
+
+  return c.json({
+    orgId: invite.org_id,
+    orgName: org.name,
+    role: { level: finalRole, name: ROLE_NAMES[finalRole] ?? "unknown" },
+  })
+})
 
 /** DELETE /api/v2/orgs/:orgId/members/:userId — owner-only. */
 orgs.delete("/:orgId/members/:userId", async (c) => {

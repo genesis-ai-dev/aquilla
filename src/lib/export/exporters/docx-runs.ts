@@ -30,6 +30,41 @@ export function htmlToSpans(html: string): Span[] {
   return spans.filter(s => s.text.length > 0)
 }
 
+function escapeXml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+}
+
+const MARK_TO_TAG: Partial<Record<Mark, string>> = {
+  b: "<w:b/>", i: "<w:i/>", u: '<w:u w:val="single"/>', s: "<w:strike/>", // code → none
+}
+
+/**
+ * String-based run builder: returns clean OOXML run markup with NO xmlns pollution.
+ *
+ * We build strings rather than DOM nodes precisely to avoid XMLSerializer emitting
+ * `xmlns:w="…"` on spliced fragments (which causes blank rendering in Apple Pages).
+ *
+ * @param spans - from htmlToSpans(); translator's inline formatting wins.
+ * @param baseRprXml - verbatim `<w:rPr>…</w:rPr>` of the paragraph's first text run,
+ *   or null. Translator toggles are spliced in before `</w:rPr>`.
+ */
+export function spansToRunXml(spans: Span[], baseRprXml: string | null): string {
+  return spans.map((span) => {
+    const toggles = (["b", "i", "u", "s"] as Mark[])
+      .filter((m) => span.marks.has(m)).map((m) => MARK_TO_TAG[m]).join("")
+    let rPr = ""
+    if (baseRprXml) {
+      // splice toggles in just before the closing </w:rPr> (or expand a self-closed base)
+      rPr = baseRprXml.includes("</w:rPr>")
+        ? baseRprXml.replace("</w:rPr>", `${toggles}</w:rPr>`)
+        : `<w:rPr>${toggles}</w:rPr>` // base was <w:rPr/> or empty
+    } else if (toggles) {
+      rPr = `<w:rPr>${toggles}</w:rPr>`
+    }
+    return `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(span.text)}</w:t></w:r>`
+  }).join("")
+}
+
 export function spansToRuns(doc: Document, spans: Span[], baseRpr: Element | null): Element[] {
   return spans.map(span => {
     const run = doc.createElementNS(W_NS, "w:r")

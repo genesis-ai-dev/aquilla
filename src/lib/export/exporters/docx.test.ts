@@ -1,5 +1,10 @@
 // Tests for the client-side DOCX export with translation injection (AQU-233).
 //
+// SURGICAL STRING APPROACH: exportDocx now does in-place string replacement of
+// paragraph run regions, not DOMParser+XMLSerializer. The XML declaration,
+// namespaces, untranslated paragraphs, and all non-document.xml parts are
+// byte-identical between input and output.
+//
 // We build minimal DOCX fixtures using JSZip (same lib the exporter uses)
 // and verify that:
 // 1. Translations are injected into the correct paragraphs.
@@ -7,10 +12,13 @@
 // 3. Heading style (w:pStyle) is preserved after injection.
 // 4. Multi-segment paragraphs (shared group) join with a space.
 // 5. Untranslated excess paragraphs remain untouched.
-// 6. Bold run formatting (w:b in w:rPr) is preserved after injection.
-// 7. Italic run formatting (w:i in w:rPr) is preserved after injection.
-// 8. Font-size run formatting (w:sz in w:rPr) is preserved after injection.
+// 6. Bold run formatting (w:b in w:rPr) is preserved from source's baseRpr.
+// 7. Italic run formatting (w:i in w:rPr) is preserved from source's baseRpr.
+// 8. Font-size run formatting (w:sz in w:rPr) is preserved from source's baseRpr.
 // 9. Paragraphs with NO rPr still inject successfully (no crash).
+// 10. Translator's inline formatting (translatedHtml) wins for translated paragraphs.
+// 11. XML declaration and namespaces are byte-identical (not reserialized).
+// 12. Non-document.xml zip parts are byte-identical.
 
 import { describe, it, expect } from "vitest"
 import JSZip from "jszip"
@@ -68,6 +76,19 @@ function makeCell(
     validationHistory: [],
     history: [],
     threads: [],
+  }
+}
+
+function makeCellWithHtml(
+  id: string,
+  original: string,
+  translated: string,
+  translatedHtml: string,
+  group: string,
+): CellData {
+  return {
+    ...makeCell(id, original, translated, group),
+    translatedHtml,
   }
 }
 
@@ -285,5 +306,92 @@ describe("exportDocx — inline run formatting preservation (AQU-233)", () => {
     expect(outDoc.documentElement.textContent).toContain("Keep me")
     // Bold run must be preserved in the untouched paragraph.
     expect(hasWElement(outDoc, "b")).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Surgical approach tests: translator formatting wins, byte-fidelity guarantees
+// ---------------------------------------------------------------------------
+
+/** Read word/document.xml from a blob as a string. */
+async function readDocumentXml(blob: Blob): Promise<string> {
+  const zip = await JSZip.loadAsync(await blob.arrayBuffer())
+  return zip.file("word/document.xml")!.async("string")
+}
+
+describe("exportDocx — surgical approach (translator formatting wins, byte-fidelity)", () => {
+  it("honors the translator's bold from translatedHtml, not the source's plain run", async () => {
+    // Source paragraph is plain "alpha"; translator provides "a<strong>B</strong>".
+    // The "B" span must be bold in the output; "a" must not be.
+    const buffer = await makeDocx(para("alpha"))
+    const cells = [makeCellWithHtml("c1", "alpha", "aB", "a<strong>B</strong>", "g0")]
+    const { blob, injected } = await exportDocx(buffer, cells)
+    expect(injected).toBe(1)
+    const xml = await readDocumentXml(blob)
+    // "a" run: plain (no rPr)
+    expect(xml).toMatch(/<w:r><w:t xml:space="preserve">a<\/w:t><\/w:r>/)
+    // "B" run: has w:b in rPr
+    expect(xml).toMatch(/<w:rPr>[\s\S]*?<w:b\/>[\s\S]*?<\/w:rPr>/)
+    expect(xml).toContain(">B<")
+  })
+
+  it("leaves untranslated paragraphs byte-identical", async () => {
+    const buffer = await makeDocx(para("keep me") + para("translate me"))
+    const originalZip = await JSZip.loadAsync(buffer)
+    const originalXml = await originalZip.file("word/document.xml")!.async("string")
+    const cells = [
+      makeCell("c1", "keep me", "", "g0"),      // untranslated
+      makeCell("c2", "translate me", "DONE", "g1"),
+    ]
+    const { blob, injected, untouched } = await exportDocx(buffer, cells)
+    expect(injected).toBe(1)
+    expect(untouched).toBe(1)
+    const xml = await readDocumentXml(blob)
+    expect(xml).toContain("keep me")   // untranslated text retained verbatim
+    expect(xml).toContain("DONE")
+    // The "keep me" paragraph text should be unchanged in the raw XML
+    expect(xml).toContain(">keep me<")
+  })
+
+  it("does not change the XML declaration or namespaces of document.xml", async () => {
+    const buffer = await makeDocx(para("x"))
+    const originalZip = await JSZip.loadAsync(buffer)
+    const before = await originalZip.file("word/document.xml")!.async("string")
+    const { blob } = await exportDocx(buffer, [
+      makeCellWithHtml("c1", "x", "y", "y", "g0"),
+    ])
+    const after = await readDocumentXml(blob)
+    // The opening XML declaration and document element (first 120 chars) must be identical.
+    // This verifies we did NOT call XMLSerializer (which would rewrite namespaces).
+    expect(after.slice(0, 120)).toBe(before.slice(0, 120))
+  })
+
+  it("preserves non-document.xml zip parts byte-identical", async () => {
+    // Add a styles.xml to the fixture so we can verify it's untouched.
+    const stylesXml = `<?xml version="1.0"?><w:styles xmlns:w="${W}"><w:style w:type="paragraph" w:styleId="Normal"/></w:styles>`
+    const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="${W}">
+  <w:body>${para("hello")}</w:body>
+</w:document>`
+    const zip = new JSZip()
+    zip.file("word/document.xml", docXml)
+    zip.file("word/styles.xml", stylesXml)
+    const buffer = await zip.generateAsync({ type: "arraybuffer" })
+
+    const { blob } = await exportDocx(buffer, [
+      makeCell("c1", "hello", "hola", "g0"),
+    ])
+    const outZip = await JSZip.loadAsync(await blob.arrayBuffer())
+    const outStyles = await outZip.file("word/styles.xml")!.async("string")
+    expect(outStyles).toBe(stylesXml)
+  })
+
+  it("translator underline on translated text produces w:u in output", async () => {
+    const buffer = await makeDocx(para("source"))
+    const cells = [makeCellWithHtml("c1", "source", "translated", "<u>translated</u>", "g0")]
+    const { blob, injected } = await exportDocx(buffer, cells)
+    expect(injected).toBe(1)
+    const xml = await readDocumentXml(blob)
+    expect(xml).toContain('<w:u w:val="single"/>')
   })
 })

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { htmlToSpans, spansToRuns } from "./docx-runs"
+import { htmlToSpans, spansToRuns, spansToRunXml } from "./docx-runs"
 
 describe("htmlToSpans", () => {
   it("plain text → one markless span", () => {
@@ -25,6 +25,36 @@ describe("htmlToSpans", () => {
     expect(spans[0].marks.size).toBe(0)
     expect([...spans[1].marks]).toEqual(["b"])
     expect(spans[2].marks.size).toBe(0)
+  })
+})
+
+describe("spansToRunXml", () => {
+  it("builds clean run XML with no xmlns pollution", () => {
+    const xml = spansToRunXml(htmlToSpans("a<strong>B</strong>"), null)
+    expect(xml).not.toMatch(/xmlns/) // critical: no namespace decls in spliced fragment
+    expect(xml).toMatch(/<w:r><w:t xml:space="preserve">a<\/w:t><\/w:r>/)
+    expect(xml).toMatch(/<w:r><w:rPr><w:b\/><\/w:rPr><w:t xml:space="preserve">B<\/w:t><\/w:r>/)
+  })
+
+  it("splices translator toggles into a cloned baseRpr", () => {
+    const xml = spansToRunXml(htmlToSpans("<em>x</em>"), '<w:rPr><w:sz w:val="24"/></w:rPr>')
+    // base font size kept AND italic added
+    expect(xml).toContain('<w:sz w:val="24"/>')
+    expect(xml).toContain("<w:i/>")
+  })
+
+  it("escapes XML special chars in text", () => {
+    expect(spansToRunXml(htmlToSpans("a & b < c"), null)).toContain("a &amp; b &lt; c")
+  })
+
+  it("emits no rPr when no toggles and no base", () => {
+    const xml = spansToRunXml([{ text: "plain", marks: new Set() }], null)
+    expect(xml).toBe('<w:r><w:t xml:space="preserve">plain</w:t></w:r>')
+  })
+
+  it("handles self-closed baseRpr (<w:rPr/>) by expanding it with toggles", () => {
+    const xml = spansToRunXml(htmlToSpans("<strong>x</strong>"), "<w:rPr/>")
+    expect(xml).toContain("<w:rPr><w:b/></w:rPr>")
   })
 })
 

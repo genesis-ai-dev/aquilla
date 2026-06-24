@@ -1,43 +1,56 @@
-// Client-side DOCX export with translation injection.
+// Client-side DOCX export with translation injection — SURGICAL STRING APPROACH.
 //
-// AQU-233: Export formats that preserve paragraph/heading structure from the
-// imported DOCX side-car. The server-side export route serves the raw DOCX
-// bytes for files with format="docx" (X-Export-Mode: raw-sidecar). The client
-// then uses JSZip to open the DOCX, substitutes translations paragraph-by-
-// paragraph, and produces a new .docx file.
+// ## Approach: surgical string-level run reinsertion (codex-editor parity)
 //
-// Fidelity levels:
-//   1. Paragraph/heading STRUCTURE is preserved (w:p elements, w:pStyle).
-//   2. DOMINANT RUN character formatting (w:rPr) is preserved on the injected
-//      run — bold, italic, underline, font-size, font family etc. survive at
-//      the level of the paragraph's first/dominant run.
-//   3. MIXED-FORMAT paragraphs (multiple differently-formatted runs) are
-//      collapsed to a single run carrying the dominant run's formatting.
+// This exporter deliberately does NOT parse `word/document.xml` with DOMParser and
+// reserialize the whole document with XMLSerializer. Full reserialisation produces
+// blank rendering in Apple Pages because XMLSerializer injects `xmlns:w="…"` namespace
+// declarations on every spliced fragment. The mature codex-editor desktop app
+// (webviews/.../importers/docx/docxExporter.ts) discovered this and instead does
+// surgical string-level replacement of paragraph content, leaving every other byte
+// in the XML byte-for-byte identical. We mirror that strategy here.
 //
-// SWARM-TODO (AQU-233): Mixed-format paragraphs — a paragraph with e.g.
-//   "Hello <bold>world</bold> today" contains two differently-formatted runs.
-//   After injection the entire translated paragraph gets the first run's rPr,
-//   so the bold mid-paragraph emphasis is lost. Fixing this requires tracking a
-//   per-run text→format map at import time and storing it alongside the cells
-//   so the exporter can reconstruct a multi-run paragraph. That work is
-//   deferred. Untranslated paragraphs keep ALL their original runs untouched.
+// Only the run region of *translated* paragraphs changes; the XML declaration,
+// namespace declarations, w:pPr, untranslated paragraphs, and all non-document.xml
+// zip parts are byte-identical between input and output.
+//
+// We EXCEED codex-editor by rebuilding runs from the translator's own `translatedHtml`
+// (codex-editor kept source-run formatting). The contract: translator's inline styling
+// wins. htmlToSpans() → spansToRunXml() produces clean OOXML run strings without any
+// xmlns pollution, which are spliced in as raw strings — no DOM serialization involved.
+//
+// ## Alternative (not used): DOM rebuild
+//
+// A simpler approach is to DOMParser.parseFromString the XML, mutate the DOM,
+// and XMLSerializer.serializeToString it back. The Element-based `spansToRuns` in
+// `docx-runs.ts` is the primitive that approach would use and is retained there for
+// reference. It is NOT used here because of the Apple Pages blank-render bug above.
+//
+// ## AQU-233: DOCX round-trip fidelity
+//
+// Fidelity levels achieved with this approach:
+//   1. Paragraph/heading STRUCTURE preserved (w:p elements, w:pStyle, w:pPr).
+//   2. Dominant run character formatting (first text-run's w:rPr) preserved on
+//      all injected runs (bold, italic, font-size, font-family, …).
+//   3. Translator's INLINE markup (bold, italic, underline, strikethrough from
+//      translatedHtml) is rebuilt run-by-run — translator formatting wins.
+//   4. Untranslated paragraphs and all other zip parts are byte-identical.
+//
+// Fidelity report (warnings): a source paragraph that carried MIXED run formatting
+// (multiple distinct w:rPr signatures across its text-bearing runs) is re-injected
+// with only the dominant (first) run's rPr as the base. That source-side simplification
+// is surfaced per-segment via the `warnings` array so the export UI can tell users
+// which segments were flattened. (Consumed by ExportDialog's inline-style fidelity band.)
 //
 // What is NOT achievable in this slice:
-// - Mixed-format per-run preservation within a single translated paragraph
-//   (see SWARM-TODO above)
 // - PPTX (separate issue AQU-152a)
 // - Files > 512 KB at import time (no side-car stored; falls back to 501)
-//
-// HONESTY: this does not fully meet "export preserves formatting" for mixed
-// inline bold/italic on translated paragraphs. It DOES meet the structural
-// claim (headings, paragraph order) and preserves dominant run character
-// formatting (bold, italic, font) — a meaningful improvement over the previous
-// complete-drop behaviour.
 
 import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
+import { htmlToSpans, spansToRunXml } from "./docx-runs"
 
-const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 export interface DocxExportResult {
   blob: Blob
@@ -46,7 +59,7 @@ export interface DocxExportResult {
   /** Number of paragraphs that were left as-is (no translation). */
   untouched: number
   /** Per-paragraph inline-style warnings: translated paragraphs whose source
-   *  had MIXED run formatting keep only the dominant run's styling —
+   *  had MIXED run formatting keep only the dominant run's styling as the base —
    *  surfaced so users know the output was simplified (additive field). */
   warnings: { segment: string; detail: string }[]
 }
@@ -54,16 +67,17 @@ export interface DocxExportResult {
 /**
  * Takes the raw DOCX bytes (fetched from the server side-car) and a list of
  * source cells with their translations. Injects translations back into
- * word/document.xml by matching paragraphs in document order.
+ * word/document.xml by matching paragraphs in document order (POSITIONAL).
  *
  * Cell ordering: cells are provided in document order. Each unique `group`
  * value corresponds to one source paragraph. Multiple cells with the same
  * `group` are segments of the same paragraph and are joined with a space.
  *
- * The DOCX paragraphs are matched positionally: the first non-empty paragraph
- * in the DOCX maps to the first unique group in cells, the second to the
- * second, and so on. Untranslated cells (empty `translated`) leave the
- * paragraph unchanged.
+ * Matching: the Nth non-empty `<w:p>` in the XML maps to the Nth unique cell
+ * group in document order. (source_location/blockPath was deferred in Task 5.)
+ *
+ * A paragraph is "non-empty" iff its inner content contains a `<w:t…>…</w:t>`
+ * with non-whitespace text.
  */
 export async function exportDocx(
   rawDocxBytes: ArrayBuffer,
@@ -71,204 +85,215 @@ export async function exportDocx(
 ): Promise<DocxExportResult> {
   const zip = await JSZip.loadAsync(rawDocxBytes)
 
-  const xmlStr = await zip.file("word/document.xml")?.async("string")
-  if (!xmlStr) {
+  const xml = await zip.file("word/document.xml")?.async("string")
+  if (!xml) {
     throw new Error("Malformed DOCX: word/document.xml not found in side-car")
   }
 
-  // Build a map: group → joined translation text.
-  // Groups appear in cells in document order; we preserve that order.
-  const groupOrder: string[] = []
-  const groupToTranslation = new Map<string, string>()
+  // Build ordered groups and their translations/html from cells in document order.
+  const groups: string[] = []
+  const groupToData = new Map<string, { html: string; plain: string }>()
 
   for (const cell of cells) {
-    if (!groupToTranslation.has(cell.group)) {
-      groupOrder.push(cell.group)
-      groupToTranslation.set(cell.group, "")
+    if (!groupToData.has(cell.group)) {
+      groups.push(cell.group)
+      groupToData.set(cell.group, { html: "", plain: "" })
     }
-    if (cell.translated.trim()) {
-      const existing = groupToTranslation.get(cell.group) ?? ""
-      groupToTranslation.set(
-        cell.group,
-        existing ? `${existing} ${cell.translated.trim()}` : cell.translated.trim(),
-      )
+    const data = groupToData.get(cell.group)!
+    if (cell.translated?.trim()) {
+      const prev = data.plain
+      data.plain = prev ? `${prev} ${cell.translated.trim()}` : cell.translated.trim()
+    }
+    if (cell.translatedHtml?.trim()) {
+      const prev = data.html
+      data.html = prev ? `${prev} ${cell.translatedHtml.trim()}` : cell.translatedHtml.trim()
     }
   }
 
-  // Parse XML.
-  const parser = new DOMParser()
-  const doc = parser.parseFromString(xmlStr, "application/xml")
-  const body = doc.getElementsByTagNameNS(W_NS, "body")[0]
-    || doc.getElementsByTagName("w:body")[0]
+  // Surgical paragraph scan: match both full <w:p …>…</w:p> and self-closing <w:p …/>.
+  // We do NOT use DOMParser/XMLSerializer — raw string splice only.
+  const paraRegex = /<w:p\b[^>]*\/?>(?:[\s\S]*?<\/w:p>)?/g
 
-  if (!body) {
-    throw new Error("Malformed DOCX: w:body not found in document.xml")
-  }
-
-  const paragraphs = Array.from(doc.getElementsByTagName("w:p"))
-
-  // Filter to non-empty paragraphs (mirrors the import parser's skip-empty logic).
-  const nonEmptyParas = paragraphs.filter((p) => {
-    const runs = p.getElementsByTagName("w:r")
-    for (let i = 0; i < runs.length; i++) {
-      const textEls = runs[i].getElementsByTagName("w:t")
-      for (let j = 0; j < textEls.length; j++) {
-        if (textEls[j].textContent?.trim()) return true
-      }
-    }
-    return false
-  })
-
+  let rebuilt = ""
+  let lastIndex = 0
+  let nonEmptyIdx = 0
   let injected = 0
   let untouched = 0
   const warnings: { segment: string; detail: string }[] = []
+  let match: RegExpExecArray | null
 
-  // Match non-empty paragraphs to groups positionally.
-  for (let i = 0; i < nonEmptyParas.length; i++) {
-    const group = groupOrder[i]
+  while ((match = paraRegex.exec(xml)) !== null) {
+    const full = match[0]
+    const matchStart = match.index
+
+    // Copy the slice before this match verbatim.
+    rebuilt += xml.slice(lastIndex, matchStart)
+    lastIndex = matchStart + full.length
+
+    // Determine if this is a self-closing paragraph (no inner content).
+    const isSelfClosing = /^<w:p\b[^>]*\/>$/.test(full.trim())
+    const inner = isSelfClosing ? "" : extractInner(full)
+
+    // A paragraph is non-empty iff it has a <w:t …>…</w:t> with non-whitespace text.
+    const isEmpty = !/<w:t[^>]*>([^<]*)<\/w:t>/.test(inner) ||
+      !inner.match(/<w:t[^>]*>([^<]*)<\/w:t>/g)?.some(m => {
+        const textMatch = m.match(/<w:t[^>]*>([^<]*)<\/w:t>/)
+        return textMatch && textMatch[1].trim().length > 0
+      })
+
+    if (isEmpty) {
+      // Empty paragraph: pass through unchanged, do not increment nonEmptyIdx.
+      rebuilt += full
+      continue
+    }
+
+    // Non-empty paragraph: map to the Nth group.
+    const group = groups[nonEmptyIdx]
+    nonEmptyIdx++
+
     if (!group) {
-      untouched++
-      continue
-    }
-    const translation = groupToTranslation.get(group) ?? ""
-    if (!translation) {
+      rebuilt += full
       untouched++
       continue
     }
 
-    // Replace paragraph runs with a single run carrying the translated text.
-    // We keep the w:pPr (paragraph properties = style) intact.
-    const p = nonEmptyParas[i]
-    if (countDistinctRunFormats(p) > 1) {
+    const data = groupToData.get(group)!
+    // Use html if available, fall back to plain text. Skip if both empty.
+    const html = data.html || data.plain
+    if (!html) {
+      rebuilt += full
+      untouched++
+      continue
+    }
+
+    // Extract the leading pPr block verbatim (the paragraph's style/spacing).
+    const pPrXml = extractPPr(inner)
+
+    // Extract baseRprXml: the FIRST TEXT-RUN's <w:rPr>…</w:rPr> from the inner
+    // content AFTER the pPr block (NOT the paragraph-mark rPr inside pPr).
+    const innerAfterPPr = pPrXml ? inner.slice(inner.indexOf(pPrXml) + pPrXml.length) : inner
+    const baseRprXml = extractFirstRunRpr(innerAfterPPr)
+
+    // Fidelity report: if the source paragraph carried more than one distinct
+    // run-format signature, injection collapses it to the dominant run's rPr as
+    // the base. Surface that per-segment so the export UI can flag it.
+    if (countDistinctRunFormats(innerAfterPPr) > 1) {
       warnings.push({
         segment: group,
         detail:
           "paragraph had mixed inline formatting; translation keeps only the first run's styling",
       })
     }
-    injectTranslationIntoParagraph(p, translation)
+
+    // Build the translated runs from translatedHtml (or plain text as fallback).
+    const spans = htmlToSpans(html)
+    const effectiveSpans = spans.length > 0
+      ? spans
+      : [{ text: data.plain || html, marks: new Set<import("./docx-runs").Mark>() }]
+    const runsXml = spansToRunXml(effectiveSpans, baseRprXml)
+
+    // Extract the open tag (attributes) of the original <w:p …>.
+    const openTag = extractOpenTag(full)
+
+    // Reconstruct: open tag + pPr (verbatim) + new runs + close tag.
+    rebuilt += `${openTag}${pPrXml}${runsXml}</w:p>`
     injected++
   }
 
-  // Serialize back to XML string.
-  const serializer = new XMLSerializer()
-  const newXml = serializer.serializeToString(doc)
+  // Append any trailing content after the last paragraph match.
+  rebuilt += xml.slice(lastIndex)
 
-  // Write modified XML back into the zip.
-  zip.file("word/document.xml", newXml)
+  // Write modified XML back — only word/document.xml changes; all other parts untouched.
+  zip.file("word/document.xml", rebuilt)
 
-  const blob = await zip.generateAsync({
-    type: "blob",
-    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  })
-
+  const blob = await zip.generateAsync({ type: "blob", mimeType: DOCX_MIME })
   return { blob, injected, untouched, warnings }
 }
 
-/** Count distinct run-format signatures among a paragraph's text-bearing runs
- *  (serialized w:rPr, "" for unformatted) — >1 means injection simplifies. */
-function countDistinctRunFormats(p: Element): number {
-  const runs = p.getElementsByTagName("w:r")
-  const formats = new Set<string>()
-  const serializer = new XMLSerializer()
-  for (let i = 0; i < runs.length; i++) {
-    const run = runs[i]
-    const textEls = run.getElementsByTagName("w:t")
-    let hasText = false
-    for (let j = 0; j < textEls.length; j++) {
-      if (textEls[j].textContent?.trim()) {
-        hasText = true
-        break
-      }
-    }
-    if (!hasText) continue
-    const rpr = run.getElementsByTagName("w:rPr")[0]
-    formats.add(rpr ? serializer.serializeToString(rpr) : "")
-  }
-  return formats.size
+/** Extract the content between the opening and closing w:p tags. */
+function extractInner(fullMatch: string): string {
+  // Find the first >, then take everything up to (but not including) </w:p>.
+  const openEnd = fullMatch.indexOf(">")
+  if (openEnd === -1) return ""
+  const closeStart = fullMatch.lastIndexOf("</w:p>")
+  if (closeStart === -1) return ""
+  return fullMatch.slice(openEnd + 1, closeStart)
+}
+
+/** Extract the opening tag of a w:p element (e.g., `<w:p w:rsidR="…">`). */
+function extractOpenTag(fullMatch: string): string {
+  const openEnd = fullMatch.indexOf(">")
+  if (openEnd === -1) return "<w:p>"
+  return fullMatch.slice(0, openEnd + 1)
 }
 
 /**
- * Extract the dominant run's w:rPr element from a paragraph.
- *
- * "Dominant" = the first <w:r> that contains visible text. If no such run
- * exists (paragraph was empty or bookmarks only), returns null and the caller
- * will create a run with no character formatting.
- *
- * We use the *first text-bearing run* as the heuristic because:
- *  - Heading paragraphs in Word typically have uniform formatting on all runs.
- *  - Body paragraphs where the first word is formatted differently are unusual.
- *  - For mixed-format paragraphs this loses later runs' per-run formatting;
- *    see SWARM-TODO at the top of this file.
+ * Extract the leading <w:pPr>…</w:pPr> block from paragraph inner content.
+ * Returns the verbatim XML string (including the tags), or "" if not present.
  */
-function extractDominantRpr(p: Element): Element | null {
-  const runs = p.getElementsByTagName("w:r")
-  for (let i = 0; i < runs.length; i++) {
-    const run = runs[i]
-    // Only count runs that carry text content.
-    const textEls = run.getElementsByTagName("w:t")
-    let hasText = false
-    for (let j = 0; j < textEls.length; j++) {
-      if (textEls[j].textContent?.trim()) {
-        hasText = true
-        break
-      }
-    }
-    if (!hasText) continue
+function extractPPr(inner: string): string {
+  // Match leading whitespace + pPr element (full or self-closing).
+  const m = inner.match(/^[\s]*<w:pPr\b[^>]*>[\s\S]*?<\/w:pPr>|^[\s]*<w:pPr\b[^>]*\/>/)
+  return m ? m[0] : ""
+}
 
-    // Return the rPr child of this run if present.
-    const rPrEls = run.getElementsByTagName("w:rPr")
-    if (rPrEls.length > 0) {
-      return rPrEls[0]
-    }
-    // First text run found but has no rPr — no character formatting to clone.
-    return null
-  }
+/**
+ * Extract the <w:rPr>…</w:rPr> from the FIRST <w:r> element in `innerAfterPPr`.
+ *
+ * This is the dominant run's character properties (the formatting the translator's
+ * runs will inherit as their base). Returns null if the first text run has no rPr,
+ * or if there are no runs.
+ *
+ * SAFETY: We only scan the first run. Paragraphs with no runs return null cleanly.
+ */
+function extractFirstRunRpr(innerAfterPPr: string): string | null {
+  // Find the first <w:r …> open tag.
+  const runStart = innerAfterPPr.search(/<w:r\b/)
+  if (runStart === -1) return null
+
+  // Find the end of this run: the first </w:r> after runStart.
+  const runEnd = innerAfterPPr.indexOf("</w:r>", runStart)
+  const runContent = runEnd !== -1
+    ? innerAfterPPr.slice(runStart, runEnd + 6)
+    : innerAfterPPr.slice(runStart)
+
+  // Within this run, look for <w:rPr>…</w:rPr> (full form).
+  const rPrMatch = runContent.match(/<w:rPr\b[^>]*>[\s\S]*?<\/w:rPr>/)
+  if (rPrMatch) return rPrMatch[0]
+
+  // Also handle self-closing <w:rPr/>.
+  const rPrSelf = runContent.match(/<w:rPr\b[^>]*\/>/)
+  if (rPrSelf) return rPrSelf[0]
+
   return null
 }
 
 /**
- * Replace all <w:r> runs in a paragraph with a single run containing the
- * translated text. Preserves:
- *   - <w:pPr> (paragraph/heading style, spacing, etc.)
- *   - The dominant run's <w:rPr> (bold, italic, font-size, font family, …)
+ * Count distinct run-format signatures among a paragraph's text-bearing runs.
  *
- * SWARM-TODO (AQU-233): For mixed-format paragraphs (multiple differently-
- * formatted runs) the entire translated paragraph receives only the dominant
- * (first text-bearing) run's rPr. Per-run inline formatting for non-dominant
- * runs is not preserved. See file header for details.
+ * Scans every `<w:r>…</w:r>` in `innerAfterPPr` (the paragraph content after the
+ * pPr block), and for each run that carries non-whitespace `<w:t>` text records
+ * its `<w:rPr>` string (or "" when the run has no rPr). More than one distinct
+ * signature means the source paragraph mixed run formatting, which the surgical
+ * injection flattens to the dominant run's rPr — the caller emits a fidelity
+ * warning for that segment. String-based (no DOM) to match the exporter approach.
  */
-function injectTranslationIntoParagraph(p: Element, text: string): void {
-  const doc = p.ownerDocument!
-
-  // Capture the dominant run's rPr BEFORE removing any runs.
-  const dominantRpr = extractDominantRpr(p)
-
-  // Collect all child nodes that are NOT w:pPr.
-  const toRemove: Element[] = []
-  const children = Array.from(p.childNodes)
-  for (const child of children) {
-    if (child.nodeType === Node.ELEMENT_NODE) {
-      const el = child as Element
-      const localName = el.localName || el.tagName.replace(/^.*:/, "")
-      if (localName !== "pPr") {
-        toRemove.push(el)
-      }
-    }
+function countDistinctRunFormats(innerAfterPPr: string): number {
+  const runRegex = /<w:r\b[^>]*>[\s\S]*?<\/w:r>/g
+  const formats = new Set<string>()
+  let run: RegExpExecArray | null
+  while ((run = runRegex.exec(innerAfterPPr)) !== null) {
+    const runXml = run[0]
+    // Only consider runs with non-whitespace text.
+    const hasText = runXml
+      .match(/<w:t[^>]*>([^<]*)<\/w:t>/g)
+      ?.some(m => {
+        const textMatch = m.match(/<w:t[^>]*>([^<]*)<\/w:t>/)
+        return textMatch && textMatch[1].trim().length > 0
+      })
+    if (!hasText) continue
+    const rPrMatch = runXml.match(/<w:rPr\b[^>]*>[\s\S]*?<\/w:rPr>|<w:rPr\b[^>]*\/>/)
+    formats.add(rPrMatch ? rPrMatch[0] : "")
   }
-  for (const el of toRemove) el.remove()
-
-  // Create a new run: <w:r>[<w:rPr>…</w:rPr>]<w:t xml:space="preserve">…</w:t></w:r>
-  const run = doc.createElementNS(W_NS, "w:r")
-
-  // Clone and attach the dominant run's character formatting if present.
-  if (dominantRpr) {
-    run.appendChild(dominantRpr.cloneNode(true))
-  }
-
-  const t = doc.createElementNS(W_NS, "w:t")
-  t.setAttribute("xml:space", "preserve")
-  t.textContent = text
-  run.appendChild(t)
-  p.appendChild(run)
+  return formats.size
 }

@@ -84,7 +84,9 @@ export interface ListedObject {
 export class R2Client {
   private host: string
   private region: string
-  constructor(private opts: R2ClientOptions) {
+  private opts: R2ClientOptions
+  constructor(opts: R2ClientOptions) {
+    this.opts = opts
     this.host = `${opts.accountId}.r2.cloudflarestorage.com`
     this.region = opts.region ?? "auto"
   }

@@ -3,8 +3,9 @@ import { ChevronDown, ChevronRight } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { getMemberAccess, type MemberEffectiveAccess, type ProjectAccessBreakdown } from "@/lib/frontier/orgs"
 import { removeProjectMember } from "@/lib/frontier/members"
-import { roleName } from "@/lib/frontier/roles"
+import { roleName, ROLE } from "@/lib/frontier/roles"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { denialMessage } from "@/lib/permissions/denial"
 
 /**
  * AD-12 effective-access panel for one org member. Expands to show, per project,
@@ -18,10 +19,19 @@ export function MemberAccessRow({
   orgId,
   userId,
   username,
+  callerOrgRoleLevel,
 }: {
   orgId: number
   userId: number
   username: string
+  /**
+   * FRO-427: The current user's org-level role. When provided, the "Revoke
+   * direct grant" button is disabled with an explanation for callers who lack
+   * PROJECT_LEAD (500) — instead of a silent no-op or a raw server 403.
+   * When omitted the button remains enabled (fail-open; server is still
+   * authoritative).
+   */
+  callerOrgRoleLevel?: number | null
 }) {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -30,6 +40,10 @@ export function MemberAccessRow({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [revoking, setRevoking] = useState<string | null>(null)
+
+  // FRO-427: callers with role < PROJECT_LEAD (500) cannot revoke direct grants.
+  const canRevoke =
+    callerOrgRoleLevel == null ? true : callerOrgRoleLevel >= ROLE.PROJECT_LEAD
 
   const fetchAccess = useCallback(async () => {
     if (!jwt) return
@@ -116,6 +130,8 @@ export function MemberAccessRow({
                       key={p.projectId}
                       p={p}
                       revoking={revoking === p.projectId}
+                      canRevoke={canRevoke}
+                      callerOrgRoleLevel={callerOrgRoleLevel ?? null}
                       onRevokeDirect={() => revokeDirect(p.projectId)}
                     />
                   ))}
@@ -132,10 +148,15 @@ export function MemberAccessRow({
 function AccessProjectRow({
   p,
   revoking,
+  canRevoke,
+  callerOrgRoleLevel,
   onRevokeDirect,
 }: {
   p: ProjectAccessBreakdown
   revoking: boolean
+  /** FRO-427: whether the current user may revoke direct grants. */
+  canRevoke: boolean
+  callerOrgRoleLevel: number | null
   onRevokeDirect: () => void
 }) {
   const otherPaths = [
@@ -163,9 +184,15 @@ function AccessProjectRow({
         {p.direct != null && (
           <button
             type="button"
-            onClick={onRevokeDirect}
-            disabled={revoking}
-            className="rounded border px-2 py-0.5 text-[10px] hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+            onClick={canRevoke ? onRevokeDirect : undefined}
+            disabled={revoking || !canRevoke}
+            title={
+              !canRevoke
+                ? denialMessage(ROLE.PROJECT_LEAD, callerOrgRoleLevel)
+                : undefined
+            }
+            data-testid="revoke-direct-grant"
+            className="rounded border px-2 py-0.5 text-[10px] hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
           >
             {revoking ? "Revoking…" : "Revoke direct grant"}
           </button>

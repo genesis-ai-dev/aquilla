@@ -6,6 +6,9 @@ import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, CommentThread as CommentThreadType } from "@/lib/parsers/types"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
+import { canPerform } from "@/lib/sync/role-policy"
+import { denialMessage } from "@/lib/permissions/denial"
+import { ROLE } from "@/lib/frontier/roles"
 import { CommentThread } from "./CommentThread"
 
 interface CommentsDrawerProps {
@@ -52,6 +55,23 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
   // Use liveComments (from useComments hook) when available; fall back to cell.threads
   const threads = liveComments !== undefined ? recordsToThreads(liveComments) : cell.threads
 
+  // FRO-427: for cloud projects, gate comment creation by syncRole level so a
+  // viewer (100) doesn't see the "New thread" input only to have the server
+  // reject it. The legacy ProjectPermissions path (git-imported) is preserved
+  // via `permissions.canEditComments`. Cloud projects have no `project.permissions`
+  // object so resolvePermissions returns the full defaults — we must also check
+  // the live syncRole.
+  const roleLevel = project.syncRole?.level ?? null
+  const cloudCanComment = canPerform("comment.create", roleLevel)
+  const cloudCanResolve = canPerform("comment.resolve", roleLevel)
+  // When a syncRole is present, let it take precedence; fall back to legacy permissions.
+  const canComment = roleLevel !== null ? cloudCanComment : permissions.canEditComments
+  const canResolve = roleLevel !== null ? cloudCanResolve : permissions.canResolveComments
+  // Build a helpful denial message for viewers who cannot comment.
+  const commentDenialReason = !canComment
+    ? denialMessage(ROLE.COMMENTER, roleLevel)
+    : null
+
   function handleCreate() {
     if (!newThreadText.trim()) return
     onNewThread(newThreadText)
@@ -96,8 +116,8 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
               key={thread.id}
               thread={thread}
               currentTranslated={cell.translated}
-              canReply={permissions.canEditComments}
-              canResolve={permissions.canResolveComments}
+              canReply={canComment}
+              canResolve={canResolve}
               onReply={(text) => onReply(thread.id, text)}
               onResolve={(msg) => onResolve(thread.id, msg)}
               onReopen={() => onReopen(thread.id)}
@@ -106,7 +126,7 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
         )}
       </div>
 
-      {permissions.canEditComments ? (
+      {canComment ? (
         <div className="border-t p-3 space-y-1.5">
           <p className="text-xs font-medium">New thread</p>
           <Textarea
@@ -121,11 +141,14 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
             Post
           </Button>
         </div>
-      ) : !permissions.canResolveComments ? (
+      ) : (
         <div className="border-t p-3">
-          <p className="text-xs text-muted-foreground">Read-only (imported from git)</p>
+          {/* FRO-427: show a human-readable denial for roles that cannot comment. */}
+          <p className="text-xs text-muted-foreground" data-testid="comments-drawer-denial">
+            {commentDenialReason ?? "Read-only (imported from git)"}
+          </p>
         </div>
-      ) : null}
+      )}
     </div>
   )
 }

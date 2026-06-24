@@ -6,6 +6,11 @@
  *  - first N cell snippets (original text + canonical ref when present)
  *  - Confirm button → triggers the actual bulk upload
  *  - Cancel button → returns to the upload screen without any network calls
+ *
+ * FRO-430: After Confirm is clicked the panel switches to an in-progress view
+ * that shows upload phase text and a progress bar (when counts are available).
+ * The Confirm button is disabled and shows a spinner label so the import is
+ * never mistaken for "doing nothing".
  */
 
 import { useState } from "react"
@@ -19,12 +24,22 @@ export interface PreviewPanelProps {
   onConfirm: () => void | Promise<void>
   /** Called when the user cancels — parent returns to the upload screen. */
   onCancel: () => void
+  /**
+   * FRO-430: Live upload phase string from the parent (e.g. "Uploading foo.docx…").
+   * When provided, shown instead of a generic "Uploading…" label during in-flight.
+   */
+  uploadPhase?: string
+  /**
+   * FRO-430: Cell-level upload progress from the parent. Drives the progress bar.
+   * When provided alongside a non-zero total, a determinate bar is rendered.
+   */
+  uploadProgress?: { count: number; total: number } | null
 }
 
 /** Max cells to show in the snippet list per result. */
 const PREVIEW_LIMIT = 20
 
-export function PreviewPanel({ results, onConfirm, onCancel }: PreviewPanelProps) {
+export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, uploadProgress }: PreviewPanelProps) {
   const [confirming, setConfirming] = useState(false)
 
   const totalCells = results.reduce((n, r) => n + r.strings.length, 0)
@@ -37,6 +52,35 @@ export function PreviewPanel({ results, onConfirm, onCancel }: PreviewPanelProps
     } finally {
       setConfirming(false)
     }
+  }
+
+  // FRO-430: after Confirm is clicked, show an in-progress view so the upload is
+  // never mistaken for doing nothing (the preview cell list disappears, replaced
+  // by phase text + optional progress bar).
+  if (confirming) {
+    const phase = uploadPhase || "Uploading…"
+    const hasProgress = uploadProgress && uploadProgress.total > 0
+    return (
+      <div className="flex flex-col items-center gap-4 py-8 text-center">
+        <p className="text-sm font-medium" data-testid="preview-upload-phase">{phase}</p>
+        {hasProgress ? (
+          <>
+            <div className="w-full max-w-xs overflow-hidden rounded-full bg-muted h-2">
+              <div
+                className="h-full bg-primary transition-all"
+                style={{ width: `${Math.round((uploadProgress.count / uploadProgress.total) * 100)}%` }}
+                data-testid="preview-upload-progress-bar"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {uploadProgress.count.toLocaleString()} / {uploadProgress.total.toLocaleString()} cells
+            </p>
+          </>
+        ) : (
+          <p className="text-xs text-muted-foreground">Working…</p>
+        )}
+      </div>
+    )
   }
 
   return (
@@ -95,7 +139,7 @@ export function PreviewPanel({ results, onConfirm, onCancel }: PreviewPanelProps
           Cancel
         </Button>
         <Button size="sm" onClick={handleConfirm} disabled={confirming}>
-          {confirming ? "Uploading…" : "Confirm import"}
+          Confirm import
         </Button>
       </div>
     </div>

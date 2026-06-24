@@ -37,11 +37,10 @@ import { resolveCredentialsFromEnv, type GitLabCredentials } from "../src/lib/mi
 import {
   discoverCodexProjects,
   getProjectById,
-  listTopLevelGroups,
-  listDescendantGroups,
   type CodexProjectMatch,
 } from "../src/lib/migrate/gitlab/api"
-import { projectIdFor, fileIdFor, orgLegacyUuidFor, teamLegacyUuidFor } from "../src/lib/migrate/ids"
+import { projectIdFor, fileIdFor } from "../src/lib/migrate/ids"
+import { syncGroupsToNeon, type Placement } from "../src/lib/migrate/group-sync"
 import { parseCodexNotebook } from "../src/lib/codex-editor/parse-codex"
 import { mapFilePairToEvents, collectSpeakers, type FilePairInput } from "../src/lib/migrate/map"
 import { collectCellAudio, audioAttachEvent } from "../src/lib/migrate/audio"
@@ -265,26 +264,10 @@ async function finalizeCounters(projectId: string): Promise<void> {
   if (!res.ok) throw new Error(`finalize HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
 }
 
-// ── group tree → namespace placement ───────────────────────────────────────
-interface Placement {
-  orgLegacyUuid: string
-  teamLegacyUuid: string | null // null for a bare top-level-group project
-}
-async function buildPlacementIndex(creds: Awaited<ReturnType<typeof resolveCredentialsFromEnv>>) {
-  const byFullPath = new Map<string, Placement>()
-  const tops = await listTopLevelGroups(creds)
-  for (const top of tops) {
-    byFullPath.set(top.full_path, { orgLegacyUuid: orgLegacyUuidFor(top.id), teamLegacyUuid: null })
-    const descendants = await listDescendantGroups(creds, top.id)
-    for (const d of descendants) {
-      byFullPath.set(d.full_path, {
-        orgLegacyUuid: orgLegacyUuidFor(top.id),
-        teamLegacyUuid: teamLegacyUuidFor(d.id),
-      })
-    }
-  }
-  return byFullPath
-}
+// Org/team placement comes from syncGroupsToNeon (src/lib/migrate/group-sync):
+// it walks the GitLab group tree, builds the full_path→Placement index, AND (on
+// apply) creates any missing orgs/teams in Neon — so a content delta fully pulls
+// in new orgs. Placement type is imported from there.
 
 // ── local working copy (fetched by migrate-fetch) → events + speakers ───────
 function listByStem(dir: string, ext: string): Map<string, string> {
@@ -732,12 +715,22 @@ async function main() {
   let orgMap = new Map<string, OrgRow>()
   let teamMap = new Map<string, number>()
   if (!args.audio && !args.audioFast) {
-    console.log("Building org/team placement index from group tree…")
-    placeIdx = await buildPlacementIndex(creds)
+    console.log("Syncing org/team structure to Neon from the GitLab group tree…")
+    const gs = await syncGroupsToNeon(creds, { syncBase: SYNC, headers: authHeaders() }, { apply: args.apply })
+    placeIdx = gs.placeIdx
+    if (gs.plan.conflicts.length) {
+      const unresolved = gs.plan.conflicts.filter((c) => c.kind === "unresolved-user").length
+      const noOwner = gs.plan.conflicts.filter((c) => c.kind === "no-owner").length
+      console.log(`  ⚠ group conflicts: ${noOwner} no-owner, ${unresolved} unresolved-user (those memberships skipped)`)
+    }
+    console.log(
+      `  ${placeIdx.size} groups indexed; ${gs.plan.orgs.length} orgs / ${gs.plan.teams.length} teams ${args.apply ? "upserted" : "planned (dry-run)"} to Neon`,
+    )
+    // Re-read full maps from Neon (now incl. any orgs just created) — fetchOrgTeamMaps
+    // also carries owner_user_id, which the project upsert needs.
     const maps = await fetchOrgTeamMaps()
     orgMap = maps.orgMap
     teamMap = maps.teamMap
-    console.log(`  ${placeIdx.size} groups indexed; ${orgMap.size} orgs, ${teamMap.size} teams preloaded (from Neon)`)
   }
 
   let projects: CodexProjectMatch[]

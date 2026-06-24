@@ -30,7 +30,7 @@ import {
 export interface ExportRouteEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
-  SNAPSHOTS?: R2Bucket
+  SNAPSHOTS: R2Bucket
 }
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/source$/
@@ -117,7 +117,7 @@ export async function handleExportSourceRequest(
     // Resolve binary bytes: prefer R2 (r2_key), fall back to legacy base64 raw_source.
     let binary: Uint8Array
     if (blob.r2_key) {
-      const obj = await env.SNAPSHOTS?.get(blob.r2_key)
+      const obj = await env.SNAPSHOTS.get(blob.r2_key)
       if (!obj) {
         return withCors(
           new Response("source bytes missing from storage — re-import", { status: 404 }),

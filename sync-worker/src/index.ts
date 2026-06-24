@@ -33,6 +33,7 @@ import { handleMigrateEventIdsRequest } from "./events/migrate-event-ids-route"
 import { handleMigrateFinalizeRequest } from "./events/migrate-finalize-route"
 import { handleMigrateAudioRequest } from "./events/migrate-audio-route"
 import { handleMigrateAudioCopyRequest } from "./events/migrate-audio-copy-route"
+import { handleMigrateOrgTeamMapsRequest } from "./events/migrate-org-team-maps-route"
 import { handleExportSourceRequest } from "./events/export-route"
 import { handleExportBundleRequest } from "./events/export-bundle-route"
 import { handleRebuildProjectionRequest } from "./events/rebuild"
@@ -260,6 +261,8 @@ export default {
     if (migrateAudioResponse) return migrateAudioResponse
     const migrateAudioCopyResponse = await handleMigrateAudioCopyRequest(request, env)
     if (migrateAudioCopyResponse) return migrateAudioCopyResponse
+    const migrateOrgTeamMapsResponse = await handleMigrateOrgTeamMapsRequest(request, env)
+    if (migrateOrgTeamMapsResponse) return migrateOrgTeamMapsResponse
     const exportSourceResponse = await handleExportSourceRequest(request, env)
     if (exportSourceResponse) return exportSourceResponse
     const exportBundleResponse = await handleExportBundleRequest(request, env)

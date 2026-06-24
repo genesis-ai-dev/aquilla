@@ -48,13 +48,9 @@ export function ProjectStep({
         <Button variant="outline" size="lg" className="w-full" onClick={onBack}>
           ← Back to sign in
         </Button>
-        <button
-          type="button"
-          onClick={onSkip}
-          className="w-full text-xs text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
-        >
-          Do this later — you can create a project anytime
-        </button>
+        <Button variant="ghost" size="lg" className="w-full" onClick={onSkip}>
+          Do this later
+        </Button>
       </div>
     )
   }
@@ -155,18 +151,20 @@ export function ProjectStep({
         >
           {busy ? "Creating…" : "Create Project"}
         </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="lg"
+          className="w-full"
+          onClick={onSkip}
+          disabled={busy}
+        >
+          Do this later
+        </Button>
       </form>
       <Button variant="ghost" size="sm" onClick={onBack} className="w-full">
         ← Back
       </Button>
-      <button
-        type="button"
-        onClick={onSkip}
-        disabled={busy}
-        className="w-full text-xs text-muted-foreground hover:text-foreground underline-offset-4 hover:underline disabled:opacity-50"
-      >
-        Do this later — you can create a project anytime
-      </button>
     </div>
   )
 }

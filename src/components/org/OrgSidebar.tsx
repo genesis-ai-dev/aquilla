@@ -6,6 +6,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
 import { OrgSwitcher } from "./OrgSwitcher"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
+import { HelpMenu } from "@/components/HelpMenu"
 import { useProductTourContext } from "@/context/ProductTourContext"
 
 const link = ({ isActive }: { isActive: boolean }) =>
@@ -65,6 +66,7 @@ export function OrgSidebar() {
             Take the tour
           </button>
         </AppTooltip>
+        <HelpMenu />
         <div data-tour="account-switcher">
           <AccountSwitcher variant="sidebar" />
         </div>

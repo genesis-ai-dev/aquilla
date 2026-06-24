@@ -252,6 +252,9 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
           <p className="text-[10px] text-muted-foreground">
             The recipient signs in (or signs up) and is added as{" "}
             {LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.name ?? "a member"}.
+            This link is single-use — once redeemed, click{" "}
+            <strong className="font-medium">Create another link</strong> to generate
+            a fresh one for the next person.
             To revoke before it is redeemed, use the Active links list below.
           </p>
           <Button size="sm" variant="outline" onClick={reset} className="w-full">

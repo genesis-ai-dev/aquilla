@@ -180,4 +180,29 @@ describe("JoinPage preview error states (signed-out)", () => {
     expect(screen.getByText("do-login")).toBeInTheDocument()
     expect(screen.queryByText("This invite link is no longer valid")).not.toBeInTheDocument()
   })
+
+  // FRO-429: distinguish "already used" from "time expired" in the UI
+  it("shows 'already been used' message with next-step hint when reason is 'used'", async () => {
+    vi.mocked(previewMultiInvite).mockResolvedValueOnce({ ok: false, reason: "used" })
+    vi.mocked(previewServerInvite).mockResolvedValueOnce({ ok: false, reason: "used" })
+    renderJoin()
+    expect(await screen.findByText("This link has already been used")).toBeInTheDocument()
+    // Must explain it's single-use and tell the user to ask for a new one
+    expect(screen.getByText(/single-use/i)).toBeInTheDocument()
+    expect(screen.getByText(/ask the project owner/i)).toBeInTheDocument()
+    expect(screen.queryByText("do-login")).not.toBeInTheDocument()
+    expect(screen.queryByText("do-signup")).not.toBeInTheDocument()
+  })
+
+  it("shows 'expired' message with next-step hint when reason is 'time_expired'", async () => {
+    vi.mocked(previewMultiInvite).mockResolvedValueOnce({ ok: false, reason: "time_expired" })
+    vi.mocked(previewServerInvite).mockResolvedValueOnce({ ok: false, reason: "time_expired" })
+    renderJoin()
+    expect(await screen.findByText("This link has expired")).toBeInTheDocument()
+    // Must explain expiry and tell the user to ask for a new one
+    expect(screen.getByText(/expiry date/i)).toBeInTheDocument()
+    expect(screen.getByText(/ask the project owner/i)).toBeInTheDocument()
+    expect(screen.queryByText("do-login")).not.toBeInTheDocument()
+    expect(screen.queryByText("do-signup")).not.toBeInTheDocument()
+  })
 })

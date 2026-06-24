@@ -957,11 +957,11 @@ projects.get("/invite-preview/:token", async (c) => {
   if (invite.expires_at) {
     const expiresAt = new Date(invite.expires_at)
     if (expiresAt < new Date()) {
-      return c.json({ error: "Invite expired" }, 410)
+      return c.json({ error: "Invite expired", code: "time_expired" }, 410)
     }
   }
   if (invite.used_at) {
-    return c.json({ error: "Invite already used" }, 410)
+    return c.json({ error: "Invite already used", code: "used" }, 410)
   }
 
   const project = await c.env.AQUILLA_PG.prepare(
@@ -1011,11 +1011,11 @@ projects.post(
     if (invite.expires_at) {
       const expiresAt = new Date(invite.expires_at)
       if (expiresAt < new Date()) {
-        return c.json({ error: "Invite expired" }, 410)
+        return c.json({ error: "Invite expired", code: "time_expired" }, 410)
       }
     }
     if (invite.used_at && invite.used_by !== user.id) {
-      return c.json({ error: "Invite already used" }, 410)
+      return c.json({ error: "Invite already used", code: "used" }, 410)
     }
 
     // Email-bound invites: require the redeemer's account email to match

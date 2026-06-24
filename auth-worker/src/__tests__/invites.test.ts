@@ -769,3 +769,153 @@ describe("POST /api/v2/projects/:id/invites: expires_in_days (FRO-283)", () => {
     expect(expiresMs - before).toBeLessThan(31 * 24 * 60 * 60 * 1000)
   })
 })
+
+// ── FRO-429: distinct error codes for used vs time-expired invites ─────────
+//
+// The frontend needs to show a different message for:
+//   "already used" (single-use link was redeemed by someone else)
+//   "time expired" (the link's expiry date has passed)
+// Both return HTTP 410 but with a `code` field in the body.
+
+describe("FRO-429: invite-preview returns code field distinguishing used vs time-expired", () => {
+  it("GET /invite-preview returns code:'used' when invite is already redeemed", async () => {
+    await seedUser(1, "alice")
+    await seedUser(2, "bob")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 1)",
+    )
+      .bind("p-fro429-used", "FRO-429 Used")
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_invites (token, project_id, role_level, created_by, used_by, used_at, expires_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)",
+    )
+      .bind("tok-fro429-used", "p-fro429-used", 400, 1, 2, new Date(Date.now() + 86400000).toISOString())
+      .run()
+    const res = await app.request(
+      "/api/v2/projects/invite-preview/tok-fro429-used",
+      { method: "GET" },
+      env,
+    )
+    expect(res.status).toBe(410)
+    const body = (await res.json()) as { error: string; code: string }
+    expect(body.code).toBe("used")
+    expect(body.error).toMatch(/already used/i)
+  })
+
+  it("GET /invite-preview returns code:'time_expired' when invite has passed expiry", async () => {
+    await seedUser(1, "alice")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 1)",
+    )
+      .bind("p-fro429-exp", "FRO-429 Expired")
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind("tok-fro429-exp", "p-fro429-exp", 400, 1, new Date(Date.now() - 60000).toISOString())
+      .run()
+    const res = await app.request(
+      "/api/v2/projects/invite-preview/tok-fro429-exp",
+      { method: "GET" },
+      env,
+    )
+    expect(res.status).toBe(410)
+    const body = (await res.json()) as { error: string; code: string }
+    expect(body.code).toBe("time_expired")
+    expect(body.error).toMatch(/expired/i)
+  })
+
+  it("POST /accept-invite returns code:'used' when already redeemed by another user", async () => {
+    await seedUser(1, "alice")
+    await seedUser(2, "bob")
+    await seedUser(3, "carol")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 1)",
+    )
+      .bind("p-fro429-accept-used", "FRO-429 Accept Used")
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_invites (token, project_id, role_level, created_by, used_by, used_at, expires_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)",
+    )
+      .bind("tok-fro429-accept-used", "p-fro429-accept-used", 400, 1, 2, new Date(Date.now() + 86400000).toISOString())
+      .run()
+    const res = await app.request(
+      "/api/v2/projects/accept-invite",
+      { method: "POST", headers: authHeader(await jwtFor("carol")), body: JSON.stringify({ token: "tok-fro429-accept-used" }) },
+      env,
+    )
+    expect(res.status).toBe(410)
+    const body = (await res.json()) as { error: string; code: string }
+    expect(body.code).toBe("used")
+  })
+
+  it("POST /accept-invite returns code:'time_expired' when past expiry", async () => {
+    await seedUser(1, "alice")
+    await seedUser(3, "carol")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 1)",
+    )
+      .bind("p-fro429-accept-exp", "FRO-429 Accept Expired")
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind("tok-fro429-accept-exp", "p-fro429-accept-exp", 400, 1, new Date(Date.now() - 60000).toISOString())
+      .run()
+    const res = await app.request(
+      "/api/v2/projects/accept-invite",
+      { method: "POST", headers: authHeader(await jwtFor("carol")), body: JSON.stringify({ token: "tok-fro429-accept-exp" }) },
+      env,
+    )
+    expect(res.status).toBe(410)
+    const body = (await res.json()) as { error: string; code: string }
+    expect(body.code).toBe("time_expired")
+  })
+})
+
+describe("FRO-429: multi-invite preview returns code field distinguishing used vs time-expired", () => {
+  it("GET /api/v2/invites/:token/preview returns code:'used' when all rows are redeemed", async () => {
+    await seedUser(10, "alice10")
+    await seedUser(11, "bob11")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 10)",
+    )
+      .bind("p-multi-used", "Multi Used")
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_invites (token, project_id, role_level, created_by, used_by, used_at, expires_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)",
+    )
+      .bind("tok-multi-used", "p-multi-used", 400, 10, 11, new Date(Date.now() + 86400000).toISOString())
+      .run()
+    const res = await app.request(
+      "/api/v2/invites/tok-multi-used/preview",
+      { method: "GET" },
+      env,
+    )
+    expect(res.status).toBe(410)
+    const body = (await res.json()) as { code: string }
+    expect(body.code).toBe("used")
+  })
+
+  it("GET /api/v2/invites/:token/preview returns code:'time_expired' when past expiry", async () => {
+    await seedUser(10, "alice10")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 10)",
+    )
+      .bind("p-multi-exp", "Multi Expired")
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind("tok-multi-exp", "p-multi-exp", 400, 10, new Date(Date.now() - 60000).toISOString())
+      .run()
+    const res = await app.request(
+      "/api/v2/invites/tok-multi-exp/preview",
+      { method: "GET" },
+      env,
+    )
+    expect(res.status).toBe(410)
+    const body = (await res.json()) as { code: string }
+    expect(body.code).toBe("time_expired")
+  })
+})

@@ -111,10 +111,23 @@ describe("previewServerInvite", () => {
     expect(result).toEqual({ ok: true, data: payload })
   })
 
-  it("returns {ok:false, reason:'expired'} on 410", async () => {
+  it("returns {ok:false, reason:'expired'} on 410 without code field (legacy server)", async () => {
     global.fetch = mockFetch(410, { error: "expired" }) as unknown as typeof fetch
     const result = await previewServerInvite("tok", API)
     expect(result).toEqual({ ok: false, reason: "expired" })
+  })
+
+  // FRO-429: server now returns code:'used' vs code:'time_expired' in the 410 body.
+  it("returns {ok:false, reason:'used'} on 410 with code:'used'", async () => {
+    global.fetch = mockFetch(410, { error: "Invite already used", code: "used" }) as unknown as typeof fetch
+    const result = await previewServerInvite("tok", API)
+    expect(result).toEqual({ ok: false, reason: "used" })
+  })
+
+  it("returns {ok:false, reason:'time_expired'} on 410 with code:'time_expired'", async () => {
+    global.fetch = mockFetch(410, { error: "Invite expired", code: "time_expired" }) as unknown as typeof fetch
+    const result = await previewServerInvite("tok", API)
+    expect(result).toEqual({ ok: false, reason: "time_expired" })
   })
 
   it("returns {ok:false, reason:'invalid'} on 404", async () => {
@@ -140,10 +153,23 @@ describe("previewMultiInvite", () => {
     expect(result).toEqual({ ok: true, data: payload })
   })
 
-  it("returns {ok:false, reason:'expired'} on 410", async () => {
+  it("returns {ok:false, reason:'expired'} on 410 without code field (legacy server)", async () => {
     global.fetch = mockFetch(410, { error: "expired" }) as unknown as typeof fetch
     const result = await previewMultiInvite("tok", API)
     expect(result).toEqual({ ok: false, reason: "expired" })
+  })
+
+  // FRO-429: server now returns code:'used' vs code:'time_expired' in the 410 body.
+  it("returns {ok:false, reason:'used'} on 410 with code:'used'", async () => {
+    global.fetch = mockFetch(410, { error: "Invite already used", code: "used" }) as unknown as typeof fetch
+    const result = await previewMultiInvite("tok", API)
+    expect(result).toEqual({ ok: false, reason: "used" })
+  })
+
+  it("returns {ok:false, reason:'time_expired'} on 410 with code:'time_expired'", async () => {
+    global.fetch = mockFetch(410, { error: "Invite expired", code: "time_expired" }) as unknown as typeof fetch
+    const result = await previewMultiInvite("tok", API)
+    expect(result).toEqual({ ok: false, reason: "time_expired" })
   })
 
   it("returns {ok:false, reason:'invalid'} on 404", async () => {

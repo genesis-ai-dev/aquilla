@@ -7,6 +7,7 @@
 //   POST /api/v2/auth/register
 //   POST /api/v2/auth/token
 //   GET  /api/v2/auth/me
+//   PATCH /api/v2/auth/me      (preferences only; username/password blocked — FRO-436)
 //   GET  /api/v2/auth/activity-log
 //   POST /api/v2/auth/password-reset/request
 //   POST /api/v2/auth/password-reset/verify

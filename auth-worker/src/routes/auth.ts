@@ -267,6 +267,116 @@ auth.get("/me", authMiddleware, async (c) => {
   })
 })
 
+// FRO-436: Self-update gate for the authenticated user.
+//
+// USERNAME is intentionally immutable for self-service users. Come and See
+// (the translation-programme manager) centrally tracks translator usernames
+// and coordinates password resets; a translator changing their own username
+// would silently break that tracking. The gate is enforced here rather than
+// at the DB layer so the error message is user-facing and precise.
+//
+// CONFIGURABLE GATE — org setting key `usernameChangeMinRole`:
+//   Unset (or null)  → nobody can self-change their username (the default and
+//                       the correct production posture for managed programmes).
+//   Set to a role level (e.g. 700) → only org members with that effective org
+//                       role or above may change their own username. Follow the
+//                       exportMinRole pattern in org-settings.ts if you need to
+//                       implement this path.
+//
+// PASSWORD changes are NOT offered here — see SWARM-TODO below.
+//
+// SWARM-TODO (password-reset policy): Decide whether self-serve password reset
+// (the existing /password-reset/request email-token flow) is sufficient, or
+// whether org Maintainer/Owner should be able to trigger a reset on behalf of
+// a subordinate user. If the latter, add a POST /api/v2/orgs/:orgId/members/:userId/reset-password
+// route gated at org MAINTAINER (600). Leave this decision to Ryder — do not
+// build it without sign-off.
+//
+// SWARM-TODO (admin credential reset): There is no route today for an org
+// Maintainer/Owner to reset a subordinate user's password. The email-token flow
+// (POST /api/v2/auth/password-reset/request) is self-serve only (requires the
+// user's email inbox). An org-managed reset path is a deliberate product
+// decision: if the programme manager needs to issue a new password to a
+// translator who has lost email access, a new admin route is needed. Track
+// separately.
+
+const patchMeSchema = z.object({
+  // Only safe, non-identity fields may be updated by the user themselves.
+  // Username and password fields are explicitly rejected below even if they
+  // somehow pass schema validation, to make the policy unmistakable.
+  preferences: z.record(z.string(), z.unknown()).optional(),
+  // Explicitly reject identity-change fields so a client sending them gets
+  // a clear 403 rather than a silent no-op.
+  username: z.string().optional(),
+  password: z.string().optional(),
+  new_password: z.string().optional(),
+})
+
+auth.patch("/me", authMiddleware, zValidator("json", patchMeSchema), async (c) => {
+  const body = c.req.valid("json")
+  const user = c.get("user")
+
+  // FRO-436: block username self-change unconditionally.
+  // Configurable override via org setting `usernameChangeMinRole` is
+  // documented above but not implemented — the default (block) is correct
+  // for all current managed translation programmes.
+  if (body.username !== undefined) {
+    return c.json(
+      {
+        error:
+          "Username cannot be changed by the user. Contact your programme manager to update credentials.",
+      },
+      403,
+    )
+  }
+
+  // FRO-436: password self-change is not offered here.
+  // Use POST /api/v2/auth/password-reset/request (email-token flow).
+  // See SWARM-TODO above for the org-managed reset path.
+  if (body.password !== undefined || body.new_password !== undefined) {
+    return c.json(
+      {
+        error:
+          "Password cannot be changed here. Use the password-reset email link, or contact your programme manager.",
+      },
+      403,
+    )
+  }
+
+  // Safe update: preferences only.
+  if (body.preferences !== undefined) {
+    const preferencesJson = JSON.stringify(body.preferences)
+    await c.env.AQUILLA_PG.prepare(
+      "UPDATE users SET preferences = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    )
+      .bind(preferencesJson, user.id)
+      .run()
+  }
+
+  // Re-fetch to return the canonical record.
+  const updated = await c.env.AQUILLA_PG.prepare(
+    "SELECT id, username, email, preferences FROM users WHERE id = ?",
+  )
+    .bind(user.id)
+    .first<{ id: number; username: string; email: string; preferences: string }>()
+
+  if (!updated) return c.json({ error: "user not found" }, 404)
+
+  let preferences: Record<string, unknown> = {}
+  try {
+    preferences = JSON.parse(updated.preferences) as Record<string, unknown>
+  } catch {
+    preferences = {}
+  }
+
+  return c.json({
+    id: updated.id,
+    username: updated.username,
+    email: updated.email,
+    preferences,
+  })
+})
+
 const verifyEmailSchema = z.object({ token: z.string().min(8) })
 
 // POST /api/v2/auth/verify-email — public; the token is the authorization.

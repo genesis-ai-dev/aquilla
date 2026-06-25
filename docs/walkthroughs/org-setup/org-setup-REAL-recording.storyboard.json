@@ -1,0 +1,75 @@
+{
+  "slug": "demo-org-admin__create-org-and-settings",
+  "persona": "demo-org-admin",
+  "feature": "create-org-and-settings",
+  "title": "Aquilla — create an organization and change its settings.",
+  "cta": "Aquilla — your team, your org, set up in seconds.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 46437,
+  "chapters": [
+    {
+      "t": 561,
+      "title": "Create an organization",
+      "subtitle": "Spin up a fresh org from the sidebar switcher."
+    },
+    {
+      "t": 19543,
+      "title": "Your organization is ready",
+      "subtitle": "Northwind Bible Society is now your active workspace."
+    },
+    {
+      "t": 23865,
+      "title": "Change its settings",
+      "subtitle": "Open Settings to manage the organization."
+    },
+    {
+      "t": 41399,
+      "title": "Saved",
+      "subtitle": "The new name propagates across the app instantly."
+    }
+  ],
+  "captions": [
+    {
+      "t": 1497,
+      "text": "Every workspace starts with an organization. Open the switcher."
+    },
+    {
+      "t": 8102,
+      "text": "Choose “+ Create org”."
+    },
+    {
+      "t": 13498,
+      "text": "Give it a name."
+    },
+    {
+      "t": 15764,
+      "text": "…and create it."
+    },
+    {
+      "t": 20451,
+      "text": "Created — and switched to automatically."
+    },
+    {
+      "t": 24775,
+      "text": "Open Settings from the sidebar."
+    },
+    {
+      "t": 29846,
+      "text": "In the Identity card, click Rename."
+    },
+    {
+      "t": 36227,
+      "text": "Edit the name…"
+    },
+    {
+      "t": 38436,
+      "text": "…and save."
+    },
+    {
+      "t": 42308,
+      "text": "Settings saved — the new name is live everywhere."
+    }
+  ],
+  "generatedAt": "2026-06-25T22:00:33.766Z"
+}

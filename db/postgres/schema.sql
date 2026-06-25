@@ -318,6 +318,7 @@ CREATE TABLE cells (
     -- { "attachments": [{ "type": "image", "url": "…", "alt": "…" }] };
     -- future keys (gif/video/audio attachments, etc.) need no schema change.
     metadata          JSONB,
+    source_location   TEXT,
     -- Replaces SQLite FTS5. Maintained automatically; no triggers needed.
     value_tsv         tsvector GENERATED ALWAYS AS (to_tsvector('simple', value)) STORED,
     PRIMARY KEY (project_id, file_id, cell_id, side)
@@ -438,7 +439,9 @@ CREATE TABLE file_source_blobs (
     file_id    TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,
     format     TEXT NOT NULL,
-    raw_source TEXT NOT NULL,
+    raw_source TEXT,
+    r2_key     TEXT,
+    size_bytes BIGINT,
     created_at BIGINT NOT NULL
 );
 

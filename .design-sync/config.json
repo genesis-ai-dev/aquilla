@@ -10,5 +10,14 @@
   "extraFonts": "node_modules/.pnpm/@fontsource-variable+geist@5.2.8/node_modules/@fontsource-variable/geist/index.css",
   "libOverrides": {
     "source-kit.mjs": "5-group pane categorization (Actions/Forms/Overlays/Layout/Feedback) — config keys are strictly validated, no group knob"
+  },
+  "dtsPropsFor": {
+    "Button": "variant?: \"default\" | \"secondary\" | \"outline\" | \"ghost\" | \"destructive\" | \"link\"; size?: \"default\" | \"xs\" | \"sm\" | \"lg\" | \"icon\" | \"icon-xs\" | \"icon-sm\" | \"icon-lg\"; disabled?: boolean; title?: string; type?: \"button\" | \"submit\" | \"reset\"; onClick?: React.MouseEventHandler; className?: string; children?: React.ReactNode",
+    "Input": "type?: string; value?: string; defaultValue?: string; placeholder?: string; disabled?: boolean; readOnly?: boolean; required?: boolean; name?: string; id?: string; 'aria-invalid'?: boolean; onChange?: React.ChangeEventHandler<HTMLInputElement>; className?: string",
+    "Textarea": "value?: string; defaultValue?: string; placeholder?: string; rows?: number; disabled?: boolean; readOnly?: boolean; required?: boolean; name?: string; id?: string; 'aria-invalid'?: boolean; onChange?: React.ChangeEventHandler<HTMLTextAreaElement>; className?: string",
+    "Field": "orientation?: \"vertical\" | \"horizontal\" | \"responsive\"; className?: string; children?: React.ReactNode",
+    "FieldLabel": "htmlFor?: string; className?: string; children?: React.ReactNode",
+    "FieldError": "errors?: Array<{ message?: string } | undefined>; className?: string; children?: React.ReactNode",
+    "Card": "className?: string; children?: React.ReactNode"
   }
 }

@@ -1,12 +1,16 @@
 /**
  * FRO-438: Cell-label / cast import via downloadable spreadsheet template.
+ * FRO-439: Now splits angle-embedded labels ("Mary Magdalene   (on)") into
+ *           voice name + cameraState before emitting cast.assign.
  *
  * Flow:
  *   1. User downloads a pre-populated CSV template (one row per source cell ref)
- *   2. PM fills in the cast_name (and optionally note) column
+ *   2. PM fills in the cast_name (and optionally note) column.
+ *      cast_name may contain a trailing "(angle)" group, e.g. "Mary (on)".
  *   3. User re-uploads the filled template
  *   4. Labels are applied to cells via the cast.assign event (non-chain-mutating;
- *      does NOT touch target text)
+ *      does NOT touch target text). If an angle was present it is split out and
+ *      set on cameraState in the same event.
  *
  * This panel is shown from the ImportDialog landing (new "Cell Labels" card).
  * It requires `sourceCells` to generate the template and to match incoming
@@ -17,7 +21,7 @@ import { useState, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import type { SourceCellRef } from "@/lib/import"
-import { generateLabelTemplate, parseCsvRows } from "@/lib/parsers/spreadsheet"
+import { generateLabelTemplate, parseCsvRows, splitCastName } from "@/lib/parsers/spreadsheet"
 import { emitCastAssign } from "@/lib/sync/events-emit"
 
 export interface LabelImportPanelProps {
@@ -38,7 +42,12 @@ export function LabelImportPanel({
 }: LabelImportPanelProps) {
   const [phase, setPhase] = useState<"idle" | "importing" | "done">("idle")
   const [error, setError] = useState<string | null>(null)
-  const [preview, setPreview] = useState<{ ref: string; castName: string }[] | null>(null)
+  const [preview, setPreview] = useState<{
+    ref: string
+    castName: string
+    /** FRO-439: camera angle extracted from the cast_name string, or undefined */
+    cameraState: "on" | "mixed" | "off" | undefined
+  }[] | null>(null)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
 
   /** Download the template CSV. */
@@ -78,11 +87,15 @@ export function LabelImportPanel({
       const castCol = lc.indexOf("cast_name") !== -1 ? lc.indexOf("cast_name") : 1
 
       const dataRows = hasHeader ? rows.slice(1) : rows
-      const entries: { ref: string; castName: string }[] = []
+      const entries: { ref: string; castName: string; cameraState: "on" | "mixed" | "off" | undefined }[] = []
       for (const row of dataRows) {
         const ref = (row[refCol] ?? "").trim()
-        const castName = (row[castCol] ?? "").trim()
-        if (ref && castName) entries.push({ ref, castName })
+        const rawCast = (row[castCol] ?? "").trim()
+        if (ref && rawCast) {
+          // FRO-439: split angle suffix from name ("Mary (on)" → voice + cameraState)
+          const { voice, cameraState } = splitCastName(rawCast)
+          entries.push({ ref, castName: voice, cameraState })
+        }
       }
       setPreview(entries)
     } catch (err) {
@@ -113,7 +126,7 @@ export function LabelImportPanel({
     const unmatched: string[] = []
     const emits: Promise<string>[] = []
 
-    for (const { ref, castName } of preview) {
+    for (const { ref, castName, cameraState } of preview) {
       const cell = byRef.get(ref)
       if (!cell) {
         unmatched.push(ref)
@@ -125,6 +138,8 @@ export function LabelImportPanel({
           fileId: cell.fileId,
           cellId: cell.cellId,
           castName,
+          // FRO-439: forward camera angle when it was present in the import row
+          ...(cameraState !== undefined ? { cameraState } : {}),
           author: username,
         }),
       )
@@ -201,7 +216,8 @@ export function LabelImportPanel({
               <thead className="bg-muted/50">
                 <tr>
                   <th className="px-2 py-1 text-left font-medium text-foreground/70">Ref</th>
-                  <th className="px-2 py-1 text-left font-medium text-foreground/70">Cast name</th>
+                  <th className="px-2 py-1 text-left font-medium text-foreground/70">Voice</th>
+                  <th className="px-2 py-1 text-left font-medium text-foreground/70">Camera</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -209,6 +225,7 @@ export function LabelImportPanel({
                   <tr key={i}>
                     <td className="px-2 py-1 font-mono text-foreground/70">{p.ref}</td>
                     <td className="px-2 py-1 text-foreground/80">{p.castName}</td>
+                    <td className="px-2 py-1 text-muted-foreground">{p.cameraState ?? "—"}</td>
                   </tr>
                 ))}
               </tbody>

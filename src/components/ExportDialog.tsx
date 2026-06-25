@@ -12,8 +12,12 @@
 // FRO-437: Filename control — editable base name with optional timestamp/lang
 // tag appended at export time. The chosen name drives the downloaded filename
 // for both single-file and project-scope exports.
+//
+// FRO-439: Voice filter — when cells have cast assignments (metadata.cast_name),
+// a "Voice" filter appears letting users export only one voice's cells across
+// all camera angles.
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { Download, AlertTriangle, CheckCircle2 } from "lucide-react"
 import {
   Dialog,
@@ -250,6 +254,38 @@ export function ExportDialog({
   const selectedFormat = FORMAT_OPTIONS.find((f) => f.id === format)!
   const isLossy = selectedFormat.lossy
 
+  // FRO-439: Voice filter — collect distinct voice names from metadata.cast_name.
+  // Only appears when at least one cell has a cast assignment.
+  const [voiceFilter, setVoiceFilter] = useState<string>("") // "" = All voices
+
+  /** Extract the cast voice name for a cell (from metadata.cast_name). */
+  function getCellVoice(cell: CellData): string {
+    return typeof cell.metadata?.cast_name === "string" ? cell.metadata.cast_name : ""
+  }
+
+  const distinctVoices = useMemo(() => {
+    const names = new Set<string>()
+    for (const c of cells) {
+      const v = getCellVoice(c)
+      if (v) names.add(v)
+    }
+    return Array.from(names).sort()
+  }, [cells])
+
+  // Reset voice filter when dialog closes or cells change.
+  useEffect(() => {
+    if (!open) setVoiceFilter("")
+  }, [open])
+
+  /**
+   * Apply the voice filter to a cell array.
+   * When voiceFilter is empty, all cells are returned.
+   */
+  function applyVoiceFilter(cs: CellData[]): CellData[] {
+    if (!voiceFilter) return cs
+    return cs.filter((c) => getCellVoice(c) === voiceFilter)
+  }
+
   // Load cells for all project files when project scope is selected and the
   // format is a client-side one. Disabled until the user actually picks
   // project scope so we don't fan-out N fetches on dialog open.
@@ -391,40 +427,43 @@ export function ExportDialog({
         setStatus({ kind: "ok", msg: `Downloaded ${projectFileCells.length} files${truncNote}` })
       } else {
         // Client-side single-file exporter
+        // FRO-439: apply voice filter before passing to any exporter.
+        const filteredCells = applyVoiceFilter(cells)
         let blob: Blob
         const baseName = buildExportStem(false) // FRO-437: user-chosen stem
         const ext = selectedFormat.ext
         switch (format) {
           case "txt":
-            blob = exportPlainText(cells)
+            blob = exportPlainText(filteredCells)
             break
           case "md":
-            blob = exportMarkdown(cells)
+            blob = exportMarkdown(filteredCells)
             break
           case "tsv":
-            blob = exportTsv(cells)
+            blob = exportTsv(filteredCells)
             break
           case "csv":
-            blob = exportCsv(cells)
+            blob = exportCsv(filteredCells)
             break
           case "xlf":
-            blob = exportXliff(cells, sourceLanguage, targetLanguage)
+            blob = exportXliff(filteredCells, sourceLanguage, targetLanguage)
             break
           case "tmx":
-            blob = exportTmx(cells, sourceLanguage, targetLanguage)
+            blob = exportTmx(filteredCells, sourceLanguage, targetLanguage)
             break
           case "vtt":
-            blob = exportVtt(cells, ttsSettings)
+            blob = exportVtt(filteredCells, ttsSettings)
             break
           case "plain-text-dump":
-            blob = exportPlainTextDump(cells, {
+            blob = exportPlainTextDump(filteredCells, {
               title: activeFileName ?? undefined,
               includeRefs: dumpIncludeRefs,
             })
             break
           case "metadata-csv":
             // FRO-441: export cast/camera metadata for the current file.
-            blob = exportMetadataCsv(cells, ttsSettings)
+            // FRO-439: voice filter applied (filteredCells already scoped).
+            blob = exportMetadataCsv(filteredCells, ttsSettings)
             break
           default:
             throw new Error(`Unknown format: ${format}`)
@@ -557,6 +596,31 @@ export function ExportDialog({
             </p>
           )}
         </fieldset>
+
+        {/* FRO-439: Voice filter — only shown when cells have cast assignments */}
+        {distinctVoices.length > 0 && (
+          <fieldset className="flex flex-col gap-1.5">
+            <legend className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
+              Voice
+            </legend>
+            <select
+              value={voiceFilter}
+              onChange={(e) => setVoiceFilter(e.target.value)}
+              aria-label="Filter export by voice"
+              className="h-7 w-full rounded-md border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+            >
+              <option value="">All voices</option>
+              {distinctVoices.map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+            {voiceFilter && (
+              <p className="text-[10px] text-muted-foreground">
+                Export will include only cells assigned to <strong>{voiceFilter}</strong>, across all camera angles.
+              </p>
+            )}
+          </fieldset>
+        )}
 
         {/* FRO-437: Filename control — editable base name + optional suffixes */}
         <fieldset className="flex flex-col gap-1.5">

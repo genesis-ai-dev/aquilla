@@ -744,6 +744,12 @@ export interface CastAssignInput {
   cellId: string
   /** The cast/character name to assign. Null clears the label. */
   castName: string | null
+  /**
+   * FRO-439: Optional camera-angle for the cell. When provided, the projection
+   * also updates cells.camera_state so angle-embedded label strings (e.g.
+   * "Mary Magdalene   (on)") can be fully split on import.
+   */
+  cameraState?: "on" | "mixed" | "off" | null
   author: string
   clientTs?: number
 }
@@ -751,6 +757,8 @@ export interface CastAssignInput {
 /**
  * Emit a `cast.assign` event — sets the cast/character name on a cell's
  * metadata WITHOUT writing to target text. Non-chain-mutating (parentId = null).
+ * FRO-439: also accepts an optional cameraState to set camera_state in the
+ * same atomic event.
  */
 export async function emitCastAssign(input: CastAssignInput): Promise<string> {
   const { eventId } = await enqueueEvent({
@@ -760,7 +768,10 @@ export async function emitCastAssign(input: CastAssignInput): Promise<string> {
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { castName: input.castName },
+    payload: {
+      castName: input.castName,
+      ...(input.cameraState !== undefined ? { cameraState: input.cameraState } : {}),
+    },
     clientTs: input.clientTs,
   })
   return eventId

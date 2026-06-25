@@ -405,6 +405,57 @@ export function mappedRowsToStrings(rows: MappedRow[]): TranslatableString[] {
   }))
 }
 
+// ─── FRO-439: Cast-name / camera-angle splitter ──────────────────────────────
+
+/**
+ * Come and See encodes camera angle inside the character-label string:
+ *   "Mary Magdalene   (on)"   →  voice = "Mary Magdalene", angle = "on"
+ *   "Peter  (mixed)"          →  voice = "Peter",          angle = "mixed"
+ *   "Narrator"                →  voice = "Narrator",       angle = undefined
+ *
+ * The trailing `(…)` group is always separated from the name by one or more
+ * spaces. Unknown angle synonyms are passed through as-is so they can be
+ * stored and rounded to the nearest known CameraState by the caller.
+ *
+ * Synonym mapping (normalises common variants to CameraState literals):
+ *   on    → "on"
+ *   off   → "off"
+ *   mixed → "mixed"
+ *   group → "mixed"   (a group shot → mixed lip-sync constraint)
+ *   (any other text) → returned verbatim; the caller maps to "mixed" as fallback
+ */
+export interface SplitCastName {
+  /** The voice/character name with the angle suffix stripped. */
+  voice: string
+  /** Normalised CameraState, or undefined when no angle was present. */
+  cameraState: "on" | "mixed" | "off" | undefined
+}
+
+const CAMERA_STATE_SYNONYM_MAP: Record<string, "on" | "mixed" | "off"> = {
+  on: "on",
+  off: "off",
+  mixed: "mixed",
+  group: "mixed",
+}
+
+/**
+ * Split a raw cast_name string that may contain a trailing `(angle)` group.
+ * Returns `{ voice, cameraState }` — the voice is always trimmed.
+ */
+export function splitCastName(raw: string): SplitCastName {
+  const trimmed = raw.trim()
+  // Match trailing "(…)" optionally preceded by whitespace.
+  // The regex requires at least one non-paren character inside the parens.
+  const match = /^(.*?)\s+\(([^)]+)\)\s*$/.exec(trimmed)
+  if (!match) {
+    return { voice: trimmed, cameraState: undefined }
+  }
+  const voice = match[1].trim()
+  const angleRaw = match[2].trim().toLowerCase()
+  const cameraState = CAMERA_STATE_SYNONYM_MAP[angleRaw] ?? "mixed"
+  return { voice, cameraState }
+}
+
 // ─── Cell-label template generation (FRO-314) ────────────────────────────────
 
 /**

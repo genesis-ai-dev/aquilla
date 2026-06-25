@@ -280,11 +280,19 @@ export interface OutboxEventPayloads {
   // FRO-438: Cast/character label assignment.
   // Non-chain-mutating: does NOT move cells.event_id, does NOT touch target text.
   // The projection writes castName into cells.metadata.cast_name on the source row.
+  // FRO-439: extended with optional cameraState so an angle-embedded label
+  // ("Mary Magdalene   (on)") can be split on import and both voice + angle
+  // are persisted atomically in one event.
   "cast.assign": {
     /**
      * The cast/character name for the voice actor. Null clears the label.
      */
     castName: string | null
+    /**
+     * FRO-439: Optional camera-angle override. When present, the projection
+     * also updates cells.camera_state. Omitted when no angle was supplied.
+     */
+    cameraState?: "on" | "mixed" | "off" | null
   }
 }
 

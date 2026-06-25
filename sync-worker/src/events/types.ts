@@ -344,12 +344,21 @@ export interface EventPayloads {
   // Emitted by the label import panel when a PM uploads a filled cast template.
   // Idempotent JSONB merge: repeated assigns for the same cell overwrite the
   // cast_name; clearing requires a null value.
+  // FRO-439: extended with optional cameraState so angle-embedded labels
+  // ("Mary Magdalene   (on)") can be split on import. The projection updates
+  // cells.camera_state when cameraState is present in the payload.
   'cast.assign': {
     /**
      * The cast/character name for the voice actor. Null clears the label.
      * The projection writes this into cells.metadata as { cast_name: value }.
      */
     castName: string | null
+    /**
+     * FRO-439: Optional camera-angle override ("on" | "mixed" | "off").
+     * When present, the projection also updates cells.camera_state.
+     * Null clears the column; omitting this field (undefined) is a no-op.
+     */
+    cameraState?: 'on' | 'mixed' | 'off' | null
   }
 }
 

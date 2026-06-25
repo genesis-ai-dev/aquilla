@@ -1153,6 +1153,8 @@ case 'cell.audio.attach': {
       // cells.metadata JSONB without touching value, event_id, or validated.
       // Applies to the SOURCE-side row (the cell's canonical reference lives
       // on the source side); the same cell_id lookup works for both sides.
+      // FRO-439: also updates camera_state column when cameraState is present
+      // in the payload, so angle-embedded labels are split cleanly on import.
       const p = event.payload as EventPayloads['cast.assign']
       if (!event.fileId || !event.cellId) {
         throw new Error(`cast.assign event ${event.id} is missing fileId or cellId`)
@@ -1181,6 +1183,19 @@ case 'cell.audio.attach': {
                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
             )
             .bind(event.projectId, event.fileId, event.cellId),
+        )
+      }
+      // FRO-439: optionally update camera_state when the payload carries it.
+      // Null clears the column; undefined = not provided = no-op.
+      if (p.cameraState !== undefined) {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells
+               SET camera_state = ?
+               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+            )
+            .bind(p.cameraState, event.projectId, event.fileId, event.cellId),
         )
       }
       return ['cells']

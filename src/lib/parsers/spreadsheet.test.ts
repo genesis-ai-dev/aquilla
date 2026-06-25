@@ -1,5 +1,6 @@
 /**
  * Tests for FRO-316 spreadsheet parser and column mapping utilities.
+ * FRO-439: added tests for splitCastName (camera-angle splitting).
  */
 
 import { describe, it, expect } from "vitest"
@@ -9,7 +10,63 @@ import {
   mappedRowsToStrings,
   generateLabelTemplate,
   matchPairedRowsToSourceCells,
+  splitCastName,
 } from "./spreadsheet"
+
+// ─── FRO-439: splitCastName ──────────────────────────────────────────────────
+
+describe("splitCastName", () => {
+  it("returns voice + cameraState when a trailing (angle) group is present", () => {
+    expect(splitCastName("Mary Magdalene   (on)")).toEqual({
+      voice: "Mary Magdalene",
+      cameraState: "on",
+    })
+  })
+
+  it("handles single-space separator", () => {
+    expect(splitCastName("Peter (off)")).toEqual({ voice: "Peter", cameraState: "off" })
+  })
+
+  it("maps group → mixed (synonym)", () => {
+    expect(splitCastName("Crowd (group)")).toEqual({ voice: "Crowd", cameraState: "mixed" })
+  })
+
+  it("maps mixed → mixed", () => {
+    expect(splitCastName("Narrator (mixed)")).toEqual({ voice: "Narrator", cameraState: "mixed" })
+  })
+
+  it("returns undefined cameraState when no angle group is present", () => {
+    expect(splitCastName("Narrator")).toEqual({ voice: "Narrator", cameraState: undefined })
+  })
+
+  it("returns undefined cameraState for an empty string", () => {
+    expect(splitCastName("")).toEqual({ voice: "", cameraState: undefined })
+  })
+
+  it("trims surrounding whitespace from the input", () => {
+    expect(splitCastName("  John  (on)  ")).toEqual({ voice: "John", cameraState: "on" })
+  })
+
+  it("falls back to mixed for unrecognised angle synonyms", () => {
+    // Unknown angles should map to "mixed" (safe default, not fail)
+    expect(splitCastName("Anna (side)")).toEqual({ voice: "Anna", cameraState: "mixed" })
+  })
+
+  it("does NOT strip parens that are mid-name (not trailing angle group)", () => {
+    // A name like "God (voice)" should be treated as name + angle
+    const result = splitCastName("God (voice)")
+    expect(result.voice).toBe("God")
+    expect(result.cameraState).toBe("mixed") // "voice" → unknown → mixed fallback
+  })
+
+  it("preserves names that contain parens as part of a longer string (no trailing group)", () => {
+    // If the parens are part of the name with no space before, no split.
+    // e.g. "Mary(on)" — no space before paren → no angle split
+    const result = splitCastName("Mary(on)")
+    expect(result.voice).toBe("Mary(on)")
+    expect(result.cameraState).toBeUndefined()
+  })
+})
 
 describe("parseCsvToSheet", () => {
   it("returns rows from a simple CSV", () => {

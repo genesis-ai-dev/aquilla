@@ -201,3 +201,83 @@ describe("LabelImportPanel — apply (cast.assign events)", () => {
     )
   })
 })
+
+// ─── FRO-439: angle-splitting on import ──────────────────────────────────────
+
+describe("LabelImportPanel — FRO-439 angle splitting", () => {
+  beforeEach(() => {
+    mockEmitCastAssign.mockClear()
+    DEFAULT_PROPS.onImported.mockClear()
+  })
+
+  it("splits a trailing (angle) group from the cast_name and forwards cameraState", async () => {
+    render(<LabelImportPanel {...DEFAULT_PROPS} />)
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    // Cast name with angle group: "Mary Magdalene   (on)"
+    const csv = makeCSV([{ ref: "GEN 1:1", castName: "Mary Magdalene   (on)" }])
+    fireEvent.change(fileInput, { target: { files: [csv] } })
+
+    await waitFor(() => screen.getByRole("button", { name: /import 1 label/i }))
+    fireEvent.click(screen.getByRole("button", { name: /import 1 label/i }))
+
+    await waitFor(() => expect(mockEmitCastAssign).toHaveBeenCalledTimes(1))
+
+    // Voice name must be stripped of the angle suffix
+    expect(mockEmitCastAssign).toHaveBeenCalledWith(
+      expect.objectContaining({
+        castName: "Mary Magdalene",
+        cameraState: "on",
+      }),
+    )
+  })
+
+  it("emits cameraState: 'mixed' for the 'group' synonym", async () => {
+    render(<LabelImportPanel {...DEFAULT_PROPS} />)
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    const csv = makeCSV([{ ref: "GEN 1:2", castName: "Crowd (group)" }])
+    fireEvent.change(fileInput, { target: { files: [csv] } })
+
+    await waitFor(() => screen.getByRole("button", { name: /import 1 label/i }))
+    fireEvent.click(screen.getByRole("button", { name: /import 1 label/i }))
+
+    await waitFor(() => expect(mockEmitCastAssign).toHaveBeenCalledTimes(1))
+    expect(mockEmitCastAssign).toHaveBeenCalledWith(
+      expect.objectContaining({ castName: "Crowd", cameraState: "mixed" }),
+    )
+  })
+
+  it("omits cameraState when no angle group is in the cast_name", async () => {
+    render(<LabelImportPanel {...DEFAULT_PROPS} />)
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    const csv = makeCSV([{ ref: "GEN 1:1", castName: "Narrator" }])
+    fireEvent.change(fileInput, { target: { files: [csv] } })
+
+    await waitFor(() => screen.getByRole("button", { name: /import 1 label/i }))
+    fireEvent.click(screen.getByRole("button", { name: /import 1 label/i }))
+
+    await waitFor(() => expect(mockEmitCastAssign).toHaveBeenCalledTimes(1))
+
+    // No cameraState in the payload when angle was absent
+    const call = mockEmitCastAssign.mock.calls[0]?.[0]
+    expect(call).not.toHaveProperty("cameraState")
+  })
+
+  it("shows a Camera column in the preview table", async () => {
+    render(<LabelImportPanel {...DEFAULT_PROPS} />)
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    const csv = makeCSV([{ ref: "GEN 1:1", castName: "Mary (on)" }])
+    fireEvent.change(fileInput, { target: { files: [csv] } })
+
+    await waitFor(() => {
+      expect(screen.getByText("Voice")).toBeInTheDocument()
+      expect(screen.getByText("Camera")).toBeInTheDocument()
+      expect(screen.getByText("on")).toBeInTheDocument()
+      // Voice column shows split name, NOT raw "Mary (on)"
+      expect(screen.getByText("Mary")).toBeInTheDocument()
+    })
+  })
+})

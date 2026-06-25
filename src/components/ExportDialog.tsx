@@ -41,11 +41,12 @@ import { exportPlainTextDump } from "@/lib/export/exporters/plain-text-dump"
 import { buildProjectZip } from "@/lib/export/project-zip-export"
 import type { TextExportFormat } from "@/lib/export/project-zip-export"
 import { previewAudioByCharacter } from "@/lib/export/audio-by-character"
+import { exportMetadataCsv } from "@/lib/export/exporters/metadata-csv"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "audio-by-character" | "docx" | "plain-text-dump"
+export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "audio-by-character" | "docx" | "plain-text-dump" | "metadata-csv"
 export type ExportScope = "file" | "project"
 
 interface FormatOption {
@@ -136,6 +137,14 @@ const FORMAT_OPTIONS: FormatOption[] = [
     ext: ".txt",
     description: "Every translated segment, one per line. Quick content extraction only.",
     lossy: true,
+  },
+  // FRO-441: Metadata/cast spreadsheet — listed in Advanced section.
+  {
+    id: "metadata-csv",
+    label: "Metadata spreadsheet",
+    ext: ".csv",
+    description: "Cast (voice/character), camera angle, and cell ref — one row per cell. Export only; the project remains the source of truth.",
+    lossy: false,
   },
 ]
 
@@ -358,6 +367,16 @@ export function ExportDialog({
           setStatus({ kind: "busy", msg: "Still loading file cells, please wait…" })
           return
         }
+        // FRO-441: metadata-csv project scope — flatten all file cells into one sheet.
+        if (format === "metadata-csv") {
+          const allCells = projectFileCells.flatMap((f) => f.cells)
+          const csvBlob = exportMetadataCsv(allCells, ttsSettings)
+          const safeName = buildExportStem(true)
+          downloadBlob(csvBlob, `${safeName}.csv`)
+          const truncNote = isTruncated ? " (first 40 files only)" : ""
+          setStatus({ kind: "ok", msg: `Downloaded ${safeName}.csv (${allCells.length} rows)${truncNote}` })
+          return
+        }
         setStatus({ kind: "busy", msg: `Building zip for ${projectFileCells.length} files…` })
         const zipBlob = await buildProjectZip({
           files: projectFileCells,
@@ -402,6 +421,10 @@ export function ExportDialog({
               title: activeFileName ?? undefined,
               includeRefs: dumpIncludeRefs,
             })
+            break
+          case "metadata-csv":
+            // FRO-441: export cast/camera metadata for the current file.
+            blob = exportMetadataCsv(cells, ttsSettings)
             break
           default:
             throw new Error(`Unknown format: ${format}`)
@@ -687,6 +710,31 @@ export function ExportDialog({
                     </span>
                   </label>
                 )}
+              </span>
+            </label>
+            {/* FRO-441: Metadata spreadsheet — cast, camera angle, cell ref */}
+            <label
+              className={
+                "flex items-start gap-2.5 rounded-xl px-2.5 py-2 cursor-pointer transition-colors " +
+                (format === "metadata-csv"
+                  ? "bg-accent/60 ring-1 ring-ring/20"
+                  : "hover:bg-accent/40")
+              }
+            >
+              <RadioGroupItem
+                value="metadata-csv"
+                className="mt-0.5 shrink-0"
+                aria-label="Metadata spreadsheet (.csv)"
+              />
+              <span className="flex flex-col gap-0.5 min-w-0">
+                <span className="text-sm font-medium leading-tight flex items-baseline gap-1.5 flex-wrap">
+                  Metadata spreadsheet
+                  <span className="text-xs text-muted-foreground font-normal font-mono">.csv</span>
+                </span>
+                <span className="text-xs text-muted-foreground leading-relaxed">
+                  Cast (voice/character), camera angle, and cell ref — one row per cell.
+                  Export only; the project remains the source of truth.
+                </span>
               </span>
             </label>
             </RadioGroup>

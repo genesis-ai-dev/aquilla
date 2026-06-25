@@ -99,12 +99,15 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   const url = `${syncWorkerHttpOrigin()}/import`
   const total = args.cells.length
   let uploaded = 0
-  let first = true
 
-  // `do…while` guarantees at least one request (carrying file.create) even for
-  // a zero-cell file.
-  let offset = 0
-  do {
+  // Chunk offsets. `do…while` semantics: at least one request (carrying
+  // file.create) even for a zero-cell file.
+  const offsets: number[] = []
+  for (let offset = 0; offset === 0 || offset < args.cells.length; offset += CHUNK) {
+    offsets.push(offset)
+  }
+
+  const sendChunk = async (offset: number, isFirst: boolean): Promise<void> => {
     if (args.signal?.aborted) throw new Error("Import cancelled")
     const chunk = args.cells.slice(offset, offset + CHUNK)
     const payload: Record<string, unknown> = {
@@ -113,7 +116,7 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
       cells: chunk,
       clientTs: Date.now(),
     }
-    if (first) {
+    if (isFirst) {
       payload.file = args.file
       // Side-car raw bytes go alongside the first chunk so they land atomically
       // with the file.create. Subsequent chunks omit them.
@@ -144,9 +147,30 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
 
     uploaded += chunk.length
     args.onProgress?.(uploaded, total)
-    first = false
-    offset += CHUNK
-  } while (offset < args.cells.length)
+  }
+
+  // The first chunk carries file.create (+ side-car raw source) and must land
+  // before the rest so the file row exists. Send it alone.
+  await sendChunk(offsets[0], true)
+
+  // The remaining chunks are independent genesis source.cell.create batches:
+  // the /import endpoint allocates each request's server_seq range atomically,
+  // inserts are idempotent (INSERT OR IGNORE / upsert), cell display order is
+  // encoded in anchorCellId/sequenceIndex (arrival-independent), and the file
+  // counter recompute self-heals. So they can upload with bounded concurrency
+  // to overlap network + DB latency — ~20 sequential round trips collapse to
+  // ~5 waves on a Bible-sized import. A failed chunk rejects the whole upload;
+  // re-running the import is safe (idempotent).
+  const rest = offsets.slice(1)
+  const POOL = 4
+  let cursor = 0
+  const worker = async (): Promise<void> => {
+    while (cursor < rest.length) {
+      const i = cursor++
+      await sendChunk(rest[i], false)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(POOL, rest.length) }, () => worker()))
 }
 
 // ---------------------------------------------------------------------------

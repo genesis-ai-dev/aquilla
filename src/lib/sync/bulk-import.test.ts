@@ -103,6 +103,49 @@ describe("bulkUploadSource", () => {
     expect(progress[1]).toEqual([3000, 3000])
   })
 
+  it("sends the file.create chunk alone, then uploads the rest concurrently", async () => {
+    // ~30k-cell imports POST ~20 chunks. Sending them sequentially serializes
+    // ~20 network round trips. The first chunk carries file.create and must
+    // land first (the file row has to exist), but the remaining genesis-cell
+    // chunks are independent — idempotent inserts, atomically-allocated seq
+    // ranges, arrival-independent cell order — so they can overlap.
+    let inFlight = 0
+    let maxInFlight = 0
+    let firstChunkResolved = false
+    let nonFirstStartedBeforeFirstResolved = false
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(init?.body as string) as Record<string, unknown>
+      const isFirst = body.file !== undefined
+      if (!isFirst && !firstChunkResolved) nonFirstStartedBeforeFirstResolved = true
+      inFlight++
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise((r) => setTimeout(r, 10))
+      inFlight--
+      if (isFirst) firstChunkResolved = true
+      return new Response(
+        JSON.stringify({ accepted: (body.cells as unknown[]).length, fileId: "f1" }),
+        { status: 200 },
+      )
+    }) as typeof fetch
+
+    // 6500 cells / 1500 per chunk → 5 chunks (1 first + 4 that can overlap).
+    const cells = Array.from({ length: 6500 }, (_, i) => makeCell(i))
+    await bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: "big.txt" },
+      cells,
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+    // Ordering invariant: the file.create chunk completes before any other starts.
+    expect(nonFirstStartedBeforeFirstResolved).toBe(false)
+    // Concurrency: the 4 trailing chunks overlap instead of running one-at-a-time.
+    expect(maxInFlight).toBeGreaterThan(1)
+  })
+
   it("throws a readable error on non-OK response", async () => {
     const fetchMock = vi.fn(
       async () => new Response("role too low", { status: 403 }),

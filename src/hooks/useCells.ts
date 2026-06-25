@@ -668,13 +668,20 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         // kind === "resync": the changed set outgrew the delta budget, or the
         // server predates ?since=. Fall through to the full stream below.
       }
-      // Stream pages in: on a hard fetch, append each page to the cache and
-      // rebuild so the first 500 rows paint immediately on Bible-sized files
-      // (~30k cells × ~60 round-trips). On a soft refetch, accumulate into a
-      // buffer and swap it in once at the end so the visible list never
-      // flickers (and never shrink-then-grows across pages). The `gen` fence
-      // aborts the stream if the caller switches files mid-flight.
+      // Stream pages in: on a hard fetch, append each page in place and rebuild
+      // ONCE on the first page so the first 500 rows paint immediately on
+      // Bible-sized files (~30k cells × ~60 round-trips); the final rebuild
+      // below swaps in the rest. On a soft refetch, accumulate into a buffer
+      // and swap it in once at the end so the visible list never flickers (and
+      // never shrink-then-grows across pages). The `gen` fence aborts the
+      // stream if the caller switches files mid-flight.
       const buffer: CellRow[] = []
+      // Paint the FIRST page that asks for a rebuild (the first source page) so
+      // the empty state never flashes, then defer: the unconditional final
+      // rebuild after both streams (below) swaps in the complete list once.
+      // Rebuilding on every page was O(pages × cells) — the dominant cost of a
+      // ~60-page Bible-sized first open.
+      let paintedFirstPage = false
       const pushRows = (rows: CellRow[], rebuild: boolean): boolean | void => {
         if (generationRef.current !== gen) return false
         if (rows.length === 0) return
@@ -682,10 +689,15 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
           for (const r of rows) buffer.push(r)
           return
         }
-        rowsRef.current = rowsRef.current.length === 0
-          ? rows.slice()
-          : rowsRef.current.concat(rows)
-        if (rebuild) rebuildFromCache()
+        // Append in place. The old `concat` minted a fresh array every page,
+        // which is O(N^2) across the stream. On the hard path rowsRef.current
+        // is always the owned `[]` seeded above (cache hits and resyncs take
+        // the effectiveSoft buffer path), so mutating it in place is safe.
+        for (const r of rows) rowsRef.current.push(r)
+        if (rebuild && !paintedFirstPage) {
+          paintedFirstPage = true
+          rebuildFromCache()
+        }
       }
       // FRO-247: the local-mutation clock at the moment the server snapshot
       // begins. Any cell mutated after this point is fresher than this

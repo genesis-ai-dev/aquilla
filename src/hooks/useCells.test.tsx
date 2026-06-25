@@ -124,6 +124,24 @@ vi.mock("@/lib/sync/cells-cache", async (importOriginal) => {
   }
 })
 
+// Count buildCellData invocations indirectly: it calls formatVttTime once per
+// axis for any cell carrying timecodes (useCells.buildCellData). A per-page
+// full rebuild over N accumulated cells therefore drives O(pages × cells)
+// formatVttTime calls; the coalesced path drives O(cells). Wrapping the real
+// impl (vi.hoisted so the factory can reach the counter) lets a test assert the
+// rebuild work stays linear without coupling to React's commit batching.
+const vtt = vi.hoisted(() => ({ calls: 0 }))
+vi.mock("@/lib/video/vtt-generator", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/video/vtt-generator")>()
+  return {
+    ...actual,
+    formatVttTime: (seconds: number) => {
+      vtt.calls++
+      return actual.formatVttTime(seconds)
+    },
+  }
+})
+
 import { useCells } from "./useCells"
 import type { CellAuditStats } from "./useCellsAuditStats"
 
@@ -158,6 +176,7 @@ beforeEach(() => {
   cacheWrites.length = 0
   delete streamMeta.maxServerSeq
   delete streamMeta.perPage
+  vtt.calls = 0
 })
 
 describe("useCells (Phase 2a, D1-backed)", () => {
@@ -368,6 +387,39 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     await waitFor(() => expect(result.current.cells).toHaveLength(4))
     expect(result.current.cells.map((c) => c.id)).toEqual(["p1a", "p1b", "p2a", "p3a"])
     expect(result.current.isLoading).toBe(false)
+  })
+
+  it("does not rebuild the whole cell list on every page of a hard stream (no O(N^2) first open)", async () => {
+    // A ~30k-cell Bible file streams in ~60 pages on first open. The old path
+    // ran a FULL rebuild (joinSourceAndTarget + buildCellData over every
+    // accumulated row) on every source page — O(pages × cells) construction
+    // work. The fix paints the first page (so the empty state never flashes)
+    // then swaps in the complete list once, so total rebuild work is linear.
+    //
+    // Each cell carries timecodes, so buildCellData calls formatVttTime twice
+    // per cell built. Counting those calls measures total rebuild work without
+    // depending on React's commit batching (which coalesces the per-page
+    // setCells into the same final reference and hides the wasted CPU).
+    const pageCount = 6
+    pagesMock.queue = Array.from({ length: pageCount }, (_, i) => [
+      makeRow({ cellId: `p${i}`, side: "source", value: `P${i}`, startMs: i * 1000, endMs: i * 1000 + 500 }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
+    )
+
+    await waitFor(() => expect(result.current.cells).toHaveLength(pageCount))
+    expect(result.current.isLoading).toBe(false)
+    // Accumulation is correct and ordered (the in-place append preserves order).
+    expect(result.current.cells.map((c) => c.id)).toEqual(
+      Array.from({ length: pageCount }, (_, i) => `p${i}`),
+    )
+    // Linear rebuild work. The hard load builds the first page (1 cell) then
+    // the whole list once (6), and a follow-up soft revalidate rebuilds once
+    // more (6) — ~13 cells built × 2 formatVttTime calls ≈ 26. A per-page
+    // rebuild builds 1+2+3+4+5+6 + 6 + 6 = 33 cells → 66 calls. The bound sits
+    // between, so it fails on the quadratic path and passes on the linear one.
+    expect(vtt.calls).toBeLessThanOrEqual(40)
   })
 
   it("re-derives validation status when stats overlay updates (no refetch)", async () => {

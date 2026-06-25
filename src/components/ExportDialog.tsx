@@ -8,6 +8,10 @@
 // FRO-253 (b fix): auto-closes when canExport flips false after settings load,
 // so a settings change mid-session doesn't leave the dialog open for a user who
 // lost access.
+//
+// FRO-437: Filename control — editable base name with optional timestamp/lang
+// tag appended at export time. The chosen name drives the downloaded filename
+// for both single-file and project-scope exports.
 
 import { useState, useEffect, useRef } from "react"
 import { Download, AlertTriangle, CheckCircle2 } from "lucide-react"
@@ -23,6 +27,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
+import { Input } from "@/components/ui/input"
 import { downloadBlob } from "@/lib/export/export-service"
 import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar } from "@/lib/sync/source-export"
 import { exportPlainText } from "@/lib/export/exporters/plaintext"
@@ -202,6 +207,18 @@ export function ExportDialog({
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [dumpIncludeRefs, setDumpIncludeRefs] = useState(false)
 
+  // FRO-437: Filename control state. Default changes with scope/format.
+  // The base name is editable; timestamp and language tag are optional suffixes.
+  const defaultBaseName = (activeFileName ?? "export").replace(/\.[^.]+$/, "")
+  const [customBaseName, setCustomBaseName] = useState<string>(defaultBaseName)
+  const [appendTimestamp, setAppendTimestamp] = useState(false)
+  const [appendLangTag, setAppendLangTag] = useState(false)
+
+  // Keep the base name in sync when the active file changes (e.g. dialog reopened on a new file).
+  useEffect(() => {
+    setCustomBaseName((activeFileName ?? "export").replace(/\.[^.]+$/, ""))
+  }, [activeFileName])
+
   // audio-by-character, vtt, docx, and plain-text-dump only support file scope.
   const fileOnlyFormats = ["audio-by-character", "vtt", "docx", "plain-text-dump"] as const
   const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
@@ -237,6 +254,33 @@ export function ExportDialog({
       enabled: projectScopeEnabled,
     })
 
+  /**
+   * FRO-437: Build the final filename stem from the user's inputs.
+   * - Starts with customBaseName (or projectName for project scope).
+   * - Appends _YYYYMMDD-HHMM suffix when appendTimestamp is set.
+   * - Appends _<langTag> suffix when appendLangTag is set and a language is available.
+   * The caller appends the format-specific extension (.txt, .csv, etc.).
+   */
+  function buildExportStem(useProjectScope: boolean): string {
+    const base = useProjectScope
+      ? (projectName.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "project")
+      : (customBaseName.trim() || "export")
+    let stem = base
+    if (appendTimestamp) {
+      const now = new Date()
+      const pad = (n: number) => String(n).padStart(2, "0")
+      const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`
+      stem = `${stem}_${stamp}`
+    }
+    if (appendLangTag) {
+      const lang = targetLanguage && targetLanguage !== "und" ? targetLanguage : sourceLanguage
+      if (lang && lang !== "und") {
+        stem = `${stem}_${lang}`
+      }
+    }
+    return stem
+  }
+
   async function handleExport() {
     if (!activeFileId) return
     setStatus({ kind: "busy", msg: "Exporting…" })
@@ -256,8 +300,9 @@ export function ExportDialog({
             : `Exported ${result.exported}; skipped ${result.skipped.length} (older imports — re-import to enable)`
           setStatus({ kind: "ok", msg })
         } else {
-          const name = activeFileName ?? "export"
-          const downloadName = /\.(sfm|usfm)$/i.test(name) ? name : `${name}.SFM`
+          // FRO-437: use user-chosen stem with .SFM extension.
+          const stem = buildExportStem(false)
+          const downloadName = `${stem}.SFM`
           // FRO-276: read lossy-verse count from response header.
           const result = await downloadSourceFile({ projectId, fileId: activeFileId, downloadName, getToken })
           const lossyCount = result.lossyVerseCount
@@ -279,7 +324,7 @@ export function ExportDialog({
         setStatus({ kind: "busy", msg: "Injecting translations…" })
         const { exportDocx } = await import("@/lib/export/exporters/docx")
         const result = await exportDocx(rawBytes, cells)
-        const baseName = (activeFileName ?? "export").replace(/\.[^.]+$/, "")
+        const baseName = buildExportStem(false) // FRO-437: user-chosen stem
         downloadBlob(result.blob, `${baseName}.docx`)
         const note = result.injected === 0
           ? " (no translations to inject — download original structure)"
@@ -303,7 +348,7 @@ export function ExportDialog({
           decode: decodeToMono48k,
           onProgress: (d, t) => setStatus({ kind: "busy", msg: `Decoding ${d}/${t}…` }),
         })
-        const safe = (activeFileName ?? "audio").replace(/\.[^.]+$/, "")
+        const safe = buildExportStem(false) // FRO-437: user-chosen stem
         downloadBlob(result.blob, `${safe}_audio-by-character.zip`)
         const skippedNote = result.skipped > 0 ? ` (${result.skipped} clip${result.skipped === 1 ? "" : "s"} skipped)` : ""
         setStatus({ kind: "ok", msg: `Exported audio by character${skippedNote}` })
@@ -320,15 +365,15 @@ export function ExportDialog({
           sourceLanguage,
           targetLanguage,
         })
-        const safeName = projectName.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "")
+        const safeName = buildExportStem(true) // FRO-437: project scope uses project name + suffixes
         const ext = selectedFormat.ext
-        downloadBlob(zipBlob, `${safeName || "project"}${ext}.zip`)
+        downloadBlob(zipBlob, `${safeName}${ext}.zip`)
         const truncNote = isTruncated ? " (first 40 files only)" : ""
         setStatus({ kind: "ok", msg: `Downloaded ${projectFileCells.length} files${truncNote}` })
       } else {
         // Client-side single-file exporter
         let blob: Blob
-        const baseName = (activeFileName ?? "export").replace(/\.[^.]+$/, "")
+        const baseName = buildExportStem(false) // FRO-437: user-chosen stem
         const ext = selectedFormat.ext
         switch (format) {
           case "txt":
@@ -488,6 +533,45 @@ export function ExportDialog({
                   large projects; see src/hooks/useProjectCells.ts for the proposed shape. */}
             </p>
           )}
+        </fieldset>
+
+        {/* FRO-437: Filename control — editable base name + optional suffixes */}
+        <fieldset className="flex flex-col gap-1.5">
+          <legend className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
+            Filename
+          </legend>
+          <div className="flex flex-col gap-2">
+            {/* Base name input — disabled for project scope (project name drives it) */}
+            <Input
+              value={effectiveScope === "project" ? projectName.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "project" : customBaseName}
+              onChange={(e) => setCustomBaseName(e.target.value)}
+              disabled={effectiveScope === "project"}
+              placeholder="filename"
+              aria-label="Export filename (without extension)"
+              className="h-7 text-sm font-mono"
+            />
+            {effectiveScope === "project" && (
+              <p className="text-[10px] text-muted-foreground -mt-0.5">
+                Project-scope exports use the project name.
+              </p>
+            )}
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-1.5 cursor-pointer text-xs text-muted-foreground hover:text-foreground transition-colors">
+                <Checkbox
+                  checked={appendTimestamp}
+                  onCheckedChange={(c) => setAppendTimestamp(c === true)}
+                />
+                Append timestamp
+              </label>
+              <label className="flex items-center gap-1.5 cursor-pointer text-xs text-muted-foreground hover:text-foreground transition-colors">
+                <Checkbox
+                  checked={appendLangTag}
+                  onCheckedChange={(c) => setAppendLangTag(c === true)}
+                />
+                Append language tag
+              </label>
+            </div>
+          </div>
         </fieldset>
 
         {/* Audio-by-character inline preview */}

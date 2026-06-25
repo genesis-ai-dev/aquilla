@@ -58,6 +58,9 @@ export type OutboxEventKind =
   | "assignment.create"
   | "assignment.reassign"
   | "assignment.unassign"
+  // FRO-438: Cast/character label assignment (non-chain-mutating; contributor+).
+  // Writes cast_name into cells.metadata JSONB without touching target text.
+  | "cast.assign"
 
 // ── Comment scope ─────────────────────────────────────────────────────────
 
@@ -272,6 +275,16 @@ export interface OutboxEventPayloads {
   }
   "assignment.unassign": {
     assignmentId: string
+  }
+
+  // FRO-438: Cast/character label assignment.
+  // Non-chain-mutating: does NOT move cells.event_id, does NOT touch target text.
+  // The projection writes castName into cells.metadata.cast_name on the source row.
+  "cast.assign": {
+    /**
+     * The cast/character name for the voice actor. Null clears the label.
+     */
+    castName: string | null
   }
 }
 

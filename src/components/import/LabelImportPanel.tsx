@@ -1,11 +1,12 @@
 /**
- * FRO-314: Cell-label / cast import via downloadable spreadsheet template.
+ * FRO-438: Cell-label / cast import via downloadable spreadsheet template.
  *
  * Flow:
  *   1. User downloads a pre-populated CSV template (one row per source cell ref)
  *   2. PM fills in the cast_name (and optionally note) column
  *   3. User re-uploads the filled template
- *   4. Labels are applied to cells via the standard bulkUploadTargetCommits pathway
+ *   4. Labels are applied to cells via the cast.assign event (non-chain-mutating;
+ *      does NOT touch target text)
  *
  * This panel is shown from the ImportDialog landing (new "Cell Labels" card).
  * It requires `sourceCells` to generate the template and to match incoming
@@ -17,6 +18,7 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import type { SourceCellRef } from "@/lib/import"
 import { generateLabelTemplate, parseCsvRows } from "@/lib/parsers/spreadsheet"
+import { emitCastAssign } from "@/lib/sync/events-emit"
 
 export interface LabelImportPanelProps {
   projectId: string
@@ -27,10 +29,11 @@ export interface LabelImportPanelProps {
   onCancel: () => void
 }
 
-// projectId/username/getToken/onImported are unused while the apply path is
-// held (FRO-314-cast-events) but stay in the props contract for the re-enable.
 export function LabelImportPanel({
+  projectId,
+  username,
   sourceCells,
+  onImported,
   onCancel,
 }: LabelImportPanelProps) {
   const [phase, setPhase] = useState<"idle" | "importing" | "done">("idle")
@@ -87,24 +90,65 @@ export function LabelImportPanel({
     }
   }, [])
 
-  /** Apply the cast labels. Since the API works via target commits, we use
-   *  a simplified approach: for each matched cell, emit a cast label note.
-   *  SWARM-TODO(FRO-314-cast-events): the server doesn't yet have a dedicated
-   *  "cast label" event type — for now we store cast names as a target-cell
-   *  attribute update. The full implementation requires a cast.assign event
-   *  type (tracked separately). This panel currently imports cast names only
-   *  when target column text equals the cast name as a placeholder. */
+  /** Apply the cast labels via cast.assign events (FRO-438).
+   *
+   * For each row in the preview:
+   *   - Look up the cellId from sourceCells by canonicalRef.
+   *   - Emit a cast.assign event (non-chain-mutating; does NOT write target text).
+   *   - Collect unmatched refs and report them to the user.
+   */
   async function handleImport() {
-    // FRO-314 HOLD: applying labels to EXISTING cells has no safe server path yet.
-    // The only available write (applyEBibleTargetImport) would commit cast names
-    // into the TARGET TEXT column — corrupting translations. Until a dedicated
-    // cast/label event exists (SWARM-TODO FRO-314-cast-events), importing is
-    // disabled; template download + preview/validation still work.
-    setError(
-      "Applying labels to existing cells isn't supported yet — it requires dedicated " +
-      "cast-label support on the server. Your file was validated; nothing was imported.",
-    )
-    setPhase("idle")
+    if (!preview || preview.length === 0) return
+    setPhase("importing")
+    setError(null)
+
+    // Build a lookup: canonicalRef → { cellId, fileId }
+    const byRef = new Map<string, { cellId: string; fileId: string }>()
+    for (const cell of sourceCells) {
+      if (cell.canonicalRef && !byRef.has(cell.canonicalRef)) {
+        byRef.set(cell.canonicalRef, { cellId: cell.cellId, fileId: cell.fileId })
+      }
+    }
+
+    const unmatched: string[] = []
+    const emits: Promise<string>[] = []
+
+    for (const { ref, castName } of preview) {
+      const cell = byRef.get(ref)
+      if (!cell) {
+        unmatched.push(ref)
+        continue
+      }
+      emits.push(
+        emitCastAssign({
+          projectId,
+          fileId: cell.fileId,
+          cellId: cell.cellId,
+          castName,
+          author: username,
+        }),
+      )
+    }
+
+    try {
+      await Promise.all(emits)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to apply labels")
+      setPhase("idle")
+      return
+    }
+
+    const matched = preview.length - unmatched.length
+    if (unmatched.length > 0) {
+      setError(
+        `Applied ${matched} label${matched !== 1 ? "s" : ""}. ` +
+        `${unmatched.length} ref${unmatched.length !== 1 ? "s" : ""} not matched to any cell: ` +
+        unmatched.slice(0, 10).join(", ") +
+        (unmatched.length > 10 ? ` …and ${unmatched.length - 10} more` : ""),
+      )
+    }
+    setPhase("done")
+    onImported()
   }
 
   return (

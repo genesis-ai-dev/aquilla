@@ -98,6 +98,11 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // route writes this kind directly); guard at PROJECT_LEAD to match the
   // auth-worker gate.
   'project.link-source': ROLE.PROJECT_LEAD,
+
+  // FRO-438: cast.assign is a metadata-only label written by a PM or project
+  // lead who is assigning voice actors to cells. Contributor-level so a project
+  // lead can bulk-assign from the label import panel without needing owner role.
+  'cast.assign': ROLE.CONTRIBUTOR,
 }
 
 export function requiredRoleFor(kind: EventKind): number {

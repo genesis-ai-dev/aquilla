@@ -1148,6 +1148,44 @@ case 'cell.audio.attach': {
       )
     }
 
+    case 'cast.assign': {
+      // FRO-438: non-chain-mutating label assignment. Merges cast_name into
+      // cells.metadata JSONB without touching value, event_id, or validated.
+      // Applies to the SOURCE-side row (the cell's canonical reference lives
+      // on the source side); the same cell_id lookup works for both sides.
+      const p = event.payload as EventPayloads['cast.assign']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cast.assign event ${event.id} is missing fileId or cellId`)
+      }
+      if (p.castName !== null && p.castName !== undefined) {
+        // Merge into existing JSONB, preserving other metadata keys.
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells
+               SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('cast_name', ?::text)
+               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+            )
+            .bind(p.castName, event.projectId, event.fileId, event.cellId),
+        )
+      } else {
+        // Null castName = clear the label.
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells
+               SET metadata = CASE
+                 WHEN metadata IS NULL THEN NULL
+                 ELSE metadata - 'cast_name'
+               END
+               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+            )
+            .bind(event.projectId, event.fileId, event.cellId),
+        )
+      }
+      return ['cells']
+    }
+
     default: {
       // Defensive exhaustiveness check. If a new EventKind is added without
       // a case here this triggers a TS compile error.

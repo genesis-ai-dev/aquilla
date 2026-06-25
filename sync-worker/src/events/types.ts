@@ -73,6 +73,10 @@ export type EventKind =
   // detached). sync-worker receives this via the shared events table and uses
   // it to invalidate any cached upstream-resolution in the stale-source route.
   | 'project.link-source'
+  // FRO-438: Cast/character label assignment. Non-chain-mutating (does NOT move
+  // cells.event_id). Writes cast_name into cells.metadata JSONB without touching
+  // target text. Contributor-level — a PM/project-lead labels cells for voice actors.
+  | 'cast.assign'
 
 // ── Comment scope ─────────────────────────────────────────────────────────
 
@@ -333,6 +337,19 @@ export interface EventPayloads {
   'project.link-source': {
     /** Non-null = link established / updated. Null = link cleared (detached). */
     sourceProjectId: string | null
+  }
+
+  // ── FRO-438: Cast/character label assignment (non-chain-mutating) ──────────
+  // Sets cells.metadata.cast_name WITHOUT touching target text or cells.event_id.
+  // Emitted by the label import panel when a PM uploads a filled cast template.
+  // Idempotent JSONB merge: repeated assigns for the same cell overwrite the
+  // cast_name; clearing requires a null value.
+  'cast.assign': {
+    /**
+     * The cast/character name for the voice actor. Null clears the label.
+     * The projection writes this into cells.metadata as { cast_name: value }.
+     */
+    castName: string | null
   }
 }
 

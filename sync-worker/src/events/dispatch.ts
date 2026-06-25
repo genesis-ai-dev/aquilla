@@ -143,6 +143,7 @@ export function dispatchEvent(
       }
 
     case 'cell.backtranslation.set':
+    case 'cast.assign':
       return {
         ok: true,
         result: handleCellEvent(

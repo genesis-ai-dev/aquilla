@@ -1,18 +1,17 @@
-name: Audio delta sync
+name: Delta sync (content + audio)
 
-# Scheduled delta import of legacy-Codex audio (GitLab LFS → R2 + cell_audio
-# events in Neon). Only NEW/changed projects are touched: per-project HEAD sha is
-# compared against the persisted state in R2, so unchanged projects are skipped
-# without cloning. Bytes are copied R2→R2 with server-side CopyObject (no egress),
-# events ingested via the pipelined /migrate/ingest path.
-#
-# Scope: AUDIO ONLY. The content/org-team pass still reads org maps from the
-# legacy D1 (pre-Neon-cutover) and must be reworked before it can be scheduled.
+# Scheduled delta import of legacy-Codex projects from GitLab → Neon + R2.
+# Two passes, both delta (per-project HEAD-sha compared against the state
+# persisted in R2, so unchanged projects are skipped without cloning):
+#   1. CONTENT — orgs/teams (created in Neon via /migrate/groups), projects,
+#      cells/comments/cast (events via the pipelined /migrate/ingest).
+#   2. AUDIO  — every take copied R2→R2 (CopyObject, no egress) + cell_audio events.
+# Idempotent end to end; safe to re-run.
 #
 # Required repo secrets (Settings → Secrets and variables → Actions):
 #   FRONTIER_USERNAME, FRONTIER_PASSWORD   GitLab creds (Frontier password grant)
-#   SYNC_SECRET_KEY                        trusted ingest auth (prod sync-worker)
-#   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY R2 S3 token (read LFS bucket, write snapshots)
+#   SYNC_SECRET_KEY                        trusted ingest/upsert auth (prod sync-worker)
+#   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY R2 S3 token (read LFS bucket, write snapshots, state)
 #   DISCORD_WEBHOOK_URL                    channel webhook for the run report
 # Optional:
 #   R2_ACCOUNT_ID (defaults to the Frontier R&D account baked into the script)
@@ -23,7 +22,7 @@ on:
   workflow_dispatch: {} # manual "Run workflow" button
 
 concurrency:
-  group: audio-delta-sync
+  group: delta-sync
   cancel-in-progress: false # never interrupt an in-flight sync (corrupts the delta state)
 
 permissions:
@@ -51,8 +50,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Restore the delta state (HEAD-sha-per-project) so we skip unchanged
-      # projects without cloning. Missing object → first run → full sweep.
+      # Restore the delta state (HEAD-sha-per-project, for BOTH passes:
+      # contentSha + audioFastSha) so unchanged projects are skipped without
+      # cloning. Missing object → first run → full sweep.
       - name: Restore migrate state from R2
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -61,10 +61,25 @@ jobs:
         run: |
           aws s3 cp "s3://${R2_BUCKET}/${STATE_KEY}" .migrate-state.json \
             --endpoint-url "$R2_ENDPOINT" || echo "no prior state — full sweep"
-          echo "state entries: $(grep -c audioFastSha .migrate-state.json 2>/dev/null || echo 0)"
+          echo "state entries: $(grep -c contentSha .migrate-state.json 2>/dev/null || echo 0) content, $(grep -c audioFastSha .migrate-state.json 2>/dev/null || echo 0) audio"
 
-      - name: Run audio delta sync
-        id: sync
+      # 1) CONTENT: orgs/teams (created in Neon) + projects + cells. The group
+      #    sync runs inline, so new orgs are fully pulled in. No R2 needed here.
+      - name: Content delta
+        id: content
+        env:
+          FRONTIER_USERNAME: ${{ secrets.FRONTIER_USERNAME }}
+          FRONTIER_PASSWORD: ${{ secrets.FRONTIER_PASSWORD }}
+          SYNC_SECRET_KEY: ${{ secrets.SYNC_SECRET_KEY }}
+        run: |
+          set -o pipefail
+          npx tsx scripts/migrate-all.ts --apply 2>&1 | tee content.log
+
+      # 2) AUDIO: every take, copied R2→R2. Runs even if content failed
+      #    (independent + idempotent), so one bad pass doesn't block the other.
+      - name: Audio delta
+        id: audio
+        if: always()
         env:
           FRONTIER_USERNAME: ${{ secrets.FRONTIER_USERNAME }}
           FRONTIER_PASSWORD: ${{ secrets.FRONTIER_PASSWORD }}
@@ -75,7 +90,7 @@ jobs:
           set -o pipefail
           # Drop noisy per-100 copy-progress lines; keep per-project results.
           npx tsx scripts/migrate-all.ts --audio-fast --apply 2>&1 \
-            | grep -vE "copied [0-9]+/[0-9]+ +copied" | tee sweep.log
+            | grep -vE "copied [0-9]+/[0-9]+ +copied" | tee audio.log
 
       # Always push state back (even on failure) so partial progress isn't lost
       # and the next run resumes — the sync is idempotent.
@@ -95,42 +110,60 @@ jobs:
         if: always()
         id: report
         run: |
-          f=sweep.log
-          [ -f "$f" ] || { echo "sweep.log missing — the run failed before producing output" > sweep.log; }
-          applied=$(grep -oE "Applied [0-9]+/[0-9]+ projects" "$f" | tail -1)
-          [ -z "$applied" ] && applied="Applied ?/? projects (run failed early)"
-          # grep -c already prints 0 when there are no matches — no `|| echo 0`.
-          skipped=$(grep -c "↩ audio unchanged" "$f")
-          # Per-project FINAL copy lines carry a "(Ns)" timing; progress lines don't.
-          changed=$(grep -cE "copied [0-9]+/[0-9]+.*\([0-9.]+s\)" "$f")
-          copied=$(grep -oE "copied [0-9]+/[0-9]+.*\([0-9.]+s\)" "$f" | grep -oE "copied [0-9]+" | awk '{s+=$2} END{print s+0}')
-          errors=$(grep -cE "✗ " "$f")
-          lfsmiss=$(grep -oE "lfs-miss [0-9]+" "$f" | awk '{s+=$2} END{print s+0}')
-          nooid=$(grep -oE "no-oid [0-9]+" "$f" | awk '{s+=$2} END{print s+0}')
+          c=content.log; a=audio.log
+          [ -f "$c" ] || echo "content.log missing — content pass did not produce output" > "$c"
+          [ -f "$a" ] || echo "audio.log missing — audio pass did not produce output" > "$a"
+
+          # ── content ── (grep -c already prints 0 when no match; no `|| echo 0`)
+          c_applied=$(grep -oE "Applied [0-9]+/[0-9]+ projects" "$c" | tail -1); [ -z "$c_applied" ] && c_applied="Applied ?/? (failed early)"
+          c_changed=$(grep -cE "↳ delta:" "$c")
+          c_events=$(grep -oE "delta: [0-9]+ new" "$c" | awk '{s+=$2} END{print s+0}')
+          c_groups=$(grep -oE "[0-9]+ orgs / [0-9]+ teams (upserted|planned)" "$c" | tail -1)
+          c_skipped=$(grep -c "content unchanged" "$c")
+          c_errors=$(grep -cE "✗ " "$c")
+
+          # ── audio ──
+          a_applied=$(grep -oE "Applied [0-9]+/[0-9]+ projects" "$a" | tail -1); [ -z "$a_applied" ] && a_applied="Applied ?/? (failed early)"
+          a_changed=$(grep -cE "copied [0-9]+/[0-9]+.*\([0-9.]+s\)" "$a")
+          a_copied=$(grep -oE "copied [0-9]+/[0-9]+.*\([0-9.]+s\)" "$a" | grep -oE "copied [0-9]+" | awk '{s+=$2} END{print s+0}')
+          a_lfsmiss=$(grep -oE "lfs-miss [0-9]+" "$a" | awk '{s+=$2} END{print s+0}')
+          a_errors=$(grep -cE "✗ " "$a")
+
+          errors=$((c_errors + a_errors))
           status="✅ ok"; [ "$errors" -gt 0 ] && status="⚠️ ${errors} errors"
           {
-            echo "## Audio delta sync — ${status}"
+            echo "## Delta sync — ${status}"
             echo ""
+            echo "### Content (orgs / projects / cells)"
             echo "| metric | value |"
             echo "|---|---|"
-            echo "| ${applied} | |"
-            echo "| projects with new audio | ${changed} |"
-            echo "| takes copied | ${copied} |"
-            echo "| unchanged (skipped) | ${skipped} |"
-            echo "| lfs-miss | ${lfsmiss} |"
-            echo "| no-oid (no pointer) | ${nooid} |"
-            echo "| hard errors | ${errors} |"
+            echo "| ${c_applied} | |"
+            echo "| projects with new content | ${c_changed} |"
+            echo "| new events ingested | ${c_events} |"
+            echo "| org/team sync | ${c_groups:-n/a} |"
+            echo "| unchanged (skipped) | ${c_skipped} |"
+            echo "| content errors | ${c_errors} |"
+            echo ""
+            echo "### Audio (takes)"
+            echo "| metric | value |"
+            echo "|---|---|"
+            echo "| ${a_applied} | |"
+            echo "| projects with new audio | ${a_changed} |"
+            echo "| takes copied | ${a_copied} |"
+            echo "| lfs-miss | ${a_lfsmiss} |"
+            echo "| audio errors | ${a_errors} |"
           } | tee "$GITHUB_STEP_SUMMARY"
           {
-            echo "applied=${applied}"
-            echo "changed=${changed}"
-            echo "copied=${copied}"
-            echo "errors=${errors}"
             echo "status=${status}"
+            echo "c_applied=${c_applied}"
+            echo "c_events=${c_events}"
+            echo "a_applied=${a_applied}"
+            echo "a_copied=${a_copied}"
+            echo "errors=${errors}"
           } >> "$GITHUB_OUTPUT"
 
       # `secrets` can't be used in an `if:` — pass the webhook as env and guard in
-      # the shell. All interpolated values are trusted (our own numeric outputs +
+      # the shell. All interpolated values are trusted (our own outputs +
       # github.run_id), never event data.
       - name: Post to Discord
         if: always()
@@ -138,14 +171,15 @@ jobs:
           WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           R_STATUS: ${{ steps.report.outputs.status }}
-          R_APPLIED: ${{ steps.report.outputs.applied }}
-          R_CHANGED: ${{ steps.report.outputs.changed }}
-          R_COPIED: ${{ steps.report.outputs.copied }}
+          R_CAPPLIED: ${{ steps.report.outputs.c_applied }}
+          R_CEVENTS: ${{ steps.report.outputs.c_events }}
+          R_AAPPLIED: ${{ steps.report.outputs.a_applied }}
+          R_ACOPIED: ${{ steps.report.outputs.a_copied }}
           R_ERRORS: ${{ steps.report.outputs.errors }}
         run: |
           if [ -z "$WEBHOOK" ]; then echo "no DISCORD_WEBHOOK_URL secret — skipping"; exit 0; fi
-          msg=$(printf '**Audio delta sync** — %s\n%s · new-audio projects: %s · takes copied: %s · errors: %s\n<%s>' \
-            "$R_STATUS" "$R_APPLIED" "$R_CHANGED" "$R_COPIED" "$R_ERRORS" "$RUN_URL")
+          msg=$(printf '**Delta sync** — %s\nContent: %s · %s new events\nAudio: %s · %s takes copied\nerrors: %s\n<%s>' \
+            "$R_STATUS" "$R_CAPPLIED" "$R_CEVENTS" "$R_AAPPLIED" "$R_ACOPIED" "$R_ERRORS" "$RUN_URL")
           curl -fsS -H "Content-Type: application/json" \
             -d "$(jq -n --arg c "$msg" '{content:$c}')" \
             "$WEBHOOK" || echo "discord post failed (non-fatal)"

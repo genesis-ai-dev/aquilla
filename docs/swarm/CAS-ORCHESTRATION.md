@@ -61,3 +61,5 @@ both /issue cycles sequentially. FRO-439 touches both cast/label code (438) and 
 - 2026-06-25 · WS-AUTH (FRO-436) · swarm/fro-436-auth · b359f24f2 · tsc 0 (auth) · merged clean
 - 2026-06-25 · INTEGRATION GATE · swarm/cas-integration · fe vitest 3188/3188 · sync 648/648 · auth 462/462 · build ✓
 - 2026-06-25 · PROMOTED main ← swarm/cas-integration (FF). Wave 2 (FRO-439) next; live-UI QA (Step 6) pending.
+- 2026-06-25 · WS-VOICE (FRO-439) · swarm/fro-439-voice · ef66f5ebe · tsc 0 (fe+sync) · fe 3202/3202 · sync 648/648 · build ✓ · merged clean
+- 2026-06-25 · PROMOTED main ← swarm/cas-integration (FF) — Wave 2. SWARM CONVERGED for AFK scope. Live-UI QA (Step 6) + HITL (434/440/442) remain.

@@ -56,3 +56,8 @@ both /issue cycles sequentially. FRO-439 touches both cast/label code (438) and 
 
 ## §M Merge log
 (append: date · WS · branch · sha · tsc · vitest)
+- 2026-06-25 · WS-EXPORT (FRO-437, FRO-441) · swarm/fro-437-441-export · cc8f6e6cf+85644a718 · tsc 0 · merged clean
+- 2026-06-25 · WS-LABELS (FRO-438) · swarm/fro-438-labels · caae58f33 · tsc 0 (fe+sync) · merged clean
+- 2026-06-25 · WS-AUTH (FRO-436) · swarm/fro-436-auth · b359f24f2 · tsc 0 (auth) · merged clean
+- 2026-06-25 · INTEGRATION GATE · swarm/cas-integration · fe vitest 3188/3188 · sync 648/648 · auth 462/462 · build ✓
+- 2026-06-25 · PROMOTED main ← swarm/cas-integration (FF). Wave 2 (FRO-439) next; live-UI QA (Step 6) pending.

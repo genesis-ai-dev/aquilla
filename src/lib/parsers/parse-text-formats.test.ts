@@ -1,0 +1,41 @@
+import { describe, it, expect } from "vitest"
+import { parseTextFormat, TEXT_PARSE_FILE_TYPES } from "./parse-text-formats"
+
+describe("parseTextFormat (worker-safe DOM-free parse core)", () => {
+  it("parses a plain text file into strings", () => {
+    const results = parseTextFormat({
+      fileType: "txt",
+      text: "First line.\n\nSecond line.",
+      name: "sample.txt",
+    })
+    expect(results).toHaveLength(1)
+    expect(results[0].name).toBe("sample.txt")
+    expect(results[0].strings.length).toBeGreaterThan(0)
+  })
+
+  it("splits a multi-book USFM file into one ImportResult per \\id, carrying raw source", () => {
+    const usfm =
+      "\\id GEN\n\\c 1\n\\v 1 In the beginning God created the heavens and the earth.\n" +
+      "\\id EXO\n\\c 1\n\\v 1 These are the names of the sons of Israel.\n"
+    const results = parseTextFormat({ fileType: "usfm", text: usfm, name: "books.usfm" })
+
+    expect(results).toHaveLength(2)
+    // Each book becomes its own result named by its \id book code.
+    expect(results.map((r) => r.name)).toEqual(["GEN", "EXO"])
+    // Round-trip side-car: each result keeps its own raw USFM section.
+    expect(results[0].rawSourceFormat).toBe("usfm")
+    expect(results[0].rawSource).toContain("\\id GEN")
+    expect(results[1].rawSource).toContain("\\id EXO")
+    // The verse text is extracted into a translatable string.
+    expect(results[0].strings.some((s) => s.original.includes("In the beginning"))).toBe(true)
+  })
+
+  it("declares exactly the DOM-free file types it can handle", () => {
+    expect(TEXT_PARSE_FILE_TYPES.has("usfm")).toBe(true)
+    expect(TEXT_PARSE_FILE_TYPES.has("txt")).toBe(true)
+    expect(TEXT_PARSE_FILE_TYPES.has("csv")).toBe(true)
+    // DOM-bound (DOMParser) formats must NOT be routed here.
+    expect(TEXT_PARSE_FILE_TYPES.has("docx")).toBe(false)
+    expect(TEXT_PARSE_FILE_TYPES.has("xliff")).toBe(false)
+  })
+})

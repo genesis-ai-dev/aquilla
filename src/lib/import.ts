@@ -21,10 +21,8 @@ import { detectFileType, isMediaFileType } from "./parsers/types"
 import { buildAudioId, uploadCellAudio, deleteCellAudio } from "./audio/upload"
 import { emitCellAudioAttach } from "./sync/events-emit"
 import { detectSpeechSegments } from "./timeline/silence-split"
-import { extractPlaintextStrings } from "./parsers/plaintext"
-import { extractMarkdownStrings } from "./parsers/markdown"
-import { extractVttStrings, extractSrtStrings } from "./parsers/subtitle"
-import { parseUsfmLossless } from "./parsers/usfm-lossless"
+import { parseTextFormatOffMainThread } from "./parsers/parse-worker-client"
+import { usfmSectionToStrings } from "./parsers/parse-text-formats"
 import {
   assembleParatextProject,
   type ParatextBook,
@@ -50,7 +48,6 @@ import {
 } from "./parsers/helloao"
 import { parseXliff } from "./parsers/xliff"
 import { parseTmx } from "./parsers/tmx"
-import { parseCsvBilingual } from "./parsers/csv-bilingual"
 import { parseMaculaTsv } from "./parsers/macula"
 import { parseTnTsv } from "./parsers/translation-notes"
 import { parseObsStories } from "./parsers/obs"
@@ -332,57 +329,6 @@ export interface ImportResult {
   /** Original filename (e.g. "01GENarONAV12.SFM") — preserved for export naming
    *  and hover-to-see-original when we rename the file to a localized book name. */
   originalName?: string
-}
-
-/** Parse one USFM book section into translatable cells (verse bodies + heading/
- *  title/intro paratext), in document order. Shared by plain-USFM import and
- *  Paratext-project import. */
-function usfmSectionToStrings(section: string): {
-  bookId: string
-  strings: TranslatableString[]
-  duplicateRefs: string[]
-} {
-  const doc = parseUsfmLossless(section)
-  const bookId = doc.bookId || "unknown"
-  const seen = new Set<string>()
-  const duplicateRefs: string[] = []
-  for (const v of doc.verses) {
-    if (seen.has(v.ref)) duplicateRefs.push(v.ref)
-    else seen.add(v.ref)
-  }
-  const allSpans = [
-    ...doc.verses.map((v) => ({
-      order: v.textStart,
-      ref: v.ref,
-      text: v.text.trim(),
-      section: `${bookId} ${v.chapter}`,
-      type: "verse" as const,
-      // D2: propagate paragraph-start signal from the lossless parser.
-      // The verse is never split — paragraphStart is a grouping signal only.
-      // See docs/superpowers/specs/2026-06-18-paragraph-drafting-retrieval-context-design.md (D1,D2).
-      paragraphStart: v.paragraphStart,
-    })),
-    ...doc.headings.map((h) => ({
-      order: h.textStart,
-      ref: h.ref,
-      text: h.text.trim(),
-      section: h.chapter > 0 ? `${bookId} ${h.chapter}` : bookId,
-      type: h.kind,
-      paragraphStart: undefined as boolean | undefined,
-    })),
-  ].sort((a, b) => a.order - b.order)
-  const strings: TranslatableString[] = allSpans.map((s) => ({
-    id: uuidv7(),
-    original: s.text,
-    translated: "",
-    context: s.ref,
-    group: s.ref,
-    section: s.section,
-    globalReferences: [s.ref],
-    type: s.type,
-    ...(s.paragraphStart ? { paragraphStart: true } : {}),
-  }))
-  return { bookId, strings, duplicateRefs }
 }
 
 export interface ImportContext {
@@ -1462,60 +1408,28 @@ export async function importParatextAsTarget(
 
 export async function parseFile(file: File, fileType: FileType): Promise<ImportResult[]> {
   switch (fileType) {
-    case "txt": {
+    case "txt":
+    case "md":
+    case "obs":
+    case "vtt":
+    case "srt":
+    case "csv":
+    case "tsv": {
+      // DOM-free text formats parse off the main thread so a large import never
+      // freezes the UI. The worker client falls back to inline parsing when a
+      // worker can't be created (SSR / tests). Per-format logic + the multi-book
+      // USFM split live in parse-text-formats.ts (worker-safe core).
       const text = await file.text()
-      return [{ name: file.name, strings: extractPlaintextStrings(text) }]
-    }
-    case "md": {
-      const text = await file.text()
-      return [{ name: file.name, strings: extractMarkdownStrings(text) }]
-    }
-    case "obs": {
-      const text = await file.text()
-      return [{ name: file.name, strings: parseObsStories(text, file.name) }]
-    }
-    case "vtt": {
-      const text = await file.text()
-      return [{ name: file.name, strings: extractVttStrings(text) }]
-    }
-    case "srt": {
-      const text = await file.text()
-      return [{ name: file.name, strings: extractSrtStrings(text) }]
+      return parseTextFormatOffMainThread({ fileType, text, name: file.name })
     }
     case "usfm": {
       const raw = await file.text()
-      // USX (Paratext's XML export) is isomorphic to USFM — convert it up front
-      // and let the proven USFM pipeline take over (cells + side-car).
+      // USX (Paratext's XML export) → USFM conversion uses the Window-only
+      // DOMParser, so it runs HERE on the main thread; the heavy lossless parse
+      // (verse extraction, \id book split, side-car capture) then happens in the
+      // worker via parse-text-formats.ts.
       const text = looksLikeUsx(raw) ? usxToUsfm(raw) : raw
-      // Use the lossless parser: clean verse text (no leaked inline footnote
-      // markers like the legacy parser produced), stable canonical refs
-      // (`MAT 1:1`), and the raw bytes captured as a side-car so export can
-      // round-trip every marker we don't explicitly model.
-      //
-      // Multi-book files (concatenated with \id boundaries) get split here so
-      // each book becomes its own File — matches the legacy behavior and
-      // Paratext convention.
-      const sections = text.includes("\\id ")
-        ? text.split(/(?=\\id\s)/).filter((s) => s.trim().length > 0)
-        : [text]
-      return sections.map((section) => {
-        const { bookId, strings, duplicateRefs } = usfmSectionToStrings(section)
-        // Surface duplicate \v refs (a real data-quality issue we see in the
-        // wild — e.g. two consecutive `\v 34`). Round-trip still works, but
-        // consultants should know their source has the bug.
-        if (duplicateRefs.length > 0) {
-          console.warn(
-            `[usfm import] ${file.name}: ${duplicateRefs.length} duplicate verse ref(s) — `
-              + `${duplicateRefs.slice(0, 5).join(", ")}${duplicateRefs.length > 5 ? `, +${duplicateRefs.length - 5} more` : ""}`,
-          )
-        }
-        return {
-          name: file.name === bookId ? bookId : sections.length > 1 ? bookId : file.name,
-          strings,
-          rawSource: section,
-          rawSourceFormat: "usfm",
-        }
-      })
+      return parseTextFormatOffMainThread({ fileType: "usfm", text, name: file.name })
     }
     case "docx": {
       const buffer = await file.arrayBuffer()
@@ -1545,11 +1459,6 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
     case "tmx": {
       const text = await file.text()
       return [{ name: file.name, strings: parseTmx(text) }]
-    }
-    case "csv":
-    case "tsv": {
-      const text = await file.text()
-      return [{ name: file.name, strings: parseCsvBilingual(text) }]
     }
     case "ebible":
       throw new Error("eBible translations import via importEBible(), not importFile()")

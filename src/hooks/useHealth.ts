@@ -173,10 +173,21 @@ export function useHealth(
     byCell: Map<string, { sig: string; infractions: RuleInfraction[] }>
   }>({ rulesSig: "", byCell: new Map() })
 
+  // `enabledRules` + `rulesSig` depend only on `rules`, which changes far less
+  // often than `fileCells` (every keystroke rebuilds the cells map). Hoisting
+  // them here keeps the JSON.stringify over potentially hundreds of terminology
+  // rules off the per-keystroke path — the infractions memo below re-runs on
+  // every edit, but now reuses these stable values instead of re-serializing.
+  const { enabledRules, rulesSig } = useMemo(() => {
+    const enabled = rules.filter((r) => r.enabled)
+    return {
+      enabledRules: enabled,
+      rulesSig: JSON.stringify(enabled.map((r) => [r.id, r.name, r.check])),
+    }
+  }, [rules])
+
   const infractions = useMemo(() => {
     const end = perfMark("useHealth.checkRules")
-    const enabledRules = rules.filter((r) => r.enabled)
-    const rulesSig = JSON.stringify(enabledRules.map((r) => [r.id, r.name, r.check]))
     const cache = infractionsCacheRef.current
     const rulesChanged = cache.rulesSig !== rulesSig
 
@@ -205,7 +216,7 @@ export function useHealth(
     end()
     memMark("useHealth.checkRules")
     return result
-  }, [fileCells, rules])
+  }, [fileCells, enabledRules, rulesSig])
 
   // File progress + open-comment counts.
   const aux = useMemo(() => deriveAuxStats(fileCells), [fileCells])

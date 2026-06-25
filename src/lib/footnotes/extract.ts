@@ -42,6 +42,13 @@ const USFM_FOOTNOTE_RE = /\\f\s+([^\s\\]+)([\s\S]*?)\\f\*/g
  * Returns an empty array for text with no \f...\f* spans.
  */
 export function extractUsfmFootnotes(text: string): ExtractedFootnote[] {
+  // Fast path: a USFM footnote always begins with a literal "\f" marker. A plain
+  // substring scan is far cheaper than allocating a RegExp and running exec, and
+  // the overwhelming majority of cell text has no footnote at all. This function
+  // is called per-visible-cell on every scroll frame and inside the ProseMirror
+  // footnote decoration plugin on every doc change, so this bailout is hot.
+  if (!text || !text.includes("\\f")) return []
+
   const results: ExtractedFootnote[] = []
   let m: RegExpExecArray | null
   const re = new RegExp(USFM_FOOTNOTE_RE.source, "g")

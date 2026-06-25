@@ -733,6 +733,39 @@ export async function emitFileRestore(input: FileRestoreInput): Promise<string> 
   return eventId
 }
 
+// ── Cast/label helper (FRO-438) ───────────────────────────────────────────
+// Non-chain-mutating (parentId omitted), like cell.waive/cell.backtranslation.set.
+// Writes cast_name into the source-side cell's metadata JSONB bucket without
+// touching target text or cells.event_id.
+
+export interface CastAssignInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The cast/character name to assign. Null clears the label. */
+  castName: string | null
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cast.assign` event — sets the cast/character name on a cell's
+ * metadata WITHOUT writing to target text. Non-chain-mutating (parentId = null).
+ */
+export async function emitCastAssign(input: CastAssignInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cast.assign",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { castName: input.castName },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface FileRenameInput {
   projectId: string
   fileId: string

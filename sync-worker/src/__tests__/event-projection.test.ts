@@ -682,6 +682,7 @@ describe('isChainMutatingKind', () => {
     'assignment.reassign': false,
     'assignment.unassign': false,
     'project.link-source': false,
+    'cast.assign': false,
   }
 
   it('classifies every EventKind exactly as the old route deny-list did', () => {

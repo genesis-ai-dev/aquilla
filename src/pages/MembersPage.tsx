@@ -1,14 +1,15 @@
 import { useState } from "react"
 import {
+  AlertTriangle,
   Clock,
   Mail,
-  Users,
   UsersRound,
   X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Page, PageHeader, Section, EmptyState } from "@/components/ui/page"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
@@ -51,42 +52,52 @@ export function MembersPage() {
 
   if (isLoading) {
     return (
-      <PageShell>
-        <div className="flex items-center justify-center py-16 text-muted-foreground">
-          <Spinner className="mr-2" />
-          <span className="text-sm">Loading…</span>
-        </div>
-      </PageShell>
+      <MembersShell>
+        <Page size="wide">
+          <PageHeader title="Members" description="People in this organization and their access." />
+          <div className="space-y-4">
+            <div className="h-24 animate-pulse rounded-2xl border bg-card" />
+            <div className="h-40 animate-pulse rounded-2xl border bg-card" />
+          </div>
+        </Page>
+      </MembersShell>
     )
   }
 
   if (error) {
     return (
-      <PageShell>
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4">
-          <p className="text-sm font-medium text-destructive">Couldn't load your organization</p>
-          <p className="mt-1 text-xs text-muted-foreground">{error}</p>
-          <p className="mt-2 text-[10px] text-muted-foreground">
-            Common causes: the Frontier worker is unreachable, your session expired,
-            or the request timed out. Check your network and try again.
-          </p>
-        </div>
-      </PageShell>
+      <MembersShell>
+        <Page size="wide">
+          <PageHeader title="Members" description="People in this organization and their access." />
+          <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
+            <p className="text-sm font-medium text-destructive">Couldn't load your organization</p>
+            <p className="mt-1 text-xs text-muted-foreground">{error}</p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Common causes: the Frontier worker is unreachable, your session expired,
+              or the request timed out. Check your network and try again.
+            </p>
+          </div>
+        </Page>
+      </MembersShell>
     )
   }
 
   if (!activeOrg) {
     return (
-      <PageShell>
-        <div className="rounded-lg border bg-card p-6 text-center">
-          <p className="text-sm font-medium">{isAllOrgs ? "Select an organization" : "Sign in to manage members"}</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {isAllOrgs
-              ? "Member access is managed within a single organization."
-              : "Member access requires a Frontier session. Sign in from the dashboard and come back to this page."}
-          </p>
-        </div>
-      </PageShell>
+      <MembersShell>
+        <Page size="wide">
+          <PageHeader title="Members" description="People in this organization and their access." />
+          <EmptyState
+            icon={AlertTriangle}
+            title={isAllOrgs ? "Select an organization" : "Sign in to manage members"}
+            description={
+              isAllOrgs
+                ? "Member access is managed within a single organization. Choose one from the switcher to continue."
+                : "Member access requires a Frontier session. Sign in from the dashboard and come back to this page."
+            }
+          />
+        </Page>
+      </MembersShell>
     )
   }
 
@@ -106,22 +117,8 @@ function MembersShell({ children }: { children: React.ReactNode }) {
       sidebar={<OrgSidebar />}
       header={<OrgBreadcrumb section="Members" />}
       statusBar={null}
-      main={<div className="h-full overflow-y-auto">{children}</div>}
+      main={children}
     />
-  )
-}
-
-function PageShell({ children }: { children: React.ReactNode }) {
-  return (
-    <MembersShell>
-      <div className="p-6">
-        <div className="mb-4 flex items-center gap-2">
-          <Users className="h-5 w-5 text-muted-foreground" aria-hidden />
-          <h1 className="text-xl font-semibold">Members</h1>
-        </div>
-        {children}
-      </div>
-    </MembersShell>
   )
 }
 
@@ -152,72 +149,80 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
     lastActiveAt: m.lastActiveAt ?? null,
   }))
 
+  const canInviteByEmail = (activeOrg?.role.level ?? 0) >= ROLE.OWNER
+
   return (
     <MembersShell>
-      <div className="p-6">
-      <div className="mb-1 flex items-center gap-2">
-        <Users className="h-5 w-5 text-muted-foreground" aria-hidden />
-        <h1 className="text-xl font-semibold">Members</h1>
-      </div>
-      <p className="mb-5 text-sm text-muted-foreground">
-        People in <strong>{orgName}</strong>. Org-level roles apply across every
-        project; per-project access can be granted separately via the
-        Invite-to-projects flow.
-      </p>
+      <Page size="wide">
+      <PageHeader
+        title="Members"
+        description={
+          <>
+            People in <strong className="font-medium text-foreground">{orgName}</strong>.
+            Org-level roles apply across every project; per-project access can be
+            granted separately via the Add-to-projects flow.
+          </>
+        }
+        actions={
+          <AppTooltip content="Add someone to specific projects without granting org-wide access.">
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => setMultiInviteOpen(true)}
+              disabled={accessibleProjects.length === 0}
+            >
+              <UsersRound className="mr-1.5 size-4" />
+              Add to projects
+            </Button>
+          </AppTooltip>
+        }
+      />
 
-      {(activeOrg?.role.level ?? 0) >= ROLE.OWNER && (
-        <OrgInviteByEmail orgId={orgId} />
-      )}
+      <div className="space-y-6">
+        {canInviteByEmail && (
+          <Section
+            title="Invite a teammate by email"
+            description="Bring someone new into this organization. They don't need an Aquilla account yet — they'll be guided to create one when they accept."
+          >
+            <OrgInviteByEmail orgId={orgId} />
+          </Section>
+        )}
 
-      {/* Operational shortcuts */}
-      <div className="mb-5 flex flex-wrap items-center gap-2">
-        <Button
-          variant="default"
-          size="sm"
-          onClick={() => setMultiInviteOpen(true)}
-          disabled={accessibleProjects.length === 0}
-        >
-          <UsersRound className="mr-1.5 h-4 w-4" />
-          Add to projects
-        </Button>
-        <span className="text-[11px] text-muted-foreground">
-          Add someone to specific projects without granting org-wide access.
-          For new users (no Aquilla account yet), use the per-project Share panel to send an email invite.
-        </span>
-      </div>
+        {membersError && (
+          <p className="text-xs text-destructive">{membersError}</p>
+        )}
 
-      {membersError && (
-        <p className="mb-2 text-xs text-destructive">{membersError}</p>
-      )}
-
-      {membersLoading && members.length === 0 ? (
-        <div className="flex items-center justify-center py-12 text-muted-foreground">
-          <Spinner className="mr-2" />
-          <span className="text-sm">Loading members…</span>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <RosterWithProjectChips
-            orgId={orgId}
-            panelMembers={panelMembers}
-            listMemberProjects={listMemberProjects}
-            add={add}
-            remove={remove}
-            callerUserId={callerUserId}
-            callerOrgRoleLevel={activeOrg?.role.level ?? null}
-            onRequestRemove={(userId, username) =>
-              setRemoveTarget({ userId, username })
-            }
-          />
-          <PendingInvitesSection orgId={orgId} />
-          {canGovern && (
-            <ExternalCollaboratorsSection
+        {membersLoading && members.length === 0 ? (
+          <Section title="Roster">
+            <div className="flex items-center justify-center py-8 text-muted-foreground">
+              <Spinner className="mr-2" />
+              <span className="text-sm">Loading members…</span>
+            </div>
+          </Section>
+        ) : (
+          <>
+            <RosterWithProjectChips
               orgId={orgId}
-              orgMemberIds={members.map((m) => m.userId)}
+              panelMembers={panelMembers}
+              listMemberProjects={listMemberProjects}
+              add={add}
+              remove={remove}
+              callerUserId={callerUserId}
+              callerOrgRoleLevel={activeOrg?.role.level ?? null}
+              onRequestRemove={(userId, username) =>
+                setRemoveTarget({ userId, username })
+              }
             />
-          )}
-        </div>
-      )}
+            <PendingInvitesSection orgId={orgId} />
+            {canGovern && (
+              <ExternalCollaboratorsSection
+                orgId={orgId}
+                orgMemberIds={members.map((m) => m.userId)}
+              />
+            )}
+          </>
+        )}
+      </div>
 
       {removeTarget && (
         <RemoveOrgMemberDialog
@@ -246,7 +251,7 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
           void refreshProjects()
         }}
       />
-      </div>
+      </Page>
     </MembersShell>
   )
 }
@@ -280,34 +285,39 @@ function RosterWithProjectChips({
   onRequestRemove,
 }: RosterProps) {
   return (
-    <div className="space-y-3">
-      <MembersPanel
-        members={panelMembers}
-        roleOptions={ORG_ROLE_OPTIONS}
-        defaultRole={ROLE.MAINTAINER}
-        callerUserId={callerUserId}
-        callerMaxRole={ROLE.MAINTAINER}
-        scopedUserSearch={false}
-        onAdd={async (username, role) => {
-          const result = await add(username, role)
-          return result
-            ? { ok: true }
-            : { ok: false, error: "Could not add user. Username may not exist." }
-        }}
-        onRemove={(userId) => {
-          const target = panelMembers.find((m) => m.userId === userId)
-          if (target) onRequestRemove(target.userId, target.username)
-          return Promise.resolve()
-        }}
-        onChangeRole={async (username, role) => {
-          await add(username, role)
-        }}
-      />
+    <>
+      <Section
+        title="Roster"
+        description="Org members and their org-wide role. Add by username, change a role, or remove someone."
+      >
+        <MembersPanel
+          members={panelMembers}
+          roleOptions={ORG_ROLE_OPTIONS}
+          defaultRole={ROLE.MAINTAINER}
+          callerUserId={callerUserId}
+          callerMaxRole={ROLE.MAINTAINER}
+          scopedUserSearch={false}
+          onAdd={async (username, role) => {
+            const result = await add(username, role)
+            return result
+              ? { ok: true }
+              : { ok: false, error: "Could not add user. Username may not exist." }
+          }}
+          onRemove={(userId) => {
+            const target = panelMembers.find((m) => m.userId === userId)
+            if (target) onRequestRemove(target.userId, target.username)
+            return Promise.resolve()
+          }}
+          onChangeRole={async (username, role) => {
+            await add(username, role)
+          }}
+        />
+      </Section>
 
-      <div className="rounded border bg-muted/20 p-3">
-        <p className="mb-2 text-xs font-medium text-muted-foreground">
-          Project access — expand a member to see per-project roles
-        </p>
+      <Section
+        title="Project access"
+        description="Expand a member to see their per-project roles."
+      >
         <ul className="divide-y">
           {panelMembers.map((m) => (
             <MemberAccessRow
@@ -319,8 +329,8 @@ function RosterWithProjectChips({
             />
           ))}
         </ul>
-      </div>
-    </div>
+      </Section>
+    </>
   )
 }
 
@@ -343,15 +353,16 @@ function PendingInvitesSection({ orgId }: { orgId: number }) {
   if (!isLoading && invites.length === 0) return null
 
   return (
-    <div className="rounded border bg-muted/20 p-3">
-      <div className="mb-2 flex items-center gap-1.5">
-        <Mail className="h-3.5 w-3.5 text-muted-foreground" />
-        <p className="text-xs font-medium text-muted-foreground">
+    <Section
+      title={
+        <span className="flex items-center gap-1.5">
+          <Mail className="size-4 text-muted-foreground" aria-hidden />
           Pending invitations
-        </p>
-        {isLoading && <Spinner className="size-3 text-muted-foreground" />}
-      </div>
-
+        </span>
+      }
+      description="Share-link invitations that haven't been redeemed yet. Revoke to cancel."
+      action={isLoading ? <Spinner className="size-3.5 text-muted-foreground" /> : null}
+    >
       {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
 
       {invites.length > 0 && (
@@ -361,7 +372,7 @@ function PendingInvitesSection({ orgId }: { orgId: number }) {
           ))}
         </ul>
       )}
-    </div>
+    </Section>
   )
 }
 

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { Check, ChevronDown, Search } from "lucide-react"
+import { Check, ChevronDown, FolderGit2, Search, Users } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Page, PageHeader, Section, EmptyState } from "@/components/ui/page"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -222,18 +223,23 @@ export function TeamDetail() {
       header={<OrgBreadcrumb parent={{ label: "Teams", to: "/teams" }} section={team?.name ?? "Team"} />}
       statusBar={null}
       main={
-        <div className="h-full overflow-y-auto p-6 space-y-8">
-          {loading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
-          ) : team == null ? (
-            <p className="text-sm text-muted-foreground">Team not found.</p>
-          ) : (
+        <Page size="wide">
+          <div className="space-y-6">
+            {loading ? (
+              <>
+                <div className="h-10 w-64 animate-pulse rounded-2xl border bg-card" />
+                <div className="h-40 animate-pulse rounded-2xl border bg-card" />
+              </>
+            ) : team == null ? (
+              <EmptyState title="Team not found." description="This team may have been deleted, or you may not have access to it." />
+            ) : (
             <>
               {/* Header / rename / delete */}
-              <section>
-                <div className="flex items-center gap-3 mb-3">
-                  <h1 className="text-lg font-semibold">{team.name}</h1>
-                  {isAdmin && !editing && (
+              <PageHeader
+                title={team.name}
+                description={!editing && team.description ? team.description : undefined}
+                actions={
+                  isAdmin && !editing ? (
                     <>
                       <Button
                         type="button"
@@ -252,324 +258,305 @@ export function TeamDetail() {
                         Delete team
                       </Button>
                     </>
-                  )}
-                </div>
-                {!editing && team.description && (
-                  <p className="mb-3 text-sm text-muted-foreground">{team.description}</p>
-                )}
+                  ) : null
+                }
+              />
 
-                {isAdmin && editing && (
+              {isAdmin && editing && (
+                <Section className="mb-6" title="Edit team" description="Update the team name or description.">
                   <div className="space-y-2">
-                    <input
-                      className="border rounded px-2 py-1 text-sm w-full"
+                    <Input
                       value={editName}
                       onChange={(e) => setEditName(e.target.value)}
                       placeholder="Team name"
                     />
-                    <input
-                      className="border rounded px-2 py-1 text-sm w-full"
+                    <Input
                       value={editDescription}
                       onChange={(e) => setEditDescription(e.target.value)}
                       placeholder="Description (optional)"
                     />
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        className="text-sm px-3 py-1 rounded bg-primary text-primary-foreground"
-                        onClick={handleSave}
-                      >
-                        Save
-                      </button>
-                      <button
-                        type="button"
-                        className="text-sm px-3 py-1 rounded border"
-                        onClick={() => setEditing(false)}
-                      >
-                        Cancel
-                      </button>
+                    <div className="flex gap-2 pt-1">
+                      <Button type="button" size="sm" onClick={handleSave}>Save</Button>
+                      <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
                     </div>
                   </div>
-                )}
+                </Section>
+              )}
 
-                {isAdmin && confirmDelete && (
-                  <div className="mt-2 rounded border border-destructive p-3 space-y-2 text-sm">
-                    <p>Delete &apos;{team.name}&apos;? This removes the team and all its grants.</p>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        className="px-3 py-1 rounded bg-destructive text-destructive-foreground"
-                        onClick={handleDelete}
-                      >
-                        Confirm
-                      </button>
-                      <button
-                        type="button"
-                        className="px-3 py-1 rounded border"
-                        onClick={() => setConfirmDelete(false)}
-                      >
-                        Cancel
-                      </button>
-                    </div>
+              {isAdmin && confirmDelete && (
+                <div className="mb-6 space-y-2 rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-sm">
+                  <p>Delete &apos;{team.name}&apos;? This removes the team and all its grants.</p>
+                  <div className="flex gap-2">
+                    <Button type="button" size="sm" variant="destructive" onClick={handleDelete}>Confirm</Button>
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Button>
                   </div>
-                )}
-              </section>
+                </div>
+              )}
 
               {/* Members section */}
-              <section>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-1.5">
-                    <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Members</h2>
-                    {/* "?" tooltip summarising all access levels — hover or focus to read */}
-                    <AppTooltip content={Object.values(ROLE_DESCRIPTIONS).join("\n")} className="max-w-xs">
-                      <span
-                        className="inline-flex items-center justify-center rounded-full border w-4 h-4 text-[10px] leading-none text-muted-foreground cursor-help"
-                        aria-label="Access level definitions"
-                        tabIndex={0}
-                      >
-                        ?
-                      </span>
-                    </AppTooltip>
-                  </div>
-                  {isAdmin && !addingMember && (
-                    <button
-                      type="button"
-                      className="text-xs underline text-muted-foreground"
-                      onClick={() => { setAddingMember(true); setSelectedUsername("") }}
-                    >
-                      Add member
-                    </button>
-                  )}
-                </div>
-
-                {isAdmin && addingMember && (
-                  <div className="flex flex-wrap items-center gap-2 mb-3">
-                    <TeamMemberCombobox
-                      members={availableOrgMembers}
-                      value={selectedUsername}
-                      onChange={setSelectedUsername}
-                      disabled={availableOrgMembers.length === 0}
-                    />
-                    <button
-                      type="button"
-                      className="text-sm px-3 py-1 rounded bg-primary text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                      onClick={handleAddMember}
-                      disabled={!selectedUsername || availableOrgMembers.length === 0}
-                    >
-                      Add
-                    </button>
-                    <button
-                      type="button"
-                      className="text-sm px-3 py-1 rounded border"
-                      onClick={() => { setAddingMember(false); setSelectedUsername("") }}
-                    >
-                      Cancel
-                    </button>
-                    {availableOrgMembers.length === 0 && (
-                      <p className="basis-full text-xs text-muted-foreground">
-                        All org members are already in this team.
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {team.members.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No members.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {team.members.map((m) => (
-                      <li key={m.userId} className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm">
-                        <span className="font-medium">{m.username}</span>
-                        <div className="flex items-center gap-2">
-                          {isOwner ? (
-                            /* Owners can change the member's org-level role via the upsert endpoint */
-                            <Select
-                              items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: r.name }))}
-                              value={m.roleLevel != null ? String(m.roleLevel) : ""}
-                              onValueChange={(v) => { if (v) void handleChangeMemberRole(m.username, Number(v)) }}
-                            >
-                              <SelectTrigger
-                                size="sm"
-                                className="text-xs"
-                                aria-label={`Role for ${m.username}`}
-                              >
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectGroup>
-                                  {ROLE_OPTIONS.map((r) => (
-                                    <SelectItem key={r.level} value={String(r.level)}>
-                                      {r.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectGroup>
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            /* Non-owners see the org-level role but cannot edit it here. */
-                            <AppTooltip content={lockedOrgRoleTooltip(m.roleLevel)} className="max-w-xs">
-                              <span
-                                tabIndex={0}
-                                className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground cursor-help"
-                                aria-label={`Org-level role: ${roleLabel(m.roleLevel)}`}
-                              >
-                                {roleLabel(m.roleLevel)}
-                                <span className="inline-flex items-center justify-center rounded-full border w-3.5 h-3.5 text-[10px] leading-none text-muted-foreground" aria-hidden="true">?</span>
-                              </span>
-                            </AppTooltip>
-                          )}
-                          {isAdmin && (
-                            <button
-                              type="button"
-                              className="text-xs text-destructive underline"
-                              aria-label={`Remove ${m.username}`}
-                              onClick={() => handleRemoveMember(m.userId)}
-                            >
-                              Remove
-                            </button>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
-
-            </>
-          )}
-
-          {/* Projects section — always rendered when authenticated; management controls admin-only.
-              The heading is deferred until team loads to avoid multiple /projects/i DOM matches
-              (sidebar nav also has "Projects") that would cause getByText to throw in tests. */}
-          {jwt != null && (
-            <section>
-              <div className="flex items-center justify-between mb-3">
-                {!loading && <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Projects</h2>}
-                {isAdmin && !attachingProject && (
-                  <button
-                    type="button"
-                    className="text-xs underline text-muted-foreground"
-                    onClick={() => {
-                      const teamProjects = team?.projects ?? []
-                      const attachableProjects = orgProjects.filter(
-                        (op) => !teamProjects.some((tp) => tp.id === op.id),
-                      )
-                      setSelectedProjectId(attachableProjects[0]?.id ?? "")
-                      setSelectedRole(String(ROLE_OPTIONS[0].level))
-                      setAttachingProject(true)
-                    }}
-                  >
-                    Attach project
-                  </button>
-                )}
-              </div>
-
-              {isAdmin && attachingProject && (
-                <div className="flex items-center gap-2 mb-3">
-                  <Select
-                    items={orgProjects
-                      .filter((op) => !(team?.projects ?? []).some((tp) => tp.id === op.id))
-                      .map((op) => ({ value: op.id, label: op.name }))}
-                    value={selectedProjectId}
-                    onValueChange={(v) => setSelectedProjectId(v ?? "")}
-                  >
-                    <SelectTrigger aria-label="Project to attach">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {orgProjects
-                          .filter((op) => !(team?.projects ?? []).some((tp) => tp.id === op.id))
-                          .map((op) => (
-                            <SelectItem key={op.id} value={op.id}>{op.name}</SelectItem>
-                          ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                  <Select
-                    items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: r.name }))}
-                    value={selectedRole}
-                    onValueChange={(v) => setSelectedRole(v ?? "")}
-                  >
-                    <SelectTrigger aria-label="Granted role">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {ROLE_OPTIONS.map((r) => (
-                          <SelectItem key={r.level} value={String(r.level)}>{r.name}</SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                  <button
-                    type="button"
-                    className="text-sm px-3 py-1 rounded bg-primary text-primary-foreground"
-                    onClick={handleAttachProject}
-                  >
-                    Attach
-                  </button>
-                  <button
-                    type="button"
-                    className="text-sm px-3 py-1 rounded border"
-                    onClick={() => { setAttachingProject(false); setSelectedProjectId("") }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-
-              {(team?.projects ?? []).length === 0 && !loading ? (
-                <p className="text-sm text-muted-foreground">No projects.</p>
-              ) : (
-                <ul className="space-y-2">
-                  {(team?.projects ?? []).map((p) => (
-                    <li key={p.id} className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm">
-                      <button
+              <Section
+                title={
+                  <span className="flex items-center gap-1.5">
+                    Members
+                      {/* "?" tooltip summarising all access levels — hover or focus to read */}
+                      <AppTooltip content={Object.values(ROLE_DESCRIPTIONS).join("\n")} className="max-w-xs">
+                        <span
+                          className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border text-[10px] leading-none text-muted-foreground"
+                          aria-label="Access level definitions"
+                          tabIndex={0}
+                        >
+                          ?
+                        </span>
+                      </AppTooltip>
+                    </span>
+                  }
+                  action={
+                    isAdmin && !addingMember ? (
+                      <Button
                         type="button"
-                        className="font-medium text-left hover:underline"
-                        onClick={() => navigate(`/projects/${p.id}`)}
+                        size="sm"
+                        variant="outline"
+                        onClick={() => { setAddingMember(true); setSelectedUsername("") }}
                       >
-                        {p.name}
-                      </button>
-                      <div className="flex items-center gap-2">
-                        {isAdmin ? (
-                          <>
-                            <Select
-                              items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: r.name }))}
-                              value={String(p.grantedRoleLevel)}
-                              onValueChange={(v) => { if (v) void handleChangeProjectRole(p.id, Number(v)) }}
-                            >
-                              <SelectTrigger size="sm" className="text-xs" aria-label={`Role for ${p.name}`}>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectGroup>
-                                  {ROLE_OPTIONS.map((r) => (
-                                    <SelectItem key={r.level} value={String(r.level)}>{r.name}</SelectItem>
-                                  ))}
-                                </SelectGroup>
-                              </SelectContent>
-                            </Select>
+                        Add member
+                      </Button>
+                    ) : null
+                  }
+                >
+                  {isAdmin && addingMember && (
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                      <TeamMemberCombobox
+                        members={availableOrgMembers}
+                        value={selectedUsername}
+                        onChange={setSelectedUsername}
+                        disabled={availableOrgMembers.length === 0}
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleAddMember}
+                        disabled={!selectedUsername || availableOrgMembers.length === 0}
+                      >
+                        Add
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => { setAddingMember(false); setSelectedUsername("") }}
+                      >
+                        Cancel
+                      </Button>
+                      {availableOrgMembers.length === 0 && (
+                        <p className="basis-full text-xs text-muted-foreground">
+                          All org members are already in this team.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {team.members.length === 0 ? (
+                    <EmptyState
+                      icon={Users}
+                      title="No members."
+                      description={isAdmin ? "Add org members to this team to grant them shared project access." : undefined}
+                    />
+                  ) : (
+                    <ul className="space-y-2">
+                      {team.members.map((m) => (
+                        <li key={m.userId} className="flex items-center justify-between rounded-2xl border px-4 py-2 text-sm">
+                          <span className="font-medium">{m.username}</span>
+                          <div className="flex items-center gap-2">
+                            {isOwner ? (
+                              /* Owners can change the member's org-level role via the upsert endpoint */
+                              <Select
+                                items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: r.name }))}
+                                value={m.roleLevel != null ? String(m.roleLevel) : ""}
+                                onValueChange={(v) => { if (v) void handleChangeMemberRole(m.username, Number(v)) }}
+                              >
+                                <SelectTrigger
+                                  size="sm"
+                                  className="text-xs"
+                                  aria-label={`Role for ${m.username}`}
+                                >
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectGroup>
+                                    {ROLE_OPTIONS.map((r) => (
+                                      <SelectItem key={r.level} value={String(r.level)}>
+                                        {r.name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectGroup>
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              /* Non-owners see the org-level role but cannot edit it here. */
+                              <AppTooltip content={lockedOrgRoleTooltip(m.roleLevel)} className="max-w-xs">
+                                <span
+                                  tabIndex={0}
+                                  className="inline-flex cursor-help items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground"
+                                  aria-label={`Org-level role: ${roleLabel(m.roleLevel)}`}
+                                >
+                                  {roleLabel(m.roleLevel)}
+                                  <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border text-[10px] leading-none text-muted-foreground" aria-hidden="true">?</span>
+                                </span>
+                              </AppTooltip>
+                            )}
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                className="text-xs text-destructive underline"
+                                aria-label={`Remove ${m.username}`}
+                                onClick={() => handleRemoveMember(m.userId)}
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </Section>
+            </>
+            )}
+
+            {/* Projects section — always rendered when authenticated; management controls admin-only.
+                The heading is deferred until team loads to avoid multiple /projects/i DOM matches
+                (sidebar nav also has "Projects") that would cause getByText to throw in tests. */}
+            {jwt != null && (
+                  <Section
+                    title={!loading ? "Projects" : undefined}
+                    action={
+                      isAdmin && !attachingProject ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const teamProjects = team?.projects ?? []
+                            const attachableProjects = orgProjects.filter(
+                              (op) => !teamProjects.some((tp) => tp.id === op.id),
+                            )
+                            setSelectedProjectId(attachableProjects[0]?.id ?? "")
+                            setSelectedRole(String(ROLE_OPTIONS[0].level))
+                            setAttachingProject(true)
+                          }}
+                        >
+                          Attach project
+                        </Button>
+                      ) : null
+                    }
+                  >
+                    {isAdmin && attachingProject && (
+                      <div className="mb-3 flex flex-wrap items-center gap-2">
+                        <Select
+                          items={orgProjects
+                            .filter((op) => !(team?.projects ?? []).some((tp) => tp.id === op.id))
+                            .map((op) => ({ value: op.id, label: op.name }))}
+                          value={selectedProjectId}
+                          onValueChange={(v) => setSelectedProjectId(v ?? "")}
+                        >
+                          <SelectTrigger aria-label="Project to attach">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              {orgProjects
+                                .filter((op) => !(team?.projects ?? []).some((tp) => tp.id === op.id))
+                                .map((op) => (
+                                  <SelectItem key={op.id} value={op.id}>{op.name}</SelectItem>
+                                ))}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                        <Select
+                          items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: r.name }))}
+                          value={selectedRole}
+                          onValueChange={(v) => setSelectedRole(v ?? "")}
+                        >
+                          <SelectTrigger aria-label="Granted role">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              {ROLE_OPTIONS.map((r) => (
+                                <SelectItem key={r.level} value={String(r.level)}>{r.name}</SelectItem>
+                              ))}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                        <Button type="button" size="sm" onClick={handleAttachProject}>Attach</Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => { setAttachingProject(false); setSelectedProjectId("") }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    )}
+
+                    {(team?.projects ?? []).length === 0 && !loading ? (
+                      <EmptyState
+                        icon={FolderGit2}
+                        title="No projects."
+                        description={isAdmin ? "Attach a project to grant this team access at a chosen role." : undefined}
+                      />
+                    ) : (
+                      <ul className="space-y-2">
+                        {(team?.projects ?? []).map((p) => (
+                          <li key={p.id} className="flex items-center justify-between rounded-2xl border px-4 py-2 text-sm">
                             <button
                               type="button"
-                              className="text-xs text-destructive underline"
-                              aria-label={`Detach ${p.name}`}
-                              onClick={() => handleDetachProject(p.id)}
+                              className="text-left font-medium hover:underline"
+                              onClick={() => navigate(`/projects/${p.id}`)}
                             >
-                              Detach
+                              {p.name}
                             </button>
-                          </>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">Level {p.grantedRoleLevel}</span>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          )}
-        </div>
+                            <div className="flex items-center gap-2">
+                              {isAdmin ? (
+                                <>
+                                  <Select
+                                    items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: r.name }))}
+                                    value={String(p.grantedRoleLevel)}
+                                    onValueChange={(v) => { if (v) void handleChangeProjectRole(p.id, Number(v)) }}
+                                  >
+                                    <SelectTrigger size="sm" className="text-xs" aria-label={`Role for ${p.name}`}>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectGroup>
+                                        {ROLE_OPTIONS.map((r) => (
+                                          <SelectItem key={r.level} value={String(r.level)}>{r.name}</SelectItem>
+                                        ))}
+                                      </SelectGroup>
+                                    </SelectContent>
+                                  </Select>
+                                  <button
+                                    type="button"
+                                    className="text-xs text-destructive underline"
+                                    aria-label={`Detach ${p.name}`}
+                                    onClick={() => handleDetachProject(p.id)}
+                                  >
+                                    Detach
+                                  </button>
+                                </>
+                              ) : (
+                                <span className="text-xs tabular-nums text-muted-foreground">Level {p.grantedRoleLevel}</span>
+                              )}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+              </Section>
+            )}
+          </div>
+        </Page>
       }
     />
   )

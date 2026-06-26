@@ -1,12 +1,11 @@
-// Shows what Whisper heard for the cell's selected recording, plus one-click
-// actions to re-run transcription or adopt the transcript as the cell's text
-// when it differs from what the user typed. Renders under the waveform when
-// timings exist; gives the otherwise-invisible transcription work an obvious
-// payoff.
+// Shows what the recording sounds like for this cell — the transcript is the
+// hero, not the controls. Three calm states: a quiet "matches" reassurance, a
+// neutral "sounds a little different" with a one-tap way to adopt what was
+// heard, and an amber "you edited after recording" nudge. No tool names, no
+// word-count chips, no jargon: just the spoken words and one obvious next step.
 
 import { forwardRef, useMemo } from "react"
-import { Sparkles, AlertTriangle, RefreshCw, CornerDownLeft } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { AudioLines, AlertTriangle, RefreshCw, CornerDownLeft, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { WordTiming } from "@/lib/codex-editor/types"
@@ -15,7 +14,7 @@ interface Props {
   timings: WordTiming[] | undefined
   cellText: string
   cellId: string
-  /** True when alignment used cell-text offsets (i.e. Whisper words match the
+  /** True when alignment used cell-text offsets (i.e. heard words match the
    *  cell's word count). When false, the karaoke decoration won't paint and
    *  this preview is the user's only signal that transcription happened. */
   alignedToCellText: boolean
@@ -49,86 +48,109 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
   const lastTiming = timings[timings.length - 1]
   const isStale = alignedToCellText && lastTiming.end > cellText.length
 
-  const wordCount = `${timings.length} word${timings.length === 1 ? "" : "s"}`
+  // Stale needs a fix (amber). Match is a quiet, hands-off reassurance
+  // (emerald). Differs is neutral — the transcript is the point, so let it
+  // breathe and offer to adopt it.
+  const state: "stale" | "match" | "differs" = isStale ? "stale" : matches ? "match" : "differs"
 
-  const tone = isStale || (!matches && !alignedToCellText)
-    ? "border-amber-500/40"
-    : matches
-      ? "border-emerald-500/30"
-      : "border-border"
+  const surface = {
+    stale: "bg-amber-500/[0.07]",
+    match: "bg-emerald-500/[0.06]",
+    differs: "bg-muted/60",
+  }[state]
 
-  const Icon = isStale ? AlertTriangle : Sparkles
-  const iconTone = isStale || !matches
-    ? "text-amber-600 dark:text-amber-400"
-    : "text-emerald-600 dark:text-emerald-400"
+  const accent = {
+    stale: "bg-amber-500/70",
+    match: "bg-emerald-500/55",
+    differs: "bg-primary/45",
+  }[state]
 
-  const headline = isStale
-    ? "Cell text was edited — word timings are out of date"
-    : matches
-      ? "Whisper heard the cell exactly"
-      : alignedToCellText
-        ? "Whisper transcript"
-        : "Transcript doesn't match cell text"
+  const Icon = state === "stale" ? AlertTriangle : state === "match" ? Check : AudioLines
+  const iconTone = {
+    stale: "text-amber-600 dark:text-amber-400",
+    match: "text-emerald-600 dark:text-emerald-400",
+    differs: "text-muted-foreground",
+  }[state]
+
+  const headline = state === "stale"
+    ? "You changed the text after recording"
+    : state === "match"
+      ? "Your recording matches your text"
+      : cellHasText
+        ? "Your recording sounds a little different"
+        : "Here's what your recording says"
 
   return (
     <div
       ref={ref}
       tabIndex={-1}
       className={cn(
-        "mt-1.5 rounded-lg border bg-card px-3 py-2 text-xs scroll-mt-16 outline-none",
+        "relative mt-2 overflow-hidden rounded-xl py-2.5 pr-3 pl-4 text-xs scroll-mt-16 outline-none",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-        tone,
+        surface,
       )}
     >
-      <div className="flex items-start gap-2 leading-snug">
-        <Icon className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", iconTone)} />
-        <div className="min-w-0 flex-1 space-y-1.5">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-medium text-foreground">{headline}</span>
-            <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal">
-              {wordCount}
-            </Badge>
-          </div>
-          <p className="break-words italic text-muted-foreground">"{transcript}"</p>
-          {editable && (
-            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-              {isStale && onRetranscribe && (
-                <Button
-                  size="xs"
-                  variant="outline"
-                  onClick={onRetranscribe}
-                  title="Run Whisper again with the current cell text"
-                >
-                  <RefreshCw /> Re-transcribe
-                </Button>
-              )}
-              {!matches && !isStale && onUseAsCellText && (
-                <Button
-                  size="xs"
-                  variant="outline"
-                  onClick={() => onUseAsCellText(transcript)}
-                  title={cellHasText
-                    ? "Replace this cell's text with the transcript"
-                    : "Set this cell's text from the transcript"}
-                >
-                  <CornerDownLeft /> {cellHasText ? "Use as cell text" : "Fill cell from transcript"}
-                </Button>
-              )}
-              {!matches && !isStale && onRetranscribe && (
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  onClick={onRetranscribe}
-                  title="Run Whisper again"
-                  className="text-muted-foreground"
-                >
-                  <RefreshCw /> Re-transcribe
-                </Button>
-              )}
-            </div>
+      {/* Soft tone bar instead of a hard bordered box. */}
+      <span aria-hidden className={cn("absolute inset-y-0 left-0 w-[3px] rounded-full", accent)} />
+
+      <div className="flex items-center gap-1.5">
+        <Icon className={cn("h-3.5 w-3.5 shrink-0", iconTone)} />
+        <span className="text-[11px] font-medium text-foreground">{headline}</span>
+      </div>
+
+      {/* The heard words — the reason this panel exists. Foreground and roomy
+          when there's something to act on; whisper-quiet when it already
+          matches (nothing to do, so don't shout it). */}
+      <p
+        className={cn(
+          "mt-1.5 break-words leading-relaxed",
+          state === "match"
+            ? "text-[12px] text-foreground/55"
+            : "text-[13px] text-foreground/90",
+        )}
+      >
+        <span aria-hidden className="select-none pr-0.5 text-foreground/25">&ldquo;</span>
+        {transcript}
+        <span aria-hidden className="select-none pl-0.5 text-foreground/25">&rdquo;</span>
+      </p>
+
+      {editable && state !== "match" && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {state === "stale" && onRetranscribe && (
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={onRetranscribe}
+              title="Listen to the recording again and refresh the transcript"
+            >
+              <RefreshCw /> Transcribe again
+            </Button>
+          )}
+          {state === "differs" && onUseAsCellText && (
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => onUseAsCellText(transcript)}
+              title={cellHasText
+                ? "Replace your text with what the recording says"
+                : "Fill in your text from the recording"}
+            >
+              <CornerDownLeft /> {cellHasText ? "Use what was heard" : "Use as the text"}
+            </Button>
+          )}
+          {state === "differs" && onRetranscribe && (
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={onRetranscribe}
+              title="Listen to the recording again and refresh the transcript"
+              className="text-muted-foreground"
+            >
+              <RefreshCw /> Transcribe again
+            </Button>
           )}
         </div>
-      </div>
+      )}
     </div>
   )
 })

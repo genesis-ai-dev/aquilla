@@ -4,7 +4,7 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity, NotebookPen,
+  ArrowRight, Activity, NotebookPen, Info, Pencil,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
@@ -3679,125 +3679,105 @@ function EditorRow({
             {
               value: "backtranslation",
               icon: <FileText className="h-3 w-3" />,
-              label: "Back Translation",
+              label: "Back-translation",
               attentionDot: isBtStale ? "amber" : undefined,
               content: (
-                <div className="flex flex-col gap-2">
-                  {/* ── Action row ─────────────────────────────────────────── */}
+                <div className="flex flex-col gap-2.5">
+                  {/* ── Header: a calm label + a quiet explainer. The controls
+                      stay subdued so the reading below is the focus, not the
+                      buttons. ─────────────────────────────────────────────── */}
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Back Translation</span>
-                      {cell.backtranslation && cell.backtranslationForText === cell.translated && (
-                        <AppTooltip content={btPolishOn ? "LLM-polished back-translation" : "Deterministic statistical back-translation"}>
-                          <span
-                            className={cn(
-                              "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-medium",
-                              btPolishOn
-                                ? "bg-violet-500/10 text-violet-700 dark:text-violet-300"
-                                : "bg-muted text-muted-foreground",
-                            )}
-                          >
-                            {btPolishOn ? "polished" : "statistical"}
-                          </span>
-                        </AppTooltip>
-                      )}
+                      <span className="text-xs font-medium text-foreground">Back-translation</span>
+                      <AppTooltip content="A plain reading of your translation back in your reference language. Use it to check the meaning carried over.">
+                        <Info className="h-3 w-3 cursor-help text-muted-foreground/50 transition-colors hover:text-muted-foreground" />
+                      </AppTooltip>
                     </div>
-                    <div className="flex items-center gap-1">
-                      {/* Polish toggle — only when BT is present and user can edit.
-                          Toggling ON regenerates the BT through the AI; OFF
-                          regenerates the statistical-only gloss so the displayed
-                          text always matches the polished/statistical label.
-                          Disabled when no AI model is configured. */}
-                      {editable && cell.backtranslation && (
-                        <AppTooltip content={
-                          !isBacktranslationConfigured
-                            ? "Configure an AI model in project settings to enable Polish"
-                            : btPolishOn
-                              ? "Polish on: regenerate statistical-only by turning this off"
-                              : "Polish off: turn on to regenerate with AI"
-                        }>
-                          <button
-                            type="button"
-                            disabled={!isBacktranslationConfigured || isBacktranslating}
-                            onClick={() => {
-                              const next = !btPolishOn
-                              setBtPolishOn(next)
-                              onBacktranslate?.(cell, next)
-                            }}
-                            className={cn(
-                              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-                              btPolishOn
-                                ? "bg-violet-500/15 text-violet-700 dark:text-violet-300 hover:bg-violet-500/25"
-                                : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                            )}
-                          >
-                            <Sparkles className={cn("h-3 w-3", isBacktranslating && btPolishOn && "animate-pulse")} />
-                            Polish
-                          </button>
-                        </AppTooltip>
-                      )}
-                      {/* Stale: one-click regenerate — does NOT auto-trigger */}
-                      {isBtStale && (
-                        <AppTooltip content="Translation changed — click to regenerate BT">
-                          <button
-                            type="button"
-                            onClick={() => onBacktranslate?.(cell, btPolishOn)}
-                            disabled={isBacktranslating || cell.translated.trim().length === 0}
-                            className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 transition-colors hover:bg-amber-500/20 dark:text-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
-                            Regenerate
-                          </button>
-                        </AppTooltip>
-                      )}
-                      {/* No BT yet: generate button */}
-                      {!cell.backtranslation && !isBtStale && (
-                        <button
-                          type="button"
-                          onClick={() => onBacktranslate?.(cell, btPolishOn)}
-                          disabled={isBacktranslating || cell.translated.trim().length === 0}
-                          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
-                          {isBacktranslating ? "Generating…" : "Generate"}
-                        </button>
-                      )}
-                      {/* Edit button — contributor+ only */}
-                      {!btEditing && cell.backtranslation && (
-                        editable ? (
-                          <button
-                            type="button"
-                            onClick={handleBtEditStart}
-                            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                          >
-                            Edit
-                          </button>
+                    {/* Controls appear only when there's a reading to act on. */}
+                    {cell.backtranslation && !btEditing && (
+                      <div className="flex items-center gap-0.5">
+                        {/* Refine — replaces the old "Polish"/"statistical" jargon.
+                            On = AI-refined wording; off = plain word-for-word.
+                            Toggling regenerates so the text matches the mode. */}
+                        {editable && (
+                          <AppTooltip content={
+                            !isBacktranslationConfigured
+                              ? "Add an AI model in project settings to refine the wording"
+                              : btPolishOn
+                                ? "Refined with AI — turn off for a plain word-for-word reading"
+                                : "Refine the wording with AI for a more natural reading"
+                          }>
+                            <button
+                              type="button"
+                              disabled={!isBacktranslationConfigured || isBacktranslating}
+                              onClick={() => {
+                                const next = !btPolishOn
+                                setBtPolishOn(next)
+                                onBacktranslate?.(cell, next)
+                              }}
+                              className={cn(
+                                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+                                btPolishOn
+                                  ? "bg-violet-500/12 text-violet-700 hover:bg-violet-500/20 dark:text-violet-300"
+                                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                              )}
+                            >
+                              <Sparkles className={cn("h-3 w-3", isBacktranslating && btPolishOn && "animate-pulse")} />
+                              Refine
+                            </button>
+                          </AppTooltip>
+                        )}
+                        {/* Edit — contributor+ only. A quiet icon, not a labelled pill. */}
+                        {editable ? (
+                          <AppTooltip content="Edit the back-translation">
+                            <button
+                              type="button"
+                              onClick={handleBtEditStart}
+                              aria-label="Edit the back-translation"
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                          </AppTooltip>
                         ) : (
                           <AppTooltip content="Contributor+ required to edit back-translations">
                             <span
                               aria-label="Contributor+ required to edit back-translations"
-                              className="inline-flex cursor-not-allowed items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground opacity-50"
+                              className="inline-flex h-6 w-6 cursor-not-allowed items-center justify-center rounded-full text-muted-foreground opacity-40"
                             >
-                              Edit
+                              <Pencil className="h-3 w-3" />
                             </span>
                           </AppTooltip>
-                        )
-                      )}
-                    </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
-                  {/* ── BT body ─────────────────────────────────────────────── */}
+                  {/* ── Body ────────────────────────────────────────────────── */}
                   {cell.translated.trim().length === 0 ? (
-                    <p className="neu-inset rounded-xl px-3 py-3 text-center text-xs text-muted-foreground">
-                      Translate this cell to see a back-translation.
-                    </p>
+                    <div className="flex flex-col items-center gap-1.5 rounded-xl bg-muted/40 px-3 py-6 text-center">
+                      <FileText className="h-4 w-4 text-muted-foreground/40" />
+                      <p className="text-xs text-muted-foreground">Translate this cell to read it back.</p>
+                    </div>
                   ) : cell.backtranslation ? (
                     <>
-                      {/* Stale indicator pill — above the italic paragraph */}
+                      {/* Stale: one warm nudge with the fix inline — not a
+                          separate warning pill plus a separate button. */}
                       {isBtStale && (
-                        <div className="inline-flex items-center gap-1 self-start rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
-                          <AlertTriangle className="h-2.5 w-2.5" />
-                          Stale — translation has changed
+                        <div className="flex items-center justify-between gap-2 rounded-lg bg-amber-500/[0.08] px-3 py-1.5">
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                            <AlertTriangle className="h-3 w-3 shrink-0" />
+                            Your translation changed since this was written
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => onBacktranslate?.(cell, btPolishOn)}
+                            disabled={isBacktranslating || cell.translated.trim().length === 0}
+                            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 transition-colors hover:bg-amber-500/25 dark:text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
+                            Refresh
+                          </button>
                         </div>
                       )}
                       {btEditing ? (
@@ -3812,13 +3792,13 @@ function EditorRow({
                               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleBtSave()
                             }}
                             rows={3}
-                            className="w-full resize-none rounded-md border border-border bg-background px-3 py-2 text-sm italic text-foreground outline-none focus:ring-1 focus:ring-ring"
+                            className="w-full resize-none rounded-lg border border-border bg-background px-3.5 py-3 text-[15px] leading-relaxed text-foreground outline-none focus:ring-1 focus:ring-ring"
                           />
                           <div className="flex items-center justify-end gap-1.5">
                             <button
                               type="button"
                               onClick={handleBtCancel}
-                              className="rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-muted"
+                              className="rounded-full px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted"
                             >
                               Cancel
                             </button>
@@ -3826,25 +3806,43 @@ function EditorRow({
                               type="button"
                               onClick={handleBtSave}
                               disabled={btSaving || !btEditValue.trim()}
-                              className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+                              className="rounded-full bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               {btSaving ? "Saving…" : "Save"}
                             </button>
                           </div>
                         </div>
                       ) : (
-                        /* Read-only display — ONE italic paragraph, BT label prefix */
-                        <p className="neu-inset rounded-lg px-3 py-2 text-sm italic leading-relaxed text-muted-foreground">
-                          {cell.backtranslation}
-                        </p>
+                        /* The reading — the hero. Foreground, comfortable size
+                           and leading, in a soft well with a gentle tone bar
+                           (rhymes with the recording's transcript). */
+                        <div className="relative overflow-hidden rounded-xl bg-muted/50 py-3 pr-4 pl-4">
+                          <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] rounded-full bg-primary/35" />
+                          <p className="text-[15px] leading-relaxed text-foreground/90">
+                            {cell.backtranslation}
+                          </p>
+                        </div>
                       )}
                     </>
                   ) : (
-                    <p className="neu-inset rounded-xl px-3 py-3 text-center text-xs text-muted-foreground">
-                      {isBacktranslating
-                        ? "Generating back-translation…"
-                        : "No back-translation yet. Click Generate to create one."}
-                    </p>
+                    /* No reading yet — friendly, with one clear primary. */
+                    <div className="flex flex-col items-center gap-2.5 rounded-xl bg-muted/40 px-3 py-6 text-center">
+                      <p className="max-w-[34ch] text-xs leading-relaxed text-muted-foreground">
+                        See what your translation says when read back, so you can check the meaning carried over.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => onBacktranslate?.(cell, btPolishOn)}
+                        disabled={isBacktranslating || cell.translated.trim().length === 0}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {isBacktranslating ? (
+                          <><RefreshCw className="h-3 w-3 animate-spin" /> Reading it back…</>
+                        ) : (
+                          <><Sparkles className="h-3 w-3" /> Read it back</>
+                        )}
+                      </button>
+                    </div>
                   )}
                   {/* ── FRO-207: Interlinear alignment panel ──────────────── */}
                   {alignmentModel && cell.original.trim() && cell.translated.trim() && (

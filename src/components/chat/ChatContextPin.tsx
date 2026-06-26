@@ -9,7 +9,7 @@ import { Pin, PinOff } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { cellTextForDisplay, truncateCellText } from "@/lib/cell-text"
-import type { CellContext } from "@/hooks/useChat"
+import type { CellContext } from "@/lib/cell-context"
 
 export interface ChatContextPinProps {
   includeCellContext: boolean

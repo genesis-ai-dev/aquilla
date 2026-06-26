@@ -8,7 +8,7 @@
 
 import { useMemo, useState } from "react"
 import { Bot } from "lucide-react"
-import type { CellContext } from "@/hooks/useChat"
+import type { CellContext } from "@/lib/cell-context"
 import { AgentDockView, type AgentDockViewProps } from "./agent/AgentDockView"
 import type { SuggestedAction } from "./chat/ChatComposer"
 import { bookSummaryPrompt, chapterSummaryPrompt } from "@/lib/summary-prompts"

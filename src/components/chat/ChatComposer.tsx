@@ -1,15 +1,25 @@
 /**
- * ChatComposer.tsx — chat UX improvements
+ * ChatComposer.tsx — shared composer for the AI agent dock.
  *
- * Shared composer for the chat sheet and dock panels.
+ * Built on the shadcn InputGroup pattern (InputGroup + InputGroupTextarea +
+ * InputGroupAddon): the textarea and the send/stop control share one bordered
+ * group, with the keyboard hint and action button in a block-end addon.
+ *
  *  - Enter sends; Shift+Enter inserts a newline; ⌘/Ctrl+Enter still sends.
  *  - Auto-growing textarea (1 → ~8 rows, then internal scroll).
  *  - While streaming, typing stays enabled and Send is replaced by Stop.
  */
 
-import { useEffect, useRef, useState, type KeyboardEvent } from "react"
-import { Sparkles, Square } from "lucide-react"
+import { useEffect, useRef, useState, type KeyboardEvent, type FormEvent } from "react"
+import { ArrowUp, Sparkles, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupText,
+  InputGroupTextarea,
+} from "@/components/ui/input-group"
 import { cn } from "@/lib/utils"
 
 /** A one-tap prompt offered above the textarea (e.g. "Summarize book"). */
@@ -66,6 +76,11 @@ export function ChatComposer({
     onSend(text)
   }
 
+  function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    handleSend()
+  }
+
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key !== "Enter") return
     if (e.shiftKey) return // Shift+Enter → newline
@@ -87,56 +102,58 @@ export function ChatComposer({
                 disabled={action.disabled || !isConfigured || isStreaming}
                 title={action.title}
                 onClick={action.onClick}
-                className={cn("gap-1", compact ? "h-6 text-[10px]" : "h-7 text-xs")}
+                className={cn(compact ? "h-6 text-[10px]" : "h-7 text-xs")}
               >
-                <Sparkles className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />
+                <Sparkles data-icon="inline-start" />
                 {action.label}
               </Button>
             ))}
           </div>
         )}
-        <textarea
-          ref={textareaRef}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Ask a question… (Enter to send)"
-          rows={1}
-          disabled={!isConfigured}
-          className={cn(
-            "w-full resize-none overflow-y-auto rounded-md border bg-background",
-            compact ? "px-2.5 py-1.5 text-xs" : "px-3 py-2 text-sm",
-            "placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring",
-            "disabled:opacity-50",
-          )}
-        />
-        <div className="flex items-center justify-between">
-          <span className={cn("text-muted-foreground", compact ? "text-[9px]" : "text-[10px]")}>
-            Enter to send · Shift+Enter for newline
-          </span>
-          <div className={cn("flex items-center", compact ? "gap-1" : "gap-1.5")}>
-            {isStreaming ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onStop}
-                className={compact ? "h-6 gap-1 text-[10px]" : "h-7 gap-1 text-xs"}
-              >
-                <Square className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />
-                Stop
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                onClick={handleSend}
-                disabled={!draft.trim() || !isConfigured}
-                className={compact ? "h-6 text-[10px]" : "h-7 text-xs"}
-              >
-                Send
-              </Button>
-            )}
-          </div>
-        </div>
+        <form onSubmit={handleSubmit}>
+          <InputGroup>
+            <InputGroupTextarea
+              ref={textareaRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask the agent…"
+              rows={1}
+              disabled={!isConfigured}
+              className={cn("min-h-9", compact ? "text-xs" : "text-sm")}
+            />
+            <InputGroupAddon align="block-end">
+              <InputGroupText className={cn(compact ? "text-[9px]" : "text-[10px]")}>
+                Enter to send · Shift+Enter for newline
+              </InputGroupText>
+              {isStreaming ? (
+                <InputGroupButton
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={onStop}
+                  className="ml-auto"
+                  aria-label="Stop"
+                  title="Stop"
+                >
+                  <Square />
+                </InputGroupButton>
+              ) : (
+                <InputGroupButton
+                  type="submit"
+                  variant="default"
+                  size="icon-sm"
+                  disabled={!draft.trim() || !isConfigured}
+                  className="ml-auto"
+                  aria-label="Send"
+                  title="Send"
+                >
+                  <ArrowUp />
+                </InputGroupButton>
+              )}
+            </InputGroupAddon>
+          </InputGroup>
+        </form>
       </div>
     </div>
   )

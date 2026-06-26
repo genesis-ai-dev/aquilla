@@ -20,6 +20,9 @@ importers:
       '@sapphi-red/web-noise-suppressor':
         specifier: ^0.3.5
         version: 0.3.5
+      '@shadcn/react':
+        specifier: ^0.1.0
+        version: 0.1.0(@types/react@19.2.14)(react@19.2.5)
       '@tanstack/react-query':
         specifier: ^5.99.0
         version: 5.100.5(react@19.2.5)
@@ -1383,6 +1386,17 @@ packages:
 
   '@sec-ant/readable-stream@0.4.1':
     resolution: {integrity: sha512-831qok9r2t8AlxLko40y2ebgSDhenenCatLVeW/uBtnHPyhHOvG0C7TvfgecV+wHzIm5KUICgzmVpWS+IMEAeg==}
+
+  '@shadcn/react@0.1.0':
+    resolution: {integrity: sha512-6i67TEnqValsZY7e4exJ4rkHo2OdHXmDH152YulwSpuEUnTQYumHkXzFsaje7HB7GbMTWuI9x1Jn6sSduCYdeA==}
+    peerDependencies:
+      '@types/react': '>=19'
+      react: '>=19'
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
+      react:
+        optional: true
 
   '@sindresorhus/is@7.2.0':
     resolution: {integrity: sha512-P1Cz1dWaFfR4IR+U13mqqiGsLFf1KbayybWwdd2vfctdV6hDpUkgCY0nKOLLTMSoRd/jJNjtbqzf13K8DCCXQw==}
@@ -5945,6 +5959,11 @@ snapshots:
   '@sapphi-red/web-noise-suppressor@0.3.5': {}
 
   '@sec-ant/readable-stream@0.4.1': {}
+
+  '@shadcn/react@0.1.0(@types/react@19.2.14)(react@19.2.5)':
+    optionalDependencies:
+      '@types/react': 19.2.14
+      react: 19.2.5
 
   '@sindresorhus/is@7.2.0': {}
 

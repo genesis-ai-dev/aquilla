@@ -12,13 +12,21 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Bot } from "lucide-react"
 import { ChatComposer, type SuggestedAction } from "@/components/chat/ChatComposer"
 import { ChatContextPin } from "@/components/chat/ChatContextPin"
-import type { CellContext } from "@/hooks/useChat"
+import type { CellContext } from "@/lib/cell-context"
 import { getTranslatorProfile, profileForPrompt } from "@/lib/translator-profile"
 import type { CellData } from "@/hooks/useCells"
 import type { TranslationRule } from "@/lib/parsers/types"
 import { runAgent } from "@/lib/agent/agent-client"
 import type { ApplyContext } from "@/lib/agent/apply"
 import { createRun, failRun, reduceRunFrame, type AgentRunUi } from "@/lib/agent/run-state"
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller"
 import { AgentRunView } from "./AgentRunView"
 import { ProposalCard } from "./ProposalCard"
 import { AquiferProposalCard } from "./AquiferProposalCard"
@@ -74,16 +82,9 @@ export function AgentDockView({
   const [includeContext, setIncludeContext] = useState(true)
   const [isStreaming, setIsStreaming] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
-  const scrollRef = useRef<HTMLDivElement>(null)
 
   // Abort any in-flight run on unmount (mode switch / dock close).
   useEffect(() => () => abortRef.current?.abort(), [])
-
-  // Keep the newest frames in view while streaming.
-  useEffect(() => {
-    const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [runs])
 
   const updateRun = useCallback((localId: string, next: (run: AgentRunUi) => AgentRunUi) => {
     setRuns((prev) => prev.map((r) => (r.localId === localId ? next(r) : r)))
@@ -184,42 +185,52 @@ export function AgentDockView({
         compact
       />
 
-      <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-2">
-        {runs.length === 0 && (
-          <div className="flex h-full flex-col items-center justify-center gap-1.5 text-center text-muted-foreground">
-            <Bot className="h-5 w-5" />
-            <p className="text-xs">
-              {jwt
-                ? "Ask the agent to draft, check, or explain — it proposes changes you review and apply."
-                : "Sign in to use the agent."}
-            </p>
-          </div>
-        )}
-        {runs.map((run) => (
-          <div key={run.localId} className="space-y-2">
-            <AgentRunView run={run} />
-            {run.proposals.map((proposal) => (
-              <ProposalCard
-                key={proposal.proposalId}
-                proposal={proposal}
-                roleLevel={roleLevel}
-                rules={rules}
-                resolveCell={resolveCell}
-                applyContext={applyContext}
-                onApplied={onApplied}
-              />
-            ))}
-            {(run.aquiferProposals ?? []).map((proposal) => (
-              <AquiferProposalCard
-                key={proposal.proposalId}
-                proposal={proposal}
-                projectId={projectId}
-                jwt={jwt}
-              />
-            ))}
-          </div>
-        ))}
-      </div>
+      {runs.length === 0 ? (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 px-3 text-center text-muted-foreground">
+          <Bot className="h-5 w-5" />
+          <p className="text-xs">
+            {jwt
+              ? "Ask the agent to draft, check, or explain — it proposes changes you review and apply."
+              : "Sign in to use the agent."}
+          </p>
+        </div>
+      ) : (
+        <MessageScrollerProvider>
+          <MessageScroller className="flex-1">
+            <MessageScrollerViewport>
+              <MessageScrollerContent className="px-3 py-2">
+                {runs.map((run) => (
+                  <MessageScrollerItem key={run.localId} messageId={run.localId} scrollAnchor>
+                    <div className="flex flex-col gap-2">
+                      <AgentRunView run={run} />
+                      {run.proposals.map((proposal) => (
+                        <ProposalCard
+                          key={proposal.proposalId}
+                          proposal={proposal}
+                          roleLevel={roleLevel}
+                          rules={rules}
+                          resolveCell={resolveCell}
+                          applyContext={applyContext}
+                          onApplied={onApplied}
+                        />
+                      ))}
+                      {(run.aquiferProposals ?? []).map((proposal) => (
+                        <AquiferProposalCard
+                          key={proposal.proposalId}
+                          proposal={proposal}
+                          projectId={projectId}
+                          jwt={jwt}
+                        />
+                      ))}
+                    </div>
+                  </MessageScrollerItem>
+                ))}
+              </MessageScrollerContent>
+            </MessageScrollerViewport>
+            <MessageScrollerButton />
+          </MessageScroller>
+        </MessageScrollerProvider>
+      )}
 
       <ChatComposer
         isStreaming={isStreaming}

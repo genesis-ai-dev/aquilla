@@ -2,6 +2,8 @@ import { describe, it, expect, afterEach, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
+import { ThemeModeProvider } from "@/branding/ThemeMode"
+import { ColorThemeProvider } from "@/branding/ColorTheme"
 import { Preferences } from "./Preferences"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -23,10 +25,20 @@ afterEach(() => vi.clearAllMocks())
 
 describe("Preferences", () => {
   it("renders personal preference sections", () => {
-    render(<MemoryRouter><OrgProvider><Preferences /></OrgProvider></MemoryRouter>)
+    render(
+      <MemoryRouter>
+        <ThemeModeProvider>
+          <ColorThemeProvider>
+            <OrgProvider><Preferences /></OrgProvider>
+          </ColorThemeProvider>
+        </ThemeModeProvider>
+      </MemoryRouter>,
+    )
     expect(screen.getByRole("heading", { name: "Preferences" })).toBeInTheDocument()
     expect(screen.getByText("Sidebar tab layout")).toBeInTheDocument()
     expect(screen.getByText("Share usage data")).toBeInTheDocument()
     expect(screen.getByText("provider section")).toBeInTheDocument()
+    // Appearance controls surfaced via the existing branding components.
+    expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument()
   })
 })

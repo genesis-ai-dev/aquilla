@@ -12,8 +12,14 @@ R2 bucket (Frontier R&D Cloudflare account), served over the custom domain
 
 | URL | Format |
 | --- | --- |
-| https://docs.aquilla.app/walkthroughs/org-setup/org-setup-create-and-settings.mp4 | 1280×800 H.264, ~48s |
-| https://docs.aquilla.app/walkthroughs/org-setup/org-setup-create-and-settings.webm | VP8/9 |
+| https://docs.aquilla.app/walkthroughs/org-setup/org-setup-create-and-settings.webm | VP8 — the faithful master |
+| https://docs.aquilla.app/walkthroughs/org-setup/org-setup-create-and-settings.mp4?v=bt709 | 1280×800 H.264, ~48s |
+
+The `.webm` is the source of truth. The MP4 is a transcode — earlier it was
+SD-colourspace tagged and some players overscan-cropped its edges; it's now
+BT.709 + square-pixel tagged so it renders 1:1, and the assembler runs a
+fidelity check (dims + frame SSIM) on every build. The `?v=bt709` query busts
+the 4-hour edge cache on the corrected file.
 
 `org-setup-REAL-recording.storyboard.json` (chapters + caption/VO script with
 timings) stays in git — it's tiny and useful on its own.

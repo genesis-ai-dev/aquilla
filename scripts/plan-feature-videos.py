@@ -15,7 +15,7 @@ SRC = "docs/FEATURE-STORIES.csv"
 PLAN = "docs/FEATURE-VIDEOS-PLAN.md"
 
 # Videos live in the aquilla-docs R2 bucket (Frontier R&D acct), NOT the repo.
-R2 = "https://docs.aquilla.app/walkthroughs"
+R2 = "https://docs.aquilla.app/media"
 # Slugs already satisfied by an existing recorded asset reuse that path.
 SPECIAL_PATH = {
     "org-create-and-settings": f"{R2}/org-setup/org-setup-create-and-settings.mp4",

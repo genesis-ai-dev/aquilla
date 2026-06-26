@@ -33,7 +33,9 @@ describe("ContextChipNode", () => {
     const editor = makeEditor()
     const json = editor.getJSON()
     const para = json.content![0]
-    const chipNode = para.content!.find((n: { type?: string }) => n.type === "contextChip")
+    const chipNode = para.content!.find(
+      (n: { type?: string }) => n.type === "contextChip",
+    ) as { attrs?: Record<string, unknown> } | undefined
     expect(chipNode!.attrs).toMatchObject({ chipId: "a", canonicalRef: "GEN 1:1", fileId: "f", cellId: "z" })
     editor.destroy()
   })

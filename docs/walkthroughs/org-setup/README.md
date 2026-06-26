@@ -7,23 +7,13 @@ cursor, click ripples, zoom-into-click, captions/chapters).
 ## Where the video lives
 
 Video binaries are **not committed to git** — they live in the `aquilla-docs`
-R2 bucket (Frontier R&D Cloudflare account):
+R2 bucket (Frontier R&D Cloudflare account), served over the custom domain
+`docs.aquilla.app`:
 
-| Object (key in `aquilla-docs`) | Format |
+| URL | Format |
 | --- | --- |
-| `walkthroughs/org-setup/org-setup-create-and-settings.mp4` | 1280×800 H.264, ~48s |
-| `walkthroughs/org-setup/org-setup-create-and-settings.webm` | VP8/9 |
-
-The bucket is currently private. Fetch a copy with:
-
-```sh
-CLOUDFLARE_ACCOUNT_ID=6a80496d1e59948a9cbaa3c643ba81d7 \
-  npx wrangler r2 object get aquilla-docs/walkthroughs/org-setup/org-setup-create-and-settings.mp4 \
-  --file=org-setup-create-and-settings.mp4
-```
-
-(Once a public `r2.dev` URL or custom domain is enabled for the bucket, link it
-directly here.)
+| https://docs.aquilla.app/walkthroughs/org-setup/org-setup-create-and-settings.mp4 | 1280×800 H.264, ~48s |
+| https://docs.aquilla.app/walkthroughs/org-setup/org-setup-create-and-settings.webm | VP8/9 |
 
 `org-setup-REAL-recording.storyboard.json` (chapters + caption/VO script with
 timings) stays in git — it's tiny and useful on its own.

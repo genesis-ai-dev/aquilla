@@ -1,0 +1,47 @@
+{
+  "slug": "consultant__validation-validate-cell",
+  "persona": "consultant",
+  "feature": "validation-validate-cell",
+  "title": "Validate a cell — approve the work, visible to the whole team.",
+  "cta": "Aquilla — quality you can see at every zoom level.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 25153,
+  "chapters": [
+    {
+      "t": 482,
+      "title": "Open the file to review",
+      "subtitle": "John — Plainspoken Draft."
+    },
+    {
+      "t": 5207,
+      "title": "Every cell carries a health signal",
+      "subtitle": "Green means validated."
+    },
+    {
+      "t": 11876,
+      "title": "Approve the work",
+      "subtitle": "The consultant's sign-off, recorded and shared."
+    },
+    {
+      "t": 18741,
+      "title": "Quality the whole team can see",
+      "subtitle": "Validated counts roll up live."
+    }
+  ],
+  "captions": [
+    {
+      "t": 8333,
+      "text": "This pill is the at-a-glance validation status."
+    },
+    {
+      "t": 13178,
+      "text": "Hover the pill to open the validation menu — Validate with one click."
+    },
+    {
+      "t": 19663,
+      "text": "Each approval rolls up into the project's validated count — shared with everyone."
+    }
+  ],
+  "generatedAt": "2026-06-26T03:32:49.792Z"
+}

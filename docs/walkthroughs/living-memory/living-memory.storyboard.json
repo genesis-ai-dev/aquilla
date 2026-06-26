@@ -1,0 +1,42 @@
+{
+  "slug": "translator__living-memory",
+  "persona": "translator",
+  "feature": "living-memory",
+  "title": "Living Memory — your validated translations, reused automatically.",
+  "cta": "Aquilla — your team's work compounds.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 17452,
+  "chapters": [
+    {
+      "t": 426,
+      "title": "What is Living Memory?",
+      "subtitle": "Validated translations, kept close at hand."
+    },
+    {
+      "t": 5980,
+      "title": "Recent validated examples",
+      "subtitle": "The best examples to draft the next cell."
+    },
+    {
+      "t": 11875,
+      "title": "Your work compounds",
+      "subtitle": "More validated work → better suggestions."
+    }
+  ],
+  "captions": [
+    {
+      "t": 1336,
+      "text": "Open Living Memory — a growing store of your team's confirmed work."
+    },
+    {
+      "t": 6896,
+      "text": "Every validated cell becomes an example the editor and AI can draw on."
+    },
+    {
+      "t": 12786,
+      "text": "The more you validate, the stronger every future draft becomes."
+    }
+  ],
+  "generatedAt": "2026-06-26T03:36:49.945Z"
+}

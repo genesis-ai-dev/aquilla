@@ -1,0 +1,42 @@
+{
+  "slug": "project-lead__projects-dashboard",
+  "persona": "project-lead",
+  "feature": "projects-dashboard",
+  "title": "Projects — every translation project, one dashboard.",
+  "cta": "Aquilla — your team's projects at a glance.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 18935,
+  "chapters": [
+    {
+      "t": 427,
+      "title": "Your projects",
+      "subtitle": "Every project your team is working on."
+    },
+    {
+      "t": 6612,
+      "title": "Open or create",
+      "subtitle": "One click into the workspace; one click to start fresh."
+    },
+    {
+      "t": 12502,
+      "title": "Always current",
+      "subtitle": "Progress and status update as your team works."
+    }
+  ],
+  "captions": [
+    {
+      "t": 1337,
+      "text": "The Projects dashboard lists everything you can access — across the organization."
+    },
+    {
+      "t": 7525,
+      "text": "Click a project to open its workspace — or start a new one in seconds."
+    },
+    {
+      "t": 13415,
+      "text": "Each card reflects live progress — so managers see where things stand at a glance."
+    }
+  ],
+  "generatedAt": "2026-06-26T03:40:47.863Z"
+}

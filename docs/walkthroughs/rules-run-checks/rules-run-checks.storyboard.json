@@ -1,0 +1,42 @@
+{
+  "slug": "project-lead__rules-checks",
+  "persona": "project-lead",
+  "feature": "rules-checks",
+  "title": "Rules & checks — encode your standards, catch drift automatically.",
+  "cta": "Aquilla — quality rules that run themselves.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 19484,
+  "chapters": [
+    {
+      "t": 442,
+      "title": "Rules & checks",
+      "subtitle": "Encode the standards your team agrees on."
+    },
+    {
+      "t": 6760,
+      "title": "Author a rule",
+      "subtitle": "Pattern, replacement, flags — test it before you save."
+    },
+    {
+      "t": 13212,
+      "title": "Checks run as you work",
+      "subtitle": "Flagged cells surface where attention's needed."
+    }
+  ],
+  "captions": [
+    {
+      "t": 1355,
+      "text": "Open Rules to author checks — from a simple find-pattern to built-in quality checks."
+    },
+    {
+      "t": 7697,
+      "text": "Write a rule, test it against real source and target, and save it for the project."
+    },
+    {
+      "t": 14128,
+      "text": "Built-in and custom checks flag drift automatically — so issues never pile up."
+    }
+  ],
+  "generatedAt": "2026-06-26T04:33:29.545Z"
+}

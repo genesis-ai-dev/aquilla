@@ -1,0 +1,42 @@
+{
+  "slug": "translator__ai-autodraft-cell",
+  "persona": "translator",
+  "feature": "ai-autodraft-cell",
+  "title": "AI completions — draft the next cells, you stay in control.",
+  "cta": "Aquilla — the AI drafts, the expert decides.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 20981,
+  "chapters": [
+    {
+      "t": 878,
+      "title": "Run AI completions",
+      "subtitle": "Let the model draft untranslated cells."
+    },
+    {
+      "t": 7626,
+      "title": "You stay in control",
+      "subtitle": "Drafts are suggestions, not commitments."
+    },
+    {
+      "t": 14336,
+      "title": "Tuned to your project",
+      "subtitle": "Model, context, and examples are yours to set."
+    }
+  ],
+  "captions": [
+    {
+      "t": 2205,
+      "text": "One click drafts the empty cells — using your project's instructions and examples."
+    },
+    {
+      "t": 8540,
+      "text": "AI drafts land as suggestions — you review, edit, and validate before anything is final."
+    },
+    {
+      "t": 15253,
+      "text": "Every draft follows the model and drafting context you configured in Project Settings."
+    }
+  ],
+  "generatedAt": "2026-06-26T03:56:04.594Z"
+}

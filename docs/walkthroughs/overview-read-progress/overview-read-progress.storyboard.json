@@ -1,0 +1,42 @@
+{
+  "slug": "project-manager__project-overview",
+  "persona": "project-manager",
+  "feature": "project-overview",
+  "title": "Project Overview — status at a glance, no target language required.",
+  "cta": "Aquilla — oversight your managers can trust.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 18481,
+  "chapters": [
+    {
+      "t": 875,
+      "title": "Project Overview",
+      "subtitle": "The manager's view — one screen, the whole picture."
+    },
+    {
+      "t": 6691,
+      "title": "Progress without the language",
+      "subtitle": "Translated and validated counts, plain numbers."
+    },
+    {
+      "t": 12583,
+      "title": "People & activity",
+      "subtitle": "Who's assigned, what's moving, where it's stuck."
+    }
+  ],
+  "captions": [
+    {
+      "t": 1781,
+      "text": "Open any project's overview to see progress, people, and health together."
+    },
+    {
+      "t": 7611,
+      "text": "Owners and PMs read status here — no need to read the target language."
+    },
+    {
+      "t": 13495,
+      "text": "See the team's workload and recent activity — oversight you can trust."
+    }
+  ],
+  "generatedAt": "2026-06-26T03:43:45.004Z"
+}

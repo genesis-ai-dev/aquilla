@@ -1,0 +1,42 @@
+{
+  "slug": "collaborator__comments",
+  "persona": "collaborator",
+  "feature": "comments",
+  "title": "Comments — discuss the work in context, settle it, move on.",
+  "cta": "Aquilla — every decision, threaded and traceable.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 18819,
+  "chapters": [
+    {
+      "t": 430,
+      "title": "Comments, in context",
+      "subtitle": "Threaded discussion attached to the work."
+    },
+    {
+      "t": 6478,
+      "title": "Reply & resolve",
+      "subtitle": "Keep decisions next to the cells they touch."
+    },
+    {
+      "t": 12604,
+      "title": "Nothing gets lost",
+      "subtitle": "Resolved threads stay searchable."
+    }
+  ],
+  "captions": [
+    {
+      "t": 1339,
+      "text": "Open Comments to see every thread across the project — filterable, resolvable."
+    },
+    {
+      "t": 7405,
+      "text": "Reply inline, mention a teammate, and resolve the thread when it's settled."
+    },
+    {
+      "t": 13519,
+      "text": "Anyone on the project can follow the conversation — no decision goes missing."
+    }
+  ],
+  "generatedAt": "2026-06-26T03:36:30.572Z"
+}

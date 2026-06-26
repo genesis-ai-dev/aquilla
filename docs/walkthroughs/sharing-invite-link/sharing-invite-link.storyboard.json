@@ -1,0 +1,42 @@
+{
+  "slug": "project-lead__sharing-invites",
+  "persona": "project-lead",
+  "feature": "sharing-invites",
+  "title": "Sharing — invite people with exactly the access they need.",
+  "cta": "Aquilla — share safely, by role.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 19362,
+  "chapters": [
+    {
+      "t": 472,
+      "title": "Share a project",
+      "subtitle": "Bring collaborators in — by link or by name."
+    },
+    {
+      "t": 6336,
+      "title": "Pick the role",
+      "subtitle": "Viewer, reviewer, contributor — never more than needed."
+    },
+    {
+      "t": 13388,
+      "title": "Revoke any time",
+      "subtitle": "Access you can audit and pull back."
+    }
+  ],
+  "captions": [
+    {
+      "t": 1869,
+      "text": "Open Share to create an invite link or add a teammate directly."
+    },
+    {
+      "t": 7255,
+      "text": "Choose the role the link grants — links are capped at contributor, so managerial access stays deliberate."
+    },
+    {
+      "t": 14303,
+      "text": "See who has access, and revoke a link the moment it's no longer needed."
+    }
+  ],
+  "generatedAt": "2026-06-26T03:56:26.269Z"
+}

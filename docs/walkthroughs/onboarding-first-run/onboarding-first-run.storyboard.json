@@ -1,0 +1,42 @@
+{
+  "slug": "new-user__onboarding",
+  "persona": "new-user",
+  "feature": "onboarding",
+  "title": "Getting started — account setup and your first project, guided.",
+  "cta": "Aquilla — from sign-up to translating in minutes.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 17957,
+  "chapters": [
+    {
+      "t": 431,
+      "title": "Welcome",
+      "subtitle": "A short, guided setup the first time you sign in."
+    },
+    {
+      "t": 6032,
+      "title": "Sign in & privacy",
+      "subtitle": "Create your account; choose what you share."
+    },
+    {
+      "t": 11654,
+      "title": "Name it & create a project",
+      "subtitle": "Pick a name; spin up your first project."
+    }
+  ],
+  "captions": [
+    {
+      "t": 1344,
+      "text": "New to Aquilla? The setup wizard walks you through it, step by step."
+    },
+    {
+      "t": 6945,
+      "text": "Sign in or create an account, then set your privacy preferences."
+    },
+    {
+      "t": 12566,
+      "text": "Name your workspace and create a first project — you're translating in minutes."
+    }
+  ],
+  "generatedAt": "2026-06-26T04:06:43.660Z"
+}

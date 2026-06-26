@@ -1,0 +1,42 @@
+{
+  "slug": "translator__audio-voice",
+  "persona": "translator",
+  "feature": "audio-voice",
+  "title": "Voice & audio — turn your translation into spoken output.",
+  "cta": "Aquilla — text and voice, side by side.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 19723,
+  "chapters": [
+    {
+      "t": 919,
+      "title": "Switch to audio",
+      "subtitle": "Same cells, now with voice."
+    },
+    {
+      "t": 6533,
+      "title": "Your cast of voices",
+      "subtitle": "Assign a narrator; add or clone characters."
+    },
+    {
+      "t": 13305,
+      "title": "Text and audio together",
+      "subtitle": "Every line, readable and hearable."
+    }
+  ],
+  "captions": [
+    {
+      "t": 2259,
+      "text": "Flip to the audio lens to give your project a spoken voice."
+    },
+    {
+      "t": 7452,
+      "text": "Build a cast — pick a narrator, add voices per character, generate speech from your text."
+    },
+    {
+      "t": 14257,
+      "text": "Audio lives right beside the text — review the words and the voice in one place."
+    }
+  ],
+  "generatedAt": "2026-06-26T03:59:32.796Z"
+}

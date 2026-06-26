@@ -1,0 +1,42 @@
+{
+  "slug": "translator__search-find-replace",
+  "persona": "translator",
+  "feature": "search-find-replace",
+  "title": "Search & replace — find anything, change it everywhere.",
+  "cta": "Aquilla — consistent wording in one pass.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 18936,
+  "chapters": [
+    {
+      "t": 855,
+      "title": "Open search",
+      "subtitle": "Find any word across files and target cells."
+    },
+    {
+      "t": 6552,
+      "title": "Scope it",
+      "subtitle": "File or project; source, target, or both."
+    },
+    {
+      "t": 12480,
+      "title": "Replace with care",
+      "subtitle": "Swap a term everywhere — review before you commit."
+    }
+  ],
+  "captions": [
+    {
+      "t": 2181,
+      "text": "Hit the search control — or ⌘F — to search the whole project."
+    },
+    {
+      "t": 7461,
+      "text": "Narrow to a file or search project-wide; match source, target, or both."
+    },
+    {
+      "t": 13392,
+      "text": "Replace across every match in one pass — your validations and history stay intact."
+    }
+  ],
+  "generatedAt": "2026-06-26T03:48:34.149Z"
+}

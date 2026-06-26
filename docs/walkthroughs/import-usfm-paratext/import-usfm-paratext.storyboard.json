@@ -1,0 +1,42 @@
+{
+  "slug": "project-lead__import",
+  "persona": "project-lead",
+  "feature": "import",
+  "title": "Import — USFM, Paratext, eBible, DOCX, spreadsheets.",
+  "cta": "Aquilla — bring your source in, ready to translate.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 19075,
+  "chapters": [
+    {
+      "t": 527,
+      "title": "Import your source",
+      "subtitle": "Start from the format you already have."
+    },
+    {
+      "t": 6626,
+      "title": "Any common format",
+      "subtitle": "USFM & Paratext, DOCX, CSV/XLSX, plain text."
+    },
+    {
+      "t": 13104,
+      "title": "Source & target together",
+      "subtitle": "Bring in a translation alongside the source."
+    }
+  ],
+  "captions": [
+    {
+      "t": 2287,
+      "text": "Open Import — upload a file or pull from an eBible corpus."
+    },
+    {
+      "t": 7542,
+      "text": "Aquilla parses your source and segments it into cells — verse by verse, row by row."
+    },
+    {
+      "t": 14018,
+      "text": "Paired import lines a translation up with its source, ready for review."
+    }
+  ],
+  "generatedAt": "2026-06-26T04:25:26.050Z"
+}

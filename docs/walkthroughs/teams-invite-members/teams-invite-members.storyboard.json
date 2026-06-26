@@ -1,0 +1,42 @@
+{
+  "slug": "org-admin__teams",
+  "persona": "org-admin",
+  "feature": "teams",
+  "title": "Teams — group your people, grant access once.",
+  "cta": "Aquilla — the right people, the right access.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 18627,
+  "chapters": [
+    {
+      "t": 412,
+      "title": "Teams",
+      "subtitle": "Organize members into the groups that match your work."
+    },
+    {
+      "t": 6459,
+      "title": "Grant access by team",
+      "subtitle": "Add a team to a project, not one person at a time."
+    },
+    {
+      "t": 12712,
+      "title": "Managers stay in control",
+      "subtitle": "Roles and membership, visible and auditable."
+    }
+  ],
+  "captions": [
+    {
+      "t": 1321,
+      "text": "Open Teams to group people — translators, reviewers, a whole language project."
+    },
+    {
+      "t": 7377,
+      "text": "Give a team access to a project once — everyone in it inherits the right role."
+    },
+    {
+      "t": 13637,
+      "text": "Owners and admins see exactly who's on each team and what they can do."
+    }
+  ],
+  "generatedAt": "2026-06-26T03:44:05.671Z"
+}

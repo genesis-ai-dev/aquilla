@@ -1,0 +1,59 @@
+{
+  "slug": "demo-curated__documentation-walkthrough",
+  "persona": "demo-curated",
+  "feature": "documentation-walkthrough",
+  "title": "Aquilla, step by step — reading a real translation project.",
+  "cta": "Aquilla — your team's work, clear at every zoom level.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 36114,
+  "chapters": [
+    {
+      "t": 1292,
+      "title": "Open a project",
+      "subtitle": "John — Plainspoken Draft · a curated demo project."
+    },
+    {
+      "t": 11804,
+      "title": "Source ↔ target, verse by verse",
+      "subtitle": "John 1 · English → French."
+    },
+    {
+      "t": 22220,
+      "title": "Validation at a glance",
+      "subtitle": "Healthy cells are marked green."
+    },
+    {
+      "t": 29998,
+      "title": "That's the workspace",
+      "subtitle": "Real content, real structure."
+    }
+  ],
+  "captions": [
+    {
+      "t": 2208,
+      "text": "Every project opens to real content — source and target, side by side."
+    },
+    {
+      "t": 7527,
+      "text": "Click a file to open it."
+    },
+    {
+      "t": 14945,
+      "text": "Left: the source text…"
+    },
+    {
+      "t": 18093,
+      "text": "…right: your team's translation, cell by cell."
+    },
+    {
+      "t": 25339,
+      "text": "Each cell carries a health signal — green means validated."
+    },
+    {
+      "t": 30906,
+      "text": "Real content, real structure — that's how you read a project in Aquilla."
+    }
+  ],
+  "generatedAt": "2026-06-26T02:54:54.696Z"
+}

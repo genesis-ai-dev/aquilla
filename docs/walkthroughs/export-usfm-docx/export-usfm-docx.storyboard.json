@@ -1,0 +1,42 @@
+{
+  "slug": "translator__export-usfm-docx",
+  "persona": "translator",
+  "feature": "export-usfm-docx",
+  "title": "Export — USFM, DOCX, and more, in one click.",
+  "cta": "Aquilla — your work, in the format you need.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 17662,
+  "chapters": [
+    {
+      "t": 893,
+      "title": "Open export",
+      "subtitle": "Take your translation out of Aquilla."
+    },
+    {
+      "t": 5609,
+      "title": "Pick a format",
+      "subtitle": "USFM & DOCX for delivery; bilingual TSV/CSV for review."
+    },
+    {
+      "t": 11874,
+      "title": "Round-trips intact",
+      "subtitle": "Structure and formatting come along."
+    }
+  ],
+  "captions": [
+    {
+      "t": 2221,
+      "text": "Click Export to open the format picker."
+    },
+    {
+      "t": 6525,
+      "text": "Export Paratext-ready USFM, a formatted DOCX, or a bilingual table for review."
+    },
+    {
+      "t": 12830,
+      "text": "Your file's structure and formatting are preserved on the way out."
+    }
+  ],
+  "generatedAt": "2026-06-26T03:47:35.009Z"
+}

@@ -1,0 +1,42 @@
+{
+  "slug": "collaborator__sync-collaboration",
+  "persona": "collaborator",
+  "feature": "sync-collaboration",
+  "title": "Sync & collaboration — real-time, local-first, never lose work.",
+  "cta": "Aquilla — your team, in sync.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 20015,
+  "chapters": [
+    {
+      "t": 923,
+      "title": "Always in sync",
+      "subtitle": "A live connection keeps everyone current."
+    },
+    {
+      "t": 7007,
+      "title": "No clobbering",
+      "subtitle": "Focus-locks keep two people off the same cell."
+    },
+    {
+      "t": 13521,
+      "title": "Local-first",
+      "subtitle": "Lose signal? Keep working — it syncs on reconnect."
+    }
+  ],
+  "captions": [
+    {
+      "t": 1848,
+      "text": "The status shows you're live — edits sync to your team the moment they land."
+    },
+    {
+      "t": 7917,
+      "text": "When a teammate is editing a cell, it's gently locked — no overwrites, no lost work."
+    },
+    {
+      "t": 14436,
+      "text": "Every edit saves on-device first, then syncs automatically when you're back online."
+    }
+  ],
+  "generatedAt": "2026-06-26T04:07:05.529Z"
+}

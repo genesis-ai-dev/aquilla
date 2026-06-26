@@ -1,0 +1,42 @@
+{
+  "slug": "admin__admin-debug",
+  "persona": "admin",
+  "feature": "admin-debug",
+  "title": "Debug shell — see exactly what the app sees.",
+  "cta": "Aquilla — transparent state, easy support.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 19225,
+  "chapters": [
+    {
+      "t": 453,
+      "title": "The debug shell",
+      "subtitle": "A plain-text view of the project's live state."
+    },
+    {
+      "t": 6236,
+      "title": "State you can read",
+      "subtitle": "Project, files, and settings as raw JSON."
+    },
+    {
+      "t": 12611,
+      "title": "Admin & shell",
+      "subtitle": "The deeper tools live behind platform-admin access."
+    }
+  ],
+  "captions": [
+    {
+      "t": 1360,
+      "text": "Append /debug to a project to inspect exactly what the app has loaded."
+    },
+    {
+      "t": 7146,
+      "text": "Files, completion settings, and identity — handy for support and troubleshooting."
+    },
+    {
+      "t": 13520,
+      "text": "Platform admins get more — impersonation and org tools — gated to the admin allowlist."
+    }
+  ],
+  "generatedAt": "2026-06-26T04:17:46.026Z"
+}

@@ -1,0 +1,42 @@
+{
+  "slug": "org-admin__org-settings",
+  "persona": "org-admin",
+  "feature": "org-settings",
+  "title": "Organization settings — identity and org-wide policy.",
+  "cta": "Aquilla — your organization, on your terms.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 19738,
+  "chapters": [
+    {
+      "t": 417,
+      "title": "Organization settings",
+      "subtitle": "Everything that applies across all your projects."
+    },
+    {
+      "t": 6602,
+      "title": "Identity",
+      "subtitle": "Rename the org; it updates everywhere at once."
+    },
+    {
+      "t": 13347,
+      "title": "Org-wide policy",
+      "subtitle": "Set defaults that every project inherits."
+    }
+  ],
+  "captions": [
+    {
+      "t": 1327,
+      "text": "Open organization settings — identity, members, and org-wide policy in one place."
+    },
+    {
+      "t": 7515,
+      "text": "Change the organization's name and it propagates to the sidebar and breadcrumb instantly."
+    },
+    {
+      "t": 14259,
+      "text": "Set org defaults — like the minimum role required to export — once, for everyone."
+    }
+  ],
+  "generatedAt": "2026-06-26T03:43:23.847Z"
+}

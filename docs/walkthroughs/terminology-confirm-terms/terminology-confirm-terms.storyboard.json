@@ -1,0 +1,42 @@
+{
+  "slug": "translator__terminology",
+  "persona": "translator",
+  "feature": "terminology",
+  "title": "Terminology — your project's shared glossary of key terms.",
+  "cta": "Aquilla — consistent terminology, automatically.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 19632,
+  "chapters": [
+    {
+      "t": 462,
+      "title": "The terminology library",
+      "subtitle": "Every key term, defined once, used everywhere."
+    },
+    {
+      "t": 5874,
+      "title": "Confirm & manage terms",
+      "subtitle": "Source term → renderings, notes, and status."
+    },
+    {
+      "t": 12927,
+      "title": "Consistency, automatically",
+      "subtitle": "Terms compile into checks that flag drift."
+    }
+  ],
+  "captions": [
+    {
+      "t": 1371,
+      "text": "Open Terminology from any project — your team's shared glossary."
+    },
+    {
+      "t": 6788,
+      "text": "Add a concept, confirm a rendering, or flag one to revisit — the editor surfaces them as you translate."
+    },
+    {
+      "t": 13843,
+      "text": "Confirmed terms become checks — so the same word is rendered the same way, project-wide."
+    }
+  ],
+  "generatedAt": "2026-06-26T03:37:11.671Z"
+}

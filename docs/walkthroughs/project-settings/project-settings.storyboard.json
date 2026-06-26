@@ -1,0 +1,42 @@
+{
+  "slug": "project-lead__project-settings",
+  "persona": "project-lead",
+  "feature": "project-settings",
+  "title": "Project Settings — AI, drafting context, and access in one place.",
+  "cta": "Aquilla — your project, configured your way.",
+  "mode": "doc",
+  "verified": true,
+  "durationMs": 19667,
+  "chapters": [
+    {
+      "t": 447,
+      "title": "Project Settings",
+      "subtitle": "Everything about how this project behaves."
+    },
+    {
+      "t": 6051,
+      "title": "AI & drafting",
+      "subtitle": "Pick a model; tune the context the AI drafts from."
+    },
+    {
+      "t": 13035,
+      "title": "Access policy",
+      "subtitle": "Who can read, translate, validate, or manage."
+    }
+  ],
+  "captions": [
+    {
+      "t": 1359,
+      "text": "Open Settings from any project — AI, drafting, and access, all here."
+    },
+    {
+      "t": 6964,
+      "text": "Choose your AI model and shape the drafting context — examples, preceding cells, instructions."
+    },
+    {
+      "t": 13952,
+      "text": "Set the role floor for sensitive actions — managers stay in control of who does what."
+    }
+  ],
+  "generatedAt": "2026-06-26T03:40:26.567Z"
+}

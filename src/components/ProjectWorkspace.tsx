@@ -85,6 +85,7 @@ import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOve
 import { useComments } from "@/hooks/useComments"
 import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, Mic2, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose } from "lucide-react"
 import { AgentDockPanel } from "./AgentDockPanel"
+import type { ContextChip } from "@/lib/agent/context-chip"
 import { SearchDockPanel } from "./SearchDockPanel"
 import { SearchResultsView } from "./search/SearchResultsView"
 import { LeftDock, type DockTab } from "./LeftDock"
@@ -552,6 +553,13 @@ export function ProjectWorkspace() {
   const [shareOpen, setShareOpen] = useState(false)
   // FRO-308: left dock active tab (null = collapsed rail only)
   const [dockTab, setDockTab] = useState<DockTab | null>("files")
+  // A source selection the user sent to the agent via "Ask AI". Opens the
+  // Agent dock and is inserted into the composer as a context chip.
+  const [pendingChip, setPendingChip] = useState<ContextChip | null>(null)
+  const handleAskAiFromSelection = useCallback((chip: ContextChip) => {
+    setPendingChip(chip)
+    setDockTab("agent")
+  }, [])
   // FRO-309: expanded search results overlay in the main area
   const [searchExpandedQuery, setSearchExpandedQuery] = useState<string | null>(null)
   const [aiSetupOpen, setAiSetupOpen] = useState(false)
@@ -3211,6 +3219,8 @@ export function ProjectWorkspace() {
                   onApplied: handleAgentApplied,
                 }}
                 bibleSummary={bibleSummary}
+                pendingChip={pendingChip}
+                onPendingChipConsumed={() => setPendingChip(null)}
               />
             }
             searchPanel={
@@ -3646,6 +3656,7 @@ export function ProjectWorkspace() {
             }}
             onProjectChanged={refresh}
             onAddConceptFromSelection={handleAddConceptFromSelection}
+            onAskAiFromSelection={handleAskAiFromSelection}
             onAttachMediaFile={handleAttachMediaFile}
             onAttachMediaUrl={handleAttachMediaUrl}
             onCellCommitted={handleCellCommitted}

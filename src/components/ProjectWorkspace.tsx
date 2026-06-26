@@ -84,12 +84,11 @@ import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timel
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
 import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, Mic2, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose } from "lucide-react"
-import { ChatPanel } from "./ChatPanel"
 import { AgentDockPanel } from "./AgentDockPanel"
+import type { ContextChip } from "@/lib/agent/context-chip"
 import { SearchDockPanel } from "./SearchDockPanel"
 import { SearchResultsView } from "./search/SearchResultsView"
 import { LeftDock, type DockTab } from "./LeftDock"
-import { useChat } from "@/hooks/useChat"
 import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
@@ -552,9 +551,15 @@ export function ProjectWorkspace() {
   const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
   const [shareOpen, setShareOpen] = useState(false)
-  const [chatOpen, setChatOpen] = useState(false)
   // FRO-308: left dock active tab (null = collapsed rail only)
   const [dockTab, setDockTab] = useState<DockTab | null>("files")
+  // A source selection the user sent to the agent via "Ask AI". Opens the
+  // Agent dock and is inserted into the composer as a context chip.
+  const [pendingChip, setPendingChip] = useState<ContextChip | null>(null)
+  const handleAskAiFromSelection = useCallback((chip: ContextChip) => {
+    setPendingChip(chip)
+    setDockTab("agent")
+  }, [])
   // FRO-309: expanded search results overlay in the main area
   const [searchExpandedQuery, setSearchExpandedQuery] = useState<string | null>(null)
   const [aiSetupOpen, setAiSetupOpen] = useState(false)
@@ -1353,16 +1358,6 @@ export function ProjectWorkspace() {
     project?.draftContext ?? DEFAULT_DRAFT_CONTEXT,
   )
 
-  // FRO-175: workspace AI chat panel
-  const chat = useChat({
-    settings: project?.completionSettings,
-    session: frontierSession,
-    sourceLanguage: project?.sourceLanguage || "",
-    targetLanguage: project?.targetLanguage || "",
-    currentFileName: activeFile?.name,
-    projectId: project?.id,
-  })
-
   // Translation agent (chat dock Agent mode): live cell lookup for proposal
   // lint + chain heads, and the post-apply flush/revalidate sequence — the
   // same steps commitCompletedCell runs after its own enqueue.
@@ -1909,17 +1904,8 @@ export function ProjectWorkspace() {
   const cellLockHoldersRef = useRef<Map<string, string>>(new Map())
   const [cellsWithRemoteChange, setCellsWithRemoteChange] = useState<Set<string>>(() => new Set())
   const focusedCellIdRef = useRef<string | null>(null)
-  // FRO-175: reactive version of focusedCellIdRef for the chat panel's context wiring.
+  // Reactive version of focusedCellIdRef for the agent panel's context wiring.
   const [focusedCellId, setFocusedCellId] = useState<string | null>(null)
-
-  // Chat "Insert into cell": commit the reply text through the same path
-  // single-cell AI completion uses (FRO-247 write-clock semantics hold).
-  const handleChatInsertIntoCell = useCallback(async (text: string) => {
-    if (!focusedCellId) return
-    const cell = cells.find((c) => c.id === focusedCellId)
-    if (!cell) return
-    await commitCompletedCell(cell, text, currentUsername)
-  }, [focusedCellId, cells, commitCompletedCell, currentUsername])
 
   // FRO-179: TN sidebar visibility + canonicalRef of the focused cell.
   // Hidden by default; toggled via the View settings menu.
@@ -3233,6 +3219,8 @@ export function ProjectWorkspace() {
                   onApplied: handleAgentApplied,
                 }}
                 bibleSummary={bibleSummary}
+                pendingChip={pendingChip}
+                onPendingChipConsumed={() => setPendingChip(null)}
               />
             }
             searchPanel={
@@ -3668,6 +3656,7 @@ export function ProjectWorkspace() {
             }}
             onProjectChanged={refresh}
             onAddConceptFromSelection={handleAddConceptFromSelection}
+            onAskAiFromSelection={handleAskAiFromSelection}
             onAttachMediaFile={handleAttachMediaFile}
             onAttachMediaUrl={handleAttachMediaUrl}
             onCellCommitted={handleCellCommitted}
@@ -3960,23 +3949,6 @@ export function ProjectWorkspace() {
         open={shareOpen} onOpenChange={setShareOpen}
         projectId={projectId!}
         onSharesChanged={refreshChecklistShares}
-      />
-      {/* FRO-175: AI chat panel */}
-      <ChatPanel
-        open={chatOpen}
-        onOpenChange={setChatOpen}
-        chat={chat}
-        onInsertIntoCell={handleChatInsertIntoCell}
-        currentCell={(() => {
-          if (!focusedCellId) return null
-          const cell = cells.find((c) => c.id === focusedCellId)
-          if (!cell) return null
-          return {
-            sourceText: cell.original,
-            translatedText: cell.translated,
-            context: cell.context ?? undefined,
-          }
-        })()}
       />
       <VideoAttachmentDialog
         open={videoDialogOpen} onOpenChange={setVideoDialogOpen}

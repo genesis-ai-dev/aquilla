@@ -8,7 +8,8 @@
 
 import { useMemo, useState } from "react"
 import { Bot } from "lucide-react"
-import type { CellContext } from "@/hooks/useChat"
+import type { CellContext } from "@/lib/cell-context"
+import type { ContextChip } from "@/lib/agent/context-chip"
 import { AgentDockView, type AgentDockViewProps } from "./agent/AgentDockView"
 import type { SuggestedAction } from "./chat/ChatComposer"
 import { bookSummaryPrompt, chapterSummaryPrompt } from "@/lib/summary-prompts"
@@ -26,13 +27,22 @@ export interface AgentDockPanelProps {
   /** The currently focused cell; wired in ProjectWorkspace via focusedCellIdRef */
   currentCell: CellContext | null
   /** Agent-run wiring. */
-  agent: Omit<AgentDockViewProps, "currentCell" | "suggestedActions" | "pendingPrompt" | "onPendingPromptConsumed">
+  agent: Omit<
+    AgentDockViewProps,
+    "currentCell" | "suggestedActions" | "pendingPrompt" | "onPendingPromptConsumed" | "pendingChip" | "onPendingChipConsumed"
+  >
   /** When a scripture file is open, shows Summarize book/chapter buttons that
    *  run an agent-backed, vetted-resource summary. */
   bibleSummary?: BibleSummaryContext | null
+  /** A source-selection chip to insert into the composer (set by EditorTable's "Ask AI"). */
+  pendingChip?: ContextChip | null
+  /** Called once the pending chip has been inserted. */
+  onPendingChipConsumed?: () => void
 }
 
-export function AgentDockPanel({ currentCell, agent, bibleSummary }: AgentDockPanelProps) {
+export function AgentDockPanel({
+  currentCell, agent, bibleSummary, pendingChip, onPendingChipConsumed,
+}: AgentDockPanelProps) {
   // A summary prompt queued by a button tap; AgentDockView runs it once.
   const [pendingAgentPrompt, setPendingAgentPrompt] = useState<string | null>(null)
 
@@ -74,6 +84,8 @@ export function AgentDockPanel({ currentCell, agent, bibleSummary }: AgentDockPa
         suggestedActions={summaryActions}
         pendingPrompt={pendingAgentPrompt}
         onPendingPromptConsumed={() => setPendingAgentPrompt(null)}
+        pendingChip={pendingChip}
+        onPendingChipConsumed={onPendingChipConsumed}
       />
     </div>
   )

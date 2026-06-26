@@ -1,17 +1,22 @@
 /**
  * AgentRunView.tsx — timeline for one translation-agent run.
  *
- * Renders the user's prompt, collapsible step rows (code_start/code_result
- * pairs as a monospace summary), the streamed assistant text (ChatMarkdown,
- * same renderer as chat replies), the usage/cost line, and error/capped
- * states. Proposal cards render separately (AgentDockView) so Apply wiring
- * stays out of this purely presentational component.
+ * Renders the user's prompt and the streamed assistant reply as shadcn
+ * Message/Bubble turns (same components the chat surface uses), collapsible
+ * step rows (code_start/code_result pairs as a monospace summary), the
+ * usage/cost line, and running/error/capped states as Marker rows. Proposal
+ * cards render separately (AgentDockView) so Apply wiring stays out of this
+ * purely presentational component.
  */
 
 import { useState } from "react"
 import { AlertTriangle, Book, Check, ChevronRight, Database, FileText, Loader2, Send, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ChatMarkdown } from "@/components/chat/ChatMarkdown"
+import { Bubble, BubbleContent } from "@/components/ui/bubble"
+import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker"
+import { Message, MessageContent } from "@/components/ui/message"
+import { Spinner } from "@/components/ui/spinner"
 import type { AgentRunUi, AgentStepUi } from "@/lib/agent/run-state"
 
 const STEP_ICON = {
@@ -72,47 +77,63 @@ export interface AgentRunViewProps {
 
 export function AgentRunView({ run }: AgentRunViewProps) {
   return (
-    <div className="space-y-2">
-      {/* User prompt bubble — mirrors chat's user-message alignment. */}
-      <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-lg bg-primary px-2.5 py-1.5 text-xs text-primary-foreground">
-          {run.prompt}
-        </div>
-      </div>
+    <div className="flex flex-col gap-2">
+      {/* User prompt — right-aligned primary bubble. */}
+      <Message align="end">
+        <MessageContent>
+          <Bubble>
+            <BubbleContent>{run.prompt}</BubbleContent>
+          </Bubble>
+        </MessageContent>
+      </Message>
 
       {run.steps.length > 0 && (
-        <div className="space-y-1">
+        <div className="flex flex-col gap-1">
           {run.steps.map((s) => (
             <StepRow key={s.step} step={s} />
           ))}
         </div>
       )}
 
+      {/* Assistant reply — ghost bubble keeps long-form markdown aligned with
+          the column at full width instead of a cramped framed bubble. */}
       {run.assistantText && (
-        <div className="rounded-lg bg-muted px-2.5 py-1.5 text-xs">
-          <ChatMarkdown content={run.assistantText} />
-        </div>
+        <Message align="start">
+          <MessageContent>
+            <Bubble variant="ghost">
+              <BubbleContent>
+                <ChatMarkdown content={run.assistantText} />
+              </BubbleContent>
+            </Bubble>
+          </MessageContent>
+        </Message>
       )}
 
       {run.status === "running" && (
-        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          <span>Agent working…</span>
-        </div>
+        <Marker role="status">
+          <MarkerIcon>
+            <Spinner />
+          </MarkerIcon>
+          <MarkerContent>Agent working…</MarkerContent>
+        </Marker>
       )}
 
       {run.status === "error" && (
-        <div className="flex items-start gap-1.5 rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive">
-          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-          <span>{run.errorMessage || "Agent run failed."}</span>
-        </div>
+        <Marker role="alert" className="text-destructive">
+          <MarkerIcon>
+            <AlertTriangle />
+          </MarkerIcon>
+          <MarkerContent>{run.errorMessage || "Agent run failed."}</MarkerContent>
+        </Marker>
       )}
 
       {run.status === "capped" && (
-        <div className="flex items-start gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-400">
-          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-          <span>Run hit its step/token cap — results may be partial.</span>
-        </div>
+        <Marker role="status" className="text-amber-700 dark:text-amber-400">
+          <MarkerIcon>
+            <AlertTriangle />
+          </MarkerIcon>
+          <MarkerContent>Run hit its step/token cap — results may be partial.</MarkerContent>
+        </Marker>
       )}
 
       {run.usage && (

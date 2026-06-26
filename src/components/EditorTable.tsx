@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useCallback, useMemo, useState, forwardRef, u
 import { useVirtualizer } from "@tanstack/react-virtual"
 import DOMPurify from "dompurify"
 import {
-  Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw, BookOpen,
+  Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
   ArrowRight, Activity, NotebookPen,
 } from "lucide-react"
@@ -73,6 +73,8 @@ import { PreAcceptanceWarningBand } from "./PreAcceptanceWarningBand"
 import { detectPreAcceptanceWarnings } from "@/lib/terminology/preacceptance"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { AddConceptDialog } from "./AddConceptDialog"
+import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
+import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
 import { FootnoteInline, FootnotedTextValue } from "./footnotes/FootnoteInline"
 import {
   AddFootnoteDialog,
@@ -436,6 +438,7 @@ interface EditorTableProps {
   onProjectChanged?: () => void
   /** Add-from-selection: create a DRAFT concept from a selected source token. */
   onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
+  onAskAiFromSelection?: (chip: ContextChip) => void
   /** Called when the user drops a voice chip onto a cell's audio area.
    *  Parent should assign the voice then trigger TTS generation. */
   onAssignVoice?: (cellId: string, voiceId: string) => void
@@ -499,7 +502,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   audioLens, onOpenAudioSetup,
   onAttachMediaFile, onAttachMediaUrl,
   orderedBy,
-  onProjectChanged, onAddConceptFromSelection, onAssignVoice,
+  onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
   onCellCommitted,
   onOptimisticEdit,
   cellLockHolders,
@@ -1148,6 +1151,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 onOpenAudioSetup={onOpenAudioSetup}
                 onProjectChanged={onProjectChanged}
                 onAddConceptFromSelection={onAddConceptFromSelection}
+                onAskAiFromSelection={onAskAiFromSelection}
                 onAssignVoice={onAssignVoice}
                 onDragStart={handleDragStart}
                 onDragEnter={handleDragEnter}
@@ -1258,6 +1262,7 @@ interface MemoizedRowProps {
   onProjectChanged?: () => void
   /** Add-from-selection: create a DRAFT concept from a selected source token. */
   onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
+  onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   onDragStart: (cellId: string) => void
   onDragEnter: (cellId: string) => void
@@ -1323,7 +1328,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onOpenComments, onOpenHistory,
     onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
     sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, onAiSetupNeeded, onOpenRecording, micDenied, onProjectChanged, onAddConceptFromSelection, onAssignVoice,
+    onJumpToCell, onAiSetupNeeded, onOpenRecording, micDenied, onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
     onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onAckRemoteChange,
@@ -1450,6 +1455,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onOpenAudioSetup={onOpenAudioSetup}
         onProjectChanged={onProjectChanged}
         onAddConceptFromSelection={onAddConceptFromSelection}
+        onAskAiFromSelection={onAskAiFromSelection}
         onAssignVoice={onAssignVoice}
         onDragStart={handleDragStart}
         onDragEnter={handleDragEnter}
@@ -1561,6 +1567,7 @@ interface EditorRowProps {
   onProjectChanged?: () => void
   /** Add-from-selection: create a DRAFT concept from a selected source token. */
   onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
+  onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
   /** FRO-251: per-file source-column font size in px. Defaults to 14 when absent. */
@@ -1587,93 +1594,8 @@ interface EditorRowProps {
   targetFootnoteNumberOffset: number
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// SelectionTermActions — floating action bar shown when source text is selected.
-// Shows "Add to termbase" when the callback is wired, and a "View term" lookup
-// popover when the selection matches an existing active concept (FRO-260).
-// ────────────────────────────────────────────────────────────────────────────
-
-interface SelectionTermActionsProps {
-  sourceSelection: string
-  concepts: Concept[]
-  onAddToTermbase?: () => void
-  onTermApply: (rendering: string) => void
-  /** FRO-260: called on mousedown so the parent can suppress selectionchange clearing. */
-  onToolbarMouseDown?: () => void
-  /** FRO-260: called on mouseup/mouseleave so the parent resets the guard. */
-  onToolbarMouseUp?: () => void
-}
-
-function SelectionTermActions({
-  sourceSelection,
-  concepts,
-  onAddToTermbase,
-  onTermApply,
-  onToolbarMouseDown,
-  onToolbarMouseUp,
-}: SelectionTermActionsProps) {
-  const activeConcepts = useMemo(
-    () => concepts.filter((c) => c.status === "active"),
-    [concepts],
-  )
-  // Case-insensitive substring match — same heuristic as TermLookupPopover.
-  const hasMatch = useMemo(
-    () =>
-      activeConcepts.some((c) =>
-        c.sourceTerm.toLowerCase().includes(sourceSelection.toLowerCase()) ||
-        sourceSelection.toLowerCase().includes(c.sourceTerm.toLowerCase()),
-      ),
-    [activeConcepts, sourceSelection],
-  )
-
-  // FRO-260: shared mousedown handler for all toolbar buttons.
-  // e.preventDefault() preserves the browser text selection (prevents focus
-  // shift). onToolbarMouseDown() sets a flag that suppresses the FRO-248
-  // selectionchange guard so that onClick still sees a non-null selection.
-  const handleButtonMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault()
-    onToolbarMouseDown?.()
-  }
-
-  return (
-    <div
-      className="absolute right-1 top-0 z-10 flex items-center gap-1"
-      dir="ltr"
-      onMouseUp={onToolbarMouseUp}
-      onMouseLeave={onToolbarMouseUp}
-    >
-      {/* Lookup popover: only when selection matches an existing active concept */}
-      {hasMatch && (
-        <TermLookupPopover
-          sourceTerm={sourceSelection}
-          concepts={activeConcepts}
-          onApply={onTermApply}
-        >
-          <button
-            type="button"
-            onMouseDown={handleButtonMouseDown}
-            className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-background px-2 py-1 text-[11px] font-medium text-primary shadow-neu-sm hover:bg-primary/10"
-          >
-            <BookOpen className="h-3 w-3" aria-hidden />
-            View term
-          </button>
-        </TermLookupPopover>
-      )}
-      {/* Add to termbase: only when the callback is wired */}
-      {onAddToTermbase && (
-        <button
-          type="button"
-          onMouseDown={handleButtonMouseDown}
-          onClick={onAddToTermbase}
-          className="inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground shadow-neu-sm hover:bg-primary/90"
-        >
-          <BookOpen className="h-3 w-3" aria-hidden />
-          Add to term base
-        </button>
-      )}
-    </div>
-  )
-}
+// SelectionTermActions was replaced by SourceSelectionToolbar (./SourceSelectionToolbar),
+// which adds an "Ask AI" action and matches the editor hover-rail aesthetic.
 
 // ────────────────────────────────────────────────────────────────────────────
 // SourceWithTermLookup — renders source plain text with per-word
@@ -2099,7 +2021,7 @@ function EditorRow({
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, onAiSetupNeeded, onOpenRecording, micDenied,
-  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection,
+  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, onAskAiFromSelection,
   onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onAckRemoteChange,
   isStaleSource,
@@ -2426,7 +2348,7 @@ function EditorRow({
   // Add-from-selection (Slice 5): capture a source-side text selection so the
   // translator can promote it to a DRAFT concept without leaving the editor.
   const handleSourceMouseUp = useCallback(() => {
-    if (!onAddConceptFromSelection) return
+    if (!onAddConceptFromSelection && !onAskAiFromSelection) return
     const sel = window.getSelection()
     const text = sel && !sel.isCollapsed ? sel.toString().trim() : ""
     const captured = text.length > 0 ? text : null
@@ -2434,7 +2356,7 @@ function EditorRow({
     // the captured text even after the selectionchange race clears the state.
     capturedSelectionRef.current = captured
     setSourceSelection(captured)
-  }, [onAddConceptFromSelection])
+  }, [onAddConceptFromSelection, onAskAiFromSelection])
 
   // Opens the confirm dialog — actual creation happens in handleAddConceptConfirm.
   // FRO-260: read from capturedSelectionRef (not sourceSelection state) so the
@@ -2471,6 +2393,26 @@ function EditorRow({
   const handleToolbarMouseUp = useCallback(() => {
     toolbarMouseDownRef.current = false
   }, [])
+
+  // Promote the current source selection into the AI agent as a context chip.
+  // FRO-260: read capturedSelectionRef (not state) for the same mousedown-race reason.
+  const handleAskAiFromSelection = useCallback(() => {
+    const text = capturedSelectionRef.current
+    if (!text || !onAskAiFromSelection) return
+    onAskAiFromSelection(
+      buildSourceChip({
+        chipId: `chip-${cell.fileId}-${cell.id}-${Date.now().toString(36)}`,
+        fileId: cell.fileId,
+        cellId: cell.id,
+        canonicalRef: cell.context ?? cell.group ?? undefined,
+        selection: text,
+      }),
+    )
+    // Dismiss the toolbar, like the terminology path.
+    capturedSelectionRef.current = null
+    setSourceSelection(null)
+    window.getSelection()?.removeAllRanges()
+  }, [onAskAiFromSelection, cell.fileId, cell.id, cell.context, cell.group])
 
   // FRO-248: clear source selection when the browser selection collapses (user
   // clicked elsewhere or selected text in a different row). This prevents the
@@ -3186,16 +3128,17 @@ function EditorRow({
             )}
             dir={sourceTextDirection}
             style={{ fontSize: `${sourceFontSize}px`, lineHeight: "1.6" }}
-            onMouseUp={onAddConceptFromSelection ? handleSourceMouseUp : undefined}
+            onMouseUp={(onAddConceptFromSelection || onAskAiFromSelection) ? handleSourceMouseUp : undefined}
           >
-            {/* Slice 5: add-from-selection affordance. Appears when a source
-                token is selected; promotes the selection to a DRAFT concept.
-                When the selected text matches an existing active concept a
-                "View term" button also appears for quick lookup (FRO-260). */}
+            {/* Source-selection toolbar. Appears when source text is selected:
+                "Ask AI" pushes the selection into the agent as a context chip,
+                "Add to terms" promotes it to a DRAFT concept, and a "View term"
+                button appears when the selection matches an active concept. */}
             {sourceSelection && (
-              <SelectionTermActions
+              <SourceSelectionToolbar
                 sourceSelection={sourceSelection}
                 concepts={project.terminology ?? []}
+                onAskAi={handleAskAiFromSelection}
                 onAddToTermbase={onAddConceptFromSelection ? handleAddSelectionToTermbase : undefined}
                 onTermApply={handleTermApply}
                 onToolbarMouseDown={handleToolbarMouseDown}

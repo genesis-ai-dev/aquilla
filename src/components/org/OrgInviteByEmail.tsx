@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Mail, Copy } from "lucide-react"
+import { Copy } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { createOrgInvite } from "@/lib/frontier/orgs"
@@ -70,15 +70,7 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
   }
 
   return (
-    <div className="mb-5 rounded-lg border p-4">
-      <div className="mb-2 flex items-center gap-2">
-        <Mail className="h-4 w-4 text-muted-foreground" aria-hidden />
-        <h2 className="text-sm font-medium">Invite a teammate by email</h2>
-      </div>
-      <p className="mb-3 text-xs text-muted-foreground">
-        Bring someone new into <strong>this organization</strong>. They don't need
-        an Aquilla account yet — they'll be guided to create one when they accept.
-      </p>
+    <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <Input
           type="email"
@@ -104,13 +96,13 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
           {busy ? "Sending…" : "Send invite"}
         </Button>
       </div>
-      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
-      {status && <p className="mt-2 text-xs text-muted-foreground">{status}</p>}
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      {status && <p className="text-xs text-muted-foreground">{status}</p>}
       {link && (
-        <div className="mt-2 flex items-center gap-2">
+        <div className="flex items-center gap-2">
           <code className="truncate rounded bg-muted px-2 py-1 text-[11px]">{link}</code>
           <Button size="sm" variant="outline" onClick={copyLink}>
-            <Copy className="mr-1 h-3.5 w-3.5" />
+            <Copy className="mr-1 size-3.5" />
             {copied ? "Copied" : "Copy"}
           </Button>
         </div>

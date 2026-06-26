@@ -1,50 +1,40 @@
 # Walkthrough — create an organization & change its settings
 
-Documentation assets for the two flows, captured against the local dev stack
-(seeded `dev` user, org id 28 created live during capture).
+Real point-and-click documentation video of the two flows, recorded against the
+live app with the `e2e/recordings` Showcase harness (doc mode: programmatic
+cursor, click ripples, zoom-into-click, captions/chapters).
 
-## Deliverables
+## Files
 
 | File | What it is |
 | --- | --- |
-| `org-setup-walkthrough.gif` | Real-app screen capture (960×600, ~22s) stitched from the 9 frames below. Drop-in for docs/Slack/issues. |
-| `org-setup-walkthrough.mp4` | Same capture as H.264 video (1280×720) for embedding where GIFs are too heavy. |
-| `org-setup-explainer.html` | Self-contained animated explainer — a stylized recreation with step highlights, auto-play, and a clickable stepper. No server or live app needed; open it in any browser. |
-| `frames/` | The nine source PNGs, one per step (real UI). |
-| `frames.txt` | ffmpeg concat list with per-step dwell times (used to rebuild the gif/mp4). |
+| `org-setup-REAL-recording.mp4` | The recording — 1280×800 H.264, ~48s. Drop-in for docs/Slack/issues. |
+| `org-setup-REAL-recording.webm` | Same take, VP8/9. |
+| `org-setup-REAL-recording.storyboard.json` | Chapters + caption/VO script with timings (assembler contract). |
 
-## The flow (9 steps)
+## The flow (recorded)
 
 **Create an organization**
 1. Click the organization switcher (sidebar top).
-2. Choose **+ Create org** in the menu.
-3. Type the org name and click **Create**.
-4. New org becomes active, with the get-started checklist.
+2. Choose **+ Create org**, type the name, click **Create**.
+3. The new org becomes the active workspace (onboarding checklist).
 
-**Change its settings** (`/settings`, owner/maintainer only)
-5. Open **Settings**, click **Rename** in the Identity card.
-6. Edit the name, click **Save**.
-7. New name propagates to the sidebar + breadcrumb instantly.
-8. Open **Who can export** and pick a minimum export role.
-9. Export floor saved (Contributor 400); settings save on the spot.
+**Change its settings**
+4. Open **Settings**, click **Rename** in the Identity card.
+5. Edit the name, click **Save** — it propagates to the sidebar + breadcrumb at once.
 
-## Rebuilding the gif / mp4
+## How it was made / how to re-record
 
-From this directory:
+This is produced by the Showcase harness, not by hand. The spec and the
+how-to skills live on the recording branch (`rec/org-setup-doc`, PR #125):
+
+- Spec: `e2e/recordings/specs/org-create-settings-doc.showcase.ts`
+- Skill: `.claude/skills/record-docs-video/` (and `record-promo-video` for trailers)
+
+Re-record from that branch:
 
 ```sh
-# GIF (two-pass palette for quality)
-ffmpeg -y -f concat -safe 0 -i frames.txt \
-  -vf "scale=960:-1:flags=lanczos,palettegen=stats_mode=full" /tmp/palette.png
-ffmpeg -y -f concat -safe 0 -i frames.txt -i /tmp/palette.png \
-  -lavfi "scale=960:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3" \
-  org-setup-walkthrough.gif
-
-# MP4
-ffmpeg -y -f concat -safe 0 -i frames.txt \
-  -vf "scale=1280:-2:flags=lanczos,format=yuv420p" -movflags +faststart -r 30 \
-  org-setup-walkthrough.mp4
+WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgresql://aquilla:aquilla@127.0.0.1:5432/aquilla_dev \
+  npm run record -- -g "Create an organization"
+npm run record:assemble -- --slug demo-org-admin__create-org-and-settings
 ```
-
-To re-capture the frames, drive the dev stack as the `dev` user (see the
-`verify-dev-change` skill) and screenshot each step at 1280×800.

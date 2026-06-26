@@ -1201,6 +1201,39 @@ case 'cell.audio.attach': {
       return ['cells']
     }
 
+    case 'cell.retime': {
+      // Timeline editor: move/stretch. Updates start_ms/end_ms on BOTH sides
+      // (timing is a property of the segment, shared by source + target rows).
+      // cellId rides on the envelope. Non-chain-mutating (not in CHAIN_MUTATING_KINDS).
+      const p = event.payload as EventPayloads['cell.retime']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.retime event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cells
+                SET start_ms = ?, end_ms = ?
+              WHERE project_id = ? AND file_id = ? AND cell_id = ?`,
+          )
+          .bind(p.startMs, p.endMs, event.projectId, event.fileId, event.cellId),
+      )
+      return ['cells']
+    }
+
+    case 'file.video.set': {
+      // Timeline editor: replay-safe core video URL update. Mirrors the live
+      // dispatch path (handlers/file-video-set.ts) via the shared SQL builder,
+      // merging/removing coreMediaUrl in files.meta JSON and advancing the
+      // file's AD-2 chain head like file.rename.
+      const p = event.payload as EventPayloads['file.video.set']
+      if (!event.fileId) {
+        throw new Error(`file.video.set event ${event.id} is missing fileId`)
+      }
+      stmts.push(buildFileVideoSetStmt(db, event.projectId, event.fileId, event.id, p.coreMediaUrl))
+      return ['files']
+    }
+
     default: {
       // Defensive exhaustiveness check. If a new EventKind is added without
       // a case here this triggers a TS compile error.
@@ -1210,6 +1243,41 @@ case 'cell.audio.attach': {
       )
     }
   }
+}
+
+/**
+ * Shared meta-merge for the file's core video URL (timeline preview). Used by
+ * both the live handler (handlers/file-video-set.ts) and the rebuild projection
+ * case above, so the SQL stays identical. `meta` is TEXT holding JSON; we cast
+ * to jsonb to merge/remove the key, then back to text. Null clears the key.
+ * Advances the file's AD-2 chain head (`event_id`) like file.rename.
+ */
+export function buildFileVideoSetStmt(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  eventId: string,
+  coreMediaUrl: string | null,
+): AquillaStatement {
+  const NOW = "(extract(epoch from now()) * 1000)::bigint"
+  if (coreMediaUrl == null) {
+    return db
+      .prepare(
+        `UPDATE files
+            SET meta = (COALESCE(NULLIF(meta, ''), '{}')::jsonb - 'coreMediaUrl')::text,
+                event_id = ?, updated_at = ${NOW}
+          WHERE id = ? AND project_id = ?`,
+      )
+      .bind(eventId, fileId, projectId)
+  }
+  return db
+    .prepare(
+      `UPDATE files
+          SET meta = (COALESCE(NULLIF(meta, ''), '{}')::jsonb || jsonb_build_object('coreMediaUrl', ?::text))::text,
+              event_id = ?, updated_at = ${NOW}
+        WHERE id = ? AND project_id = ?`,
+    )
+    .bind(coreMediaUrl, eventId, fileId, projectId)
 }
 
 /**

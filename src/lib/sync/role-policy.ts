@@ -59,6 +59,10 @@ const REQUIRED_ROLE: Record<string, number> = {
   "assignment.create": ROLE.PROJECT_LEAD,
   "assignment.reassign": ROLE.PROJECT_LEAD,
   "assignment.unassign": ROLE.PROJECT_LEAD,
+
+  // Timeline editor (mirrors server).
+  "cell.retime": ROLE.CONTRIBUTOR,
+  "file.video.set": ROLE.CONTRIBUTOR,
 }
 
 /**

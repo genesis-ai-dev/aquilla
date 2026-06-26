@@ -103,6 +103,12 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // lead who is assigning voice actors to cells. Contributor-level so a project
   // lead can bulk-assign from the label import panel without needing owner role.
   'cast.assign': ROLE.CONTRIBUTOR,
+
+  // Timeline editor: retiming a cell (move/stretch) is a translator-level edit.
+  'cell.retime': ROLE.CONTRIBUTOR,
+  // Timeline editor: linking a core video to a file — contributor-level, like
+  // file.rename (normal editing flow, not a structural change to the inventory).
+  'file.video.set': ROLE.CONTRIBUTOR,
 }
 
 export function requiredRoleFor(kind: EventKind): number {

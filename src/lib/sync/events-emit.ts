@@ -400,6 +400,57 @@ export async function emitCellAudioSelect(input: CellAudioSelectInput): Promise<
   return eventId
 }
 
+export interface CellRetimeInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** New segment bounds in milliseconds. */
+  startMs: number
+  endMs: number
+  author: string
+  clientTs?: number
+}
+
+/** Emit a `cell.retime` — move/stretch a timeline cell. Non-chain-mutating;
+ *  the projection updates start_ms/end_ms on both the source and target rows. */
+export async function emitCellRetime(input: CellRetimeInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.retime",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { startMs: input.startMs, endMs: input.endMs },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface FileVideoSetInput {
+  projectId: string
+  fileId: string
+  /** Core video URL for the timeline preview; null clears it. */
+  coreMediaUrl: string | null
+  author: string
+  clientTs?: number
+}
+
+/** Emit a `file.video.set` — set/clear the file's core video URL (timeline
+ *  preview master clock). Stored in files.meta JSON. */
+export async function emitFileVideoSet(input: FileVideoSetInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "file.video.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    parentId: null,
+    author: input.author,
+    payload: { coreMediaUrl: input.coreMediaUrl },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface CellAudioRemoveInput {
   projectId: string
   fileId: string

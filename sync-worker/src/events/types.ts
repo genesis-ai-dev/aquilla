@@ -77,6 +77,12 @@ export type EventKind =
   // cells.event_id). Writes cast_name into cells.metadata JSONB without touching
   // target text. Contributor-level — a PM/project-lead labels cells for voice actors.
   | 'cast.assign'
+  // Timeline editor: retime a cell (move/stretch). Non-chain-mutating — updates
+  // start_ms/end_ms on both the source and target rows without moving cells.event_id.
+  | 'cell.retime'
+  // Timeline editor: set/clear a file's core video URL (timeline preview master
+  // clock), stored in files.meta JSON. Non-chain-mutating; file-level.
+  | 'file.video.set'
 
 // ── Comment scope ─────────────────────────────────────────────────────────
 
@@ -359,6 +365,19 @@ export interface EventPayloads {
      * Null clears the column; omitting this field (undefined) is a no-op.
      */
     cameraState?: 'on' | 'mixed' | 'off' | null
+  }
+
+  // ── Timeline editor (non-chain-mutating) ────────────────────────────────
+  // Retime a cell (move/stretch). cellId rides on the envelope; the projection
+  // updates start_ms/end_ms on both the source and target rows.
+  'cell.retime': {
+    startMs: number
+    endMs: number
+  }
+  // Set/clear a file's core video URL (timeline preview master clock), stored
+  // in files.meta JSON; null clears it. File-level.
+  'file.video.set': {
+    coreMediaUrl: string | null
   }
 }
 

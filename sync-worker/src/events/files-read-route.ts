@@ -49,6 +49,9 @@ interface FileSummary {
   /** Timeline-segment-model order lens, read from meta. Null ⇒ client treats
    *  it as 'sequence'. */
   orderedBy: string | null
+  /** Timeline editor: core video URL for the preview, read from meta. Null ⇒
+   *  no video linked. */
+  coreMediaUrl: string | null
   cellCount: number
   approvedCount: number
   /** Target cells with content (TRIM(value) != ''): the "translated" count. */
@@ -60,7 +63,12 @@ interface FileSummary {
 }
 
 function mapRow(row: FileRowRaw): FileSummary {
-  let meta: { source_language?: string; target_language?: string; orderedBy?: string } = {}
+  let meta: {
+    source_language?: string
+    target_language?: string
+    orderedBy?: string
+    coreMediaUrl?: string
+  } = {}
   try {
     meta = row.meta ? JSON.parse(row.meta) : {}
   } catch {
@@ -77,6 +85,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     sourceLanguage: meta.source_language ?? null,
     targetLanguage: meta.target_language ?? null,
     orderedBy: meta.orderedBy ?? null,
+    coreMediaUrl: meta.coreMediaUrl ?? null,
     cellCount: row.cell_count,
     approvedCount: row.approved_count,
     filledCount: row.filled_count,

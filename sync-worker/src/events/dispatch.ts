@@ -17,6 +17,7 @@ import type { RealtimeMessage } from './realtime'
 import { handleCellEvent, type CellEventKind } from './handlers/cell-events'
 import { handleFileCreate } from './handlers/file-create'
 import { handleFileRename } from './handlers/file-rename'
+import { handleFileVideoSet } from './handlers/file-video-set'
 import { handleFileDelete, handleFileRestore } from './handlers/file-delete-restore'
 import { handleCommentEvent, type CommentEventKind } from './handlers/comment-events'
 import { handleAssignmentEvent, type AssignmentEventKind } from './handlers/assignment-events'
@@ -129,6 +130,16 @@ export function dispatchEvent(
         ),
       }
 
+    case 'file.video.set':
+      return {
+        ok: true,
+        result: handleFileVideoSet(
+          db,
+          authed as AuthorizedEvent<'file.video.set'>,
+          serverTs,
+        ),
+      }
+
     case 'comment.create':
     case 'comment.edit':
     case 'comment.delete':
@@ -144,6 +155,7 @@ export function dispatchEvent(
 
     case 'cell.backtranslation.set':
     case 'cast.assign':
+    case 'cell.retime':
       return {
         ok: true,
         result: handleCellEvent(

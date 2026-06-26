@@ -439,6 +439,11 @@ export interface FileReference {
    * mutates cell data — it only chooses the sort key. Fully reversible.
    */
   orderedBy?: OrderedBy
+  /**
+   * Timeline editor: core video URL for the preview / master clock. Stored in
+   * files.meta JSON (set via the `file.video.set` event). Absent ⇒ no video.
+   */
+  coreMediaUrl?: string | null
 }
 
 /** Which key is authoritative for ordering a file's segments. */

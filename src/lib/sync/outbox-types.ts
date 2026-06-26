@@ -61,6 +61,11 @@ export type OutboxEventKind =
   // FRO-438: Cast/character label assignment (non-chain-mutating; contributor+).
   // Writes cast_name into cells.metadata JSONB without touching target text.
   | "cast.assign"
+  // Timeline editor: retime a cell (move/stretch). Non-chain-mutating — updates
+  // start_ms/end_ms on both sides without moving cells.event_id.
+  | "cell.retime"
+  // Timeline editor: set/clear a file's core video URL (stored in files.meta).
+  | "file.video.set"
 
 // ── Comment scope ─────────────────────────────────────────────────────────
 
@@ -293,6 +298,16 @@ export interface OutboxEventPayloads {
      * also updates cells.camera_state. Omitted when no angle was supplied.
      */
     cameraState?: "on" | "mixed" | "off" | null
+  }
+
+  // Timeline editor: retime a cell (move/stretch). cellId is on the envelope.
+  "cell.retime": {
+    startMs: number
+    endMs: number
+  }
+  // Timeline editor: set/clear a file's core video URL (timeline preview).
+  "file.video.set": {
+    coreMediaUrl: string | null
   }
 }
 

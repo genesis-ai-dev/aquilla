@@ -43,6 +43,8 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'assignment.unassign': { assignmentId: 'as-1' },
     'project.link-source': { sourceProjectId: 'upstream-proj-1' },
     'cast.assign': { castName: 'Narrator' },
+    'cell.retime': { startMs: 0, endMs: 1000 },
+    'file.video.set': { coreMediaUrl: 'https://cdn/v.mp4' },
   }
 
   const raw = {

@@ -6,6 +6,9 @@ import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { Page, PageHeader, Section } from "@/components/ui/page"
+import { ThemeToggle, useThemeMode } from "@/branding/ThemeMode"
+import { ColorThemePicker } from "@/branding/ColorTheme"
 import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
 import { PersonalProviderSection } from "@/components/settings/PersonalProviderSection"
@@ -59,47 +62,82 @@ function TranslatorProfileSection() {
   }
 
   return (
-    <section className="mt-8 space-y-3">
-      <div>
-        <h2 className="text-base font-semibold">Translator profile</h2>
-        <p className="text-xs text-muted-foreground">
-          Tell the AI about yourself so its summaries and answers fit your context — and so it
-          replies in your language. All fields are optional.
-        </p>
+    <Section
+      title="Translator profile"
+      description="Tell the AI about yourself so its summaries and answers fit your context — and so it replies in your language. All fields are optional."
+    >
+      <div className="grid gap-4 sm:grid-cols-2">
+        {PROFILE_TEXT_FIELDS.map(({ key, label, placeholder }) => (
+          <div key={key} className="space-y-1">
+            <Label htmlFor={`profile-${key}`} className="text-sm font-medium">
+              {label}
+            </Label>
+            <Input
+              id={`profile-${key}`}
+              value={form[key] ?? ""}
+              onChange={(e) => update(key, e.target.value)}
+              placeholder={placeholder}
+            />
+          </div>
+        ))}
       </div>
-      <div className="rounded-lg border bg-card p-4">
-        <div className="grid gap-4 sm:grid-cols-2">
-          {PROFILE_TEXT_FIELDS.map(({ key, label, placeholder }) => (
-            <div key={key} className="space-y-1">
-              <Label htmlFor={`profile-${key}`} className="text-sm font-medium">
-                {label}
-              </Label>
-              <Input
-                id={`profile-${key}`}
-                value={form[key] ?? ""}
-                onChange={(e) => update(key, e.target.value)}
-                placeholder={placeholder}
-              />
-            </div>
-          ))}
-        </div>
-        <div className="mt-4 space-y-1">
-          <Label htmlFor="profile-otherInfo" className="text-sm font-medium">
-            Other relevant information
-          </Label>
-          <Textarea
-            id="profile-otherInfo"
-            value={form.otherInfo ?? ""}
-            onChange={(e) => update("otherInfo", e.target.value)}
-            placeholder="Anything else that should shape the summaries you get"
-            rows={3}
-          />
-        </div>
-        <p className="mt-3 text-xs text-muted-foreground">
-          This profile is stored on this device and sent to the AI to tailor your summaries.
-        </p>
+      <div className="mt-4 space-y-1">
+        <Label htmlFor="profile-otherInfo" className="text-sm font-medium">
+          Other relevant information
+        </Label>
+        <Textarea
+          id="profile-otherInfo"
+          value={form.otherInfo ?? ""}
+          onChange={(e) => update("otherInfo", e.target.value)}
+          placeholder="Anything else that should shape the summaries you get"
+          rows={3}
+        />
       </div>
-    </section>
+      <p className="mt-3 text-xs text-muted-foreground">
+        This profile is stored on this device and sent to the AI to tailor your summaries.
+      </p>
+    </Section>
+  )
+}
+
+/**
+ * Appearance — theme (light/dark/system) + accent color. These controls already
+ * exist (in the overflow menu) but weren't reachable from Preferences; surfaced
+ * here near the top since they're high-value, using the existing components
+ * unchanged.
+ */
+function AppearanceSection() {
+  const { mode } = useThemeMode()
+  const modeLabel = mode === "system" ? "System" : mode === "dark" ? "Dark" : "Light"
+
+  return (
+    <Section
+      title="Appearance"
+      description="How the workspace looks on this device."
+    >
+      <div className="space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-foreground">Theme</p>
+            <p className="text-xs text-muted-foreground">
+              Cycle between light, dark, and following your system. Currently {modeLabel.toLowerCase()}.
+            </p>
+          </div>
+          <ThemeToggle className="shrink-0" />
+        </div>
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-foreground">Accent color</p>
+            <p className="text-xs text-muted-foreground">
+              The highlight color used across the workspace.
+            </p>
+          </div>
+          <div className="shrink-0 pt-0.5">
+            <ColorThemePicker />
+          </div>
+        </div>
+      </div>
+    </Section>
   )
 }
 
@@ -113,101 +151,91 @@ export function Preferences() {
       header={<OrgBreadcrumb section="Preferences" />}
       statusBar={null}
       main={
-        <div className="h-full overflow-y-auto">
-          <div className="p-6">
-            <h1 className="mb-1 text-xl font-semibold">Preferences</h1>
-            <p className="mb-6 text-sm text-muted-foreground">
-              Personal preferences that apply to you across all projects on this device.
-            </p>
+        <Page>
+          <PageHeader
+            title="Preferences"
+            description="Personal preferences that apply to you across all projects on this device."
+          />
 
-            <section className="space-y-3">
-              <div>
-                <h2 className="text-base font-semibold">Workspace</h2>
-                <p className="text-xs text-muted-foreground">
-                  Layout choices for the project sidebar.
-                </p>
-              </div>
-              <div className="rounded-lg border bg-card p-4">
-                <div className="space-y-3">
-                  <div className="space-y-1">
-                    <Label className="text-sm font-medium">Sidebar tab layout</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Show Files, Chat, and Search as a vertical rail on the left or a horizontal bar
-                      across the top of the sidebar.
-                    </p>
-                  </div>
-                  <div
-                    className="neu-inset inline-flex items-center gap-0.5 rounded-full p-1 text-xs"
-                    role="group"
-                    aria-label="Sidebar tab layout"
-                  >
-                    {RAIL_OPTIONS.map(({ id, label }) => {
-                      const active = railPosition === id
-                      return (
-                        <button
-                          key={id}
-                          type="button"
-                          onClick={() => setRailPosition(id)}
-                          aria-pressed={active}
-                          className={cn(
-                            "rounded-full px-3 py-1.5 transition-all",
-                            active
-                              ? "bg-card font-medium text-foreground shadow-neu-xs"
-                              : "text-muted-foreground hover:text-foreground",
-                          )}
-                        >
-                          {label}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section className="mt-8 space-y-3">
-              <div>
-                <h2 className="text-base font-semibold">Privacy</h2>
-                <p className="text-xs text-muted-foreground">
-                  Control what's shared with us about how you use the app.
-                </p>
-              </div>
-              <div className="rounded-lg border bg-card p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-1">
-                    <Label htmlFor="analytics-consent" className="text-sm font-medium">
-                      Share usage data
-                    </Label>
-                    <p className="text-xs text-muted-foreground">
-                      Events like project creation, exports, and AI translations. Never the contents of your
-                      translations or files.
-                    </p>
-                  </div>
-                  <Switch
-                    id="analytics-consent"
-                    checked={enabled}
-                    onCheckedChange={setEnabled}
-                  />
-                </div>
-                {!enabled && (
-                  <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
-                    With analytics disabled, we may not be able to help diagnose problems you encounter.
+          <div className="space-y-6">
+            <Section
+              title="Workspace"
+              description="Layout choices for the project sidebar."
+            >
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label className="text-sm font-medium">Sidebar tab layout</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Show Files, Chat, and Search as a vertical rail on the left or a horizontal bar
+                    across the top of the sidebar.
                   </p>
-                )}
+                </div>
+                <div
+                  className="neu-inset inline-flex items-center gap-0.5 rounded-full p-1 text-xs"
+                  role="group"
+                  aria-label="Sidebar tab layout"
+                >
+                  {RAIL_OPTIONS.map(({ id, label }) => {
+                    const active = railPosition === id
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setRailPosition(id)}
+                        aria-pressed={active}
+                        className={cn(
+                          "rounded-full px-3 py-1.5 transition-all",
+                          active
+                            ? "bg-card font-medium text-foreground shadow-neu-xs"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
-            </section>
+            </Section>
+
+            <AppearanceSection />
+
+            <Section
+              title="Privacy"
+              description="Control what's shared with us about how you use the app."
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <Label htmlFor="analytics-consent" className="text-sm font-medium">
+                    Share usage data
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Events like project creation, exports, and AI translations. Never the contents of your
+                    translations or files.
+                  </p>
+                </div>
+                <Switch
+                  id="analytics-consent"
+                  checked={enabled}
+                  onCheckedChange={setEnabled}
+                />
+              </div>
+              {!enabled && (
+                <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
+                  With analytics disabled, we may not be able to help diagnose problems you encounter.
+                </p>
+              )}
+            </Section>
 
             <TranslatorProfileSection />
 
             <UsageSection />
 
-            <div className="mt-8">
-              <PersonalProviderSection />
-            </div>
+            <PersonalProviderSection />
 
             <LocalModelsSection />
           </div>
-        </div>
+        </Page>
       }
     />
   )

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { getOrgUsage, type OrgUsage } from "@/lib/sync/usage"
+import { Section } from "@/components/ui/page"
 
 /**
  * Per-member usage rollup for the org Overview (manager oversight). Fetches
@@ -30,9 +31,8 @@ export function UsageRollup({ jwt, orgId }: { jwt: string; orgId: number }) {
   if (!hasUsage) return null
 
   return (
-    <div className="rounded-lg border p-4">
-      <h2 className="text-sm font-semibold">Team usage</h2>
-      <div className="mt-3 divide-y">
+    <Section title="Team usage" contentClassName="pt-0">
+      <div className="divide-y">
         {data.members.map((m) => {
           const mins = Math.floor(m.audioSeconds / 60)
           const secs = Math.round(m.audioSeconds % 60)
@@ -44,12 +44,12 @@ export function UsageRollup({ jwt, orgId }: { jwt: string; orgId: number }) {
                 : `${mins} min audio`
           const requests = m.ttsRequests + m.llmRequests
           return (
-            <div key={m.userId} className="flex items-center gap-4 py-2">
+            <div key={m.userId} className="flex items-center gap-4 py-2.5 first:pt-0">
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">{m.username ?? `User ${m.userId}`}</p>
               </div>
               <div className="shrink-0 text-right">
-                <p className="text-sm font-medium tabular-nums">{audioLabel}</p>
+                <p className="text-sm font-semibold tabular-nums">{audioLabel}</p>
                 <p className="text-xs text-muted-foreground tabular-nums">
                   {requests} AI request{requests !== 1 ? "s" : ""}
                 </p>
@@ -58,6 +58,6 @@ export function UsageRollup({ jwt, orgId }: { jwt: string; orgId: number }) {
           )
         })}
       </div>
-    </div>
+    </Section>
   )
 }

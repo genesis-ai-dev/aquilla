@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { getOrgCredits, type OrgCredits } from "@/lib/sync/credits"
 import { formatCredits, capUsagePct } from "@/lib/credits"
 import { ROLE } from "@/lib/frontier/roles"
+import { Section } from "@/components/ui/page"
 
 /**
  * Credit cap usage panel for the org Overview (maintainer+ view).
@@ -59,11 +60,12 @@ export function CreditsPanel({
   const agentWeekPct = capUsagePct(week.agentCredits, config.agentWeeklyCap)
 
   return (
-    <div className="rounded-lg border p-4" data-testid="credits-panel">
-      <h2 className="text-sm font-semibold">Compute credits</h2>
-      <p className="mt-0.5 text-xs text-muted-foreground">Daily and weekly cap usage</p>
-
-      <div className="mt-4 space-y-4">
+    <Section
+      title="Compute credits"
+      description="Daily and weekly cap usage"
+      data-testid="credits-panel"
+    >
+      <div className="space-y-4">
         {/* Daily total */}
         <CapBar
           label="Today"
@@ -83,7 +85,7 @@ export function CreditsPanel({
         />
 
         {/* Agent sub-cap — visually highlighted as the dangerous rail */}
-        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/40">
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/40">
           <p className="mb-2 text-xs font-medium text-amber-800 dark:text-amber-300">
             Agent spend (elevated rail)
           </p>
@@ -105,7 +107,7 @@ export function CreditsPanel({
           </div>
         </div>
       </div>
-    </div>
+    </Section>
   )
 }
 
@@ -135,7 +137,7 @@ function CapBar({
     <div>
       <div className="mb-1 flex items-baseline justify-between">
         <span className="text-xs text-muted-foreground">{label}</span>
-        <span className="text-xs tabular-nums font-medium">
+        <span className="text-xs tabular-nums font-semibold">
           {formatCredits(used)}
           <span className="font-normal text-muted-foreground"> / {formatCredits(cap)}</span>
           <span className="ml-1 text-muted-foreground">({pct}%)</span>

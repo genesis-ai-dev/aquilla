@@ -12,7 +12,7 @@ Produces real footage of the live app teaching a flow: a big cursor leads the ey
 1. Write `e2e/recordings/specs/<slug>.showcase.ts` (see template below).
 2. `WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgresql://aquilla:aquilla@127.0.0.1:5432/aquilla_dev npm run record -- -g "<test title>"`
 3. Confirm `e2e/recordings/output/<slug>.storyboard.json` has `verified: true` and a `video.webm` exists.
-4. `npm run record:assemble -- --slug <slug>` → MP4 + edit-list (add `--vo` for narration).
+4. `npm run record:assemble -- --slug <slug>` → MP4 + edit-list (add `--vo` for narration). The assembler runs a **fidelity check** (below) and logs `fidelity OK` or a `⚠ FIDELITY` warning — read it.
 
 ## Spec shape
 
@@ -46,6 +46,18 @@ test("Demo · <what the viewer learns>", async ({ page }) => {
 3. Authenticate by driving `/__marketing/login` + `waitForURL(/project/demo-john)` — it persists the session via the real store so OrgContext hydrates. Manual `injectSession` does not hydrate the org dashboard reliably.
 4. NEVER `waitForLoadState("networkidle")` on org/project pages — the sync worker holds a live connection so it never settles and burns the whole timeout. Use `locator.waitFor` / `expect().toBeVisible()`.
 5. `zoomReset()` before interacting with anything outside the magnified region — a lingering `#root` transform fails Playwright actionability ("visible, enabled and stable").
+6. **MP4 edge-crop:** the source `.webm` is the master. ffmpeg used to infer an SD colourspace (`bt470bg`) and no explicit pixel aspect, so some players OVERSCAN-CROP the MP4's edges while the `.webm` shows them in full. The assembler now tags BT.709 + `setsar=1` to render 1:1. If a player still crops the MP4, prefer the `.webm`.
+
+## Fidelity check (regression)
+
+The assembled MP4 must faithfully reproduce the source `.webm` — no clipped edges, no rescale. `scripts/assemble-showcase.ts` verifies this automatically after transcode (`verifyFidelity`): identical pixel dimensions + a frame SSIM ≥ 0.98 at mid-take. A `⚠ FIDELITY` warning means **ship the `.webm`** until the MP4 is corrected. To eyeball it manually (the `.webm` is authoritative):
+
+```sh
+W=$(ls -t e2e/recordings/output/*chromium*/video.webm | head -1); M=e2e/recordings/output/<slug>.mp4
+for f in "$W" "$M"; do ffmpeg -hide_banner -i "$f" 2>&1 | grep "Video:"; done   # dims/SAR/DAR must match
+ffmpeg -y -ss 5 -i "$W" -frames:v 1 -vf crop=260:70:1020:0 /tmp/w.png   # top-right corner (brand bug)
+ffmpeg -y -ss 5 -i "$M" -frames:v 1 -vf crop=260:70:1020:0 /tmp/m.png   # the AQUILLA bug margin must match
+```
 
 ## Rules
 - Real footage only; assert the money moment (`verified`). Don't ship a degraded take.

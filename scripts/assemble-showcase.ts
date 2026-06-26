@@ -20,6 +20,7 @@
 import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import path from "node:path"
+import os from "node:os"
 import { fileURLToPath } from "node:url"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -47,6 +48,49 @@ function has(flag: string): boolean {
 
 function hasFfmpeg(): boolean {
   return spawnSync("ffmpeg", ["-version"], { stdio: "ignore" }).status === 0
+}
+
+/** Parse `WIDTHxHEIGHT` from `ffmpeg -i` stderr (ffprobe-free). */
+function videoDims(file: string): string | null {
+  const out = spawnSync("ffmpeg", ["-hide_banner", "-i", file], { encoding: "utf8" }).stderr ?? ""
+  const m = out.match(/Video:.*?,\s*(\d{2,5}x\d{2,5})/)
+  return m ? m[1] : null
+}
+
+/**
+ * Regression guard — the assembled MP4 must faithfully reproduce the source
+ * .webm. We've been bitten by SD-colourspace overscan cropping the MP4's edges
+ * (the .webm shows them in full), so verify two things: identical pixel
+ * dimensions, and a high frame-SSIM at a representative timestamp. ffmpeg-only
+ * (no ffprobe). Returns ok=false with a reason a human should act on.
+ */
+function verifyFidelity(
+  webm: string,
+  mp4: string,
+  durationMs: number,
+): { ok: boolean; reason: string; dims: string; ssim: number } {
+  const wDims = videoDims(webm)
+  const mDims = videoDims(mp4)
+  const dims = mDims ?? "?"
+  if (!wDims || !mDims) return { ok: false, reason: "could not read dimensions", dims, ssim: 0 }
+  if (wDims !== mDims) return { ok: false, reason: `dimensions differ (webm ${wDims} vs mp4 ${mDims})`, dims, ssim: 0 }
+
+  // Sample a frame from each at the same timestamp (mid-take) and SSIM them.
+  const t = Math.max(1, Math.round(durationMs / 2000)).toString()
+  const a = path.join(os.tmpdir(), `fid-webm-${sbSlugSafe(mp4)}.png`)
+  const b = path.join(os.tmpdir(), `fid-mp4-${sbSlugSafe(mp4)}.png`)
+  spawnSync("ffmpeg", ["-y", "-ss", t, "-i", webm, "-frames:v", "1", a], { stdio: "ignore" })
+  spawnSync("ffmpeg", ["-y", "-ss", t, "-i", mp4, "-frames:v", "1", b], { stdio: "ignore" })
+  const ss = spawnSync("ffmpeg", ["-i", a, "-i", b, "-lavfi", "ssim", "-f", "null", "-"], { encoding: "utf8" }).stderr ?? ""
+  const m = ss.match(/All:\s*([0-9.]+)/)
+  const ssim = m ? Number(m[1]) : 0
+  // 0.98 catches gross corruption/rescale while tolerating codec noise.
+  if (ssim && ssim < 0.98) return { ok: false, reason: `frame SSIM ${ssim.toFixed(4)} < 0.98`, dims, ssim }
+  return { ok: true, reason: "", dims, ssim }
+}
+
+function sbSlugSafe(p: string): string {
+  return path.basename(p).replace(/[^a-z0-9]+/gi, "-")
 }
 
 /** Recursively collect files matching a predicate. */
@@ -173,9 +217,22 @@ async function main(): Promise<void> {
   const mp4 = path.join(OUT, `${sb.slug}.mp4`)
   // Normalise to a clean, faststart 30fps H.264 MP4 the assembler/social
   // platforms accept; captions are already burned into the frame by Showcase.
+  //
+  // Fidelity matters: the raw .webm is the source of truth. ffmpeg otherwise
+  // infers an SD colourspace (bt470bg) and writes no explicit pixel aspect, and
+  // some players then OVERSCAN-CROP the SD-flagged MP4 — clipping the edges the
+  // .webm shows in full. So tag BT.709 (HD) + square pixels (setsar=1) and keep
+  // yuv420p via the format filter, so the MP4 renders 1:1 like the .webm.
   const r = spawnSync(
     "ffmpeg",
-    ["-y", "-i", video, "-r", "30", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", mp4],
+    [
+      "-y", "-i", video,
+      "-r", "30",
+      "-vf", "setsar=1:1,format=yuv420p",
+      "-c:v", "libx264",
+      "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709",
+      "-movflags", "+faststart", "-an", mp4,
+    ],
     { stdio: "inherit" },
   )
   if (r.status !== 0) {
@@ -183,6 +240,19 @@ async function main(): Promise<void> {
     return
   }
   console.log(`[assemble] MP4 → ${path.relative(REPO_ROOT, mp4)}`)
+
+  // Regression check — the MP4 must faithfully match the source .webm (no
+  // dropped edges, no rescale). Compares pixel dimensions and a frame SSIM.
+  const fid = verifyFidelity(video, mp4, sb.durationMs)
+  if (!fid.ok) {
+    console.warn(
+      `[assemble] ⚠ FIDELITY: MP4 diverges from source .webm — ${fid.reason}. ` +
+        `The .webm is authoritative; prefer it for embeds until the MP4 is corrected.`,
+    )
+  } else {
+    console.log(`[assemble] fidelity OK — MP4 matches .webm (${fid.dims}, SSIM ${fid.ssim.toFixed(4)}).`)
+  }
+
   console.log("[assemble] done. Next: feed the edit-list + MP4 to the HyperFrames/Remotion composition for branded title cards + intro/outro, then route cuts through the human gate (see docs/distribution/DISTRIBUTION-CYCLE.md).")
 }
 

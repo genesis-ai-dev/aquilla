@@ -1,91 +1,144 @@
 /**
- * ChatComposer.tsx — shared composer for the AI agent dock.
+ * ChatComposer.tsx — chip-aware composer for the AI agent dock.
  *
- * Built on the shadcn InputGroup pattern (InputGroup + InputGroupTextarea +
- * InputGroupAddon): the textarea and the send/stop control share one bordered
- * group, with the keyboard hint and action button in a block-end addon.
+ * A minimal single-paragraph TipTap editor: plain prose interleaved with
+ * atomic `contextChip` nodes (a highlighted source selection the user attached
+ * via "Ask AI"). On send it serializes the doc to `{ text, chips }` — text with
+ * `⟦chip:<id>⟧` placeholders — which AgentDockView turns into the wire message.
  *
- *  - Enter sends; Shift+Enter inserts a newline; ⌘/Ctrl+Enter still sends.
- *  - Auto-growing textarea (1 → ~8 rows, then internal scroll).
+ *  - Enter sends; Shift+Enter inserts a newline.
  *  - While streaming, typing stays enabled and Send is replaced by Stop.
+ *  - `insertChip` (imperative handle) inserts a chip at the caret, de-duped.
+ *
+ * Send is driven off the ProseMirror `view` (not a captured `editor` closure)
+ * so the latest props are read via refs and there is no stale-closure hazard.
  */
 
-import { useEffect, useRef, useState, type KeyboardEvent, type FormEvent } from "react"
+import {
+  forwardRef, useEffect, useImperativeHandle, useRef, useState,
+} from "react"
+import { useEditor, EditorContent } from "@tiptap/react"
+import type { EditorView } from "@tiptap/pm/view"
+import StarterKit from "@tiptap/starter-kit"
 import { ArrowUp, Sparkles, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupText,
-  InputGroupTextarea,
+  InputGroup, InputGroupAddon, InputGroupButton, InputGroupText,
 } from "@/components/ui/input-group"
 import { cn } from "@/lib/utils"
+import { ContextChipNode } from "@/lib/richtext/context-chip-node"
+import { serializeDocJSON, type ContextChip } from "@/lib/agent/context-chip"
 
-/** A one-tap prompt offered above the textarea (e.g. "Summarize book"). */
 export interface SuggestedAction {
   label: string
   onClick: () => void
-  /** Disabled with this reason as a tooltip (e.g. no chapter focused yet). */
   disabled?: boolean
-  /** Native tooltip text. */
   title?: string
+}
+
+export interface ChatComposerHandle {
+  insertChip: (chip: ContextChip) => void
 }
 
 export interface ChatComposerProps {
   isStreaming: boolean
   isConfigured: boolean
-  onSend: (text: string) => void
+  onSend: (payload: { text: string; chips: ContextChip[] }) => void
   onStop: () => void
   compact?: boolean
-  /** One-tap prompts rendered as a chip row above the input. Hidden when empty. */
   suggestedActions?: SuggestedAction[]
 }
 
-export function ChatComposer({
-  isStreaming,
-  isConfigured,
-  onSend,
-  onStop,
-  compact,
-  suggestedActions,
-}: ChatComposerProps) {
-  const [draft, setDraft] = useState("")
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function ChatComposer(
+  { isStreaming, isConfigured, onSend, onStop, compact, suggestedActions },
+  ref,
+) {
+  const [isEmpty, setIsEmpty] = useState(true)
 
-  // ~8 rows before internal scroll kicks in.
-  const maxHeightPx = compact ? 128 : 160
+  // Latest props for the view-driven send path (avoids stale closures in the
+  // editor's keydown handler, which is bound once at editor creation).
+  const onSendRef = useRef(onSend)
+  onSendRef.current = onSend
+  const flagsRef = useRef({ isStreaming, isConfigured })
+  flagsRef.current = { isStreaming, isConfigured }
 
-  useEffect(() => {
-    const el = textareaRef.current
-    if (!el) return
-    el.style.height = "auto"
-    el.style.height = `${Math.min(el.scrollHeight, maxHeightPx)}px`
-  }, [draft, maxHeightPx])
-
-  // Focus on mount without scrolling ancestors (dock rail / sheet open).
-  useEffect(() => {
-    const t = setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 50)
-    return () => clearTimeout(t)
-  }, [])
-
-  function handleSend() {
-    if (!draft.trim() || isStreaming || !isConfigured) return
-    const text = draft
-    setDraft("")
-    onSend(text)
+  function sendFromView(view: EditorView) {
+    const { isStreaming, isConfigured } = flagsRef.current
+    if (isStreaming || !isConfigured) return
+    const { text, chips } = serializeDocJSON(view.state.doc.toJSON() as { type?: string; content?: unknown[] })
+    if (!text.trim() && chips.length === 0) return
+    onSendRef.current({ text, chips })
+    view.dispatch(view.state.tr.delete(0, view.state.doc.content.size))
+    setIsEmpty(true)
   }
 
-  function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    handleSend()
-  }
+  const editor = useEditor({
+    editable: isConfigured,
+    extensions: [
+      StarterKit.configure({
+        heading: false, bulletList: false, orderedList: false, listItem: false,
+        blockquote: false, codeBlock: false, horizontalRule: false,
+      }),
+      ContextChipNode,
+    ],
+    editorProps: {
+      attributes: {
+        role: "textbox",
+        "aria-label": "Ask the agent",
+        class: cn(
+          "max-h-32 min-h-9 overflow-y-auto px-3 py-2 focus:outline-none",
+          compact ? "text-xs" : "text-sm",
+        ),
+      },
+      handleKeyDown(view, event) {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault()
+          sendFromView(view)
+          return true
+        }
+        return false
+      },
+    },
+    onUpdate({ editor }) {
+      setIsEmpty(editor.isEmpty)
+    },
+  })
 
-  function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key !== "Enter") return
-    if (e.shiftKey) return // Shift+Enter → newline
-    e.preventDefault() // plain Enter and ⌘/Ctrl+Enter both send
-    handleSend()
+  // Keep editability in sync with configuration changes.
+  useEffect(() => {
+    editor?.setEditable(isConfigured)
+  }, [editor, isConfigured])
+
+  // Focus on mount once configured.
+  useEffect(() => {
+    if (editor && isConfigured) editor.commands.focus()
+  }, [editor, isConfigured])
+
+  useImperativeHandle(ref, () => ({
+    insertChip(chip: ContextChip) {
+      if (!editor) return
+      // De-dupe on (fileId, cellId, selection): re-tapping the same selection is a no-op.
+      let exists = false
+      editor.state.doc.descendants((node) => {
+        if (
+          node.type.name === "contextChip" &&
+          node.attrs.fileId === chip.fileId &&
+          node.attrs.cellId === chip.cellId &&
+          node.attrs.selection === chip.selection
+        ) exists = true
+      })
+      if (exists) { editor.commands.focus(); return }
+      editor
+        .chain()
+        .focus()
+        .insertContent([{ type: "contextChip", attrs: chip }, { type: "text", text: " " }])
+        .run()
+      setIsEmpty(editor.isEmpty)
+    },
+  }), [editor])
+
+  function handleSendClick() {
+    if (editor) sendFromView(editor.view)
   }
 
   return (
@@ -110,51 +163,43 @@ export function ChatComposer({
             ))}
           </div>
         )}
-        <form onSubmit={handleSubmit}>
-          <InputGroup>
-            <InputGroupTextarea
-              ref={textareaRef}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask the agent…"
-              rows={1}
-              disabled={!isConfigured}
-              className={cn("min-h-9", compact ? "text-xs" : "text-sm")}
-            />
-            <InputGroupAddon align="block-end">
-              <InputGroupText className={cn(compact ? "text-[9px]" : "text-[10px]")}>
-                Enter to send · Shift+Enter for newline
-              </InputGroupText>
-              {isStreaming ? (
-                <InputGroupButton
-                  type="button"
-                  variant="outline"
-                  size="icon-sm"
-                  onClick={onStop}
-                  className="ml-auto"
-                  aria-label="Stop"
-                  title="Stop"
-                >
-                  <Square />
-                </InputGroupButton>
-              ) : (
-                <InputGroupButton
-                  type="submit"
-                  variant="default"
-                  size="icon-sm"
-                  disabled={!draft.trim() || !isConfigured}
-                  className="ml-auto"
-                  aria-label="Send"
-                  title="Send"
-                >
-                  <ArrowUp />
-                </InputGroupButton>
-              )}
-            </InputGroupAddon>
-          </InputGroup>
-        </form>
+        <InputGroup>
+          <div className="relative flex-1">
+            <EditorContent editor={editor} />
+            {isEmpty && (
+              <span
+                className={cn(
+                  "pointer-events-none absolute left-3 top-2 text-muted-foreground",
+                  compact ? "text-xs" : "text-sm",
+                )}
+                aria-hidden
+              >
+                Ask the agent…
+              </span>
+            )}
+          </div>
+          <InputGroupAddon align="block-end">
+            <InputGroupText className={cn(compact ? "text-[9px]" : "text-[10px]")}>
+              Enter to send · Shift+Enter for newline
+            </InputGroupText>
+            {isStreaming ? (
+              <InputGroupButton
+                type="button" variant="outline" size="icon-sm" onClick={onStop}
+                className="ml-auto" aria-label="Stop" title="Stop"
+              >
+                <Square />
+              </InputGroupButton>
+            ) : (
+              <InputGroupButton
+                type="button" variant="default" size="icon-sm" onClick={handleSendClick}
+                disabled={isEmpty || !isConfigured} className="ml-auto" aria-label="Send" title="Send"
+              >
+                <ArrowUp />
+              </InputGroupButton>
+            )}
+          </InputGroupAddon>
+        </InputGroup>
       </div>
     </div>
   )
-}
+})

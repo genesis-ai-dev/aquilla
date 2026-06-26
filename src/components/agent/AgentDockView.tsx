@@ -10,9 +10,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Bot } from "lucide-react"
-import { ChatComposer, type SuggestedAction } from "@/components/chat/ChatComposer"
+import { ChatComposer, type ChatComposerHandle, type SuggestedAction } from "@/components/chat/ChatComposer"
 import { ChatContextPin } from "@/components/chat/ChatContextPin"
 import type { CellContext } from "@/lib/cell-context"
+import { serializeWithChips, type ContextChip } from "@/lib/agent/context-chip"
 import { getTranslatorProfile, profileForPrompt } from "@/lib/translator-profile"
 import type { CellData } from "@/hooks/useCells"
 import type { TranslationRule } from "@/lib/parsers/types"
@@ -61,6 +62,11 @@ export interface AgentDockViewProps {
   pendingPrompt?: string | null
   /** Called once the pending prompt has been dispatched, so the parent clears it. */
   onPendingPromptConsumed?: () => void
+  /** A chip to insert into the composer as soon as the view is ready (set when
+   *  the user taps "Ask AI" on a source selection). */
+  pendingChip?: ContextChip | null
+  /** Called once the pending chip has been inserted, so the parent clears it. */
+  onPendingChipConsumed?: () => void
 }
 
 export function AgentDockView({
@@ -77,11 +83,14 @@ export function AgentDockView({
   suggestedActions,
   pendingPrompt,
   onPendingPromptConsumed,
+  pendingChip,
+  onPendingChipConsumed,
 }: AgentDockViewProps) {
   const [runs, setRuns] = useState<AgentRunUi[]>([])
   const [includeContext, setIncludeContext] = useState(true)
   const [isStreaming, setIsStreaming] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
+  const composerRef = useRef<ChatComposerHandle>(null)
 
   // Abort any in-flight run on unmount (mode switch / dock close).
   useEffect(() => () => abortRef.current?.abort(), [])
@@ -91,24 +100,28 @@ export function AgentDockView({
   }, [])
 
   const sendPrompt = useCallback(
-    async (text: string) => {
-      const prompt = text.trim()
-      if (!prompt || !jwt || isStreaming) return
+    async (text: string, chips: ContextChip[] = []) => {
+      if ((!text.trim() && chips.length === 0) || !jwt || isStreaming) return
+      // `display` (with [ref] chips) shows in the bubble; `wire` (tokens +
+      // legend) is what the model receives.
+      const { wire, display } = serializeWithChips(text, chips)
 
-      const run = createRun(prompt)
+      const run = createRun(display, wire)
       setRuns((prev) => [...prev, run])
       setIsStreaming(true)
       abortRef.current?.abort()
       const controller = new AbortController()
       abortRef.current = controller
 
-      // Prior turns: each finished run is one user + one assistant turn.
+      // Prior turns: each finished run is one user + one assistant turn. Send
+      // the stored wire content so prior chip legends ride along (and evict
+      // naturally via the ≤10-turn slice).
       const messages: { role: "user" | "assistant"; content: string }[] = []
       for (const r of runs) {
-        messages.push({ role: "user", content: r.prompt })
+        messages.push({ role: "user", content: r.wireContent ?? r.prompt })
         if (r.assistantText) messages.push({ role: "assistant", content: r.assistantText })
       }
-      messages.push({ role: "user", content: prompt })
+      messages.push({ role: "user", content: wire })
       const truncated = messages.slice(-MAX_WIRE_TURNS)
 
       // Read the profile at send time (fresh, no extra re-render). The server
@@ -161,6 +174,13 @@ export function AgentDockView({
     void sendPrompt(pendingPrompt)
     onPendingPromptConsumed?.()
   }, [pendingPrompt, jwt, isStreaming, sendPrompt, onPendingPromptConsumed])
+
+  // Insert a chip handed in from the editor's "Ask AI" selection action.
+  useEffect(() => {
+    if (!pendingChip) return
+    composerRef.current?.insertChip(pendingChip)
+    onPendingChipConsumed?.()
+  }, [pendingChip, onPendingChipConsumed])
 
   const applyContext: ApplyContext = {
     projectId,
@@ -233,9 +253,10 @@ export function AgentDockView({
       )}
 
       <ChatComposer
+        ref={composerRef}
         isStreaming={isStreaming}
         isConfigured={Boolean(jwt)}
-        onSend={(text) => void sendPrompt(text)}
+        onSend={({ text, chips }) => void sendPrompt(text, chips)}
         onStop={stop}
         compact
         suggestedActions={suggestedActions}

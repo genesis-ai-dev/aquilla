@@ -51,11 +51,26 @@ in Nairobi and a phone in Jakarta. Moving to the web didn't just improve UX — 
 **changed who is allowed to participate in Bible translation.** That is the
 headline of the company.
 
-> The Reformation democratized scripture *reading* — "the priesthood of all
-> believers." Aquilla democratizes scripture *translation*: **translation by all
-> believers, with the experts keeping it trustworthy.** The slogan already
-> encodes the balance — *Scale* (the movement) *without losing trust* (the
-> ballast). Don't over-rotate on the second clause.
+> **The worldview spine (fixed, governs everything):** *The next era of Bible
+> translation will be done mostly by the church in its own language — and the
+> only responsible way to let that happen is to make expert oversight scale with
+> it, not disappear behind it.*
+
+**Lead with oversight, not "democratize."** The Reformation / priesthood-of-all-
+believers framing is true and powerful — but "translation by all believers" is
+semantically adjacent to the MAST speed thesis, and a consultant hears the
+headline, not the caveat. So that analogy is **long-form-only**, used only where
+the "experts keep it trustworthy" clause is inseparable from the claim. Never
+lead a Short, thumbnail, or slogan with "democratize." The slogan still encodes
+the balance — *Scale* (the movement) *without losing trust* (the ballast) — but
+the public lead is **oversight that scales with the movement**, not disruption of
+it.
+
+> **This plan is governed by [MARKETING-OPERATING-SYSTEM.md](./MARKETING-OPERATING-SYSTEM.md)** —
+> the fusion of the Hormozi (volume/value) and Anthropic-credibility (worldview/
+> honesty) playbooks into one doctrine: one worldview, two cadences, one
+> automated machine, and the mutual-immunization rule that keeps generosity and
+> honesty defending each other. Read it first; §1–§11 below are its execution.
 
 ### 1a. The two engines
 

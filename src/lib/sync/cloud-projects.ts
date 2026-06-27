@@ -16,6 +16,8 @@ export interface CloudFileSummary {
   cellCount: number
   /** Timeline-segment-model order lens ('time' | 'sequence'); absent ⇒ sequence. */
   orderedBy?: string
+  /** Timeline editor: core video URL for the preview; absent/null ⇒ no video. */
+  coreMediaUrl?: string | null
 }
 
 export interface CloudProjectSummary {
@@ -210,6 +212,7 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
       createdAt: now,
       cellCount: f.cellCount,
       ...(f.orderedBy === "time" || f.orderedBy === "sequence" ? { orderedBy: f.orderedBy } : {}),
+      ...(f.coreMediaUrl ? { coreMediaUrl: f.coreMediaUrl } : {}),
     })),
     members: [],
     syncRole: {

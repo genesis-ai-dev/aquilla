@@ -73,7 +73,8 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitFileVideoSet } from "@/lib/sync/events-emit"
+import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
 import { canPerform } from "@/lib/sync/role-policy"
 import { useFocusLock } from "@/hooks/useFocusLock"
@@ -951,6 +952,72 @@ export function ProjectWorkspace() {
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     revalidateCells()
   }, [project?.id, activeFileId, currentUsername, getTokenForFile, getTokenForProjectFile, revalidateCells])
+
+  // Timeline editor: move/stretch a clip → cell.retime (timing on both sides).
+  const handleRetime = useCallback(
+    async (cellId: string, startSec: number, endSec: number) => {
+      if (!project?.id || !activeFileId) return
+      await emitCellRetime({
+        projectId: project.id,
+        fileId: activeFileId,
+        cellId,
+        startMs: Math.round(startSec * 1000),
+        endMs: Math.round(endSec * 1000),
+        author: currentUsername,
+      })
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      revalidateCells()
+    },
+    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, revalidateCells],
+  )
+
+  // Timeline editor detail pane: commit a target edit (same path as the table).
+  const handleTimelineCommitTarget = useCallback(
+    async (cellId: string, value: string) => {
+      if (!project?.id) return
+      const cell = cells.find((c) => c.id === cellId)
+      if (!cell) return
+      applyOptimisticTargetEdit(cellId, { value })
+      await emitTargetCellCommit({
+        projectId: project.id,
+        fileId: cell.fileId,
+        cellId,
+        parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
+        sourceEventId: cell.sourceEventId ?? null,
+        value,
+        author: currentUsername,
+      })
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      await refreshOutboxPending()
+      revalidateCell(cellId)
+    },
+    [
+      project?.id,
+      cells,
+      applyOptimisticTargetEdit,
+      currentUsername,
+      getTokenForProjectFile,
+      refreshOutboxPending,
+      revalidateCell,
+    ],
+  )
+
+  // Timeline editor: set/clear the file's core video URL (preview master clock).
+  // coreMediaUrl lives on the file row, so refresh the project (not just cells).
+  const handleLinkVideo = useCallback(
+    async (url: string | null) => {
+      if (!project?.id || !activeFileId) return
+      await emitFileVideoSet({
+        projectId: project.id,
+        fileId: activeFileId,
+        coreMediaUrl: url,
+        author: currentUsername,
+      })
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      refresh()
+    },
+    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, refresh],
+  )
 
   const [videoDialogOpen, setVideoDialogOpen] = useState(false)
   const [currentVideoTime, setCurrentVideoTime] = useState(0)
@@ -3608,6 +3675,17 @@ export function ProjectWorkspace() {
               </div>
             )}
             <div className="min-h-0 flex-1">
+              {lens === "audio" && activeFile && fileOrderedBy(activeFile) === "time" ? (
+                <TimelineEditor
+                  cells={cells}
+                  coreMediaUrl={activeFile.coreMediaUrl ?? null}
+                  editable={!isReadOnly}
+                  fileId={activeFile.id}
+                  onRetime={handleRetime}
+                  onCommitTarget={handleTimelineCommitTarget}
+                  onLinkVideo={handleLinkVideo}
+                />
+              ) : (
               <EditorTable
             ref={editorRef} project={project} cells={cellsWithBacktranslation}
             showFootnotesInline={footnoteViewMode === "inline"}
@@ -3682,6 +3760,7 @@ export function ProjectWorkspace() {
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
           />
+              )}
             </div>
             {footnoteViewMode === "tray" && (
               <FootnotesTray

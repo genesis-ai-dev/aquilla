@@ -6,6 +6,8 @@
   "srcDir": "src/components/ui",
   "tsconfig": "./tsconfig.json",
   "cssEntry": ".design-sync/.cache/compiled.css",
+  "guidelinesGlob": ["docs/UI-GLOSSARY.md"],
+  "readmeHeader": ".design-sync/conventions.md",
   "buildCmd": "pnpm exec vite build && cp \"$(ls -t dist/assets/BrandProvider-*.css | head -1)\" .design-sync/.cache/compiled.css",
   "extraFonts": "node_modules/.pnpm/@fontsource-variable+geist@5.2.8/node_modules/@fontsource-variable/geist/index.css",
   "libOverrides": {
@@ -18,6 +20,27 @@
     "Field": "orientation?: \"vertical\" | \"horizontal\" | \"responsive\"; className?: string; children?: React.ReactNode",
     "FieldLabel": "htmlFor?: string; className?: string; children?: React.ReactNode",
     "FieldError": "errors?: Array<{ message?: string } | undefined>; className?: string; children?: React.ReactNode",
-    "Card": "className?: string; children?: React.ReactNode"
+    "Card": "className?: string; children?: React.ReactNode",
+    "Badge": "variant?: \"default\" | \"secondary\" | \"destructive\" | \"outline\"; title?: string; className?: string; children?: React.ReactNode",
+    "Checkbox": "checked?: boolean; defaultChecked?: boolean; disabled?: boolean; required?: boolean; name?: string; id?: string; onCheckedChange?: (checked: boolean) => void; className?: string",
+    "Switch": "checked?: boolean; defaultChecked?: boolean; disabled?: boolean; name?: string; id?: string; onCheckedChange?: (checked: boolean) => void; className?: string",
+    "RadioGroup": "value?: string; defaultValue?: string; disabled?: boolean; name?: string; onValueChange?: (value: string) => void; className?: string; children?: React.ReactNode",
+    "Separator": "orientation?: \"horizontal\" | \"vertical\"; decorative?: boolean; className?: string",
+    "Tabs": "value: string; onValueChange: (next: string) => void; className?: string; children?: React.ReactNode",
+    "Collapsible": "open: boolean; onOpenChange: (open: boolean) => void; className?: string; children?: React.ReactNode",
+    "Dialog": "open?: boolean; defaultOpen?: boolean; onOpenChange?: (open: boolean) => void; modal?: boolean; children?: React.ReactNode",
+    "Select": "value?: string; defaultValue?: string; onValueChange?: (value: string) => void; disabled?: boolean; name?: string; children?: React.ReactNode",
+    "Popover": "open?: boolean; defaultOpen?: boolean; onOpenChange?: (open: boolean) => void; children?: React.ReactNode",
+    "Sheet": "open?: boolean; defaultOpen?: boolean; onOpenChange?: (open: boolean) => void; children?: React.ReactNode",
+    "Tooltip": "open?: boolean; defaultOpen?: boolean; delay?: number; children?: React.ReactNode",
+    "AppTooltip": "content?: React.ReactNode; side?: \"top\" | \"right\" | \"bottom\" | \"left\"; children?: React.ReactNode",
+    "DropdownMenu": "open?: boolean; defaultOpen?: boolean; onOpenChange?: (open: boolean) => void; modal?: boolean; children?: React.ReactNode"
+  },
+  "overrides": {
+    "Dialog": { "cardMode": "single", "viewport": "560x420" },
+    "Sheet": { "cardMode": "single", "viewport": "560x420" },
+    "Popover": { "cardMode": "single", "viewport": "440x320" },
+    "DropdownMenu": { "cardMode": "single", "viewport": "440x360" },
+    "Tooltip": { "cardMode": "single", "viewport": "440x220" }
   }
 }

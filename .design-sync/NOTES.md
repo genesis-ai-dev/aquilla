@@ -69,6 +69,43 @@ system is `src/components/ui/` — 23 shadcn-style files exporting 96 components
 - Previews use Aquilla-domain content (Bible translation: Gospel of Mark, Tok Pisin,
   verse refs). Realistic, not placeholder.
 
+## Authoring learnings (folded from the fan-out waves)
+
+### Overlays — rendering the OPEN state statically (drives the conventions header)
+- `cfg.overrides` cardMode:single + per-component viewport make Base UI portals
+  render INSIDE the card. **Never override `position`/`transform`** on overlay
+  content — the component's own `fixed` centering works; forcing `position:static`
+  collapses it.
+- Dialog/Sheet/DropdownMenu: pass `open`/`defaultOpen` AND `modal={false}` (modal
+  applies inert/scroll-lock that breaks headless capture).
+- Tooltip: AppTooltip is hover-only (won't render statically). Raw `Tooltip
+  defaultOpen` MUST be wrapped in `<TooltipProvider delay={0}>`.
+- `DropdownMenuLabel` (Base UI Menu.GroupLabel) MUST be inside `DropdownMenuGroup`
+  or the whole cell renders blank with a swallowed `MenuGroupRootContext is missing`
+  — that error only shows in `.cache/review/<Name>.json` `pageErrs`, not capture stdout.
+
+### Forms
+- base-ui `SelectValue` echoes the raw `value` string when it can't resolve a label
+  → use human-readable `value`s (e.g. `value="Tok Pisin"`, not `"tpi"`).
+- RadioGroupItem associates via `value` + a `<Label htmlFor>`/`id` pair.
+
+### Layout
+- **Tabs & Collapsible are CONTROLLED-ONLY** (required `value`+`onValueChange` /
+  `open`+`onOpenChange`; NO defaultValue/defaultOpen). dtsPropsFor now reflects this.
+  Static previews pass a fixed value/open + no-op handler. TabsContent returns null
+  for non-active value → one card per active tab.
+- `Page` scroll wrapper (`h-full overflow-y-auto`) collapses to 0 height without a
+  sized parent — compose PageHeader+StatTile+Section directly in a fixed-width div.
+- Base UI ScrollArea needs an explicit Root height for the thumb; vertical Separator
+  needs a sized flex parent.
+
+### Chat
+- MessageScroller renders statically with just MessageScrollerProvider + an
+  explicit-height wrapper — no extra provider needed.
+- The chat components were added Jun 26; their `data-[slot=…]` arbitrary Tailwind
+  selectors only exist in compiled.css AFTER a fresh `buildCmd`. This is the general
+  rule: any NEW ui/ component needs a fresh vite build before its CSS ships.
+
 ## Known render warns (triaged legitimate)
 
 - Unauthored components show the typographic floor card (RENDER_BLANK/RENDER_THIN on

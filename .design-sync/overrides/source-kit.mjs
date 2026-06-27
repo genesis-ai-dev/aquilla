@@ -157,8 +157,9 @@ export async function resolvePackage(ctx) {
     Actions: ['Button', 'Badge'],
     Forms: ['Input', 'Textarea', 'Checkbox', 'Switch', 'RadioGroup', 'Select', 'Label', 'Field'],
     Overlays: ['Dialog', 'Sheet', 'Popover', 'DropdownMenu', 'Tooltip', 'AppTooltip'],
-    Layout: ['Card', 'Tabs', 'Collapsible', 'Scroll', 'Separator'],
+    Layout: ['Card', 'Tabs', 'Collapsible', 'Scroll', 'Separator', 'Page', 'Section', 'StatTile', 'EmptyState'],
     Feedback: ['Spinner', 'Skeleton'],
+    Chat: ['Attachment', 'Bubble', 'Message', 'Marker'],
   };
   const groupRules = [];
   for (const [label, entries] of Object.entries(GROUPS))

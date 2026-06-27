@@ -18,7 +18,7 @@ PLAN = "docs/FEATURE-VIDEOS-PLAN.md"
 R2 = "https://docs.aquilla.app/media"
 # Slugs already satisfied by an existing recorded asset reuse that path.
 SPECIAL_PATH = {
-    "org-create-and-settings": f"{R2}/org-setup/org-setup-create-and-settings.mp4",
+    "org-create-and-settings": f"{R2}/org-setup/org-setup.mp4",
 }
 
 def slugpath(slug):

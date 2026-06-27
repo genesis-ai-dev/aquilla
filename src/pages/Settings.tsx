@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
+import { Check } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Page, PageHeader, Section, StatTile, EmptyState } from "@/components/ui/page"
 import {
   Select,
   SelectContent,
@@ -125,131 +127,145 @@ export function Settings() {
       header={<OrgBreadcrumb section="Settings" />}
       statusBar={null}
       main={
-        <div className="h-full overflow-y-auto">
-          <div className="p-6">
-            <h1 className="mb-1 text-xl font-semibold">Organization settings</h1>
-            <p className="mb-6 text-sm text-muted-foreground">
-              Manage this organization. Personal preferences moved to{" "}
-              <Link to="/preferences" className="underline underline-offset-4">Preferences</Link>.
-            </p>
+        <Page>
+          <PageHeader
+            title="Organization settings"
+            description={
+              <>
+                Manage this organization. Personal preferences moved to{" "}
+                <Link to="/preferences" className="font-medium text-foreground underline underline-offset-4">
+                  Preferences
+                </Link>
+                .
+              </>
+            }
+          />
 
-            {isLoading ? (
-              <p className="text-sm text-muted-foreground">Loading…</p>
-            ) : !activeOrg ? (
-              <div className="rounded-lg border bg-card p-6 text-center">
-                <p className="text-sm font-medium">Select an organization</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Organization settings are managed within a single organization.
-                </p>
+          {isLoading ? (
+            <div className="space-y-6">
+              <div className="h-28 animate-pulse rounded-2xl border bg-card" />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="h-24 animate-pulse rounded-2xl border bg-card" />
+                <div className="h-24 animate-pulse rounded-2xl border bg-card" />
               </div>
-            ) : (
-              <div className="space-y-6">
-                {/* Identity */}
-                <section className="rounded-lg border bg-card p-4">
-                  <h2 className="text-base font-semibold">Identity</h2>
-                  {editing ? (
-                    <div className="mt-3 space-y-2">
-                      <Label htmlFor="org-name" className="text-xs">Organization name</Label>
-                      <Input
-                        id="org-name"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        disabled={busy}
-                      />
-                      {error && <p className="text-xs text-destructive">{error}</p>}
-                      <div className="flex gap-2">
-                        <Button size="sm" onClick={handleSave} disabled={busy || !name.trim()}>Save</Button>
-                        <Button size="sm" variant="outline" onClick={() => setEditing(false)} disabled={busy}>Cancel</Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mt-3 flex items-center justify-between gap-4">
-                      <div>
-                        <p className="text-lg font-medium">{activeOrg.name ?? "Untitled organization"}</p>
-                        <p className="text-xs text-muted-foreground">Your role: {activeOrg.role.name}</p>
-                      </div>
-                      {canRename && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => { setName(activeOrg.name ?? ""); setEditing(true) }}
-                        >
-                          Rename
-                        </Button>
-                      )}
-                    </div>
-                  )}
-                </section>
-
-                {/* Facts */}
-                <section className="grid grid-cols-2 gap-4">
-                  <div className="rounded-lg border p-4 text-center">
-                    <p className="text-2xl font-bold">{members.length}</p>
-                    <p className="text-sm text-muted-foreground">Members</p>
-                  </div>
-                  <div className="rounded-lg border p-4 text-center">
-                    <p className="text-2xl font-bold">{projectCount ?? "—"}</p>
-                    <p className="text-sm text-muted-foreground">Projects</p>
-                  </div>
-                </section>
-
-                {/* FRO-253: Export permissions */}
-                <section className="rounded-lg border bg-card p-4">
-                  <h2 className="text-base font-semibold">Export permissions</h2>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Minimum role required to download project deliverables (USFM export, project zip).
-                    Default is <strong>Maintainer</strong>. Lower the floor to let translators export their
-                    own work; raise it to restrict deliverable access to leads only.
-                    Client-side formats (TSV, CSV, etc.) operate on already-fetched cells and cannot
-                    be fully enforced here; this gate applies to server-rendered deliverables only.
-                  </p>
-                  <div className="mt-3 space-y-2">
-                    <Label htmlFor="export-min-role" className="text-xs">Who can export</Label>
-                    <Select
-                      items={exportRoleOptions.map((opt) => ({ value: String(opt.level), label: opt.label }))}
-                      value={String(displayedExportMinRole)}
-                      onValueChange={(v) => { if (v) void handleExportRoleChange(Number(v)) }}
-                      disabled={!canEditExportFloor || exportRoleBusy}
+            </div>
+          ) : !activeOrg ? (
+            <EmptyState
+              title="Select an organization"
+              description="Organization settings are managed within a single organization. Choose one from the switcher to continue."
+            />
+          ) : (
+            <div className="space-y-6">
+              {/* Identity */}
+              <Section
+                title="Identity"
+                description="The organization's display name, shown across the workspace."
+                action={
+                  !editing && canRename ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => { setName(activeOrg.name ?? ""); setEditing(true) }}
                     >
-                      <SelectTrigger id="export-min-role" className="w-full max-w-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          {exportRoleOptions.map((opt) => (
-                            <SelectItem key={opt.level} value={String(opt.level)}>
-                              {opt.label}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                    {!canEditExportFloor && (
-                      <p className="text-xs text-muted-foreground">Only org owners can change the export permission policy.</p>
-                    )}
-                    {exportRoleError && (
-                      <p className="text-xs text-destructive">{exportRoleError}</p>
-                    )}
-                    {exportRoleSaved && (
-                      <p className="text-xs text-green-600 dark:text-green-400" role="status" data-testid="export-role-saved">
-                        Saved
-                      </p>
-                    )}
+                      Rename
+                    </Button>
+                  ) : null
+                }
+              >
+                {editing ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="org-name" className="text-sm font-medium">Organization name</Label>
+                    <Input
+                      id="org-name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      disabled={busy}
+                      autoFocus
+                    />
+                    {error && <p className="text-xs text-destructive">{error}</p>}
+                    <div className="flex gap-2 pt-1">
+                      <Button size="sm" onClick={handleSave} disabled={busy || !name.trim()}>
+                        {busy ? "Saving…" : "Save"}
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => setEditing(false)} disabled={busy}>Cancel</Button>
+                    </div>
                   </div>
-                </section>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <span className="text-lg font-medium text-foreground">{activeOrg.name ?? "Untitled organization"}</span>
+                    <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                      Your role: {activeOrg.role.name}
+                    </span>
+                  </div>
+                )}
+              </Section>
 
-                {/* FRO-433: Org-level provider API keys */}
-                <OrgProviderSection orgSettings={orgSettings} />
+              {/* Facts */}
+              <div className="grid grid-cols-2 gap-4">
+                <StatTile label="Members" value={members.length} />
+                <StatTile label="Projects" value={projectCount ?? "—"} />
+              </div>
 
+              {/* FRO-253: Export permissions */}
+              <Section
+                title="Export permissions"
+                description="Minimum role required to download project deliverables — USFM export and project zip. Defaults to Maintainer."
+              >
+                <div className="space-y-2">
+                  <Label htmlFor="export-min-role" className="text-sm font-medium">Who can export</Label>
+                  <Select
+                    items={exportRoleOptions.map((opt) => ({ value: String(opt.level), label: opt.label }))}
+                    value={String(displayedExportMinRole)}
+                    onValueChange={(v) => { if (v) void handleExportRoleChange(Number(v)) }}
+                    disabled={!canEditExportFloor || exportRoleBusy}
+                  >
+                    <SelectTrigger id="export-min-role" className="w-full max-w-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {exportRoleOptions.map((opt) => (
+                          <SelectItem key={opt.level} value={String(opt.level)}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Lower the floor to let translators export their own work; raise it to keep deliverables
+                    with leads. Client-side formats (CSV, TSV) operate on already-loaded cells and can't be
+                    enforced here.
+                  </p>
+                  {!canEditExportFloor && (
+                    <p className="text-xs text-muted-foreground">Only org owners can change the export permission policy.</p>
+                  )}
+                  {exportRoleError && (
+                    <p className="text-xs text-destructive">{exportRoleError}</p>
+                  )}
+                  {exportRoleSaved && (
+                    <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400" role="status" data-testid="export-role-saved">
+                      <Check className="size-3.5" /> Saved
+                    </p>
+                  )}
+                </div>
+              </Section>
+
+              {/* FRO-433: Org-level provider API keys */}
+              <OrgProviderSection orgSettings={orgSettings} />
+
+              {/* Related org surfaces */}
+              <div className="space-y-2">
+                <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Manage</p>
                 <div className="flex flex-wrap gap-2 text-sm">
-                  <Link to="/members" className="rounded-md border px-3 py-1.5 hover:bg-accent/40">Members</Link>
-                  <Link to="/teams" className="rounded-md border px-3 py-1.5 hover:bg-accent/40">Teams</Link>
-                  <Link to="/projects/archived" className="rounded-md border px-3 py-1.5 hover:bg-accent/40">Archived</Link>
+                  <Link to="/members" className="rounded-lg border px-3 py-1.5 transition-colors hover:bg-accent/40">Members</Link>
+                  <Link to="/teams" className="rounded-lg border px-3 py-1.5 transition-colors hover:bg-accent/40">Teams</Link>
+                  <Link to="/projects/archived" className="rounded-lg border px-3 py-1.5 transition-colors hover:bg-accent/40">Archived</Link>
                 </div>
               </div>
-            )}
-          </div>
-        </div>
+            </div>
+          )}
+        </Page>
       }
     />
   )

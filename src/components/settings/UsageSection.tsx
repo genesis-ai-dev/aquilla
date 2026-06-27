@@ -8,6 +8,7 @@
 
 import { useEffect, useState } from "react"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Section } from "@/components/ui/page"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getMyUsage, type MyUsage } from "@/lib/sync/usage"
 
@@ -99,38 +100,33 @@ export function UsageSection() {
     hasHistory
 
   return (
-    <section className="mt-8 space-y-3">
-      <div>
-        <h2 className="text-base font-semibold">Usage</h2>
-        <p className="text-xs text-muted-foreground">
-          Your audio and AI activity. No pricing is shown here.
-        </p>
-      </div>
-      <div className="rounded-lg border bg-card p-4">
-        {loading ? (
-          <p className="text-xs text-muted-foreground">Loading…</p>
-        ) : !hasAnyData ? (
-          <p className="text-xs text-muted-foreground">No usage recorded yet.</p>
-        ) : (
-          <>
-            <div className="flex flex-wrap gap-x-6 gap-y-2">
-              <div>
-                <p className="text-xs text-muted-foreground">Audio generated today</p>
-                <p className="text-sm font-medium tabular-nums">
-                  {fmtAudioSeconds(today?.audioSeconds ?? 0)}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">AI requests today</p>
-                <p className="text-sm font-medium tabular-nums">
-                  {(today?.ttsRequests ?? 0) + (today?.llmRequests ?? 0)}
-                </p>
-              </div>
+    <Section
+      title="Usage"
+      description="Your audio and AI activity. No pricing is shown here."
+    >
+      {loading ? (
+        <p className="text-xs text-muted-foreground">Loading…</p>
+      ) : !hasAnyData ? (
+        <p className="text-xs text-muted-foreground">No usage recorded yet.</p>
+      ) : (
+        <>
+          <div className="flex flex-wrap gap-x-6 gap-y-2">
+            <div>
+              <p className="text-xs text-muted-foreground">Audio generated today</p>
+              <p className="text-sm font-medium tabular-nums">
+                {fmtAudioSeconds(today?.audioSeconds ?? 0)}
+              </p>
             </div>
-            {hasHistory && <MiniBarChart history={data!.history} />}
-          </>
-        )}
-      </div>
-    </section>
+            <div>
+              <p className="text-xs text-muted-foreground">AI requests today</p>
+              <p className="text-sm font-medium tabular-nums">
+                {(today?.ttsRequests ?? 0) + (today?.llmRequests ?? 0)}
+              </p>
+            </div>
+          </div>
+          {hasHistory && <MiniBarChart history={data!.history} />}
+        </>
+      )}
+    </Section>
   )
 }

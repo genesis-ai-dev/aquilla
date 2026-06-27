@@ -27,7 +27,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
-import { X } from "lucide-react"
+import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
+import { FolderPlus, X } from "lucide-react"
 
 const STALE_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000
 
@@ -410,25 +411,28 @@ export function OrgHome() {
       }
       statusBar={null}
       main={
-        <div className="h-full overflow-y-auto p-6 space-y-6">
+        <Page size="wide">
+          <PageHeader title={workspaceLabel} />
           {isPageLoading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="h-[88px] animate-pulse rounded-2xl border bg-card" />
+                ))}
+              </div>
+              <div className="h-64 animate-pulse rounded-2xl border bg-card" />
+            </div>
           ) : error ? (
             <p className="text-sm text-destructive">{error}</p>
           ) : (
-            <>
-              {/* Org header */}
-              <div className="rounded-lg border p-4">
-                <h1 className="text-lg font-semibold">{workspaceLabel}</h1>
-              </div>
-
+            <div className="space-y-6">
               {/* FRO-326: received invites — the user has been invited but
                   hasn't accepted yet. Without this, an invite whose email/link
                   never arrived is undiscoverable in-app. */}
               {pendingInvites.length > 0 && (
                 <section data-testid="pending-invitations" className="space-y-2">
                   <h2 className="text-sm font-medium text-muted-foreground">Pending invitations</h2>
-                  <div className="rounded-lg border divide-y">
+                  <div className="rounded-2xl border divide-y">
                     {pendingInvites.map((inv) => (
                       <div key={inv.token} className="flex flex-wrap items-center gap-3 p-4">
                         <div className="flex-1 min-w-0">
@@ -462,35 +466,24 @@ export function OrgHome() {
 
               {isAllOrgs ? (
                 <>
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-6">
-                    <div className="rounded-lg border bg-card p-4 text-center">
-                      <p className="text-2xl font-bold">{orgs.length}</p>
-                      <p className="text-sm text-muted-foreground">Organizations</p>
-                    </div>
-                    <div className="rounded-lg border bg-card p-4 text-center">
-                      <p className="text-2xl font-bold">{projects.length}</p>
-                      <p className="text-sm text-muted-foreground">Projects</p>
-                    </div>
-                    <div className="rounded-lg border bg-card p-4 text-center">
-                      <p className="text-2xl font-bold">{Math.round(avgTranslatedPct * 100)}%</p>
-                      <p className="text-sm text-muted-foreground">Avg translated</p>
-                    </div>
-                    <div className="rounded-lg border bg-card p-4 text-center">
-                      <p className="text-2xl font-bold">{Math.round(avgValidatedPct * 100)}%</p>
-                      <p className="text-sm text-muted-foreground">Avg validated</p>
-                    </div>
-                    <div className="rounded-lg border bg-card p-4 text-center">
-                      <p className="text-2xl font-bold">{stalledCount}</p>
-                      <p className="text-sm text-muted-foreground">Stalled</p>
-                    </div>
-                    <div className="rounded-lg border bg-card p-4 text-center">
-                      <p className={`text-2xl font-bold ${overdueCount > 0 ? "text-destructive" : ""}`}>{overdueCount}</p>
-                      <p className="text-sm text-muted-foreground">Overdue</p>
-                    </div>
+                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+                    <StatTile label="Organizations" value={orgs.length} />
+                    <StatTile label="Projects" value={projects.length} />
+                    <StatTile label="Avg translated" value={`${Math.round(avgTranslatedPct * 100)}%`} />
+                    <StatTile label="Avg validated" value={`${Math.round(avgValidatedPct * 100)}%`} />
+                    <StatTile label="Stalled" value={stalledCount} />
+                    <StatTile
+                      label="Overdue"
+                      value={
+                        <span className={overdueCount > 0 ? "text-destructive" : undefined}>
+                          {overdueCount}
+                        </span>
+                      }
+                    />
                   </div>
 
                   <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-                    <section className="rounded-lg border bg-card">
+                    <section className="rounded-2xl border bg-card">
                       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
                         <div>
                           <h2 className="text-base font-semibold">Organizations</h2>
@@ -546,7 +539,7 @@ export function OrgHome() {
                       )}
                     </section>
 
-                    <section className="rounded-lg border bg-card">
+                    <section className="rounded-2xl border bg-card">
                       <div className="space-y-3 border-b px-4 py-3">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
@@ -715,31 +708,20 @@ export function OrgHome() {
               ) : (
                 <>
                   {/* Rollup strip */}
-                  <div className="grid grid-cols-6 gap-4">
-                    <div className="rounded-lg border p-4 text-center">
-                      <p className="text-2xl font-bold">{projects.length}</p>
-                      <p className="text-sm text-muted-foreground">Projects</p>
-                    </div>
-                    <div className="rounded-lg border p-4 text-center">
-                      <p className="text-2xl font-bold">{Math.round(avgTranslatedPct * 100)}%</p>
-                      <p className="text-sm text-muted-foreground">Avg translated</p>
-                    </div>
-                    <div className="rounded-lg border p-4 text-center">
-                      <p className="text-2xl font-bold">{Math.round(avgValidatedPct * 100)}%</p>
-                      <p className="text-sm text-muted-foreground">Avg validated</p>
-                    </div>
-                    <div className="rounded-lg border p-4 text-center">
-                      <p className="text-2xl font-bold">{Math.round(avgAudioPct * 100)}%</p>
-                      <p className="text-sm text-muted-foreground">Avg audio</p>
-                    </div>
-                    <div className="rounded-lg border p-4 text-center">
-                      <p className="text-2xl font-bold">{stalledCount}</p>
-                      <p className="text-sm text-muted-foreground">Stalled</p>
-                    </div>
-                    <div className="rounded-lg border p-4 text-center">
-                      <p className={`text-2xl font-bold ${overdueCount > 0 ? "text-destructive" : ""}`}>{overdueCount}</p>
-                      <p className="text-sm text-muted-foreground">Overdue</p>
-                    </div>
+                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+                    <StatTile label="Projects" value={projects.length} />
+                    <StatTile label="Avg translated" value={`${Math.round(avgTranslatedPct * 100)}%`} />
+                    <StatTile label="Avg validated" value={`${Math.round(avgValidatedPct * 100)}%`} />
+                    <StatTile label="Avg audio" value={`${Math.round(avgAudioPct * 100)}%`} />
+                    <StatTile label="Stalled" value={stalledCount} />
+                    <StatTile
+                      label="Overdue"
+                      value={
+                        <span className={overdueCount > 0 ? "text-destructive" : undefined}>
+                          {overdueCount}
+                        </span>
+                      }
+                    />
                   </div>
 
                   {/* Filter bar */}
@@ -820,25 +802,25 @@ export function OrgHome() {
 
                   {/* Project directory */}
                   {projects.length === 0 ? (
-                    <div className="rounded-lg border border-dashed p-6 text-center">
-                      <h3 className="text-base font-medium">Your organization is ready 🎉</h3>
-                      <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-                        Start a translation project, or bring your team in first —
-                        Aquilla is built for people working together.
-                      </p>
-                      <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                        {activeOrgId != null && (
-                          <ProjectCreateDialog orgId={activeOrgId} onCreated={handleCreated} />
-                        )}
-                        <Button variant="outline" onClick={() => navigate("/members")}>
-                          Invite your team
-                        </Button>
-                      </div>
-                    </div>
+                    <EmptyState
+                      icon={FolderPlus}
+                      title="Your organization is ready"
+                      description="Start a translation project, or bring your team in first — Aquilla is built for people working together."
+                      action={
+                        <div className="flex flex-wrap items-center justify-center gap-2">
+                          {activeOrgId != null && (
+                            <ProjectCreateDialog orgId={activeOrgId} onCreated={handleCreated} />
+                          )}
+                          <Button variant="outline" onClick={() => navigate("/members")}>
+                            Invite your team
+                          </Button>
+                        </div>
+                      }
+                    />
                   ) : visible.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No matching projects.</p>
                   ) : (
-                    <div className="rounded-lg border divide-y">
+                    <div className="rounded-2xl border divide-y">
                       {visible.map((p) => {
                         const access = accessByProjectId.get(p.id)
                         const tpct = Math.round(translatedPct(p) * 100)
@@ -906,7 +888,7 @@ export function OrgHome() {
                   {sharedProjects.length > 0 && (
                     <section data-testid="shared-with-you" className="space-y-2">
                       <h2 className="text-sm font-medium text-muted-foreground">Shared with you</h2>
-                      <div className="rounded-lg border divide-y">
+                      <div className="rounded-2xl border divide-y">
                         {sharedProjects.map((p) => (
                           <Link
                             key={p.id}
@@ -932,9 +914,9 @@ export function OrgHome() {
                   orgRoleLevel={activeOrg?.role.level ?? 0}
                 />
               )}
-            </>
+            </div>
           )}
-        </div>
+        </Page>
       }
     />
   )

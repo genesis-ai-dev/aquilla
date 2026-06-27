@@ -6,37 +6,45 @@
   "cta": "Aquilla — your team's projects at a glance.",
   "mode": "doc",
   "verified": true,
-  "durationMs": 18935,
+  "durationMs": 29080,
   "chapters": [
     {
-      "t": 427,
+      "t": 437,
       "title": "Your projects",
-      "subtitle": "Every project your team is working on."
+      "subtitle": "Every project your team can reach, in one list."
     },
     {
-      "t": 6612,
-      "title": "Open or create",
-      "subtitle": "One click into the workspace; one click to start fresh."
+      "t": 12073,
+      "title": "Start a new project",
+      "subtitle": "One click to begin a fresh translation."
     },
     {
-      "t": 12502,
-      "title": "Always current",
-      "subtitle": "Progress and status update as your team works."
+      "t": 19452,
+      "title": "Open the workspace",
+      "subtitle": "One click drops you into the editor."
     }
   ],
   "captions": [
     {
-      "t": 1337,
-      "text": "The Projects dashboard lists everything you can access — across the organization."
+      "t": 1346,
+      "text": "The Projects dashboard lists everything you can access across the organization."
     },
     {
-      "t": 7525,
-      "text": "Click a project to open its workspace — or start a new one in seconds."
+      "t": 6417,
+      "text": "Here's the John — Plainspeak Draft project, with your role on it."
     },
     {
-      "t": 13415,
-      "text": "Each card reflects live progress — so managers see where things stand at a glance."
+      "t": 14385,
+      "text": "Need a new one? '+ New Project' starts a fresh translation in seconds."
+    },
+    {
+      "t": 20362,
+      "text": "Click a project to open its workspace."
+    },
+    {
+      "t": 24579,
+      "text": "And we're in — the project's real content, live."
     }
   ],
-  "generatedAt": "2026-06-26T03:40:47.863Z"
+  "generatedAt": "2026-06-27T00:01:24.587Z"
 }

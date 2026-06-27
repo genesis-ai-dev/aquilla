@@ -6,37 +6,37 @@
   "cta": "Aquilla — oversight your managers can trust.",
   "mode": "doc",
   "verified": true,
-  "durationMs": 18481,
+  "durationMs": 20599,
   "chapters": [
     {
-      "t": 875,
-      "title": "Project Overview",
-      "subtitle": "The manager's view — one screen, the whole picture."
+      "t": 424,
+      "title": "Open the project",
+      "subtitle": "Riverstone Bible Society · John — Plainspeak Draft."
     },
     {
-      "t": 6691,
+      "t": 5023,
       "title": "Progress without the language",
-      "subtitle": "Translated and validated counts, plain numbers."
+      "subtitle": "Translated and validated, as plain numbers."
     },
     {
-      "t": 12583,
-      "title": "People & activity",
-      "subtitle": "Who's assigned, what's moving, where it's stuck."
+      "t": 13679,
+      "title": "Every file, at a glance",
+      "subtitle": "Per-file translated + validated bars."
     }
   ],
   "captions": [
     {
-      "t": 1781,
-      "text": "Open any project's overview to see progress, people, and health together."
+      "t": 1332,
+      "text": "Every project has an overview — the manager's one screen."
     },
     {
-      "t": 7611,
-      "text": "Owners and PMs read status here — no need to read the target language."
+      "t": 6727,
+      "text": "77% translated, 54% validated — owners read status here, no French required."
     },
     {
-      "t": 13495,
-      "text": "See the team's workload and recent activity — oversight you can trust."
+      "t": 14600,
+      "text": "Drill into each file — John 1 is nearly done, John 2 is just getting started."
     }
   ],
-  "generatedAt": "2026-06-26T03:43:45.004Z"
+  "generatedAt": "2026-06-27T00:00:24.782Z"
 }

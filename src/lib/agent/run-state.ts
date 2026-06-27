@@ -24,8 +24,11 @@ export type AgentRunStatus = "running" | "ok" | "capped" | "error"
 export interface AgentRunUi {
   /** Local list key — assigned by the dock, not the server. */
   localId: string
-  /** The user prompt that started this run. */
+  /** The user prompt that started this run (display text, with [ref] chips). */
   prompt: string
+  /** The exact content sent to the model for this turn (prompt + chip legend).
+   *  Defaults to `prompt` when no chips were attached. */
+  wireContent?: string
   /** Server run id (run_start frame); null until it arrives. */
   runId: string | null
   assistantText: string
@@ -41,10 +44,11 @@ export interface AgentRunUi {
 
 let runCounter = 0
 
-export function createRun(prompt: string): AgentRunUi {
+export function createRun(prompt: string, wireContent?: string): AgentRunUi {
   return {
     localId: `run-${Date.now().toString(36)}-${++runCounter}`,
     prompt,
+    wireContent: wireContent ?? prompt,
     runId: null,
     assistantText: "",
     steps: [],

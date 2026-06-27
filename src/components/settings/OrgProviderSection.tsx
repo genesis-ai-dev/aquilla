@@ -8,10 +8,11 @@
 //   project key > user (localStorage) key > org key (this section)
 
 import { useState } from "react"
-import { Eye, EyeOff } from "lucide-react"
+import { Check, Eye, EyeOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Section } from "@/components/ui/page"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 
 interface OrgProviderSectionProps {
@@ -62,33 +63,34 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
 
   if (!hasFetched) {
     return (
-      <section className="rounded-lg border bg-card p-4">
-        <h2 className="text-base font-semibold">Provider API keys</h2>
-        <p className="mt-1 text-xs text-muted-foreground">Loading…</p>
-      </section>
+      <Section title="Provider API keys">
+        <p className="text-xs text-muted-foreground">Loading…</p>
+      </Section>
     )
   }
 
   return (
-    <section className="rounded-lg border bg-card p-4">
-      <h2 className="text-base font-semibold">Provider API keys</h2>
-      <p className="mt-1 text-xs text-muted-foreground">
-        Org-level API keys act as a baseline for all members and projects in
-        this org. Individual projects or users can override with their own key.
-        Precedence: project key &gt; personal key &gt; org key.
-      </p>
-
+    <Section
+      title="Provider API keys"
+      description={
+        <>
+          Org-level keys act as a baseline for everyone in this org. Projects or
+          individuals can override with their own. Precedence: project key &gt;
+          personal key &gt; org key.
+        </>
+      }
+    >
       {!canEditOrgKeys && (
-        <p className="mt-2 text-xs text-muted-foreground">
+        <p className="mb-4 text-xs text-muted-foreground">
           Only org maintainers and owners can set org-level keys. You can still
           save a personal key in your project or personal settings.
         </p>
       )}
 
-      <div className="mt-4 space-y-4">
+      <div className="space-y-4">
         {/* Gemini TTS */}
         <div className="space-y-2">
-          <Label htmlFor="org-gemini-tts-key" className="text-xs">
+          <Label htmlFor="org-gemini-tts-key" className="text-sm font-medium">
             Gemini TTS API key
           </Label>
           <div className="flex gap-2">
@@ -143,12 +145,12 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
           )}
           {error && <p className="text-xs text-destructive">{error}</p>}
           {saved && (
-            <p className="text-xs text-green-600 dark:text-green-400" role="status" data-testid="org-key-saved">
-              Saved
+            <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400" role="status" data-testid="org-key-saved">
+              <Check className="size-3.5" /> Saved
             </p>
           )}
         </div>
       </div>
-    </section>
+    </Section>
   )
 }

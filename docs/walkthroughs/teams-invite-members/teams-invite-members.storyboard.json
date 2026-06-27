@@ -1,25 +1,30 @@
 {
-  "slug": "org-admin__teams",
+  "slug": "org-admin__teams-and-members",
   "persona": "org-admin",
-  "feature": "teams",
-  "title": "Teams — group your people, grant access once.",
+  "feature": "teams-and-members",
+  "title": "Teams & Members — group your people, grant access once.",
   "cta": "Aquilla — the right people, the right access.",
   "mode": "doc",
   "verified": true,
-  "durationMs": 18627,
+  "durationMs": 30020,
   "chapters": [
     {
-      "t": 412,
+      "t": 414,
       "title": "Teams",
-      "subtitle": "Organize members into the groups that match your work."
+      "subtitle": "Group people into the units that match your work."
     },
     {
-      "t": 6459,
+      "t": 7400,
       "title": "Grant access by team",
       "subtitle": "Add a team to a project, not one person at a time."
     },
     {
-      "t": 12712,
+      "t": 15632,
+      "title": "Members",
+      "subtitle": "Everyone in the org, with the role they hold."
+    },
+    {
+      "t": 23731,
       "title": "Managers stay in control",
       "subtitle": "Roles and membership, visible and auditable."
     }
@@ -27,16 +32,20 @@
   "captions": [
     {
       "t": 1321,
-      "text": "Open Teams to group people — translators, reviewers, a whole language project."
+      "text": "Three teams here — Translators, Review Board, and Leadership."
     },
     {
-      "t": 7377,
-      "text": "Give a team access to a project once — everyone in it inherits the right role."
+      "t": 8307,
+      "text": "Each team carries a role — give a team a project once and everyone inherits it."
     },
     {
-      "t": 13637,
+      "t": 16540,
+      "text": "And here's the roster — james.t, sofia.r, amara.k and the rest, each with a role."
+    },
+    {
+      "t": 24639,
       "text": "Owners and admins see exactly who's on each team and what they can do."
     }
   ],
-  "generatedAt": "2026-06-26T03:44:05.671Z"
+  "generatedAt": "2026-06-27T00:04:09.716Z"
 }

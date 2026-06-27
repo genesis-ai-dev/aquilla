@@ -6,37 +6,37 @@
   "cta": "Aquilla — your project, configured your way.",
   "mode": "doc",
   "verified": true,
-  "durationMs": 19667,
+  "durationMs": 27195,
   "chapters": [
     {
-      "t": 447,
+      "t": 437,
       "title": "Project Settings",
       "subtitle": "Everything about how this project behaves."
     },
     {
-      "t": 6051,
+      "t": 6403,
       "title": "AI & drafting",
       "subtitle": "Pick a model; tune the context the AI drafts from."
     },
     {
-      "t": 13035,
+      "t": 16315,
       "title": "Access policy",
       "subtitle": "Who can read, translate, validate, or manage."
     }
   ],
   "captions": [
     {
-      "t": 1359,
-      "text": "Open Settings from any project — AI, drafting, and access, all here."
+      "t": 1347,
+      "text": "Open Settings from any project — AI, drafting, and access, all in one place."
     },
     {
-      "t": 6964,
-      "text": "Choose your AI model and shape the drafting context — examples, preceding cells, instructions."
+      "t": 9911,
+      "text": "Shape the AI's instructions and the examples it drafts from — your house style, encoded."
     },
     {
-      "t": 13952,
-      "text": "Set the role floor for sensitive actions — managers stay in control of who does what."
+      "t": 19794,
+      "text": "Set the validator role floor and how many approvals a cell needs — managers stay in control."
     }
   ],
-  "generatedAt": "2026-06-26T03:40:26.567Z"
+  "generatedAt": "2026-06-27T00:00:53.121Z"
 }

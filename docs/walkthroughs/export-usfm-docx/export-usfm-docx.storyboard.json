@@ -2,41 +2,41 @@
   "slug": "translator__export-usfm-docx",
   "persona": "translator",
   "feature": "export-usfm-docx",
-  "title": "Export — USFM, DOCX, and more, in one click.",
+  "title": "Export — bilingual tables, plain text, and standards formats, in one click.",
   "cta": "Aquilla — your work, in the format you need.",
   "mode": "doc",
   "verified": true,
-  "durationMs": 17662,
+  "durationMs": 23002,
   "chapters": [
     {
-      "t": 893,
+      "t": 830,
       "title": "Open export",
       "subtitle": "Take your translation out of Aquilla."
     },
     {
-      "t": 5609,
+      "t": 6029,
       "title": "Pick a format",
-      "subtitle": "USFM & DOCX for delivery; bilingual TSV/CSV for review."
+      "subtitle": "Bilingual TSV/CSV for review; standards formats for delivery."
     },
     {
-      "t": 11874,
-      "title": "Round-trips intact",
-      "subtitle": "Structure and formatting come along."
+      "t": 15546,
+      "title": "File or whole project",
+      "subtitle": "Export one file or the entire project at once."
     }
   ],
   "captions": [
     {
-      "t": 2221,
+      "t": 1740,
       "text": "Click Export to open the format picker."
     },
     {
-      "t": 6525,
-      "text": "Export Paratext-ready USFM, a formatted DOCX, or a bilingual table for review."
+      "t": 7726,
+      "text": "Export a bilingual table for review, plain text or Markdown, or a standards format like XLIFF or TMX."
     },
     {
-      "t": 12830,
-      "text": "Your file's structure and formatting are preserved on the way out."
+      "t": 16454,
+      "text": "Choose Current file or Whole project — structure and formatting are preserved on the way out."
     }
   ],
-  "generatedAt": "2026-06-26T03:47:35.009Z"
+  "generatedAt": "2026-06-26T23:57:39.275Z"
 }

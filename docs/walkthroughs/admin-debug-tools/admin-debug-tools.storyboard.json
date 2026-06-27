@@ -6,37 +6,37 @@
   "cta": "Aquilla — transparent state, easy support.",
   "mode": "doc",
   "verified": true,
-  "durationMs": 19225,
+  "durationMs": 20818,
   "chapters": [
     {
-      "t": 453,
+      "t": 424,
       "title": "The debug shell",
       "subtitle": "A plain-text view of the project's live state."
     },
     {
-      "t": 6236,
+      "t": 7827,
       "title": "State you can read",
       "subtitle": "Project, files, and settings as raw JSON."
     },
     {
-      "t": 12611,
+      "t": 14205,
       "title": "Admin & shell",
       "subtitle": "The deeper tools live behind platform-admin access."
     }
   ],
   "captions": [
     {
-      "t": 1360,
+      "t": 1332,
       "text": "Append /debug to a project to inspect exactly what the app has loaded."
     },
     {
-      "t": 7146,
+      "t": 8735,
       "text": "Files, completion settings, and identity — handy for support and troubleshooting."
     },
     {
-      "t": 13520,
+      "t": 15118,
       "text": "Platform admins get more — impersonation and org tools — gated to the admin allowlist."
     }
   ],
-  "generatedAt": "2026-06-26T04:17:46.026Z"
+  "generatedAt": "2026-06-26T23:54:44.132Z"
 }

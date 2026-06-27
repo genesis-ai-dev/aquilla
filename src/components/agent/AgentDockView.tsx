@@ -10,15 +10,24 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Bot } from "lucide-react"
-import { ChatComposer, type SuggestedAction } from "@/components/chat/ChatComposer"
+import { ChatComposer, type ChatComposerHandle, type SuggestedAction } from "@/components/chat/ChatComposer"
 import { ChatContextPin } from "@/components/chat/ChatContextPin"
-import type { CellContext } from "@/hooks/useChat"
+import type { CellContext } from "@/lib/cell-context"
+import { serializeWithChips, type ContextChip } from "@/lib/agent/context-chip"
 import { getTranslatorProfile, profileForPrompt } from "@/lib/translator-profile"
 import type { CellData } from "@/hooks/useCells"
 import type { TranslationRule } from "@/lib/parsers/types"
 import { runAgent } from "@/lib/agent/agent-client"
 import type { ApplyContext } from "@/lib/agent/apply"
 import { createRun, failRun, reduceRunFrame, type AgentRunUi } from "@/lib/agent/run-state"
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller"
 import { AgentRunView } from "./AgentRunView"
 import { ProposalCard } from "./ProposalCard"
 import { AquiferProposalCard } from "./AquiferProposalCard"
@@ -53,6 +62,11 @@ export interface AgentDockViewProps {
   pendingPrompt?: string | null
   /** Called once the pending prompt has been dispatched, so the parent clears it. */
   onPendingPromptConsumed?: () => void
+  /** A chip to insert into the composer as soon as the view is ready (set when
+   *  the user taps "Ask AI" on a source selection). */
+  pendingChip?: ContextChip | null
+  /** Called once the pending chip has been inserted, so the parent clears it. */
+  onPendingChipConsumed?: () => void
 }
 
 export function AgentDockView({
@@ -69,45 +83,45 @@ export function AgentDockView({
   suggestedActions,
   pendingPrompt,
   onPendingPromptConsumed,
+  pendingChip,
+  onPendingChipConsumed,
 }: AgentDockViewProps) {
   const [runs, setRuns] = useState<AgentRunUi[]>([])
   const [includeContext, setIncludeContext] = useState(true)
   const [isStreaming, setIsStreaming] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
-  const scrollRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<ChatComposerHandle>(null)
 
   // Abort any in-flight run on unmount (mode switch / dock close).
   useEffect(() => () => abortRef.current?.abort(), [])
-
-  // Keep the newest frames in view while streaming.
-  useEffect(() => {
-    const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [runs])
 
   const updateRun = useCallback((localId: string, next: (run: AgentRunUi) => AgentRunUi) => {
     setRuns((prev) => prev.map((r) => (r.localId === localId ? next(r) : r)))
   }, [])
 
   const sendPrompt = useCallback(
-    async (text: string) => {
-      const prompt = text.trim()
-      if (!prompt || !jwt || isStreaming) return
+    async (text: string, chips: ContextChip[] = []) => {
+      if ((!text.trim() && chips.length === 0) || !jwt || isStreaming) return
+      // `display` (with [ref] chips) shows in the bubble; `wire` (tokens +
+      // legend) is what the model receives.
+      const { wire, display } = serializeWithChips(text, chips)
 
-      const run = createRun(prompt)
+      const run = createRun(display, wire)
       setRuns((prev) => [...prev, run])
       setIsStreaming(true)
       abortRef.current?.abort()
       const controller = new AbortController()
       abortRef.current = controller
 
-      // Prior turns: each finished run is one user + one assistant turn.
+      // Prior turns: each finished run is one user + one assistant turn. Send
+      // the stored wire content so prior chip legends ride along (and evict
+      // naturally via the ≤10-turn slice).
       const messages: { role: "user" | "assistant"; content: string }[] = []
       for (const r of runs) {
-        messages.push({ role: "user", content: r.prompt })
+        messages.push({ role: "user", content: r.wireContent ?? r.prompt })
         if (r.assistantText) messages.push({ role: "assistant", content: r.assistantText })
       }
-      messages.push({ role: "user", content: prompt })
+      messages.push({ role: "user", content: wire })
       const truncated = messages.slice(-MAX_WIRE_TURNS)
 
       // Read the profile at send time (fresh, no extra re-render). The server
@@ -161,6 +175,13 @@ export function AgentDockView({
     onPendingPromptConsumed?.()
   }, [pendingPrompt, jwt, isStreaming, sendPrompt, onPendingPromptConsumed])
 
+  // Insert a chip handed in from the editor's "Ask AI" selection action.
+  useEffect(() => {
+    if (!pendingChip) return
+    composerRef.current?.insertChip(pendingChip)
+    onPendingChipConsumed?.()
+  }, [pendingChip, onPendingChipConsumed])
+
   const applyContext: ApplyContext = {
     projectId,
     author,
@@ -184,47 +205,58 @@ export function AgentDockView({
         compact
       />
 
-      <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-2">
-        {runs.length === 0 && (
-          <div className="flex h-full flex-col items-center justify-center gap-1.5 text-center text-muted-foreground">
-            <Bot className="h-5 w-5" />
-            <p className="text-xs">
-              {jwt
-                ? "Ask the agent to draft, check, or explain — it proposes changes you review and apply."
-                : "Sign in to use the agent."}
-            </p>
-          </div>
-        )}
-        {runs.map((run) => (
-          <div key={run.localId} className="space-y-2">
-            <AgentRunView run={run} />
-            {run.proposals.map((proposal) => (
-              <ProposalCard
-                key={proposal.proposalId}
-                proposal={proposal}
-                roleLevel={roleLevel}
-                rules={rules}
-                resolveCell={resolveCell}
-                applyContext={applyContext}
-                onApplied={onApplied}
-              />
-            ))}
-            {(run.aquiferProposals ?? []).map((proposal) => (
-              <AquiferProposalCard
-                key={proposal.proposalId}
-                proposal={proposal}
-                projectId={projectId}
-                jwt={jwt}
-              />
-            ))}
-          </div>
-        ))}
-      </div>
+      {runs.length === 0 ? (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 px-3 text-center text-muted-foreground">
+          <Bot className="h-5 w-5" />
+          <p className="text-xs">
+            {jwt
+              ? "Ask the agent to draft, check, or explain — it proposes changes you review and apply."
+              : "Sign in to use the agent."}
+          </p>
+        </div>
+      ) : (
+        <MessageScrollerProvider>
+          <MessageScroller className="flex-1">
+            <MessageScrollerViewport>
+              <MessageScrollerContent className="px-3 py-2">
+                {runs.map((run) => (
+                  <MessageScrollerItem key={run.localId} messageId={run.localId} scrollAnchor>
+                    <div className="flex flex-col gap-2">
+                      <AgentRunView run={run} />
+                      {run.proposals.map((proposal) => (
+                        <ProposalCard
+                          key={proposal.proposalId}
+                          proposal={proposal}
+                          roleLevel={roleLevel}
+                          rules={rules}
+                          resolveCell={resolveCell}
+                          applyContext={applyContext}
+                          onApplied={onApplied}
+                        />
+                      ))}
+                      {(run.aquiferProposals ?? []).map((proposal) => (
+                        <AquiferProposalCard
+                          key={proposal.proposalId}
+                          proposal={proposal}
+                          projectId={projectId}
+                          jwt={jwt}
+                        />
+                      ))}
+                    </div>
+                  </MessageScrollerItem>
+                ))}
+              </MessageScrollerContent>
+            </MessageScrollerViewport>
+            <MessageScrollerButton />
+          </MessageScroller>
+        </MessageScrollerProvider>
+      )}
 
       <ChatComposer
+        ref={composerRef}
         isStreaming={isStreaming}
         isConfigured={Boolean(jwt)}
-        onSend={(text) => void sendPrompt(text)}
+        onSend={({ text, chips }) => void sendPrompt(text, chips)}
         onStop={stop}
         compact
         suggestedActions={suggestedActions}

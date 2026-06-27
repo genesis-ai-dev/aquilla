@@ -6,37 +6,41 @@
   "cta": "Aquilla — the AI drafts, the expert decides.",
   "mode": "doc",
   "verified": true,
-  "durationMs": 20981,
+  "durationMs": 33989,
   "chapters": [
     {
-      "t": 878,
+      "t": 891,
       "title": "Run AI completions",
       "subtitle": "Let the model draft untranslated cells."
     },
     {
-      "t": 7626,
+      "t": 8506,
       "title": "You stay in control",
       "subtitle": "Drafts are suggestions, not commitments."
     },
     {
-      "t": 14336,
-      "title": "Tuned to your project",
-      "subtitle": "Model, context, and examples are yours to set."
+      "t": 17722,
+      "title": "Drafted in seconds",
+      "subtitle": "The model fills the next gaps with a real draft."
     }
   ],
   "captions": [
     {
-      "t": 2205,
-      "text": "One click drafts the empty cells — using your project's instructions and examples."
+      "t": 1804,
+      "text": "One click drafts the empty cells — using your project's instructions and validated examples."
     },
     {
-      "t": 8540,
+      "t": 10215,
       "text": "AI drafts land as suggestions — you review, edit, and validate before anything is final."
     },
     {
-      "t": 15253,
-      "text": "Every draft follows the model and drafting context you configured in Project Settings."
+      "t": 18635,
+      "text": "Confirm the run — the model drafts the next untranslated cell right in the editor."
+    },
+    {
+      "t": 28473,
+      "text": "Every draft follows the model and drafting context you set in Project Settings."
     }
   ],
-  "generatedAt": "2026-06-26T03:56:04.594Z"
+  "generatedAt": "2026-06-26T23:55:19.179Z"
 }

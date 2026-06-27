@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Section } from "@/components/ui/page"
 import {
   clearUserProviderOverride,
   getUserProviderOverride,
@@ -59,21 +60,23 @@ export function PersonalProviderSection() {
   }
 
   return (
-    <section className="space-y-3">
+    <Section contentClassName={open ? undefined : "pb-0"}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 text-left"
+        className="flex w-full items-start gap-2 text-left"
         aria-expanded={open}
       >
         {open ? (
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
         ) : (
-          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
         )}
-        <div>
-          <h2 className="text-base font-semibold">AI provider (advanced)</h2>
-          <p className="text-xs text-muted-foreground">
+        <div className="min-w-0 space-y-1">
+          <h2 className="font-heading text-base leading-snug font-medium text-foreground">
+            AI provider (advanced)
+          </h2>
+          <p className="text-sm text-muted-foreground">
             {hasOverride
               ? "Active — your projects use this endpoint on this device."
               : "Optional. Most users should leave this off and use Frontier."}
@@ -82,7 +85,7 @@ export function PersonalProviderSection() {
       </button>
 
       {open && (
-        <div className="rounded-lg border bg-card p-4 space-y-4">
+        <div className="mt-4 space-y-4">
           <p className="text-xs text-muted-foreground">
             Use your own OpenAI-compatible endpoint instead of Frontier for AI
             translations. Stored only in this browser, never synced. Overrides
@@ -154,6 +157,6 @@ export function PersonalProviderSection() {
           </div>
         </div>
       )}
-    </section>
+    </Section>
   )
 }

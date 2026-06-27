@@ -6,37 +6,46 @@
   "cta": "Aquilla — from sign-up to translating in minutes.",
   "mode": "doc",
   "verified": true,
-  "durationMs": 17957,
+  "durationMs": 26393,
   "chapters": [
     {
-      "t": 431,
+      "t": 456,
       "title": "Welcome",
       "subtitle": "A short, guided setup the first time you sign in."
     },
     {
-      "t": 6032,
+      "t": 7261,
       "title": "Sign in & privacy",
       "subtitle": "Create your account; choose what you share."
     },
     {
-      "t": 11654,
+      "t": 14252,
+      "title": "Sign in",
+      "subtitle": "Unlock AI & sync with a Frontier account."
+    },
+    {
+      "t": 20096,
       "title": "Name it & create a project",
       "subtitle": "Pick a name; spin up your first project."
     }
   ],
   "captions": [
     {
-      "t": 1344,
+      "t": 1365,
       "text": "New to Aquilla? The setup wizard walks you through it, step by step."
     },
     {
-      "t": 6945,
-      "text": "Sign in or create an account, then set your privacy preferences."
+      "t": 8171,
+      "text": "Tap Get Started, then choose your privacy preferences."
     },
     {
-      "t": 12566,
+      "t": 15166,
+      "text": "Sign in or create an account to turn on AI assistance and cloud sync."
+    },
+    {
+      "t": 21007,
       "text": "Name your workspace and create a first project — you're translating in minutes."
     }
   ],
-  "generatedAt": "2026-06-26T04:06:43.660Z"
+  "generatedAt": "2026-06-26T23:58:51.221Z"
 }

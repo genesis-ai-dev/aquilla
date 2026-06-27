@@ -108,7 +108,7 @@ KW = [
 # VideoPath is the canonical R2 key; the .mp4 is staged in the gitignored
 # recording-output dir until batch-uploaded (see docs/walkthroughs/UPLOAD-MANIFEST.tsv).
 R2 = "https://docs.aquilla.app/media"
-ORG_VIDEO = f"{R2}/org-setup/org-setup-create-and-settings.mp4"  # already live in R2
+ORG_VIDEO = f"{R2}/org-setup/org-setup.mp4"  # already live in R2
 TOUR_VIDEO = f"{R2}/project-tour/project-tour.mp4"
 TRANSLATE_VIDEO = f"{R2}/editor-translate-cell/editor-translate-cell.mp4"
 VALIDATE_VIDEO = f"{R2}/validation-validate-cell/validation-validate-cell.mp4"

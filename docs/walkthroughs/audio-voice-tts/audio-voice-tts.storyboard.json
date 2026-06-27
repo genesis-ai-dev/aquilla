@@ -6,37 +6,46 @@
   "cta": "Aquilla — text and voice, side by side.",
   "mode": "doc",
   "verified": true,
-  "durationMs": 19723,
+  "durationMs": 27522,
   "chapters": [
     {
-      "t": 919,
+      "t": 479,
+      "title": "Open your file",
+      "subtitle": "John — Plainspeak Draft · real translated lines."
+    },
+    {
+      "t": 8815,
       "title": "Switch to audio",
       "subtitle": "Same cells, now with voice."
     },
     {
-      "t": 6533,
+      "t": 14373,
       "title": "Your cast of voices",
-      "subtitle": "Assign a narrator; add or clone characters."
+      "subtitle": "A narrator plus a voice per character."
     },
     {
-      "t": 13305,
+      "t": 21132,
       "title": "Text and audio together",
       "subtitle": "Every line, readable and hearable."
     }
   ],
   "captions": [
     {
-      "t": 2259,
+      "t": 1391,
+      "text": "Start in the editor — real source and target text, side by side."
+    },
+    {
+      "t": 9735,
       "text": "Flip to the audio lens to give your project a spoken voice."
     },
     {
-      "t": 7452,
+      "t": 15292,
       "text": "Build a cast — pick a narrator, add voices per character, generate speech from your text."
     },
     {
-      "t": 14257,
+      "t": 22058,
       "text": "Audio lives right beside the text — review the words and the voice in one place."
     }
   ],
-  "generatedAt": "2026-06-26T03:59:32.796Z"
+  "generatedAt": "2026-06-27T00:05:35.398Z"
 }

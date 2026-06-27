@@ -6,42 +6,42 @@
   "cta": "Aquilla — quality you can see at every zoom level.",
   "mode": "doc",
   "verified": true,
-  "durationMs": 25153,
+  "durationMs": 27191,
   "chapters": [
     {
-      "t": 482,
+      "t": 455,
       "title": "Open the file to review",
-      "subtitle": "John — Plainspoken Draft."
+      "subtitle": "John — Plainspeak Draft."
     },
     {
-      "t": 5207,
+      "t": 5626,
       "title": "Every cell carries a health signal",
-      "subtitle": "Green means validated."
+      "subtitle": "Drafted, but not yet validated."
     },
     {
-      "t": 11876,
+      "t": 12227,
       "title": "Approve the work",
-      "subtitle": "The consultant's sign-off, recorded and shared."
+      "subtitle": "One click signs it off for the whole team."
     },
     {
-      "t": 18741,
+      "t": 20397,
       "title": "Quality the whole team can see",
       "subtitle": "Validated counts roll up live."
     }
   ],
   "captions": [
     {
-      "t": 8333,
-      "text": "This pill is the at-a-glance validation status."
+      "t": 7951,
+      "text": "This draft is translated, but no reviewer has signed off yet."
     },
     {
-      "t": 13178,
-      "text": "Hover the pill to open the validation menu — Validate with one click."
+      "t": 13149,
+      "text": "Click the pill to validate — the reviewer's sign-off, recorded and shared."
     },
     {
-      "t": 19663,
-      "text": "Each approval rolls up into the project's validated count — shared with everyone."
+      "t": 21314,
+      "text": "That approval rolls straight into the project's validated count — shared with everyone."
     }
   ],
-  "generatedAt": "2026-06-26T03:32:49.792Z"
+  "generatedAt": "2026-06-27T00:05:05.382Z"
 }

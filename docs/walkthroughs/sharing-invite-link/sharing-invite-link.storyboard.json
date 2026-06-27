@@ -6,37 +6,46 @@
   "cta": "Aquilla — share safely, by role.",
   "mode": "doc",
   "verified": true,
-  "durationMs": 19362,
+  "durationMs": 23588,
   "chapters": [
     {
-      "t": 472,
+      "t": 564,
       "title": "Share a project",
       "subtitle": "Bring collaborators in — by link or by name."
     },
     {
-      "t": 6336,
+      "t": 4875,
+      "title": "Create an invite link",
+      "subtitle": "A tokenized URL anyone signed in can redeem."
+    },
+    {
+      "t": 9896,
       "title": "Pick the role",
       "subtitle": "Viewer, reviewer, contributor — never more than needed."
     },
     {
-      "t": 13388,
+      "t": 17287,
       "title": "Revoke any time",
       "subtitle": "Access you can audit and pull back."
     }
   ],
   "captions": [
     {
-      "t": 1869,
-      "text": "Open Share to create an invite link or add a teammate directly."
+      "t": 1484,
+      "text": "Open Share from the project nav."
     },
     {
-      "t": 7255,
-      "text": "Choose the role the link grants — links are capped at contributor, so managerial access stays deliberate."
+      "t": 5788,
+      "text": "Switch to Invite link to mint a shareable URL."
     },
     {
-      "t": 14303,
-      "text": "See who has access, and revoke a link the moment it's no longer needed."
+      "t": 10847,
+      "text": "Choose what the link grants — links are capped at contributor, so managerial access stays deliberate."
+    },
+    {
+      "t": 18204,
+      "text": "Create the link, share it, and revoke it the moment it's no longer needed."
     }
   ],
-  "generatedAt": "2026-06-26T03:56:26.269Z"
+  "generatedAt": "2026-06-27T00:03:08.787Z"
 }

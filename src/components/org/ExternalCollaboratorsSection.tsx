@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
-import { ShieldOff, UserX } from "lucide-react"
+import { ShieldOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Section } from "@/components/ui/page"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchOrgMembersMatrix, removeProjectMember } from "@/lib/frontier/members"
@@ -73,22 +74,15 @@ export function ExternalCollaboratorsSection({
   if (externals.length === 0 && !error) return null
 
   return (
-    <section data-testid="external-collaborators" className="space-y-2">
-      <div>
-        <h2 className="flex items-center gap-2 text-sm font-medium">
-          <UserX className="h-4 w-4 text-muted-foreground" aria-hidden />
-          External collaborators
-        </h2>
-        <p className="text-xs text-muted-foreground">
-          People outside this organization with access to specific projects
-          (via invite links, direct adds, or teams). Revoking removes their
-          access to that project only.
-        </p>
-      </div>
-
+    <Section
+      data-testid="external-collaborators"
+      title="External collaborators"
+      description="People outside this organization with access to specific projects (via invite links, direct adds, or teams). Revoking removes their access to that project only."
+      contentClassName="space-y-2"
+    >
       {error && <p className="text-xs text-destructive">{error}</p>}
 
-      <ul className="divide-y rounded border">
+      <ul className="divide-y rounded-2xl border">
         {externals.map((e) => (
           <li key={e.userId} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
             <span className="font-medium">{e.username}</span>
@@ -107,12 +101,12 @@ export function ExternalCollaboratorsSection({
                     <Button
                       size="icon"
                       variant="ghost"
-                      className="h-4 w-4 text-muted-foreground hover:text-destructive"
+                      className="size-4 text-muted-foreground hover:text-destructive"
                       aria-label={`Revoke ${e.username}'s access to ${g.projectName}`}
                       disabled={busyGrant === `${g.projectId}:${e.userId}`}
                       onClick={() => void revoke(g.projectId, e.userId)}
                     >
-                      <ShieldOff className="h-3 w-3" />
+                      <ShieldOff className="size-3" />
                     </Button>
                   ) : (
                     <AppTooltip
@@ -134,6 +128,6 @@ export function ExternalCollaboratorsSection({
           </li>
         ))}
       </ul>
-    </section>
+    </Section>
   )
 }

@@ -19,7 +19,6 @@ DRY="${1:-}"
 count=0
 for mp4 in "$STAGE"/*/*.mp4; do
   slug="$(basename "$(dirname "$mp4")")"
-  [ "$slug" = "org-setup" ] && continue   # already published under its real name
   key="$BUCKET/walkthroughs/$slug/$slug.mp4"
   if [ "$DRY" = "--dry-run" ]; then
     echo "would upload: $mp4 -> $key"

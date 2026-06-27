@@ -12,7 +12,7 @@ npm run record:assemble -- --slug <persona>__<slug>
 | # | Walkthrough | Area | Persona | Features | VideoPath | Status |
 | --: | --- | --- | --- | --: | --- | --- |
 | 1 | First-run onboarding wizard | Onboarding & Product Tour | New org owner | 42 | `https://docs.aquilla.app/media/onboarding-first-run/onboarding-first-run.mp4` | ✅ recorded |
-| 2 | Create an org & change its settings | Orgs & Org Switcher | Org owner / admin | 29 | `https://docs.aquilla.app/media/org-setup/org-setup-create-and-settings.mp4` | ✅ recorded |
+| 2 | Create an org & change its settings | Orgs & Org Switcher | Org owner / admin | 29 | `https://docs.aquilla.app/media/org-setup/org-setup.mp4` | ✅ recorded |
 | 3 | Invite & manage team members | Teams, Members & Permissions | Org admin / project lead | 29 | `https://docs.aquilla.app/media/teams-invite-members/teams-invite-members.mp4` | ✅ recorded |
 | 4 | Read a project's overview & progress | Project Overview | Project manager / owner | 37 | `https://docs.aquilla.app/media/overview-read-progress/overview-read-progress.mp4` | ✅ recorded |
 | 5 | Translate a cell in the editor | Editor Core | Translator | 55 | `https://docs.aquilla.app/media/editor-translate-cell/editor-translate-cell.mp4` | ✅ recorded |

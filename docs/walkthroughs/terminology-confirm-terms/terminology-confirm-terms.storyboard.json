@@ -6,37 +6,41 @@
   "cta": "Aquilla — consistent terminology, automatically.",
   "mode": "doc",
   "verified": true,
-  "durationMs": 19632,
+  "durationMs": 25964,
   "chapters": [
     {
-      "t": 462,
+      "t": 422,
       "title": "The terminology library",
       "subtitle": "Every key term, defined once, used everywhere."
     },
     {
-      "t": 5874,
-      "title": "Confirm & manage terms",
-      "subtitle": "Source term → renderings, notes, and status."
+      "t": 8611,
+      "title": "Add a concept",
+      "subtitle": "Source term → preferred rendering."
     },
     {
-      "t": 12927,
+      "t": 18956,
       "title": "Consistency, automatically",
-      "subtitle": "Terms compile into checks that flag drift."
+      "subtitle": "Confirmed terms compile into checks that flag drift."
     }
   ],
   "captions": [
     {
-      "t": 1371,
-      "text": "Open Terminology from any project — your team's shared glossary."
+      "t": 1335,
+      "text": "Open Terminology from any project — your team's shared glossary, with live stats."
     },
     {
-      "t": 6788,
-      "text": "Add a concept, confirm a rendering, or flag one to revisit — the editor surfaces them as you translate."
+      "t": 9517,
+      "text": "Pin a key term so everyone renders it the same way."
     },
     {
-      "t": 13843,
+      "t": 12965,
+      "text": "Type the source term, then its preferred rendering."
+    },
+    {
+      "t": 19870,
       "text": "Confirmed terms become checks — so the same word is rendered the same way, project-wide."
     }
   ],
-  "generatedAt": "2026-06-26T03:37:11.671Z"
+  "generatedAt": "2026-06-27T00:04:37.028Z"
 }

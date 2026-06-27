@@ -6,54 +6,63 @@
   "cta": "Aquilla — your team's work, clear at every zoom level.",
   "mode": "doc",
   "verified": true,
-  "durationMs": 36114,
+  "durationMs": 44951,
   "chapters": [
     {
-      "t": 1292,
+      "t": 463,
       "title": "Open a project",
-      "subtitle": "John — Plainspoken Draft · a curated demo project."
+      "subtitle": "John — Plainspeak Draft · a curated demo project."
     },
     {
-      "t": 11804,
+      "t": 11561,
       "title": "Source ↔ target, verse by verse",
       "subtitle": "John 1 · English → French."
     },
     {
-      "t": 22220,
+      "t": 24001,
       "title": "Validation at a glance",
-      "subtitle": "Healthy cells are marked green."
+      "subtitle": "Healthy, validated cells are marked green."
     },
     {
-      "t": 29998,
+      "t": 32520,
+      "title": "The whole file, summed up",
+      "subtitle": "Translated and validated, counted live."
+    },
+    {
+      "t": 38189,
       "title": "That's the workspace",
       "subtitle": "Real content, real structure."
     }
   ],
   "captions": [
     {
-      "t": 2208,
+      "t": 1382,
       "text": "Every project opens to real content — source and target, side by side."
     },
     {
-      "t": 7527,
-      "text": "Click a file to open it."
+      "t": 6674,
+      "text": "Click a file in the sidebar to open it."
     },
     {
-      "t": 14945,
-      "text": "Left: the source text…"
+      "t": 14692,
+      "text": "Left: the source — “In the beginning was the Word.”"
     },
     {
-      "t": 18093,
-      "text": "…right: your team's translation, cell by cell."
+      "t": 19140,
+      "text": "Right: your team's French — “Au commencement était la Parole.”"
     },
     {
-      "t": 25339,
-      "text": "Each cell carries a health signal — green means validated."
+      "t": 27126,
+      "text": "Each cell carries a health signal — green means a reviewer validated it."
     },
     {
-      "t": 30906,
-      "text": "Real content, real structure — that's how you read a project in Aquilla."
+      "t": 33432,
+      "text": "The status bar rolls up exactly how much is translated and validated."
+    },
+    {
+      "t": 39103,
+      "text": "Real French scripture, real validation — that's how you read a project in Aquilla."
     }
   ],
-  "generatedAt": "2026-06-26T02:54:54.696Z"
+  "generatedAt": "2026-06-26T23:56:37.457Z"
 }

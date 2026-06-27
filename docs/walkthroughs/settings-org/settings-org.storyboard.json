@@ -2,41 +2,41 @@
   "slug": "org-admin__org-settings",
   "persona": "org-admin",
   "feature": "org-settings",
-  "title": "Organization settings — identity and org-wide policy.",
+  "title": "Organization settings — identity and the facts that matter.",
   "cta": "Aquilla — your organization, on your terms.",
   "mode": "doc",
   "verified": true,
-  "durationMs": 19738,
+  "durationMs": 21296,
   "chapters": [
     {
-      "t": 417,
+      "t": 410,
       "title": "Organization settings",
       "subtitle": "Everything that applies across all your projects."
     },
     {
-      "t": 6602,
+      "t": 6098,
       "title": "Identity",
-      "subtitle": "Rename the org; it updates everywhere at once."
+      "subtitle": "Who this organization is, and a one-click rename."
     },
     {
-      "t": 13347,
-      "title": "Org-wide policy",
-      "subtitle": "Set defaults that every project inherits."
+      "t": 15018,
+      "title": "The facts that matter",
+      "subtitle": "Members and projects, counted live."
     }
   ],
   "captions": [
     {
-      "t": 1327,
-      "text": "Open organization settings — identity, members, and org-wide policy in one place."
+      "t": 1319,
+      "text": "Open Settings — the org's identity and at-a-glance facts in one place."
     },
     {
-      "t": 7515,
-      "text": "Change the organization's name and it propagates to the sidebar and breadcrumb instantly."
+      "t": 7806,
+      "text": "Riverstone Bible Society — rename it once and it updates everywhere."
     },
     {
-      "t": 14259,
-      "text": "Set org defaults — like the minimum role required to export — once, for everyone."
+      "t": 15948,
+      "text": "Six members, one active project — read straight off the seeded org."
     }
   ],
-  "generatedAt": "2026-06-26T03:43:23.847Z"
+  "generatedAt": "2026-06-27T00:00:03.011Z"
 }

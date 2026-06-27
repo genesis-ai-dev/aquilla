@@ -6,37 +6,37 @@
   "cta": "Aquilla — your team's work compounds.",
   "mode": "doc",
   "verified": true,
-  "durationMs": 17452,
+  "durationMs": 20404,
   "chapters": [
     {
-      "t": 426,
+      "t": 422,
       "title": "What is Living Memory?",
       "subtitle": "Validated translations, kept close at hand."
     },
     {
-      "t": 5980,
+      "t": 5981,
       "title": "Recent validated examples",
       "subtitle": "The best examples to draft the next cell."
     },
     {
-      "t": 11875,
+      "t": 14212,
       "title": "Your work compounds",
       "subtitle": "More validated work → better suggestions."
     }
   ],
   "captions": [
     {
-      "t": 1336,
+      "t": 1330,
       "text": "Open Living Memory — a growing store of your team's confirmed work."
     },
     {
-      "t": 6896,
-      "text": "Every validated cell becomes an example the editor and AI can draw on."
+      "t": 6895,
+      "text": "Every validated cell becomes an example — real source, real confirmed rendering."
     },
     {
-      "t": 12786,
-      "text": "The more you validate, the stronger every future draft becomes."
+      "t": 15120,
+      "text": "The more your team validates, the stronger every future draft becomes."
     }
   ],
-  "generatedAt": "2026-06-26T03:36:49.945Z"
+  "generatedAt": "2026-06-26T23:58:24.001Z"
 }

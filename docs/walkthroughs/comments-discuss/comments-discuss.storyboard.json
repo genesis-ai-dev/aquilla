@@ -6,37 +6,46 @@
   "cta": "Aquilla — every decision, threaded and traceable.",
   "mode": "doc",
   "verified": true,
-  "durationMs": 18819,
+  "durationMs": 29314,
   "chapters": [
     {
-      "t": 430,
-      "title": "Comments, in context",
-      "subtitle": "Threaded discussion attached to the work."
+      "t": 441,
+      "title": "Open the work",
+      "subtitle": "John — Plainspeak Draft · a real, populated project."
     },
     {
-      "t": 6478,
-      "title": "Reply & resolve",
-      "subtitle": "Keep decisions next to the cells they touch."
+      "t": 9228,
+      "title": "Comment right on the cell",
+      "subtitle": "No separate chat — the discussion is attached to the work."
     },
     {
-      "t": 12604,
-      "title": "Nothing gets lost",
-      "subtitle": "Resolved threads stay searchable."
+      "t": 16084,
+      "title": "Raise the question in context",
+      "subtitle": "Type, mention a teammate, post — it stays on the cell."
+    },
+    {
+      "t": 22611,
+      "title": "Every thread, in one place",
+      "subtitle": "Filter, sort, and resolve across the whole project."
     }
   ],
   "captions": [
     {
-      "t": 1339,
-      "text": "Open Comments to see every thread across the project — filterable, resolvable."
+      "t": 1351,
+      "text": "Comments live on the cells they're about — let's open the editor."
     },
     {
-      "t": 7405,
-      "text": "Reply inline, mention a teammate, and resolve the thread when it's settled."
+      "t": 10154,
+      "text": "Open the cell menu and choose Add comment."
     },
     {
-      "t": 13519,
-      "text": "Anyone on the project can follow the conversation — no decision goes missing."
+      "t": 16992,
+      "text": "Write the comment right where the decision belongs."
+    },
+    {
+      "t": 23518,
+      "text": "The Comments view rolls up every thread — filterable, resolvable, never lost."
     }
   ],
-  "generatedAt": "2026-06-26T03:36:30.572Z"
+  "generatedAt": "2026-06-26T23:55:50.364Z"
 }

@@ -6,37 +6,46 @@
   "cta": "Aquilla — quality rules that run themselves.",
   "mode": "doc",
   "verified": true,
-  "durationMs": 19484,
+  "durationMs": 49482,
   "chapters": [
     {
-      "t": 442,
+      "t": 20855,
       "title": "Rules & checks",
       "subtitle": "Encode the standards your team agrees on."
     },
     {
-      "t": 6760,
-      "title": "Author a rule",
-      "subtitle": "Pattern, replacement, flags — test it before you save."
+      "t": 27894,
+      "title": "Built-in quality checks",
+      "subtitle": "Empty target, number drift, punctuation — out of the box."
     },
     {
-      "t": 13212,
+      "t": 35633,
+      "title": "Author a rule",
+      "subtitle": "Pattern, replacement, severity — test it before you save."
+    },
+    {
+      "t": 42706,
       "title": "Checks run as you work",
       "subtitle": "Flagged cells surface where attention's needed."
     }
   ],
   "captions": [
     {
-      "t": 1355,
-      "text": "Open Rules to author checks — from a simple find-pattern to built-in quality checks."
+      "t": 21763,
+      "text": "Flip from the Editor to Rules to see the checks running on your project."
     },
     {
-      "t": 7697,
-      "text": "Write a rule, test it against real source and target, and save it for the project."
+      "t": 28805,
+      "text": "A library of built-in checks runs automatically — empty targets, mismatched numbers, drift."
     },
     {
-      "t": 14128,
+      "t": 36546,
+      "text": "Add a custom rule to encode a team standard, test it against real cells, and save it."
+    },
+    {
+      "t": 43623,
       "text": "Built-in and custom checks flag drift automatically — so issues never pile up."
     }
   ],
-  "generatedAt": "2026-06-26T04:33:29.545Z"
+  "generatedAt": "2026-06-27T00:02:15.384Z"
 }

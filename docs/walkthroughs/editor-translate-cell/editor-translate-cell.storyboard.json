@@ -6,50 +6,50 @@
   "cta": "Aquilla — every keystroke persisted, online or off.",
   "mode": "doc",
   "verified": true,
-  "durationMs": 31361,
+  "durationMs": 31958,
   "chapters": [
     {
-      "t": 479,
+      "t": 433,
       "title": "Open your file",
-      "subtitle": "John — Plainspoken Draft · a curated demo project."
+      "subtitle": "John — Plainspeak Draft · a curated demo project."
     },
     {
-      "t": 8246,
+      "t": 8170,
       "title": "Source on the left, your draft on the right",
       "subtitle": "John 1 · English → French."
     },
     {
-      "t": 17658,
+      "t": 15465,
       "title": "Type your translation",
       "subtitle": "Every keystroke is persisted locally first."
     },
     {
-      "t": 25070,
+      "t": 25444,
       "title": "Saved — and it survives anything",
       "subtitle": "Reload, lose signal, close the laptop — still here."
     }
   ],
   "captions": [
     {
-      "t": 1395,
+      "t": 1344,
       "text": "Pick a file from the sidebar to start translating."
     },
     {
-      "t": 11366,
-      "text": "Read the source…"
+      "t": 11295,
+      "text": "The source stays read-only — your reference, never overwritten."
     },
     {
-      "t": 14217,
-      "text": "…then type your translation into the target cell."
+      "t": 16758,
+      "text": "This verse is still empty — let's draft it."
     },
     {
-      "t": 20733,
+      "t": 21011,
       "text": "Saved the moment you move on — no Save button, no lost work."
     },
     {
-      "t": 25989,
+      "t": 26395,
       "text": "Your draft is in the cell, persisted on-device and syncing when you reconnect."
     }
   ],
-  "generatedAt": "2026-06-26T03:32:20.587Z"
+  "generatedAt": "2026-06-26T23:57:13.395Z"
 }

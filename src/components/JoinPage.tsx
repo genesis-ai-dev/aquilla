@@ -19,7 +19,7 @@ import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
 import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
 import posthog from "@/lib/posthog"
-import { INVITE_REDEEMED } from "@/lib/analytics-events"
+import { INVITE_REDEEMED } from "@/lib/event-names"
 
 type Phase = "initial" | "redeeming" | "error"
 type AuthMode = "login" | "signup" | "forgot"

@@ -1,7 +1,7 @@
 /**
  * FRO-267: Unit tests for outbox-flush quarantine instrumentation.
  *
- * Kept separate from analytics-events.test.ts because that file mocks
+ * Kept separate from event-names.test.ts because that file mocks
  * "./sync/outbox" (needed for events-emit tests) which conflicts with the
  * real IDB-backed outbox needed here.
  *
@@ -29,7 +29,7 @@ vi.mock("./sync/sync-worker-url", () => ({
 }))
 
 // ── Imports ────────────────────────────────────────────────────────────────
-import { OUTBOX_QUARANTINED } from "./analytics-events"
+import { OUTBOX_QUARANTINED } from "./event-names"
 import { flushOutboxBatch } from "./sync/outbox-flush"
 import {
   enqueueOutboxEvent,

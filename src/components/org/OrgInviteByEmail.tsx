@@ -6,7 +6,7 @@ import { createOrgInvite } from "@/lib/frontier/orgs"
 import { ROLE, ORG_ROLE_PICKER, roleName } from "@/lib/frontier/roles"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import posthog from "@/lib/posthog"
-import { INVITE_SENT } from "@/lib/analytics-events"
+import { INVITE_SENT } from "@/lib/event-names"
 
 /**
  * Owner-only: invite a teammate to the organization by EMAIL (not just by

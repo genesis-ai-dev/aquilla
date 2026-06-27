@@ -6,7 +6,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { createOrg, renameOrg } from "@/lib/frontier/orgs"
 import { isOrgScopedRoute } from "./org-route-scope"
 import posthog from "@/lib/posthog"
-import { ORG_CREATED } from "@/lib/analytics-events"
+import { ORG_CREATED } from "@/lib/event-names"
 
 export function OrgSwitcher() {
   const { orgs, activeOrg, activeOrgId, isAllOrgs, setActiveOrg, setAllOrgs, refresh } = useActiveOrg()

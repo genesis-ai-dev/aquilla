@@ -17,7 +17,7 @@ import {
   type ActiveProjectInvite,
 } from "@/lib/sync/invites"
 import posthog from "@/lib/posthog"
-import { INVITE_SENT } from "@/lib/analytics-events"
+import { INVITE_SENT } from "@/lib/event-names"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { MembersPanel, type MembersPanelMember } from "./MembersPanel"

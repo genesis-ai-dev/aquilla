@@ -15,7 +15,7 @@ import {
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { timeoutSignal } from "./fetch-timeout"
 import posthog from "@/lib/posthog"
-import { OUTBOX_QUARANTINED } from "@/lib/analytics-events"
+import { OUTBOX_QUARANTINED } from "@/lib/event-names"
 
 const MAX_BATCH = 100
 

@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react"
 import { CheckCircle2, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import posthog from "@/lib/posthog"
-import { SETUP_CHECKLIST_COMPLETED } from "@/lib/analytics-events"
+import { SETUP_CHECKLIST_COMPLETED } from "@/lib/event-names"
 import {
   Sheet,
   SheetContent,

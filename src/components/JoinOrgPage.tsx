@@ -11,7 +11,7 @@ import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
 import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
 import { UserError } from "@/lib/errors/user-error"
 import posthog from "@/lib/posthog"
-import { INVITE_REDEEMED } from "@/lib/analytics-events"
+import { INVITE_REDEEMED } from "@/lib/event-names"
 
 type Phase = "initial" | "redeeming" | "done" | "error"
 type AuthMode = "login" | "signup"

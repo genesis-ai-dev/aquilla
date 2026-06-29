@@ -49,7 +49,7 @@ import {
   getOrCreateUserOrg,
   listEffectiveProjectMembers,
 } from "../services/org-permissions"
-import { isPlatformAdminUsername } from "../middleware/platform-admin"
+import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { lookupUserByUsername } from "../services/user-lookup"
 import { sendProjectInviteEmail } from "../services/email"
 
@@ -240,7 +240,7 @@ projects.get("/", authMiddleware, async (c) => {
   // Platform operators see every project (the WHERE access predicate is
   // bypassed below); their effective role is forced to 700/"platform" in the
   // JS mapping, mirroring the resolver in project-permissions.ts.
-  const isAdmin = isPlatformAdminUsername(c.env, user.username)
+  const isAdmin = isPlatformAdminEmail(c.env, user.email)
 
   // AD-12 max-wins across direct + group + org + creator. Each path is
   // computed in the same query; role_level = MAX(coalesced levels). On a

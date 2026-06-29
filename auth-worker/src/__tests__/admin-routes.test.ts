@@ -3,8 +3,8 @@ import { describe, it, expect } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
-// PLATFORM_ADMINS is pinned to "root" in vitest.config.ts. These tests seed a
-// "root" user (admin) and a "wendi" user (ordinary) and assert the gate.
+// ADMIN_EMAILS is pinned to "root@example.com" (pg-test-env). These tests seed a
+// "root" user (admin, by email) and a "wendi" user (ordinary) and assert the gate.
 
 describe("/api/v2/admin/* platform-admin gate", () => {
   it("403s a non-allowlisted user and 401s an anonymous caller", async () => {

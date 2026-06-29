@@ -5,7 +5,7 @@ import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
+import { useAdminElevation } from "@/hooks/useAdminElevation"
 import {
   getAdminOverview,
   getAdminOrgs,
@@ -23,8 +23,10 @@ import {
   type AdminAdmin,
 } from "@/lib/frontier/admin"
 import { AdminCreditsSection } from "@/components/admin/AdminCreditsSection"
+import { AdminSettingsSection } from "@/components/admin/AdminSettingsSection"
+import { AdminElevationGate } from "@/components/admin/AdminElevationGate"
 
-type Tab = "overview" | "orgs" | "teams" | "users" | "projects" | "activity" | "admins" | "credits"
+type Tab = "overview" | "orgs" | "teams" | "users" | "projects" | "activity" | "admins" | "credits" | "settings"
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "overview", label: "Overview" },
   { key: "orgs", label: "Orgs" },
@@ -34,6 +36,7 @@ const TABS: Array<{ key: Tab; label: string }> = [
   { key: "activity", label: "Activity" },
   { key: "admins", label: "Admins" },
   { key: "credits", label: "Compute / Credits" },
+  { key: "settings", label: "Settings" },
 ]
 
 const fmtDate = (iso: string | null): string => {
@@ -72,13 +75,19 @@ function groupByOrg(
  * Site-wide admin console (/admin). Cross-tenant, read-only: orgs, users,
  * projects, and the global activity feed. Gated by `usePlatformAdmin` — but
  * that is UX only; every /api/v2/admin/* call is enforced server-side against
- * the PLATFORM_ADMINS allowlist. A non-admin who forces the route is redirected
+ * the ADMIN_EMAILS allowlist. A non-admin who forces the route is redirected
  * to their org overview ("/"), and any data fetch would 403 regardless.
  */
 export function AdminConsole() {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
-  const { isAdmin, loading: adminLoading } = usePlatformAdmin()
+  const {
+    isAdmin,
+    loading: adminLoading,
+    email: adminEmail,
+    isElevated,
+    refresh: refreshElevation,
+  } = useAdminElevation()
   const { setActiveOrg } = useActiveOrg()
   const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>("overview")
@@ -115,7 +124,8 @@ export function AdminConsole() {
   }, [])
 
   const refresh = useCallback(async () => {
-    if (!jwt || !isAdmin) return
+    // Don't fetch console data until elevated — every admin call would 403.
+    if (!jwt || !isAdmin || !isElevated) return
     if (aliveRef.current) {
       setLoading(true)
       setError(null)
@@ -144,14 +154,14 @@ export function AdminConsole() {
     } finally {
       if (aliveRef.current) setLoading(false)
     }
-  }, [jwt, isAdmin])
+  }, [jwt, isAdmin, isElevated])
 
   useEffect(() => {
     void refresh()
   }, [refresh])
 
   // Non-admins have no business here — send them back to their overview.
-  // (Server still enforces the PLATFORM_ADMINS allowlist on every fetch.)
+  // (Server still enforces the ADMIN_EMAILS allowlist on every fetch.)
   if (!adminLoading && !isAdmin) {
     return <Navigate to="/" replace />
   }
@@ -159,6 +169,9 @@ export function AdminConsole() {
   let body: React.ReactNode
   if (adminLoading) {
     body = <p className="text-sm text-muted-foreground">Checking access…</p>
+  } else if (!isElevated && jwt) {
+    // Hardened console: require a fresh email step-up code before anything loads.
+    body = <AdminElevationGate jwt={jwt} email={adminEmail} onElevated={refreshElevation} />
   } else if (loading && overview == null) {
     body = <p className="text-sm text-muted-foreground">Loading…</p>
   } else if (error) {
@@ -298,15 +311,15 @@ export function AdminConsole() {
           {tab === "admins" && (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
-                Platform admins are allowlisted in the auth worker's deploy config
-                (<code className="text-xs">PLATFORM_ADMINS</code> in wrangler.toml) and have
-                owner-level access to every org and project. Changing the list requires a
-                redeploy of the auth worker.
+                Platform admins are identified by account email, allowlisted in the auth
+                worker's deploy config (<code className="text-xs">ADMIN_EMAILS</code> in
+                wrangler.toml), and have owner-level access to every org and project. Changing
+                the list requires a redeploy of the auth worker.
               </p>
-              <Table head={["Username", "Account", "Email", "Last active", "Joined"]}>
+              <Table head={["Email", "Account", "User", "Last active", "Joined"]}>
                 {admins.map((a) => (
-                  <tr key={a.username} className="border-t">
-                    <Td>{a.displayName ? `${a.displayName} (${a.username})` : a.username}</Td>
+                  <tr key={a.email} className="border-t">
+                    <Td>{a.email}</Td>
                     <Td>
                       {a.hasAccount ? (
                         "Registered"
@@ -314,7 +327,7 @@ export function AdminConsole() {
                         <span className="text-destructive">No account</span>
                       )}
                     </Td>
-                    <Td>{a.email ?? "—"}</Td>
+                    <Td>{a.displayName ? `${a.displayName} (${a.username})` : (a.username ?? "—")}</Td>
                     <Td>{fmtDate(a.lastActiveAt ?? null)}</Td>
                     <Td>{fmtDate(a.createdAt ?? null)}</Td>
                   </tr>
@@ -325,8 +338,12 @@ export function AdminConsole() {
 
           {/* Compute / Credits tab — platform-admin only; AdminConsole already
               gates the whole route via usePlatformAdmin + Navigate redirect.
-              Each API call is also server-enforced against PLATFORM_ADMINS. */}
+              Each API call is also server-enforced against ADMIN_EMAILS. */}
           {tab === "credits" && jwt && <AdminCreditsSection jwt={jwt} />}
+
+          {/* Global platform settings (LLM models, allowed models, AI budgets).
+              Server-enforced behind the elevation gate. */}
+          {tab === "settings" && jwt && <AdminSettingsSection jwt={jwt} />}
         </div>
       </>
     )
@@ -342,7 +359,7 @@ export function AdminConsole() {
           <div className="p-6">
             <h1 className="mb-1 text-xl font-semibold">Admin console</h1>
             <p className="mb-6 text-sm text-muted-foreground">
-              Site-wide, cross-tenant view. Read-only.
+              Site-wide, cross-tenant view. Mostly read-only; Compute and Settings are editable.
             </p>
             {body}
           </div>

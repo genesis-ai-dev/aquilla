@@ -19,6 +19,7 @@ import { z } from "zod"
 import type { Env, Variables } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
+import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
 import { creditGuard, recordCredit } from "../lib/credits"
 
 const chat = new Hono<{ Bindings: Env; Variables: Variables }>()
@@ -43,10 +44,13 @@ type ChatRequest = z.infer<typeof chatCompletionRequestSchema>
 
 /**
  * "default", "free-tier", or an empty model string means "let the server
- * pick". Anything else passes through unchanged.
+ * pick". Anything else passes through unchanged. The server pick is the
+ * admin-set platform_settings.defaultLlmModel, then DEFAULT_LLM_MODEL, then the
+ * hardcoded fallback.
  */
-function resolveModel(env: Env, requested: string): string {
-  const fallback = env.DEFAULT_LLM_MODEL || "anthropic/claude-sonnet-4.5"
+function resolveModel(env: Env, requested: string, settings: PlatformSettings): string {
+  const fallback =
+    settings.defaultLlmModel || env.DEFAULT_LLM_MODEL || "anthropic/claude-sonnet-4.5"
   if (!requested) return fallback
   if (requested === "default" || requested === "free-tier") return fallback
   return requested
@@ -79,7 +83,8 @@ chat.post(
     }
 
     const request = c.req.valid("json")
-    const model = resolveModel(c.env, request.model)
+    const settings = await getPlatformSettingsCached(c.env)
+    const model = resolveModel(c.env, request.model, settings)
 
     // AI guard: model allowlist + per-user/global daily budget (FRO-265).
     const user = c.get("user")

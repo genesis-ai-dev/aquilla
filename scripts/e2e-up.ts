@@ -295,10 +295,11 @@ async function main(): Promise<void> {
       SYNC_WORKER_URL: `http://127.0.0.1:${SYNC_WORKER_PORT}`,
       ENVIRONMENT: "development",
     },
-    // PLATFORM_ADMINS: wrangler.toml's default list doesn't include the seed
-    // users, so /admin would Navigate away — the admin-console specs need
-    // alice to be a platform admin.
-    extraArgs: ["--persist-to", PERSIST_DIR, "--var", "WRANGLER_LOCAL:1", "--var", "PLATFORM_ADMINS:alice"],
+    // ADMIN_EMAILS: site-admin identity is by account email; the admin-console
+    // specs need alice to be a platform admin. Her seeded email is
+    // alice@example.test (e2e/helpers/seed.ts). WRANGLER_LOCAL=1 + the unset
+    // ADMIN_REQUIRE_ELEVATION here keep the step-up off so the console opens.
+    extraArgs: ["--persist-to", PERSIST_DIR, "--var", "WRANGLER_LOCAL:1", "--var", "ADMIN_REQUIRE_ELEVATION:false", "--var", "ADMIN_EMAILS:alice@example.test"],
     logFile: openLogFile(logFiles.identity),
     streamToParent: VERBOSE,
   })

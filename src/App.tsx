@@ -196,7 +196,7 @@ function AppRoutes() {
         <Route path="/teams/:groupId" element={<TeamDetail />} />
 
         {/* Lazy — site-wide admin console (platform operators only; gated
-            client-side by usePlatformAdmin and server-side by PLATFORM_ADMINS) */}
+            client-side by usePlatformAdmin and server-side by ADMIN_EMAILS) */}
         <Route path="/admin" element={<AdminConsole />} />
 
         {/* Lazy — debug views (dev/staging only) */}

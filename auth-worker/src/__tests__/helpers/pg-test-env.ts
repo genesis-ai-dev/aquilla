@@ -37,15 +37,15 @@ function pgliteExecutor(db: PGlite): PgExecutor {
   return wrap(db)
 }
 
-// The worker reads these off c.env. Mirrors auth-worker/wrangler.toml [vars] +
-// the test overrides from the old vitest.config (PLATFORM_ADMINS pinned to root).
+// The worker reads these off c.env. Mirrors auth-worker/wrangler.toml [vars].
+// Platform-admin identity is by email — the seeded "root" user gets
+// root@example.com (see seedUser), so that's the test allowlist.
 export const env = {
   AQUILLA_PG: new PostgresDb(pgliteExecutor(pg)) as unknown as AquillaDb,
   SECRET_KEY: "frontier-test-secret",
   SYNC_SECRET_KEY: "sync-secret",
   ALGORITHM: "HS256",
   ACCESS_TOKEN_EXPIRE_MINUTES: "43200",
-  PLATFORM_ADMINS: "root",
   EMAIL_FROM: "noreply@support.aquilla.app",
   BASE_URL: "https://aquilla.app",
   SYNC_WORKER_URL: "https://api.aquilla.app/sync",
@@ -57,6 +57,15 @@ export const env = {
   AI_ALLOWED_MODELS: undefined as string | undefined,
   AI_USER_DAILY_REQUEST_LIMIT: undefined as string | undefined,
   AI_GLOBAL_DAILY_REQUEST_LIMIT: undefined as string | undefined,
+  AGENT_MODEL_DEFAULT: undefined as string | undefined,
+  // Site-admin identity by email: "root" (root@example.com) is the test admin.
+  ADMIN_EMAILS: "root@example.com" as string | undefined,
+  // Step-up elevation OFF by default so existing admin-route tests stay open;
+  // the elevation suite sets it per-test.
+  ADMIN_REQUIRE_ELEVATION: undefined as string | undefined,
+  ELEVATION_TTL_MINUTES: undefined as string | undefined,
+  ELEVATION_SESSION_HOURS: undefined as string | undefined,
+  WRANGLER_LOCAL: undefined as string | undefined,
 }
 
 /** Load the canonical Postgres schema into the test PGlite (call once, beforeAll). */

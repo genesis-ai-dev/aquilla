@@ -13,6 +13,20 @@ import { MockLLMServer } from "../e2e/helpers/mock-llm-server"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(__dirname, "..")
+
+// Shard support. E2E_SHARD="i/N" boots an isolated stack for shard i of N so
+// several stacks can run concurrently — each gets its own ports, Postgres DB,
+// wrangler state, build dir, and Playwright --shard slice. Unset (or N=1) keeps
+// the original single-stack behavior byte-for-byte. K is the 0-based offset used
+// to fan out ports/names. See scripts/e2e-shard.ts for the parallel runner.
+const SHARD_MATCH = /^(\d+)\/(\d+)$/.exec(process.env.E2E_SHARD ?? "")
+const SHARD_INDEX = SHARD_MATCH ? parseInt(SHARD_MATCH[1], 10) : 1
+const SHARD_TOTAL = SHARD_MATCH ? parseInt(SHARD_MATCH[2], 10) : 1
+const SHARDED = SHARD_TOTAL > 1
+const K = SHARD_INDEX - 1
+const SUFFIX = SHARDED ? `-s${K}` : ""
+const TAG = SHARDED ? `[shard ${SHARD_INDEX}/${SHARD_TOTAL}] ` : ""
+
 // Identity is the in-repo auth-worker (aquilla-identity) — it replaced the
 // retired frontier-server and owns the full aquilla-db schema + migrations.
 // It also serves /__test__/reset (gated by WRANGLER_LOCAL) and /api/v1/auth/*,
@@ -22,16 +36,19 @@ const SYNC_WORKER_DIR = path.join(REPO_ROOT, "sync-worker")
 // Shared wrangler local state so auth-worker (writes users/orgs/projects) and
 // sync-worker (writes files/cells/events) see the same aquilla-db rows. Without
 // --persist-to each cwd gets its own isolated sqlite and the two drift apart.
-const PERSIST_DIR = path.join(REPO_ROOT, ".wrangler-e2e-state")
+// Per-shard so concurrent stacks don't trample each other's DO storage.
+const PERSIST_DIR = path.join(REPO_ROOT, `.wrangler-e2e-state${SUFFIX}`)
 // Local Postgres used as the Hyperdrive target for e2e. Wrangler reads
 // WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_<BINDING> to override the
 // Hyperdrive connection without needing a deployed Hyperdrive ID. The
 // aquilla_e2e database is recreated from db/postgres/schema.sql on each run.
+// Each shard gets its own database (aquilla_e2e_s<K>) for full isolation.
 //
 // The reset prefers the Docker container `aquilla-dev-pg` (the canonical
 // CI/dev setup); when Docker isn't available it falls back to a local `psql`
 // against the same localhost:5432 endpoint (e.g. a Homebrew Postgres dev box).
-const E2E_PG_URL = "postgresql://aquilla:aquilla@localhost:5432/aquilla_e2e"
+const E2E_PG_DB = `aquilla_e2e${SHARDED ? `_s${K}` : ""}`
+const E2E_PG_URL = `postgresql://aquilla:aquilla@localhost:5432/${E2E_PG_DB}`
 const PG_CONTAINER = "aquilla-dev-pg"
 // Admin connection used only by the Docker-less reset fallback. Drop/recreate
 // needs CREATE DATABASE, which the `aquilla` login role lacks, so we default to
@@ -39,12 +56,16 @@ const PG_CONTAINER = "aquilla-dev-pg"
 // Override with E2E_PG_ADMIN_URL for non-standard local setups.
 const E2E_PG_ADMIN_URL = process.env.E2E_PG_ADMIN_URL || "postgresql:///postgres"
 const HYPERDRIVE_ENV = { WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: E2E_PG_URL }
-const IDENTITY_PORT = 8787
-const SYNC_WORKER_PORT = 8788
-const VITE_PORT = 5173
+// Ports fan out by K*100 so shards never collide (8787/8788, 8887/8888, …).
+const IDENTITY_PORT = 8787 + K * 100
+const SYNC_WORKER_PORT = 8788 + K * 100
+const VITE_PORT = 5173 + K * 100
+// Per-shard build output so concurrent `vite build`s don't overwrite one dist.
+// Single-stack keeps the default `dist` so nothing else changes.
+const DIST_DIR = SHARDED ? `dist-e2e-s${K}` : "dist"
 
 const VERBOSE = process.env.E2E_VERBOSE === "1" || process.argv.includes("--verbose")
-const LOG_DIR = path.join(REPO_ROOT, ".e2e-logs")
+const LOG_DIR = path.join(REPO_ROOT, `.e2e-logs${SUFFIX}`)
 
 const cleanup: Array<() => Promise<void>> = []
 const logFiles: Record<string, string> = {}
@@ -56,7 +77,7 @@ async function shutdown(code = 0): Promise<never> {
     process.exit(code)
   }
   shuttingDown = true
-  console.log("\n[e2e-up] shutting down…")
+  console.log(`\n${TAG}[e2e-up] shutting down…`)
   // Iterate a copy so the array isn't mutated.
   for (const fn of [...cleanup].reverse()) {
     try { await fn() } catch (e) { console.error(e) }
@@ -82,17 +103,19 @@ async function waitForUrl(url: string, timeoutMs: number): Promise<void> {
 }
 
 /** Run a command and either inherit stdio (verbose) or pipe to /dev/null
- * (quiet). Output goes to the log file in quiet mode if `logLabel` is set. */
+ * (quiet). Output goes to the log file in quiet mode if `logLabel` is set.
+ * `env` overrides are merged onto process.env for the child. */
 function runOnce(
   cmd: string,
   args: string[],
   cwd: string,
   logLabel?: string,
+  env?: NodeJS.ProcessEnv,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const stdio: ("inherit" | "ignore" | "pipe")[] =
       VERBOSE ? ["inherit", "inherit", "inherit"] : ["ignore", "pipe", "pipe"]
-    const c = spawn(cmd, args, { cwd, stdio })
+    const c = spawn(cmd, args, { cwd, stdio, env: env ? { ...process.env, ...env } : process.env })
     if (!VERBOSE && logLabel && logFiles[logLabel]) {
       const stream = openLogFile(logFiles[logLabel])
       c.stdout?.pipe(stream, { end: false })
@@ -116,7 +139,7 @@ function dumpLogs(tailLines = 80): void {
     // Cap line length — the build log contains minified asset content with
     // multi-megabyte single lines that would otherwise flood the terminal.
     const tail = lines.slice(-tailLines).map((l) => (l.length > 500 ? l.slice(0, 500) + " …[truncated]" : l))
-    process.stderr.write(`\n──── ${label} (last ${tail.length} lines of ${file}) ────\n`)
+    process.stderr.write(`\n──── ${TAG}${label} (last ${tail.length} lines of ${file}) ────\n`)
     process.stderr.write(tail.join("\n") + "\n")
   }
 }
@@ -128,7 +151,7 @@ async function freePort(port: number): Promise<void> {
   const pidsRaw = spawnSync("lsof", ["-ti", `:${port}`], { encoding: "utf8" }).stdout || ""
   const pids = pidsRaw.split("\n").filter(Boolean)
   if (pids.length === 0) return
-  console.log(`[e2e-up] freeing port ${port} (held by ${pids.join(", ")})…`)
+  console.log(`${TAG}[e2e-up] freeing port ${port} (held by ${pids.join(", ")})…`)
   for (const pid of pids) {
     try { process.kill(Number(pid), "SIGTERM") } catch {}
   }
@@ -147,11 +170,11 @@ function ensureDevVars(appDir: string, label: string): void {
   const source = path.join(appDir, ".dev.vars.example")
   if (existsSync(target)) return
   if (!existsSync(source)) {
-    console.warn(`[e2e-up] ${label}: no .dev.vars and no .dev.vars.example — the worker may fail to boot.`)
+    console.warn(`${TAG}[e2e-up] ${label}: no .dev.vars and no .dev.vars.example — the worker may fail to boot.`)
     return
   }
   copyFileSync(source, target)
-  console.log(`[e2e-up] ${label}: created .dev.vars from .dev.vars.example`)
+  console.log(`${TAG}[e2e-up] ${label}: created .dev.vars from .dev.vars.example`)
 }
 
 /** True when the Docker-managed Postgres container is reachable. False when
@@ -185,21 +208,21 @@ function resetE2ePostgres(): void {
     const dropResult = spawnSync(
       "docker",
       ["exec", PG_CONTAINER, "psql", "-v", "ON_ERROR_STOP=1", "-U", "aquilla", "-d", "postgres",
-        "-c", "DROP DATABASE IF EXISTS aquilla_e2e WITH (FORCE)", "-c", "CREATE DATABASE aquilla_e2e"],
+        "-c", `DROP DATABASE IF EXISTS ${E2E_PG_DB} WITH (FORCE)`, "-c", `CREATE DATABASE ${E2E_PG_DB}`],
       { stdio: ["ignore", "inherit", "inherit"] },
     )
     if (dropResult.status !== 0) {
-      console.error(`[e2e-up] aquilla_e2e drop/recreate failed (psql exit ${dropResult.status}) — refusing to run against a stale schema.`)
+      console.error(`${TAG}[e2e-up] ${E2E_PG_DB} drop/recreate failed (psql exit ${dropResult.status}) — refusing to run against a stale schema.`)
       process.exit(1)
     }
     // Pipe schema.sql into psql via stdin — no shell interpolation needed.
     const psqlResult = spawnSync(
       "docker",
-      ["exec", "-i", PG_CONTAINER, "psql", "-v", "ON_ERROR_STOP=1", "-U", "aquilla", "-d", "aquilla_e2e"],
+      ["exec", "-i", PG_CONTAINER, "psql", "-v", "ON_ERROR_STOP=1", "-U", "aquilla", "-d", E2E_PG_DB],
       { input: schemaSql, stdio: ["pipe", "pipe", "pipe"] },
     )
     if (psqlResult.status !== 0) {
-      console.error("[e2e-up] schema apply failed:", psqlResult.stderr?.toString())
+      console.error(`${TAG}[e2e-up] schema apply failed:`, psqlResult.stderr?.toString())
       process.exit(1)
     }
     return
@@ -208,25 +231,25 @@ function resetE2ePostgres(): void {
   // Docker-less fallback: use a local psql (e.g. Homebrew Postgres on :5432).
   if (!hasLocalPsql()) {
     console.error(
-      "[e2e-up] no Docker container 'aquilla-dev-pg' and no local 'psql' on PATH.\n" +
+      `${TAG}[e2e-up] no Docker container 'aquilla-dev-pg' and no local 'psql' on PATH.\n` +
         "  Start Docker (with the aquilla-dev-pg container) or install a local\n" +
         "  Postgres reachable at localhost:5432 with role 'aquilla'. See e2e/README.md.",
     )
     process.exit(1)
   }
-  console.log("[e2e-up] Docker unavailable — resetting via local psql (localhost:5432).")
+  console.log(`${TAG}[e2e-up] Docker unavailable — resetting via local psql (localhost:5432).`)
   // Drop/recreate needs CREATE DATABASE (the `aquilla` login role lacks it), so
   // run it through the admin connection and hand ownership to `aquilla` so the
   // schema apply (as aquilla) can create objects in the public schema.
   const dropResult = spawnSync(
     "psql",
     [E2E_PG_ADMIN_URL, "-v", "ON_ERROR_STOP=1",
-      "-c", "DROP DATABASE IF EXISTS aquilla_e2e WITH (FORCE)",
-      "-c", "CREATE DATABASE aquilla_e2e OWNER aquilla"],
+      "-c", `DROP DATABASE IF EXISTS ${E2E_PG_DB} WITH (FORCE)`,
+      "-c", `CREATE DATABASE ${E2E_PG_DB} OWNER aquilla`],
     { stdio: ["ignore", "inherit", "inherit"] },
   )
   if (dropResult.status !== 0) {
-    console.error(`[e2e-up] aquilla_e2e drop/recreate failed (psql exit ${dropResult.status}) — refusing to run against a stale schema.`)
+    console.error(`${TAG}[e2e-up] ${E2E_PG_DB} drop/recreate failed (psql exit ${dropResult.status}) — refusing to run against a stale schema.`)
     process.exit(1)
   }
   const psqlResult = spawnSync(
@@ -235,19 +258,32 @@ function resetE2ePostgres(): void {
     { input: schemaSql, stdio: ["pipe", "pipe", "pipe"] },
   )
   if (psqlResult.status !== 0) {
-    console.error("[e2e-up] schema apply failed:", psqlResult.stderr?.toString())
+    console.error(`${TAG}[e2e-up] schema apply failed:`, psqlResult.stderr?.toString())
     process.exit(1)
   }
 }
 
 async function main(): Promise<void> {
   if (!existsSync(AUTH_WORKER_DIR)) {
-    console.error(`[e2e-up] auth-worker not found at ${AUTH_WORKER_DIR}`)
+    console.error(`${TAG}[e2e-up] auth-worker not found at ${AUTH_WORKER_DIR}`)
     process.exit(1)
   }
   if (!existsSync(SYNC_WORKER_DIR)) {
-    console.error(`[e2e-up] sync-worker not found at ${SYNC_WORKER_DIR}`)
+    console.error(`${TAG}[e2e-up] sync-worker not found at ${SYNC_WORKER_DIR}`)
     process.exit(1)
+  }
+  if (SHARDED) {
+    console.log(`${TAG}[e2e-up] isolated stack: identity :${IDENTITY_PORT} · sync :${SYNC_WORKER_PORT} · vite :${VITE_PORT} · db ${E2E_PG_DB}`)
+  }
+
+  // The per-shard backend URLs the browser app must be built against, and the
+  // node-side helpers (seed.ts, auth.ts) read. Mock LLM URL is filled in once
+  // the server picks a port below. Setting these on process.env makes the
+  // `vite build` child bake them in (Vite inlines VITE_*-prefixed process env).
+  const browserEnv: Record<string, string> = {
+    VITE_AUTH_BASE: `http://127.0.0.1:${IDENTITY_PORT}`,
+    VITE_FRONTIER_BASE: `http://127.0.0.1:${IDENTITY_PORT}`,
+    VITE_SYNC_WORKER_HOST: `127.0.0.1:${SYNC_WORKER_PORT}`,
   }
 
   // 0. Free our managed ports — survives stale processes from a prior aborted run.
@@ -269,7 +305,7 @@ async function main(): Promise<void> {
   ensureDevVars(SYNC_WORKER_DIR, "sync")
 
   // Reset wrangler local D1 state (Durable Object storage, KV caches, etc.)
-  console.log(`[boot 1/8] resetting wrangler local state… (logs: ${LOG_DIR}/)`)
+  console.log(`${TAG}[boot 1/8] resetting wrangler local state… (logs: ${LOG_DIR}/)`)
   rmSync(PERSIST_DIR, { recursive: true, force: true })
   mkdirSync(PERSIST_DIR, { recursive: true })
 
@@ -277,7 +313,7 @@ async function main(): Promise<void> {
   //    schema. Workers use Hyperdrive → Postgres (not D1 SQLite) for all auth
   //    and sync queries, so we apply db/postgres/schema.sql here instead of
   //    wrangler d1 migrations apply.
-  console.log("[boot 2/8] resetting aquilla_e2e postgres schema…")
+  console.log(`${TAG}[boot 2/8] resetting ${E2E_PG_DB} postgres schema…`)
   resetE2ePostgres()
 
   // 3. Boot identity (auth-worker). WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE
@@ -285,7 +321,7 @@ async function main(): Promise<void> {
   // SQL (Postgres syntax) executes correctly without a deployed Hyperdrive.
   // --var WRANGLER_LOCAL:1 unlocks /__test__/reset (process env alone doesn't
   // reach c.env bindings).
-  console.log(`[boot 3/8] starting identity (auth-worker) on :${IDENTITY_PORT}…`)
+  console.log(`${TAG}[boot 3/8] starting identity (auth-worker) on :${IDENTITY_PORT}…`)
   const identity: SpawnedWorker = await spawnWranglerDev({
     cwd: AUTH_WORKER_DIR,
     port: IDENTITY_PORT,
@@ -305,7 +341,7 @@ async function main(): Promise<void> {
   cleanup.push(() => identity.kill())
 
   // 4. Boot sync-worker. Same Hyperdrive override so sync SQL also hits Postgres.
-  console.log(`[boot 4/8] starting sync-worker on :${SYNC_WORKER_PORT}…`)
+  console.log(`${TAG}[boot 4/8] starting sync-worker on :${SYNC_WORKER_PORT}…`)
   const sync: SpawnedWorker = await spawnWranglerDev({
     cwd: SYNC_WORKER_DIR,
     port: SYNC_WORKER_PORT,
@@ -317,28 +353,34 @@ async function main(): Promise<void> {
   })
   cleanup.push(() => sync.kill())
 
-  // 5. Boot mock LLM
-  console.log("[boot 5/8] starting mock LLM…")
+  // 5. Boot mock LLM (binds to an OS-assigned free port, so shards never clash).
+  console.log(`${TAG}[boot 5/8] starting mock LLM…`)
   const mockLLM = new MockLLMServer()
   await mockLLM.start()
   cleanup.push(async () => mockLLM.stop())
+  browserEnv.VITE_LLM_BASE_URL = mockLLM.baseUrl
 
   // 6. Write .env.test.local. The browser app reads VITE_AUTH_BASE for auth +
   // project data (auth.ts has NO VITE_FRONTIER_BASE fallback), so it must point
   // at the local identity worker or the app calls prod. VITE_FRONTIER_BASE is
   // kept for the completion-service mock-LLM fallback and the e2e helpers.
-  const envFile = path.join(REPO_ROOT, ".env.test.local")
-  writeFileSync(
-    envFile,
-    [
-      `VITE_AUTH_BASE=http://127.0.0.1:${IDENTITY_PORT}`,
-      `VITE_FRONTIER_BASE=http://127.0.0.1:${IDENTITY_PORT}`,
-      `VITE_SYNC_WORKER_HOST=127.0.0.1:${SYNC_WORKER_PORT}`,
-      `VITE_LLM_BASE_URL=${mockLLM.baseUrl}`,
-      "",
-    ].join("\n"),
-  )
-  cleanup.push(async () => rmSync(envFile, { force: true }))
+  //
+  // Skipped when sharding: concurrent stacks would race on this one shared file,
+  // and the build picks the URLs up from process.env (browserEnv) instead.
+  if (!SHARDED) {
+    const envFile = path.join(REPO_ROOT, ".env.test.local")
+    writeFileSync(
+      envFile,
+      [
+        `VITE_AUTH_BASE=${browserEnv.VITE_AUTH_BASE}`,
+        `VITE_FRONTIER_BASE=${browserEnv.VITE_FRONTIER_BASE}`,
+        `VITE_SYNC_WORKER_HOST=${browserEnv.VITE_SYNC_WORKER_HOST}`,
+        `VITE_LLM_BASE_URL=${browserEnv.VITE_LLM_BASE_URL}`,
+        "",
+      ].join("\n"),
+    )
+    cleanup.push(async () => rmSync(envFile, { force: true }))
+  }
 
   // 7. Build once, then serve via `vite preview` (static).
   //
@@ -347,18 +389,20 @@ async function main(): Promise<void> {
   // crater CPU/RAM under E2E load. A pre-built dist is served by a plain
   // static server with ~0 ongoing CPU and ~50 MB RAM vs. several hundred MB.
   //
-  // The build cost (~15-30s) pays for itself after the second spec.
-  console.log("[boot 7/8] building app for test mode (one-time, ~30s)…")
-  await runOnce("npx", ["vite", "build", "--mode", "test"], REPO_ROOT, "build")
+  // The build cost (~15-30s) pays for itself after the second spec. The backend
+  // URLs are passed via env so each shard bakes its own (VITE_* process env is
+  // inlined by Vite at build time and takes priority over .env files).
+  console.log(`${TAG}[boot 7/8] building app for test mode (one-time, ~30s)…`)
+  await runOnce("npx", ["vite", "build", "--mode", "test", "--outDir", DIST_DIR], REPO_ROOT, "build", browserEnv)
 
-  console.log(`[boot 8/8] starting Vite preview on :${VITE_PORT}…`)
+  console.log(`${TAG}[boot 8/8] starting Vite preview on :${VITE_PORT}…`)
   const vite = spawn(
     "npx",
-    ["vite", "preview", "--port", String(VITE_PORT), "--strictPort", "--mode", "test"],
+    ["vite", "preview", "--port", String(VITE_PORT), "--strictPort", "--mode", "test", "--outDir", DIST_DIR],
     {
       cwd: REPO_ROOT,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env },
+      env: { ...process.env, ...browserEnv },
     },
   )
   attachOutput(vite, "vite", openLogFile(logFiles.vite), VERBOSE)
@@ -366,7 +410,7 @@ async function main(): Promise<void> {
 
   await waitForUrl(`http://127.0.0.1:${VITE_PORT}/`, 30_000)
 
-  console.log("[boot ✓] all services up, handing off to Playwright")
+  console.log(`${TAG}[boot ✓] all services up, handing off to Playwright`)
   console.log("")
 
   // 8. Hand off to Playwright. Forward extra CLI args after `--`.
@@ -386,36 +430,41 @@ async function main(): Promise<void> {
     playwrightArgs.push("--reporter=line")
   }
   playwrightArgs.push(...userArgs)
-  console.log(`[run] npx ${playwrightArgs.join(" ")}`)
+  // When sharding, run this stack's slice and isolate artifacts so concurrent
+  // shards don't fight over test-results/. Honor a user-supplied --shard.
+  if (SHARDED) {
+    const hasShard = userArgs.some((a) => a === "--shard" || a.startsWith("--shard="))
+    if (!hasShard) playwrightArgs.push(`--shard=${SHARD_INDEX}/${SHARD_TOTAL}`)
+    playwrightArgs.push(`--output=test-results${SUFFIX}`)
+  }
+  console.log(`${TAG}[run] npx ${playwrightArgs.join(" ")}`)
   // Pass the local backend URLs through to the Playwright child so test
   // helpers (seed.ts, auth.ts, AI completion spec) can read them via
-  // process.env. .env.test.local handles the Vite/browser side; this
-  // handles the test-runner/node side.
+  // process.env, and E2E_BASE_URL so the config points the browser at this
+  // shard's Vite preview (the config defaults to :5173 otherwise).
   const pw = spawn("npx", playwrightArgs, {
     cwd: REPO_ROOT,
     stdio: "inherit",
     env: {
       ...process.env,
-      VITE_AUTH_BASE: `http://127.0.0.1:${IDENTITY_PORT}`,
-      VITE_FRONTIER_BASE: `http://127.0.0.1:${IDENTITY_PORT}`,
-      VITE_SYNC_WORKER_HOST: `127.0.0.1:${SYNC_WORKER_PORT}`,
-      VITE_LLM_BASE_URL: mockLLM.baseUrl,
+      ...browserEnv,
+      E2E_BASE_URL: `http://127.0.0.1:${VITE_PORT}`,
     },
   })
   pw.on("exit", (code) => {
     if (code !== 0 && !VERBOSE) {
       // Test failed and worker logs are in files. Tail them so the dev
       // sees what went wrong without having to know the file paths.
-      console.log(`\n[fail] Playwright exited ${code}. Tailing worker logs:`)
+      console.log(`\n${TAG}[fail] Playwright exited ${code}. Tailing worker logs:`)
       dumpLogs()
-      console.log(`\n[hint] Full logs: ${LOG_DIR}/`)
-      console.log(`[hint] Re-run with --verbose to stream live: npm run test:e2e -- --verbose`)
+      console.log(`\n${TAG}[hint] Full logs: ${LOG_DIR}/`)
+      console.log(`${TAG}[hint] Re-run with --verbose to stream live: npm run test:e2e -- --verbose`)
     }
     void shutdown(code ?? 1)
   })
 }
 
 main().catch((e) => {
-  console.error("[e2e-up] fatal:", e)
+  console.error(`${TAG}[e2e-up] fatal:`, e)
   void shutdown(1)
 })

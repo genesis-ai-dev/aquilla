@@ -55,10 +55,6 @@ import { sendProjectInviteEmail } from "../services/email"
 
 const projects = new Hono<AuthHonoEnv>()
 
-// Default invite lifetime — 30 days. Mirrors the open-link UX of the old
-// share-token flow and gives recipients time to redeem on a fresh laptop.
-const DEFAULT_INVITE_TTL_MS = 30 * 24 * 60 * 60 * 1000
-
 function roleNameFor(level: number): string {
   return ROLE_NAMES[level] ?? `level_${level}`
 }

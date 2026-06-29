@@ -54,7 +54,7 @@ const FIELD_IDS = new Set(BRIEF_FIELDS.map((f) => f.id))
 
 /** Parse the extractor response into a sparse, validated parameters map. */
 export function parseExtractedParameters(raw: string): Record<string, string> {
-  let cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "")
+  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "")
   const start = cleaned.indexOf("{")
   const end = cleaned.lastIndexOf("}")
   if (start === -1 || end === -1 || end < start) return {}

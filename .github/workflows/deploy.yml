@@ -140,13 +140,10 @@ jobs:
         id: deploy_preview
         if: steps.decide.outputs.deploy == 'true' && github.event_name == 'pull_request'
         uses: cloudflare/wrangler-action@v3
-        env:
-          PR_NUMBER: ${{ github.event.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
-          command: versions upload --preview-alias "pr-${PR_NUMBER}" --message "PR ${PR_NUMBER} @ ${HEAD_SHA}"
+          command: versions upload --preview-alias "pr-${{ github.event.number }}" --message "PR ${{ github.event.number }} @ ${{ github.event.pull_request.head.sha }}"
 
       - name: Comment preview URL on PR
         if: github.event_name == 'pull_request' && steps.decide.outputs.deploy == 'true'

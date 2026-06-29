@@ -64,9 +64,9 @@ test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice,
   await expect(expandBtn).toBeVisible({ timeout: 8_000 })
   await expandBtn.click()
 
-  // Switch to BT tab.
-  const btTab = bob.getByRole("button", { name: /^BT$/i })
-    .or(bob.getByRole("tab", { name: /^BT$/i }))
+  // Switch to the Back-translation tab (formerly labelled "BT").
+  const btTab = bob.getByRole("button", { name: /back-translation/i })
+    .or(bob.getByRole("tab", { name: /back-translation/i }))
   await expect(btTab.first()).toBeVisible({ timeout: 5_000 })
   await btTab.first().click()
 
@@ -75,7 +75,7 @@ test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice,
   // Alice's auto-BT on first edit may not persist server-side, so generate one
   // as bob — the statistical glosser is client-side and the Generate button is
   // role-independent; only *editing* the BT is Contributor+.
-  const btPanel = bob.getByRole("tabpanel", { name: "BT" })
+  const btPanel = bob.getByRole("tabpanel", { name: /back-translation/i })
   const generateBtn = btPanel.getByRole("button", { name: /^(Generate|Generating…)$/ })
   const lockedEdit = btPanel.getByLabel("Contributor+ required to edit back-translations")
   await expect(generateBtn.or(lockedEdit).first()).toBeVisible({ timeout: 8_000 })

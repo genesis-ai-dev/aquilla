@@ -29,7 +29,11 @@ export class Dashboard {
     const source = opts.source ?? "en"
     const target = opts.target ?? "fr"
 
-    await this.page.getByRole("button", { name: /new project/i }).click()
+    // A freshly-reset org renders three "+ New Project" buttons on /projects:
+    // the page header, the empty-state "Create your first project" CTA, and the
+    // org setup checklist. They all open the same create dialog, so scope to the
+    // first (the header) to avoid a strict-mode violation.
+    await this.page.getByRole("button", { name: /new project/i }).first().click()
     // Exact match: the AD-9 "Advanced: project shape" radios carry long
     // descriptions (e.g. the "Source-only" option mentions "target language"),
     // so a substring getByLabel would resolve to multiple elements.

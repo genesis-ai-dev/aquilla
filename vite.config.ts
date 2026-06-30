@@ -148,6 +148,11 @@ export default defineConfig(({ mode }) => ({
         "case-study": path.resolve(__dirname, "case-study.html"),
       },
       output: {
+        // Keep source module names out of emitted chunk URLs. Brave/EasyList can
+        // block app-critical chunks whose filenames look like tracking scripts,
+        // which blanks the SPA before React mounts. Entry files keep their
+        // configured page names.
+        chunkFileNames: "assets/app-chunk-[hash].js",
         manualChunks: (id: string) => {
           if (!id.includes("node_modules")) return
           if (id.includes("/yjs/") || id.includes("/y-indexeddb/") || id.includes("/y-partyserver/") || id.includes("/partyserver/")) return "yjs"

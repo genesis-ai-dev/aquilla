@@ -15,7 +15,7 @@ import posthog from "@/lib/posthog"
 import {
   ONBOARDING_STEP_VIEWED,
   ONBOARDING_RETURNING_USER_SKIP,
-} from "@/lib/analytics-events"
+} from "@/lib/event-names"
 
 // Human-readable label for each wizard step number.
 const STEP_LABELS: Record<number, string> = {

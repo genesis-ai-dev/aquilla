@@ -6,7 +6,7 @@ import { createOrg, createOrgInvite } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrg } from "@/context/OrgContext"
 import posthog from "@/lib/posthog"
-import { ORG_CREATED, INVITE_SENT } from "@/lib/analytics-events"
+import { ORG_CREATED, INVITE_SENT } from "@/lib/event-names"
 
 /**
  * Team-onboarding step: name the organization and (optionally) invite the first

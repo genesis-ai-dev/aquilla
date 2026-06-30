@@ -73,7 +73,7 @@ import {
   IMPORT_COLLISION_DETECTED,
   IMPORT_COLLISION_SKIPPED,
   IMPORT_COLLISION_DUPLICATED,
-} from "@/lib/analytics-events"
+} from "@/lib/event-names"
 import { SpreadsheetImportPanel } from "@/components/import/SpreadsheetImportPanel"
 import { LabelImportPanel } from "@/components/import/LabelImportPanel"
 import { PairedImportPanel } from "@/components/import/PairedImportPanel"

@@ -59,21 +59,38 @@ export interface Env {
   ENVIRONMENT?: string
 
   /**
-   * Comma-separated allowlist of usernames granted platform-operator
+   * Comma-separated allowlist of ACCOUNT EMAILS granted platform-operator
    * (site-wide admin) access — see middleware/platform-admin.ts and
-   * routes/admin.ts. This is a SEPARATE axis from the org-scoped role
-   * ladder (ROLE below): a platform admin can read across every org/user,
-   * which the 100–700 levels never confer. Kept in deploy config rather
-   * than a DB column so god-mode can't be granted by a stray SQL write;
-   * empty/unset means no platform admins exist. Whitespace around names is
-   * trimmed; matching is exact and case-sensitive.
+   * routes/admin.ts. Identity is by email; usernames don't matter. This is a
+   * SEPARATE axis from the org-scoped role ladder (ROLE below): a platform admin
+   * can read across every org/user, which the 100–700 levels never confer. Kept
+   * in deploy config rather than a DB column so god-mode can't be granted by a
+   * stray SQL write; empty/unset means no platform admins exist. Emails are
+   * trimmed + lowercased for matching.
    */
-  PLATFORM_ADMINS?: string
+  ADMIN_EMAILS?: string
+
+  /**
+   * Step-up "sudo" switch (middleware/platform-admin.ts). When "true", the
+   * `/api/v2/admin/*` console additionally requires a fresh emailed 6-digit code
+   * (→ a ~6h elevated session) before any data/config route. Bypassed under
+   * WRANGLER_LOCAL=1 (local dev-stack / e2e). Independent of WHO is an admin
+   * (ADMIN_EMAILS) — that's always enforced; this only governs the extra step-up.
+   * Set it "true" in production/staging.
+   */
+  ADMIN_REQUIRE_ELEVATION?: string
+  /** Minutes a step-up code is valid for entry. Default: 10. */
+  ELEVATION_TTL_MINUTES?: string
+  /** Hours an elevated admin session lasts after a successful verify. Default: 6. */
+  ELEVATION_SESSION_HOURS?: string
 
   // Chat-completion proxy (folded in from the former aquilla-chat-worker
   // on 2026-05-26 — see routes/chat.ts).
   OPENROUTER_API_KEY?: string
   DEFAULT_LLM_MODEL?: string
+  /** Fallback model for the translation agent (routes/agent.ts) when
+   *  platform_settings.agentModel is unset. Default: anthropic/claude-haiku-4-5. */
+  AGENT_MODEL_DEFAULT?: string
   /** Dev/e2e only: override the OpenRouter API base (e.g. the scripted mock
    *  in scripts/mock-openrouter.ts). Never set in prod. */
   OPENROUTER_BASE_URL?: string
@@ -205,7 +222,7 @@ export interface SyncTokenClaims {
  * show every contributing path should call the resolver's `breakdown`
  * helper instead of reading `source` alone.
  *
- * `"platform"` is the PLATFORM_ADMINS allowlist path (owner-level on every
+ * `"platform"` is the ADMIN_EMAILS allowlist path (owner-level on every
  * project, see middleware/platform-admin.ts). Lowest tie priority, so a
  * genuine grant keeps attribution when the admin is also a real member.
  */

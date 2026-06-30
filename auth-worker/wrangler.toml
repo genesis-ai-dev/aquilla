@@ -104,10 +104,14 @@ BASE_URL = "https://aquilla.app"
 SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "production"
-# Comma-separated username allowlist for the site-wide admin surface
-# (/api/v2/admin/*). Separate axis from the org role ladder — see
-# src/middleware/platform-admin.ts.
-PLATFORM_ADMINS = "daniel2,dadukhankevin,ryder,ryder-aquilla,ryder-aquilla-2,ryder-aquilla-3,matthew_test,sam-test,luke"
+# Site-wide admin surface (/api/v2/admin/*) identity, by ACCOUNT EMAIL — usernames
+# don't matter. Separate axis from the org role ladder; see platform-admin.ts.
+# ADMIN_REQUIRE_ELEVATION="true" adds the emailed 6-digit step-up code (→ 6h
+# session); bypassed under WRANGLER_LOCAL=1 (local dev-stack / e2e) so the local
+# console stays open. NOTE: deployed via `wrangler deploy` (CI main) which reads
+# THIS top-level block, so it must carry both to harden prod.
+ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com"
+ADMIN_REQUIRE_ELEVATION = "true"
 
 # ---------------------------------------------------------------------------
 # Production environment — owns routes on api.aquilla.app for the identity
@@ -143,7 +147,8 @@ BASE_URL = "https://aquilla.app"
 SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "production"
-PLATFORM_ADMINS = "daniel2,dadukhankevin,ryder,ryder-aquilla,ryder-aquilla-2,ryder-aquilla-3,matthew_test,sam-test,luke"
+ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com"
+ADMIN_REQUIRE_ELEVATION = "true"
 
 # ---------------------------------------------------------------------------
 # Development environment — for the dev branch, deployed to api.dev.aquilla.app
@@ -186,7 +191,8 @@ BASE_URL = "https://dev.aquilla.app"
 SYNC_WORKER_URL = "https://api.dev.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "development"
-PLATFORM_ADMINS = "daniel2,dadukhankevin,ryder,ryder-aquilla,ryder-aquilla-2,ryder-aquilla-3"
+ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com"
+ADMIN_REQUIRE_ELEVATION = "true"
 
 # ---------------------------------------------------------------------------
 # Staging environment — for the staging branch, deployed to api.staging.aquilla.app
@@ -231,7 +237,8 @@ BASE_URL = "https://dev.aquilla.app"
 SYNC_WORKER_URL = "https://api.dev.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "staging"
-PLATFORM_ADMINS = "daniel2,dadukhankevin,ryder,ryder-aquilla,ryder-aquilla-2,ryder-aquilla-3"
+ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com"
+ADMIN_REQUIRE_ELEVATION = "true"
 
 # ---------------------------------------------------------------------------
 # e2e test environment. Local e2e (scripts/e2e-up.ts) runs `wrangler dev` on
@@ -255,4 +262,4 @@ EMAIL_FROM = "noreply@local.test"
 BASE_URL = "http://127.0.0.1:5173"
 SYNC_WORKER_URL = "http://127.0.0.1:8788"
 ENVIRONMENT = "development"
-PLATFORM_ADMINS = "dev"
+ADMIN_EMAILS = "alice@example.test"

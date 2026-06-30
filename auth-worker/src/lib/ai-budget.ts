@@ -25,6 +25,7 @@
 
 // AquillaDb is a global type (declared in ../aquilla-db.d.ts).
 import type { Env } from "../types"
+import { getPlatformSettingsCached, type PlatformSettings } from "./platform-settings"
 
 // ── Allowlist ──────────────────────────────────────────────────────────────────
 
@@ -52,7 +53,15 @@ const DEFAULT_ALLOWED_MODELS = [
   "free-tier",
 ]
 
-export function getAllowedModels(env: Env): Set<string> {
+/**
+ * Effective allowlist: admin-set platform_settings.allowedModels wins, then the
+ * AI_ALLOWED_MODELS env var, then the hardcoded default. `settings` is passed in
+ * (already loaded) so this stays sync + DB-free for testing.
+ */
+export function getAllowedModels(env: Env, settings?: PlatformSettings): Set<string> {
+  if (settings?.allowedModels && settings.allowedModels.length > 0) {
+    return new Set(settings.allowedModels)
+  }
   const raw = env.AI_ALLOWED_MODELS?.trim()
   if (!raw) return new Set(DEFAULT_ALLOWED_MODELS)
   return new Set(raw.split(",").map((m) => m.trim()).filter(Boolean))
@@ -80,10 +89,12 @@ export async function recordAndCheckBudget(
   db: AquillaDb,
   userId: number,
   env: Env,
+  settings?: PlatformSettings,
 ): Promise<BudgetResult> {
   const today = utcDateKey()
-  const userLimit = Number(env.AI_USER_DAILY_REQUEST_LIMIT ?? 500)
-  const globalLimit = Number(env.AI_GLOBAL_DAILY_REQUEST_LIMIT ?? 5000)
+  // admin-set platform_settings wins over the env var, which wins over the default.
+  const userLimit = settings?.aiUserDailyLimit ?? Number(env.AI_USER_DAILY_REQUEST_LIMIT ?? 500)
+  const globalLimit = settings?.aiGlobalDailyLimit ?? Number(env.AI_GLOBAL_DAILY_REQUEST_LIMIT ?? 5000)
 
   // Upsert user counter.
   const userRow = await db
@@ -152,8 +163,11 @@ export async function runAiGuard(
   db: AquillaDb,
   env: Env,
 ): Promise<GuardOutcome> {
+  // Load global overrides once; the cache keeps this off the per-request DB path.
+  const settings = await getPlatformSettingsCached(env)
+
   // 1. Allowlist (always enforced).
-  const allowedModels = getAllowedModels(env)
+  const allowedModels = getAllowedModels(env, settings)
   const modelCheck = checkModelAllowed(model, allowedModels)
   if (!modelCheck.allowed) {
     return {
@@ -166,14 +180,14 @@ export async function runAiGuard(
   // 2. Budget counters.
   let budget: BudgetResult
   try {
-    budget = await recordAndCheckBudget(db, userId, env)
+    budget = await recordAndCheckBudget(db, userId, env, settings)
   } catch (err) {
     // Never block a request due to a counter failure — degrade gracefully.
     console.error("[ai-budget] counter error (allowing through):", err)
     return { ok: true }
   }
 
-  const enforce = env.AI_BUDGET_ENFORCE === "true"
+  const enforce = settings.aiBudgetEnforce ?? (env.AI_BUDGET_ENFORCE === "true")
 
   if (budget.globalOver) {
     console.warn(

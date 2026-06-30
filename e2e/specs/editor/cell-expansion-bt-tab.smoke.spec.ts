@@ -41,9 +41,9 @@ test("BT tab is accessible from cell expansion panel", async ({ alice }) => {
   await expect(expandBtn).toBeVisible({ timeout: 5_000 })
   await expandBtn.click()
 
-  // Switch to BT tab.
-  const btTab = alice.getByRole("button", { name: /^BT$/i })
-    .or(alice.getByRole("tab", { name: /^BT$/i }))
+  // Switch to the Back-translation tab (formerly labelled "BT").
+  const btTab = alice.getByRole("button", { name: /back-translation/i })
+    .or(alice.getByRole("tab", { name: /back-translation/i }))
   await expect(btTab.first()).toBeVisible({ timeout: 5_000 })
   await btTab.first().click()
 

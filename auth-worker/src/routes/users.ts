@@ -22,15 +22,17 @@ users.use("*", authMiddleware)
 /**
  * GET /api/v2/users/lookup?username=X
  *
- * Resolve a username to a public user record. Auth-gated; case-sensitive to
- * match existing auth behaviour. Used by the "Add member" UX.
+ * Resolve a username to a public user record. Auth-gated. Trimmed +
+ * case-insensitive (FRO-457) — matches lookupUserByUsername. Used by the
+ * "Add member" UX.
  */
 users.get("/lookup", async (c) => {
   const username = c.req.query("username")
-  if (!username || username.trim() === "") {
+  const trimmed = username?.trim() ?? ""
+  if (!trimmed) {
     return c.json({ error: "username query parameter is required" }, 400)
   }
-  const user = await lookupUserByUsername(c.env, username)
+  const user = await lookupUserByUsername(c.env, trimmed)
   if (!user) {
     return c.json({ error: "user not found" }, 404)
   }

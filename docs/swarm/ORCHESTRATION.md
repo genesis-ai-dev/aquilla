@@ -4,7 +4,7 @@
 
 # 🆕🆕🆕🆕🆕🆕🆕 CURRENT GOAL (2026-07-01) — Drain "Prototype Debugging" (Biblica demo bugs)
 
-> **This block is the ACTIVE goal.** Everything below (incl. the 2026-06-19 block) is reference-only from prior swarms.
+> **✅ CONVERGED 2026-07-01** — all 4 issues (FRO-455/457/458/460) Fixed + live-verified + promoted to local main `1bb9b6a5d` (ff-only, NOT pushed/deployed). See §M. (Was the ACTIVE goal.) Everything below (incl. the 2026-06-19 block) is reference-only from prior swarms.
 > Driver: user `/swarm`. Project: **Prototype Debugging** (`215cff7b-1a95-443d-9343-1f1528754462`), team FrontierR&D.
 > Scope = 4 Biblica-labelled issues from the 2026-06-30 Kilisusu demo call: FRO-455, FRO-457, FRO-458, FRO-460.
 > Base: main tip `77cd6abb7` (main is LIVE/moving — re-verify tip before every promotion). Integration branch: `swarm/proto-debug-integration` at `.worktrees/proto-debug-integration`.
@@ -33,7 +33,7 @@
 | A | FRO-455 Rules add-all | Med | 1 | `src/hooks/useRules.ts` (latestRulesRef accumulation), `src/hooks/useRules.test.ts` | `swarm/fro-455` | a53b2ee4 | **Fixed+RE-QA PASS** `fbd362c00` (AD-3 root cause; server proof 2→5 rules after reload) |
 | B | FRO-457 username-assign | Med | 1 | `auth-worker/src/services/user-lookup.ts`, `auth-worker/src/routes/users.ts` (+test) — client already trimmed | `swarm/fro-457` | aebd06ec | **Fixed** `4e28d7a47`, merged→int, UI-QA pending |
 | C | FRO-458 export scroll | Low | 1 | `src/components/ExportDialog.tsx` (+test) | `swarm/fro-458` | a78dcf9e | **Fixed** `4a1081d63`, merged→int, UI-QA pending |
-| D | FRO-460 Bible resources default | Low | 2 | `ProjectWorkspace.tsx` (auto-enable effect+hasFetched gate), `useProject.ts`, `ProjectSettings.tsx` (card+hint), `parsers/types.ts` | `swarm/fro-460` | a16ecacd | **Fixed** `d56776637`, merged→int; HIGH race fixed (hasFetched gate); focused live re-QA a39834a running |
+| D | FRO-460 Bible resources default | Low | 2 (REDESIGN) | `parsers/types.ts` (resolveBibleResourcesEnabled), `SearchDock`/`ProjectWorkspace.tsx`, `ProjectSettings.tsx`, `auth-worker/src/lib/aquifer/gate.ts` (files.kind scripture query), `sync/project-settings.ts` | `swarm/fro-460-derive` | aea69ff0 | **DERIVE-ON-READ** `c9e020096` (no write-on-load → race gone by construction); gate ✅ tsc/vitest 3225/auth 492/build; adversarial wf + independent live-QA running |
 
 Root-cause notes:
 - **FRO-455**: `useRules.ts:69` `addRule` — sequential `handleCommit` loop (`RuleSuggestFromEditsDialog.tsx:137-142`) calls `addRule` per accepted rule, but each call closes over render-time `project`, so appends clobber (only last persists). Fix: batch-append (single `patchProject`) or read fresh state per append. Contain to `useRules.ts` + dialog.
@@ -42,6 +42,8 @@ Root-cause notes:
 - **FRO-460**: default lives at `ProjectSettings.tsx:163/271` (`?? false`) + `useProject.ts:49`; server gate `auth-worker/src/lib/aquifer/gate.ts` (default off). Consumed at `SearchDockPanel.tsx:156`, agent schema-card. Needs design (brainstorming): default-on for scripture projects vs. surface toggle on Bible-file detection.
 
 ## §M Merge log
+- 2026-07-01 · **🎉 PROMOTED FRO-460 (derive-on-read) → local main** `c251b54f3`→`1bb9b6a5d` (ff-only; swarm docs stashed/restored around ff). Gate: root tsc ✅ · vitest 393/3226 ×2 ✅ · auth-worker tsc ✅ + 492 ✅ · build ✅. Adversarial wf = PROMOTE; independent live-QA 4/4 (explicit-OFF respected ×2, no writes); display-race fixed+re-verified. **★ ALL 4 ISSUES CONVERGED ON MAIN.**
+- 2026-07-01 · **🎉 PROMOTED FRO-455+457+458 → local main** `4fb6e6dde`→`c251b54f3` (ff-only). Built fresh on live main tip (user cleaned their branding work first), merged the 3 verified branches, gate: root tsc ✅ · vitest 391/3213 ✅ · auth-worker tsc ✅ + 483 ✅ · build ✅ (8.63s). Main clean before+after. NOT pushed/deployed (no --deploy). FRO-460 EXCLUDED (broken persist-on-load race) → redesigning derive-on-read.
 - 2026-07-01 · WS C · FRO-458 · `swarm/fro-458` → integration `4a1081d63` (ff) · tsc ✅ · vitest deferred to combined gate · UI-QA pending · not yet on main
 - 2026-07-01 · WS B · FRO-457 · `swarm/fro-457` → integration (merge) · root tsc ✅ · auth-worker tsc ✅ + `npm test` 481/481 ✅ (incl 5 new) · service-layer fix also covers projects.ts/orgs.ts callers · UI-QA pending · not yet on main
 - 2026-07-01 · WS A · FRO-455 · `swarm/fro-455` → integration (merge) · root tsc ✅ · fix = await patchShared serializes D1 writes (agent disproved closure-clobber hunch) · UI-QA pending · not yet on main

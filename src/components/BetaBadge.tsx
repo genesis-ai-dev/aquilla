@@ -17,7 +17,7 @@ export function BetaBadge() {
 
   return (
     <Dialog>
-      <DialogTrigger className="mt-2 inline-flex cursor-pointer items-center rounded-full bg-gradient-to-r from-violet-500 to-pink-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white shadow-sm transition-transform hover:scale-105 active:scale-95">
+      <DialogTrigger className="inline-flex cursor-pointer items-center rounded-full bg-gradient-to-r from-violet-500 to-pink-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white shadow-sm transition-transform hover:scale-105 active:scale-95">
         Beta
       </DialogTrigger>
       <DialogContent>

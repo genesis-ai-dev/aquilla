@@ -70,7 +70,21 @@ export function useRules(
     if (!project) return
     const newRule: TranslationRule = { ...rule, id: uuid(), createdAt: new Date().toISOString() }
     const updated = await patchProject(project.id, (p) => ({ ...p, rules: [...(p.rules || []), newRule] }))
-    void patchShared?.({ rules: updated?.rules ?? [...(project.rules || []), newRule] })
+    // FRO-455: await the shared-settings write (D1 project_settings PATCH).
+    // Callers like RuleSuggestFromEditsDialog/RuleImportDialog invoke onAdd
+    // (= addRule) once per accepted suggestion in a sequential
+    // `for (...) { await onAdd(...) }` loop. patchShared's write is queued
+    // (useProjectSettings.patch → runSerialized) and re-fetches the latest
+    // server row before merging, so back-to-back calls don't clobber each
+    // other server-side *once they're properly ordered* — but when this call
+    // was fire-and-forget (`void patchShared?.(...)`), addRule returned (and
+    // the loop advanced to the next accepted rule) before the PATCH actually
+    // landed. Multiple in-flight PATCH/refresh round trips could then resolve
+    // out of order, and the last one to land wins — silently dropping all but
+    // the final accepted rule. Awaiting here makes each loop iteration a true
+    // synchronous-from-the-caller's-perspective step: the server write for
+    // rule N is durably queued and committed before rule N+1 starts.
+    await patchShared?.({ rules: updated?.rules ?? [...(project.rules || []), newRule] })
     refresh()
   }, [project, refresh, patchShared])
 

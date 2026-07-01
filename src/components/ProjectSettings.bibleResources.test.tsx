@@ -34,6 +34,11 @@ function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
 }
 
 let currentProject: ProjectRecord = makeProject()
+// FRO-460 display-race: lets a test simulate the two-phase hydration where
+// `project.bibleResourcesEnabled` is still `undefined` because the settings
+// GET hasn't resolved yet. Defaults to true (hydrated) so the other tests in
+// this file — which don't care about the race — keep their prior behavior.
+let currentHasFetched = true
 
 vi.mock("@/hooks/useProject", () => ({
   useProject: () => ({
@@ -54,7 +59,7 @@ vi.mock("@/hooks/useProjectSettings", () => ({
     conflict: false,
     dismissConflict: vi.fn(),
     settings: {},
-    hasFetched: true,
+    hasFetched: currentHasFetched,
     isOnline: true,
     refresh: vi.fn(),
   }),
@@ -114,6 +119,7 @@ function renderSettings() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  currentHasFetched = true
 })
 
 describe("ProjectSettings — Bible resources (FRO-460 derive-on-read)", () => {
@@ -159,5 +165,52 @@ describe("ProjectSettings — Bible resources (FRO-460 derive-on-read)", () => {
     const toggle = screen.getByRole("switch", { name: /enable bible resources/i })
     fireEvent.click(toggle)
     expect(screen.getByRole("button", { name: /save changes/i })).toBeTruthy()
+  })
+
+  // FRO-460 display-race (live-QA finding): `project.bibleResourcesEnabled`
+  // hydrates in two async phases in the real hook — `useProject`'s minimal
+  // record resolves first WITHOUT the field (undefined), then a later
+  // settings GET fills it in. If the component's baseline seed locks onto
+  // that pre-hydration `undefined`, a scripture project with an explicit
+  // server `false` would transiently (or permanently, until a manual reseed)
+  // paint the switch as CHECKED. This must never happen — the switch must
+  // settle to the real server value once settings are known-hydrated.
+  it("scripture project mid-hydration (settings not yet fetched, false arrives later) -> switch settles OFF, never sticks derived-true", () => {
+    // Phase 1: project record resolved, but the settings GET hasn't landed —
+    // `bibleResourcesEnabled` is still undefined (not "explicitly unset",
+    // just "not known yet"), mirroring `useProject`'s pre-hydration state.
+    currentProject = makeProject({
+      files: [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "", cellCount: 1 }],
+      bibleResourcesEnabled: undefined,
+    })
+    currentHasFetched = false
+    const { rerender } = renderSettings()
+
+    const rerenderSettings = () =>
+      rerender(
+        <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings`]}>
+          <Routes>
+            <Route path="/project/:id/settings" element={<ProjectSettings />} />
+          </Routes>
+        </MemoryRouter>,
+      )
+
+    // During the pre-hydration window the derived default (scripture -> on)
+    // is an acceptable transient display — the important assertion is what
+    // happens once hydration completes below.
+
+    // Phase 2: settings GET resolves with the real, explicit server value:
+    // Bible resources are OFF for this project.
+    currentProject = makeProject({
+      files: [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "", cellCount: 1 }],
+      bibleResourcesEnabled: false,
+    })
+    currentHasFetched = true
+    rerenderSettings()
+
+    const toggle = screen.getByRole("switch", { name: /enable bible resources/i })
+    expect(toggle).toHaveAttribute("aria-checked", "false")
+    // Settling to the real value must not itself count as a user edit.
+    expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
   })
 })

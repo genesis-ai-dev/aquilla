@@ -204,6 +204,7 @@ export function ProjectSettings() {
     updatedBy: sharedUpdatedBy,
     conflict: sharedConflict,
     dismissConflict,
+    hasFetched: sharedSettingsFetched,
   } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null)
 
   // Org context for the termbase-sharing section. The user's org; the section's
@@ -343,6 +344,30 @@ export function ProjectSettings() {
     applyBaseline(b)
     seededRef.current = true
   }, [project, applyBaseline])
+
+  // FRO-460 display-race fix: `project.bibleResourcesEnabled` hydrates in two
+  // async phases — `useProject`'s minimal record resolves first WITHOUT the
+  // field (undefined), then its own `useProjectSettings` GET fills it in. If
+  // the baseline seed above (which runs on first non-null `project`) lands
+  // during that undefined window, it locks in `undefined`, and the Switch
+  // paints `resolveBibleResourcesEnabled(undefined, hasScriptureFiles)` —
+  // wrongly `true` for a scripture project whose server value is really
+  // `false`. Once THIS component's own settings hook confirms a fetch has
+  // resolved (`sharedSettingsFetched`), re-sync the seeded value to whatever
+  // `project.bibleResourcesEnabled` now holds — but only if the user hasn't
+  // already touched the switch (don't clobber an in-progress edit), and only
+  // once (matches the "seed once" contract above).
+  const bibleResourcesResyncedRef = useRef(false)
+  useEffect(() => {
+    if (!project || !baseline || !sharedSettingsFetched) return
+    if (bibleResourcesResyncedRef.current) return
+    bibleResourcesResyncedRef.current = true
+    if (project.bibleResourcesEnabled === baseline.bibleResourcesEnabled) return
+    setBaseline((prev) => (prev ? { ...prev, bibleResourcesEnabled: project.bibleResourcesEnabled } : prev))
+    // Only overwrite the draft value if the user hasn't diverged from the
+    // (possibly-stale) baseline yet — otherwise we'd stomp an in-progress toggle.
+    setBibleResourcesEnabled((prev) => (prev === baseline.bibleResourcesEnabled ? project.bibleResourcesEnabled : prev))
+  }, [project, baseline, sharedSettingsFetched])
 
   const effectiveCompletionApiKey = apiKey.trim() || completionUserKey.trim()
 

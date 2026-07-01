@@ -14,21 +14,32 @@ export function brandingHtmlPlugin(brand: BrandData): Plugin {
       const ogImagePath = brand.deploy?.ogImage
       const socialImageTags = ogImagePath ? buildSocialImageTags(brand, ogImagePath) : ""
       const twitterCard = ogImagePath ? "summary_large_image" : "summary"
-      // Bare %BRAND_OG_IMAGE% is still used by the standalone marketing pages
-      // (homepage/beta/case-study), which only ship for image-bearing brands.
-      const ogImage = ogImagePath ? absolutize(ogImagePath, brand.deploy?.domain) : ""
+      const iconTags = buildIconTags(brand)
       return html
         .replace(/%BRAND_TITLE%/g, escapeHtml(brand.app.htmlTitle))
         .replace(/%BRAND_NAME%/g, escapeHtml(brand.app.name))
         .replace(/%BRAND_DESCRIPTION%/g, escapeHtml(brand.app.description))
         .replace(/%BRAND_FAVICON%/g, escapeHtml(brand.logo.faviconHref))
+        .replace(/%BRAND_ICON_TAGS%/g, iconTags)
         .replace(/%BRAND_OG_URL%/g, escapeHtml(ogUrl))
-        .replace(/%BRAND_OG_IMAGE%/g, escapeHtml(ogImage))
         .replace(/%BRAND_TWITTER_CARD%/g, twitterCard)
         .replace(/%BRAND_SOCIAL_IMAGE_TAGS%/g, socialImageTags)
         .replace(/%BRAND_THEME_STYLE%/g, styleTag)
     },
   }
+}
+
+// PNG fallbacks for browsers/contexts that don't render SVG favicons (e.g.
+// Safari's apple-touch-icon). Only emitted for brands that ship them.
+function buildIconTags(brand: BrandData): string {
+  const lines: string[] = []
+  if (brand.logo.icon32) {
+    lines.push(`<link rel="icon" type="image/png" sizes="32x32" href="${escapeHtml(brand.logo.icon32)}" />`)
+  }
+  if (brand.logo.appleTouchIcon) {
+    lines.push(`<link rel="apple-touch-icon" href="${escapeHtml(brand.logo.appleTouchIcon)}" />`)
+  }
+  return lines.join("\n    ")
 }
 
 function buildSocialImageTags(brand: BrandData, ogImagePath: string): string {

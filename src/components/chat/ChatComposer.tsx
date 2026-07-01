@@ -85,8 +85,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       attributes: {
         role: "textbox",
         "aria-label": "Ask the agent",
+        "data-slot": "input-group-control",
         class: cn(
-          "max-h-32 min-h-9 overflow-y-auto px-3 py-2 focus:outline-none",
+          "w-full max-h-32 min-h-9 overflow-y-auto px-3 py-2 focus:outline-none",
           compact ? "text-xs" : "text-sm",
         ),
       },
@@ -164,7 +165,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           </div>
         )}
         <InputGroup>
-          <div className="relative flex-1">
+          <div className="relative w-full min-w-0 flex-1">
             <EditorContent editor={editor} />
             {isEmpty && (
               <span

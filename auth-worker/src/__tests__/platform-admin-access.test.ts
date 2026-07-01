@@ -1,7 +1,7 @@
 /**
  * Platform-operator cross-tenant access — the "platform" grant path.
  *
- * WHY: PLATFORM_ADMINS (deploy-config allowlist, pinned to "root" in
+ * WHY: ADMIN_EMAILS (deploy-config allowlist, pinned to "root@example.com" in
  * pg-test-env.ts) is the support/oversight axis. An allowlisted operator must
  * be able to open ANY org/project without holding a membership row — and that
  * access must come from the central resolvers (resolveProjectRole's
@@ -114,8 +114,8 @@ describe("platform-admin cross-tenant access", () => {
 })
 
 describe("GET /api/v2/admin/admins", () => {
-  it("returns the allowlist joined to accounts; unmatched names flagged hasAccount:false", async () => {
-    // Test env allowlist is exactly "root". Seed root so it matches.
+  it("returns the email allowlist joined to accounts; unmatched emails flagged hasAccount:false", async () => {
+    // Test env allowlist is exactly "root@example.com". Seed root so it matches.
     await seedUser(7, "root")
 
     const res = await app.request("/api/v2/admin/admins", { headers: authHeader(await jwtFor("root")) }, env)
@@ -123,10 +123,10 @@ describe("GET /api/v2/admin/admins", () => {
     const body = (await res.json()) as { admins: Array<Record<string, unknown>> }
     expect(body.admins).toHaveLength(1)
     expect(body.admins[0]).toMatchObject({
-      username: "root",
+      email: "root@example.com",
       hasAccount: true,
       userId: 7,
-      email: "root@example.com",
+      username: "root",
     })
   })
 

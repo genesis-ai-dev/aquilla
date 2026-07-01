@@ -243,6 +243,61 @@ export async function sendOrgInviteEmail(
   }
 }
 
+function buildAdminElevationHtml(code: string, ttlMinutes: number): string {
+  return `
+    <html>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #111;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #2563eb; margin-bottom: 16px;">Admin console access code</h2>
+          <p>Use this code to unlock the Aquilla admin console. If you didn't request it, you can ignore this email and your account stays locked.</p>
+          <p style="margin: 24px 0; text-align: center;">
+            <span style="display: inline-block; padding: 12px 24px; background-color: #f3f4f6; border-radius: 6px; font-size: 28px; letter-spacing: 8px; font-weight: bold;">
+              ${code}
+            </span>
+          </p>
+          <p>This code expires in ${ttlMinutes} minutes and can be used once.</p>
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+          <p style="color: #6b7280; font-size: 0.875rem;">
+            This is a privileged-access step-up code. Never share it with anyone.
+          </p>
+        </div>
+      </body>
+    </html>
+  `.trim()
+}
+
+/**
+ * Email a step-up admin elevation code. Best-effort: returns false (does NOT
+ * throw) when the EMAIL binding is absent (local/e2e), so the caller can fall
+ * back to returning the code in the dev response. Returns true once handed to
+ * the mail provider.
+ */
+export async function sendAdminElevationCodeEmail(
+  env: Env,
+  toEmail: string,
+  code: string,
+  ttlMinutes: number,
+): Promise<boolean> {
+  if (!env.EMAIL) return false
+  const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
+  const html = buildAdminElevationHtml(code, ttlMinutes)
+  const text = `Your Aquilla admin console access code is ${code}. It expires in ${ttlMinutes} minutes.`
+  try {
+    await env.EMAIL.send({
+      from,
+      to: [toEmail],
+      subject: "Your Aquilla admin access code",
+      html,
+      text,
+    })
+    return true
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn("[admin-elevation] code email failed:", message)
+    return false
+  }
+}
+
 export async function sendPasswordResetEmail(
   env: Env,
   toEmail: string,

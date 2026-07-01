@@ -26,7 +26,7 @@ import {
   isGenesisKind,
 } from "./outbox-types"
 import posthog from "@/lib/posthog"
-import { FIRST_CELL_COMMIT, FIRST_CELL_VALIDATE } from "@/lib/analytics-events"
+import { FIRST_CELL_COMMIT, FIRST_CELL_VALIDATE } from "@/lib/event-names"
 
 // Session-scoped flags — reset on page reload (true "first in session" semantics).
 let _firstCommitFired = false

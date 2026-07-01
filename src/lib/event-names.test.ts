@@ -2,14 +2,14 @@
  * FRO-267: Unit tests for funnel instrumentation.
  *
  * Verifies:
- * 1. Event names match the constants in analytics-events.ts.
+ * 1. Event names match the constants in event-names.ts.
  * 2. posthog.capture is called with the right event name at the events-emit seam.
  * 3. posthog.capture is NOT called when consent is off (the posthog module
  *    already gates all calls; the mock is the gatekeeper in tests).
  *
  * All posthog calls are mocked — no real network traffic.
  * Outbox-flush quarantine instrumentation is covered in
- * analytics-events-flush.test.ts (separate file, real IDB, no outbox mock).
+ * event-names-flush.test.ts (separate file, real IDB, no outbox mock).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
@@ -55,7 +55,7 @@ import {
   ORG_CREATED,
   INVITE_SENT,
   SETUP_CHECKLIST_COMPLETED,
-} from "./analytics-events"
+} from "./event-names"
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -69,7 +69,7 @@ afterEach(() => {
 
 // ── 1. Event-name constants sanity ─────────────────────────────────────────
 
-describe("analytics-events constants", () => {
+describe("event-names constants", () => {
   const ALL_EVENTS = [
     ONBOARDING_STEP_VIEWED,
     ONBOARDING_RETURNING_USER_SKIP,
@@ -223,14 +223,14 @@ describe("consent-off guard — mock plumbing", () => {
    * zero events escape to "real" posthog (i.e. our code doesn't bypass
    * the posthog module to call posthog-js directly).
    */
-  it("a silent capture mock records zero events from the analytics-events module", async () => {
+  it("a silent capture mock records zero events from the event-names module", async () => {
     // Replace mock with no-op for this test
     const silentCapture = vi.fn()
     mockCapture.mockImplementation(silentCapture)
     silentCapture.mockClear()
 
     // Import the constants module — it has no side effects.
-    const mod = await import("./analytics-events")
+    const mod = await import("./event-names")
 
     // Verify the constants are strings (no capture fired on import).
     expect(typeof mod.FIRST_CELL_COMMIT).toBe("string")

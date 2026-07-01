@@ -101,7 +101,7 @@ export interface OrgSummary {
   id: number
   name: string | null
   role: OrgRole
-  /** True when the org is visible only via the PLATFORM_ADMINS allowlist
+  /** True when the org is visible only via the ADMIN_EMAILS allowlist
    *  (not a genuine membership). Server appends these after real orgs. */
   viaPlatformAdmin?: boolean
 }

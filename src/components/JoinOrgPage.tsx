@@ -11,10 +11,18 @@ import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
 import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
 import { UserError } from "@/lib/errors/user-error"
 import posthog from "@/lib/posthog"
-import { INVITE_REDEEMED } from "@/lib/analytics-events"
+import { INVITE_REDEEMED } from "@/lib/event-names"
 
 type Phase = "initial" | "redeeming" | "done" | "error"
 type AuthMode = "login" | "signup"
+
+function JoinOrgShell({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex min-h-screen items-center justify-center p-4">
+      <Card className="w-full max-w-md">{children}</Card>
+    </div>
+  )
+}
 
 /**
  * Organization invite landing page (/join-org/:token). The token identifies an
@@ -64,17 +72,9 @@ export function JoinOrgPage() {
     }
   }
 
-  function Shell({ children }: { children: ReactNode }) {
-    return (
-      <div className="flex min-h-screen items-center justify-center p-4">
-        <Card className="w-full max-w-md">{children}</Card>
-      </div>
-    )
-  }
-
   if (!token) {
     return (
-      <Shell>
+      <JoinOrgShell>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <AlertCircle className="size-5 text-destructive" /> Invalid invite link
@@ -83,13 +83,13 @@ export function JoinOrgPage() {
         <CardContent>
           <Button variant="outline" onClick={() => navigate("/")}>Go home</Button>
         </CardContent>
-      </Shell>
+      </JoinOrgShell>
     )
   }
 
   if (phase === "error") {
     return (
-      <Shell>
+      <JoinOrgShell>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <AlertCircle className="size-5 text-destructive" /> Can't join
@@ -99,13 +99,13 @@ export function JoinOrgPage() {
           <p className="text-sm text-muted-foreground">{error}</p>
           <Button variant="outline" onClick={() => navigate("/")}>Go home</Button>
         </CardContent>
-      </Shell>
+      </JoinOrgShell>
     )
   }
 
   if (phase === "done") {
     return (
-      <Shell>
+      <JoinOrgShell>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <CheckCircle2 className="size-5 text-green-600" /> You're in
@@ -116,24 +116,24 @@ export function JoinOrgPage() {
             Joined {orgName ?? "the organization"}. Taking you there…
           </p>
         </CardContent>
-      </Shell>
+      </JoinOrgShell>
     )
   }
 
   if (sessionLoading) {
     return (
-      <Shell>
+      <JoinOrgShell>
         <CardContent className="flex items-center justify-center py-10">
           <Spinner className="mr-2" /> <span className="text-sm">Loading…</span>
         </CardContent>
-      </Shell>
+      </JoinOrgShell>
     )
   }
 
   // Signed in with a valid session → confirm + accept.
   if (hasValidSession) {
     return (
-      <Shell>
+      <JoinOrgShell>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Users className="size-5" /> Join organization
@@ -150,14 +150,14 @@ export function JoinOrgPage() {
             {phase === "redeeming" ? "Joining…" : "Accept invitation"}
           </Button>
         </CardContent>
-      </Shell>
+      </JoinOrgShell>
     )
   }
 
   // Signed out → inline auth. The session hook updates reactively on success,
   // which re-renders into the confirm card above.
   return (
-    <Shell>
+    <JoinOrgShell>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Users className="size-5" /> Join organization
@@ -184,6 +184,6 @@ export function JoinOrgPage() {
             : "Already have an account? Sign in"}
         </button>
       </CardContent>
-    </Shell>
+    </JoinOrgShell>
   )
 }

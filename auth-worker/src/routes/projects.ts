@@ -49,15 +49,11 @@ import {
   getOrCreateUserOrg,
   listEffectiveProjectMembers,
 } from "../services/org-permissions"
-import { isPlatformAdminUsername } from "../middleware/platform-admin"
+import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { lookupUserByUsername } from "../services/user-lookup"
 import { sendProjectInviteEmail } from "../services/email"
 
 const projects = new Hono<AuthHonoEnv>()
-
-// Default invite lifetime — 30 days. Mirrors the open-link UX of the old
-// share-token flow and gives recipients time to redeem on a fresh laptop.
-const DEFAULT_INVITE_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
 function roleNameFor(level: number): string {
   return ROLE_NAMES[level] ?? `level_${level}`
@@ -240,7 +236,7 @@ projects.get("/", authMiddleware, async (c) => {
   // Platform operators see every project (the WHERE access predicate is
   // bypassed below); their effective role is forced to 700/"platform" in the
   // JS mapping, mirroring the resolver in project-permissions.ts.
-  const isAdmin = isPlatformAdminUsername(c.env, user.username)
+  const isAdmin = isPlatformAdminEmail(c.env, user.email)
 
   // AD-12 max-wins across direct + group + org + creator. Each path is
   // computed in the same query; role_level = MAX(coalesced levels). On a

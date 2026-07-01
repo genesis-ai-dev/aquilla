@@ -44,12 +44,12 @@
 //   POST /api/v2/invites/multi
 //   GET  /api/v2/invites/:token/preview
 //   POST /api/v2/invites/:token/accept
-//   GET  /api/v2/admin/me          (PLATFORM_ADMINS only)
-//   GET  /api/v2/admin/overview    (PLATFORM_ADMINS only)
-//   GET  /api/v2/admin/orgs        (PLATFORM_ADMINS only)
-//   GET  /api/v2/admin/users       (PLATFORM_ADMINS only)
-//   GET  /api/v2/admin/projects    (PLATFORM_ADMINS only)
-//   GET  /api/v2/admin/activity    (PLATFORM_ADMINS only)
+//   GET  /api/v2/admin/me          (ADMIN_EMAILS only)
+//   GET  /api/v2/admin/overview    (ADMIN_EMAILS only)
+//   GET  /api/v2/admin/orgs        (ADMIN_EMAILS only)
+//   GET  /api/v2/admin/users       (ADMIN_EMAILS only)
+//   GET  /api/v2/admin/projects    (ADMIN_EMAILS only)
+//   GET  /api/v2/admin/activity    (ADMIN_EMAILS only)
 //   GET  /api/v2/health
 //   POST /__test__/reset (WRANGLER_LOCAL only)
 //   POST /__dev__/seed   (WRANGLER_LOCAL only)
@@ -159,8 +159,8 @@ app.route("/api/v2/orgs", orgSettingsRoutes)
 // termbase/*. The two path-spaces are disjoint so one router serves both.
 app.route("/api/v2/orgs", termbaseSubscriptionRoutes)
 app.route("/api/v2/orgs", orgsRoutes)
-// Platform-operator (site-wide admin) surface — read-only, cross-tenant.
-// Gated by PLATFORM_ADMINS allowlist via requirePlatformAdmin (see
+// Platform-operator (site-wide admin) surface — cross-tenant.
+// Gated by the ADMIN_EMAILS allowlist via requirePlatformAdmin (see
 // routes/admin.ts); no-op for everyone not on the list.
 app.route("/api/v2/admin", adminRoutes)
 // Project-settings + source-linking surfaces are mounted as siblings to

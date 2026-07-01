@@ -14,7 +14,7 @@ import {
 import { FileTargetImportPanel } from "@/components/import/FileTargetImportPanel"
 import type { FileTargetCellRef } from "@/lib/import-file-target"
 import posthog from "@/lib/posthog"
-import { IMPORT_STARTED, IMPORT_SUCCEEDED } from "@/lib/analytics-events"
+import { IMPORT_STARTED, IMPORT_SUCCEEDED } from "@/lib/event-names"
 
 export interface FileTargetImportDialogProps {
   open: boolean

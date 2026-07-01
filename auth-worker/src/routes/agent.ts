@@ -15,6 +15,7 @@ import { z } from "zod"
 import type { Env, Variables } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
+import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
 import { creditGuard, recordCredit } from "../lib/credits"
 import { resolveProjectRole } from "../services/project-permissions"
 import { AliasMap, compressRows } from "../lib/agent/compress"
@@ -38,8 +39,13 @@ function resolveOpenRouterUrl(env: Env): string {
     ? `${env.OPENROUTER_BASE_URL.replace(/\/$/, "")}/chat/completions`
     : OPENROUTER_URL
 }
-/** Haiku-class default from the existing allowlist (lib/ai-budget.ts). */
-const AGENT_MODEL = "anthropic/claude-haiku-4-5"
+/** Haiku-class default from the existing allowlist (lib/ai-budget.ts). Used
+ *  when neither platform_settings.agentModel nor AGENT_MODEL_DEFAULT is set. */
+const DEFAULT_AGENT_MODEL = "anthropic/claude-haiku-4-5"
+/** Resolve the agent model: admin-set store wins, then env, then the default. */
+function resolveAgentModel(env: Env, settings: PlatformSettings): string {
+  return settings.agentModel || env.AGENT_MODEL_DEFAULT || DEFAULT_AGENT_MODEL
+}
 // Counted per model round that runs sql/emit (docs-only rounds are free).
 // Sized for: recipe query + exemplars + draft emit + one lint-redraft emit,
 // with headroom for error recovery (battery case 2 capped at 8 mid-redraft).
@@ -194,8 +200,12 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
     return c.json({ error: "forbidden", message: "No access to this project" }, 403)
   }
 
+  // Resolve the agent model from the global store (env/default fallback).
+  const platformSettings = await getPlatformSettingsCached(c.env)
+  const agentModel = resolveAgentModel(c.env, platformSettings)
+
   // AI guard: model allowlist + per-user/global daily budget (FRO-265).
-  const guard = await runAiGuard(AGENT_MODEL, user.id, c.env.AQUILLA_PG, c.env)
+  const guard = await runAiGuard(agentModel, user.id, c.env.AQUILLA_PG, c.env)
   if (!guard.ok) {
     return c.json(guard.body, guard.status)
   }
@@ -236,7 +246,7 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
     userId: user.id,
     username: user.username,
     prompt: lastUserMessage?.content ?? "",
-    model: AGENT_MODEL,
+    model: agentModel,
   })
 
   const encoder = new TextEncoder()
@@ -245,7 +255,7 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
       const send = (frame: AgentFrame) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`))
       }
-      runAgentLoop({ env, body, user: { id: user.id, username: user.username }, roleLevel: role.level, runId, orgId, signal, send })
+      runAgentLoop({ env, body, user: { id: user.id, username: user.username }, roleLevel: role.level, runId, orgId, model: agentModel, signal, send })
         .catch((err) => {
           // Last-resort: surface, then settle the ledger as error.
           try {
@@ -289,11 +299,12 @@ interface LoopArgs {
   roleLevel: number
   runId: string
   orgId: number
+  model: string
   signal: AbortSignal
   send: (frame: AgentFrame) => void
 }
 
-async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, signal, send }: LoopArgs): Promise<void> {
+async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, model, signal, send }: LoopArgs): Promise<void> {
   const aliases = new AliasMap()
   const sqlVars: SqlVarContext = {
     projectId: body.projectId,
@@ -409,7 +420,7 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, signal, 
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: AGENT_MODEL,
+          model,
           messages: convo,
           tools: [EXECUTE_TOOL],
           stream: false,

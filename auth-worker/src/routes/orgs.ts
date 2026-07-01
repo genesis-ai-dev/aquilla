@@ -6,7 +6,7 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
-import { isPlatformAdminUsername } from "../middleware/platform-admin"
+import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { ROLE } from "../types"
 import {
   addGroupMember,
@@ -68,7 +68,7 @@ orgs.get("/", async (c) => {
     role: { level: o.role, name: ROLE_NAMES[o.role] ?? "unknown" },
   }))
 
-  if (isPlatformAdminUsername(c.env, user.username)) {
+  if (isPlatformAdminEmail(c.env, user.email)) {
     const memberIds = new Set(list.map((o) => o.id))
     const all = await c.env.AQUILLA_PG.prepare(
       "SELECT id, name FROM organizations ORDER BY LOWER(COALESCE(name, ''))",
@@ -132,7 +132,7 @@ orgs.post("/portfolio", zValidator("json", portfolioBatchBody), async (c) => {
   const uniqueOrgIds = [...new Set(orgIds)]
   if (uniqueOrgIds.length === 0) return c.json({ portfolios: [] })
 
-  if (!isPlatformAdminUsername(c.env, user.username)) {
+  if (!isPlatformAdminEmail(c.env, user.email)) {
     const placeholders = uniqueOrgIds.map(() => "?").join(", ")
     const allowed = await c.env.AQUILLA_PG.prepare(
       `SELECT org_id FROM org_members WHERE user_id = ? AND org_id IN (${placeholders})`,

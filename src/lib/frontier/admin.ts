@@ -1,5 +1,5 @@
 // Client for the site-wide admin surface (/api/v2/admin/*). The server gates
-// every endpoint on the PLATFORM_ADMINS allowlist (a separate axis from the
+// every endpoint on the ADMIN_EMAILS allowlist (a separate axis from the
 // org role ladder); a non-admin caller gets 403. The SPA never treats this
 // as a security boundary — it calls `getAdminMe` to decide whether to render
 // the /admin route, but the worker is the real gate.
@@ -75,18 +75,65 @@ export interface AdminActivity {
 }
 
 /**
- * One PLATFORM_ADMINS allowlist entry. `hasAccount: false` means the name is
+ * One ADMIN_EMAILS allowlist entry. `hasAccount: false` means the email is
  * allowlisted in wrangler.toml but no user row matches it (typo or
  * not-yet-registered) — surfaced so the list stays auditable from the UI.
  */
 export interface AdminAdmin {
-  username: string
+  email: string
   hasAccount: boolean
   userId?: number
-  email?: string
+  username?: string
   displayName?: string | null
   createdAt?: string
   lastActiveAt?: string | null
+}
+
+/**
+ * Identity + elevation status for the current session. `hardened` reflects
+ * whether the console requires the step-up gate; when it does, `elevated` says
+ * whether a fresh step-up code has been entered (≤6h ago).
+ */
+export interface AdminMe {
+  isPlatformAdmin: boolean
+  username: string
+  email: string
+  hardened: boolean
+  elevated: boolean
+  elevatedUntil: string | null
+}
+
+/** Global, runtime-editable AI config (mirrors auth-worker PlatformSettings). */
+export interface PlatformSettings {
+  defaultLlmModel?: string
+  agentModel?: string
+  allowedModels?: string[]
+  aiUserDailyLimit?: number
+  aiGlobalDailyLimit?: number
+  aiBudgetEnforce?: boolean
+}
+
+export interface PlatformSettingsResponse {
+  settings: PlatformSettings
+  version: number
+  updatedAt: string | null
+  updatedBy: number | null
+  /** The values actually in force right now (store value OR env fallback). */
+  effective: {
+    defaultLlmModel: string
+    agentModel: string
+    allowedModels: string[]
+  }
+}
+
+/** Best-effort extraction of the server's error message for UI display. */
+async function readError(res: Response): Promise<string> {
+  try {
+    const body = (await res.json()) as { message?: string; error?: string }
+    return body.message || body.error || `HTTP ${res.status}`
+  } catch {
+    return `HTTP ${res.status}`
+  }
 }
 
 /**
@@ -95,11 +142,64 @@ export interface AdminAdmin {
  * errors, so callers can gate UI without a try/catch for the common case.
  */
 export async function getAdminMe(jwt: string): Promise<boolean> {
+  return (await getAdminStatus(jwt)) !== null
+}
+
+/**
+ * Full admin identity + elevation status. Resolves to null on 403/401 (account
+ * email not in the ADMIN_EMAILS allowlist), else the AdminMe object.
+ */
+export async function getAdminStatus(jwt: string): Promise<AdminMe | null> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/me`, { headers: authHeaders(jwt) })
-  if (res.status === 403 || res.status === 401) return false
+  if (res.status === 403 || res.status === 401) return null
   if (!res.ok) throw new UserError(res.status, "")
-  const body = (await res.json()) as { isPlatformAdmin?: boolean }
-  return body.isPlatformAdmin === true
+  const body = (await res.json()) as AdminMe
+  return body.isPlatformAdmin ? body : null
+}
+
+/**
+ * Request a step-up elevation code, emailed to the admin's account address.
+ * In local/e2e (no mail binding) the server returns the code as `devCode` so
+ * the flow is testable; production always emails and never returns it.
+ */
+export async function requestAdminElevation(jwt: string): Promise<{ sent: boolean; devCode?: string }> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/elevation/request`, {
+    method: "POST",
+    headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  const body = (await res.json()) as { ok: boolean; sent: boolean; devCode?: string }
+  return { sent: body.sent, devCode: body.devCode }
+}
+
+/** Exchange a code for a ~6h elevated session. Throws UserError(400) on a bad code. */
+export async function verifyAdminElevation(jwt: string, code: string): Promise<{ elevatedUntil: string }> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/elevation/verify`, {
+    method: "POST",
+    headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return (await res.json()) as { elevatedUntil: string }
+}
+
+export async function getPlatformSettings(jwt: string): Promise<PlatformSettingsResponse> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/settings`, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return (await res.json()) as PlatformSettingsResponse
+}
+
+export async function updatePlatformSettings(
+  jwt: string,
+  patch: PlatformSettings & { ifMatchVersion: number },
+): Promise<{ settings: PlatformSettings; version: number }> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/settings`, {
+    method: "PATCH",
+    headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return (await res.json()) as { settings: PlatformSettings; version: number }
 }
 
 export async function getAdminAdmins(jwt: string): Promise<AdminAdmin[]> {

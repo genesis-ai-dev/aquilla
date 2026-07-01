@@ -8,7 +8,7 @@
 //
 // Routes (mounted at /api/v2/admin):
 //   GET /me                    — { isPlatformAdmin: true } (only reachable past the gate)
-//   GET /admins                — the PLATFORM_ADMINS allowlist joined to user accounts
+//   GET /admins                — the ADMIN_EMAILS allowlist joined to user accounts
 //   GET /overview              — top-line counts (orgs, users, projects, active-7d)
 //   GET /orgs                  — every org + owner + member/project counts
 //   GET /users                 — every user
@@ -21,8 +21,11 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
-import { parsePlatformAdmins, requirePlatformAdmin } from "../middleware/platform-admin"
+import { parseAdminEmails, requirePlatformAdmin, requireAdminElevation, adminElevationRequired } from "../middleware/platform-admin"
 import { resolveCreditConfig, readSpend } from "../lib/credits"
+import { loadPlatformSettings, savePlatformSettings } from "../lib/platform-settings"
+import { getAllowedModels } from "../lib/ai-budget"
+import { sendAdminElevationCodeEmail } from "../services/email"
 
 const admin = new Hono<AuthHonoEnv>()
 
@@ -32,24 +35,130 @@ admin.use("*", authMiddleware)
 admin.use("*", requirePlatformAdmin)
 
 /**
- * GET /api/v2/admin/me — liveness/identity probe for the SPA. Reaching this
- * at all means the caller passed the gate, so the body is a constant. The
- * frontend calls it to decide whether to render the /admin route; non-admins
- * get a 403 and never see it.
+ * GET /api/v2/admin/me — liveness/identity + elevation status for the SPA.
+ * Reaching this means the caller passed the allowlist + domain gate; the SPA
+ * uses `elevated` to decide whether to show the console or the step-up prompt.
+ * Not behind requireAdminElevation (it's how the SPA learns it must elevate).
  */
-admin.get("/me", (c) => {
+admin.get("/me", async (c) => {
   const user = c.get("user")
-  return c.json({ isPlatformAdmin: true, username: user.username })
+  const hardened = adminElevationRequired(c.env)
+  const row = hardened
+    ? await c.env.AQUILLA_PG.prepare(
+        `SELECT elevated_until FROM admin_elevations WHERE user_id = ? AND elevated_until > now()`,
+      )
+        .bind(user.id)
+        .first<{ elevated_until: string }>()
+    : null
+  return c.json({
+    isPlatformAdmin: true,
+    username: user.username,
+    email: user.email,
+    hardened,
+    // When the console isn't hardened, it's open (no step-up needed).
+    elevated: hardened ? Boolean(row) : true,
+    elevatedUntil: row?.elevated_until ?? null,
+  })
+})
+
+// ── Step-up elevation (NOT behind requireAdminElevation — they establish it) ──
+
+/**
+ * POST /api/v2/admin/elevation/request — email a fresh 6-digit code to the
+ * operator's account email. Rate-limited to 5/hour/user. When no EMAIL binding
+ * is configured (local/e2e), the code is returned in the body so the dev flow
+ * is testable; production always has EMAIL, so the code never leaks there.
+ */
+admin.post("/elevation/request", async (c) => {
+  const user = c.get("user")
+
+  const recent = await c.env.AQUILLA_PG.prepare(
+    `SELECT COUNT(*) AS n FROM admin_elevation_codes
+      WHERE user_id = ? AND created_at >= now() - interval '1 hour'`,
+  )
+    .bind(user.id)
+    .first<{ n: number }>()
+  if ((recent?.n ?? 0) >= 5) {
+    return c.json(
+      { error: "rate_limited", message: "Too many codes requested — try again later." },
+      429,
+    )
+  }
+
+  const code = String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0")
+  const ttlMin = Number(c.env.ELEVATION_TTL_MINUTES ?? 10)
+  const expiresAt = new Date(Date.now() + ttlMin * 60_000).toISOString()
+  await c.env.AQUILLA_PG.prepare(
+    `INSERT INTO admin_elevation_codes (user_id, code, expires_at) VALUES (?, ?, ?)`,
+  )
+    .bind(user.id, code, expiresAt)
+    .run()
+
+  const sent = await sendAdminElevationCodeEmail(c.env, user.email, code, ttlMin)
+  const body: { ok: true; sent: boolean; devCode?: string } = { ok: true, sent }
+  if (!c.env.EMAIL) body.devCode = code // dev only — prod always has EMAIL
+  return c.json(body)
 })
 
 /**
- * GET /api/v2/admin/admins — the PLATFORM_ADMINS allowlist, joined to user
- * accounts. Allowlist entries without a matching users row are still
- * returned (hasAccount: false) so a typo'd or not-yet-registered name in
+ * POST /api/v2/admin/elevation/verify — exchange a valid code for a ~6h
+ * elevated session. Single-use (all of the user's codes are cleared on
+ * success); audited.
+ */
+const elevationVerifySchema = z.object({ code: z.string().min(4).max(12) })
+
+admin.post("/elevation/verify", zValidator("json", elevationVerifySchema), async (c) => {
+  const user = c.get("user")
+  const { code } = c.req.valid("json")
+
+  const match = await c.env.AQUILLA_PG.prepare(
+    `SELECT id FROM admin_elevation_codes
+      WHERE user_id = ? AND code = ? AND expires_at > now()
+      ORDER BY id DESC LIMIT 1`,
+  )
+    .bind(user.id, code)
+    .first<{ id: number }>()
+  if (!match) {
+    return c.json(
+      { error: "invalid_code", message: "That code is invalid or has expired." },
+      400,
+    )
+  }
+
+  // Single-use: clear every outstanding code for this user.
+  await c.env.AQUILLA_PG.prepare(`DELETE FROM admin_elevation_codes WHERE user_id = ?`)
+    .bind(user.id)
+    .run()
+
+  const hours = Number(c.env.ELEVATION_SESSION_HOURS ?? 6)
+  const until = new Date(Date.now() + hours * 3_600_000).toISOString()
+  await c.env.AQUILLA_PG.prepare(
+    `INSERT INTO admin_elevations (user_id, elevated_until, updated_at) VALUES (?, ?, now())
+     ON CONFLICT (user_id) DO UPDATE SET elevated_until = EXCLUDED.elevated_until, updated_at = now()`,
+  )
+    .bind(user.id, until)
+    .run()
+  await c.env.AQUILLA_PG.prepare(
+    `INSERT INTO admin_audit_log (user_id, action, detail) VALUES (?, 'elevation.grant', ?)`,
+  )
+    .bind(user.id, JSON.stringify({ until }))
+    .run()
+
+  return c.json({ elevated: true, elevatedUntil: until })
+})
+
+// Everything below requires an active elevated session (no-op when the console
+// is not hardened — see requireAdminElevation).
+admin.use("*", requireAdminElevation)
+
+/**
+ * GET /api/v2/admin/admins — the ADMIN_EMAILS allowlist, joined to user
+ * accounts by email. Allowlist entries without a matching users row are still
+ * returned (hasAccount: false) so a typo'd or not-yet-registered email in
  * wrangler.toml is visible from the dashboard instead of silently inert.
  */
 admin.get("/admins", async (c) => {
-  const allowlist = Array.from(parsePlatformAdmins(c.env)).sort((a, b) =>
+  const allowlist = Array.from(parseAdminEmails(c.env)).sort((a, b) =>
     a.localeCompare(b),
   )
   if (allowlist.length === 0) return c.json({ admins: [] })
@@ -59,7 +168,7 @@ admin.get("/admins", async (c) => {
     `SELECT u.id, u.username, u.email, u.display_name, u.created_at,
             (SELECT MAX(last_active_at) FROM org_members m WHERE m.user_id = u.id) AS last_active_at
        FROM users u
-      WHERE u.username IN (${placeholders})`,
+      WHERE LOWER(u.email) IN (${placeholders})`,
   )
     .bind(...allowlist)
     .all<{
@@ -71,21 +180,21 @@ admin.get("/admins", async (c) => {
       last_active_at: string | null
     }>()
 
-  const byUsername = new Map(results.map((r) => [r.username, r]))
+  const byEmail = new Map(results.map((r) => [r.email.toLowerCase(), r]))
   return c.json({
-    admins: allowlist.map((username) => {
-      const u = byUsername.get(username)
+    admins: allowlist.map((email) => {
+      const u = byEmail.get(email)
       return u
         ? {
-            username,
+            email,
             hasAccount: true,
             userId: u.id,
-            email: u.email,
+            username: u.username,
             displayName: u.display_name,
             createdAt: u.created_at,
             lastActiveAt: u.last_active_at,
           }
-        : { username, hasAccount: false }
+        : { email, hasAccount: false }
     }),
   })
 })
@@ -445,5 +554,87 @@ admin.patch(
     return c.json({ orgId, credits: nextCredits })
   },
 )
+
+// ── Global platform settings (LLM models, allowed models, AI budgets) ─────────
+// Stored in platform_settings; read on the chat/agent hot path with env-var
+// fallbacks. Both routes are behind requireAdminElevation (mounted above).
+
+/**
+ * GET /api/v2/admin/settings — the stored settings + version, plus the
+ * `effective` values actually in force (store value OR env fallback) and the
+ * allowed-model menu so the UI can render dropdowns instead of free text.
+ */
+admin.get("/settings", async (c) => {
+  const rec = await loadPlatformSettings(c.env)
+  const allowedMenu = [...getAllowedModels(c.env, rec.settings)].filter(
+    (m) => m !== "default" && m !== "free-tier",
+  )
+  return c.json({
+    settings: rec.settings,
+    version: rec.version,
+    updatedAt: rec.updatedAt,
+    updatedBy: rec.updatedBy,
+    effective: {
+      defaultLlmModel:
+        rec.settings.defaultLlmModel || c.env.DEFAULT_LLM_MODEL || "anthropic/claude-sonnet-4.5",
+      agentModel:
+        rec.settings.agentModel || c.env.AGENT_MODEL_DEFAULT || "anthropic/claude-haiku-4-5",
+      allowedModels: allowedMenu,
+    },
+  })
+})
+
+const platformSettingsPatchSchema = z.object({
+  defaultLlmModel:    z.string().min(1).optional(),
+  agentModel:         z.string().min(1).optional(),
+  allowedModels:      z.array(z.string().min(1)).optional(),
+  aiUserDailyLimit:   z.number().int().nonnegative().optional(),
+  aiGlobalDailyLimit: z.number().int().nonnegative().optional(),
+  aiBudgetEnforce:    z.boolean().optional(),
+  ifMatchVersion:     z.number().int().nonnegative(),
+})
+
+/**
+ * PATCH /api/v2/admin/settings — partial update under an optimistic-version
+ * guard. Rejects (400) any stored model that wouldn't be in the post-merge
+ * allowed-models set, so we can never persist a model the AI guard would then
+ * reject platform-wide. 409 on a version mismatch. Audited.
+ */
+admin.patch("/settings", zValidator("json", platformSettingsPatchSchema), async (c) => {
+  const user = c.get("user")
+  const { ifMatchVersion, ...patch } = c.req.valid("json")
+
+  // Validate the effective (post-merge) chat/agent model against the effective
+  // (post-merge) allowlist — catches both "set a model not in the list" and
+  // "shrink the list below the current model".
+  const current = await loadPlatformSettings(c.env)
+  const merged = { ...current.settings, ...patch }
+  const mergedAllowed = getAllowedModels(c.env, merged)
+  for (const field of ["defaultLlmModel", "agentModel"] as const) {
+    const value = merged[field]
+    if (value !== undefined && !mergedAllowed.has(value)) {
+      return c.json(
+        {
+          error: "model_not_allowed",
+          message: `${field} "${value}" is not in the allowed-models list. Add it to allowedModels first, or choose one of: ${[...mergedAllowed].filter((m) => m !== "default" && m !== "free-tier").join(", ")}.`,
+        },
+        400,
+      )
+    }
+  }
+
+  const result = await savePlatformSettings(c.env, patch, ifMatchVersion, user.id)
+  if (!result.ok) {
+    return c.json({ error: "version_mismatch", current: result.conflict }, 409)
+  }
+
+  await c.env.AQUILLA_PG.prepare(
+    `INSERT INTO admin_audit_log (user_id, action, detail) VALUES (?, 'settings.update', ?)`,
+  )
+    .bind(user.id, JSON.stringify(patch))
+    .run()
+
+  return c.json({ settings: result.record.settings, version: result.record.version })
+})
 
 export default admin

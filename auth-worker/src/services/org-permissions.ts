@@ -2,7 +2,7 @@
 
 import type { Env, AuthUser } from "../types"
 import { resolveProjectRole } from "./project-permissions"
-import { isPlatformAdminUsername } from "../middleware/platform-admin"
+import { isPlatformAdminEmail } from "../middleware/platform-admin"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -134,7 +134,7 @@ export async function getOrgMemberRole(
 
 /**
  * Caller-side org guard: the caller's effective role on an org. Platform
- * operators (PLATFORM_ADMINS) resolve as owner (700) on every org — the
+ * operators (ADMIN_EMAILS) resolve as owner (700) on every org — the
  * org-side twin of the "platform" path in resolveProjectRole. Route guards
  * checking the CALLER must use this; keep raw getOrgMemberRole for
  * target-user lookups (e.g. "is the invitee an org member?"), where
@@ -146,7 +146,7 @@ export async function getEffectiveOrgRole(
   user: AuthUser,
 ): Promise<number | null> {
   const membership = await getOrgMemberRole(env, orgId, user.id)
-  if (isPlatformAdminUsername(env, user.username)) {
+  if (isPlatformAdminEmail(env, user.email)) {
     return Math.max(membership ?? 0, 700)
   }
   return membership

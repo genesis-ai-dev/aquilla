@@ -69,7 +69,7 @@ export async function recordTtsUsage(
   userId: number,
   orgId: number,
   seconds: number,
-  env?: Pick<Cloudflare.Env, "TTS_USER_DAILY_SECONDS_LIMIT">, // unused here; kept for symmetry with ai-budget.ts
+  _env?: Pick<Cloudflare.Env, "TTS_USER_DAILY_SECONDS_LIMIT">, // kept for symmetry with ai-budget.ts
 ): Promise<void> {
   const today = utcDateKey()
   const upsertSql = `

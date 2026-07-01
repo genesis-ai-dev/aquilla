@@ -112,9 +112,14 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: auth-worker/pnpm-lock.yaml
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            auth-worker/pnpm-lock.yaml
 
-      # M0-2: install only the worker's own dir, proving self-contained deps
+      # Shared db shims live outside the worker dir and resolve their own bare imports from the repo root.
+      - run: pnpm install --frozen-lockfile
+
+      # Worker-local install proves the worker package owns its direct runtime deps.
       - run: pnpm install --frozen-lockfile
         working-directory: auth-worker
 
@@ -135,9 +140,14 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: sync-worker/pnpm-lock.yaml
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sync-worker/pnpm-lock.yaml
 
-      # M0-2: install only the worker's own dir, proving self-contained deps
+      # Shared db shims live outside the worker dir and resolve their own bare imports from the repo root.
+      - run: pnpm install --frozen-lockfile
+
+      # Worker-local install proves the worker package owns its direct runtime deps.
       - run: pnpm install --frozen-lockfile
         working-directory: sync-worker
 

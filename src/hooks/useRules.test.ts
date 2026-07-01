@@ -230,4 +230,73 @@ describe("useRules — addRule under sequential multi-accept commit (FRO-455)", 
     expect(addRuleSettled).toBe(true)
     expect(patchShared).toHaveBeenCalledTimes(1)
   })
+
+  it("REAL-WORLD REGRESSION (AD-3 thin client): server ends up with ALL N rules even when patchProject never finds an IDB record and the caller's `project` closure is stale across the loop", async () => {
+    // This is the test the prior swarm-fixed FRO-455 pass was missing, and
+    // the reason unit tests went green while live-UI QA against the real dev
+    // stack still showed only the last accepted rule surviving.
+    //
+    // The `happy path` and `OUTCOME REGRESSION` tests above both use a
+    // `patchProject` mock that ALWAYS returns a truthy, correctly-cumulative
+    // record (`store[id]` exists and is updated in place). That can never
+    // reproduce the actual production bug, because on the real dev stack
+    // (confirmed live: Editor -> Rules -> Suggest from edits -> accept 3
+    // suggestions with 2 pre-existing rules -> only the last accepted rule
+    // + pre-existing survived a reload), the project is loaded via the AD-3
+    // thin-client path (useProject.ts): the ProjectRecord comes from the
+    // server and is NEVER written to IndexedDB as a whole record. So
+    // `patchProject(project.id, ...)` in addRule calls `getProject(id)`,
+    // finds NOTHING in IDB, and returns `undefined` -- every single call, not
+    // just occasionally.
+    //
+    // Additionally, the real callers (RuleSuggestFromEditsDialog /
+    // RuleImportDialog) hold ONE `onAdd` (= addRule) closure for the whole
+    // `for (const i of accepted) { await onAdd(...) }` loop -- the same
+    // closure captured when the dialog's props were last set, which closes
+    // over the `project` value from THAT render. `refresh()` is a full async
+    // server re-fetch (useProject's refresh, not a fast IDB read) and cannot
+    // resolve, flow through React, and produce a new `addRule` closure before
+    // the loop's next iteration starts. So `project.rules` inside every
+    // iteration of the loop is the SAME pre-loop snapshot.
+    //
+    // Model both facts here: `patchProject` always resolves `undefined`
+    // (no IDB record for this project id), and the hook is driven with a
+    // single stable `project` object for the entire loop (mirroring the
+    // stale closure), exactly like the real caller. If addRule's fallback
+    // ever again reads `project.rules` (the stale prop) instead of a
+    // self-maintained running total, this test fails exactly like the real
+    // bug: the server ends up with only the pre-existing rules + the last
+    // accepted one instead of all N.
+    store = {} // no IDB record for any project id -- patchProject always returns undefined
+
+    const preexisting = [
+      { id: "pre-1", name: "Pre-existing A", description: "", severity: "major" as const, source: "user" as const, scope: "project" as const, check: { type: "source-target-match" as const, pattern: "x" }, enabled: true, createdAt: "2026-01-01T00:00:00.000Z" },
+    ]
+    const project: ProjectRecord = { ...baseProject(), rules: preexisting }
+
+    const server: { rules: ProjectWideSettings["rules"] } = { rules: preexisting }
+    const patchShared = vi.fn(async (partial: ProjectWideSettings) => {
+      // Server semantics per project-settings.ts: PATCH replaces top-level
+      // keys (like `rules`) wholesale -- it does not element-wise merge.
+      if (partial.rules != null) server.rules = partial.rules
+      return { kind: "ok" as const }
+    })
+
+    const { result } = renderHook(() => useRules(project, noop, patchShared))
+
+    const accepted = [acceptedRule("Rule A"), acceptedRule("Rule B"), acceptedRule("Rule C")]
+
+    // Exactly mirrors RuleSuggestFromEditsDialog.handleCommit: one held
+    // `addRule` reference, sequential awaited calls, `project` never changes.
+    await act(async () => {
+      for (const rule of accepted) {
+        await result.current.addRule(rule)
+      }
+    })
+
+    expect(patchShared).toHaveBeenCalledTimes(3)
+    expect(server.rules?.map((r) => r.name).sort()).toEqual(
+      ["Pre-existing A", "Rule A", "Rule B", "Rule C"].sort(),
+    )
+  })
 })

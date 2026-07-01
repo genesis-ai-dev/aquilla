@@ -70,10 +70,12 @@ export interface ProjectWideSettings {
    */
   alignmentSeeds?: import("@/lib/completion/interlinear").AlignmentSeed[]
   /**
-   * Bible Aquifer reference data (bibletranslation.org). Default off — when
-   * absent/false the Search-dock "Bible resources" mode is hidden and the
-   * agent's execute.aquifer branch is rejected. Read server-side by the agent
-   * and the aquifer routes via project_settings.settings->>'bibleResourcesEnabled'.
+   * Bible Aquifer reference data (bibletranslation.org). FRO-460 derive-on-read:
+   * this is the EXPLICIT user override only. When absent, the effective value
+   * is derived — on for scripture projects, off otherwise — and is NEVER
+   * persisted just by viewing/loading a project. An explicit `true`/`false`
+   * here always wins. Read server-side by the agent and the aquifer routes via
+   * auth-worker/src/lib/aquifer/gate.ts (mirrors the same derivation).
    * See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
    */
   bibleResourcesEnabled?: boolean

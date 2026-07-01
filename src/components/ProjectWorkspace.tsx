@@ -29,7 +29,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileOrderedBy, fileTypeHasSections } from "@/lib/parsers/types"
+import { fileOrderedBy, fileTypeHasSections, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
@@ -3311,7 +3311,10 @@ export function ProjectWorkspace() {
                   setParallelOpen(true)
                 }}
                 onExpandResults={(q) => setSearchExpandedQuery(q)}
-                bibleResourcesEnabled={Boolean(project.bibleResourcesEnabled)}
+                bibleResourcesEnabled={resolveBibleResourcesEnabled(
+                  project.bibleResourcesEnabled,
+                  projectHasScriptureFiles(project.files),
+                )}
                 projectId={project.id}
                 getJwt={() => jwtRef.current}
                 canonicalRef={focusedCellCanonicalRef}

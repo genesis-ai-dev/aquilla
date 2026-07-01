@@ -41,6 +41,7 @@ import type {
   DecaySettings,
   ProjectRecord,
 } from "@/lib/parsers/types"
+import { projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
@@ -126,7 +127,10 @@ interface Baseline {
   validationNamedUsers: string[]
   allowSelfValidation: boolean
   harmonize_min_role: "project_lead" | "maintainer"
-  bibleResourcesEnabled: boolean
+  /** FRO-460: EXPLICIT persisted value only. `undefined` = no explicit choice
+   *  yet — the effective (displayed) state is derived via
+   *  `resolveBibleResourcesEnabled`, not defaulted here. */
+  bibleResourcesEnabled: boolean | undefined
   decaySettings: DecaySettings | undefined
   audioMediaStrategy: AudioMediaStrategy
   geminiApiKey: string
@@ -160,7 +164,9 @@ function buildBaseline(project: ProjectRecord): Baseline {
     validationNamedUsers: project.validationNamedUsers ?? [],
     allowSelfValidation: project.allowSelfValidation ?? true,
     harmonize_min_role: project.harmonize_min_role ?? "project_lead",
-    bibleResourcesEnabled: project.bibleResourcesEnabled ?? false,
+    // FRO-460: preserve "unset" — do NOT default to false here, that would
+    // make an unset scripture project look explicitly off in the diff/baseline.
+    bibleResourcesEnabled: project.bibleResourcesEnabled,
     decaySettings: project.decaySettings,
     audioMediaStrategy: project.audioMediaStrategy ?? "lazy",
     geminiApiKey: project.ttsSettings?.apiKey ?? "",
@@ -268,7 +274,10 @@ export function ProjectSettings() {
   const [allowSelfValidation, setAllowSelfValidation] = useState(true)
   // FRO-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
   const [harmonizeMinRole, setHarmonizeMinRole] = useState<"project_lead" | "maintainer">("project_lead")
-  const [bibleResourcesEnabled, setBibleResourcesEnabled] = useState(false)
+  // FRO-460: EXPLICIT persisted value only — `undefined` means no explicit
+  // choice yet. The switch displays the DERIVED effective value (see render);
+  // this state only ever holds what will be persisted on Save.
+  const [bibleResourcesEnabled, setBibleResourcesEnabled] = useState<boolean | undefined>(undefined)
   const [decaySettings, setDecaySettings] = useState<DecaySettings | undefined>(undefined)
   const [audioMediaStrategy, setAudioMediaStrategy] = useState<AudioMediaStrategy>("lazy")
   const [precedingTargetCells, setPrecedingTargetCells] = useState(DEFAULT_DRAFT_CONTEXT.precedingTargetCells)
@@ -642,6 +651,7 @@ export function ProjectSettings() {
   const ALL_SECTIONS: SettingsSection[] = [
     { id: "section-source-link", label: "Source link", keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
     { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language"] },
+    { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["system prompt", "ai", "llm", "instructions"] },
     { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
@@ -655,7 +665,6 @@ export function ProjectSettings() {
     { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts"] },
     { id: "section-termbase-sharing", label: "Term Base Sharing", keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"], visible: SHOW_TERMBASE_SHARING_IN_SETTINGS },
     { id: "section-ai-metrics", label: "AI Metrics", keywords: ["post-edit", "edit distance", "ai metrics", "magnitude", "levenshtein", "ned", "biblica"] },
-    { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
   ]
 
   // ── Search filter ──────────────────────────────────────────────────────────
@@ -805,6 +814,51 @@ export function ProjectSettings() {
                   </DisabledFieldTooltip>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {visibleSections.some((s) => s.id === "section-bible-resources") && (
+          <Card id="section-bible-resources">
+            <CardHeader>
+              <CardTitle>Bible resources</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="bible-resources-enabled" className="text-sm">
+                      Enable Bible resources
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Scholarly reference data from bibletranslation.org in Search and the agent.
+                    </p>
+                    {/* FRO-460 derive-on-read: nothing is written just by viewing this
+                        page — the hint below only describes what's already true. */}
+                    {bibleResourcesEnabled === undefined && projectHasScriptureFiles(project?.files) && (
+                      <p className="text-xs text-muted-foreground">
+                        Available by default for scripture projects — turn off to disable.
+                      </p>
+                    )}
+                    {bibleResourcesEnabled === undefined && !projectHasScriptureFiles(project?.files) && (
+                      <p className="text-xs text-muted-foreground">
+                        Off by default for non-scripture projects — turn on to enable.
+                      </p>
+                    )}
+                    {bibleResourcesEnabled === false && (
+                      <p className="text-xs text-muted-foreground">
+                        Turned off for this project. This is always respected, even for scripture projects.
+                      </p>
+                    )}
+                  </div>
+                  <Switch
+                    id="bible-resources-enabled"
+                    checked={resolveBibleResourcesEnabled(bibleResourcesEnabled, projectHasScriptureFiles(project?.files))}
+                    onCheckedChange={(checked) => setBibleResourcesEnabled(checked)}
+                    disabled={!canEditShared}
+                  />
+                </div>
+              </DisabledFieldTooltip>
             </CardContent>
           </Card>
         )}
@@ -1308,33 +1362,6 @@ export function ProjectSettings() {
               <p className="text-xs text-muted-foreground">
                 Interval is floored at 1 minute. Sync will only push when there are local changes.
               </p>
-            </CardContent>
-          </Card>
-        )}
-        {visibleSections.some((s) => s.id === "section-bible-resources") && (
-          <Card id="section-bible-resources">
-            <CardHeader>
-              <CardTitle>Bible resources</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
-                <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="bible-resources-enabled" className="text-sm">
-                      Enable Bible resources
-                    </Label>
-                    <p className="text-xs text-muted-foreground">
-                      Enable scholarly reference data from bibletranslation.org in Search and the agent.
-                    </p>
-                  </div>
-                  <Switch
-                    id="bible-resources-enabled"
-                    checked={bibleResourcesEnabled}
-                    onCheckedChange={(checked) => setBibleResourcesEnabled(checked)}
-                    disabled={!canEditShared}
-                  />
-                </div>
-              </DisabledFieldTooltip>
             </CardContent>
           </Card>
         )}

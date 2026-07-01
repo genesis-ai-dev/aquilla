@@ -1,14 +1,14 @@
 {
-  "generatedAt": "2026-06-06T16:26:25.803Z",
+  "generatedAt": "2026-06-30T23:41:38.212Z",
   "source": "prod neon sweet-paper-88472094",
   "r2": {
     "accountId": "6a80496d1e59948a9cbaa3c643ba81d7",
     "bucket": "aquilla-snapshots",
-    "key": "seed/dev-seed-bcce00e0a0d7.jsonl.zst"
+    "key": "seed/dev-seed-154ff2be5bb2.jsonl.zst"
   },
-  "bundleBytes": 67067205,
-  "sha256": "bcce00e0a0d759d739ed0690d63979bee61d31f9c874b7dead2c5ae92c85091a",
-  "schemaHash": "de974b0e8f46fbbc9d65ec6182bcbb65e91669b89c61f5195fda68571a3c68c4",
+  "bundleBytes": 94500070,
+  "sha256": "154ff2be5bb21883b14c43ca6377033b6d0575735a9ad9c4c0ba508d7cbb6ceb",
+  "schemaHash": "3494aa58348c6cd08be4a43543d84a6770e771e35c6edc4c6a13ef54a382d0c6",
   "projectIds": [
     "41ee4729-6862-51b1-b89c-47401d1a7850",
     "5a75dd78-f4a6-5454-81c6-8a7dc7efd9aa",
@@ -17,31 +17,31 @@
     "6ecec038-70e8-5e62-8087-8afbe1bc3548",
     "d51f82a7-a50c-5897-9c38-b4a2272c370a",
     "d04c4f29-a7cb-55e3-9c2b-5fe5eedcfbd2",
-    "40be0415-2364-5ec8-8c5d-e2ad6d99e760"
+    "40be0415-2364-5ec8-8c5d-e2ad6d99e760",
+    "3f4ca834-7cbe-517a-8504-a62108ff3bce"
   ],
   "counts": {
-    "users": 203,
-    "organizations": 3,
-    "org_members": 208,
-    "groups": 4,
-    "group_members": 9,
-    "projects": 8,
-    "project_members": 0,
-    "group_project_grants": 4,
-    "project_settings": 0,
-    "events": 131045,
-    "files": 239,
-    "cells": 126434,
-    "cell_validators": 1605,
+    "users": 230,
+    "organizations": 4,
+    "org_members": 236,
+    "groups": 5,
+    "group_members": 11,
+    "projects": 9,
+    "project_members": 1,
+    "group_project_grants": 5,
+    "project_settings": 7,
+    "events": 253491,
+    "files": 305,
+    "cells": 185167,
+    "cell_validators": 18184,
     "cell_waivers": 0,
-    "cell_audio": 0,
+    "cell_audio": 789,
     "cell_backtranslations": 0,
-    "comments": 2,
+    "comments": 5,
     "assignments": 0,
     "assignment_cells": 0,
     "diarization_jobs": 0,
     "file_source_blobs": 0,
-    "checkpoints": 0,
-    "snapshots": 0
+    "checkpoints": 0
   }
 }

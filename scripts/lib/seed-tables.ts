@@ -50,7 +50,6 @@ export const SEED_TABLES: SeedTable[] = [
   { name: "diarization_jobs", by: { col: "project_id", set: "project" }, pk: ["id"] },
   { name: "file_source_blobs", by: { col: "project_id", set: "project" }, pk: ["file_id"] },
   { name: "checkpoints", by: { col: "project_id", set: "project" }, pk: ["id"] },
-  { name: "snapshots", by: { col: "project_id", set: "project" }, pk: ["id"] },
 ]
 
 /** Tables intentionally excluded from the seed (PII / noise). */

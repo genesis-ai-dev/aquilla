@@ -10,18 +10,29 @@ export interface LookedUpUser {
 }
 
 /**
- * Resolve a username to a user id. Case-sensitive on purpose — matches the
- * auth login path (`SELECT * FROM users WHERE username = ?`). A miss returns
- * null; callers translate that into a 404 at the HTTP layer.
+ * Resolve a username to a user id. Trimmed + case-insensitive (FRO-457):
+ * a leading/trailing space or different case (e.g. pasted from elsewhere)
+ * used to produce a false "user not found" 404, since the SQL was a plain
+ * `WHERE username = ?` against case- and whitespace-sensitive Postgres.
+ * The `users.username` column has no case-insensitive uniqueness constraint,
+ * so `LOWER(username) = LOWER(?)` could in principle match more than one row
+ * (e.g. "Bob" and "bob" both existing) — `LIMIT 1` with a deterministic
+ * ORDER BY keeps this a single, predictable result. A miss returns null;
+ * callers translate that into a 404 at the HTTP layer.
  */
 export async function lookupUserByUsername(
   env: Env,
   username: string,
 ): Promise<LookedUpUser | null> {
+  const trimmed = username.trim()
+  if (!trimmed) return null
   const row = await env.AQUILLA_PG.prepare(
-    "SELECT id, username FROM users WHERE username = ?",
+    `SELECT id, username FROM users
+      WHERE LOWER(username) = LOWER(?)
+      ORDER BY id ASC
+      LIMIT 1`,
   )
-    .bind(username)
+    .bind(trimmed)
     .first<LookedUpUser>()
   return row
 }

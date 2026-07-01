@@ -72,6 +72,7 @@ import type { Concept } from "@/lib/terminology/types"
 import { PreAcceptanceWarningBand } from "./PreAcceptanceWarningBand"
 import { detectPreAcceptanceWarnings } from "@/lib/terminology/preacceptance"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
+import { useEditorActions } from "@/context/EditorActionsContext"
 import { AddConceptDialog } from "./AddConceptDialog"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
@@ -411,7 +412,8 @@ interface EditorTableProps {
   healthMap: Map<string, number>
   infractions?: Map<string, RuleInfraction[]>
   rules?: TranslationRule[]
-  onInfractionClick?: (ruleId: string) => void
+  // onInfractionClick moved to EditorActionsContext (FRO perf cleanup) — pure
+  // pass-through, never consumed above the row.
   isBacktranslationConfigured?: boolean
   onBacktranslate?: (cell: CellData, polish?: boolean) => void
   backtranslating?: Set<string>
@@ -419,8 +421,8 @@ interface EditorTableProps {
   /** Called when user saves a BT edit. Parent emits `cell.backtranslation.set`. */
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   cellOpenCommentCount?: Map<string, number>
-  onOpenComments?: (cellId: string) => void
-  onOpenHistory?: (cellId: string) => void
+  // onOpenComments/onOpenHistory moved to EditorActionsContext (FRO perf
+  // cleanup) — pure pass-through, never consumed above the row.
   activeCueIndex?: number
   onSeekToCue?: (cellId: string) => void
   lineNumbersEnabled: boolean
@@ -429,11 +431,8 @@ interface EditorTableProps {
   targetTextDirection: "ltr" | "rtl"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
-  /** Called when user clicks a disabled sparkle while AI is not yet configured. */
-  onAiSetupNeeded?: () => void
-  /** Called when the user clicks the mic button on a cell. The parent owns
-   *  the recording modal so it can persist across cell navigation. */
-  onOpenRecording?: (cellId: string) => void
+  // onAiSetupNeeded/onOpenRecording moved to EditorActionsContext (FRO perf
+  // cleanup) — pure pass-through, never consumed above the row.
   /** Re-read the project record from IDB after a settings change (e.g. voice library edits). */
   onProjectChanged?: () => void
   /** Add-from-selection: create a DRAFT concept from a selected source token. */
@@ -492,13 +491,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   project, cells, username, isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews,
   onCompleteSingle, onCompleteBatch, healthMap,
-  infractions = new Map(), rules = [], onInfractionClick,
+  infractions = new Map(), rules = [],
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
   onSaveBacktranslation,
-  cellOpenCommentCount, onOpenComments, onOpenHistory,
+  cellOpenCommentCount,
   activeCueIndex, onSeekToCue,
   lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
-  isAnonymous, onJumpToCell, onAiSetupNeeded, onOpenRecording,
+  isAnonymous, onJumpToCell,
   audioLens, onOpenAudioSetup,
   onAttachMediaFile, onAttachMediaUrl,
   orderedBy,
@@ -1129,15 +1128,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 infractions={infractions}
                 ruleMap={ruleMap}
                 onCompleteSingle={onCompleteSingle}
-                onInfractionClick={onInfractionClick}
                 isBacktranslationConfigured={isBacktranslationConfigured}
                 backtranslating={backtranslating}
                 backtranslationErrors={backtranslationErrors}
                 onBacktranslate={onBacktranslate}
                 onSaveBacktranslation={onSaveBacktranslation}
                 cellOpenCommentCount={cellOpenCommentCount}
-                onOpenComments={onOpenComments}
-                onOpenHistory={onOpenHistory}
                 activeCueIndex={activeCueIndex}
                 onSeekToCue={onSeekToCue}
                 rowIndex={virtualRow.index}
@@ -1148,8 +1144,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 gridCols={gridCols}
                 isAnonymous={isAnonymous}
                 onJumpToCell={onJumpToCell}
-                onAiSetupNeeded={onAiSetupNeeded}
-                onOpenRecording={onOpenRecording}
                 micDenied={micDenied}
                 audioLens={audioLens ?? null}
                 onOpenAudioSetup={onOpenAudioSetup}
@@ -1239,15 +1233,12 @@ interface MemoizedRowProps {
   infractions: Map<string, RuleInfraction[]>
   ruleMap: Map<string, TranslationRule>
   onCompleteSingle: (cell: CellData) => void
-  onInfractionClick?: (ruleId: string) => void
   isBacktranslationConfigured?: boolean
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
   onBacktranslate?: (cell: CellData, polish?: boolean) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   cellOpenCommentCount?: Map<string, number>
-  onOpenComments?: (cellId: string) => void
-  onOpenHistory?: (cellId: string) => void
   activeCueIndex?: number
   onSeekToCue?: (cellId: string) => void
   rowIndex: number
@@ -1258,8 +1249,6 @@ interface MemoizedRowProps {
   gridCols: "grid-cols-[44px_1fr_1fr]"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
-  onAiSetupNeeded?: () => void
-  onOpenRecording?: (cellId: string) => void
   micDenied?: boolean
   audioLens: AudioLensContext | null
   onOpenAudioSetup?: () => void
@@ -1327,12 +1316,11 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     sourceFontSize,
     targetFontSize,
     project, username, editable, canValidate, isCompletionConfigured, isCompletionAvailable,
-    ruleMap, onCompleteSingle, onInfractionClick,
+    ruleMap, onCompleteSingle,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation,
-    onOpenComments, onOpenHistory,
     onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
     sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, onAiSetupNeeded, onOpenRecording, micDenied, onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
+    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
     onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onAckRemoteChange,
@@ -1433,15 +1421,12 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         waivedInfractions={waivedInfractions}
         ruleMap={ruleMap}
         onCompleteSingle={onCompleteSingle}
-        onInfractionClick={onInfractionClick}
         isBacktranslationConfigured={isBacktranslationConfigured}
         isBacktranslating={isBacktranslating}
         backtranslationError={backtranslationError}
         onBacktranslate={onBacktranslate}
         onSaveBacktranslation={onSaveBacktranslation}
         openCommentCount={openCommentCount}
-        onOpenComments={onOpenComments}
-        onOpenHistory={onOpenHistory}
         isActiveCue={isActiveCue}
         onSeekToCue={onSeekToCue}
         rowIndex={rowIndex}
@@ -1452,8 +1437,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         gridCols={gridCols}
         isAnonymous={isAnonymous}
         onJumpToCell={onJumpToCell}
-        onAiSetupNeeded={onAiSetupNeeded}
-        onOpenRecording={onOpenRecording}
         micDenied={micDenied}
         audioLens={audioLens}
         onOpenAudioSetup={onOpenAudioSetup}
@@ -1531,7 +1514,6 @@ interface EditorRowProps {
   waivedInfractions: RuleInfraction[]
   ruleMap: Map<string, TranslationRule>
   onCompleteSingle: (cell: CellData) => void
-  onInfractionClick?: (ruleId: string) => void
   isBacktranslationConfigured?: boolean
   isBacktranslating?: boolean
   backtranslationError?: string
@@ -1542,8 +1524,6 @@ interface EditorRowProps {
   /** FRO-207: Called when user confirms/invalidates an alignment. */
   onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
   openCommentCount: number
-  onOpenComments?: (cellId: string) => void
-  onOpenHistory?: (cellId: string) => void
   isActiveCue?: boolean
   onSeekToCue?: (cellId: string) => void
   onDragStart: () => void
@@ -1563,8 +1543,6 @@ interface EditorRowProps {
   gridCols: "grid-cols-[44px_1fr_1fr]"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
-  onAiSetupNeeded?: () => void
-  onOpenRecording?: (cellId: string) => void
   micDenied?: boolean
   audioLens: AudioLensContext | null
   onOpenAudioSetup?: () => void
@@ -2017,14 +1995,14 @@ function EditorRow({
   completionPreview, loadingPhase,
   cellExamples, highlights, error, health,
   cellInfractions, waivedInfractions, ruleMap,
-  onCompleteSingle, onInfractionClick,
+  onCompleteSingle,
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate, onSaveBacktranslation,
-  openCommentCount, onOpenComments, onOpenHistory,
+  openCommentCount,
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
-  isAnonymous, onAiSetupNeeded, onOpenRecording, micDenied,
+  isAnonymous, micDenied,
   audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, onAskAiFromSelection,
   onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onAckRemoteChange,
@@ -2045,6 +2023,10 @@ function EditorRow({
   sourceFootnoteNumberOffset,
   targetFootnoteNumberOffset,
 }: EditorRowProps) {
+  // FRO perf cleanup: pure pass-through openers (never consumed by
+  // EditorTable/MemoizedRow) come from context instead of the prop chain —
+  // keeps them out of MemoizedRow's React.memo compare surface.
+  const { onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording } = useEditorActions()
   const hasTranslatedText = Boolean(cell.translated?.trim())
   const showCompletionOverlay = isLoading && !hasTranslatedText
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)

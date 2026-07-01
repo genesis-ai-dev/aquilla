@@ -115,6 +115,7 @@ import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import { useFileFontSizes, setFileViewPref } from "@/lib/store/file-view-prefs"
 import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
+import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
 import { applySuggestions, buildUndo } from "@/lib/file-labeling/apply"
 import { renameFile, moveFileToCorpus, renameCorpus, deleteFile } from "@/lib/store/file-operations"
@@ -2263,6 +2264,25 @@ export function ProjectWorkspace() {
   }, [])
   const handleAiSetupNeeded = useCallback(() => setAiSetupOpen(true), [])
   const handleOpenRecording = useCallback((cellId: string) => setRecordingCellId(cellId), [])
+
+  // FRO perf cleanup: the five openers above are pure pass-throughs through
+  // EditorTable -> MemoizedRow -> EditorRow with no intermediate consumer, so
+  // they've been moved off the row prop bag into EditorActionsContext. All
+  // five deps are `[]`-memoized above, so this value's identity is stable —
+  // the provider never forces a re-render of the table subtree.
+  // (onAssignVoice/onOpenAudioSetup stay drilled: onAssignVoice's identity is
+  // NOT stable — it closes over `cells`/`frontierSession` — and both are
+  // entangled with the still-drilled audio-lens prop cluster in EditorRow's
+  // audio section, so pulling just the callback into context wouldn't shrink
+  // that section's prop surface.)
+  const editorActionsValue = useMemo(() => ({
+    onInfractionClick: handleInfractionClick,
+    onOpenComments: handleOpenComments,
+    onOpenHistory: handleOpenHistory,
+    onAiSetupNeeded: handleAiSetupNeeded,
+    onOpenRecording: handleOpenRecording,
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording])
+
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
     // First assign the voice to this cell in the cast
@@ -3719,6 +3739,7 @@ export function ProjectWorkspace() {
                   onLinkVideo={handleLinkVideo}
                 />
               ) : (
+              <EditorActionsProvider value={editorActionsValue}>
               <EditorTable
             ref={editorRef} project={project} cells={cellsWithBacktranslation}
             showFootnotesInline={footnoteViewMode === "inline"}
@@ -3730,15 +3751,12 @@ export function ProjectWorkspace() {
             examples={examples} errors={errors} previews={previews}
             onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}
             healthMap={effectiveHealthMap} infractions={infractions} rules={rules}
-            onInfractionClick={handleInfractionClick}
             isBacktranslationConfigured={isBacktranslationConfigured}
             onBacktranslate={runBacktranslation}
             onSaveBacktranslation={saveBacktranslation}
             backtranslating={backtranslating}
             backtranslationErrors={backtranslationErrors}
             cellOpenCommentCount={cellOpenCommentCount}
-            onOpenComments={handleOpenComments}
-            onOpenHistory={handleOpenHistory}
             getTokenForFile={getTokenForFile}
             alignmentModel={alignmentModel}
             onAlignmentSeedChange={handleAlignmentSeedChange}
@@ -3750,11 +3768,9 @@ export function ProjectWorkspace() {
             targetTextDirection={fileMeta.targetTextDirection}
             isAnonymous={!frontierSession}
             onJumpToCell={jumpToCellId}
-            onAiSetupNeeded={handleAiSetupNeeded}
             audioLens={audioLens}
             orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
             onOpenAudioSetup={openAudioSetup}
-            onOpenRecording={handleOpenRecording}
             onAssignVoice={handleAssignVoice}
             onProjectChanged={refresh}
             onAddConceptFromSelection={handleAddConceptFromSelection}
@@ -3773,6 +3789,7 @@ export function ProjectWorkspace() {
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
           />
+              </EditorActionsProvider>
               )}
             </div>
             {footnoteViewMode === "tray" && (

@@ -57,6 +57,41 @@ describe("GET /api/v2/users/lookup — whitespace/case robustness (FRO-457)", ()
     expect(body.username).toBe("CaseUser")
   })
 
+  it("prefers the exact-case match over a lower-id case-collision (hardening)", async () => {
+    // 'Bob' has the LOWER id — a naive `ORDER BY id ASC LIMIT 1` over a
+    // case-insensitive match would silently resolve 'bob' to 'Bob'. The
+    // exact-match-first lookup must return the exact 'bob' row instead.
+    await seedUser(308, "Bob")
+    await seedUser(309, "bob")
+    await seedUser(310, "caller-collision-1")
+
+    const res = await app.request(
+      `/api/v2/users/lookup?username=${encodeURIComponent("bob")}`,
+      { method: "GET", headers: authHeader(await jwtFor("caller-collision-1")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { id: number; username: string }
+    expect(body.username).toBe("bob")
+    expect(body.id).toBe(309)
+  })
+
+  it("returns not-found (not a silent guess) when case-insensitive match is ambiguous", async () => {
+    // Querying 'BOB' has no exact row, and matches BOTH 'Bob' and 'bob'
+    // case-insensitively. Picking either one risks granting membership to
+    // the wrong account, so this must 404 rather than guess.
+    await seedUser(311, "Bob2")
+    await seedUser(312, "bob2")
+    await seedUser(313, "caller-collision-2")
+
+    const res = await app.request(
+      `/api/v2/users/lookup?username=${encodeURIComponent("BOB2")}`,
+      { method: "GET", headers: authHeader(await jwtFor("caller-collision-2")) },
+      env,
+    )
+    expect(res.status).toBe(404)
+  })
+
   it("still 404s for a genuinely-absent username", async () => {
     await seedUser(306, "caller-absent-1")
 

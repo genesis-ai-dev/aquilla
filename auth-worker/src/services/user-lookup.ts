@@ -10,15 +10,24 @@ export interface LookedUpUser {
 }
 
 /**
- * Resolve a username to a user id. Trimmed + case-insensitive (FRO-457):
- * a leading/trailing space or different case (e.g. pasted from elsewhere)
- * used to produce a false "user not found" 404, since the SQL was a plain
- * `WHERE username = ?` against case- and whitespace-sensitive Postgres.
- * The `users.username` column has no case-insensitive uniqueness constraint,
- * so `LOWER(username) = LOWER(?)` could in principle match more than one row
- * (e.g. "Bob" and "bob" both existing) — `LIMIT 1` with a deterministic
- * ORDER BY keeps this a single, predictable result. A miss returns null;
- * callers translate that into a 404 at the HTTP layer.
+ * Resolve a username to a user id. Trimmed, exact-match-first, then
+ * unambiguous case-insensitive fallback (FRO-457 + hardening):
+ *
+ *   1. Trim, then try `WHERE username = ?` (exact). A hit is returned
+ *      immediately — this alone fixes the original bug (a leading/trailing
+ *      space, e.g. pasted from elsewhere, used to cause a false "not found"
+ *      against case- and whitespace-sensitive Postgres).
+ *   2. If no exact row, fall back to `WHERE LOWER(username) = LOWER(?)`.
+ *      The `users.username` column has only a case-sensitive uniqueness
+ *      constraint, so two rows can differ only in case (e.g. "Bob" and
+ *      "bob" both existing). If exactly one row matches case-insensitively,
+ *      return it. If more than one matches, the query is genuinely
+ *      ambiguous — we do NOT guess (e.g. via `ORDER BY id LIMIT 1`), since
+ *      this lookup feeds member/permission-grant flows and picking the
+ *      wrong account would be a silent wrong-grant. Ambiguous case
+ *      collisions return null, same as a true miss; callers translate that
+ *      into a 404 at the HTTP layer, and the caller can disambiguate by
+ *      typing the exact case.
  */
 export async function lookupUserByUsername(
   env: Env,
@@ -26,15 +35,25 @@ export async function lookupUserByUsername(
 ): Promise<LookedUpUser | null> {
   const trimmed = username.trim()
   if (!trimmed) return null
-  const row = await env.AQUILLA_PG.prepare(
-    `SELECT id, username FROM users
-      WHERE LOWER(username) = LOWER(?)
-      ORDER BY id ASC
-      LIMIT 1`,
+
+  const exact = await env.AQUILLA_PG.prepare(
+    `SELECT id, username FROM users WHERE username = ? LIMIT 1`,
   )
     .bind(trimmed)
     .first<LookedUpUser>()
-  return row
+  if (exact) return exact
+
+  const ciMatches = await env.AQUILLA_PG.prepare(
+    `SELECT id, username FROM users
+      WHERE LOWER(username) = LOWER(?)
+      ORDER BY id ASC
+      LIMIT 2`,
+  )
+    .bind(trimmed)
+    .all<LookedUpUser>()
+  const rows = ciMatches.results ?? []
+  if (rows.length === 1) return rows[0]
+  return null
 }
 
 /**

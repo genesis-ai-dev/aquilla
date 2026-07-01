@@ -277,7 +277,7 @@ export function LeftDock({
         type="button"
         aria-label="Expand sidebar"
         onClick={() => setActiveTab("files")}
-        className="mt-1 flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+        className="mt-3 flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
       >
         <PanelLeftOpen className="h-3.5 w-3.5" />
       </button>

@@ -56,7 +56,7 @@ export function AppShell({ leftDock, sidebar, logoSlot, logoAccessory, header, s
     <a
       href="/homepage"
       aria-label={`${brand.app.name} — homepage`}
-      className="mx-2 mt-2 flex w-fit items-center rounded-md p-1.5 hover:bg-accent/60"
+      className="flex w-fit items-center rounded-md p-1.5 hover:bg-accent/60"
     >
       <brand.logo.Mark className="h-6 w-6 shrink-0" aria-hidden />
     </a>
@@ -77,13 +77,19 @@ export function AppShell({ leftDock, sidebar, logoSlot, logoAccessory, header, s
           // owned by LeftDock (resizable). Footer chrome for the dock lives
           // inside LeftDock so a long branch name can't stretch the rail.
           !leftDock && "w-56",
+          // Collapsed rail: mirror the floating main card's 8px left inset (m-2
+          // below) so the centered icon column reads as centered in the visible
+          // chrome band instead of being pulled toward the screen edge.
+          railCollapsed && "pl-2",
         )}
       >
         {(resolvedLogo || logoAccessory) && (
           <div
             className={cn(
-              "flex shrink-0",
-              railCollapsed ? "flex-col items-center gap-1" : "items-center justify-between",
+              // Vertical/horizontal spacing is owned here so every child aligns by
+              // box-center under items-center — no per-child mt-2 to drift the row.
+              "flex shrink-0 pt-2",
+              railCollapsed ? "flex-col items-center gap-1" : "items-center justify-between px-2",
             )}
           >
             <div className={cn("flex gap-0.5", railCollapsed ? "flex-col items-center" : "items-center")}>
@@ -91,8 +97,13 @@ export function AppShell({ leftDock, sidebar, logoSlot, logoAccessory, header, s
               {/* Browser-style back/forward + history popover, top-left chrome. */}
               <NavHistoryControls />
             </div>
-            <BetaBadge />
-            {logoAccessory && <div className="mr-2 mt-2 shrink-0">{logoAccessory}</div>}
+            {/* BETA + collapse toggle ride together as a right-aligned cluster so the
+                badge hugs the toggle instead of floating in the justify-between middle
+                slot. On org pages / collapsed rail there's no toggle, so it's just the badge. */}
+            <div className="flex items-center gap-2">
+              <BetaBadge />
+              {logoAccessory && <div className="shrink-0">{logoAccessory}</div>}
+            </div>
           </div>
         )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{dockContent}</div>
@@ -106,7 +117,11 @@ export function AppShell({ leftDock, sidebar, logoSlot, logoAccessory, header, s
         )}
       </aside>
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {header}
+        {/* Center the page header on the sidebar logo's baseline (~52px band:
+            pt-2 + 36px logo) so the breadcrumb row lines up with the top of the
+            rail. flex-col keeps the header full-width so its right-aligned
+            controls still push to the edge. */}
+        <div className="flex min-h-[52px] flex-col justify-center">{header}</div>
         <div className="m-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background">
           {beforeMain}
           <main className="flex min-h-0 flex-1 overflow-hidden">

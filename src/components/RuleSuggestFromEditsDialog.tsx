@@ -137,6 +137,15 @@ export function RuleSuggestFromEditsDialog({
   async function handleCommit(accepted: number[]) {
     setCommitting(true)
     try {
+      // FRO-455: this loop calls onAdd (= useRules.addRule) once per accepted
+      // suggestion, and correctness now depends on addRule fully awaiting its
+      // shared-settings (D1 project_settings) write before resolving — see
+      // useRules.ts addRule for the fix. Previously addRule fired that write
+      // fire-and-forget, so N concurrent in-flight PATCH requests could
+      // resolve out of order and silently drop all but the last accepted
+      // rule. SWARM-TODO(manual verify): Editor -> Rules -> "Suggest from
+      // edits" -> accept >= 2 suggestions -> confirm -> all N rules appear in
+      // the list and survive a reload.
       for (const i of accepted) {
         const s = suggestions[i]
         await onAdd({

@@ -67,7 +67,7 @@ function acceptedRule(name: string) {
 }
 
 describe("useRules — addRule under sequential multi-accept commit (FRO-455)", () => {
-  it("persists ALL rules when addRule is awaited N times in a row, not just the last", async () => {
+  it("happy path: patchShared is called once per accepted rule with the full cumulative array (does not by itself distinguish void vs await patchShared — see the out-of-order-server test below for the actual regression)", async () => {
     store = { p1: baseProject() }
     const patchShared = vi.fn(async (_partial: ProjectWideSettings) => ({ kind: "ok" as const }))
 
@@ -92,6 +92,83 @@ describe("useRules — addRule under sequential multi-accept commit (FRO-455)", 
     expect(patchShared).toHaveBeenCalledTimes(3)
     const lastCall = patchShared.mock.calls[patchShared.mock.calls.length - 1][0]
     expect(lastCall.rules?.map((r) => r.name).sort()).toEqual(["Rule A", "Rule B", "Rule C"])
+  })
+
+  it("OUTCOME REGRESSION: server ends up with ALL N rules even when patchShared responses land out of order (not just the mechanism, the actual observable outcome)", async () => {
+    // FRO-455's real failure mode: each addRule() call's `patchShared` payload
+    // already carries the correct full cumulative `rules` array at *dispatch*
+    // time (it reads the just-updated IDB snapshot via `patchProject`'s
+    // return value) — so a mock that resolves synchronously/in-order can
+    // never show the bug: the last dispatched call always has the full
+    // array, regardless of whether the previous call was awaited or
+    // fire-and-forgotten. The actual production hazard is that with `void
+    // patchShared?.(...)`, addRule's *caller loop* does not wait for the
+    // network write to land before moving on (and, in the real dialogs,
+    // before calling refresh()/closing). If patchShared's server-side
+    // responses can land OUT OF ORDER relative to dispatch order (slow
+    // earlier request, fast later one racing ahead, or vice versa) and the
+    // server applies whichever response landed *last* (last-write-wins on
+    // the whole `rules` blob — exactly what a naive PATCH handler /
+    // `writeServer(outcome.value)` does), then whichever call the caller
+    // failed to wait for can have its write silently overwritten by a
+    // differently-ordered write for another rule.
+    //
+    // Model this directly: a `patchShared` mock backed by a shared "server"
+    // object, where the promise for the Nth call resolves *later* than the
+    // (N+1)th call's promise (decreasing/reversed resolve order — the first
+    // dispatched call is the slowest, so it lands last and "wins" with a
+    // stale, non-cumulative payload) unless the caller actually awaits each
+    // call before dispatching the next.
+    //
+    // - Under the OLD `void patchShared?.(...)` code: addRule resolves as
+    //   soon as the local IDB write finishes, so the loop dispatches all 3
+    //   patchShared calls back-to-back without waiting for any of them. The
+    //   slow-resolving call for Rule A (dispatched first, carrying only
+    //   `[Rule A]` as the cumulative array observed at ITS dispatch time)
+    //   lands LAST and clobbers the server's `rules` field, discarding Rule B
+    //   and Rule C's server-side writes. Server ends up with `[Rule A]`, not
+    //   all three -- test must FAIL here.
+    // - Under the FIX (`await patchShared?.(...)`): addRule does not resolve
+    //   until its own patchShared call has landed, so the loop cannot
+    //   dispatch call N+1 until call N's server write is durably applied.
+    //   Calls are therefore serialized in dispatch order and each carries the
+    //   full cumulative array by the time it lands. Server ends up with all
+    //   three -- test must PASS here.
+    store = { p1: baseProject() }
+
+    const server: { rules: ProjectWideSettings["rules"] } = { rules: [] }
+    let dispatchCount = 0
+    const patchShared = vi.fn((partial: ProjectWideSettings) => {
+      const dispatchIndex = dispatchCount++
+      // Reversed delay: the call dispatched FIRST (index 0) waits longest,
+      // so later-dispatched calls land at the server first. Only a caller
+      // that genuinely serializes dispatch (awaits each call before firing
+      // the next) avoids ever having two calls in flight concurrently, which
+      // is the only way to guarantee correct final server state here.
+      const delayMs = (3 - dispatchIndex) * 20
+      return new Promise<{ kind: "ok" }>((resolve) => {
+        setTimeout(() => {
+          server.rules = partial.rules
+          resolve({ kind: "ok" })
+        }, delayMs)
+      })
+    })
+
+    const { result } = renderHook(() => useRules(store.p1, noop, patchShared))
+
+    const accepted = [acceptedRule("Rule A"), acceptedRule("Rule B"), acceptedRule("Rule C")]
+
+    await act(async () => {
+      for (const rule of accepted) {
+        await result.current.addRule(rule)
+      }
+      // Let any straggling out-of-order writes (dispatched but not awaited
+      // by the loop under the old fire-and-forget code) finish landing.
+      await new Promise((r) => setTimeout(r, 100))
+    })
+
+    expect(patchShared).toHaveBeenCalledTimes(3)
+    expect(server.rules?.map((r) => r.name).sort()).toEqual(["Rule A", "Rule B", "Rule C"])
   })
 
   it("REGRESSION: addRule's returned promise does not resolve until patchShared's write lands", async () => {

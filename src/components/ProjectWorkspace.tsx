@@ -2244,6 +2244,37 @@ export function ProjectWorkspace() {
   const checkLockHolder = useCallback((cellId: string) =>
     cellLockHoldersRef.current.get(cellId) ?? null, [])
 
+  // Stable identities for the EditorTable callback props below — EditorTable
+  // rows are React.memo'd, so a new function identity here would fail the
+  // shallow-compare for every visible row on every ProjectWorkspace render.
+  const handleInfractionClick = useCallback((ruleId: string) => {
+    setCommentsCellId(null); setHistoryCellId(null); setDrawerRuleId(ruleId)
+  }, [])
+  const handleOpenComments = useCallback((cellId: string) => {
+    setDrawerRuleId(null); setHistoryCellId(null); setCommentsCellId(cellId)
+  }, [])
+  const handleOpenHistory = useCallback((cellId: string) => {
+    setDrawerRuleId(null); setCommentsCellId(null); setHistoryCellId(cellId)
+  }, [])
+  const handleAiSetupNeeded = useCallback(() => setAiSetupOpen(true), [])
+  const handleOpenRecording = useCallback((cellId: string) => setRecordingCellId(cellId), [])
+  const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
+    if (!audioProject || !frontierSession) return
+    // First assign the voice to this cell in the cast
+    tts.assignCells([cellId], voiceId)
+    // Then synthesise with the newly assigned voice
+    const targetCell = cells.find((c) => c.id === cellId)
+    if (!targetCell) return
+    const ok = await generateCellVoice({
+      project: audioProject,
+      cell: targetCell,
+      session: frontierSession,
+      username: currentUsername,
+      voiceId,
+    })
+    if (ok) refresh()
+  }, [audioProject, frontierSession, tts.assignCells, cells, currentUsername, refresh])
+
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.
   // EditorTable. Centralizes the decision so we don't flash between states
   // while a file hydrates.
@@ -3688,21 +3719,15 @@ export function ProjectWorkspace() {
             examples={examples} errors={errors} previews={previews}
             onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}
             healthMap={effectiveHealthMap} infractions={infractions} rules={rules}
-            onInfractionClick={(ruleId) => {
-              setCommentsCellId(null); setHistoryCellId(null); setDrawerRuleId(ruleId)
-            }}
+            onInfractionClick={handleInfractionClick}
             isBacktranslationConfigured={isBacktranslationConfigured}
             onBacktranslate={runBacktranslation}
             onSaveBacktranslation={saveBacktranslation}
             backtranslating={backtranslating}
             backtranslationErrors={backtranslationErrors}
             cellOpenCommentCount={cellOpenCommentCount}
-            onOpenComments={(cellId) => {
-              setDrawerRuleId(null); setHistoryCellId(null); setCommentsCellId(cellId)
-            }}
-            onOpenHistory={(cellId) => {
-              setDrawerRuleId(null); setCommentsCellId(null); setHistoryCellId(cellId)
-            }}
+            onOpenComments={handleOpenComments}
+            onOpenHistory={handleOpenHistory}
             getTokenForFile={getTokenForFile}
             alignmentModel={alignmentModel}
             onAlignmentSeedChange={handleAlignmentSeedChange}
@@ -3714,27 +3739,12 @@ export function ProjectWorkspace() {
             targetTextDirection={fileMeta.targetTextDirection}
             isAnonymous={!frontierSession}
             onJumpToCell={jumpToCellId}
-            onAiSetupNeeded={() => setAiSetupOpen(true)}
+            onAiSetupNeeded={handleAiSetupNeeded}
             audioLens={audioLens}
             orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
             onOpenAudioSetup={openAudioSetup}
-            onOpenRecording={(cellId) => setRecordingCellId(cellId)}
-            onAssignVoice={async (cellId, voiceId) => {
-              if (!audioProject || !frontierSession) return
-              // First assign the voice to this cell in the cast
-              tts.assignCells([cellId], voiceId)
-              // Then synthesise with the newly assigned voice
-              const targetCell = cells.find((c) => c.id === cellId)
-              if (!targetCell) return
-              const ok = await generateCellVoice({
-                project: audioProject,
-                cell: targetCell,
-                session: frontierSession,
-                username: currentUsername,
-                voiceId,
-              })
-              if (ok) refresh()
-            }}
+            onOpenRecording={handleOpenRecording}
+            onAssignVoice={handleAssignVoice}
             onProjectChanged={refresh}
             onAddConceptFromSelection={handleAddConceptFromSelection}
             onAskAiFromSelection={handleAskAiFromSelection}

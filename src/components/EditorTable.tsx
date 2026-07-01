@@ -624,6 +624,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     count: displayCells.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 90,
+    // Rows are heavyweight (full TipTap editor + 2 audio controllers each),
+    // so buffer a few rows beyond the viewport to avoid mount-thrash at the
+    // scroll edge.
+    overscan: 4,
   })
 
   useImperativeHandle(ref, () => ({
@@ -2134,6 +2138,14 @@ function EditorRow({
     [cell.waivers],
   )
 
+  // Stable identity across renders (cellInfractions/waivedInfractions are
+  // themselves memoized in MemoizedRow) so TranslatedEditor's violation-
+  // decoration-plugin rebuild effect doesn't fire on every unrelated render.
+  const mergedInfractions = useMemo(
+    () => [...cellInfractions, ...waivedInfractions],
+    [cellInfractions, waivedInfractions],
+  )
+
   const handleWaive = useCallback((input: { ruleId: string; reason?: string }) => {
     setOpenRuleId(null)
     if (!project.id) return
@@ -2526,35 +2538,28 @@ function EditorRow({
     ? cell.audioTimings?.[cell.selectedGeneratedVoiceAudioId]
     : undefined
 
-  // Minimal CodexCell shape for the audio hook — only the metadata fields it
-  // actually reads (selectedAudioId, attachments). Avoids plumbing the entire
-  // CodexCell through CellData.
+  // Minimal CodexCell shape for the audio hook — useCellAudio only ever reads
+  // cell.metadata.selectedAudioId and cell.metadata.attachments[selectedAudioId]
+  // (verified in useCellAudio.ts), so the dep array is narrowed to exactly
+  // those fields. Previously this depended on cell.id/cell.type/cell.translated
+  // too, so every debounced text commit reallocated both objects and
+  // re-triggered downstream effects keyed on their identity.
   const cellForAudio = useMemo(() => ({
-    kind: 2 as const,
-    languageId: "html",
-    value: cell.translated ?? "",
     metadata: {
-      id: cell.id,
-      type: (cell.type ?? "text") as "text",
       attachments: cell.attachments,
       selectedAudioId: cell.selectedAudioId,
     },
   } as unknown as import("@/lib/codex-editor/types").CodexCell), [
-    cell.id, cell.type, cell.translated, cell.attachments, cell.selectedAudioId,
+    cell.attachments, cell.selectedAudioId,
   ])
   const audioController = useCellAudio(project, cellForAudio, cell.fileId)
   const cellForGeneratedVoice = useMemo(() => ({
-    kind: 2 as const,
-    languageId: "html",
-    value: cell.translated ?? "",
     metadata: {
-      id: cell.id,
-      type: (cell.type ?? "text") as "text",
       attachments: cell.attachments,
       selectedAudioId: cell.selectedGeneratedVoiceAudioId,
     },
   } as unknown as import("@/lib/codex-editor/types").CodexCell), [
-    cell.id, cell.type, cell.translated, cell.attachments, cell.selectedGeneratedVoiceAudioId,
+    cell.attachments, cell.selectedGeneratedVoiceAudioId,
   ])
   const generatedVoiceController = useCellAudio(project, cellForGeneratedVoice, cell.fileId)
 
@@ -3279,7 +3284,7 @@ function EditorRow({
                 compactHeight={hasInlineFootnotes}
                 editable={editable && !isLoading}
                 heldByLabel={lockHolderLabel}
-                infractions={[...cellInfractions, ...waivedInfractions]}
+                infractions={mergedInfractions}
                 ruleSeverity={ruleSeverity}
                 waivedRuleIds={waivedRuleIds}
                 onRuleClick={openInlineRule}

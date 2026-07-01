@@ -23,6 +23,29 @@ interface CachedToken {
   expiresAtMs: number
 }
 
+// Module-level singleton cache, shared across every `makeAudioSyncTokenFetcher`
+// instance — mirrors the established pattern for audio caches in this codebase
+// (bytes-cache.ts, peaks-cache.ts already live at module scope). EditorRow
+// mounts useCellAudio twice per row (recorded + generated voice), so a
+// per-instance cache meant a 500-row file could mint up to 1000 independent
+// tokens for the same (projectId, fileId) instead of sharing one mint.
+//
+// CORRECTNESS CONSTRAINT: because this cache now outlives any single hook
+// instance, it also outlives a logout/login (or multi-account switch) that
+// happens without a full page reload. Without a session-identity component in
+// the key, a token minted under user A's role could be served back to user B
+// after an account switch — a real authorization leak, since sync-tokens are
+// role-scoped per project. We key on `session.username`, the same field
+// session-store.ts already uses as the canonical per-account identity
+// (`sessionKey(s) = s.username`), so switching the active session naturally
+// partitions the cache instead of leaking across it.
+const cache = new Map<string, CachedToken>()
+
+/** @internal — test seam; clears the shared cache between test cases. */
+export function __resetAudioSyncTokenCacheForTests(): void {
+  cache.clear()
+}
+
 /**
  * Build a sync-token fetcher tied to a Frontier session. Re-uses cached
  * tokens for the same (projectId, fileId) until they're within 30 s of
@@ -44,16 +67,20 @@ export function audioSyncTokenFetcherForSession(
 export function makeAudioSyncTokenFetcher(
   getSession: () => FrontierSession | null,
 ): SyncTokenForFile {
-  const cache = new Map<string, CachedToken>()
   return async (projectId, fileId) => {
-    const key = `${projectId}::${fileId}`
+    // Resolve the session first: the cache key is scoped by username, so we
+    // need it before we can even look up a hit (see module-level comment on
+    // `cache` for why identity must be part of the key). This also means a
+    // logged-out call (no session) can never accidentally serve a token that
+    // was cached under a still-active session.
+    const session = getSession()
+    if (!session?.jwt) return null
+    const key = `${session.username}::${projectId}::${fileId}`
     const now = Date.now()
     const cached = cache.get(key)
     if (cached && cached.expiresAtMs > now + REFRESH_SAFETY_MS) {
       return cached.value
     }
-    const session = getSession()
-    if (!session?.jwt) return null
     try {
       const resp = await fetchSyncToken(session.jwt, projectId, fileId)
       cache.set(key, {

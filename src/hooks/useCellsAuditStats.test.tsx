@@ -128,4 +128,74 @@ describe("useCellsAuditStats (Phase 2b)", () => {
     act(() => { result.current.revalidate() })
     await waitFor(() => expect(result.current.byCellId.size).toBe(2))
   })
+
+  // Perf regression guard (see ProjectWorkspace.tsx commitCompletedCell etc.):
+  // a single-cell commit must not re-fetch stats for the whole file. Without
+  // revalidateCellStats, every keystroke-commit paired an O(1) cell fetch
+  // with an O(all-cells) audit-stats fetch.
+  describe("revalidateCellStats", () => {
+    it("fetches only the given cell (scoped by cellId) and merges it into the existing map, without a full-file refetch", async () => {
+      global.fetch = vi.fn().mockResolvedValueOnce(
+        new Response(JSON.stringify({ cells: STATS_RESPONSE }), { status: 200 }),
+      ) as unknown as typeof fetch
+
+      const { result } = renderHook(() =>
+        useCellsAuditStats({
+          enabled: true,
+          fileId: "file-abc",
+          getTokenForFile: TOKEN_FN,
+        }),
+      )
+      await waitFor(() => expect(result.current.byCellId.size).toBe(2))
+      expect(global.fetch).toHaveBeenCalledTimes(1)
+
+      const updatedCell1 = {
+        cellId: "cell-1",
+        editCount: 4,
+        contentHash: "post-commit-hash",
+        lastEditAt: 1900,
+        lastEditEventId: "ev-2",
+        activeValidators: [],
+      }
+      global.fetch = vi.fn().mockResolvedValueOnce(
+        new Response(JSON.stringify({ cells: [updatedCell1] }), { status: 200 }),
+      ) as unknown as typeof fetch
+
+      act(() => { result.current.revalidateCellStats("cell-1") })
+
+      await waitFor(() => expect(result.current.byCellId.get("cell-1")?.editCount).toBe(4))
+
+      // Exactly one request, scoped to the changed cell — not a full-file fetch.
+      expect(global.fetch).toHaveBeenCalledTimes(1)
+      const calledUrl = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+      expect(calledUrl).toContain("cellId=cell-1")
+
+      // The untouched cell's stats are preserved (merge, not replace).
+      expect(result.current.byCellId.get("cell-2")?.editCount).toBe(7)
+      expect(result.current.byCellId.size).toBe(2)
+    })
+
+    it("is a no-op when the server returns no matching row (e.g. a stale cellId)", async () => {
+      global.fetch = vi.fn().mockResolvedValueOnce(
+        new Response(JSON.stringify({ cells: STATS_RESPONSE }), { status: 200 }),
+      ) as unknown as typeof fetch
+      const { result } = renderHook(() =>
+        useCellsAuditStats({
+          enabled: true,
+          fileId: "file-abc",
+          getTokenForFile: TOKEN_FN,
+        }),
+      )
+      await waitFor(() => expect(result.current.byCellId.size).toBe(2))
+
+      global.fetch = vi.fn().mockResolvedValueOnce(
+        new Response(JSON.stringify({ cells: [] }), { status: 200 }),
+      ) as unknown as typeof fetch
+      await act(async () => {
+        result.current.revalidateCellStats("cell-1")
+        await new Promise((r) => setTimeout(r, 0))
+      })
+      expect(result.current.byCellId.get("cell-1")?.editCount).toBe(3)
+    })
+  })
 })

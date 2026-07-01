@@ -24,8 +24,9 @@ export function useCellsAuditStatsWithOverlay(
   isLoading: boolean
   isError: boolean
   revalidate: () => void
+  revalidateCellStats: (cellId: string) => void
 } {
-  const { byCellId: base, isLoading, isError, revalidate } = useCellsAuditStats(opts)
+  const { byCellId: base, isLoading, isError, revalidate, revalidateCellStats } = useCellsAuditStats(opts)
 
   const pending = usePendingOutboxRecords({
     enabled: !!opts.fileId,
@@ -37,5 +38,5 @@ export function useCellsAuditStatsWithOverlay(
     return applyOutboxOverlay({ base, pending })
   }, [base, pending])
 
-  return { byCellId, isLoading, isError, revalidate }
+  return { byCellId, isLoading, isError, revalidate, revalidateCellStats }
 }

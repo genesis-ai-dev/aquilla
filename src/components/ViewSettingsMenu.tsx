@@ -140,7 +140,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               size="icon"
               title="View settings"
               aria-label="View settings"
-              className={cn("relative", hideTrigger && "sr-only")}
+              className={cn(hideTrigger ? "sr-only" : "relative")}
             >
               <Eye className="h-4 w-4" />
               {showHint && !hideTrigger && (

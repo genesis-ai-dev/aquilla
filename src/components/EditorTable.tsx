@@ -562,6 +562,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     startX: number
     startY: number
     didDrag: boolean
+    clickAction: "clear-single" | null
   } | null>(null)
   const selectionDragAbortRef = useRef<AbortController | null>(null)
   const selectionAutoScrollFrameRef = useRef<number | null>(null)
@@ -678,11 +679,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const last = cellsRef.current.length - 1
     if (last < 0) return -1
     return Math.max(0, Math.min(last, index))
-  }, [])
-
-  const findCellIndex = useCallback((cellId: string | null | undefined) => {
-    if (!cellId) return -1
-    return cellsRef.current.findIndex((c) => c.id === cellId)
   }, [])
 
   // Move keyboard focus into the target editor at `index`, placing the caret
@@ -807,10 +803,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [focusGridRowByIndex])
 
   const selectRangeByIndexes = useCallback((anchorIndex: number, focusIndex: number) => {
-    const list = cellsRef.current
+    const list = displayCellsRef.current
     if (list.length === 0) return
-    const anchor = clampCellIndex(anchorIndex)
-    const focus = clampCellIndex(focusIndex)
+    const anchor = clampIndex(anchorIndex, list.length)
+    const focus = clampIndex(focusIndex, list.length)
     if (anchor < 0 || focus < 0) return
 
     const start = focus >= anchor
@@ -821,17 +817,39 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       : anchor
     const ids = list.slice(start, end + 1).map((c) => c.id)
     setSelection(ids, list[anchor]?.id ?? ids[0] ?? null)
-  }, [clampCellIndex])
+  }, [])
 
   const getIndexAtClientY = useCallback((clientY: number) => {
-    const scrollEl = parentRef.current
-    const list = cellsRef.current
+    const scrollEl = parentRef.current ?? listRootRef.current
+    const list = displayCellsRef.current
     if (!scrollEl || list.length === 0) return -1
+
+    const root = getListQueryRoot()
+    const rowEls = root
+      ? Array.from(root.querySelectorAll<HTMLElement>("[data-cell-id][data-index]"))
+      : []
+    let nearestDomIndex = -1
+    let nearestDomDistance = Number.POSITIVE_INFINITY
+    for (const rowEl of rowEls) {
+      const indexAttr = rowEl.dataset.index
+      if (indexAttr == null) continue
+      const index = Number(indexAttr)
+      if (!Number.isInteger(index) || index < 0 || index >= list.length) continue
+      const rect = rowEl.getBoundingClientRect()
+      if (clientY >= rect.top && clientY <= rect.bottom) return index
+      const distance = clientY < rect.top ? rect.top - clientY : clientY - rect.bottom
+      if (distance < nearestDomDistance) {
+        nearestDomIndex = index
+        nearestDomDistance = distance
+      }
+    }
+    if (nearestDomIndex >= 0) return nearestDomIndex
+
     const rect = scrollEl.getBoundingClientRect()
     const yWithin = Math.max(0, Math.min(rect.height, clientY - rect.top))
     const state = listRef.current?.getState()
     const y = (state?.scroll ?? scrollEl.scrollTop) + yWithin
-    if (!state) return clampCellIndex(Math.round(y / ESTIMATED_ROW_HEIGHT_PX))
+    if (!state) return clampIndex(Math.round(y / ESTIMATED_ROW_HEIGHT_PX), list.length)
 
     let nearestIndex = 0
     let nearestDistance = Number.POSITIVE_INFINITY
@@ -846,8 +864,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         nearestDistance = distance
       }
     }
-    return clampCellIndex(nearestIndex)
-  }, [clampCellIndex])
+    return clampIndex(nearestIndex, list.length)
+  }, [getListQueryRoot])
 
   const updateSelectionFromPointer = useCallback((clientY: number) => {
     const drag = selectionDragRef.current
@@ -859,7 +877,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [getIndexAtClientY, selectRangeByIndexes])
 
   const scrollSelectionNearEdge = useCallback((clientY: number) => {
-    const scrollEl = parentRef.current
+    const scrollEl = parentRef.current ?? listRootRef.current
     if (!scrollEl) return
     const rect = scrollEl.getBoundingClientRect()
     let delta = 0
@@ -911,6 +929,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const drag = selectionDragRef.current
     if (!drag || e.pointerId !== drag.pointerId) return
     e.preventDefault()
+    if (!drag.didDrag && drag.clickAction === "clear-single") {
+      clearSelection()
+    }
     stopSelectionDrag()
   }, [stopSelectionDrag])
 
@@ -945,7 +966,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const selectedIds = getSelectedIds()
     const isAdditive = e.metaKey || e.ctrlKey
     const isAlreadySelected = selectedIds.has(cellId)
-    const anchorIndex = findCellIndex(getSelectionAnchorId())
+    const anchorId = getSelectionAnchorId()
+    const anchorIndex = displayCellsRef.current.findIndex((cell) => cell.id === anchorId)
     const shouldRange =
       !isAdditive &&
       anchorIndex >= 0 &&
@@ -954,11 +976,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
     selectionDragRef.current = {
       pointerId: e.pointerId,
-      anchorIndex: clampCellIndex(startIndex),
-      lastIndex: clampCellIndex(rowIndex),
+      anchorIndex: clampIndex(startIndex, displayCellsRef.current.length),
+      lastIndex: clampIndex(rowIndex, displayCellsRef.current.length),
       startX: e.clientX,
       startY: e.clientY,
       didDrag: false,
+      clickAction: isAlreadySelected && selectedIds.size === 1 ? "clear-single" : null,
     }
     selectionPointerYRef.current = e.clientY
 
@@ -969,12 +992,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     selectionDragAbortRef.current = controller
     window.addEventListener("pointermove", handleSelectionPointerMove, {
       signal: controller.signal,
+      capture: true,
     })
     window.addEventListener("pointerup", handleSelectionPointerEnd, {
       signal: controller.signal,
+      capture: true,
     })
     window.addEventListener("pointercancel", handleSelectionPointerEnd, {
       signal: controller.signal,
+      capture: true,
     })
 
     try {
@@ -989,14 +1015,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     } else if (shouldRange) {
       selectRangeByIndexes(anchorIndex, rowIndex)
     } else if (isAlreadySelected && selectedIds.size === 1) {
-      clearSelection()
+      // Defer clearing until pointerup. If the user drags from the selected
+      // anchor, the move handler should extend the range instead.
     } else {
       setSelection([cellId], cellId)
     }
     startSelectionAutoScroll()
   }, [
-    clampCellIndex,
-    findCellIndex,
     handleSelectionPointerEnd,
     handleSelectionPointerMove,
     selectRangeByIndexes,

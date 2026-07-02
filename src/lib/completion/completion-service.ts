@@ -469,6 +469,17 @@ export async function fetchModels(endpoint: string, apiKey?: string): Promise<st
   return data.data.map((m: { id: string }) => m.id)
 }
 
+/**
+ * Model A/B assignment echoed by the frontier worker (routes/chat.ts) when a
+ * platform experiment served this request. The SPA uses `requestId` to report
+ * what the user did with the output (see src/lib/ab/feedback.ts).
+ */
+export interface AbAssignment {
+  requestId: string
+  arm: "champion" | "challenger"
+  model: string
+}
+
 export interface CompleteOptions {
   settings: CompletionSettings
   session: FrontierSession | null
@@ -477,6 +488,8 @@ export interface CompleteOptions {
   onChunk?: (text: string) => void
   /** If provided, the in-flight fetch and stream are aborted when signalled. */
   signal?: AbortSignal
+  /** Called when the response carries an X-AB-* model-experiment assignment. */
+  onAbAssignment?: (ab: AbAssignment) => void
 }
 
 export async function complete(options: CompleteOptions): Promise<string> {
@@ -522,6 +535,19 @@ export async function complete(options: CompleteOptions): Promise<string> {
       throw new Error(`Frontier AI limit reached: ${text || "Out of credits."}`)
     }
     throw new Error(`Completion failed: ${res.status} ${text}`)
+  }
+
+  // A/B experiment assignment (frontier default-model traffic only): surface
+  // it so the caller can attribute the eventual accept/edit gesture. Optional
+  // chaining: some test stubs fake fetch without a headers object.
+  const abRequestId = res.headers?.get("X-AB-Request-Id")
+  if (abRequestId && options.onAbAssignment) {
+    const arm = res.headers.get("X-AB-Arm")
+    options.onAbAssignment({
+      requestId: abRequestId,
+      arm: arm === "challenger" ? "challenger" : "champion",
+      model: res.headers.get("X-AB-Model") ?? "",
+    })
   }
 
   if (useStream && options.onChunk && res.body) {

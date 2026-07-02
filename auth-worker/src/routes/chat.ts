@@ -21,6 +21,13 @@ import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
 import { creditGuard, recordCredit } from "../lib/credits"
+import {
+  AB_OUTCOMES,
+  pickAbArm,
+  recordAbEvent,
+  recordAbOutcome,
+  setAbHeaders,
+} from "../lib/model-ab"
 
 const chat = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -42,6 +49,11 @@ const chatCompletionRequestSchema = z.object({
 
 type ChatRequest = z.infer<typeof chatCompletionRequestSchema>
 
+/** True when the client asked the server to pick ("", "default", "free-tier"). */
+function isDefaultRequest(requested: string): boolean {
+  return !requested || requested === "default" || requested === "free-tier"
+}
+
 /**
  * "default", "free-tier", or an empty model string means "let the server
  * pick". Anything else passes through unchanged. The server pick is the
@@ -51,8 +63,7 @@ type ChatRequest = z.infer<typeof chatCompletionRequestSchema>
 function resolveModel(env: Env, requested: string, settings: PlatformSettings): string {
   const fallback =
     settings.defaultLlmModel || env.DEFAULT_LLM_MODEL || "anthropic/claude-sonnet-4.5"
-  if (!requested) return fallback
-  if (requested === "default" || requested === "free-tier") return fallback
+  if (isDefaultRequest(requested)) return fallback
   return requested
 }
 
@@ -84,10 +95,17 @@ chat.post(
 
     const request = c.req.valid("json")
     const settings = await getPlatformSettingsCached(c.env)
-    const model = resolveModel(c.env, request.model, settings)
+    let model = resolveModel(c.env, request.model, settings)
+
+    // Model A/B (FRO: admin console experiments): only default-model traffic
+    // is eligible — an explicit model request is never reassigned. When an
+    // arm is rolled, the served model may become the challenger, and the
+    // assignment is echoed back via X-AB-* headers for outcome feedback.
+    const user = c.get("user")
+    const ab = isDefaultRequest(request.model) ? pickAbArm(settings, model) : null
+    if (ab) model = ab.model
 
     // AI guard: model allowlist + per-user/global daily budget (FRO-265).
-    const user = c.get("user")
     const guard = await runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env)
     if (!guard.ok) {
       return c.json(guard.body, guard.status)
@@ -104,6 +122,7 @@ chat.post(
     }
 
     try {
+      const startedAt = Date.now()
       const upstream = await fetch(OPENROUTER_URL, {
         method: "POST",
         headers: {
@@ -112,6 +131,16 @@ chat.post(
         },
         body: buildOpenRouterBody(request, model),
       })
+      const latencyMs = Date.now() - startedAt
+
+      // Log the A/B assignment now that we know whether upstream succeeded.
+      // Failed requests count against the serving arm's error rate.
+      if (ab) {
+        await recordAbEvent(c.env.AQUILLA_PG, ab, user.id, {
+          error: !upstream.ok,
+          latencyMs,
+        })
+      }
 
       if (!upstream.ok) {
         const errorText = await upstream.text()
@@ -134,14 +163,13 @@ chat.post(
         // point). Record a flat 1¢ fallback estimate so the ledger always has
         // a row — this is the cheap/low-priority rail.
         await recordCredit(c.env.AQUILLA_PG, 0, user.id, "llm", 1, 1)
-        return new Response(upstream.body, {
-          status: 200,
-          headers: {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            Connection: "keep-alive",
-          },
+        const streamHeaders = new Headers({
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
         })
+        if (ab) setAbHeaders(streamHeaders, ab)
+        return new Response(upstream.body, { status: 200, headers: streamHeaders })
       }
 
       const data = (await upstream.json()) as Record<string, unknown>
@@ -160,6 +188,11 @@ chat.post(
       // Record asynchronously (graceful-degrade) — never block the response.
       await recordCredit(c.env.AQUILLA_PG, 0, user.id, "llm", costCents, 1)
 
+      if (ab) {
+        c.header("X-AB-Request-Id", ab.requestId)
+        c.header("X-AB-Arm", ab.arm)
+        c.header("X-AB-Model", ab.model)
+      }
       return c.json(data)
     } catch (error) {
       const message =
@@ -169,5 +202,32 @@ chat.post(
     }
   },
 )
+
+const abFeedbackSchema = z.object({
+  requestId: z.string().uuid(),
+  outcome: z.enum(AB_OUTCOMES),
+  /** Normalized Levenshtein [0,1] between the AI draft and the human's text. */
+  editDistance: z.number().min(0).max(1).optional(),
+})
+
+/**
+ * POST /api/v1/chat/ab-feedback — the SPA reports what the user did with an
+ * A/B-assigned completion (accepted = validated the cell, edited = overwrote
+ * the AI draft) plus how far the text moved (editDistance). Outcome is
+ * first-write-wins; the distance refines with further edits. Only the
+ * requester may report. Always 200 with { recorded } so a stale/duplicate
+ * report never surfaces as a user-visible error — telemetry, not a workflow.
+ */
+chat.post("/ab-feedback", authMiddleware, zValidator("json", abFeedbackSchema), async (c) => {
+  const user = c.get("user")
+  const { requestId, outcome, editDistance } = c.req.valid("json")
+  try {
+    const recorded = await recordAbOutcome(c.env.AQUILLA_PG, requestId, user.id, outcome, editDistance)
+    return c.json({ ok: true, recorded })
+  } catch (err) {
+    console.error("[model-ab] feedback write failed:", err)
+    return c.json({ ok: false, recorded: false })
+  }
+})
 
 export default chat

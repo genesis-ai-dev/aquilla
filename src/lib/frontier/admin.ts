@@ -103,6 +103,14 @@ export interface AdminMe {
   elevatedUntil: string | null
 }
 
+/** Champion/challenger experiment on the default chat model (mirrors auth-worker AbTestConfig). */
+export interface AbTestConfig {
+  enabled: boolean
+  challengerModel: string
+  /** 0–100: share of default-model traffic served by the challenger. */
+  trafficPct: number
+}
+
 /** Global, runtime-editable AI config (mirrors auth-worker PlatformSettings). */
 export interface PlatformSettings {
   defaultLlmModel?: string
@@ -111,6 +119,7 @@ export interface PlatformSettings {
   aiUserDailyLimit?: number
   aiGlobalDailyLimit?: number
   aiBudgetEnforce?: boolean
+  abTest?: AbTestConfig
 }
 
 export interface PlatformSettingsResponse {
@@ -200,6 +209,29 @@ export async function updatePlatformSettings(
   })
   if (!res.ok) throw new UserError(res.status, await readError(res))
   return (await res.json()) as { settings: PlatformSettings; version: number }
+}
+
+/** One model/arm aggregate from GET /api/v2/admin/ab-results. */
+export interface AbResultRow {
+  model: string
+  arm: "champion" | "challenger"
+  requests: number
+  errors: number
+  accepted: number
+  edited: number
+  rejected: number
+  avgLatencyMs: number | null
+  /** Mean normalized edit distance [0,1] over decided drafts — lower = better. */
+  avgEditDistance: number | null
+}
+
+export async function getAbResults(jwt: string, days = 30): Promise<{ days: number; results: AbResultRow[] }> {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/admin/ab-results?days=${encodeURIComponent(String(days))}`,
+    { headers: authHeaders(jwt) },
+  )
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return (await res.json()) as { days: number; results: AbResultRow[] }
 }
 
 export async function getAdminAdmins(jwt: string): Promise<AdminAdmin[]> {

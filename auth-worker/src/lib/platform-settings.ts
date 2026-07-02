@@ -18,6 +18,20 @@
 
 import type { Env } from "../types"
 
+/**
+ * Champion/challenger experiment on the platform-default chat model. While
+ * enabled, `trafficPct`% of default-model requests are served by
+ * `challengerModel` instead of defaultLlmModel; every assigned request is
+ * logged to model_ab_events with its arm so outcomes can be compared in the
+ * admin console. Explicit (non-default) model requests are never reassigned.
+ */
+export interface AbTestConfig {
+  enabled: boolean
+  challengerModel: string
+  /** 0–100: share of default-model traffic routed to the challenger. */
+  trafficPct: number
+}
+
 export interface PlatformSettings {
   /** Default model for /chat/completions when the client sends ""/"default"/"free-tier". */
   defaultLlmModel?: string
@@ -31,6 +45,8 @@ export interface PlatformSettings {
   aiGlobalDailyLimit?: number
   /** When true, the AI budget is enforced with 429s instead of log-only. */
   aiBudgetEnforce?: boolean
+  /** Champion/challenger A/B experiment on the default chat model. */
+  abTest?: AbTestConfig
 }
 
 export interface PlatformSettingsRecord {
@@ -69,6 +85,21 @@ function parseSettings(raw: string): PlatformSettings {
   if (typeof obj.aiUserDailyLimit === "number") out.aiUserDailyLimit = obj.aiUserDailyLimit
   if (typeof obj.aiGlobalDailyLimit === "number") out.aiGlobalDailyLimit = obj.aiGlobalDailyLimit
   if (typeof obj.aiBudgetEnforce === "boolean") out.aiBudgetEnforce = obj.aiBudgetEnforce
+  const ab = obj.abTest
+  if (ab && typeof ab === "object" && !Array.isArray(ab)) {
+    const a = ab as Record<string, unknown>
+    if (
+      typeof a.enabled === "boolean" &&
+      typeof a.challengerModel === "string" &&
+      typeof a.trafficPct === "number"
+    ) {
+      out.abTest = {
+        enabled: a.enabled,
+        challengerModel: a.challengerModel,
+        trafficPct: Math.min(100, Math.max(0, a.trafficPct)),
+      }
+    }
+  }
   return out
 }
 

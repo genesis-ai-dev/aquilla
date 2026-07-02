@@ -17,6 +17,15 @@
       "port": 5221
     },
     {
+      "name": "stack-sdbh",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/ryderwishart/prototypes/codex-web-app-worktrees/sdbh-importer && DEV_STACK_IDENTITY_PORT=8831 DEV_STACK_SYNC_PORT=8832 npm run dev -- --vite-port=5231"
+      ],
+      "port": 5231
+    },
+    {
       "name": "stack-qa",
       "runtimeExecutable": "env",
       "runtimeArgs": [

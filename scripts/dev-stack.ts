@@ -531,9 +531,15 @@ async function main(): Promise<void> {
     // wrangler dev — process env alone does NOT propagate through to the
     // worker's bindings. WRANGLER_LOCAL=1 unlocks /__test__/reset and
     // /__dev__/{seed,login}. NEVER set in prod.
+    // ADMIN_EMAILS: allowlist the seeded dev user (dev@local.test,
+    // routes/dev-seed.ts) so /admin is reachable locally — wrangler.toml's
+    // list only carries the real company emails. The email step-up gate is
+    // already bypassed under WRANGLER_LOCAL=1 (middleware/platform-admin.ts).
+    // Mirrors e2e-up.ts, which allowlists alice@example.test the same way.
     extraArgs: [
       "--persist-to", PERSIST_DIR,
       "--var", "WRANGLER_LOCAL:1",
+      "--var", "ADMIN_EMAILS:dev@local.test",
     ],
     logFile: openLogFile(path.join(LOG_DIR, "identity.log")),
     streamToParent: VERBOSE,

@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Page, PageHeader, Section } from "@/components/ui/page"
-import { NavList, NavRow } from "@/components/ui/nav-list"
+import { NavList, NavRow, BackLink } from "@/components/ui/nav-list"
 import { ThemeToggle, useThemeMode } from "@/branding/ThemeMode"
 import { ColorThemePicker } from "@/branding/ColorTheme"
 import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
@@ -303,7 +303,14 @@ function PreferencesDetail({ slug }: { slug: string }) {
       sidebar={<OrgSidebar />}
       header={<OrgBreadcrumb parent={{ label: "Preferences", to: "/preferences" }} section={section.title} />}
       statusBar={null}
-      main={<Page>{section.render()}</Page>}
+      main={
+        <Page>
+          <div className="space-y-4">
+            <BackLink to="/preferences" label="Preferences" />
+            {section.render()}
+          </div>
+        </Page>
+      }
     />
   )
 }

@@ -1,6 +1,6 @@
 import * as React from "react"
 import { Link } from "react-router-dom"
-import { ChevronRight } from "lucide-react"
+import { ChevronLeft, ChevronRight } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
@@ -89,4 +89,33 @@ function NavRow({
   )
 }
 
-export { NavList, NavRow }
+/**
+ * A small "back to the index" link for the top-left of a detail/submenu page.
+ * Pairs with the section card's own title below it, so a submenu page reads as
+ * "‹ Settings" then the section heading — self-sufficient navigation inside the
+ * main area without relying on the header breadcrumb.
+ */
+function BackLink({
+  to,
+  label,
+  className,
+}: {
+  to: string
+  label: React.ReactNode
+  className?: string
+}) {
+  return (
+    <Link
+      to={to}
+      className={cn(
+        "group -ml-1.5 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        className,
+      )}
+    >
+      <ChevronLeft className="size-4 transition-transform group-hover:-translate-x-0.5" />
+      {label}
+    </Link>
+  )
+}
+
+export { NavList, NavRow, BackLink }

@@ -264,16 +264,20 @@ export async function listOrgMemberProjects(
 }
 
 /**
- * GET /api/v2/orgs/:orgId/invites — pending invites for projects in this org.
- * Owner-only server-side; returns null on 403 (caller isn't owner) so the
- * Roster can hide the "Pending" section gracefully without surfacing the
- * gate as an error. Throws on other failures.
+ * GET /api/v2/orgs/:orgId/project-invites — pending invites for projects in
+ * this org. Owner-only server-side; returns null on 403 (caller isn't
+ * owner) so the Roster can hide the "Pending" section gracefully without
+ * surfacing the gate as an error. Throws on other failures.
+ *
+ * Distinct path from `/invites` (org-level org_invites, see
+ * `createOrgInvite`/`listOrgInvites`) — those used to share this path and
+ * the org_invites handler (registered first) silently shadowed this one.
  */
 export async function listPendingOrgInvites(
   jwt: string,
   orgId: number
 ): Promise<PendingOrgInvite[] | null> {
-  const res = await fetch(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/invites`, {
+  const res = await fetch(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/project-invites`, {
     headers: authHeaders(jwt),
   });
   if (res.status === 403) return null;

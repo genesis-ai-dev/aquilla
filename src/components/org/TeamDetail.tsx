@@ -5,6 +5,7 @@ import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Page, PageHeader, Section, EmptyState } from "@/components/ui/page"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -101,6 +102,7 @@ export function TeamDetail() {
 
   // Delete confirm state
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   // Add member UI state
   const [addingMember, setAddingMember] = useState(false)
@@ -166,8 +168,13 @@ export function TeamDetail() {
 
   async function handleDelete() {
     if (!jwt || activeOrgId == null || groupIdNum == null) return
-    await deleteTeam(jwt, activeOrgId, groupIdNum)
-    navigate("/teams")
+    setDeleting(true)
+    try {
+      await deleteTeam(jwt, activeOrgId, groupIdNum)
+      navigate("/teams")
+    } finally {
+      setDeleting(false)
+    }
   }
 
   async function handleAddMember() {
@@ -283,14 +290,25 @@ export function TeamDetail() {
                 </Section>
               )}
 
-              {isAdmin && confirmDelete && (
-                <div className="mb-6 space-y-2 rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-sm">
-                  <p>Delete &apos;{team.name}&apos;? This removes the team and all its grants.</p>
-                  <div className="flex gap-2">
-                    <Button type="button" size="sm" variant="destructive" onClick={handleDelete}>Confirm</Button>
-                    <Button type="button" size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Button>
-                  </div>
-                </div>
+              {isAdmin && (
+                <Dialog open={confirmDelete} onOpenChange={(o) => { if (!o) setConfirmDelete(false) }}>
+                  <DialogContent className="max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>Delete &apos;{team.name}&apos;?</DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm text-muted-foreground">
+                      This removes the team and all its grants.
+                    </p>
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={() => setConfirmDelete(false)} disabled={deleting}>
+                        Cancel
+                      </Button>
+                      <Button type="button" variant="destructive" onClick={handleDelete} disabled={deleting}>
+                        {deleting ? "Deleting…" : "Confirm"}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               )}
 
               {/* Members section */}
@@ -311,7 +329,7 @@ export function TeamDetail() {
                     </span>
                   }
                   action={
-                    isAdmin && !addingMember ? (
+                    isAdmin ? (
                       <Button
                         type="button"
                         size="sm"
@@ -323,36 +341,37 @@ export function TeamDetail() {
                     ) : null
                   }
                 >
-                  {isAdmin && addingMember && (
-                    <div className="mb-3 flex flex-wrap items-center gap-2">
-                      <TeamMemberCombobox
-                        members={availableOrgMembers}
-                        value={selectedUsername}
-                        onChange={setSelectedUsername}
-                        disabled={availableOrgMembers.length === 0}
-                      />
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={handleAddMember}
-                        disabled={!selectedUsername || availableOrgMembers.length === 0}
-                      >
-                        Add
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => { setAddingMember(false); setSelectedUsername("") }}
-                      >
-                        Cancel
-                      </Button>
-                      {availableOrgMembers.length === 0 && (
-                        <p className="basis-full text-xs text-muted-foreground">
-                          All org members are already in this team.
-                        </p>
-                      )}
-                    </div>
+                  {isAdmin && (
+                    <Dialog open={addingMember} onOpenChange={(o) => { if (!o) { setAddingMember(false); setSelectedUsername("") } }}>
+                      <DialogContent className="max-w-md">
+                        <DialogHeader>
+                          <DialogTitle>Add member to &apos;{team.name}&apos;</DialogTitle>
+                        </DialogHeader>
+                        <TeamMemberCombobox
+                          members={availableOrgMembers}
+                          value={selectedUsername}
+                          onChange={setSelectedUsername}
+                          disabled={availableOrgMembers.length === 0}
+                        />
+                        {availableOrgMembers.length === 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            All org members are already in this team.
+                          </p>
+                        )}
+                        <DialogFooter>
+                          <Button type="button" variant="outline" onClick={() => { setAddingMember(false); setSelectedUsername("") }}>
+                            Cancel
+                          </Button>
+                          <Button
+                            type="button"
+                            onClick={handleAddMember}
+                            disabled={!selectedUsername || availableOrgMembers.length === 0}
+                          >
+                            Add
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
                   )}
 
                   {team.members.length === 0 ? (

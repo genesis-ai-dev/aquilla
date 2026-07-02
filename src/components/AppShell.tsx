@@ -1,4 +1,5 @@
 import { useContext, type ReactNode } from "react"
+import { useLocation } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { BrandContext } from "@/branding/use-brand"
 import { VersionTag } from "./VersionBadge"
@@ -6,6 +7,7 @@ import { BetaBadge } from "./BetaBadge"
 import { NavHistoryControls } from "./NavHistoryControls"
 // FRO-307: always-available report button (3 lines: import + mount in left rail)
 import { ReportProblemButton } from "./ReportProblemButton/ReportProblemButton"
+import { ErrorBoundary } from "./ErrorBoundary"
 
 // Project-wide z-index scale (Tailwind v4 dynamic):
 //   (no z) — in-flow chrome (workspace header, status bar, sidebar). It sits
@@ -49,6 +51,12 @@ interface Props {
 
 export function AppShell({ leftDock, sidebar, logoSlot, logoAccessory, header, statusBar, beforeMain, main, aside, railCollapsed }: Props) {
   const dockContent = leftDock ?? sidebar
+  // Route-keyed so a crash in one page's content doesn't stick around after
+  // the user navigates elsewhere — a key change unmounts + remounts the
+  // boundary, clearing its error state. Chrome (sidebar, header, status bar)
+  // stays outside the boundary so navigation itself is never blocked by a
+  // crash in the main content.
+  const { pathname } = useLocation()
   // Optional read (not useBrand) — the shell is rendered by page tests that
   // don't mount BrandProvider; the logo link is chrome, not a hard dependency.
   const brand = useContext(BrandContext)
@@ -125,7 +133,11 @@ export function AppShell({ leftDock, sidebar, logoSlot, logoAccessory, header, s
         <div className="m-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background">
           {beforeMain}
           <main className="flex min-h-0 flex-1 overflow-hidden">
-            <div className="min-w-0 flex-1 overflow-hidden">{main}</div>
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <ErrorBoundary key={pathname} compact>
+                {main}
+              </ErrorBoundary>
+            </div>
             {aside}
           </main>
         </div>

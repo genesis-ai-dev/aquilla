@@ -7,7 +7,7 @@
  */
 
 import { useMemo, useState } from "react"
-import { Bot } from "lucide-react"
+import { Bot, Maximize2 } from "lucide-react"
 import type { CellContext } from "@/lib/cell-context"
 import type { ContextChip } from "@/lib/agent/context-chip"
 import { AgentDockView, type AgentDockViewProps } from "./agent/AgentDockView"
@@ -38,10 +38,12 @@ export interface AgentDockPanelProps {
   pendingChip?: ContextChip | null
   /** Called once the pending chip has been inserted. */
   onPendingChipConsumed?: () => void
+  /** Opens the full-screen workbench (same session — nothing is lost). */
+  onExpand?: () => void
 }
 
 export function AgentDockPanel({
-  currentCell, agent, bibleSummary, pendingChip, onPendingChipConsumed,
+  currentCell, agent, bibleSummary, pendingChip, onPendingChipConsumed, onExpand,
 }: AgentDockPanelProps) {
   // A summary prompt queued by a button tap; AgentDockView runs it once.
   const [pendingAgentPrompt, setPendingAgentPrompt] = useState<string | null>(null)
@@ -76,6 +78,17 @@ export function AgentDockPanel({
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <Bot className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-xs font-medium">AI Agent</span>
+        {onExpand && (
+          <button
+            type="button"
+            onClick={onExpand}
+            className="ml-auto rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            title="Open full-screen workbench"
+            aria-label="Open full-screen workbench"
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
 
       <AgentDockView

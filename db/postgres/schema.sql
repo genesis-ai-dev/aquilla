@@ -643,6 +643,10 @@ CREATE TABLE IF NOT EXISTS model_ab_events (
     error      INTEGER NOT NULL DEFAULT 0,    -- 1 = upstream request failed
     latency_ms INTEGER,
     outcome    TEXT,                          -- 'accepted' | 'edited' | 'rejected'
+    -- 0049: normalized Levenshtein [0,1] between the AI draft and the human's
+    -- text — 0 = accepted verbatim. Outcome is first-write-wins; the distance
+    -- refines with further edits (last write wins).
+    edit_distance DOUBLE PRECISION,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     outcome_at TIMESTAMPTZ
 );

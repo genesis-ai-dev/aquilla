@@ -628,6 +628,27 @@ CREATE TABLE IF NOT EXISTS agent_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_runs_project ON agent_runs (project_id, started_at DESC);
 
+-- Model A/B testing (0048_model_ab_events.sql). One row per default-model chat
+-- request while a platform experiment (platform_settings.abTest) is enabled;
+-- arm = champion (defaultLlmModel) | challenger. The SPA reports the user's
+-- gesture on the AI output (accepted = cell validated, edited = human commit
+-- overwrote the draft) via POST /chat/ab-feedback keyed by the id returned in
+-- the X-AB-Request-Id response header. Aggregated by GET /admin/ab-results.
+CREATE TABLE IF NOT EXISTS model_ab_events (
+    id         TEXT PRIMARY KEY,
+    user_id    BIGINT NOT NULL,
+    arm        TEXT NOT NULL,                 -- 'champion' | 'challenger'
+    model      TEXT NOT NULL,
+    source     TEXT NOT NULL DEFAULT 'chat',
+    error      INTEGER NOT NULL DEFAULT 0,    -- 1 = upstream request failed
+    latency_ms INTEGER,
+    outcome    TEXT,                          -- 'accepted' | 'edited' | 'rejected'
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    outcome_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_model_ab_events_created ON model_ab_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_model_ab_events_user ON model_ab_events(user_id);
+
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new
 -- inserts don't collide with migrated ids:

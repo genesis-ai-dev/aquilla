@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import { Section } from "@/components/ui/page"
+import { ModelListEditor, type ModelListValue } from "./ModelListEditor"
+import { AbResultsPanel } from "./AbResultsPanel"
 import {
   getPlatformSettings,
   updatePlatformSettings,
@@ -9,14 +12,14 @@ import {
 } from "@/lib/frontier/admin"
 
 /**
- * Platform-admin "Settings" section — global, runtime-editable AI config:
- * the default chat model, the agent model, the allowed-models list, and the AI
+ * Platform-admin "Settings" — global, runtime-editable AI config: the allowed
+ * model list (with the default chat + agent models marked on it), and the AI
  * request budgets. Saved to platform_settings (auth-worker) and read on the
- * chat/agent hot path with env-var fallbacks. Behind the elevation gate (the
- * console only renders this once elevated), and every call is server-enforced.
+ * chat/agent hot path with env-var fallbacks. Behind the elevation gate; every
+ * call is server-enforced.
  *
- * Model fields are dropdowns sourced from the allowed-models list (never free
- * text) so a typo can't break generation platform-wide.
+ * Models are one managed list (ModelListEditor) — no free-text box feeding a
+ * hidden dropdown — so a default can never point at a model that isn't allowed.
  */
 export function AdminSettingsSection({ jwt }: { jwt: string }) {
   const [data, setData] = useState<PlatformSettingsResponse | null>(null)
@@ -28,12 +31,13 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Draft form state.
-  const [chatModel, setChatModel] = useState("")
-  const [agentModel, setAgentModel] = useState("")
-  const [allowedText, setAllowedText] = useState("")
+  const [modelList, setModelList] = useState<ModelListValue>({ models: [], chatModel: "", agentModel: "" })
   const [userLimit, setUserLimit] = useState("")
   const [globalLimit, setGlobalLimit] = useState("")
   const [enforce, setEnforce] = useState(false)
+  const [abEnabled, setAbEnabled] = useState(false)
+  const [abChallenger, setAbChallenger] = useState("")
+  const [abTrafficPct, setAbTrafficPct] = useState("20")
 
   useEffect(() => {
     aliveRef.current = true
@@ -44,12 +48,17 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
   }, [])
 
   const hydrate = useCallback((d: PlatformSettingsResponse) => {
-    setChatModel(d.settings.defaultLlmModel ?? d.effective.defaultLlmModel)
-    setAgentModel(d.settings.agentModel ?? d.effective.agentModel)
-    setAllowedText((d.settings.allowedModels ?? d.effective.allowedModels).join("\n"))
+    setModelList({
+      models: d.settings.allowedModels ?? d.effective.allowedModels,
+      chatModel: d.settings.defaultLlmModel ?? d.effective.defaultLlmModel,
+      agentModel: d.settings.agentModel ?? d.effective.agentModel,
+    })
     setUserLimit(d.settings.aiUserDailyLimit != null ? String(d.settings.aiUserDailyLimit) : "")
     setGlobalLimit(d.settings.aiGlobalDailyLimit != null ? String(d.settings.aiGlobalDailyLimit) : "")
     setEnforce(d.settings.aiBudgetEnforce ?? false)
+    setAbEnabled(d.settings.abTest?.enabled ?? false)
+    setAbChallenger(d.settings.abTest?.challengerModel ?? "")
+    setAbTrafficPct(String(d.settings.abTest?.trafficPct ?? 20))
   }, [])
 
   const refresh = useCallback(async () => {
@@ -79,28 +88,28 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
     setBusy(true)
     setError(null)
     setSaved(false)
-    const allowedModels = allowedText
-      .split(/[\n,]/)
-      .map((m) => m.trim())
-      .filter(Boolean)
     try {
-      const res = await updatePlatformSettings(jwt, {
-        defaultLlmModel: chatModel,
-        agentModel,
-        allowedModels,
+      await updatePlatformSettings(jwt, {
+        defaultLlmModel: modelList.chatModel,
+        agentModel: modelList.agentModel,
+        allowedModels: modelList.models,
         aiUserDailyLimit: userLimit === "" ? undefined : Number(userLimit),
         aiGlobalDailyLimit: globalLimit === "" ? undefined : Number(globalLimit),
         aiBudgetEnforce: enforce,
+        abTest: {
+          enabled: abEnabled,
+          challengerModel: abChallenger,
+          trafficPct: Math.min(100, Math.max(0, Math.round(Number(abTrafficPct) || 0))),
+        },
         ifMatchVersion: data.version,
       })
-      // Refetch so the version + effective values (and the dropdown menu) update.
+      // Refetch so the version + effective values update.
       await refresh()
       if (aliveRef.current) {
         setSaved(true)
         if (savedTimer.current) clearTimeout(savedTimer.current)
         savedTimer.current = setTimeout(() => aliveRef.current && setSaved(false), 2500)
       }
-      void res
     } catch (err) {
       // 409 → someone else changed it; reload so the admin retries against fresh state.
       const msg = err instanceof Error ? err.message : String(err)
@@ -109,77 +118,108 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
     } finally {
       if (aliveRef.current) setBusy(false)
     }
-  }, [data, jwt, chatModel, agentModel, allowedText, userLimit, globalLimit, enforce, refresh])
+  }, [data, jwt, modelList, userLimit, globalLimit, enforce, abEnabled, abChallenger, abTrafficPct, refresh])
 
-  if (loading) return <p className="text-sm text-muted-foreground">Loading settings…</p>
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="h-56 animate-pulse rounded-2xl border bg-card" />
+        <div className="h-40 animate-pulse rounded-2xl border bg-card" />
+      </div>
+    )
+  }
   if (error && !data) return <p className="text-sm text-destructive">{error}</p>
   if (!data) return <p className="text-sm text-muted-foreground">No settings available.</p>
 
-  // Dropdown menu = allowed list ∪ the currently-selected values (so a selected
-  // model never renders blank even if it's not in the persisted list).
-  const menu = Array.from(
-    new Set([...data.effective.allowedModels, chatModel, agentModel].filter(Boolean)),
-  )
-
   return (
-    <div className="max-w-2xl space-y-6">
-      <p className="text-xs text-muted-foreground">
-        Global AI configuration for the whole platform. Changes apply within ~30s. An unset
-        value falls back to the deploy default.
+    <div className="space-y-6">
+      <p className="text-sm text-muted-foreground">
+        Global AI configuration for the whole platform. Changes apply within ~30s; an unset value
+        falls back to the deploy default.
       </p>
 
-      <section className="space-y-4 rounded-2xl border bg-card p-5">
-        <h2 className="font-heading text-base font-medium">Models</h2>
+      <Section title="Models" description="The allowed model list and which model powers chat and the agent.">
+        <ModelListEditor value={modelList} onChange={setModelList} />
+      </Section>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="admin-chat-model">Default chat model</Label>
-          <ModelSelect id="admin-chat-model" value={chatModel} options={menu} onChange={setChatModel} />
-          <p className="text-xs text-muted-foreground">
-            Used for chat completions when the client requests the default model.
-          </p>
-        </div>
+      <Section
+        title="A/B experiment"
+        description="Route a share of default-model chat traffic to a challenger and compare how often each model's drafts are accepted."
+      >
+        <div className="space-y-4">
+          <label className="flex items-center gap-2 text-sm">
+            <Toggle checked={abEnabled} onChange={setAbEnabled} label="enable A/B experiment" />
+            <span>Run the experiment</span>
+          </label>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="admin-agent-model">Agent model</Label>
-          <ModelSelect id="admin-agent-model" value={agentModel} options={menu} onChange={setAgentModel} />
-          <p className="text-xs text-muted-foreground">Model the translation agent runs on.</p>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="admin-allowed-models">Allowed models</Label>
-          <textarea
-            id="admin-allowed-models"
-            value={allowedText}
-            onChange={(e) => setAllowedText(e.target.value)}
-            rows={5}
-            spellCheck={false}
-            className="w-full rounded-lg border bg-background p-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          />
-          <p className="text-xs text-muted-foreground">
-            One model ID per line. The chat/agent models must be in this list.
-          </p>
-        </div>
-      </section>
-
-      <section className="space-y-4 rounded-2xl border bg-card p-5">
-        <h2 className="font-heading text-base font-medium">AI budget</h2>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="admin-user-limit">User daily limit</Label>
-            <NumberInput id="admin-user-limit" value={userLimit} onChange={setUserLimit} placeholder="default 500" />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="admin-ab-challenger">Challenger model</Label>
+              <select
+                id="admin-ab-challenger"
+                value={abChallenger}
+                onChange={(e) => setAbChallenger(e.target.value)}
+                disabled={!abEnabled}
+                className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+              >
+                <option value="">— choose a model —</option>
+                {modelList.models
+                  .filter((m) => m !== modelList.chatModel)
+                  .map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Competes against the default chat model ({modelList.chatModel || "unset"}).
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="admin-ab-traffic">Challenger traffic %</Label>
+              <NumberInput
+                id="admin-ab-traffic"
+                value={abTrafficPct}
+                onChange={setAbTrafficPct}
+                placeholder="20"
+              />
+              <p className="text-xs text-muted-foreground">
+                Share of default-model requests served by the challenger (0–100).
+              </p>
+            </div>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="admin-global-limit">Global daily limit</Label>
-            <NumberInput id="admin-global-limit" value={globalLimit} onChange={setGlobalLimit} placeholder="default 5000" />
+
+          <div className="border-t pt-4">
+            <h3 className="mb-2 text-sm font-medium text-foreground">Results</h3>
+            <AbResultsPanel jwt={jwt} />
           </div>
         </div>
+      </Section>
 
-        <label className="flex items-center gap-2 text-sm">
-          <Toggle checked={enforce} onChange={setEnforce} label="enforce AI budget" />
-          <span>Enforce budget (block with 429 instead of log-only)</span>
-        </label>
-      </section>
+      <Section title="AI budget" description="Daily request ceilings, and whether they block or just log.">
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="admin-user-limit">User daily limit</Label>
+              <NumberInput id="admin-user-limit" value={userLimit} onChange={setUserLimit} placeholder="default 500" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="admin-global-limit">Global daily limit</Label>
+              <NumberInput
+                id="admin-global-limit"
+                value={globalLimit}
+                onChange={setGlobalLimit}
+                placeholder="default 5000"
+              />
+            </div>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm">
+            <Toggle checked={enforce} onChange={setEnforce} label="enforce AI budget" />
+            <span>Enforce budget (block with 429 instead of log-only)</span>
+          </label>
+        </div>
+      </Section>
 
       <div className="flex items-center gap-3">
         <Button type="button" onClick={save} disabled={busy}>
@@ -193,33 +233,6 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
         {error && data && <span className="text-xs text-destructive">{error}</span>}
       </div>
     </div>
-  )
-}
-
-function ModelSelect({
-  id,
-  value,
-  options,
-  onChange,
-}: {
-  id: string
-  value: string
-  options: string[]
-  onChange: (v: string) => void
-}) {
-  return (
-    <select
-      id={id}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      {options.map((m) => (
-        <option key={m} value={m}>
-          {m}
-        </option>
-      ))}
-    </select>
   )
 }
 

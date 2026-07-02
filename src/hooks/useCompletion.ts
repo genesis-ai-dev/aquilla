@@ -43,6 +43,7 @@ import { useFrontierHealth } from "@/lib/completion/frontier-health"
 import posthog from "@/lib/posthog"
 import { memMark } from "@/lib/perf-log"
 import { compressExampleSource, dedupeExamples, dropPrecedingContextDuplicates } from "@/lib/completion/compress-examples"
+import { noteAbAssignment } from "@/lib/ab/feedback"
 import { gatherPrecedingContext, gatherFollowingSource, DEFAULT_DRAFT_CONTEXT, type DraftContextSettings } from "@/lib/completion/draft-context"
 
 // Cap per LLM call. Above this we split sequentially and chain via priorBatch.
@@ -202,6 +203,9 @@ export function useCompletion(
           setPreviews((p) => new Map(p).set(cell.id, text))
         },
         signal,
+        // Model A/B: remember which experiment request drafted this cell so the
+        // user's validate/edit gesture can be attributed to the served model.
+        onAbAssignment: (ab) => noteAbAssignment(cell.fileId, cell.id, ab),
       })
       posthog.capture("ai translation completed", {
         provider,
@@ -353,6 +357,11 @@ export function useCompletion(
             // FRO-235 fix: getBatchCompletionSignal(runId) returns an
             // already-aborted signal when this run has been superseded.
             signal: getBatchCompletionSignal(runId),
+            // Model A/B: one batch request drafts every cell in the chunk; the
+            // first gesture on any of them reports (server keeps one outcome).
+            onAbAssignment: (ab) => {
+              for (const c of chunk) noteAbAssignment(c.fileId, c.id, ab)
+            },
           })
         } catch (err) {
           // AbortError: user cancelled (or run superseded) — clear all
@@ -565,6 +574,10 @@ export function useCompletion(
         // (the tag format already supports it — see paragraph-protocol.ts).
         stream: false,
         signal,
+        // Model A/B: the paragraph request drafts the whole group.
+        onAbAssignment: (ab) => {
+          for (const c of groupCells) noteAbAssignment(c.fileId, c.id, ab)
+        },
       })
 
       // 5. Parse + reconcile LOUDLY (D11).

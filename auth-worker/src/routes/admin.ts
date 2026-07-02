@@ -25,6 +25,7 @@ import { parseAdminEmails, requirePlatformAdmin, requireAdminElevation, adminEle
 import { resolveCreditConfig, readSpend } from "../lib/credits"
 import { loadPlatformSettings, savePlatformSettings } from "../lib/platform-settings"
 import { getAllowedModels } from "../lib/ai-budget"
+import { aggregateAbResults } from "../lib/model-ab"
 import { sendAdminElevationCodeEmail } from "../services/email"
 
 const admin = new Hono<AuthHonoEnv>()
@@ -591,6 +592,13 @@ const platformSettingsPatchSchema = z.object({
   aiUserDailyLimit:   z.number().int().nonnegative().optional(),
   aiGlobalDailyLimit: z.number().int().nonnegative().optional(),
   aiBudgetEnforce:    z.boolean().optional(),
+  abTest: z
+    .object({
+      enabled: z.boolean(),
+      challengerModel: z.string(),
+      trafficPct: z.number().int().min(0).max(100),
+    })
+    .optional(),
   ifMatchVersion:     z.number().int().nonnegative(),
 })
 
@@ -623,6 +631,34 @@ admin.patch("/settings", zValidator("json", platformSettingsPatchSchema), async 
     }
   }
 
+  // An enabled A/B experiment needs a real, allowlisted challenger that isn't
+  // just the champion — otherwise the roll is meaningless or would serve a
+  // model the AI guard rejects on every challenger request.
+  const mergedAb = merged.abTest
+  if (mergedAb?.enabled) {
+    const challenger = mergedAb.challengerModel.trim()
+    const champion =
+      merged.defaultLlmModel || c.env.DEFAULT_LLM_MODEL || "anthropic/claude-sonnet-4.5"
+    if (!challenger || !mergedAllowed.has(challenger)) {
+      return c.json(
+        {
+          error: "model_not_allowed",
+          message: `abTest.challengerModel "${challenger}" is not in the allowed-models list.`,
+        },
+        400,
+      )
+    }
+    if (challenger === champion) {
+      return c.json(
+        {
+          error: "ab_challenger_is_champion",
+          message: "The challenger model must differ from the default chat model.",
+        },
+        400,
+      )
+    }
+  }
+
   const result = await savePlatformSettings(c.env, patch, ifMatchVersion, user.id)
   if (!result.ok) {
     return c.json({ error: "version_mismatch", current: result.conflict }, 409)
@@ -635,6 +671,20 @@ admin.patch("/settings", zValidator("json", platformSettingsPatchSchema), async 
     .run()
 
   return c.json({ settings: result.record.settings, version: result.record.version })
+})
+
+/**
+ * GET /api/v2/admin/ab-results?days=30 — per-model/arm aggregates from
+ * model_ab_events: request volume, error count, and the user gestures the SPA
+ * reported (accepted / edited / rejected). Rows only exist while an experiment
+ * is enabled, so both arms always cover the same window. Behind the elevation
+ * gate like the rest of the console.
+ */
+admin.get("/ab-results", async (c) => {
+  const daysRaw = Number(c.req.query("days") ?? 30)
+  const days = Number.isFinite(daysRaw) ? Math.min(365, Math.max(1, Math.floor(daysRaw))) : 30
+  const results = await aggregateAbResults(c.env.AQUILLA_PG, days)
+  return c.json({ days, results })
 })
 
 export default admin

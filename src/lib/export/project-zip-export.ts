@@ -25,7 +25,7 @@ import { exportTmx } from "./exporters/tmx"
  *  requires the raw sidecar bytes from the server, plain-text-dump which
  *  is advanced/single-file only, and metadata-csv which has its own
  *  project-scope path in ExportDialog that flattens all cells into one sheet). */
-export type TextExportFormat = Exclude<ExportFormat, "usfm" | "audio-by-character" | "vtt" | "docx" | "plain-text-dump" | "metadata-csv">
+export type TextExportFormat = Exclude<ExportFormat, "usfm" | "audio-by-character" | "vtt" | "docx" | "plain-text-dump" | "metadata-csv" | "sdbh-xml">
 
 export interface ProjectFileCellsInput {
   fileId: string

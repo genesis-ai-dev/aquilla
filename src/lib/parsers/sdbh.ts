@@ -330,11 +330,11 @@ export function injectSdbhXml(skeletonXml: string, opts: SdbhInjectOptions): Sdb
   // Id="..." and each contains at most one <LEXSenses> list with one <LEXSense>.
   let out = skeletonXml.replace(
     /(<LEXMeaning Id="(\d+)"[^>]*>)([\s\S]*?)(<\/LEXMeaning>)/g,
-    (whole, open: string, lexId: string, body: string, close: string) => {
+    (_whole, open: string, lexId: string, body: string, close: string) => {
       const rewritten = body.replace(
         // LEXSense: self-closing never occurs (children always serialized).
         /(<LEXSense\b[^>]*>)([\s\S]*?)(<\/LEXSense>)/,
-        (sWhole, sOpen: string, sBody: string, sClose: string) => {
+        (_sWhole, sOpen: string, sBody: string, sClose: string) => {
           sensesInjected += 1
           // Indentation: derive from the first child line of the sense body.
           const indentMatch = /\n(\s*)</.exec(sBody)
@@ -375,7 +375,7 @@ export function injectSdbhXml(skeletonXml: string, opts: SdbhInjectOptions): Sdb
   if (opts.rewriteDomainLabels) {
     out = out.replace(
       /(<(LEXDomain|LEXSubDomain|LEXCoreDomain) Code="([^"]*)"[^>]*>)([^<]*)(<\/\2>)/g,
-      (whole, open: string, tag: string, code: string, label: string, close: string) => {
+      (whole, open: string, tag: string, code: string, _label: string, close: string) => {
         const prefix = tag === "LEXCoreDomain" ? SDBH_COREDOMAIN_CELL_PREFIX : SDBH_DOMAIN_CELL_PREFIX
         const localized = opts.byCellId.get(`${prefix}${code}`)
         return localized ? `${open}${escapeXmlText(localized)}${close}` : whole

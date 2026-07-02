@@ -46,6 +46,7 @@ import {
   existsSync,
   copyFileSync,
   mkdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs"
@@ -77,6 +78,10 @@ const LOG_DIR = path.join(REPO_ROOT, ".dev-stack-logs")
 const IDENTITY_PORT = Number(process.env.DEV_STACK_IDENTITY_PORT) || 8788
 const SYNC_PORT = Number(process.env.DEV_STACK_SYNC_PORT) || 8789
 const DEFAULT_VITE_PORT = 5173
+// Scripted OpenRouter mock (scripts/mock-openrouter.ts) — booted when the
+// identity worker has no real OPENROUTER_API_KEY, so the agent/chat paths
+// work end-to-end locally with a deterministic model.
+const MOCK_LLM_PORT = Number(process.env.DEV_STACK_MOCK_LLM_PORT) || 9456
 
 // D1→Neon migration (FRO-146): auth-worker + sync-worker bind HYPERDRIVE and
 // swap AQUILLA_PG for a Postgres shim (see auth-worker/src/index.ts). Under
@@ -163,6 +168,15 @@ function ensureDevVars(appDir: string, label: string): void {
   console.log(
     `[dev-stack] ${label}: created .dev.vars from .dev.vars.example (edit ${path.relative(REPO_ROOT, target)} to customise).`,
   )
+}
+
+/** True when auth-worker/.dev.vars carries a real (non-mock) OpenRouter key. */
+function identityHasRealOpenRouterKey(): boolean {
+  const p = path.join(IDENTITY_DIR, ".dev.vars")
+  if (!existsSync(p)) return false
+  const m = readFileSync(p, "utf8").match(/^OPENROUTER_API_KEY\s*=\s*"?([^"\n]*)"?\s*$/m)
+  const key = m?.[1]?.trim() ?? ""
+  return key !== "" && key !== "mock"
 }
 
 async function freePort(port: number): Promise<void> {
@@ -512,6 +526,22 @@ async function main(): Promise<void> {
   applyIdentityMigrations()
   await ensureLocalPostgres()
 
+  // Without a real OpenRouter key, boot the scripted mock so the agent and
+  // chat paths work end-to-end (deterministic model, zero cost). A real key
+  // in auth-worker/.dev.vars wins — no mock, no overrides.
+  const useMockLlm = !identityHasRealOpenRouterKey()
+  if (useMockLlm) {
+    await freePort(MOCK_LLM_PORT)
+    console.log(`[dev-stack] starting mock OpenRouter on :${MOCK_LLM_PORT}… (no real OPENROUTER_API_KEY in auth-worker/.dev.vars)`)
+    const mockLlm = spawn(
+      "npx",
+      ["tsx", "scripts/mock-openrouter.ts", String(MOCK_LLM_PORT)],
+      { cwd: REPO_ROOT, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } },
+    )
+    attachOutput(mockLlm, "mock-llm", openLogFile(path.join(LOG_DIR, "mock-llm.log")), VERBOSE)
+    cleanup.push(() => killChildTree(mockLlm))
+  }
+
   console.log(`[dev-stack] starting identity (auth-worker) on :${IDENTITY_PORT}…`)
   const identity: SpawnedWorker = await spawnWranglerDev({
     cwd: IDENTITY_DIR,
@@ -540,6 +570,13 @@ async function main(): Promise<void> {
       "--persist-to", PERSIST_DIR,
       "--var", "WRANGLER_LOCAL:1",
       "--var", "ADMIN_EMAILS:dev@local.test",
+      // Route the model calls at the scripted mock when no real key exists.
+      ...(useMockLlm
+        ? [
+            "--var", `OPENROUTER_BASE_URL:http://127.0.0.1:${MOCK_LLM_PORT}/api/v1`,
+            "--var", "OPENROUTER_API_KEY:mock",
+          ]
+        : []),
     ],
     logFile: openLogFile(path.join(LOG_DIR, "identity.log")),
     streamToParent: VERBOSE,
@@ -632,6 +669,9 @@ async function main(): Promise<void> {
       ? `         sync     -> http://127.0.0.1:${SYNC_PORT}/  (logs: ${path.relative(REPO_ROOT, path.join(LOG_DIR, "sync.log"))})`
       : `         sync     -> skipped (--no-sync)`,
     `         chat     -> http://127.0.0.1:${IDENTITY_PORT}/chat/  (served by identity worker)`,
+    useMockLlm
+      ? `         llm      -> http://127.0.0.1:${MOCK_LLM_PORT}/  (scripted mock — set OPENROUTER_API_KEY in auth-worker/.dev.vars for a real model)`
+      : `         llm      -> OpenRouter (real key from auth-worker/.dev.vars)`,
     `         state    -> ${path.relative(REPO_ROOT, PERSIST_DIR)}/  (delete to reset local D1)`,
     "[dev-stack] press Ctrl+C to stop",
     "",

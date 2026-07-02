@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, waitFor, fireEvent } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { OrgHome, activityStatus } from "./OrgHome"
@@ -132,12 +132,21 @@ describe("OrgHome", () => {
     expect(screen.getAllByText("Overdue").length).toBeGreaterThan(1)
   })
 
-  it("shows the audio rollup card and per-project audio %", async () => {
+  it("shows the audio rollup card and per-project audio % in the project table", async () => {
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
+    // Rollup average is still surfaced…
     expect(screen.getByText("Avg audio")).toBeInTheDocument()
-    // both projects are 50% audio → at least one "50% audio" per-row label
-    expect(screen.getAllByText("50% audio").length).toBeGreaterThan(0)
+    // …and the project list is a table with a dedicated Audio column…
+    expect(screen.getByText("Audio")).toBeInTheDocument()
+    // …so each project row shows its own audio coverage (both are 50% audio).
+    // Scope to the row so the bare "50%" cell isn't confused with a rollup tile.
+    const legacyRow = screen.getByText("Legacy Translation").closest("a")
+    const freshRow = screen.getByText("New Testament").closest("a")
+    expect(legacyRow).not.toBeNull()
+    expect(freshRow).not.toBeNull()
+    expect(within(legacyRow!).getByText("50%")).toBeInTheDocument()
+    expect(within(freshRow!).getByText("50%")).toBeInTheDocument()
   })
 
   it("renders the stalled project before the fresh project (attention rank order)", async () => {

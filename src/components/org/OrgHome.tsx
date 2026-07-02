@@ -139,9 +139,9 @@ function roleLabel(org: OrgSummary): string {
   return org.role.name.replace(/_/g, " ")
 }
 
-function formatUpdatedAt(value: number | null): string {
-  if (value == null) return "No activity yet"
-  return `Updated ${new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(value))}`
+function formatShortDate(value: number | null): string {
+  if (value == null) return "—"
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(value))
 }
 
 function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, now: number): PortfolioProjectRow[] {
@@ -159,6 +159,100 @@ function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, 
         return attentionRank(b, now) - attentionRank(a, now) || a.name.localeCompare(b.name)
     }
   })
+}
+
+// Shared column template for the project table so the header row and the data
+// rows always line up. Name flexes; the metric + date columns are fixed-width.
+// Kept compact so the Name column survives inside the narrow all-orgs panel.
+const PROJECT_TABLE_COLS = "grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_4rem_6rem]"
+
+/**
+ * The org/portfolio project list as a compact table — one row per project with
+ * aligned Translated / Validated / Audio / Updated columns — instead of a stack
+ * of full-width progress-bar cards. Rows stay `<Link>`s so cmd-click still opens
+ * a project in a new tab. Wrapped in `overflow-x-auto` so the fixed columns can
+ * scroll rather than squash on a narrow viewport.
+ */
+function ProjectTable({
+  projects,
+  now,
+  showOrg,
+}: {
+  projects: PortfolioProjectRow[]
+  now: number
+  showOrg: boolean
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <div className="min-w-[32rem]">
+        <div
+          className={`grid ${PROJECT_TABLE_COLS} gap-x-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground`}
+        >
+          <span>Name</span>
+          <span className="whitespace-nowrap text-right">Translated</span>
+          <span className="whitespace-nowrap text-right">Validated</span>
+          <span className="whitespace-nowrap text-right">Audio</span>
+          <span className="whitespace-nowrap text-right">Updated</span>
+        </div>
+        <div className="divide-y">
+          {projects.map((p) => {
+            const tpct = Math.round(translatedPct(p) * 100)
+            const pct = Math.round(validatedPct(p) * 100)
+            const apct = Math.round(audioPct(p) * 100)
+            const status = activityStatus(p, now)
+            const dstatus = deadlineStatus(p, now)
+            return (
+              <Link
+                key={p.id}
+                to={`/projects/${p.id}`}
+                className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-3 px-4 py-2.5 text-sm transition-colors hover:bg-muted/50`}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="truncate font-medium">{p.name}</span>
+                  {showOrg && p.orgName && (
+                    <span className="max-w-[8rem] shrink-0 truncate rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                      {p.orgName}
+                    </span>
+                  )}
+                  {dstatus === "overdue" && (
+                    <span className="shrink-0 rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-medium text-destructive">
+                      Overdue
+                    </span>
+                  )}
+                  {dstatus === "soon" && (
+                    <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                      Due soon
+                    </span>
+                  )}
+                </span>
+
+                <span className="text-right font-medium tabular-nums text-foreground" aria-label={`${tpct}% translated`}>
+                  {tpct}%
+                </span>
+                <span className="text-right tabular-nums text-muted-foreground" aria-label={`${pct}% validated`}>
+                  {pct}%
+                </span>
+                <span className="text-right tabular-nums text-muted-foreground" aria-label={`${apct}% audio`}>
+                  {apct}%
+                </span>
+                <span
+                  className={`truncate text-right text-xs ${
+                    status === "stalled" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
+                  }`}
+                >
+                  {status === "not-started"
+                    ? "Not started"
+                    : status === "stalled"
+                      ? "Stalled"
+                      : formatShortDate(p.lastEditAt)}
+                </span>
+              </Link>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export function OrgHome() {
@@ -329,7 +423,6 @@ export function OrgHome() {
   const overdueCount = projects.filter((p) => deadlineStatus(p, now) === "overdue").length
   const avgAudioPct =
     projects.length > 0 ? projects.reduce((sum, p) => sum + audioPct(p), 0) / projects.length : 0
-  const accessByProjectId = new Map(accessibleProjects.map((project) => [project.id, project]))
   const sharedProjects = partitionSharedProjects(accessibleProjects, orgs, activeOrgId).sharedWithMe
 
   const orgSummaries: OrgPortfolioSummary[] = orgs
@@ -632,75 +725,7 @@ export function OrgHome() {
                           </p>
                         </div>
                       ) : (
-                        <div className="divide-y">
-                          {visible.map((p) => {
-                            const access = accessByProjectId.get(p.id)
-                            const tpct = Math.round(translatedPct(p) * 100)
-                            const pct = Math.round(validatedPct(p) * 100)
-                            const apct = Math.round(audioPct(p) * 100)
-                            const status = activityStatus(p, now)
-                            const dstatus = deadlineStatus(p, now)
-                            const statusText =
-                              projectLens === "recent"
-                                ? formatUpdatedAt(p.lastEditAt)
-                                : status === "stalled"
-                                  ? "Stalled"
-                                  : status === "not-started"
-                                    ? "Not started"
-                                    : `${tpct}% translated`
-                            return (
-                              <Link
-                                key={p.id}
-                                to={`/projects/${p.id}`}
-                                className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
-                              >
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-2">
-                                    <p className="truncate font-medium">{p.name}</p>
-                                    {p.orgName && (
-                                      <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                                        {p.orgName}
-                                      </span>
-                                    )}
-                                    {access && (
-                                      <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                                        {access.role.name}
-                                      </span>
-                                    )}
-                                    {dstatus === "overdue" && (
-                                      <span className="shrink-0 rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-medium text-destructive">
-                                        Overdue
-                                      </span>
-                                    )}
-                                    {dstatus === "soon" && (
-                                      <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
-                                        Due soon
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div
-                                    className="mt-1 space-y-0.5"
-                                    aria-label={`${tpct}% translated, ${pct}% validated`}
-                                  >
-                                    <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                                      <div className="h-full rounded-full bg-amber-500" style={{ width: `${tpct}%` }} />
-                                    </div>
-                                    <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                                      <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
-                                    </div>
-                                  </div>
-                                </div>
-                                <div className="shrink-0 text-right">
-                                  <p className={`text-xs ${status === "stalled" ? "text-destructive" : "text-muted-foreground"}`}>
-                                    {statusText}
-                                  </p>
-                                  <p className="text-xs text-muted-foreground">{pct}% validated</p>
-                                  <p className="text-xs text-muted-foreground">{apct}% audio</p>
-                                </div>
-                              </Link>
-                            )
-                          })}
-                        </div>
+                        <ProjectTable projects={visible} now={now} showOrg />
                       )}
                     </section>
                   </div>
@@ -820,65 +845,8 @@ export function OrgHome() {
                   ) : visible.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No matching projects.</p>
                   ) : (
-                    <div className="rounded-2xl border divide-y">
-                      {visible.map((p) => {
-                        const access = accessByProjectId.get(p.id)
-                        const tpct = Math.round(translatedPct(p) * 100)
-                        const pct = Math.round(validatedPct(p) * 100)
-                        const apct = Math.round(audioPct(p) * 100)
-                        const status = activityStatus(p, now)
-                        const dstatus = deadlineStatus(p, now)
-                        return (
-                          <Link
-                            key={p.id}
-                            to={`/projects/${p.id}`}
-                            className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
-                          >
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <p className="font-medium truncate">{p.name}</p>
-                                {access && (
-                                  <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                                    {access.role.name}
-                                  </span>
-                                )}
-                                {dstatus === "overdue" && (
-                                  <span className="shrink-0 rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-medium text-destructive">
-                                    Overdue
-                                  </span>
-                                )}
-                                {dstatus === "soon" && (
-                                  <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
-                                    Due soon
-                                  </span>
-                                )}
-                              </div>
-                              <div
-                                className="mt-1 space-y-0.5"
-                                aria-label={`${tpct}% translated, ${pct}% validated`}
-                              >
-                                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                                  <div className="h-full rounded-full bg-amber-500" style={{ width: `${tpct}%` }} />
-                                </div>
-                                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                                  <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
-                                </div>
-                              </div>
-                            </div>
-                            <div className="shrink-0 text-right">
-                              <p className={`text-xs ${status === "stalled" ? "text-destructive" : "text-muted-foreground"}`}>
-                                {status === "stalled"
-                                  ? "Stalled"
-                                  : status === "not-started"
-                                    ? "Not started"
-                                    : `${tpct}% translated`}
-                              </p>
-                              <p className="text-xs text-muted-foreground">{pct}% validated</p>
-                              <p className="text-xs text-muted-foreground">{apct}% audio</p>
-                            </div>
-                          </Link>
-                        )
-                      })}
+                    <div className="overflow-hidden rounded-2xl border bg-card">
+                      <ProjectTable projects={visible} now={now} showOrg={false} />
                     </div>
                   )}
 

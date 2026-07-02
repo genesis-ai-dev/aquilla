@@ -1,8 +1,13 @@
 # Agent Mode v2 — a translation workbench, not a chat widget
 
-Status: DESIGN (supersedes the UX + tool surface of
-2026-06-12-translation-agent-design.md; the staged-proposal safety model, role
-filtering, emit-stage lint, and credit rails all carry forward unchanged).
+Status: IMPLEMENTED on branch `agent-v2` (all five phases, 2026-07-02) —
+supersedes the UX + tool surface of 2026-06-12-translation-agent-design.md;
+the staged-proposal safety model, role filtering, emit-stage lint, and credit
+rails all carry forward unchanged. Implementation notes vs. this design:
+`propose` kept the `emit` frame kind on the wire; the legacy `execute` tool
+remains as a back-compat shim (scripted mocks, stored v1 sessions); the dev
+stack and e2e harness auto-boot scripts/mock-openrouter.ts when no real
+OPENROUTER_API_KEY is configured.
 
 ## 0. Why v1 underperforms — audit of what exists
 

@@ -5,7 +5,7 @@ import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 const noConcepts = { concepts: [], onTermApply: vi.fn() }
 
 describe("SourceSelectionToolbar", () => {
-  it("renders Ask AI and Add to terms with labels", () => {
+  it("renders Ask AI and Add to termbase with labels", () => {
     render(
       <SourceSelectionToolbar
         sourceSelection="grace"
@@ -15,7 +15,7 @@ describe("SourceSelectionToolbar", () => {
       />,
     )
     expect(screen.getByRole("button", { name: /ask ai/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /add to terms/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /add to termbase/i })).toBeInTheDocument()
   })
 
   it("fires onAskAi on click", () => {
@@ -27,9 +27,9 @@ describe("SourceSelectionToolbar", () => {
     expect(onAskAi).toHaveBeenCalledOnce()
   })
 
-  it("hides Add to terms when no callback is wired but always shows Ask AI", () => {
+  it("hides Add to termbase when no callback is wired but always shows Ask AI", () => {
     render(<SourceSelectionToolbar sourceSelection="grace" onAskAi={vi.fn()} {...noConcepts} />)
-    expect(screen.queryByRole("button", { name: /add to terms/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /add to termbase/i })).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: /ask ai/i })).toBeInTheDocument()
   })
 

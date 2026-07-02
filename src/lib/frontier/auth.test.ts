@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import "fake-indexeddb/auto";
-import { login, FrontierAuthError } from "./auth";
+import { login, FrontierAuthError, AUTH_BASE } from "./auth";
 import { clearSession, loadSession } from "./session-store";
 
 describe("login", () => {
@@ -15,7 +15,7 @@ describe("login", () => {
     );
     const s = await login({ username: "alice", password: "pw" });
     expect(fetchSpy).toHaveBeenCalledWith(
-      "https://api.aquilla.app/identity/api/v2/auth/token",
+      `${AUTH_BASE}/api/v2/auth/token`,
       expect.objectContaining({ method: "POST" })
     );
     expect(s.jwt).toBe("jwt-1");

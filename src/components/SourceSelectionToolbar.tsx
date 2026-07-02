@@ -1,6 +1,6 @@
 // Floating action cluster shown above a SOURCE selection. Mirrors the
 // CellActionRail aesthetic (rounded neumorphic pill, muted icons). Buttons:
-// Ask AI (push the selection into the agent chat as a chip) and Add to terms
+// Ask AI (push the selection into the agent chat as a chip) and Add to termbase
 // (existing terminology flow). A "View term" lookup appears when the selection
 // matches an active concept.
 import { useMemo } from "react"
@@ -77,13 +77,12 @@ export function SourceSelectionToolbar({
       {onAddToTermbase && (
         <button
           type="button"
-          aria-label="Add to termbase"
           onMouseDown={handleButtonMouseDown}
           onClick={onAddToTermbase}
           className={cn(PILL)}
         >
           <BookOpen className="size-3" aria-hidden />
-          Add to terms
+          Add to termbase
         </button>
       )}
     </div>

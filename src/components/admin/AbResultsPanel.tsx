@@ -94,6 +94,7 @@ export function AbResultsPanel({ jwt }: { jwt: string }) {
             <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
               <th className="px-3 py-2 font-medium">Model</th>
               <th className="px-3 py-2 text-right font-medium">Requests</th>
+              <th className="px-3 py-2 font-medium">Avg edit</th>
               <th className="px-3 py-2 font-medium">Acceptance</th>
               <th className="px-3 py-2 text-right font-medium">Edited</th>
               <th className="px-3 py-2 text-right font-medium">Pending</th>
@@ -109,8 +110,10 @@ export function AbResultsPanel({ jwt }: { jwt: string }) {
         </table>
       </div>
       <p className="text-xs text-muted-foreground">
-        Acceptance = validated without edits, as a share of drafts someone acted on. Small
-        samples swing wildly — compare only once both arms have a few dozen decided drafts.
+        Avg edit = how much of the model's draft humans rewrote before settling (0% = kept
+        verbatim) — the primary quality signal, lower is better. Acceptance = validated without
+        edits, as a share of drafts someone acted on. Small samples swing wildly — compare only
+        once both arms have a few dozen decided drafts.
       </p>
     </div>
   )
@@ -132,6 +135,9 @@ function ResultRow({ row }: { row: AbResultRow }) {
         </div>
       </td>
       <td className="px-3 py-2 text-right tabular-nums">{row.requests.toLocaleString()}</td>
+      <td className="px-3 py-2">
+        <EditDistanceCell value={row.avgEditDistance} />
+      </td>
       <td className="px-3 py-2">
         {acceptPct == null ? (
           <span className="text-xs text-muted-foreground">no decisions yet</span>
@@ -165,5 +171,24 @@ function ResultRow({ row }: { row: AbResultRow }) {
         {row.avgLatencyMs == null ? "—" : `${(row.avgLatencyMs / 1000).toFixed(1)}s`}
       </td>
     </tr>
+  )
+}
+
+/**
+ * Mean normalized edit distance as "% of the draft humans rewrote" — the
+ * primary quality signal (lower = better). Green under 15%, amber under 40%,
+ * red beyond: past ~40% the model is drafting more noise than help.
+ */
+function EditDistanceCell({ value }: { value: number | null }) {
+  if (value == null) return <span className="text-xs text-muted-foreground">—</span>
+  const pct = Math.round(value * 100)
+  const color = pct <= 15 ? "bg-emerald-500" : pct <= 40 ? "bg-amber-500" : "bg-destructive"
+  return (
+    <div className="flex items-center gap-2">
+      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
+        <div className={cn("h-full rounded-full", color)} style={{ width: `${Math.min(100, pct)}%` }} aria-hidden />
+      </div>
+      <span className="text-xs tabular-nums">{pct}%</span>
+    </div>
   )
 }

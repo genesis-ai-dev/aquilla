@@ -206,20 +206,23 @@ chat.post(
 const abFeedbackSchema = z.object({
   requestId: z.string().uuid(),
   outcome: z.enum(AB_OUTCOMES),
+  /** Normalized Levenshtein [0,1] between the AI draft and the human's text. */
+  editDistance: z.number().min(0).max(1).optional(),
 })
 
 /**
  * POST /api/v1/chat/ab-feedback — the SPA reports what the user did with an
  * A/B-assigned completion (accepted = validated the cell, edited = overwrote
- * the AI draft). First write wins; only the requester may report. Always 200
- * with { recorded } so a stale/duplicate report never surfaces as a user
- * -visible error — this is telemetry, not a workflow.
+ * the AI draft) plus how far the text moved (editDistance). Outcome is
+ * first-write-wins; the distance refines with further edits. Only the
+ * requester may report. Always 200 with { recorded } so a stale/duplicate
+ * report never surfaces as a user-visible error — telemetry, not a workflow.
  */
 chat.post("/ab-feedback", authMiddleware, zValidator("json", abFeedbackSchema), async (c) => {
   const user = c.get("user")
-  const { requestId, outcome } = c.req.valid("json")
+  const { requestId, outcome, editDistance } = c.req.valid("json")
   try {
-    const recorded = await recordAbOutcome(c.env.AQUILLA_PG, requestId, user.id, outcome)
+    const recorded = await recordAbOutcome(c.env.AQUILLA_PG, requestId, user.id, outcome, editDistance)
     return c.json({ ok: true, recorded })
   } catch (err) {
     console.error("[model-ab] feedback write failed:", err)

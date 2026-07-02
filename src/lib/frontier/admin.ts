@@ -221,6 +221,8 @@ export interface AbResultRow {
   edited: number
   rejected: number
   avgLatencyMs: number | null
+  /** Mean normalized edit distance [0,1] over decided drafts — lower = better. */
+  avgEditDistance: number | null
 }
 
 export async function getAbResults(jwt: string, days = 30): Promise<{ days: number; results: AbResultRow[] }> {

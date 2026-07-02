@@ -27,7 +27,7 @@ import {
 } from "./outbox-types"
 import posthog from "@/lib/posthog"
 import { FIRST_CELL_COMMIT, FIRST_CELL_VALIDATE } from "@/lib/event-names"
-import { reportAbOutcome } from "@/lib/ab/feedback"
+import { noteAbDraftText, reportAbOutcome } from "@/lib/ab/feedback"
 
 // Session-scoped flags — reset on page reload (true "first in session" semantics).
 let _firstCommitFired = false
@@ -183,12 +183,16 @@ export async function emitTargetCellCommit(
       ai_suggestion: input.aiSuggestion ?? false,
     })
   }
-  // Model A/B: a human commit landing on a cell with an unreported AI draft
-  // means the user rewrote it — the "edited" outcome. The AI's own auto-commit
-  // (aiSuggestion) is the draft itself, not a gesture on it. No-op for cells
-  // without a pending assignment (see lib/ab/feedback.ts).
-  if (!input.aiSuggestion) {
-    reportAbOutcome(input.fileId, input.cellId, "edited")
+  // Model A/B: the AI auto-commit carries the draft's actual per-cell text —
+  // attach it to the pending assignment so later gestures can measure edit
+  // distance against it. A human commit on such a cell is the "edited"
+  // outcome, with the distance from draft to this new text; the entry stays
+  // so further polish keeps refining the distance until validation. No-op for
+  // cells without a pending assignment (see lib/ab/feedback.ts).
+  if (input.aiSuggestion) {
+    noteAbDraftText(input.fileId, input.cellId, input.value)
+  } else {
+    reportAbOutcome(input.fileId, input.cellId, "edited", input.value)
   }
   const parentId = input.parentId
   // A first-time commit on a cell that has never been written before is a

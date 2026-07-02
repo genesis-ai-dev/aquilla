@@ -92,23 +92,29 @@ export async function recordAbEvent(
 }
 
 /**
- * Record the user's gesture on an assigned request. First write wins — a
- * validate after an edit (or a replayed POST) never flips the recorded
- * outcome. Only the requester may report. Returns whether a row was updated.
+ * Record the user's gesture on an assigned request. The OUTCOME is
+ * first-write-wins — a validate after an edit never flips 'edited' back to
+ * 'accepted'. The EDIT DISTANCE (normalized Levenshtein [0,1] between the AI
+ * draft and the human's text, computed client-side) is last-write-wins: it
+ * refines as the translator keeps editing toward the final text. Only the
+ * requester may report. Returns whether a row matched.
  */
 export async function recordAbOutcome(
   db: AquillaDb,
   requestId: string,
   userId: number,
   outcome: AbOutcome,
+  editDistance?: number,
 ): Promise<boolean> {
   const result = await db
     .prepare(
       `UPDATE model_ab_events
-          SET outcome = ?, outcome_at = now()
-        WHERE id = ? AND user_id = ? AND outcome IS NULL`,
+          SET outcome = COALESCE(outcome, ?),
+              edit_distance = COALESCE(?, edit_distance),
+              outcome_at = COALESCE(outcome_at, now())
+        WHERE id = ? AND user_id = ?`,
     )
-    .bind(outcome, requestId, userId)
+    .bind(outcome, editDistance ?? null, requestId, userId)
     .run()
   const changes = result.meta?.changes
   return typeof changes === "number" && changes > 0
@@ -123,6 +129,8 @@ export interface AbResultRow {
   edited: number
   rejected: number
   avgLatencyMs: number | null
+  /** Mean normalized edit distance [0,1] over decided drafts — lower = better. */
+  avgEditDistance: number | null
 }
 
 /** Per-model/arm aggregates over the trailing `days` window (admin console). */
@@ -135,7 +143,8 @@ export async function aggregateAbResults(db: AquillaDb, days: number): Promise<A
               COUNT(*) FILTER (WHERE outcome = 'accepted')::int    AS accepted,
               COUNT(*) FILTER (WHERE outcome = 'edited')::int      AS edited,
               COUNT(*) FILTER (WHERE outcome = 'rejected')::int    AS rejected,
-              AVG(latency_ms) FILTER (WHERE error = 0)             AS avg_latency_ms
+              AVG(latency_ms) FILTER (WHERE error = 0)             AS avg_latency_ms,
+              AVG(edit_distance) FILTER (WHERE edit_distance IS NOT NULL) AS avg_edit_distance
          FROM model_ab_events
         WHERE created_at >= now() - make_interval(days => ?)
         GROUP BY model, arm
@@ -151,6 +160,7 @@ export async function aggregateAbResults(db: AquillaDb, days: number): Promise<A
       edited: number
       rejected: number
       avg_latency_ms: number | string | null
+      avg_edit_distance: number | string | null
     }>()
 
   return (results ?? []).map((r) => ({
@@ -162,5 +172,6 @@ export async function aggregateAbResults(db: AquillaDb, days: number): Promise<A
     edited: r.edited,
     rejected: r.rejected,
     avgLatencyMs: r.avg_latency_ms == null ? null : Math.round(Number(r.avg_latency_ms)),
+    avgEditDistance: r.avg_edit_distance == null ? null : Number(r.avg_edit_distance),
   }))
 }

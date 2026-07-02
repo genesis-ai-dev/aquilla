@@ -24,6 +24,7 @@ const ROWS: AbResultRow[] = [
     edited: 10,
     rejected: 0,
     avgLatencyMs: 1500,
+    avgEditDistance: 0.12,
   },
   {
     model: "anthropic/claude-haiku-4-5",
@@ -34,6 +35,7 @@ const ROWS: AbResultRow[] = [
     edited: 15,
     rejected: 0,
     avgLatencyMs: 800,
+    avgEditDistance: 0.47,
   },
 ]
 
@@ -48,6 +50,9 @@ describe("AbResultsPanel", () => {
     // champion: 30 accepted of 40 decided = 75%; challenger: 5 of 20 = 25%.
     expect(await screen.findByText(/75%/)).toBeInTheDocument()
     expect(screen.getByText(/25%/)).toBeInTheDocument()
+    // Avg edit distance renders as "% rewritten": 0.12 → 12%, 0.47 → 47%.
+    expect(screen.getByText("12%")).toBeInTheDocument()
+    expect(screen.getByText("47%")).toBeInTheDocument()
     expect(screen.getByText("champion")).toBeInTheDocument()
     expect(screen.getByText("challenger")).toBeInTheDocument()
     expect(mockGet).toHaveBeenCalledWith("jwt", 30)

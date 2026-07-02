@@ -131,10 +131,14 @@ describe("chat A/B assignment", () => {
 })
 
 describe("POST /api/v1/chat/ab-feedback", () => {
-  const feedback = (jwt: string, requestId: string, outcome: string) =>
+  const feedback = (jwt: string, requestId: string, outcome: string, editDistance?: number) =>
     app.request(
       "/api/v1/chat/ab-feedback",
-      { method: "POST", headers: authHeader(jwt), body: JSON.stringify({ requestId, outcome }) },
+      {
+        method: "POST",
+        headers: authHeader(jwt),
+        body: JSON.stringify({ requestId, outcome, ...(editDistance !== undefined ? { editDistance } : {}) }),
+      },
       env,
     )
 
@@ -145,23 +149,42 @@ describe("POST /api/v1/chat/ab-feedback", () => {
     return res.headers.get("X-AB-Request-Id")!
   }
 
-  it("records the first outcome and refuses to flip it", async () => {
+  it("keeps the first outcome but lets the edit distance refine", async () => {
     await seedUser(1, "wendi")
     await enableAb(100)
     const jwt = await jwtFor("wendi")
     const requestId = await assignedRequestId(jwt)
 
-    const first = await feedback(jwt, requestId, "accepted")
+    // First gesture: a human commit rewrote 40% of the draft.
+    const first = await feedback(jwt, requestId, "edited", 0.4)
     expect(await first.json()).toMatchObject({ ok: true, recorded: true })
 
-    const second = await feedback(jwt, requestId, "edited")
-    expect(await second.json()).toMatchObject({ ok: true, recorded: false })
+    // They kept polishing (distance refines), then validated — outcome must
+    // stay 'edited' (first write wins) while the distance takes the latest.
+    await feedback(jwt, requestId, "edited", 0.55)
+    await feedback(jwt, requestId, "accepted", 0.55)
 
     const row = await env.AQUILLA_PG
-      .prepare(`SELECT outcome FROM model_ab_events WHERE id = ?`)
+      .prepare(`SELECT outcome, edit_distance FROM model_ab_events WHERE id = ?`)
       .bind(requestId)
-      .first<{ outcome: string }>()
+      .first<{ outcome: string; edit_distance: number }>()
+    expect(row?.outcome).toBe("edited")
+    expect(Number(row?.edit_distance)).toBeCloseTo(0.55)
+  })
+
+  it("a validate-first draft records accepted with distance 0", async () => {
+    await seedUser(1, "wendi")
+    await enableAb(100)
+    const jwt = await jwtFor("wendi")
+    const requestId = await assignedRequestId(jwt)
+
+    await feedback(jwt, requestId, "accepted", 0)
+    const row = await env.AQUILLA_PG
+      .prepare(`SELECT outcome, edit_distance FROM model_ab_events WHERE id = ?`)
+      .bind(requestId)
+      .first<{ outcome: string; edit_distance: number }>()
     expect(row?.outcome).toBe("accepted")
+    expect(Number(row?.edit_distance)).toBe(0)
   })
 
   it("another user cannot report on someone else's request", async () => {
@@ -237,7 +260,11 @@ describe("GET /api/v2/admin/ab-results", () => {
       {
         method: "POST",
         headers: authHeader(jwt),
-        body: JSON.stringify({ requestId: r1.headers.get("X-AB-Request-Id"), outcome: "accepted" }),
+        body: JSON.stringify({
+          requestId: r1.headers.get("X-AB-Request-Id"),
+          outcome: "accepted",
+          editDistance: 0.2,
+        }),
       },
       env,
     )
@@ -251,11 +278,12 @@ describe("GET /api/v2/admin/ab-results", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
       days: number
-      results: Array<{ model: string; arm: string; requests: number; accepted: number }>
+      results: Array<{ model: string; arm: string; requests: number; accepted: number; avgEditDistance: number | null }>
     }
     expect(body.days).toBe(30)
     const challengerRow = body.results.find((r) => r.arm === "challenger")
     expect(challengerRow).toMatchObject({ model: CHALLENGER, requests: 2, accepted: 1 })
+    expect(challengerRow?.avgEditDistance).toBeCloseTo(0.2)
   })
 
   it("is admin-gated", async () => {

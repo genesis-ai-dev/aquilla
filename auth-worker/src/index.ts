@@ -90,6 +90,9 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match-Version",
+  // Model A/B assignment echo (routes/chat.ts) — the SPA reads these off the
+  // completion response to attribute accept/edit outcomes to the served model.
+  "Access-Control-Expose-Headers": "X-AB-Request-Id, X-AB-Arm, X-AB-Model",
   "Access-Control-Max-Age": "86400",
   Vary: "Origin",
 }
@@ -136,6 +139,7 @@ app.get("/", (c) =>
       "/api/v2/admin/*",
       "/api/v2/health",
       "/api/v1/chat/completions",
+      "/api/v1/chat/ab-feedback",
       "/api/v1/ai/agent/run",
     ],
   }),

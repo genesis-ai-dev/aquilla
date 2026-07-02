@@ -123,18 +123,27 @@ jobs:
         if: steps.decide.outputs.deploy == 'true'
         run: rm -f dist/_redirects
 
-      # Pushes to main/dev publish the live Worker. PRs upload a preview
-      # version aliased as `pr-<N>`, reachable at
+      # Pushes to main/staging/dev publish the live Worker for THAT branch's
+      # env. The env mapping must match the VITE_* build vars above — a bare
+      # `deploy` here targets the top-level wrangler.toml worker (aquilla-web,
+      # PRODUCTION), which shipped dev-API-pointing bundles to aquilla.app on
+      # every dev push (2026-07-01/02 outages: api.dev.aquilla.app is
+      # NXDOMAIN, so prod looked API-dead until a manual prod redeploy).
+      # NOTE: --env=staging/--env=development declare `routes`, and CI's token
+      # lacks Zone.Workers Routes edit — the code uploads, then the route-sync
+      # step fails (code 10000, same as deploy-workers.yml). Red but harmless;
+      # fix is upgrading the token (see wrangler.toml route convention doc).
+      # PRs upload a preview version aliased as `pr-<N>`, reachable at
       # https://pr-<N>-aquilla-web.<workers-subdomain>.workers.dev without
       # touching the production version.
-      - name: Deploy aquilla-web (main/dev)
+      - name: Deploy aquilla-web (main/staging/dev)
         id: deploy_prod
         if: steps.decide.outputs.deploy == 'true' && github.event_name != 'pull_request'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
-          command: deploy
+          command: deploy ${{ github.ref == 'refs/heads/main' && ' ' || github.ref == 'refs/heads/staging' && '--env=staging' || '--env=development' }}
 
       - name: Upload aquilla-web preview (PR)
         id: deploy_preview

@@ -19,7 +19,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { TranslationRule } from "@/lib/parsers/types"
 import { runAgent } from "@/lib/agent/agent-client"
 import type { ApplyContext } from "@/lib/agent/apply"
-import { createRun, failRun, reduceRunFrame, type AgentRunUi } from "@/lib/agent/run-state"
+import { assistantTextOf, createRun, failRun, reduceRunFrame, type AgentRunUi } from "@/lib/agent/run-state"
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -119,7 +119,8 @@ export function AgentDockView({
       const messages: { role: "user" | "assistant"; content: string }[] = []
       for (const r of runs) {
         messages.push({ role: "user", content: r.wireContent ?? r.prompt })
-        if (r.assistantText) messages.push({ role: "assistant", content: r.assistantText })
+        const said = assistantTextOf(r)
+        if (said) messages.push({ role: "assistant", content: said })
       }
       messages.push({ role: "user", content: wire })
       const truncated = messages.slice(-MAX_WIRE_TURNS)
@@ -221,9 +222,9 @@ export function AgentDockView({
               <MessageScrollerContent className="px-3 py-2">
                 {runs.map((run) => (
                   <MessageScrollerItem key={run.localId} messageId={run.localId} scrollAnchor>
-                    <div className="flex flex-col gap-2">
-                      <AgentRunView run={run} />
-                      {run.proposals.map((proposal) => (
+                    <AgentRunView
+                      run={run}
+                      renderProposal={(proposal) => (
                         <ProposalCard
                           key={proposal.proposalId}
                           proposal={proposal}
@@ -233,16 +234,16 @@ export function AgentDockView({
                           applyContext={applyContext}
                           onApplied={onApplied}
                         />
-                      ))}
-                      {(run.aquiferProposals ?? []).map((proposal) => (
+                      )}
+                      renderAquiferProposal={(proposal) => (
                         <AquiferProposalCard
                           key={proposal.proposalId}
                           proposal={proposal}
                           projectId={projectId}
                           jwt={jwt}
                         />
-                      ))}
-                    </div>
+                      )}
+                    />
                   </MessageScrollerItem>
                 ))}
               </MessageScrollerContent>

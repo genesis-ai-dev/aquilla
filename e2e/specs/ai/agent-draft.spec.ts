@@ -18,6 +18,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * drafting call returns deterministic "[bozza] <source>" values.
  */
 test("agent drafts the open file; workbench accept-all lands in the editor", async ({ alice }) => {
+  // Import + agent run + apply + sync round-trip busts the 30s default.
+  test.setTimeout(120_000)
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `Agent ${Date.now()}`
@@ -50,9 +52,10 @@ test("agent drafts the open file; workbench accept-all lands in the editor", asy
   await acceptAll.click()
   await expect(acceptAll).toBeHidden({ timeout: 15_000 })
 
-  // Back to the editor: the applied draft is in the first cell.
+  // Back to the editor: /project/:id restores the last open file (the dock is
+  // still on the Agent tab, so don't reach for the file list). The applied
+  // draft must be in the first cell.
   await alice.getByRole("button", { name: "Close workbench" }).click()
-  await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
   await expect(ws.cellRow(0)).toContainText("[bozza]", { timeout: 15_000 })
 })

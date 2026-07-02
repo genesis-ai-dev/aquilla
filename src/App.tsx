@@ -171,6 +171,8 @@ function AppRoutes() {
         {/* Lazy — org-level pages */}
         <Route path="/projects/archived" element={<ArchivedProjects />} />
         <Route path="/preferences" element={<Preferences />} />
+        {/* Preferences detail sub-pages — index of nav rows lives at /preferences */}
+        <Route path="/preferences/:section" element={<Preferences />} />
 
         {/* Lazy — heavy workspace tree (pulls in tiptap, editor deps, react-player) */}
         <Route path="/project/:id" element={<ProjectWorkspace />} />
@@ -191,6 +193,8 @@ function AppRoutes() {
 
         {/* Lazy — org admin pages */}
         <Route path="/settings" element={<Settings />} />
+        {/* Org settings detail sub-pages — index of nav rows lives at /settings */}
+        <Route path="/settings/:section" element={<Settings />} />
         <Route path="/members" element={<MembersPage />} />
         <Route path="/teams" element={<TeamsList />} />
         <Route path="/teams/:groupId" element={<TeamDetail />} />

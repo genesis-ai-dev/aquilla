@@ -1,7 +1,7 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
-import { selectEditorContents } from "../../helpers/editor-selection"
+import { formattingBubbleButton, selectEditorContents } from "../../helpers/editor-selection"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -32,13 +32,8 @@ test("formatting bubble menu appears on text selection and Bold toggles", async 
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Click the translation cell to focus it.
-  const row = ws.cellRow(0)
-  await row.scrollIntoViewIfNeeded()
-
-  // Double-click to enter edit mode (focuses the contenteditable).
-  const targetCell = row.locator('[contenteditable="true"]').first()
-  await targetCell.dblclick()
+  // Click the translation cell to enter edit mode and focus the contenteditable.
+  const targetCell = await ws.activateTargetCell(0)
   await expect(targetCell).toBeFocused({ timeout: 3_000 })
   await alice.keyboard.insertText("bubble menu test")
 
@@ -46,7 +41,7 @@ test("formatting bubble menu appears on text selection and Bold toggles", async 
   await selectEditorContents(targetCell)
 
   // BubbleMenu should appear — look for the Bold button.
-  const boldBtn = alice.getByRole("button", { name: "Bold" })
+  const boldBtn = formattingBubbleButton(alice, "Bold")
   await expect(boldBtn).toBeVisible({ timeout: 5_000 })
 
   // Click Bold.

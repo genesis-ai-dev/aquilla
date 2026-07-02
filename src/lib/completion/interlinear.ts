@@ -9,11 +9,11 @@
  * Cold start (< WARM_THRESHOLD pairs): Dice co-occurrence coefficient, O(1)
  * update per pair.
  *
- * Warm (>= WARM_THRESHOLD pairs): IBM Model 1 EM (~10 iterations). This runs
- * synchronously in this module. Callers that invoke `buildAlignmentModel` with
- * large corpora (full Bible, 31k verses) SHOULD wrap the call in a Web Worker
- * or debounce it; for typical incremental use (a few hundred verse pairs) it
- * runs in well under 50 ms.
+ * Warm (>= WARM_THRESHOLD pairs): sparse IBM Model 1 EM (~10 iterations). This
+ * runs synchronously in this module. The probability table is intentionally
+ * limited to source/target token pairs observed in the same sentence; a dense
+ * source-vocabulary x target-vocabulary table is too large for Bible-sized
+ * files in a browser renderer.
  *
  * Diagonal prior (fast_align-style): every alignment score is multiplied by
  * exp(-λ · |srcPos/srcLen − tgtPos/tgtLen|), λ = 4.0.
@@ -209,44 +209,48 @@ function renormalizeRow(
   }
 }
 
-// ── IBM Model 1 EM ────────────────────────────────────────────────────────────
+// ── Sparse IBM Model 1 EM ─────────────────────────────────────────────────────
 
 /**
- * Run IBM Model 1 EM over `pairs` for `iterations` passes.
+ * Run sparse IBM Model 1 EM over `pairs` for `iterations` passes.
  * Returns updated `probTable` and `countTable` (counts from final E-step).
  *
- * NOTE: This is synchronous. For corpora of a few hundred verse pairs it runs
- * in < 10 ms. For full 31k-verse Bibles, callers SHOULD run this in a Web
- * Worker and debounce it (suggested: every 10 confirmations or 60 s idle).
+ * The important memory detail: initialization is over observed co-occurrences,
+ * not the full source-vocabulary x target-vocabulary product. Dense IBM Model
+ * 1 is mathematically tidy, but a couple thousand scripture rows can produce
+ * millions of Map entries and multi-GB renderer spikes.
  */
-function runEM(
+function runSparseEM(
   pairs: VersPair[],
   iterations: number,
 ): { probTable: Map<string, Map<string, number>>; countTable: Map<string, Map<string, number>> } {
-  // Collect vocabulary
+  // Collect tokenized pairs and sparse support: src token -> target tokens it
+  // has actually co-occurred with in a sentence.
   const tokenizedPairs: { src: string[]; tgt: string[] }[] = []
-  const srcVocab = new Set<string>()
-  const tgtVocab = new Set<string>()
+  const support = new Map<string, Set<string>>()
 
   for (const { source, target } of pairs) {
     const src = tokenize(source)
     const tgt = tokenize(target)
     if (src.length === 0 || tgt.length === 0) continue
     tokenizedPairs.push({ src, tgt })
-    for (const t of src) srcVocab.add(t)
-    for (const t of tgt) tgtVocab.add(t)
+    for (const s of src) {
+      const row = getOrCreate(support, s, () => new Set<string>())
+      for (const t of tgt) row.add(t)
+    }
   }
 
-  if (tokenizedPairs.length === 0 || srcVocab.size === 0 || tgtVocab.size === 0) {
+  if (tokenizedPairs.length === 0 || support.size === 0) {
     return { probTable: new Map(), countTable: new Map() }
   }
 
-  // Initialize uniformly: P(tgt | src) = 1 / |tgt_vocab|
-  const uniform = 1 / tgtVocab.size
+  // Initialize uniformly over observed support only.
   const probTable = new Map<string, Map<string, number>>()
-  for (const s of srcVocab) {
+  for (const [s, targets] of support) {
+    if (targets.size === 0) continue
+    const uniform = 1 / targets.size
     const row = new Map<string, number>()
-    for (const t of tgtVocab) row.set(t, uniform)
+    for (const t of targets) row.set(t, uniform)
     probTable.set(s, row)
   }
 
@@ -275,15 +279,18 @@ function runEM(
       }
     }
 
-    // M-step: renormalize counts → probabilities
+    // M-step: renormalize counts -> probabilities. Replace rows wholesale so
+    // entries that received zero final mass do not linger from previous passes.
+    probTable.clear()
     for (const [s, tCounts] of countTable) {
       let total = 0
       for (const c of tCounts.values()) total += c
       if (total === 0) continue
-      const pRow = getOrCreate(probTable, s, () => new Map<string, number>())
+      const pRow = new Map<string, number>()
       for (const [t, c] of tCounts) {
         pRow.set(t, c / total)
       }
+      probTable.set(s, pRow)
     }
   }
 
@@ -308,7 +315,7 @@ export function buildAlignmentModel(
   pairs: VersPair[],
   seeds: AlignmentSeed[] = [],
 ): AlignmentModel {
-  const countTable = new Map<string, Map<string, number>>()
+  let countTable = new Map<string, Map<string, number>>()
   const srcCounts = new Map<string, number>()
   const tgtCounts = new Map<string, number>()
 
@@ -346,9 +353,12 @@ export function buildAlignmentModel(
   let probTable: Map<string, Map<string, number>>
 
   if (isWarm) {
-    // Run EM — it returns its own probTable and countTable derived from EM counts
-    const emResult = runEM(pairs, EM_ITERATIONS)
+    // Run sparse EM. The old dense initializer allocated one probability entry
+    // for every source-vocab x target-vocab pair, which made large scripture
+    // files jump into multi-GB renderer heaps just by opening the editor.
+    const emResult = runSparseEM(pairs, EM_ITERATIONS)
     probTable = emResult.probTable
+    countTable = emResult.countTable
 
     // Merge seed pseudo-counts on top of EM result (post-process)
     for (const { srcToken, tgtToken, weight } of seeds) {

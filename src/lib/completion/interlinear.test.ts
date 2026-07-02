@@ -135,6 +135,12 @@ const WARM_CORPUS = (() => {
   return [...SMALL_CORPUS, ...extras]
 })()
 
+function countProbabilityEntries(model: ReturnType<typeof buildAlignmentModel>): number {
+  let count = 0
+  for (const row of model.probTable.values()) count += row.size
+  return count
+}
+
 // ── Sanity checks on constants ─────────────────────────────────────────────────
 
 describe("confidence threshold constants", () => {
@@ -278,6 +284,17 @@ describe("buildAlignmentModel — warm EM path", () => {
     const links1 = alignCell("God created", "Dieu créa", model1)
     const links2 = alignCell("God created", "Dieu créa", model2)
     expect(links1).toEqual(links2)
+  })
+
+  it("keeps the warm probability table sparse instead of source-vocab x target-vocab dense", () => {
+    const pairs = Array.from({ length: 80 }, (_, i) => ({
+      source: `sourceunique${i}`,
+      target: `targetunique${i}`,
+    }))
+    const model = buildAlignmentModel(pairs)
+
+    expect(model.isWarm).toBe(true)
+    expect(countProbabilityEntries(model)).toBeLessThanOrEqual(pairs.length)
   })
 
   it("cold model is also deterministic", () => {

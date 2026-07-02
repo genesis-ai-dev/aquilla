@@ -12,36 +12,52 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
 import { EditorActionsProvider, type EditorActionsContextValue } from "@/context/EditorActionsContext"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
-// happy-dom has no real layout engine, so the scroll container the real
-// @tanstack/react-virtual measures against always reports a 0px height and
-// the virtualizer renders zero rows. Replace it with a trivial "render every
-// row" stand-in — good enough for a single-cell wiring test and avoids
-// depending on layout measurement this environment can't provide.
-vi.mock("@tanstack/react-virtual", () => ({
-  useVirtualizer: (opts: { count: number; estimateSize: () => number }) => {
-    const size = opts.estimateSize()
-    const items = Array.from({ length: opts.count }, (_, index) => ({
-      index,
-      start: index * size,
-      end: (index + 1) * size,
-      size,
-      key: index,
-    }))
-    return {
-      getVirtualItems: () => items,
-      getTotalSize: () => opts.count * size,
-      measureElement: () => {},
-      scrollToIndex: () => {},
-      scrollOffset: 0,
-      getVirtualItemForOffset: () => items[0],
-    }
-  },
-}))
+// happy-dom has no real layout engine, so the real LegendList may decide no
+// rows are visible. Replace it with a trivial "render every row" stand-in —
+// good enough for a single-cell wiring test and independent of layout.
+vi.mock("@legendapp/list/react", async () => {
+  const React = await import("react")
+
+  return {
+    LegendList: React.forwardRef(function MockLegendList({
+      data,
+      renderItem,
+      keyExtractor,
+    }: {
+      data: CellData[]
+      renderItem: (props: { item: CellData; index: number }) => ReactNode
+      keyExtractor?: (item: CellData, index: number) => string
+    }, ref) {
+      React.useImperativeHandle(ref, () => ({
+        getState: () => ({
+          scroll: 0,
+          positionAtIndex: (index: number) => index * 140,
+          sizeAtIndex: () => 140,
+        }),
+        scrollToIndex: async () => undefined,
+        scrollToOffset: async () => undefined,
+      }))
+
+      return React.createElement(
+        "div",
+        null,
+        data.map((item, index) => (
+          React.createElement(
+            React.Fragment,
+            { key: keyExtractor?.(item, index) ?? item.id },
+            renderItem({ item, index }),
+          )
+        )),
+      )
+    }),
+  }
+})
 
 const project: ProjectRecord = {
   id: "proj-1",

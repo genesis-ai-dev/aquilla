@@ -48,7 +48,9 @@ export interface UseCellsAuditStatsResult {
 
 const EMPTY_AUDIT_STATS = new Map<string, CellAuditStats>()
 
-function toCellAuditStats(row: Partial<CellAuditStats>): CellAuditStats | null {
+type CellAuditStatsWireRow = Partial<CellAuditStats> & { side?: string }
+
+function toCellAuditStats(row: CellAuditStatsWireRow): CellAuditStats | null {
   if (!row.cellId) return null
   return {
     cellId: row.cellId,
@@ -59,6 +61,21 @@ function toCellAuditStats(row: Partial<CellAuditStats>): CellAuditStats | null {
     activeValidators: row.activeValidators ?? [],
     waivers: row.waivers ?? [],
   }
+}
+
+function mergeStatsRows(rows: CellAuditStatsWireRow[]): Map<string, CellAuditStats> {
+  const map = new Map<string, CellAuditStats>()
+  const sides = new Map<string, string | undefined>()
+  for (const row of rows) {
+    const stats = toCellAuditStats(row)
+    if (!stats) continue
+    const existingSide = sides.get(stats.cellId)
+    if (!map.has(stats.cellId) || (existingSide !== "target" && row.side === "target")) {
+      map.set(stats.cellId, stats)
+      sides.set(stats.cellId, row.side)
+    }
+  }
+  return map
 }
 
 async function fetchCellsAuditStats(
@@ -73,13 +90,8 @@ async function fetchCellsAuditStats(
     const body = await res.text().catch(() => "")
     throw new Error(`cells/audit-stats failed: HTTP ${res.status} — ${body.slice(0, 200)}`)
   }
-  const body = (await res.json()) as { cells: Partial<CellAuditStats>[] }
-  const map = new Map<string, CellAuditStats>()
-  for (const row of body.cells) {
-    const stats = toCellAuditStats(row)
-    if (stats) map.set(stats.cellId, stats)
-  }
-  return map
+  const body = (await res.json()) as { cells: CellAuditStatsWireRow[] }
+  return mergeStatsRows(body.cells)
 }
 
 // Single-cell variant of fetchCellsAuditStats — same endpoint, scoped via
@@ -97,8 +109,8 @@ async function fetchCellAuditStats(
     const body = await res.text().catch(() => "")
     throw new Error(`cells/audit-stats (cell) failed: HTTP ${res.status} — ${body.slice(0, 200)}`)
   }
-  const body = (await res.json()) as { cells: Partial<CellAuditStats>[] }
-  return body.cells[0] ? toCellAuditStats(body.cells[0]) : null
+  const body = (await res.json()) as { cells: CellAuditStatsWireRow[] }
+  return mergeStatsRows(body.cells).get(cellId) ?? null
 }
 
 export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAuditStatsResult {

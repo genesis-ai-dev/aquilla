@@ -65,6 +65,12 @@ function AppTooltip({
     import.meta.env.MODE === "test" && typeof content === "string"
       ? content
       : undefined
+  if (typeof content === "string" && typeof children.type === "string") {
+    return cloneElement(children, {
+      "data-tooltip": testTooltipAttr,
+      title: content,
+    } as Record<string, string | undefined>)
+  }
   const trigger =
     typeof content === "string"
       ? cloneElement(children, { "data-tooltip": testTooltipAttr, title: undefined } as Record<string, string | undefined>)

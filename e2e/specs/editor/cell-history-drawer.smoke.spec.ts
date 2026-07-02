@@ -32,17 +32,14 @@ test("cell expansion History tab opens full HistoryDrawer", async ({ alice }) =>
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  const row = ws.cellRow(0)
-  await row.scrollIntoViewIfNeeded()
-
   // Edit the cell so there's at least one history entry.
-  const editable = row.locator('textarea, [contenteditable="true"]').first()
-  await editable.waitFor({ state: "visible", timeout: 10_000 })
-  await editable.click()
+  await ws.activateTargetCell(0)
   await alice.keyboard.press("End")
   await alice.keyboard.insertText(" hist-test")
   // Click away to commit.
   await alice.locator("aside, header").first().click()
+
+  const row = ws.cellRow(0)
 
   // Hover to reveal CellActionRail.
   await row.hover()

@@ -1,5 +1,10 @@
 import React, { useEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
-import { useVirtualizer } from "@tanstack/react-virtual"
+import {
+  LegendList,
+  type LegendListRef,
+  type LegendListRenderItemProps,
+  type OnViewableItemsChangedInfo,
+} from "@legendapp/list/react"
 import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
@@ -93,6 +98,8 @@ import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/ex
 import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
+import { hasMeaningfulRichText, prepareReadOnlyRichTextHtml } from "@/lib/richtext/editor-content"
+import { findTermMatches } from "@/lib/richtext/terminology-chip-plugin"
 
 // Per-row render counter. Always accumulated when perf logging is on (cheap)
 // but NOT auto-logged — render logs would flood the console and push the
@@ -102,6 +109,18 @@ import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/typ
 //   window.__perfRowRenders         → Map of "cellIdPrefix" → count
 //   window.__perfDumpRowRenders()   → console.table of the same
 const rowRenders = new Map<string, number>()
+const ESTIMATED_ROW_HEIGHT_PX = 140
+const LEGEND_LIST_DRAW_DISTANCE_PX = 240
+
+function clampIndex(index: number, length: number): number {
+  if (length <= 0) return 0
+  return Math.max(0, Math.min(length - 1, index))
+}
+
+function areNumberArraysEqual(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) return false
+  return a.every((value, index) => value === b[index])
+}
 if (typeof window !== "undefined") {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ;(window as any).__perfRowRenders = rowRenders
@@ -318,12 +337,14 @@ function ValidationHistoryTimeline({
 // mint a fresh [] and break React.memo for every row.
 const EMPTY_EXAMPLES: ScoredPair[] = []
 const EMPTY_INFRACTIONS: RuleInfraction[] = []
+const EMPTY_HIGHLIGHTS: ReturnType<typeof buildHighlightsFromExamples> = []
 const SELECTION_DRAG_THRESHOLD_PX = 3
 const SELECTION_EDGE_SCROLL_ZONE_PX = 56
 const SELECTION_EDGE_SCROLL_STEP_PX = 22
 
 export interface EditorTableHandle {
   scrollToCellIndex: (index: number) => void
+  focusCellEditorIndex: (index: number) => void
   getCurrentIndex?: () => number
   /** Briefly outline a cell after a "Go to cell" so the user sees where the search landed. */
   flashCell: (cellId: string, searchTerm: string) => void
@@ -449,10 +470,10 @@ interface EditorTableProps {
   /** Token fetcher for project-scoped sync reads. Required for the inline
    *  History tab to query the D1 event log on demand. */
   getTokenForFile?: (fileId: string) => Promise<string | null>
-  /** FRO-207: Pre-built interlinear alignment model for source↔target token
-   *  alignment in the BT expansion tab. Built by ProjectWorkspace from all
-   *  project cell pairs + persisted seeds. Optional — panel hides when absent. */
-  alignmentModel?: import("@/lib/completion/interlinear").AlignmentModel | null
+  /** FRO-207: Lazily returns the interlinear alignment model for source↔target
+   *  token alignment in the BT expansion tab. Built by ProjectWorkspace from
+   *  all project cell pairs + persisted seeds only when the panel opens. */
+  getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
   /** FRO-207: Called when the user confirms or invalidates an alignment seed.
    *  Parent persists via project-settings and rebuilds the model. */
   onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
@@ -509,7 +530,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onClaimCell, onReleaseCell, onAckRemoteChange,
   staleCellIds,
   getTokenForFile,
-  alignmentModel,
+  getAlignmentModel,
   onAlignmentSeedChange,
   assignmentsByCellId,
   checkLockHolder,
@@ -524,7 +545,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // Probe mic permission once (shared across all rows) so the help affordance
   // on CellAudioRecordButton activates when the user has blocked the mic.
   const { micDenied } = useMicPermission(audioLens !== null)
-  const parentRef = useRef<HTMLDivElement>(null)
+  const parentRef = useRef<HTMLElement | null>(null)
+  const listRootRef = useRef<HTMLDivElement | null>(null)
+  const listRef = useRef<LegendListRef | null>(null)
+  const [firstVisibleIndex, setFirstVisibleIndex] = useState(0)
+  const [viewableIndexes, setViewableIndexes] = useState<number[]>([])
+  const [activeEditorCellId, setActiveEditorCellId] = useState<string | null>(null)
   const [hoveredFootnote, setHoveredFootnote] = useState<{ cellId: string; index: number } | null>(null)
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
@@ -575,6 +601,22 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     )
     return sortByLens(filtered, "time")
   }, [cellsWithAudio, isTimeOrdered, audioLens])
+  const displayCellsRef = useRef(displayCells)
+  displayCellsRef.current = displayCells
+
+  useEffect(() => {
+    if (!activeEditorCellId) return
+    if (displayCells.some((cell) => cell.id === activeEditorCellId)) return
+    setActiveEditorCellId(null)
+  }, [activeEditorCellId, displayCells])
+
+  const handleActivateEditor = useCallback((cellId: string) => {
+    setActiveEditorCellId(cellId)
+  }, [])
+
+  const handleDeactivateEditor = useCallback((cellId: string) => {
+    setActiveEditorCellId((current) => current === cellId ? null : current)
+  }, [])
 
   // Hydrate the per-cell trim cache (localStorage, seconds — what the player
   // reads) from the server attachment's trim (ms). Server is authoritative on
@@ -600,8 +642,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const editorFileId = cells[0]?.fileId ?? null
   const { source: sourceFontSize, target: targetFontSize } = useFileFontSizes(editorFileId)
 
+  const setListScrollElement = useCallback((node: unknown) => {
+    parentRef.current = node instanceof HTMLElement ? node : null
+  }, [])
+  const getListQueryRoot = useCallback(() => parentRef.current ?? listRootRef.current, [])
+
   // FRO-250: sticky chapter indicator. Derives the "current section" label from
-  // the first visible virtual item so the reader always knows which chapter/
+  // Legend List's first visible item so the reader always knows which chapter/
   // section they're in without scrolling back to a section heading.
   const sectionByIndex = useMemo(() => {
     const out: string[] = []
@@ -619,36 +666,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     return out
   }, [displayCells])
 
-  const virtualizer = useVirtualizer({
-    count: displayCells.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => 90,
-    // Rows are heavyweight (full TipTap editor + 2 audio controllers each),
-    // so buffer a few rows beyond the viewport to avoid mount-thrash at the
-    // scroll edge.
-    overscan: 4,
-  })
-
-  useImperativeHandle(ref, () => ({
-    scrollToCellIndex(index: number) {
-      if (index >= 0 && index < cells.length) {
-        virtualizer.scrollToIndex(index, { align: "center" })
-      }
-    },
-    getCurrentIndex: () => 0,
-    flashCell(cellId, _searchTerm) {
-      // Defer to next frame: the virtualizer may still be scrolling, so the
-      // DOM node we want might not exist yet.
-      requestAnimationFrame(() => {
-        const root = parentRef.current
-        if (!root) return
-        const el = root.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(cellId)}"]`)
-        if (!el) return
-        el.classList.add("codex-search-flash")
-        window.setTimeout(() => el.classList.remove("codex-search-flash"), 1800)
-      })
-    },
-  }), [virtualizer, cells.length])
+  useEffect(() => {
+    setFirstVisibleIndex((current) => clampIndex(current, displayCells.length))
+    setViewableIndexes((current) => {
+      const next = current.filter((index) => index >= 0 && index < displayCells.length)
+      return next.length === current.length ? current : next
+    })
+  }, [displayCells.length])
 
   const clampCellIndex = useCallback((index: number) => {
     const last = cellsRef.current.length - 1
@@ -662,20 +686,33 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [])
 
   // Move keyboard focus into the target editor at `index`, placing the caret
-  // at the end. Scrolls the (virtualized) row into view first, then focuses on
-  // the next frame once the DOM node exists. No-op if the index is out of range.
+  // at the end. Legend List may recycle/mount the destination row a frame or
+  // two after scrollToIndex, so retry briefly until the DOM node exists.
   const focusCellEditorByIndex = useCallback((index: number) => {
-    const list = cellsRef.current
+    const list = displayCellsRef.current
     if (index < 0 || index >= list.length) return
     const targetId = list[index].id
-    virtualizer.scrollToIndex(index, { align: "center" })
-    requestAnimationFrame(() => {
-      const root = parentRef.current
+    setActiveEditorCellId(targetId)
+    void listRef.current?.scrollToIndex({
+      index,
+      viewPosition: 0.5,
+      animated: false,
+    })
+
+    let attempts = 0
+    const focusWhenMounted = () => {
+      const root = getListQueryRoot()
       if (!root) return
       const pm = root.querySelector<HTMLElement>(
         `[data-cell-id="${CSS.escape(targetId)}"] .ProseMirror`,
       )
-      if (!pm) return
+      if (!pm) {
+        if (attempts < 8) {
+          attempts += 1
+          requestAnimationFrame(focusWhenMounted)
+        }
+        return
+      }
       pm.focus()
       const sel = window.getSelection()
       if (sel) {
@@ -685,49 +722,89 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         sel.removeAllRanges()
         sel.addRange(range)
       }
-    })
-  }, [virtualizer])
+    }
+    focusWhenMounted()
+  }, [getListQueryRoot])
+
+  useImperativeHandle(ref, () => ({
+    scrollToCellIndex(index: number) {
+      if (index >= 0 && index < displayCells.length) {
+        void listRef.current?.scrollToIndex({
+          index,
+          viewPosition: 0.5,
+          animated: false,
+        })
+      }
+    },
+    focusCellEditorIndex: focusCellEditorByIndex,
+    getCurrentIndex: () => 0,
+    flashCell(cellId, _searchTerm) {
+      // Defer to next frame: the list may still be scrolling, so the
+      // DOM node we want might not exist yet.
+      requestAnimationFrame(() => {
+        const root = getListQueryRoot()
+        if (!root) return
+        const el = root.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(cellId)}"]`)
+        if (!el) return
+        el.classList.add("codex-search-flash")
+        window.setTimeout(() => el.classList.remove("codex-search-flash"), 1800)
+      })
+    },
+  }), [displayCells.length, focusCellEditorByIndex, getListQueryRoot])
 
   // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.
   // The wrapper div has tabIndex={0} so it can receive programmatic focus.
   const focusGridRowByIndex = useCallback((index: number) => {
-    const list = cellsRef.current
+    const list = displayCellsRef.current
     if (index < 0 || index >= list.length) return
     const targetId = list[index].id
-    virtualizer.scrollToIndex(index, { align: "center" })
-    requestAnimationFrame(() => {
-      const root = parentRef.current
+    void listRef.current?.scrollToIndex({
+      index,
+      viewPosition: 0.5,
+      animated: false,
+    })
+    let attempts = 0
+    const focusWhenMounted = () => {
+      const root = getListQueryRoot()
       if (!root) return
       const rowEl = root.querySelector<HTMLElement>(
         `[data-cell-id="${CSS.escape(targetId)}"] [data-grid-row]`,
       )
-      rowEl?.focus()
-    })
-  }, [virtualizer])
+      if (!rowEl) {
+        if (attempts < 8) {
+          attempts += 1
+          requestAnimationFrame(focusWhenMounted)
+        }
+        return
+      }
+      rowEl.focus()
+    }
+    focusWhenMounted()
+  }, [getListQueryRoot])
 
   // Resolve a navigation request from a cell editor (Up/Down/Tab) to the
   // adjacent cell and focus it. Out-of-range steps (top/bottom edge) no-op.
   const handleNavigateCell = useCallback((cellId: string, direction: "prev" | "next") => {
-    const idx = findCellIndex(cellId)
+    const idx = displayCellsRef.current.findIndex((c) => c.id === cellId)
     if (idx < 0) return
     focusCellEditorByIndex(direction === "next" ? idx + 1 : idx - 1)
-  }, [findCellIndex, focusCellEditorByIndex])
+  }, [focusCellEditorByIndex])
 
   // FRO-297: Esc from a cell editor — commit-and-return to grid row focus.
   const handleEscapeToGrid = useCallback((cellId: string) => {
-    const idx = findCellIndex(cellId)
+    const idx = displayCellsRef.current.findIndex((c) => c.id === cellId)
     if (idx < 0) return
     focusGridRowByIndex(idx)
-  }, [findCellIndex, focusGridRowByIndex])
+  }, [focusGridRowByIndex])
 
   // FRO-297: Arrow-key (or j/k) navigation within the grid (row focused, not TipTap).
   // This is called from the row's own keydown when focus is on the grid row wrapper.
   const handleGridRowKeyNav = useCallback((cellId: string, direction: "prev" | "next") => {
-    const idx = findCellIndex(cellId)
+    const idx = displayCellsRef.current.findIndex((c) => c.id === cellId)
     if (idx < 0) return
     focusGridRowByIndex(direction === "next" ? idx + 1 : idx - 1)
-  }, [findCellIndex, focusGridRowByIndex])
+  }, [focusGridRowByIndex])
 
   const selectRangeByIndexes = useCallback((anchorIndex: number, focusIndex: number) => {
     const list = cellsRef.current
@@ -752,23 +829,25 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (!scrollEl || list.length === 0) return -1
     const rect = scrollEl.getBoundingClientRect()
     const yWithin = Math.max(0, Math.min(rect.height, clientY - rect.top))
-    const y = scrollEl.scrollTop + yWithin
-    const virtualItems = virtualizer.getVirtualItems()
-    if (virtualItems.length === 0) return clampCellIndex(Math.round(y / 90))
+    const state = listRef.current?.getState()
+    const y = (state?.scroll ?? scrollEl.scrollTop) + yWithin
+    if (!state) return clampCellIndex(Math.round(y / ESTIMATED_ROW_HEIGHT_PX))
 
-    let nearest = virtualItems[0]
+    let nearestIndex = 0
     let nearestDistance = Number.POSITIVE_INFINITY
-    for (const item of virtualItems) {
-      const end = item.start + item.size
-      if (y >= item.start && y <= end) return clampCellIndex(item.index)
-      const distance = y < item.start ? item.start - y : y - end
+    for (let index = 0; index < list.length; index += 1) {
+      const start = state.positionAtIndex(index)
+      const size = state.sizeAtIndex(index) || ESTIMATED_ROW_HEIGHT_PX
+      const end = start + size
+      if (y >= start && y <= end) return clampCellIndex(index)
+      const distance = y < start ? start - y : y - end
       if (distance < nearestDistance) {
-        nearest = item
+        nearestIndex = index
         nearestDistance = distance
       }
     }
-    return clampCellIndex(nearest.index)
-  }, [clampCellIndex, virtualizer])
+    return clampCellIndex(nearestIndex)
+  }, [clampCellIndex])
 
   const updateSelectionFromPointer = useCallback((clientY: number) => {
     const drag = selectionDragRef.current
@@ -789,7 +868,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     } else if (clientY > rect.bottom - SELECTION_EDGE_SCROLL_ZONE_PX) {
       delta = SELECTION_EDGE_SCROLL_STEP_PX
     }
-    if (delta !== 0) scrollEl.scrollTop += delta
+    if (delta !== 0) {
+      const current = listRef.current?.getState()?.scroll ?? scrollEl.scrollTop
+      void listRef.current?.scrollToOffset({
+        offset: Math.max(0, current + delta),
+        animated: false,
+      })
+    }
   }, [])
 
   const stopSelectionDrag = useCallback(() => {
@@ -951,21 +1036,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     return cellsRef.current.slice(startIndex, startIndex + count)
   }, [])
 
-  // FRO-250: derive the current section label from the first row whose top
-  // edge is at or past the current scroll position. Using getVirtualItems()[0]
-  // is wrong because the virtualizer pre-renders overscan rows ABOVE the
-  // viewport — that item can be a full chapter above the visible area, making
-  // the sticky label lag by ~one chapter at section boundaries.
-  // getVirtualItemForOffset(scrollOffset) returns the item that spans that
-  // pixel, giving us the true first-visible row without overscan noise.
-  const scrollOffset = virtualizer.scrollOffset ?? 0
-  const virtualItems = virtualizer.getVirtualItems()
-  const firstVisibleItem = virtualizer.getVirtualItemForOffset(scrollOffset)
-  const firstVisibleIndex = firstVisibleItem?.index ?? 0
   const currentSectionLabel = sectionByIndex[firstVisibleIndex] ?? ""
 
   // Parallel-bibles sidebar tracking: report the first visible row's canonical
-  // ref as the user scrolls. Keyed on the derived ref string (not scrollOffset)
+  // ref as the user scrolls. Keyed on the derived ref string
   // so the effect only fires on actual row changes, not every scrolled pixel.
   const firstVisibleRef = displayCells[firstVisibleIndex]?.group || null
   useEffect(() => {
@@ -991,22 +1065,19 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const visibleFootnoteEntries = useMemo<VisibleFootnoteEntry[]>(() => {
     if (!onVisibleFootnotesChange || displayCells.length === 0) return []
 
-    const viewportStart = scrollOffset
-    const viewportEnd = viewportStart + (parentRef.current?.clientHeight ?? Number.POSITIVE_INFINITY)
-
-    return virtualItems
-      .filter((item) => item.start + item.size > viewportStart && item.start < viewportEnd)
-      .map((item) => {
-        const cell = displayCells[item.index]
+    const indexes = viewableIndexes.length > 0 ? viewableIndexes : [firstVisibleIndex]
+    return indexes
+      .map((index) => {
+        const cell = displayCells[index]
         if (!cell) return null
         const sourceFootnotes = extractUsfmFootnotes(cell.original ?? "")
         const targetFootnotes = extractUsfmFootnotes(cell.translated ?? "")
         if (sourceFootnotes.length === 0 && targetFootnotes.length === 0) return null
         return {
           cellId: cell.id,
-          cellLabel: cell.cellLabel || String(item.index + 1),
+          cellLabel: cell.cellLabel || String(index + 1),
           cellRef: humanFootnoteCellRef(cell),
-          rowIndex: item.index,
+          rowIndex: index,
           sourceFootnotes,
           targetFootnotes,
           activeFootnoteIndex: hoveredFootnote?.cellId === cell.id ? hoveredFootnote.index : null,
@@ -1015,7 +1086,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         }
       })
       .filter((entry): entry is VisibleFootnoteEntry => entry !== null)
-  }, [displayCells, footnoteNumberOffsets, hoveredFootnote, onVisibleFootnotesChange, scrollOffset, virtualItems])
+  }, [displayCells, firstVisibleIndex, footnoteNumberOffsets, hoveredFootnote, onVisibleFootnotesChange, viewableIndexes])
 
   useEffect(() => {
     onVisibleFootnotesChange?.(visibleFootnoteEntries)
@@ -1025,9 +1096,185 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onVisibleFootnotesChange?.([])
   }, [onVisibleFootnotesChange])
 
+  const handleFirstVisibleItemChanged = useCallback((info: {
+    index: number
+    item: CellData
+    key: string
+  }) => {
+    setFirstVisibleIndex(clampIndex(info.index, displayCells.length))
+  }, [displayCells.length])
+
+  const handleViewableItemsChanged = useCallback((info: OnViewableItemsChangedInfo<CellData>) => {
+    const next = info.viewableItems
+      .map((item) => item.index)
+      .filter((index) => index >= 0 && index < displayCells.length)
+      .sort((a, b) => a - b)
+    setViewableIndexes((current) => areNumberArraysEqual(current, next) ? current : next)
+  }, [displayCells.length])
+
+  const renderListItem = useCallback(({ item: cell, index }: LegendListRenderItemProps<CellData>) => {
+    const untimedInTimeLens = isTimeOrdered && !hasTiming(cell)
+    return (
+      <div
+        data-cell-id={cell.id}
+        data-index={index}
+        data-untimed={untimedInTimeLens ? "true" : undefined}
+        aria-label={untimedInTimeLens ? "No specific timing — ordered by sequence" : undefined}
+        className={cn("relative", untimedInTimeLens && "border-l-2 border-dashed border-amber-400/70")}
+      >
+        {untimedInTimeLens && (
+          <span className="pointer-events-none absolute left-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
+            no timing
+          </span>
+        )}
+        <MemoizedRow
+          key={cell.id}
+          project={project}
+          cell={cell}
+          isEditorActive={activeEditorCellId === cell.id}
+          onActivateEditor={handleActivateEditor}
+          onDeactivateEditor={handleDeactivateEditor}
+          isStaleSource={staleCellIds?.has(cell.id) ?? false}
+          username={username}
+          editable={canEdit}
+          canValidate={canValidate}
+          onCellCommitted={onCellCommitted}
+          onOptimisticEdit={onOptimisticEdit}
+          lockHolderLabel={cellLockHolders?.get(cell.id) ?? null}
+          remoteChangedWhileFocused={cellsWithRemoteChange?.has(cell.id) ?? false}
+          onClaimCell={onClaimCell}
+          onReleaseCell={onReleaseCell}
+          onAckRemoteChange={onAckRemoteChange}
+          isCompletionConfigured={isCompletionConfigured}
+          isCompletionAvailable={isCompletionAvailable}
+          examples={examples}
+          completing={completing}
+          errors={errors}
+          previews={previews}
+          healthMap={healthMap}
+          infractions={infractions}
+          ruleMap={ruleMap}
+          onCompleteSingle={onCompleteSingle}
+          isBacktranslationConfigured={isBacktranslationConfigured}
+          backtranslating={backtranslating}
+          backtranslationErrors={backtranslationErrors}
+          onBacktranslate={onBacktranslate}
+          onSaveBacktranslation={onSaveBacktranslation}
+          cellOpenCommentCount={cellOpenCommentCount}
+          activeCueIndex={activeCueIndex}
+          onSeekToCue={onSeekToCue}
+          rowIndex={index}
+          lineNumbersEnabled={lineNumbersEnabled}
+          cellLabelsEnabled={cellLabelsEnabled}
+          sourceTextDirection={sourceTextDirection}
+          targetTextDirection={targetTextDirection}
+          gridCols={gridCols}
+          isAnonymous={isAnonymous}
+          onJumpToCell={onJumpToCell}
+          micDenied={micDenied}
+          audioLens={audioLens ?? null}
+          onOpenAudioSetup={onOpenAudioSetup}
+          onProjectChanged={onProjectChanged}
+          onAddConceptFromSelection={onAddConceptFromSelection}
+          onAskAiFromSelection={onAskAiFromSelection}
+          onAssignVoice={onAssignVoice}
+          onDragStart={handleDragStart}
+          onDragEnter={handleDragEnter}
+          onSelectionPointerDown={handleSelectionPointerDown}
+          onNavigateCell={handleNavigateCell}
+          onEscapeToGrid={handleEscapeToGrid}
+          onGridRowKeyNav={handleGridRowKeyNav}
+          getVoiceTakeCells={getVoiceTakeCells}
+          getTokenForFile={getTokenForFile}
+          getAlignmentModel={getAlignmentModel}
+          onAlignmentSeedChange={onAlignmentSeedChange}
+          sourceFontSize={sourceFontSize}
+          targetFontSize={targetFontSize}
+          assigneeLabel={assignmentsByCellId?.get(cell.id)?.username ?? null}
+          assigneeNote={assignmentsByCellId?.get(cell.id)?.scopeLabel ?? null}
+          checkLockHolder={checkLockHolder}
+          showFootnotesInline={showFootnotesInline}
+          footnotePanelActive={footnotePanelActive}
+          footnoteViewMode={footnoteViewMode}
+          onFootnoteHoverChange={setHoveredFootnote}
+          onFootnoteCreated={onFootnoteCreated}
+          sourceFootnoteNumberOffset={footnoteNumberOffsets.get(cell.id)?.source ?? 0}
+          targetFootnoteNumberOffset={footnoteNumberOffsets.get(cell.id)?.target ?? 0}
+        />
+      </div>
+    )
+  }, [
+    activeCueIndex,
+    activeEditorCellId,
+    assignmentsByCellId,
+    audioLens,
+    backtranslating,
+    backtranslationErrors,
+    canEdit,
+    canValidate,
+    cellLockHolders,
+    cellOpenCommentCount,
+    cellsWithRemoteChange,
+    checkLockHolder,
+    completing,
+    errors,
+    examples,
+    footnoteNumberOffsets,
+    footnotePanelActive,
+    footnoteViewMode,
+    getTokenForFile,
+    getAlignmentModel,
+    getVoiceTakeCells,
+    gridCols,
+    handleDragEnter,
+    handleDragStart,
+    handleActivateEditor,
+    handleDeactivateEditor,
+    handleEscapeToGrid,
+    handleGridRowKeyNav,
+    handleNavigateCell,
+    handleSelectionPointerDown,
+    healthMap,
+    infractions,
+    isAnonymous,
+    isBacktranslationConfigured,
+    isCompletionAvailable,
+    isCompletionConfigured,
+    isTimeOrdered,
+    lineNumbersEnabled,
+    micDenied,
+    onAckRemoteChange,
+    onAddConceptFromSelection,
+    onAlignmentSeedChange,
+    onAskAiFromSelection,
+    onBacktranslate,
+    onCellCommitted,
+    onClaimCell,
+    onCompleteSingle,
+    onFootnoteCreated,
+    onJumpToCell,
+    onOpenAudioSetup,
+    onOptimisticEdit,
+    onProjectChanged,
+    onReleaseCell,
+    onSaveBacktranslation,
+    onSeekToCue,
+    onAssignVoice,
+    previews,
+    project,
+    ruleMap,
+    showFootnotesInline,
+    sourceFontSize,
+    sourceTextDirection,
+    staleCellIds,
+    targetFontSize,
+    targetTextDirection,
+    username,
+  ])
+
   return (
-    <div ref={parentRef} className="h-full overflow-auto" onMouseUp={handleMouseUp}>
-      <div className="sticky top-0 z-10 bg-background">
+    <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
+      <div className="shrink-0 bg-background">
         {/* FRO-250: sticky section/chapter indicator strip. Appears above the
             column header when the file has section-tagged cells. Keeps the
             reader oriented while scrolling through long Bible chapters. */}
@@ -1068,126 +1315,40 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         </div>
       </div>
 
-      <div style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
-        {virtualItems.map((virtualRow) => {
-          const cell = displayCells[virtualRow.index]
-          // The positioning wrapper lives OUTSIDE MemoizedRow. When the typed
-          // cell grows in height, every row below it gets a new virtualRow.start
-          // — if that value crossed the memo boundary, every shifted row would
-          // re-render. Here the position-carrying div is a fresh element each
-          // parent render (cheap), but MemoizedRow below it sees stable props.
-          //
-          // Timeline-segment-model: in the time lens, a segment with no timing
-          // is kept in its sequence "home" but flagged — never given fake
-          // timecodes ("fail loud"). Marked here on the wrapper so we don't
-          // touch EditorRow internals.
-          const untimedInTimeLens = isTimeOrdered && !hasTiming(cell)
-          return (
-            <div
-              key={cell.id}
-              data-cell-id={cell.id}
-              data-index={virtualRow.index}
-              data-untimed={untimedInTimeLens ? "true" : undefined}
-              ref={virtualizer.measureElement}
-              aria-label={untimedInTimeLens ? "No specific timing — ordered by sequence" : undefined}
-              className={cn(untimedInTimeLens && "border-l-2 border-dashed border-amber-400/70")}
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                transform: `translateY(${virtualRow.start}px)`,
-              }}
-            >
-              {untimedInTimeLens && (
-                <span className="pointer-events-none absolute left-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
-                  no timing
-                </span>
-              )}
-              <MemoizedRow
-                project={project}
-                cell={cell}
-                isStaleSource={staleCellIds?.has(cell.id) ?? false}
-                username={username}
-                editable={canEdit}
-                canValidate={canValidate}
-                onCellCommitted={onCellCommitted}
-                onOptimisticEdit={onOptimisticEdit}
-                lockHolderLabel={cellLockHolders?.get(cell.id) ?? null}
-                remoteChangedWhileFocused={cellsWithRemoteChange?.has(cell.id) ?? false}
-                onClaimCell={onClaimCell}
-                onReleaseCell={onReleaseCell}
-                onAckRemoteChange={onAckRemoteChange}
-                isCompletionConfigured={isCompletionConfigured}
-                isCompletionAvailable={isCompletionAvailable}
-                examples={examples}
-                completing={completing}
-                errors={errors}
-                previews={previews}
-                healthMap={healthMap}
-                infractions={infractions}
-                ruleMap={ruleMap}
-                onCompleteSingle={onCompleteSingle}
-                isBacktranslationConfigured={isBacktranslationConfigured}
-                backtranslating={backtranslating}
-                backtranslationErrors={backtranslationErrors}
-                onBacktranslate={onBacktranslate}
-                onSaveBacktranslation={onSaveBacktranslation}
-                cellOpenCommentCount={cellOpenCommentCount}
-                activeCueIndex={activeCueIndex}
-                onSeekToCue={onSeekToCue}
-                rowIndex={virtualRow.index}
-                lineNumbersEnabled={lineNumbersEnabled}
-                cellLabelsEnabled={cellLabelsEnabled}
-                sourceTextDirection={sourceTextDirection}
-                targetTextDirection={targetTextDirection}
-                gridCols={gridCols}
-                isAnonymous={isAnonymous}
-                onJumpToCell={onJumpToCell}
-                micDenied={micDenied}
-                audioLens={audioLens ?? null}
-                onOpenAudioSetup={onOpenAudioSetup}
-                onProjectChanged={onProjectChanged}
-                onAddConceptFromSelection={onAddConceptFromSelection}
-                onAskAiFromSelection={onAskAiFromSelection}
-                onAssignVoice={onAssignVoice}
-                onDragStart={handleDragStart}
-                onDragEnter={handleDragEnter}
-                onSelectionPointerDown={handleSelectionPointerDown}
-                onNavigateCell={handleNavigateCell}
-                onEscapeToGrid={handleEscapeToGrid}
-                onGridRowKeyNav={handleGridRowKeyNav}
-                getVoiceTakeCells={getVoiceTakeCells}
-                getTokenForFile={getTokenForFile}
-                alignmentModel={alignmentModel}
-                onAlignmentSeedChange={onAlignmentSeedChange}
-                sourceFontSize={sourceFontSize}
-                targetFontSize={targetFontSize}
-                assigneeLabel={assignmentsByCellId?.get(cell.id)?.username ?? null}
-                assigneeNote={assignmentsByCellId?.get(cell.id)?.scopeLabel ?? null}
-                checkLockHolder={checkLockHolder}
-                showFootnotesInline={showFootnotesInline}
-                footnotePanelActive={footnotePanelActive}
-                footnoteViewMode={footnoteViewMode}
-                onFootnoteHoverChange={setHoveredFootnote}
-                onFootnoteCreated={onFootnoteCreated}
-                sourceFootnoteNumberOffset={footnoteNumberOffsets.get(cell.id)?.source ?? 0}
-                targetFootnoteNumberOffset={footnoteNumberOffsets.get(cell.id)?.target ?? 0}
-              />
-            </div>
-          )
-        })}
-      </div>
-      {isTimeOrdered && displayCells.length === 0 && (
+      {displayCells.length > 0 ? (
+        <div ref={listRootRef} className="flex min-h-0 flex-1">
+          <LegendList
+            ref={listRef}
+            refScrollView={setListScrollElement}
+            data={displayCells}
+            renderItem={renderListItem}
+            extraData={renderListItem}
+            keyExtractor={(cell) => cell.id}
+            estimatedItemSize={ESTIMATED_ROW_HEIGHT_PX}
+            drawDistance={LEGEND_LIST_DRAW_DISTANCE_PX}
+            recycleItems
+            maintainVisibleContentPosition
+            onFirstVisibleItemChanged={handleFirstVisibleItemChanged}
+            onViewableItemsChanged={handleViewableItemsChanged}
+            viewabilityConfig={{ viewAreaCoveragePercentThreshold: 0 }}
+            style={{ flex: 1, minHeight: 0 }}
+            contentContainerStyle={{ width: "100%" }}
+          />
+        </div>
+      ) : isTimeOrdered ? (
         audioLens && canEdit && onAttachMediaFile && onAttachMediaUrl ? (
-          <TimelineAddMedia onAttachFile={onAttachMediaFile} onAttachUrl={onAttachMediaUrl} />
+          <div className="flex-1">
+            <TimelineAddMedia onAttachFile={onAttachMediaFile} onAttachUrl={onAttachMediaUrl} />
+          </div>
         ) : (
-          <div className="px-4 py-10 text-center text-sm text-muted-foreground">
+          <div className="flex-1 px-4 py-10 text-center text-sm text-muted-foreground">
             {audioLens
               ? "No media segments yet. Import an audio or video file, or record a take, to populate the media layer."
               : "No text segments in this file."}
           </div>
         )
+      ) : (
+        <div className="flex-1" />
       )}
     </div>
   )
@@ -1208,6 +1369,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 interface MemoizedRowProps {
   project: ProjectRecord
   cell: CellData
+  isEditorActive: boolean
+  onActivateEditor: (cellId: string) => void
+  onDeactivateEditor: (cellId: string) => void
   username: string
   editable: boolean
   /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
@@ -1271,8 +1435,8 @@ interface MemoizedRowProps {
   onGridRowKeyNav: (cellId: string, direction: "prev" | "next") => void
   getVoiceTakeCells: (startIndex: number, count: number) => CellData[]
   getTokenForFile?: (fileId: string) => Promise<string | null>
-  /** FRO-207: Pre-built interlinear alignment model. */
-  alignmentModel?: import("@/lib/completion/interlinear").AlignmentModel | null
+  /** FRO-207: Lazily returns the interlinear alignment model. */
+  getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
   /** FRO-207: Called when user confirms/invalidates an alignment. */
   onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
   /** FRO-251: per-file source-column font size in px. Defaults to 14 when absent. */
@@ -1311,10 +1475,13 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onGridRowKeyNav: onGridRowKeyNavParent,
     getVoiceTakeCells,
     getTokenForFile,
-    alignmentModel,
+    getAlignmentModel,
     onAlignmentSeedChange,
     sourceFontSize,
     targetFontSize,
+    isEditorActive,
+    onActivateEditor,
+    onDeactivateEditor,
     project, username, editable, canValidate, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation,
@@ -1395,15 +1562,18 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   return (
     <div
       className={cn(
-        // Outer wrapper is the virtualizer's MEASURED spacer. Rows are now a
+        // Outer wrapper is the list item's measured spacer. Rows are now a
         // flush, continuous list (Linear flat model), so there's no inset/gap
         // here — the row's own px-4 and its border-b divider do the work.
-        // (Margins on absolutely-positioned virtual rows break measurement.)
+        // (Margins here would interfere with dynamic row measurement.)
       )}
     >
       <EditorRow
         project={project}
         cell={cell}
+        isEditorActive={isEditorActive}
+        onActivateEditor={onActivateEditor}
+        onDeactivateEditor={onDeactivateEditor}
         username={username}
         editable={editable}
         canValidate={canValidate}
@@ -1452,7 +1622,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onGridRowKeyNav={handleGridRowKeyNav}
         getVoiceTakeCells={getVoiceTakeCells}
         getTokenForFile={getTokenForFile}
-        alignmentModel={alignmentModel}
+        getAlignmentModel={getAlignmentModel}
         onAlignmentSeedChange={onAlignmentSeedChange}
         onCellCommitted={onCellCommitted}
         onOptimisticEdit={onOptimisticEdit}
@@ -1481,6 +1651,9 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
 interface EditorRowProps {
   project: ProjectRecord
   cell: CellData
+  isEditorActive: boolean
+  onActivateEditor: (cellId: string) => void
+  onDeactivateEditor: (cellId: string) => void
   username: string
   editable: boolean
   /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
@@ -1519,8 +1692,8 @@ interface EditorRowProps {
   backtranslationError?: string
   onBacktranslate?: (cell: CellData, polish?: boolean) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
-  /** FRO-207: Pre-built interlinear alignment model. */
-  alignmentModel?: import("@/lib/completion/interlinear").AlignmentModel | null
+  /** FRO-207: Lazily returns the interlinear alignment model. */
+  getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
   /** FRO-207: Called when user confirms/invalidates an alignment. */
   onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
   openCommentCount: number
@@ -1946,6 +2119,245 @@ function UsfmSourceText(props: SourceWithTermLookupProps) {
   return <div>{parts}</div>
 }
 
+function SanitizedRichHtml({ html }: { html: string }) {
+  const safeHtml = useMemo(() => DOMPurify.sanitize(html), [html])
+  const innerHtml = useMemo(() => ({ __html: safeHtml }), [safeHtml])
+
+  return (
+    <div
+      // eslint-disable-next-line react/no-danger
+      dangerouslySetInnerHTML={innerHtml}
+    />
+  )
+}
+
+function TargetRichHtml({
+  html,
+  footnotePanelActive,
+  footnoteNumberOffset = 0,
+}: {
+  html: string
+  footnotePanelActive?: boolean
+  footnoteNumberOffset?: number
+}) {
+  const safeHtml = useMemo(
+    () => prepareReadOnlyRichTextHtml(html, {
+      footnoteNumberOffset,
+      showFootnoteTooltips: !footnotePanelActive,
+    }),
+    [footnoteNumberOffset, footnotePanelActive, html],
+  )
+  const innerHtml = useMemo(() => ({ __html: safeHtml }), [safeHtml])
+
+  return (
+    <div
+      // eslint-disable-next-line react/no-danger
+      dangerouslySetInnerHTML={innerHtml}
+    />
+  )
+}
+
+function TargetReadText({
+  text,
+  ranges,
+  concepts,
+  onRangeClick,
+  onTermChipClick,
+  footnotePanelActive,
+  footnoteNumberOffset = 0,
+}: {
+  text: string
+  ranges: RangeHighlight[]
+  concepts: Concept[]
+  onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
+  onTermChipClick?: (term: string, anchor: HTMLElement) => void
+  footnotePanelActive?: boolean
+  footnoteNumberOffset?: number
+}) {
+  const segments = useMemo(() => segmentUsfmForDisplay(text), [text])
+
+  if (segments === null) {
+    return (
+      <TargetDecoratedText
+        text={text}
+        concepts={concepts}
+        ranges={ranges}
+        onRangeClick={onRangeClick}
+        onTermChipClick={onTermChipClick}
+      />
+    )
+  }
+
+  let ordinal = footnoteNumberOffset
+  const parts: React.ReactNode[] = []
+  segments.forEach((seg, i) => {
+    if (seg.kind === "break") {
+      if (parts.length === 0) return
+      parts.push(<br key={`br-${i}`} />)
+      if (seg.blank) parts.push(<br key={`br2-${i}`} />)
+      if (seg.indent > 0) {
+        parts.push(
+          <span key={`in-${i}`} aria-hidden className="inline-block" style={{ width: `${seg.indent}em` }} />,
+        )
+      }
+      return
+    }
+    if (seg.kind === "note") {
+      ordinal += 1
+      parts.push(
+        <UsfmNoteChip
+          key={`note-${i}`}
+          note={seg}
+          ordinal={ordinal}
+          panelActive={footnotePanelActive}
+        />,
+      )
+      return
+    }
+    parts.push(
+      <TargetDecoratedText
+        key={`t-${i}`}
+        text={seg.text}
+        concepts={concepts}
+        ranges={clipRangesToSegment(ranges, seg)}
+        onRangeClick={onRangeClick}
+        onTermChipClick={onTermChipClick}
+      />,
+    )
+  })
+
+  return <div>{parts}</div>
+}
+
+function TargetDecoratedText({
+  text,
+  concepts,
+  ranges,
+  onRangeClick,
+  onTermChipClick,
+}: {
+  text: string
+  concepts: Concept[]
+  ranges: RangeHighlight[]
+  onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
+  onTermChipClick?: (term: string, anchor: HTMLElement) => void
+}) {
+  const matches = useMemo(() => {
+    const activeConcepts = concepts.filter((concept) => concept.status === "active")
+    if (activeConcepts.length === 0 || !text) return []
+
+    const out: Array<{ start: number; end: number; term: string }> = []
+    for (const concept of activeConcepts) {
+      for (const match of findTermMatches(text, concept.sourceTerm)) {
+        out.push({ ...match, term: concept.sourceTerm })
+      }
+    }
+    out.sort((a, b) => a.start - b.start || b.end - a.end)
+
+    const nonOverlapping: Array<{ start: number; end: number; term: string }> = []
+    let cursor = 0
+    for (const match of out) {
+      if (match.start < cursor) continue
+      nonOverlapping.push(match)
+      cursor = match.end
+    }
+    return nonOverlapping
+  }, [concepts, text])
+
+  if (matches.length === 0) {
+    return (
+      <HighlightedText
+        text={text}
+        highlights={EMPTY_HIGHLIGHTS}
+        ranges={ranges}
+        showEvidence={false}
+        onRangeClick={onRangeClick}
+      />
+    )
+  }
+
+  const parts: React.ReactNode[] = []
+  let cursor = 0
+  matches.forEach((match, index) => {
+    if (match.start > cursor) {
+      const before = text.slice(cursor, match.start)
+      parts.push(
+        <HighlightedText
+          key={`t-${index}-before`}
+          text={before}
+          highlights={EMPTY_HIGHLIGHTS}
+          ranges={clipRangesToTextSlice(ranges, cursor, match.start)}
+          showEvidence={false}
+          onRangeClick={onRangeClick}
+        />,
+      )
+    }
+
+    const matchedText = text.slice(match.start, match.end)
+    parts.push(
+      <span key={`t-${index}-term`} className="term-chip-host" data-source-term={match.term}>
+        <HighlightedText
+          text={matchedText}
+          highlights={EMPTY_HIGHLIGHTS}
+          ranges={clipRangesToTextSlice(ranges, match.start, match.end)}
+          showEvidence={false}
+          onRangeClick={onRangeClick}
+        />
+        <span
+          role={onTermChipClick ? "button" : undefined}
+          tabIndex={onTermChipClick ? 0 : undefined}
+          aria-label={`Managed term: ${match.term}`}
+          title={`Managed term: ${match.term}`}
+          data-source-term={match.term}
+          className="term-chip term-chip-preferred"
+          onClick={onTermChipClick ? (event) => {
+            event.stopPropagation()
+            onTermChipClick(match.term, event.currentTarget)
+          } : undefined}
+          onKeyDown={onTermChipClick ? (event) => {
+            if (event.key !== "Enter" && event.key !== " ") return
+            event.preventDefault()
+            event.stopPropagation()
+            onTermChipClick(match.term, event.currentTarget)
+          } : undefined}
+        />
+      </span>,
+    )
+    cursor = match.end
+  })
+
+  if (cursor < text.length) {
+    parts.push(
+      <HighlightedText
+        key="t-tail"
+        text={text.slice(cursor)}
+        highlights={EMPTY_HIGHLIGHTS}
+        ranges={clipRangesToTextSlice(ranges, cursor, text.length)}
+        showEvidence={false}
+        onRangeClick={onRangeClick}
+      />,
+    )
+  }
+
+  return <span>{parts}</span>
+}
+
+function clipRangesToTextSlice(
+  ranges: readonly RangeHighlight[],
+  sliceStart: number,
+  sliceEnd: number,
+): RangeHighlight[] {
+  const out: RangeHighlight[] = []
+  for (const range of ranges) {
+    const start = Math.max(range.start, sliceStart)
+    const end = Math.min(range.end, sliceEnd)
+    if (start < end) {
+      out.push({ ...range, start: start - sliceStart, end: end - sliceStart })
+    }
+  }
+  return out
+}
+
 // ---------------------------------------------------------------------------
 // SourceReferenceAttachments — read-only source-side reference media (OBS frame
 // images, etc.) drawn from the extensible `cell.metadata.attachments` bucket.
@@ -1991,7 +2403,8 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
 }
 
 function EditorRow({
-  project, cell, username, editable, canValidate, isCompletionConfigured, isCompletionAvailable, isLoading,
+  project, cell, isEditorActive, onActivateEditor, onDeactivateEditor,
+  username, editable, canValidate, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, highlights, error, health,
   cellInfractions, waivedInfractions, ruleMap,
@@ -2008,7 +2421,7 @@ function EditorRow({
   onClaimCell, onReleaseCell, onAckRemoteChange,
   isStaleSource,
   getTokenForFile,
-  alignmentModel,
+  getAlignmentModel,
   onAlignmentSeedChange,
   sourceFontSize = 14,
   targetFontSize = 14,
@@ -2069,6 +2482,7 @@ function EditorRow({
   // cell. True = dialog is open; clicking Confirm calls onCompleteSingle,
   // clicking Cancel discards the pending action (nothing committed).
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false)
+  const rowRef = useRef<HTMLDivElement | null>(null)
   const translatedEditorRef = useRef<TranslatedEditorHandle | null>(null)
   const pendingFootnoteAnchorRef = useRef<FootnoteInsertionAnchor | null>(null)
   const [activeFootnoteIndex, setActiveFootnoteIndex] = useState<number | null>(null)
@@ -2187,11 +2601,23 @@ function EditorRow({
     return out
   }, [cellInfractions, waivedInfractions, waivedRuleIds, ruleSeverity])
 
-  // Phase 2c-β: target-side rendering of violations happens via the
-  // ProseMirror plugin inside TranslatedEditor, so we no longer compute
-  // textarea-overlay ranges. Source-side ranges still flow through
-  // HighlightedText below.
-  void waivedRuleIds; void cellInfractions; void waivedInfractions; void ruleSeverity
+  const targetRanges = useMemo<RangeHighlight[]>(() => {
+    const out: RangeHighlight[] = []
+    const all = [...cellInfractions, ...waivedInfractions]
+    for (const inf of all) {
+      const waived = waivedRuleIds.has(inf.ruleId)
+      const severity = ruleSeverity.get(inf.ruleId) ?? "major"
+      for (const span of inf.spans) {
+        if (span.side !== "target") continue
+        out.push({
+          start: span.start, end: span.end, ruleId: inf.ruleId,
+          kind: waived ? "violation-waived" : (severity === "major" ? "violation-major" : "violation-minor"),
+        })
+      }
+    }
+    return out
+  }, [cellInfractions, waivedInfractions, waivedRuleIds, ruleSeverity])
+  const targetHasRichFormatting = hasMeaningfulRichText(cell.translatedHtml)
 
   // Editor commit path. The plain TipTap editor (TranslatedEditor) calls
   // this on idle/blur/release with the current `{value, valueHtml}` snapshot.
@@ -2486,14 +2912,61 @@ function EditorRow({
     })
   }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, onCellCommitted])
 
+  const editorFocusedRef = useRef(false)
+  const requestTargetEdit = useCallback(() => {
+    if (!editable || isLoading) return
+    onActivateEditor(cell.id)
+  }, [editable, isLoading, onActivateEditor, cell.id])
+
   const handleEditorFocus = useCallback(() => {
+    editorFocusedRef.current = true
+    onActivateEditor(cell.id)
     onClaimCell?.(cell.id)
     onAckRemoteChange?.(cell.id)
-  }, [cell.id, onClaimCell, onAckRemoteChange])
+  }, [cell.id, onActivateEditor, onClaimCell, onAckRemoteChange])
 
   const handleEditorBlurOuter = useCallback(() => {
-    onReleaseCell?.(cell.id)
-  }, [cell.id, onReleaseCell])
+    if (editorFocusedRef.current) {
+      editorFocusedRef.current = false
+      onReleaseCell?.(cell.id)
+    }
+    onDeactivateEditor(cell.id)
+  }, [cell.id, onDeactivateEditor, onReleaseCell])
+
+  useEffect(() => {
+    if (!isEditorActive) return
+    let attempts = 0
+    let frame = 0
+    const focusEditor = () => {
+      const pm = rowRef.current?.querySelector<HTMLElement>(".ProseMirror")
+      if (!pm) {
+        if (attempts < 8) {
+          attempts += 1
+          frame = window.requestAnimationFrame(focusEditor)
+        }
+        return
+      }
+      if (document.activeElement !== pm) {
+        pm.focus()
+        const sel = window.getSelection()
+        if (sel) {
+          const range = document.createRange()
+          range.selectNodeContents(pm)
+          range.collapse(false)
+          sel.removeAllRanges()
+          sel.addRange(range)
+        }
+      }
+    }
+    frame = window.requestAnimationFrame(focusEditor)
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame)
+      if (editorFocusedRef.current) {
+        editorFocusedRef.current = false
+        onReleaseCell?.(cell.id)
+      }
+    }
+  }, [isEditorActive, cell.id, onReleaseCell])
 
   const handleDiscardLocalAndReload = useCallback(() => {
     onAckRemoteChange?.(cell.id)
@@ -2548,7 +3021,6 @@ function EditorRow({
   // When this cell starts playing, gently bring it into view if it's
   // off-screen. Skips when the user is actively interacting with another cell
   // (focus inside an editable element).
-  const rowRef = useRef<HTMLDivElement | null>(null)
   const wasPlayingRef = useRef(false)
   useEffect(() => {
     const wasPlaying = wasPlayingRef.current
@@ -2594,10 +3066,10 @@ function EditorRow({
       return
     }
     // "keyboard" fires when activated via Space/Enter; "trigger-press" fires
-    // on pointer press. Both should validate on first touch (not open popover).
+    // on pointer press. The trigger button's own click handler performs the
+    // validation, so the popover only needs to stay closed on first touch.
     if (details.reason === "trigger-press" || details.reason === "keyboard") {
       if (canValidate && !isSelfValidated) {
-        emitValidationChange(true)
         details.cancel()
         return
       }
@@ -2690,6 +3162,11 @@ function EditorRow({
   // ── Expansion state ───────────────────────────────────────────────────────
   const [expanded, setExpanded] = useState(false)
   const [expansionTab, setExpansionTab] = useState<string>("backtranslation")
+  const alignmentModelForExpansion = useMemo(() => {
+    if (!expanded || expansionTab !== "backtranslation") return null
+    if (!cell.original.trim() || !cell.translated.trim()) return null
+    return getAlignmentModel?.() ?? null
+  }, [cell.original, cell.translated, expanded, expansionTab, getAlignmentModel])
 
   // History tab: fetch the D1 event log on demand only when the History tab is
   // visible. `cell.history` from useCells is intentionally empty (EMPTY_HISTORY)
@@ -2871,7 +3348,10 @@ function EditorRow({
   const cellRef = cell.context?.trim()
     || cell.globalReferences?.[0]?.trim()
     || `row ${rowIndex + 1}`
-  const validationTooltip = canValidate ? "Click to Validate" : "Validation unavailable"
+  const validationTooltip = canValidate ? "Not validated — click to validate" : "Validation unavailable"
+  type PreventableReactEvent<T> = React.SyntheticEvent<T> & {
+    preventBaseUIHandler?: () => void
+  }
   const renderValidationButton = (onClick?: () => void) => (
     <button
       type="button"
@@ -2883,9 +3363,20 @@ function EditorRow({
           ? `Validated — ${cellRef}. Click to remove your validation.`
           : vs === "full-others" || vs === "others"
             ? `Validated by others — ${cellRef}. Click to add your validation.`
-            : `Validate ${cellRef}`
+            : `Not validated — ${cellRef}. Click to validate.`
       }
-      onClick={onClick}
+      onClick={(e) => {
+        if (!onClick) return
+        onClick()
+        ;(e as PreventableReactEvent<HTMLButtonElement>).preventBaseUIHandler?.()
+      }}
+      onKeyDown={(e) => {
+        if (!onClick || (e.key !== " " && e.key !== "Enter")) return
+        e.preventDefault()
+        e.stopPropagation()
+        onClick()
+        ;(e as PreventableReactEvent<HTMLButtonElement>).preventBaseUIHandler?.()
+      }}
       className={cn(
         "relative flex h-6 w-6 items-center justify-center rounded-full transition-[transform,color,background-color] duration-150 ease-out",
         "active:scale-[0.88] disabled:cursor-not-allowed disabled:opacity-30",
@@ -2933,11 +3424,9 @@ function EditorRow({
       onGridRowKeyNav("prev")
     } else if (e.key === "Enter") {
       e.preventDefault()
-      // Enter edit mode: focus the TipTap editor for this row.
-      const pm = rowRef.current?.querySelector<HTMLElement>(".ProseMirror")
-      pm?.focus()
+      requestTargetEdit()
     }
-  }, [onGridRowKeyNav])
+  }, [onGridRowKeyNav, requestTargetEdit])
 
   return (
     // Each cell is a flat row in a continuous list — no dividers; rows separate
@@ -3003,7 +3492,11 @@ function EditorRow({
                 openOnHover
                 delay={400}
                 closeDelay={100}
-                render={renderValidationButton()}
+                render={renderValidationButton(
+                  canValidate && !isSelfValidated
+                    ? () => emitValidationChange(true)
+                    : undefined,
+                )}
               />
               {vs !== "empty" && (
                 <PopoverContent
@@ -3049,9 +3542,11 @@ function EditorRow({
           )}
           {hasContent && !hasValidatorInfo && (
             <AppTooltip content={validationTooltip}>
-              {renderValidationButton(() => {
-                if (canValidate && !isSelfValidated) emitValidationChange(true)
-              })}
+              {renderValidationButton(
+                canValidate && !isSelfValidated
+                  ? () => emitValidationChange(true)
+                  : undefined,
+              )}
             </AppTooltip>
           )}
           {/* Stale-source indicator alongside validate button */}
@@ -3114,6 +3609,8 @@ function EditorRow({
               isSynthBusy && "opacity-70",
             )}
             dir={sourceTextDirection}
+            aria-label="Source text"
+            data-cell-type="source"
             style={{ fontSize: `${sourceFontSize}px`, lineHeight: "1.6" }}
             onMouseUp={(onAddConceptFromSelection || onAskAiFromSelection) ? handleSourceMouseUp : undefined}
           >
@@ -3145,12 +3642,7 @@ function EditorRow({
             </div>
             <SourceReferenceAttachments metadata={cell.metadata} />
             {cell.originalHtml ? (
-              <div
-                // Font size inherits from the column wrapper's inline style —
-                // a fixed text-* class here would override the per-file size.
-                // eslint-disable-next-line react/no-danger
-                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(cell.originalHtml) }}
-              />
+              <SanitizedRichHtml html={cell.originalHtml} />
             ) : (
               <UsfmSourceText
                 text={cell.original}
@@ -3239,11 +3731,11 @@ function EditorRow({
             )}
           </div>
           <div className="flex flex-1 flex-col">
-            {/* Editable target is flat at rest (symmetric with the source) and
-                only lifts into a muted well on hover/focus. Empty cells keep a
-                faint resting fill as a "translate here" cue. Chrome only — no
-                editor logic touched. */}
+            {/* Target is a cheap read surface at rest. It upgrades to TipTap
+                only for the active cell, which keeps scrolling from mounting
+                dozens of ProseMirror instances. */}
             <div
+              data-cell-type="target"
               className={cn(
                 "relative flex min-h-[40px] flex-1 flex-col rounded-lg px-2 py-1.5 transition-colors",
                 hasInlineFootnotes && "min-h-0 py-0.5",
@@ -3251,42 +3743,97 @@ function EditorRow({
                 !cell.translated?.trim() && "bg-muted/40",
               )}
             >
-              <TranslatedEditor
-                ref={translatedEditorRef}
-                cellId={cell.id}
-                initialPlain={cell.translated}
-                initialHtml={cell.translatedHtml}
-                onCommit={handleEditorCommit}
-                onFocus={handleEditorFocus}
-                onBlur={handleEditorBlurOuter}
-                className={cn(
-                  "w-full",
-                  showCompletionOverlay && "opacity-30 transition-opacity",
+                {isEditorActive ? (
+                  <TranslatedEditor
+                    ref={translatedEditorRef}
+                    cellId={cell.id}
+                    initialPlain={cell.translated}
+                    initialHtml={cell.translatedHtml}
+                    onCommit={handleEditorCommit}
+                    onFocus={handleEditorFocus}
+                    onBlur={handleEditorBlurOuter}
+                    className={cn(
+                      "w-full",
+                      showCompletionOverlay && "opacity-30 transition-opacity",
+                    )}
+                    compactHeight={hasInlineFootnotes}
+                    editable={editable && !isLoading}
+                    heldByLabel={lockHolderLabel}
+                    infractions={mergedInfractions}
+                    ruleSeverity={ruleSeverity}
+                    waivedRuleIds={waivedRuleIds}
+                    onRuleClick={openInlineRule}
+                    audioTimings={cellAudioTimings}
+                    audioCurrentTime={hasAudio ? audioController.currentTime : undefined}
+                    onSeekToTime={hasAudio ? audioController.seek : undefined}
+                    remoteChangedDuringEdit={remoteChangedWhileFocused}
+                    onDiscardLocal={handleDiscardLocalAndReload}
+                    onNavigateCell={onNavigateCell}
+                    terminologyConcepts={project.terminology ?? []}
+                    onTermChipClick={handleTermChipClick}
+                    footnoteNumberOffset={targetFootnoteNumberOffset}
+                    showFootnoteTooltips={!footnotePanelActive}
+                    onFootnoteHover={(index) => {
+                      setActiveFootnoteIndex(index)
+                      onFootnoteHoverChange?.(index === null ? null : { cellId: cell.id, index })
+                    }}
+                    ariaLabel={editorAriaLabel}
+                    onEscapeToGrid={onEscapeToGrid}
+                  />
+                ) : (
+                  <div
+                    role="textbox"
+                    aria-multiline="true"
+                    aria-readonly={!editable || isLoading || Boolean(lockHolderLabel)}
+                    aria-label={editorAriaLabel}
+                    data-target-read-view
+                    tabIndex={editable && !isLoading ? 0 : undefined}
+                    className={cn(
+                      "min-h-[40px] w-full whitespace-pre-wrap rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
+                      "focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-1",
+                      showCompletionOverlay && "opacity-30 transition-opacity",
+                      !cell.translated?.trim() && "text-muted-foreground/60",
+                    )}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      requestTargetEdit()
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return
+                      event.preventDefault()
+                      event.stopPropagation()
+                      requestTargetEdit()
+                    }}
+                  >
+                    {lockHolderLabel && (
+                      <div
+                        aria-live="polite"
+                        className="pointer-events-none absolute right-1 top-1 z-10 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400"
+                      >
+                        {lockHolderLabel} is editing
+                      </div>
+                    )}
+                    {targetHasRichFormatting && cell.translatedHtml ? (
+                      <TargetRichHtml
+                        html={cell.translatedHtml}
+                        footnotePanelActive={footnotePanelActive}
+                        footnoteNumberOffset={targetFootnoteNumberOffset}
+                      />
+                    ) : cell.translated?.trim() ? (
+                      <TargetReadText
+                        text={cell.translated}
+                        ranges={targetRanges}
+                        concepts={project.terminology ?? []}
+                        onRangeClick={openInlineRule}
+                        onTermChipClick={handleTermChipClick}
+                        footnotePanelActive={footnotePanelActive}
+                        footnoteNumberOffset={targetFootnoteNumberOffset}
+                      />
+                    ) : (
+                      <span aria-hidden="true" className="block min-h-[1.6em]" />
+                    )}
+                  </div>
                 )}
-                compactHeight={hasInlineFootnotes}
-                editable={editable && !isLoading}
-                heldByLabel={lockHolderLabel}
-                infractions={mergedInfractions}
-                ruleSeverity={ruleSeverity}
-                waivedRuleIds={waivedRuleIds}
-                onRuleClick={openInlineRule}
-                audioTimings={cellAudioTimings}
-                audioCurrentTime={hasAudio ? audioController.currentTime : undefined}
-                onSeekToTime={hasAudio ? audioController.seek : undefined}
-                remoteChangedDuringEdit={remoteChangedWhileFocused}
-                onDiscardLocal={handleDiscardLocalAndReload}
-                onNavigateCell={onNavigateCell}
-                terminologyConcepts={project.terminology ?? []}
-                onTermChipClick={handleTermChipClick}
-                footnoteNumberOffset={targetFootnoteNumberOffset}
-                showFootnoteTooltips={!footnotePanelActive}
-                onFootnoteHover={(index) => {
-                  setActiveFootnoteIndex(index)
-                  onFootnoteHoverChange?.(index === null ? null : { cellId: cell.id, index })
-                }}
-                ariaLabel={editorAriaLabel}
-                onEscapeToGrid={onEscapeToGrid}
-              />
               {/* FRO-204: Terminology chip popover — controlled via termChipState.
                   Anchored to the chip DOM element that was clicked. Apply is
                   offered only when the target had a non-empty text selection
@@ -3832,11 +4379,11 @@ function EditorRow({
                     </div>
                   )}
                   {/* ── FRO-207: Interlinear alignment panel ──────────────── */}
-                  {alignmentModel && cell.original.trim() && cell.translated.trim() && (
+                  {alignmentModelForExpansion && cell.original.trim() && cell.translated.trim() && (
                     <InterlinearAlignmentPanel
                       sourceText={cell.original}
                       targetText={cell.translated}
-                      alignmentModel={alignmentModel}
+                      alignmentModel={alignmentModelForExpansion}
                       confirmedSeeds={project.alignmentSeeds ?? []}
                       onSeedChange={onAlignmentSeedChange ?? (() => undefined)}
                     />

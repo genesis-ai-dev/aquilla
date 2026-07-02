@@ -46,11 +46,7 @@ test("alice enables 'Extra whitespace' rule and sees a violation surfaced in edi
   await ws.waitForEditor()
   // Use insertText (not keyboard.type) to preserve consecutive spaces through
   // ProseMirror — type() fires individual key events that get normalized.
-  const row = ws.cellRow(0)
-  await row.scrollIntoViewIfNeeded()
-  const editable = row.locator('textarea, .ProseMirror[contenteditable="true"], [contenteditable="true"]').first()
-  await editable.waitFor({ state: "visible", timeout: 10_000 })
-  await editable.click()
+  await ws.activateTargetCell(0)
   await alice.keyboard.insertText("this  has  double  spaces") // intentional doubles
   await alice.locator("aside").click() // blur
   await alice.waitForTimeout(2_000)

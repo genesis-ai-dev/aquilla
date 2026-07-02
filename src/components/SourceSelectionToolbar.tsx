@@ -75,7 +75,13 @@ export function SourceSelectionToolbar({
       </button>
 
       {onAddToTermbase && (
-        <button type="button" onMouseDown={handleButtonMouseDown} onClick={onAddToTermbase} className={cn(PILL)}>
+        <button
+          type="button"
+          aria-label="Add to termbase"
+          onMouseDown={handleButtonMouseDown}
+          onClick={onAddToTermbase}
+          className={cn(PILL)}
+        >
           <BookOpen className="size-3" aria-hidden />
           Add to terms
         </button>

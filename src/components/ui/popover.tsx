@@ -25,15 +25,18 @@ function PopoverContent({
 }) {
   return (
     <PopoverPrimitive.Portal>
-      {/* z-40 has to live on the Positioner — see TooltipContent for the
+      {/* z-50 has to live on the Positioner — see TooltipContent for the
           rationale. The Popup's z-index would otherwise be sealed inside
-          the Positioner's transform-induced stacking context. */}
+          the Positioner's transform-induced stacking context. Matches
+          Dialog and Select (both z-50): a popover portal mounts after an
+          already-open dialog's, so equal z-index resolves by document
+          order and the popover stacks correctly above a parent dialog. */}
       <PopoverPrimitive.Positioner
         side={side}
         align={align}
         anchor={anchor}
         sideOffset={sideOffset}
-        className="z-40"
+        className="z-50"
       >
         <PopoverPrimitive.Popup
           data-slot="popover-content"

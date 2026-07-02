@@ -244,9 +244,9 @@ export function TeamDetail() {
               {/* Header / rename / delete */}
               <PageHeader
                 title={team.name}
-                description={!editing && team.description ? team.description : undefined}
+                description={team.description || undefined}
                 actions={
-                  isAdmin && !editing ? (
+                  isAdmin ? (
                     <>
                       <Button
                         type="button"
@@ -269,25 +269,40 @@ export function TeamDetail() {
                 }
               />
 
-              {isAdmin && editing && (
-                <Section className="mb-6" title="Edit team" description="Update the team name or description.">
-                  <div className="space-y-2">
-                    <Input
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      placeholder="Team name"
-                    />
-                    <Input
-                      value={editDescription}
-                      onChange={(e) => setEditDescription(e.target.value)}
-                      placeholder="Description (optional)"
-                    />
-                    <div className="flex gap-2 pt-1">
-                      <Button type="button" size="sm" onClick={handleSave}>Save</Button>
-                      <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
-                    </div>
-                  </div>
-                </Section>
+              {isAdmin && (
+                <Dialog open={editing} onOpenChange={(o) => { if (!o) setEditing(false) }}>
+                  <DialogContent className="max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>Edit team</DialogTitle>
+                    </DialogHeader>
+                    <form
+                      id="edit-team-form"
+                      onSubmit={async (e) => {
+                        e.preventDefault()
+                        await handleSave()
+                      }}
+                      className="space-y-2"
+                    >
+                      <Input
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        placeholder="Team name"
+                        autoFocus
+                      />
+                      <Input
+                        value={editDescription}
+                        onChange={(e) => setEditDescription(e.target.value)}
+                        placeholder="Description (optional)"
+                      />
+                    </form>
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={() => setEditing(false)}>
+                        Cancel
+                      </Button>
+                      <Button type="submit" form="edit-team-form" disabled={!editName.trim()}>Save</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               )}
 
               {isAdmin && (

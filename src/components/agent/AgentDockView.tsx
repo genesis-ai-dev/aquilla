@@ -14,6 +14,7 @@ import { ChatComposer, type ChatComposerHandle, type SuggestedAction } from "@/c
 import { ChatContextPin } from "@/components/chat/ChatContextPin"
 import type { CellContext } from "@/lib/cell-context"
 import { serializeWithChips, type ContextChip } from "@/lib/agent/context-chip"
+import { expandSlashCommand } from "@/lib/agent/slash-commands"
 import { getTranslatorProfile, profileForPrompt } from "@/lib/translator-profile"
 import type { CellData } from "@/hooks/useCells"
 import type { TranslationRule } from "@/lib/parsers/types"
@@ -89,9 +90,15 @@ export function AgentDockView({
   const sendPrompt = useCallback(
     (text: string, chips: ContextChip[] = []) => {
       if ((!text.trim() && chips.length === 0) || !jwt) return
+      // Slash commands expand into vetted prompts; the bubble keeps the typed
+      // command (CLI-style). Chips skip expansion — a chip message is already
+      // a specific ask, not a command.
+      const expanded = chips.length === 0 ? expandSlashCommand(text) : null
       // `display` (with [ref] chips) shows in the bubble; `wire` (tokens +
       // legend) is what the model receives.
-      const { wire, display } = serializeWithChips(text, chips)
+      const { wire, display } = expanded
+        ? { wire: expanded, display: text.trim() }
+        : serializeWithChips(text, chips)
       // Read the profile at send time (fresh, no extra re-render). The server
       // re-caps every field; this just avoids sending an empty object.
       const translatorProfile = profileForPrompt(getTranslatorProfile())
@@ -213,6 +220,7 @@ export function AgentDockView({
         compact
         suggestedActions={suggestedActions}
         queueWhileStreaming
+        placeholder="Ask the agent… (/draft, /check, /find, /status)"
       />
     </div>
   )

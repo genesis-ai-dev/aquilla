@@ -51,10 +51,12 @@ export interface ChatComposerProps {
   suggestedActions?: SuggestedAction[]
   /** Keep Send live during a run — the caller queues the prompt (agent mode). */
   queueWhileStreaming?: boolean
+  /** Empty-state hint; defaults to "Ask the agent…". */
+  placeholder?: string
 }
 
 export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function ChatComposer(
-  { isStreaming, isConfigured, onSend, onStop, compact, suggestedActions, queueWhileStreaming },
+  { isStreaming, isConfigured, onSend, onStop, compact, suggestedActions, queueWhileStreaming, placeholder },
   ref,
 ) {
   const [isEmpty, setIsEmpty] = useState(true)
@@ -179,7 +181,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 )}
                 aria-hidden
               >
-                Ask the agent…
+                {placeholder ?? "Ask the agent…"}
               </span>
             )}
           </div>

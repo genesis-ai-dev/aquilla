@@ -11,14 +11,14 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * Cell expansion panel — BT (Backtranslation) tab.
  *
  * The CellExpansion panel (opened by "Open cell details" chevron) has a
- * "BT" tab. When the cell has no back-translation and no translated value,
- * the "Generate" button is disabled.  After adding a translation, the
- * "Generate" button becomes enabled (but actually triggering AI is
- * out-of-scope for this smoke spec — we only verify the button appears).
+ * "Back-translation" tab. A cell with a translation but no back-translation
+ * shows a "Read it back" generate affordance (an empty cell shows only a
+ * "Translate this cell to read it back" hint). Actually triggering generation
+ * is out-of-scope for this smoke spec — we only verify the button appears.
  *
- * This spec: open cell details → switch to BT tab → assert "Generate"
- * button is visible (disabled until cell has content — just verifying
- * the tab and button exist).
+ * This spec: translate cell 0 → open cell details → switch to the
+ * Back-translation tab → assert a BT control ("Read it back" or "Edit the
+ * back-translation") is visible.
  */
 test("BT tab is accessible from cell expansion panel", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -31,6 +31,10 @@ test("BT tab is accessible from cell expansion panel", async ({ alice }) => {
   await ws.importFile(SAMPLE_MD)
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
+  // The BT generate affordance ("Read it back") only renders once the cell has
+  // a translation — an empty cell shows a "Translate this cell to read it back"
+  // hint instead. Add a translation so the button is present to assert on.
+  await ws.editCell(0, "Translation for BT tab test")
 
   const row = ws.cellRow(0)
   await row.scrollIntoViewIfNeeded()
@@ -47,7 +51,12 @@ test("BT tab is accessible from cell expansion panel", async ({ alice }) => {
   await expect(btTab.first()).toBeVisible({ timeout: 5_000 })
   await btTab.first().click()
 
-  // "Generate" button appears (may be disabled when cell has no translation).
-  const generateBtn = alice.getByRole("button", { name: /Generate/i }).first()
-  await expect(generateBtn).toBeVisible({ timeout: 5_000 })
+  // A translated cell shows BT controls in the panel: the "Read it back"
+  // generate affordance (formerly "Generate") when there's no back-translation
+  // yet, or the "Edit the back-translation" control once one exists (editing the
+  // cell can auto-generate a reading in-session). Either proves the tab renders.
+  const btPanel = alice.getByRole("tabpanel", { name: /back-translation/i })
+  const readItBack = btPanel.getByRole("button", { name: /read it back|reading it back/i })
+  const editBt = btPanel.getByRole("button", { name: "Edit the back-translation" })
+  await expect(readItBack.or(editBt).first()).toBeVisible({ timeout: 5_000 })
 })

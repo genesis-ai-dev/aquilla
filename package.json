@@ -24,6 +24,7 @@
     "test:watch": "vitest",
     "test:e2e:smoke": "tsx scripts/e2e-up.ts -- smoke.spec",
     "test:e2e": "tsx scripts/e2e-up.ts",
+    "test:e2e:shard": "tsx scripts/e2e-shard.ts",
     "test:e2e:ui": "tsx scripts/e2e-up.ts -- --ui",
     "test:e2e:debug": "tsx scripts/e2e-up.ts -- --debug",
     "//test:e2e:tauri": "Plan 3 — config file does not yet exist; this script will fail until Tauri smoke is implemented.",

@@ -2,9 +2,68 @@
 
 ---
 
+# 🆕🆕🆕🆕🆕🆕🆕 CURRENT GOAL (2026-07-01) — Drain "Prototype Debugging" (Biblica demo bugs)
+
+> **✅ CONVERGED 2026-07-01** — all 4 issues (FRO-455/457/458/460) Fixed + live-verified + promoted to local main `1bb9b6a5d` (ff-only, NOT pushed/deployed). See §M. (Was the ACTIVE goal.) Everything below (incl. the 2026-06-19 block) is reference-only from prior swarms.
+> Driver: user `/swarm`. Project: **Prototype Debugging** (`215cff7b-1a95-443d-9343-1f1528754462`), team FrontierR&D.
+> Scope = 4 Biblica-labelled issues from the 2026-06-30 Kilisusu demo call: FRO-455, FRO-457, FRO-458, FRO-460.
+> Base: main tip `77cd6abb7` (main is LIVE/moving — re-verify tip before every promotion). Integration branch: `swarm/proto-debug-integration` at `.worktrees/proto-debug-integration`.
+
+## §0 STOP checklist (the goal)
+- [ ] Every eligible issue at **Fixed** (verified) or honestly blocked with a Linear note.
+- [ ] Integration green: `npx tsc -b --noEmit` + `npx vitest run`; `npm run build` before each promotion.
+- [ ] `cd auth-worker && npx tsc --noEmit && npm test` green (FRO-457 touches it).
+- [ ] Each fix verified on the real dev stack (live UI) before → Fixed; spec reconciled per `/issue` Step 2.5.
+- [ ] Promoted to main only with main clean apart from recorded protected files (never clobbered).
+- [ ] Every remaining gap traced in `docs/swarm/TRACES.md`.
+
+## §EXCLUDED
+- Nothing excluded yet. Only the 4 user-named issues are in scope (the rest of Prototype Debugging is out of scope for this run).
+- Protected/forbidden path on main: `public/aquilla-logo.png` was untracked at session start (now committed as `77cd6abb7`); no other actor's dirty files at base.
+
+## §1 Operating model
+- Orchestrator (me) is the ONLY merger to main. Subagents never push/deploy/promote/run the shared dev stack.
+- Per-issue agents run the `.claude/commands/issue.md` lifecycle in a manual worktree off the LIVE integration tip.
+- `ProjectWorkspace.tsx` is a shared mega-file → at most ONE wave member may edit it; FRO-455 is forbidden from it (fix in `useRules.ts`), FRO-460 (Wave 2) may.
+- `src/components/ui/**` primitives are shared → reuse, don't modify (FRO-458 uses existing `DialogBody`).
+
+## §3 Workstream registry + wave plan
+| WS | Issue | Pri | Wave | Owned surface | Branch | Agent | Status |
+|----|-------|-----|------|---------------|--------|-------|--------|
+| A | FRO-455 Rules add-all | Med | 1 | `src/hooks/useRules.ts` (latestRulesRef accumulation), `src/hooks/useRules.test.ts` | `swarm/fro-455` | a53b2ee4 | **Fixed+RE-QA PASS** `fbd362c00` (AD-3 root cause; server proof 2→5 rules after reload) |
+| B | FRO-457 username-assign | Med | 1 | `auth-worker/src/services/user-lookup.ts`, `auth-worker/src/routes/users.ts` (+test) — client already trimmed | `swarm/fro-457` | aebd06ec | **Fixed** `4e28d7a47`, merged→int, UI-QA pending |
+| C | FRO-458 export scroll | Low | 1 | `src/components/ExportDialog.tsx` (+test) | `swarm/fro-458` | a78dcf9e | **Fixed** `4a1081d63`, merged→int, UI-QA pending |
+| D | FRO-460 Bible resources default | Low | 2 (REDESIGN) | `parsers/types.ts` (resolveBibleResourcesEnabled), `SearchDock`/`ProjectWorkspace.tsx`, `ProjectSettings.tsx`, `auth-worker/src/lib/aquifer/gate.ts` (files.kind scripture query), `sync/project-settings.ts` | `swarm/fro-460-derive` | aea69ff0 | **DERIVE-ON-READ** `c9e020096` (no write-on-load → race gone by construction); gate ✅ tsc/vitest 3225/auth 492/build; adversarial wf + independent live-QA running |
+
+Root-cause notes:
+- **FRO-455**: `useRules.ts:69` `addRule` — sequential `handleCommit` loop (`RuleSuggestFromEditsDialog.tsx:137-142`) calls `addRule` per accepted rule, but each call closes over render-time `project`, so appends clobber (only last persists). Fix: batch-append (single `patchProject`) or read fresh state per append. Contain to `useRules.ts` + dialog.
+- **FRO-457**: `auth-worker/src/routes/users.ts:33` passes UNTRIMMED username to `lookupUserByUsername` (validation at :30 only checks trimmed-empty); `user-lookup.ts:22` `WHERE username = ?` is whitespace/case-sensitive (Neon). Trailing space → false 404. Fix: trim (and consider case-insensitive) server-side; add whitespace test.
+- **FRO-458**: `ExportDialog.tsx:501` RadioGroup `max-h-64` inside `DialogContent overflow-hidden` with no `DialogBody` scroll region → lower options clipped. Fix: adopt the existing `DialogBody` (`ui/dialog.tsx:102`, `min-h-0 flex-1 overflow-y-auto`) pattern; do NOT modify the shared primitive.
+- **FRO-460**: default lives at `ProjectSettings.tsx:163/271` (`?? false`) + `useProject.ts:49`; server gate `auth-worker/src/lib/aquifer/gate.ts` (default off). Consumed at `SearchDockPanel.tsx:156`, agent schema-card. Needs design (brainstorming): default-on for scripture projects vs. surface toggle on Bible-file detection.
+
+## §M Merge log
+- 2026-07-01 · **🎉 PROMOTED FRO-460 (derive-on-read) → local main** `c251b54f3`→`1bb9b6a5d` (ff-only; swarm docs stashed/restored around ff). Gate: root tsc ✅ · vitest 393/3226 ×2 ✅ · auth-worker tsc ✅ + 492 ✅ · build ✅. Adversarial wf = PROMOTE; independent live-QA 4/4 (explicit-OFF respected ×2, no writes); display-race fixed+re-verified. **★ ALL 4 ISSUES CONVERGED ON MAIN.**
+- 2026-07-01 · **🎉 PROMOTED FRO-455+457+458 → local main** `4fb6e6dde`→`c251b54f3` (ff-only). Built fresh on live main tip (user cleaned their branding work first), merged the 3 verified branches, gate: root tsc ✅ · vitest 391/3213 ✅ · auth-worker tsc ✅ + 483 ✅ · build ✅ (8.63s). Main clean before+after. NOT pushed/deployed (no --deploy). FRO-460 EXCLUDED (broken persist-on-load race) → redesigning derive-on-read.
+- 2026-07-01 · WS C · FRO-458 · `swarm/fro-458` → integration `4a1081d63` (ff) · tsc ✅ · vitest deferred to combined gate · UI-QA pending · not yet on main
+- 2026-07-01 · WS B · FRO-457 · `swarm/fro-457` → integration (merge) · root tsc ✅ · auth-worker tsc ✅ + `npm test` 481/481 ✅ (incl 5 new) · service-layer fix also covers projects.ts/orgs.ts callers · UI-QA pending · not yet on main
+- 2026-07-01 · WS A · FRO-455 · `swarm/fro-455` → integration (merge) · root tsc ✅ · fix = await patchShared serializes D1 writes (agent disproved closure-clobber hunch) · UI-QA pending · not yet on main
+- 2026-07-01 · **COMBINED GATE on integration (all 3 wave-1)**: root `tsc -b` ✅ · root `vitest run` 391 files / 3211 tests ✅ · auth-worker tsc ✅ + 481 ✅ · `npm run build` ✅ (✓ built 8.82s).
+- 2026-07-01 · **ADVERSARIAL VERIFY** (wf 7 agents, no REFUTED): FRO-455 fix CONFIRMED correct but one new test VACUOUS (Rule 9) → finisher ab3e7f83 hardening test-only. FRO-457 fix correct but MEDIUM footgun: `LOWER(username) ORDER BY id LIMIT 1` can silently resolve WRONG account on case-collision (auth path) → finisher a52355d4 (exact-match-first, ambiguous→not-found, no migration). FRO-458 CONFIRMED both lenses → UI-QA only. **Fast-follow noted:** functional index `users(LOWER(username))` + optional `UNIQUE(LOWER(username))` (needs migration) — candidate new ticket, NOT this run.
+- 2026-07-01 · Hardening finishers dispatched into existing worktrees (fro-455, fro-457); re-gate + re-merge pending, then FRO-458 short-viewport UI-QA, then promote.
+- 2026-07-01 · WS B hardening · FRO-457 `a94b72281` → int (merge) · exact-first + ambiguous→404 · auth-worker tsc ✅ + 483 ✅ (2 new red-on-old). Spec edit STAGED-not-committed in aquilla-specs (reconcile at convergence).
+- 2026-07-01 · WS A hardening · FRO-455 `71444559c` → int (merge) · TEST-ONLY (useRules.ts byte-identical to fix) · new out-of-order-server outcome test red-on-old/green-on-fix; vacuous test renamed honestly.
+- 2026-07-01 · **FINAL COMBINED GATE on integration**: diff = 7 expected files only · root tsc ✅ · root vitest 391f/**3212** ✅ · auth-worker tsc ✅ + 483 ✅ · SPA build valid (only useRules.ts+ExportDialog.tsx are prod changes, covered by prior ✓ built). Remaining: live-UI QA singleton → rebuild → promote.
+- 2026-07-01 · **LIVE-UI QA (singleton, real dev stack @ isolated ports 5273/8888/8889)**: FRO-458 **PASS** (short/tablet/tall viewports; footer pinned; audio-by-character reachable; single scrollbar). FRO-457 **PASS** (`"bob "` + `"BOB"` resolve & add; nonexistent still rejected). FRO-455 **FAIL** — reproduced on real Postgres: accepted 3, server `settings.rules` kept only 2 after reload (pre-existing + last); 3 serialized PATCH 200s confirmed → payload not cumulative (stale-`project` fallback overwrites). Mock unit test gave FALSE GREEN. → FRO-455 reverted to Dispatched; re-fix agent a53b2ee4 dispatched with MANDATORY live-server proof (GET /settings shows all N after reload).
+- 2026-07-01 · **PROMOTION HELD**: main still @ base `77cd6abb7` but its WORKING TREE is DIRTY with the USER's active branding work (homepage/beta/case-study/index.html, vite-html-branding.ts, src/branding/*, new og/favicon PNGs) — disjoint from swarm changes but I will NOT merge into the user's dirty checkout (field rule: never touch their working changes). FRO-457+458 verified & ready; promote once main is clean (user commits/stashes) or user authorizes disjoint merge. Plan: promote all 3 together after FRO-455 re-fix passes.
+  - LESSON (memory-worthy): unit tests + adversarial code-review BOTH passed FRO-455 while the REAL stack failed — the mock didn't model patchProject/patch server-merge semantics. The "always drive the real UI" gate is what caught it.
+- 2026-07-01 · **FRO-455 RE-FIX + INDEPENDENT RE-QA PASS**: real root cause = AD-3 thin-client never persists project to IDB, so `patchProject`→undefined EVERY call → stale-`project` fallback overwrote. Fix = `latestRulesRef` in useRules.ts (no ProjectWorkspace touch). Merged `fbd362c00` → integration `ba342f6`. Independent re-QA: server `settings.rules` 2→5 after accepting 3 + reload, version 35→38, none dropped. Root tsc ✅ · vitest 391f/3213 ✅. **All 3 wave-1 fixes now independently live-verified (455/457/458).**
+- 2026-07-01 · Wave 2 FRO-460 dispatched EARLY (a6c85327) — now file-disjoint from wave-1 (455 stayed in useRules). Awaiting its landing + a final centralized UI-QA, then promote all 4 together (pending clean main).
+
+---
+
 # 🆕🆕🆕🆕🆕🆕🆕 CURRENT GOAL (2026-06-19) — Paragraph-drafting Phase 1 (segmentation + paragraph unit)
 
-> **This block is the active goal.** Everything below is reference-only from prior swarms.
+> **[SUPERSEDED 2026-07-01 — reference only; converged & promoted 2026-06-19.]**
 > Spec (read first): `docs/superpowers/specs/2026-06-18-paragraph-drafting-retrieval-context-design.md` (D1/D2/D3/D11). Phase 0 shipped on main.
 > Driver: user `/swarm-orchestration`. **Scope (user 2026-06-19): NEW IMPORTS ONLY** — no retrofit of existing files.
 

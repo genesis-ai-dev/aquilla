@@ -152,4 +152,38 @@ describe('GET /cells/audit-stats', () => {
     expect(c2.sourceEventId).toBe(null)
     expect(c2.activeValidators).toEqual([])
   })
+
+  it('scopes to a single cell when cellId is passed, so a single-cell commit does not have to pull the whole file', async () => {
+    // Perf regression guard: revalidateCellStats (useCellsAuditStats.ts) relies
+    // on this filter existing so a single-cell commit on a 30k-cell file only
+    // ever fetches one row back, not the whole file's stats.
+    const { db } = await makeTestDb({
+      cells: [
+        {
+          project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1',
+          side: 'target', value: 'hello world', content_hash: 'abcd1234',
+          event_id: 'ev-current', source_event_id: 'src-current-1',
+          last_editor: 'a', last_edit_at: 1700, validated: 1, word_count: 2,
+        },
+        {
+          project_id: 'proj-x', file_id: 'file-x', cell_id: 'c2',
+          side: 'source', value: 'hola', content_hash: 'beef9999',
+          event_id: 'src-1', source_event_id: null,
+          last_editor: 'b', last_edit_at: 1800, validated: 0, word_count: 1,
+        },
+      ],
+      cell_validators: [
+        { project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1', event_id: 'ev-current', username: 'alice', decided_ts: 1750 },
+      ],
+    })
+    const token = await makeTestToken(SECRET, { fileId: 'file-x', projectId: 'proj-x' })
+    const req = new Request('https://w/cells/audit-stats?fileId=file-x&cellId=c1', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const res = (await handleCellsAuditReadRequest(req, envWith(db)))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { cells: { cellId: string }[] }
+    expect(body.cells).toHaveLength(1)
+    expect(body.cells[0].cellId).toBe('c1')
+  })
 })

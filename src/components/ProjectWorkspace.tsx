@@ -29,7 +29,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileOrderedBy, fileTypeHasSections } from "@/lib/parsers/types"
+import { fileOrderedBy, fileTypeHasSections, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
@@ -115,6 +115,7 @@ import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import { useFileFontSizes, setFileViewPref } from "@/lib/store/file-view-prefs"
 import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
+import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
 import { applySuggestions, buildUndo } from "@/lib/file-labeling/apply"
 import { renameFile, moveFileToCorpus, renameCorpus, deleteFile } from "@/lib/store/file-operations"
@@ -744,6 +745,7 @@ export function ProjectWorkspace() {
   const {
     byCellId: auditStatsByCellId,
     revalidate: revalidateAuditStats,
+    revalidateCellStats,
   } = useCellsAuditStatsWithOverlay({
     enabled: auditStatsEnabled,
     fileId: activeFileId,
@@ -1369,12 +1371,12 @@ export function ProjectWorkspace() {
     pendingCompletionEventIdRef.current.set(cell.id, eventId)
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
-    revalidateAuditStats()
-    // Targeted: we just changed exactly one cell. Pull only that row back
-    // (its authoritative event_id becomes the next commit's parent) instead of
-    // re-streaming all ~30k source cells. The optimistic shadow keeps the value
-    // visible until this confirms; the WS event.applied also pokes the same
-    // cell (coalesced).
+    // Targeted: we just changed exactly one cell. Pull only that row's stats
+    // and cell data back (its authoritative event_id becomes the next
+    // commit's parent) instead of re-fetching stats for all ~30k cells in
+    // the file. The optimistic shadow keeps the value visible until this
+    // confirms; the WS event.applied also pokes the same cell (coalesced).
+    revalidateCellStats(cell.id)
     revalidateCell(cell.id)
 
     // ── Auto statistical BT after AI completion commit (FRO-203) ───────────
@@ -1390,7 +1392,7 @@ export function ProjectWorkspace() {
         persistBtRef.current(cell, btText, false, eventId)
       }
     }
-  }, [project?.id, applyOptimisticTargetEdit, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell])
+  }, [project?.id, applyOptimisticTargetEdit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
   /**
    * AD-2 sibling promotion: emit a new target-cell commit whose parentId is
@@ -1415,10 +1417,10 @@ export function ProjectWorkspace() {
     })
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
-    revalidateAuditStats()
     // Single-cell promotion — targeted refetch (see commitCompletedCell).
+    revalidateCellStats(cell.id)
     revalidateCell(cell.id)
-  }, [project?.id, historyCellId, cells, applyOptimisticTargetEdit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateAuditStats, revalidateCell])
+  }, [project?.id, historyCellId, cells, applyOptimisticTargetEdit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
   const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, allProjectCells, project?.translationBrief?.l1Summary ?? undefined,
@@ -1436,10 +1438,14 @@ export function ProjectWorkspace() {
     async (_eventIds: string[], cellIds: string[]) => {
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       await refreshOutboxPending()
-      revalidateAuditStats()
-      for (const cellId of cellIds) revalidateCell(cellId)
+      // Targeted: the agent only touched cellIds — pull just those rows'
+      // stats instead of the whole file's (see commitCompletedCell).
+      for (const cellId of cellIds) {
+        revalidateCellStats(cellId)
+        revalidateCell(cellId)
+      }
     },
-    [getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell],
+    [getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell],
   )
 
   // ── Back-translation: statistical primary path + optional LLM polish ────────
@@ -2244,6 +2250,56 @@ export function ProjectWorkspace() {
   const checkLockHolder = useCallback((cellId: string) =>
     cellLockHoldersRef.current.get(cellId) ?? null, [])
 
+  // Stable identities for the EditorTable callback props below — EditorTable
+  // rows are React.memo'd, so a new function identity here would fail the
+  // shallow-compare for every visible row on every ProjectWorkspace render.
+  const handleInfractionClick = useCallback((ruleId: string) => {
+    setCommentsCellId(null); setHistoryCellId(null); setDrawerRuleId(ruleId)
+  }, [])
+  const handleOpenComments = useCallback((cellId: string) => {
+    setDrawerRuleId(null); setHistoryCellId(null); setCommentsCellId(cellId)
+  }, [])
+  const handleOpenHistory = useCallback((cellId: string) => {
+    setDrawerRuleId(null); setCommentsCellId(null); setHistoryCellId(cellId)
+  }, [])
+  const handleAiSetupNeeded = useCallback(() => setAiSetupOpen(true), [])
+  const handleOpenRecording = useCallback((cellId: string) => setRecordingCellId(cellId), [])
+
+  // FRO perf cleanup: the five openers above are pure pass-throughs through
+  // EditorTable -> MemoizedRow -> EditorRow with no intermediate consumer, so
+  // they've been moved off the row prop bag into EditorActionsContext. All
+  // five deps are `[]`-memoized above, so this value's identity is stable —
+  // the provider never forces a re-render of the table subtree.
+  // (onAssignVoice/onOpenAudioSetup stay drilled: onAssignVoice's identity is
+  // NOT stable — it closes over `cells`/`frontierSession` — and both are
+  // entangled with the still-drilled audio-lens prop cluster in EditorRow's
+  // audio section, so pulling just the callback into context wouldn't shrink
+  // that section's prop surface.)
+  const editorActionsValue = useMemo(() => ({
+    onInfractionClick: handleInfractionClick,
+    onOpenComments: handleOpenComments,
+    onOpenHistory: handleOpenHistory,
+    onAiSetupNeeded: handleAiSetupNeeded,
+    onOpenRecording: handleOpenRecording,
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording])
+
+  const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
+    if (!audioProject || !frontierSession) return
+    // First assign the voice to this cell in the cast
+    tts.assignCells([cellId], voiceId)
+    // Then synthesise with the newly assigned voice
+    const targetCell = cells.find((c) => c.id === cellId)
+    if (!targetCell) return
+    const ok = await generateCellVoice({
+      project: audioProject,
+      cell: targetCell,
+      session: frontierSession,
+      username: currentUsername,
+      voiceId,
+    })
+    if (ok) refresh()
+  }, [audioProject, frontierSession, tts.assignCells, cells, currentUsername, refresh])
+
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.
   // EditorTable. Centralizes the decision so we don't flash between states
   // while a file hydrates.
@@ -2301,7 +2357,8 @@ export function ProjectWorkspace() {
     })
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
-    revalidateAuditStats()
+    // Single-cell edit — targeted refetch (see commitCompletedCell).
+    revalidateCellStats(cell.id)
     revalidateCell(cell.id)
   }, [
     project?.id,
@@ -2311,7 +2368,7 @@ export function ProjectWorkspace() {
     currentUsername,
     getTokenForProjectFile,
     refreshOutboxPending,
-    revalidateAuditStats,
+    revalidateCellStats,
     revalidateCell,
   ])
 
@@ -2826,13 +2883,18 @@ export function ProjectWorkspace() {
 
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
-    revalidateAuditStats()
     // Targeted: a hand edit / validate / waive touches exactly one cell. Pull
-    // only that row instead of re-streaming the whole file. Fall back to a full
-    // revalidate if the caller didn't pass a cellId (older call sites).
+    // only that row's stats and cell data instead of re-fetching the whole
+    // file. Fall back to a full revalidate if the caller didn't pass a
+    // cellId (older call sites).
     const changed = cellId ?? pendingBt?.cellId
-    if (changed) revalidateCell(changed)
-    else revalidateCells()
+    if (changed) {
+      revalidateCellStats(changed)
+      revalidateCell(changed)
+    } else {
+      revalidateAuditStats()
+      revalidateCells()
+    }
 
     // ── Auto statistical BT on target commit (FRO-203) ─────────────────────
     // Run synchronously after the flush so the BT reflects the committed text.
@@ -2851,7 +2913,7 @@ export function ProjectWorkspace() {
         }
       }
     }
-  }, [getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells])
+  }, [getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCellStats, revalidateCell, revalidateCells])
 
   const workspaceHeaderMenuItems = useMemo((): OverflowMenuItem[] => {
     const diarizeLabel =
@@ -3311,7 +3373,10 @@ export function ProjectWorkspace() {
                   setParallelOpen(true)
                 }}
                 onExpandResults={(q) => setSearchExpandedQuery(q)}
-                bibleResourcesEnabled={Boolean(project.bibleResourcesEnabled)}
+                bibleResourcesEnabled={resolveBibleResourcesEnabled(
+                  project.bibleResourcesEnabled,
+                  projectHasScriptureFiles(project.files),
+                )}
                 projectId={project.id}
                 getJwt={() => jwtRef.current}
                 canonicalRef={focusedCellCanonicalRef}
@@ -3674,6 +3739,7 @@ export function ProjectWorkspace() {
                   onLinkVideo={handleLinkVideo}
                 />
               ) : (
+              <EditorActionsProvider value={editorActionsValue}>
               <EditorTable
             ref={editorRef} project={project} cells={cellsWithBacktranslation}
             showFootnotesInline={footnoteViewMode === "inline"}
@@ -3685,21 +3751,12 @@ export function ProjectWorkspace() {
             examples={examples} errors={errors} previews={previews}
             onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}
             healthMap={effectiveHealthMap} infractions={infractions} rules={rules}
-            onInfractionClick={(ruleId) => {
-              setCommentsCellId(null); setHistoryCellId(null); setDrawerRuleId(ruleId)
-            }}
             isBacktranslationConfigured={isBacktranslationConfigured}
             onBacktranslate={runBacktranslation}
             onSaveBacktranslation={saveBacktranslation}
             backtranslating={backtranslating}
             backtranslationErrors={backtranslationErrors}
             cellOpenCommentCount={cellOpenCommentCount}
-            onOpenComments={(cellId) => {
-              setDrawerRuleId(null); setHistoryCellId(null); setCommentsCellId(cellId)
-            }}
-            onOpenHistory={(cellId) => {
-              setDrawerRuleId(null); setCommentsCellId(null); setHistoryCellId(cellId)
-            }}
             getTokenForFile={getTokenForFile}
             alignmentModel={alignmentModel}
             onAlignmentSeedChange={handleAlignmentSeedChange}
@@ -3711,27 +3768,10 @@ export function ProjectWorkspace() {
             targetTextDirection={fileMeta.targetTextDirection}
             isAnonymous={!frontierSession}
             onJumpToCell={jumpToCellId}
-            onAiSetupNeeded={() => setAiSetupOpen(true)}
             audioLens={audioLens}
             orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
             onOpenAudioSetup={openAudioSetup}
-            onOpenRecording={(cellId) => setRecordingCellId(cellId)}
-            onAssignVoice={async (cellId, voiceId) => {
-              if (!audioProject || !frontierSession) return
-              // First assign the voice to this cell in the cast
-              tts.assignCells([cellId], voiceId)
-              // Then synthesise with the newly assigned voice
-              const targetCell = cells.find((c) => c.id === cellId)
-              if (!targetCell) return
-              const ok = await generateCellVoice({
-                project: audioProject,
-                cell: targetCell,
-                session: frontierSession,
-                username: currentUsername,
-                voiceId,
-              })
-              if (ok) refresh()
-            }}
+            onAssignVoice={handleAssignVoice}
             onProjectChanged={refresh}
             onAddConceptFromSelection={handleAddConceptFromSelection}
             onAskAiFromSelection={handleAskAiFromSelection}
@@ -3749,6 +3789,7 @@ export function ProjectWorkspace() {
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
           />
+              </EditorActionsProvider>
               )}
             </div>
             {footnoteViewMode === "tray" && (

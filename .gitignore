@@ -43,6 +43,9 @@ src-tauri/gen/schemas/
 
 # Playwright
 test-results/
+test-results-*/
+# Per-shard build output (scripts/e2e-shard.ts)
+dist-e2e-*/
 playwright-report/
 blob-report/
 playwright/.cache/
@@ -53,12 +56,14 @@ playwright/.cache/
 # E2E suite — local-only state
 e2e/.auth/
 .e2e-logs/
+.e2e-logs-*/
 
 # Local dev-stack state (wrangler local D1/R2/DO sqlite + worker logs)
 .wrangler-dev-state/
 .dev-stack-logs/
 # E2E orchestrator's shared wrangler local D1/R2/DO state
 .wrangler-e2e-state/
+.wrangler-e2e-state-*/
 
 # legacy-migration change-detection state
 .migrate-state.json

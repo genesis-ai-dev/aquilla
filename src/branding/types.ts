@@ -49,6 +49,8 @@ export interface BrandData {
   }
   logo: {
     faviconHref: string
+    appleTouchIcon?: string
+    icon32?: string
   }
   theme: {
     light: ThemeTokens

@@ -31,6 +31,28 @@ async function seedWorld(opts: { enabled: boolean }) {
   }
 }
 
+// FRO-460: a project with the setting UNSET but a scripture (USFM) file —
+// the gate must derive "on" from the file, at the route level, without
+// anything ever being persisted to project_settings for this to work.
+async function seedScriptureProjectUnset(projectId: string) {
+  await seedUser(2, "bob")
+  await env.AQUILLA_PG.prepare(`INSERT INTO projects (id, name, created_by) VALUES (?, 'P2', 2)`)
+    .bind(projectId)
+    .run()
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO project_members (project_id, user_id, role_level) VALUES (?, 2, 400)`,
+  )
+    .bind(projectId)
+    .run()
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO files (id, project_id, name, kind, event_id, cell_count, approved_count, word_count, last_edit_at)
+     VALUES ('sf1', ?, 'GEN.usfm', 'usfm', 'evt-sf1', 0, 0, 0, NULL)`,
+  )
+    .bind(projectId)
+    .run()
+  // Deliberately NOT inserting a project_settings row — the setting is unset.
+}
+
 function aquiferJson(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } })
 }
@@ -72,6 +94,28 @@ describe("GET /api/v1/aquifer/search", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { results: unknown[] }
     expect(body.results).toHaveLength(1)
+  })
+
+  it("FRO-460: 200 for a scripture project with the setting UNSET (derived default-on)", async () => {
+    const project2 = "22222222-2222-4222-8222-222222222222"
+    await seedScriptureProjectUnset(project2)
+    const jwt = await jwtFor("bob")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      aquiferJson({ query: "abraham", lang: "en", count: 1, results: [{ title: "Abraham", url: "u", kind: "person", description: "d" }] }),
+    )
+    const res = await app.request(
+      `/api/v1/aquifer/search?projectId=${project2}&q=abraham`,
+      { headers: authHeader(jwt) },
+      testEnv(),
+    )
+    expect(res.status).toBe(200)
+    // Confirm nothing was written to project_settings by merely reading the gate.
+    const row = await env.AQUILLA_PG.prepare(
+      `SELECT settings FROM project_settings WHERE project_id = ?`,
+    )
+      .bind(project2)
+      .first<{ settings: string } | null>()
+    expect(row).toBeNull()
   })
 })
 

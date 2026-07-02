@@ -16,8 +16,12 @@ export const aquillaData: BrandData = {
     description: "Aquilla — translators, lifted.",
     htmlTitle: "Aquilla",
   },
-  logo: { faviconHref: "/favicon-aquilla.svg" },
-  deploy: { domain: "aquilla.app", ogImage: "/aquilla-og.png", ogImageWidth: 1536, ogImageHeight: 1024 },
+  logo: {
+    faviconHref: "/favicon-aquilla.svg",
+    appleTouchIcon: "/favicon-aquilla-180.png",
+    icon32: "/favicon-aquilla-32.png",
+  },
+  deploy: { domain: "aquilla.app", ogImage: "/aquilla-og-1200x630.png", ogImageWidth: 1200, ogImageHeight: 630 },
   marketing: {
     onboardingHeadline: "Welcome to Aquilla",
     onboardingSubhead: "Translators, lifted — the steering system your team can live in.",

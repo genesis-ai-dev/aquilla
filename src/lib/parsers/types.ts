@@ -63,6 +63,33 @@ export function fileTypeHasSections(type: FileType): boolean {
   return SCRIPTURE_FILE_TYPES.has(type)
 }
 
+/** FRO-460: true when any project file is a scripture type (USFM/eBible/HelloAO).
+ *  Feeds `resolveBibleResourcesEnabled` — same signal as `fileTypeHasSections`,
+ *  just aggregated across the file list. */
+export function projectHasScriptureFiles(files: { type: FileType }[] | undefined): boolean {
+  return (files ?? []).some((f) => SCRIPTURE_FILE_TYPES.has(f.type))
+}
+
+/**
+ * FRO-460 derive-on-read: the effective Bible-resources availability for a
+ * project. The PERSISTED setting (`explicit`) is written ONLY by an explicit
+ * user toggle in Project Settings — nothing writes it on load. When absent,
+ * the effective value falls back to whether the project has scripture files,
+ * so scripture/Bible projects get Aquifer reference data by default without
+ * ever persisting that default. An explicit `false` always wins, even for a
+ * scripture project — that's the trust invariant this redesign exists for
+ * (a prior load-time auto-enable effect silently overrode explicit OFF).
+ *
+ * Mirrored server-side in auth-worker/src/lib/aquifer/gate.ts using
+ * `files.kind` (the server projection of `FileType`) as the scripture signal.
+ */
+export function resolveBibleResourcesEnabled(
+  explicit: boolean | undefined,
+  hasScriptureFiles: boolean,
+): boolean {
+  return explicit !== undefined ? explicit : hasScriptureFiles
+}
+
 export type BuiltinCheckId =
   | "empty-target"
   | "target-equals-source"
@@ -400,8 +427,12 @@ export interface ProjectRecord {
    */
   alignmentSeeds?: import("@/lib/completion/interlinear").AlignmentSeed[]
   /** Bible Aquifer reference data (bibletranslation.org). Synced via
-   *  ProjectWideSettings; default off. Gates the Search-dock "Bible resources"
-   *  mode and the agent's aquifer branch. */
+   *  ProjectWideSettings. This is the EXPLICIT user override only — absent
+   *  means "no explicit choice yet". Do not read this field directly for
+   *  gating; use `resolveBibleResourcesEnabled(explicit, hasScriptureFiles)`
+   *  (FRO-460 derive-on-read: unset defaults to on for scripture projects,
+   *  never persisted just by opening/viewing). Gates the Search-dock "Bible
+   *  resources" mode and the agent's aquifer branch. */
   bibleResourcesEnabled?: boolean
   /** AI-draft context budget. Synced via ProjectWideSettings; absent →
    *  DEFAULT_DRAFT_CONTEXT applies. See D10 in paragraph-drafting spec. */

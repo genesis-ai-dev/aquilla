@@ -40,9 +40,26 @@ export interface UseCellsAuditStatsResult {
   isLoading: boolean
   isError: boolean
   revalidate: () => void
+  /** Targeted refetch for a single cell (e.g. right after that cell's
+   *  commit/validate/waive), merged into the existing map. Avoids
+   *  re-fetching the whole file's stats on every single-cell commit. */
+  revalidateCellStats: (cellId: string) => void
 }
 
 const EMPTY_AUDIT_STATS = new Map<string, CellAuditStats>()
+
+function toCellAuditStats(row: Partial<CellAuditStats>): CellAuditStats | null {
+  if (!row.cellId) return null
+  return {
+    cellId: row.cellId,
+    editCount: row.editCount ?? 0,
+    contentHash: row.contentHash ?? "",
+    lastEditAt: row.lastEditAt ?? null,
+    lastEditEventId: row.lastEditEventId ?? null,
+    activeValidators: row.activeValidators ?? [],
+    waivers: row.waivers ?? [],
+  }
+}
 
 async function fetchCellsAuditStats(
   fileId: string,
@@ -59,18 +76,29 @@ async function fetchCellsAuditStats(
   const body = (await res.json()) as { cells: Partial<CellAuditStats>[] }
   const map = new Map<string, CellAuditStats>()
   for (const row of body.cells) {
-    if (!row.cellId) continue
-    map.set(row.cellId, {
-      cellId: row.cellId,
-      editCount: row.editCount ?? 0,
-      contentHash: row.contentHash ?? "",
-      lastEditAt: row.lastEditAt ?? null,
-      lastEditEventId: row.lastEditEventId ?? null,
-      activeValidators: row.activeValidators ?? [],
-      waivers: row.waivers ?? [],
-    })
+    const stats = toCellAuditStats(row)
+    if (stats) map.set(stats.cellId, stats)
   }
   return map
+}
+
+// Single-cell variant of fetchCellsAuditStats — same endpoint, scoped via
+// the optional `cellId` query param (see cells-audit-read-route.ts).
+async function fetchCellAuditStats(
+  fileId: string,
+  cellId: string,
+  jwt: string,
+): Promise<CellAuditStats | null> {
+  const url = `${syncWorkerHttpOrigin()}/cells/audit-stats?fileId=${encodeURIComponent(fileId)}&cellId=${encodeURIComponent(cellId)}`
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${jwt}` },
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => "")
+    throw new Error(`cells/audit-stats (cell) failed: HTTP ${res.status} — ${body.slice(0, 200)}`)
+  }
+  const body = (await res.json()) as { cells: Partial<CellAuditStats>[] }
+  return body.cells[0] ? toCellAuditStats(body.cells[0]) : null
 }
 
 export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAuditStatsResult {
@@ -149,5 +177,27 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
     void doFetch()
   }, [doFetch])
 
-  return { byCellId: data, isLoading, isError, revalidate }
+  const revalidateCellStats = useCallback((cellId: string) => {
+    const fid = fileRef.current
+    if (!enabledRef.current || !fid) return
+    void (async () => {
+      try {
+        const token = await tokenRef.current(fid)
+        if (!token) return
+        const stats = await fetchCellAuditStats(fid, cellId, token)
+        // The active file may have changed while this was in flight — don't
+        // merge stale-file data into the current map.
+        if (!stats || fileRef.current !== fid) return
+        setData((prev) => {
+          const next = new Map(prev)
+          next.set(stats.cellId, stats)
+          return next
+        })
+      } catch (err) {
+        console.warn("[useCellsAuditStats] cell revalidate failed:", err)
+      }
+    })()
+  }, [])
+
+  return { byCellId: data, isLoading, isError, revalidate, revalidateCellStats }
 }

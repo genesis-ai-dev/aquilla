@@ -24,6 +24,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogBody,
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -490,6 +491,13 @@ export function ExportDialog({
           <DialogTitle>Export</DialogTitle>
         </DialogHeader>
 
+        {/* FRO-458: the whole body scrolls as one region (DialogBody =
+            min-h-0 flex-1 overflow-y-auto) instead of nesting a fixed-height
+            scroll area inside the Format fieldset. A max-h-64 inner scroll
+            on just the format list got clipped by the dialog's own
+            overflow-hidden + max-h-[85dvh] on short/tablet viewports, making
+            the lower format options unreachable. */}
+        <DialogBody className="flex flex-col gap-4">
         {/* Format selector */}
         <fieldset className="flex flex-col gap-1.5 min-w-0">
           <legend className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
@@ -498,7 +506,7 @@ export function ExportDialog({
           <RadioGroup
             value={format}
             onValueChange={(value) => setFormat(value as ExportFormat)}
-            className="flex flex-col gap-0.5 max-h-64 overflow-y-auto overscroll-contain pr-0.5"
+            className="flex flex-col gap-0.5"
             aria-label="Export format"
           >
             {FORMAT_OPTIONS.filter((f) => {
@@ -841,6 +849,7 @@ export function ExportDialog({
             </span>
           </div>
         )}
+        </DialogBody>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={isBusy}>

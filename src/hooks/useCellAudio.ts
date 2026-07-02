@@ -89,9 +89,13 @@ export function useCellAudio(
   const volumeRef = useRef(1)
   const trimRef = useRef<{ start: number | null; end: number | null }>({ start: null, end: null })
 
-  // Keep the latest session reachable from the cached token fetcher without
-  // recreating it (and trashing the per-(project,file) token cache) on every
-  // session field update.
+  // Keep the latest session reachable from the token fetcher without
+  // recreating it on every session field update. The underlying token cache
+  // lives at module scope in sync-token-fetcher.ts (shared across every
+  // useCellAudio instance — a row's recorded + generated-voice audio share
+  // one mint per (session, project, file) instead of each mounting its own
+  // cache), so this useMemo only avoids pointless closure churn, not cache
+  // loss.
   const sessionRef = useRef(session)
   useEffect(() => { sessionRef.current = session }, [session])
   const getSyncToken = useMemo(

@@ -1,9 +1,14 @@
-// GET /cells/audit-stats?fileId=
+// GET /cells/audit-stats?fileId=&cellId=
 //
 // Returns per-cell audit data the UI needs to render validation status and
 // staleness without walking the event log: chain-head event_id, content
 // hash, last-edit timestamp, source pin (AD-9), and the active validators
 // tied to the current edit.
+//
+// `cellId` is optional and further restricts the response to a single cell
+// (mirrors the `/events?fileId=&cellId=` convention) — used by the client
+// after a single-cell commit so it doesn't have to re-fetch stats for every
+// cell in the file.
 //
 // Two parallel queries — one over `cells` for stats, one over
 // `cell_validators` for active validators — then joined in JS.
@@ -38,10 +43,15 @@ export async function handleCellsAuditReadRequest(
   const fileId = url.searchParams.get('fileId')
   if (!fileId) return new Response('missing fileId', { status: 400 })
 
+  const cellId = url.searchParams.get('cellId')
+
   const auth = await verifyTokenForFile(token, fileId, env.SYNC_SECRET_KEY)
   if (!auth.ok) return new Response(auth.reason, { status: auth.status })
 
   const projectId = auth.claims.projectId
+
+  const scopeSql = cellId ? ' AND cell_id = ?' : ''
+  const binds = cellId ? [projectId, fileId, cellId] : [projectId, fileId]
 
   // `event_id` is the chain head (AD-2); `source_event_id` is the AD-9
   // staleness pin. `last_edit_event_id` in the response keeps the old
@@ -55,21 +65,21 @@ export async function handleCellsAuditReadRequest(
       event_id        AS last_edit_event_id,
       source_event_id
     FROM cells
-    WHERE project_id = ? AND file_id = ?
+    WHERE project_id = ? AND file_id = ?${scopeSql}
   `
 
   // DELETE-on-unvalidate: every row is active (no is_active filter needed).
   const validatorsSql = `
     SELECT cell_id, event_id, username
     FROM cell_validators
-    WHERE project_id = ? AND file_id = ?
+    WHERE project_id = ? AND file_id = ?${scopeSql}
   `
 
   // DELETE-on-unwaive: every row present is an active waiver.
   const waiversSql = `
     SELECT cell_id, rule_id, reason, waived_by, waived_ts
     FROM cell_waivers
-    WHERE project_id = ? AND file_id = ?
+    WHERE project_id = ? AND file_id = ?${scopeSql}
   `
 
   interface CellRow {
@@ -94,9 +104,9 @@ export async function handleCellsAuditReadRequest(
   }
 
   const [cellsRes, validatorsRes, waiversRes] = await Promise.all([
-    env.AQUILLA_PG.prepare(cellsSql).bind(projectId, fileId).all<CellRow>(),
-    env.AQUILLA_PG.prepare(validatorsSql).bind(projectId, fileId).all<ValidatorRow>(),
-    env.AQUILLA_PG.prepare(waiversSql).bind(projectId, fileId).all<WaiverRow>(),
+    env.AQUILLA_PG.prepare(cellsSql).bind(...binds).all<CellRow>(),
+    env.AQUILLA_PG.prepare(validatorsSql).bind(...binds).all<ValidatorRow>(),
+    env.AQUILLA_PG.prepare(waiversSql).bind(...binds).all<WaiverRow>(),
   ])
 
   // Bucket validators by cell_id → event_id → usernames[].

@@ -284,6 +284,59 @@ describe("POST /api/v1/ai/agent/run — scripted full loop", () => {
     expect(run!.steps).toBe(12)
   })
 
+  it("read → draft: semantic tools with typed result frames, progress, and a staged proposal", async () => {
+    await seedProjectWorld()
+    const jwt = await jwtFor("alice")
+
+    const namedCall = (id: string, name: string, args: Record<string, unknown>) => ({
+      role: "assistant",
+      content: null,
+      tool_calls: [{ id, type: "function", function: { name, arguments: JSON.stringify(args) } }],
+    })
+    const script = [
+      namedCall("tc1", "read", { filter: "untranslated" }),
+      namedCall("tc2", "draft", {}),
+      { role: "assistant", content: "Staged 1 draft — review and apply." },
+    ]
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { tools?: unknown }
+      // The draft tool's INTERNAL model call carries no tools array.
+      if (!body.tools) {
+        return modelTurn({ role: "assistant", content: '[{"i":1,"t":"En el principio"}]' })
+      }
+      return modelTurn(script.shift()!)
+    })
+
+    const res = await postRun(jwt)
+    const frames = parseFrames(await res.text())
+
+    const starts = frames.filter((f) => f.type === "code_start")
+    expect(starts.map((f) => f.kind)).toEqual(["read", "draft"])
+
+    // read's code_result carries the typed working-set payload.
+    const readResult = frames.find((f) => f.type === "code_result")!
+    const data = readResult.data as { cells: { ref: string; status?: string; cellId: string }[] }
+    expect(data.cells[0]).toMatchObject({ ref: "GEN 1:1", status: "untranslated", cellId: CELL })
+
+    // draft emitted progress frames and staged through emit-stage (provenance intact).
+    expect(frames.filter((f) => f.type === "progress").length).toBeGreaterThanOrEqual(2)
+    const proposalFrame = frames.find((f) => f.type === "proposal")!
+    const proposal = proposalFrame.proposal as {
+      events: { kind: string; cellId: string; payload: Record<string, unknown> }[]
+    }
+    expect(proposal.events).toHaveLength(1)
+    expect(proposal.events[0]).toMatchObject({
+      kind: "target.cell.commit",
+      cellId: CELL,
+    })
+    expect(proposal.events[0].payload).toMatchObject({
+      value: "En el principio",
+      ai_suggestion: true,
+    })
+
+    expect(frames.find((f) => f.type === "done")!.status).toBe("ok")
+  })
+
   it("streams SSE upstreams as per-token assistant_delta frames", async () => {
     await seedProjectWorld()
     const jwt = await jwtFor("alice")

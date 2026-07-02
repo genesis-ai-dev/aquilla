@@ -5,6 +5,7 @@ import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Page, PageHeader, EmptyState } from "@/components/ui/page"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -82,7 +83,7 @@ export function TeamsList() {
             title="Teams"
             description="Group members and grant project access together."
             actions={
-              isAdmin && !creating ? (
+              isAdmin ? (
                 <Button size="sm" onClick={() => setCreating(true)}>
                   <Plus className="size-4" />
                   New team
@@ -91,32 +92,45 @@ export function TeamsList() {
             }
           />
 
-          {isAdmin && creating && (
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault()
-                if (!jwt || activeOrgId == null || !name.trim()) return
-                const t = await createTeam(jwt, activeOrgId, name.trim(), description.trim() || undefined)
-                navigate(`/teams/${t.id}`)
-              }}
-              className="mb-6 flex flex-wrap items-center gap-2 rounded-2xl border bg-card px-4 py-3"
+          {isAdmin && (
+            <Dialog
+              open={creating}
+              onOpenChange={(o) => { if (!o) { setCreating(false); setName(""); setDescription("") } }}
             >
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Team name"
-                className="w-48"
-                autoFocus
-              />
-              <Input
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Description (optional)"
-                className="w-64"
-              />
-              <Button type="submit" size="sm" disabled={!name.trim()}>Create</Button>
-              <Button type="button" size="sm" variant="ghost" onClick={() => setCreating(false)}>Cancel</Button>
-            </form>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>New team</DialogTitle>
+                </DialogHeader>
+                <form
+                  id="create-team-form"
+                  onSubmit={async (e) => {
+                    e.preventDefault()
+                    if (!jwt || activeOrgId == null || !name.trim()) return
+                    const t = await createTeam(jwt, activeOrgId, name.trim(), description.trim() || undefined)
+                    navigate(`/teams/${t.id}`)
+                  }}
+                  className="space-y-2"
+                >
+                  <Input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Team name"
+                    autoFocus
+                  />
+                  <Input
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Description (optional)"
+                  />
+                </form>
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => { setCreating(false); setName(""); setDescription("") }}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" form="create-team-form" disabled={!name.trim()}>Create</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           )}
 
           {/* Search + sort bar */}

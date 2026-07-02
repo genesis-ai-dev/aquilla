@@ -1,4 +1,6 @@
 import { useState } from "react"
+import { Navigate, useParams } from "react-router-dom"
+import { Cpu, Gauge, KeyRound, Palette, PanelLeft, ShieldCheck, UserRound } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
@@ -7,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Page, PageHeader, Section } from "@/components/ui/page"
+import { NavList, NavRow } from "@/components/ui/nav-list"
 import { ThemeToggle, useThemeMode } from "@/branding/ThemeMode"
 import { ColorThemePicker } from "@/branding/ColorTheme"
 import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
@@ -26,6 +29,11 @@ import {
  * Personal, device-scoped preferences. Split out of the old /settings page so
  * these are reachable by EVERY signed-in user (via the AccountSwitcher), not
  * just org admins — /settings is now an org-level surface gated to managers.
+ *
+ * Rather than stacking every form onto one long page, `/preferences` is an
+ * index of navigation rows (grouped, with a hint showing the current value);
+ * each row opens a focused detail sub-page at `/preferences/:section`. Both
+ * routes render this same component — it branches on the `section` param.
  */
 const RAIL_OPTIONS: { id: DockRailPosition; label: string }[] = [
   { id: "left", label: "Left rail" },
@@ -46,6 +54,120 @@ const PROFILE_TEXT_FIELDS: {
   { key: "translationExperience", label: "Translation experience", placeholder: "e.g. 2 years" },
   { key: "geographicalSetting", label: "Geographical setting", placeholder: "e.g. Rural, Asia" },
 ]
+
+/** All translator-profile keys, used to count how many fields are filled in. */
+const PROFILE_KEYS: (keyof TranslatorProfile)[] = [
+  ...PROFILE_TEXT_FIELDS.map((f) => f.key),
+  "otherInfo",
+]
+
+/**
+ * Sidebar tab layout — Files/Chat/Search as a left rail or a top bar.
+ * Self-contained so it can render on its own detail page.
+ */
+function WorkspaceSection() {
+  const { position: railPosition, setPosition: setRailPosition } = useDockRailPosition()
+  return (
+    <Section title="Workspace" description="Layout choices for the project sidebar.">
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <Label className="text-sm font-medium">Sidebar tab layout</Label>
+          <p className="text-xs text-muted-foreground">
+            Show Files, Chat, and Search as a vertical rail on the left or a horizontal bar
+            across the top of the sidebar.
+          </p>
+        </div>
+        <div
+          className="neu-inset inline-flex items-center gap-0.5 rounded-full p-1 text-xs"
+          role="group"
+          aria-label="Sidebar tab layout"
+        >
+          {RAIL_OPTIONS.map(({ id, label }) => {
+            const active = railPosition === id
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setRailPosition(id)}
+                aria-pressed={active}
+                className={cn(
+                  "rounded-full px-3 py-1.5 transition-all",
+                  active
+                    ? "bg-card font-medium text-foreground shadow-neu-xs"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </Section>
+  )
+}
+
+/**
+ * Appearance — theme (light/dark/system) + accent color, using the existing
+ * branding components unchanged.
+ */
+function AppearanceSection() {
+  const { mode } = useThemeMode()
+  const modeLabel = mode === "system" ? "System" : mode === "dark" ? "Dark" : "Light"
+
+  return (
+    <Section title="Appearance" description="How the workspace looks on this device.">
+      <div className="space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-foreground">Theme</p>
+            <p className="text-xs text-muted-foreground">
+              Cycle between light, dark, and following your system. Currently {modeLabel.toLowerCase()}.
+            </p>
+          </div>
+          <ThemeToggle className="shrink-0" />
+        </div>
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-foreground">Accent color</p>
+            <p className="text-xs text-muted-foreground">
+              The highlight color used across the workspace.
+            </p>
+          </div>
+          <div className="shrink-0 pt-0.5">
+            <ColorThemePicker />
+          </div>
+        </div>
+      </div>
+    </Section>
+  )
+}
+
+/** Analytics consent toggle. Self-contained for its detail page. */
+function PrivacySection() {
+  const { enabled, setEnabled } = useAnalyticsConsent()
+  return (
+    <Section title="Privacy" description="Control what's shared with us about how you use the app.">
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <Label htmlFor="analytics-consent" className="text-sm font-medium">
+            Share usage data
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            Events like project creation, exports, and AI translations. Never the contents of your
+            translations or files.
+          </p>
+        </div>
+        <Switch id="analytics-consent" checked={enabled} onCheckedChange={setEnabled} />
+      </div>
+      {!enabled && (
+        <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
+          With analytics disabled, we may not be able to help diagnose problems you encounter.
+        </p>
+      )}
+    </Section>
+  )
+}
 
 /**
  * Translator profile editor. Local form state so editing (incl. trailing
@@ -100,50 +222,45 @@ function TranslatorProfileSection() {
   )
 }
 
-/**
- * Appearance — theme (light/dark/system) + accent color. These controls already
- * exist (in the overflow menu) but weren't reachable from Preferences; surfaced
- * here near the top since they're high-value, using the existing components
- * unchanged.
- */
-function AppearanceSection() {
-  const { mode } = useThemeMode()
-  const modeLabel = mode === "system" ? "System" : mode === "dark" ? "Dark" : "Light"
-
-  return (
-    <Section
-      title="Appearance"
-      description="How the workspace looks on this device."
-    >
-      <div className="space-y-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <p className="text-sm font-medium text-foreground">Theme</p>
-            <p className="text-xs text-muted-foreground">
-              Cycle between light, dark, and following your system. Currently {modeLabel.toLowerCase()}.
-            </p>
-          </div>
-          <ThemeToggle className="shrink-0" />
-        </div>
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <p className="text-sm font-medium text-foreground">Accent color</p>
-            <p className="text-xs text-muted-foreground">
-              The highlight color used across the workspace.
-            </p>
-          </div>
-          <div className="shrink-0 pt-0.5">
-            <ColorThemePicker />
-          </div>
-        </div>
-      </div>
-    </Section>
-  )
+/** One preference section: its route slug, index-row presentation, and body. */
+interface PreferenceSection {
+  slug: string
+  title: string
+  group: string
+  icon: React.ComponentType<{ className?: string }>
+  render: () => React.ReactNode
 }
 
-export function Preferences() {
-  const { enabled, setEnabled } = useAnalyticsConsent()
-  const { position: railPosition, setPosition: setRailPosition } = useDockRailPosition()
+const PREFERENCE_SECTIONS: PreferenceSection[] = [
+  { slug: "workspace", title: "Workspace", group: "General", icon: PanelLeft, render: () => <WorkspaceSection /> },
+  { slug: "appearance", title: "Appearance", group: "General", icon: Palette, render: () => <AppearanceSection /> },
+  { slug: "privacy", title: "Privacy", group: "General", icon: ShieldCheck, render: () => <PrivacySection /> },
+  { slug: "profile", title: "Translator profile", group: "AI & personalization", icon: UserRound, render: () => <TranslatorProfileSection /> },
+  { slug: "provider-keys", title: "AI provider keys", group: "AI & personalization", icon: KeyRound, render: () => <PersonalProviderSection /> },
+  { slug: "local-models", title: "Local models", group: "AI & personalization", icon: Cpu, render: () => <LocalModelsSection /> },
+  { slug: "usage", title: "Usage", group: "Account", icon: Gauge, render: () => <UsageSection /> },
+]
+
+const PREFERENCE_GROUPS = ["General", "AI & personalization", "Account"] as const
+
+/** The index: grouped navigation rows, each hinting its current value. */
+function PreferencesIndex() {
+  const { enabled } = useAnalyticsConsent()
+  const { position } = useDockRailPosition()
+  const { mode } = useThemeMode()
+
+  const profile = getTranslatorProfile()
+  const profileFilled = PROFILE_KEYS.filter((k) => (profile[k] ?? "").trim().length > 0).length
+
+  const hints: Record<string, string> = {
+    workspace: RAIL_OPTIONS.find((o) => o.id === position)?.label ?? "",
+    appearance: mode === "system" ? "System" : mode === "dark" ? "Dark" : "Light",
+    privacy: enabled ? "Sharing on" : "Sharing off",
+    profile: profileFilled > 0 ? `${profileFilled}/${PROFILE_KEYS.length} set` : "Not set",
+    "provider-keys": "Personal",
+    "local-models": "On-device",
+    usage: "This week",
+  }
 
   return (
     <AppShell
@@ -156,87 +273,42 @@ export function Preferences() {
             title="Preferences"
             description="Personal preferences that apply to you across all projects on this device."
           />
-
           <div className="space-y-6">
-            <Section
-              title="Workspace"
-              description="Layout choices for the project sidebar."
-            >
-              <div className="space-y-3">
-                <div className="space-y-1">
-                  <Label className="text-sm font-medium">Sidebar tab layout</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Show Files, Chat, and Search as a vertical rail on the left or a horizontal bar
-                    across the top of the sidebar.
-                  </p>
-                </div>
-                <div
-                  className="neu-inset inline-flex items-center gap-0.5 rounded-full p-1 text-xs"
-                  role="group"
-                  aria-label="Sidebar tab layout"
-                >
-                  {RAIL_OPTIONS.map(({ id, label }) => {
-                    const active = railPosition === id
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => setRailPosition(id)}
-                        aria-pressed={active}
-                        className={cn(
-                          "rounded-full px-3 py-1.5 transition-all",
-                          active
-                            ? "bg-card font-medium text-foreground shadow-neu-xs"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        {label}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            </Section>
-
-            <AppearanceSection />
-
-            <Section
-              title="Privacy"
-              description="Control what's shared with us about how you use the app."
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="space-y-1">
-                  <Label htmlFor="analytics-consent" className="text-sm font-medium">
-                    Share usage data
-                  </Label>
-                  <p className="text-xs text-muted-foreground">
-                    Events like project creation, exports, and AI translations. Never the contents of your
-                    translations or files.
-                  </p>
-                </div>
-                <Switch
-                  id="analytics-consent"
-                  checked={enabled}
-                  onCheckedChange={setEnabled}
-                />
-              </div>
-              {!enabled && (
-                <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
-                  With analytics disabled, we may not be able to help diagnose problems you encounter.
-                </p>
-              )}
-            </Section>
-
-            <TranslatorProfileSection />
-
-            <UsageSection />
-
-            <PersonalProviderSection />
-
-            <LocalModelsSection />
+            {PREFERENCE_GROUPS.map((group) => (
+              <NavList key={group} label={group}>
+                {PREFERENCE_SECTIONS.filter((s) => s.group === group).map((s) => (
+                  <NavRow
+                    key={s.slug}
+                    to={`/preferences/${s.slug}`}
+                    icon={s.icon}
+                    title={s.title}
+                    hint={hints[s.slug]}
+                  />
+                ))}
+              </NavList>
+            ))}
           </div>
         </Page>
       }
     />
   )
+}
+
+/** A single section, rendered on its own page with a back breadcrumb. */
+function PreferencesDetail({ slug }: { slug: string }) {
+  const section = PREFERENCE_SECTIONS.find((s) => s.slug === slug)
+  if (!section) return <Navigate to="/preferences" replace />
+  return (
+    <AppShell
+      sidebar={<OrgSidebar />}
+      header={<OrgBreadcrumb parent={{ label: "Preferences", to: "/preferences" }} section={section.title} />}
+      statusBar={null}
+      main={<Page>{section.render()}</Page>}
+    />
+  )
+}
+
+export function Preferences() {
+  const { section } = useParams<{ section?: string }>()
+  return section ? <PreferencesDetail slug={section} /> : <PreferencesIndex />
 }

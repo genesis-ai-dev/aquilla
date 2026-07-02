@@ -41,7 +41,7 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
       setOffsetInput(current.videoStartOffset !== undefined ? String(current.videoStartOffset) : "")
       setError(null)
     }
-  }, [open, current])
+  }, [open, current.videoUrl, current.videoFileName, current.videoStartOffset])
 
   function parseOffset(): number | undefined {
     const trimmed = offsetInput.trim()
@@ -177,6 +177,7 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
 
         <div className="flex gap-1 border-b">
           <button
+            type="button"
             onClick={() => setTab("url")}
             className={cn(
               "flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm",
@@ -186,6 +187,7 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
             <LinkIcon className="h-3.5 w-3.5" /> From URL
           </button>
           <button
+            type="button"
             onClick={() => setTab("upload")}
             className={cn(
               "flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm",

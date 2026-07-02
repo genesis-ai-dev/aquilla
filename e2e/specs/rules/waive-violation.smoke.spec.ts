@@ -57,9 +57,7 @@ test("waive and unwaive a rule violation via violation popover", async ({ alice 
 
   const row = ws.cellRow(0)
   await row.scrollIntoViewIfNeeded()
-  const editable = row.locator('textarea, .ProseMirror[contenteditable="true"], [contenteditable="true"]').first()
-  await editable.waitFor({ state: "visible", timeout: 10_000 })
-  await editable.click()
+  await ws.activateTargetCell(0)
   await alice.keyboard.insertText("double  space  text")
   await alice.locator("aside").click()
 

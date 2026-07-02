@@ -14,7 +14,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * text, or fewer than validationCount validators). FRO-331 moved the action
  * from a toolbar button into the workspace header "More" overflow menu as the
  * "Next unfinished" menu item; it is disabled when there is no active file or
- * no unfinished cell. Selecting it scrolls the virtualizer to the next
+ * no unfinished cell. Selecting it scrolls the list to the next
  * unfinished cell after the current position (Cmd+. is the shortcut).
  *
  * This spec verifies:

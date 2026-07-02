@@ -26,7 +26,7 @@ import StarterKit from "@tiptap/starter-kit"
 import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { createViolationDecorationExtension, violationPluginKey } from "@/lib/richtext/violation-decoration-plugin"
 import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } from "@/lib/richtext/karaoke-plugin"
@@ -36,9 +36,9 @@ import { UsfmFootnote } from "@/lib/richtext/footnote-node"
 import {
   FOOTNOTE_NODE_NAME,
   buildUsfmPlainTextMap,
-  injectFootnoteSpans,
   pmToPlainOffset,
 } from "@/lib/richtext/usfm-plain-text"
+import { prepareEditorContent, sanitizeEditorHtml } from "@/lib/richtext/editor-content"
 import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
 import type { Concept } from "@/lib/terminology/types"
 import { findActiveTimingIndex } from "@/lib/audio/timings"
@@ -211,7 +211,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   // plain text. Either form may carry raw `\f...\f*` (legacy) or footnote spans
   // (our own serialisation); prepareEditorContent normalises both into the
   // <span data-usfm-footnote> form that parses into footnote nodes.
-  const initialContent = prepareEditorContent(initialHtml, initialPlain)
+  const initialContent = useMemo(
+    () => prepareEditorContent(initialHtml, initialPlain),
+    [initialHtml, initialPlain],
+  )
 
   const isReadOnly = !editable || Boolean(heldByLabel)
 
@@ -276,7 +279,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         ),
       },
       transformPastedHTML(html: string) {
-        return stripToAllowedHtml(html)
+        return sanitizeEditorHtml(html)
       },
       handleDoubleClick(view, pos, event) {
         const didSelect = selectVisibleWord(view, pos)
@@ -575,6 +578,21 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     editor?.setEditable(!isReadOnly)
   }, [editor, isReadOnly])
 
+  const handleEditorKeyDownCapture = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Tab") return
+    const target = event.target as HTMLElement | null
+    if (!target?.closest(".ProseMirror")) return
+    const navigate = onNavigateCellRef.current
+    if (!navigate) return
+    event.preventDefault()
+    event.stopPropagation()
+    navigate(event.shiftKey ? "prev" : "next")
+  }, [])
+
+  const handleFormattingToolbarMouseDown = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault()
+  }, [])
+
   useEffect(() => {
     latestViolationStateRef.current = {
       infractions: infractions ?? [],
@@ -697,7 +715,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         shouldShow={({ editor, from, to }) => editor.isFocused && from !== to}
         options={{ placement: "top" }}
       >
-        <div className="flex gap-0.5 rounded-lg bg-card p-0.5 shadow-neu-sm">
+        <div
+          data-testid="formatting-bubble-menu"
+          className="flex gap-0.5 rounded-lg bg-card p-0.5 shadow-neu-sm"
+          onMouseDown={handleFormattingToolbarMouseDown}
+        >
           <AppTooltip content="Bold (Cmd+B)">
             <button
               type="button"
@@ -767,6 +789,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       </BubbleMenu>
       <div
         className={cn(compactHeight ? "" : "h-full")}
+        onKeyDownCapture={handleEditorKeyDownCapture}
         onClick={(e) => {
           const target = e.target as HTMLElement
           // FRO-204: term chip click → open TermLookupPopover via caller
@@ -1025,52 +1048,4 @@ function normalizeAnchorPreview(value: string): string {
   const normalized = value.replace(/\s+/g, " ").trim()
   if (normalized.length <= 80) return normalized
   return `${normalized.slice(0, 77).trimEnd()}...`
-}
-
-// Normalise stored content (HTML or plain) into the form TipTap hydrates from:
-// allowed inline marks only, with raw `\f...\f*` turned into footnote-node spans.
-function prepareEditorContent(html: string | undefined, plain: string): string {
-  const base = html && html.length > 0 ? stripToAllowedHtml(html) : plain
-  return injectFootnoteSpans(base)
-}
-
-// Strip pasted HTML to only the marks we support.
-// Allowed tags: b, strong, i, em, u, s, strike, del, code, p, br
-// Footnote markers (<span data-usfm-footnote>) are preserved so they re-parse
-// into footnote nodes. Everything else is removed (content preserved).
-function stripToAllowedHtml(html: string): string {
-  const parser = new DOMParser()
-  const doc = parser.parseFromString(`<body>${html}</body>`, "text/html")
-  walkAndStrip(doc.body)
-  return doc.body.innerHTML
-}
-
-const ALLOWED_TAGS = new Set(["B", "STRONG", "I", "EM", "U", "S", "STRIKE", "DEL", "CODE", "P", "BR"])
-
-function walkAndStrip(el: Element): void {
-  const children = Array.from(el.childNodes)
-  for (const child of children) {
-    if (child.nodeType === 1) {
-      const elChild = child as Element
-      // Preserve footnote markers verbatim (drop every attribute except the
-      // raw payload); they carry no text content to recurse into.
-      if (elChild.tagName === "SPAN" && elChild.hasAttribute("data-usfm-footnote")) {
-        const raw = elChild.getAttribute("data-usfm-footnote") ?? ""
-        for (const attr of Array.from(elChild.attributes)) elChild.removeAttribute(attr.name)
-        elChild.setAttribute("data-usfm-footnote", raw)
-        continue
-      }
-      walkAndStrip(elChild)
-      if (!ALLOWED_TAGS.has(elChild.tagName)) {
-        const parent = elChild.parentNode
-        if (parent) {
-          while (elChild.firstChild) parent.insertBefore(elChild.firstChild, elChild)
-          parent.removeChild(elChild)
-        }
-      } else {
-        const attrs = Array.from(elChild.attributes)
-        for (const attr of attrs) elChild.removeAttribute(attr.name)
-      }
-    }
-  }
 }

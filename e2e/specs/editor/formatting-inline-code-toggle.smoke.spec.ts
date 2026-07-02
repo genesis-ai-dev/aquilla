@@ -1,7 +1,7 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
-import { selectEditorContents } from "../../helpers/editor-selection"
+import { formattingBubbleButton, selectEditorContents } from "../../helpers/editor-selection"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -37,12 +37,7 @@ test("formatting bubble menu Inline code button toggles on and off", async ({ al
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  const row = ws.cellRow(0)
-  await row.scrollIntoViewIfNeeded()
-
-  // Double-click to enter edit mode.
-  const targetCell = row.locator('[contenteditable="true"]').first()
-  await targetCell.dblclick()
+  const targetCell = await ws.activateTargetCell(0)
 
   // Type some text.
   await alice.keyboard.type("code_sample text")
@@ -51,7 +46,7 @@ test("formatting bubble menu Inline code button toggles on and off", async ({ al
   await selectEditorContents(targetCell)
 
   // The BubbleMenu should appear with the "Inline code" button.
-  const codeBtn = alice.getByRole("button", { name: "Inline code" })
+  const codeBtn = formattingBubbleButton(alice, "Inline code")
   await expect(codeBtn).toBeVisible({ timeout: 5_000 })
 
   // The button should NOT have "bg-accent" initially.

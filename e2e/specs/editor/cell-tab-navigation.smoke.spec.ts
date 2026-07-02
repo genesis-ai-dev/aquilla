@@ -40,9 +40,8 @@ test("Tab moves focus to the next target cell; Shift+Tab returns to previous", a
   // Click directly into the first target cell's TipTap editor to focus it.
   // (Workspace.editCell() is unsuitable here: it clicks the sidebar after
   // typing to blur-commit, so nothing would be focused afterwards.)
-  const firstEditor = ws.cellRow(0).locator('.ProseMirror[contenteditable="true"]').first()
+  const firstEditor = await ws.activateTargetCell(0)
   const secondEditor = ws.cellRow(1).locator('.ProseMirror[contenteditable="true"]').first()
-  await firstEditor.click()
   await expect(firstEditor).toBeFocused({ timeout: 5_000 })
 
   // Press Tab — TranslatedEditor's handleKeyDown calls navigate("next"),
@@ -52,5 +51,6 @@ test("Tab moves focus to the next target cell; Shift+Tab returns to previous", a
 
   // Press Shift+Tab — should navigate back to the previous (first) cell.
   await alice.keyboard.press("Shift+Tab")
-  await expect(firstEditor).toBeFocused({ timeout: 5_000 })
+  const reactivatedFirstEditor = ws.cellRow(0).locator('.ProseMirror[contenteditable="true"]').first()
+  await expect(reactivatedFirstEditor).toBeFocused({ timeout: 5_000 })
 })

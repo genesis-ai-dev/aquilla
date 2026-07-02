@@ -76,7 +76,7 @@ test("alice edits cell 0; bob sees the new text in his open editor within 15s", 
   //    The ProjectSync DO delivers the event.applied frame to bob's WS
   //    connection → useCells calls revalidateCell() → D1 refetch → re-render.
   //    We filter to the specific cell that contains the edit text rather than
-  //    checking a fixed row index — the virtualizer can render cells in varying
+  //    checking a fixed row index — the virtualized list can render cells in varying
   //    DOM order depending on scroll position.
   await expect(
     bob.locator("[data-cell-id]").filter({ hasText: editText }).first(),

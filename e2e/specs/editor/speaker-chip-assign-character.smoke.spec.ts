@@ -8,19 +8,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * Voice chip — clicking a cast chip assigns + voices a line in audio mode.
+ * Voice picker — choosing a cast voice assigns + voices a line in audio mode.
  *
  * In audio lens (EditorTable audioLens), each translated cell renders a
- * CellVoicePanel showing the whole cast as a scrollable chip strip. There's no
- * dropdown: clicking a chip assigns the line to that voice (aria-pressed flips)
- * and kicks off generation immediately.
+ * CellVoicePanel with a compact cast combobox. Picking a voice assigns the
+ * line to that voice and kicks off generation immediately.
  *
  * This spec:
  *   1. Creates a project, imports sample.md, opens the editor.
  *   2. Switches to audio mode.
  *   3. Creates a voice "Hero" via the New voice modal.
- *   4. Finds Hero's chip in the first cell (not yet active).
- *   5. Clicks it → the chip becomes the active voice (aria-pressed="true").
+ *   4. Opens the first cell's voice chooser.
+ *   5. Chooses Hero → the trigger updates to Hero.
  */
 test("clicking a voice chip assigns a line to that voice in audio mode", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -57,14 +56,23 @@ test("clicking a voice chip assigns a line to that voice in audio mode", async (
   await expect(dialog).not.toBeVisible({ timeout: 5_000 })
   await expect(alice.getByText(voiceName)).toBeVisible({ timeout: 5_000 })
 
-  // The voice column shows the cast as chips. Scope to the editor (main) so we
-  // don't match the identically-named "Hero" row in the Voices dock panel.
-  const heroChip = alice.getByRole("main").getByRole("button", { name: voiceName, exact: true }).first()
-  await expect(heroChip).toBeVisible({ timeout: 8_000 })
-  // The line resolves to the narrator by default, so Hero isn't active yet.
-  await expect(heroChip).toHaveAttribute("aria-pressed", "false")
+  // The voice column shows a compact cast combobox. Scope to the editor (main)
+  // so we don't match the identically-named row in the Voices dock panel.
+  const voiceTrigger = alice
+    .getByRole("main")
+    .getByTitle("Choose a voice")
+    .first()
+  await expect(voiceTrigger).toBeVisible({ timeout: 8_000 })
+  await expect(voiceTrigger).toHaveAttribute("aria-label", /Voice: Narrator\. Choose a voice/i)
 
-  // Clicking the chip assigns this line to Hero (and kicks off generation).
-  await heroChip.click()
-  await expect(heroChip).toHaveAttribute("aria-pressed", "true", { timeout: 5_000 })
+  // Choosing Hero assigns this line to Hero (and kicks off generation).
+  await voiceTrigger.click()
+  const heroOption = alice
+    .locator('[data-slot="popover-content"]')
+    .getByRole("button", { name: voiceName, exact: true })
+  await expect(heroOption).toBeVisible({ timeout: 5_000 })
+  await heroOption.click()
+  await expect(voiceTrigger).toHaveAttribute("aria-label", /Voice: Hero\. Choose a voice/i, {
+    timeout: 5_000,
+  })
 })

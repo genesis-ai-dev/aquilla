@@ -8,13 +8,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const VTT_FIXTURE = path.resolve(__dirname, "../../fixtures/voices-roundtrip.vtt")
 
 /**
- * Media attachment — fills a direct media URL and attaches it.
+ * Video attachment dialog — fills a direct media URL and attaches it.
  *
- * TimelineAddMedia.tsx has:
- *   - Media URL input
- *   - "Attach" button (disabled while URL is empty; enabled once URL is filled)
+ * VideoAttachmentDialog.tsx has:
+ *   - Video URL input
+ *   - "Save URL" button (disabled while URL is empty; enabled once URL is filled)
  *
- * This spec: switch to Media → type a URL → verify "Attach" is enabled.
+ * This spec: open Attach video → type a URL → verify "Save URL" is enabled.
  */
 test("video attachment dialog Save URL enables after entering a URL", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -28,13 +28,24 @@ test("video attachment dialog Save URL enables after entering a URL", async ({ a
   await ws.openFileBySubstring("voices-roundtrip")
   await ws.waitForEditor()
 
-  await alice.getByRole("button", { name: /^Media$/i }).click()
+  const moreBtn = alice.getByRole("banner").getByRole("button", { name: /^More$/i })
+  await expect(moreBtn).toBeVisible({ timeout: 10_000 })
+  await moreBtn.click()
 
-  const urlInput = alice.getByLabel("Media URL")
+  const attachVideoItem = alice.getByRole("menuitem", { name: /Attach video/i })
+  await expect(attachVideoItem).toBeVisible({ timeout: 3_000 })
+  await attachVideoItem.click()
+
+  const dialog = alice.getByRole("dialog").filter({ hasText: "Attach Video" })
+  await expect(dialog).toBeVisible({ timeout: 5_000 })
+  await expect(dialog.getByRole("heading", { name: /Attach Video/i })).toBeVisible()
+  await dialog.getByRole("button", { name: /From URL/i }).click()
+
+  const urlInput = dialog.getByLabel("Video URL")
   await expect(urlInput).toBeVisible({ timeout: 5_000 })
-  const attachBtn = alice.getByRole("button", { name: /^Attach$/i })
-  await expect(attachBtn).toBeDisabled()
+  const saveUrlBtn = dialog.getByRole("button", { name: /^Save URL$/i })
+  await expect(saveUrlBtn).toBeDisabled()
 
   await urlInput.fill("https://example.com/video.mp4")
-  await expect(attachBtn).toBeEnabled({ timeout: 3_000 })
+  await expect(saveUrlBtn).toBeEnabled({ timeout: 3_000 })
 })

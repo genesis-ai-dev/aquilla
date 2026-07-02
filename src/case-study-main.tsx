@@ -8,6 +8,7 @@ import { brand } from "./branding/current-brand"
 import { applyTheme } from "./branding/apply-theme"
 import { BrandProvider } from "./branding/BrandProvider"
 import { ComeAndSeeCaseStudy } from "./pages/CaseStudy/ComeAndSee"
+import { DelegatedTooltipLayer } from "./components/ui/tooltip"
 
 applyTheme(brand)
 document.title = `Come and See — ${brand.app.name}`
@@ -16,6 +17,7 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrandProvider>
       <ComeAndSeeCaseStudy />
+      <DelegatedTooltipLayer />
     </BrandProvider>
   </StrictMode>,
 )

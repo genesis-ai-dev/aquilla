@@ -23,10 +23,10 @@ test("import dialog back button returns to landing screen", async ({ alice }) =>
   await dash.createProject({ name, source: "en", target: "fr" })
   await dash.openProject(name)
 
-  // Open the import dialog via the + Import Files button.
-  const importBtn = alice.getByRole("button", { name: /Import/i })
-    .or(alice.locator('[aria-label="Import files"]'))
-    .first()
+  await alice.waitForLoadState("networkidle")
+
+  // Open the import dialog via the empty-workspace primary Import action.
+  const importBtn = alice.getByRole("button", { name: /^Import$/i }).first()
   await expect(importBtn).toBeVisible({ timeout: 10_000 })
   await importBtn.click()
 

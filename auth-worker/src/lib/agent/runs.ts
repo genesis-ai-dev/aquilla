@@ -15,15 +15,26 @@ export interface AgentRunStart {
   /** The user's request (last user message), for the observability ledger. */
   prompt: string
   model: string
+  /** Owning agent_sessions row; null for sessionless (v1) clients. */
+  sessionId?: string | null
 }
 
 export async function insertAgentRun(db: AquillaDb, run: AgentRunStart): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO agent_runs (run_id, project_id, user_id, username, prompt, model, status, started_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'running', ?)`,
+      `INSERT INTO agent_runs (run_id, project_id, user_id, username, prompt, model, status, session_id, started_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?)`,
     )
-    .bind(run.runId, run.projectId, run.userId, run.username, run.prompt, run.model, Date.now())
+    .bind(
+      run.runId,
+      run.projectId,
+      run.userId,
+      run.username,
+      run.prompt,
+      run.model,
+      run.sessionId ?? null,
+      Date.now(),
+    )
     .run()
 }
 

@@ -284,6 +284,119 @@ describe("POST /api/v1/ai/agent/run — scripted full loop", () => {
     expect(run!.steps).toBe(12)
   })
 
+  it("streams SSE upstreams as per-token assistant_delta frames", async () => {
+    await seedProjectWorld()
+    const jwt = await jwtFor("alice")
+
+    const encoder = new TextEncoder()
+    const sseChunks = [
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "Token " } }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "by " } }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "token." } }] })}\n\n`,
+      `data: ${JSON.stringify({ usage: { prompt_tokens: 42, completion_tokens: 7, cost: 0.0002 } })}\n\n`,
+      "data: [DONE]\n\n",
+    ]
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const c of sseChunks) controller.enqueue(encoder.encode(c))
+          controller.close()
+        },
+      })
+      return new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    })
+
+    const res = await postRun(jwt)
+    const frames = parseFrames(await res.text())
+    const deltas = frames.filter((f) => f.type === "assistant_delta").map((f) => f.text)
+    expect(deltas).toEqual(["Token ", "by ", "token."])
+    expect(frames.find((f) => f.type === "usage")).toMatchObject({ promptTokens: 42, completionTokens: 7 })
+    expect(frames.find((f) => f.type === "done")!.status).toBe("ok")
+  })
+
+  it("session runs persist the convo (incl. tool results) and replay it on the next turn", async () => {
+    await seedProjectWorld()
+    const jwt = await jwtFor("alice")
+    const sessionId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+
+    const upstreamBodies: { messages: { role: string; content: string | null }[] }[] = []
+    const script = [
+      toolCall("tc1", { sql: "SELECT cell_id, value FROM cells WHERE project_id = :project AND side = 'source'" }),
+      { role: "assistant", content: "The chapter has 1 source cell." },
+      // Second run (same session): answers directly from remembered context.
+      { role: "assistant", content: "As I found earlier, it is GEN 1:1." },
+    ]
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      upstreamBodies.push(JSON.parse(String(init?.body)))
+      return modelTurn(script.shift()!)
+    })
+
+    // Run 1 — establishes the session.
+    const res1 = await postRun(jwt, {
+      projectId: PROJECT,
+      sessionId,
+      messages: [{ role: "user", content: "How many source cells?" }],
+    })
+    const frames1 = parseFrames(await res1.text())
+    expect(frames1[0]).toMatchObject({ type: "run_start", sessionId })
+    expect(frames1.find((f) => f.type === "done")!.status).toBe("ok")
+
+    // The session row persists user, assistant(tool_calls), tool, assistant.
+    const row = await env.AQUILLA_PG.prepare("SELECT convo FROM agent_sessions WHERE session_id = ?")
+      .bind(sessionId)
+      .first<{ convo: string }>()
+    const stored = JSON.parse(row!.convo) as { role: string }[]
+    expect(stored.map((m) => m.role)).toEqual(["user", "assistant", "tool", "assistant"])
+
+    // Run 2 — sends ONLY the new user turn; the server replays the history.
+    const res2 = await postRun(jwt, {
+      projectId: PROJECT,
+      sessionId,
+      messages: [{ role: "user", content: "Which ref was it?" }],
+    })
+    parseFrames(await res2.text())
+    const run2Messages = upstreamBodies[2].messages
+    expect(run2Messages.map((m) => m.role)).toEqual([
+      "system",
+      "user",
+      "assistant",
+      "tool",
+      "assistant",
+      "user",
+    ])
+    const replayedTool = run2Messages.find((m) => m.role === "tool")!
+    expect(replayedTool.content).toContain("cell_id|value") // prior tool result rode along
+
+    // agent_runs rows carry the session id.
+    const runs = await env.AQUILLA_PG.prepare(
+      "SELECT session_id FROM agent_runs WHERE session_id = ?",
+    )
+      .bind(sessionId)
+      .all<{ session_id: string }>()
+    expect(runs.results).toHaveLength(2)
+  })
+
+  it("403 when the session belongs to another user", async () => {
+    await seedProjectWorld()
+    const sessionId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO agent_sessions (session_id, project_id, user_id, title, convo, created_at, updated_at)
+       VALUES (?, ?, 2, 'boss session', '[]', 0, 0)`,
+    )
+      .bind(sessionId, PROJECT)
+      .run()
+
+    const res = await postRun(await jwtFor("alice"), {
+      projectId: PROJECT,
+      sessionId,
+      messages: [{ role: "user", content: "hi" }],
+    })
+    expect(res.status).toBe(403)
+  })
+
   it("surfaces upstream failure as error frame + done:error + ledger status", async () => {
     await seedProjectWorld()
     const jwt = await jwtFor("alice")

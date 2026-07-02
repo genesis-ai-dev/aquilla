@@ -1,0 +1,126 @@
+/**
+ * session-store tests — the shared-session behaviors the two mounts rely on:
+ * session-native wire shape (one user turn + sessionId), queueing instead of
+ * dropping prompts sent mid-run, stop clearing the queue, and reset minting a
+ * fresh server session.
+ */
+
+import { describe, it, expect, vi } from "vitest"
+import { AgentSessionStore, type AgentSendOptions } from "./session-store"
+import type { RunAgentOptions } from "./agent-client"
+
+function sendOptions(text: string): AgentSendOptions {
+  return { wire: text, display: text, jwt: "jwt", request: { projectId: "p1" } }
+}
+
+/** A runAgent fake the test resolves manually, capturing each call. */
+function deferredRunAgent() {
+  const calls: RunAgentOptions[] = []
+  const resolvers: (() => void)[] = []
+  const impl = vi.fn((options: RunAgentOptions) => {
+    calls.push(options)
+    return new Promise<void>((resolve) => resolvers.push(resolve))
+  })
+  return { impl, calls, finish: (i: number) => resolvers[i]() }
+}
+
+const flush = () => new Promise((r) => setTimeout(r, 0))
+
+describe("AgentSessionStore", () => {
+  it("sends session-native requests: sessionId + only the new user turn", async () => {
+    const { impl, calls, finish } = deferredRunAgent()
+    const store = new AgentSessionStore(impl)
+    store.send(sendOptions("Draft GEN 1"))
+    await flush()
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].request.sessionId).toBe(store.getState().sessionId)
+    expect(calls[0].request.messages).toEqual([{ role: "user", content: "Draft GEN 1" }])
+    expect(store.getState().isStreaming).toBe(true)
+
+    calls[0].onFrame({ type: "assistant_delta", text: "ok" })
+    calls[0].onFrame({ type: "done", runId: "r1", status: "ok" })
+    finish(0)
+    await flush()
+    expect(store.getState().isStreaming).toBe(false)
+    expect(store.getState().runs[0].status).toBe("ok")
+  })
+
+  it("queues prompts sent mid-run and dispatches them in order", async () => {
+    const { impl, calls, finish } = deferredRunAgent()
+    const store = new AgentSessionStore(impl)
+    store.send(sendOptions("first"))
+    await flush()
+    store.send(sendOptions("second"))
+    store.send(sendOptions("third"))
+
+    expect(calls).toHaveLength(1) // second/third are waiting
+    expect(store.getState().queued).toEqual(["second", "third"])
+
+    finish(0)
+    await flush()
+    expect(calls).toHaveLength(2)
+    expect(calls[1].request.messages[0].content).toBe("second")
+    expect(store.getState().queued).toEqual(["third"])
+
+    finish(1)
+    await flush()
+    expect(calls).toHaveLength(3)
+    expect(store.getState().queued).toEqual([])
+    expect(store.getState().runs.map((r) => r.prompt)).toEqual(["first", "second", "third"])
+  })
+
+  it("stop aborts the in-flight run and drops the queue", async () => {
+    const impl = vi.fn(
+      (options: RunAgentOptions) =>
+        new Promise<void>((_resolve, reject) => {
+          options.signal?.addEventListener("abort", () =>
+            reject(new DOMException("Agent run aborted", "AbortError")),
+          )
+        }),
+    )
+    const store = new AgentSessionStore(impl)
+    store.send(sendOptions("long job"))
+    await flush()
+    store.send(sendOptions("follow-up"))
+    expect(store.getState().queued).toEqual(["follow-up"])
+
+    store.stop()
+    await flush()
+    expect(store.getState().queued).toEqual([])
+    expect(impl).toHaveBeenCalledTimes(1) // the queued prompt never dispatched
+    expect(store.getState().runs[0].status).toBe("error")
+    expect(store.getState().runs[0].errorMessage).toBe("Stopped.")
+  })
+
+  it("reset clears runs and mints a new server session id", async () => {
+    const { impl, calls, finish } = deferredRunAgent()
+    const store = new AgentSessionStore(impl)
+    const before = store.getState().sessionId
+    store.send(sendOptions("hello"))
+    await flush()
+    finish(0)
+    await flush()
+
+    store.reset()
+    const after = store.getState()
+    expect(after.runs).toEqual([])
+    expect(after.sessionId).not.toBe(before)
+
+    store.send(sendOptions("fresh"))
+    await flush()
+    expect(calls[1].request.sessionId).toBe(after.sessionId)
+  })
+
+  it("a failed run surfaces its error and still releases the stream lock", async () => {
+    const impl = vi.fn(() => Promise.reject(new Error("AI limit reached: Out of credits.")))
+    const store = new AgentSessionStore(impl)
+    store.send(sendOptions("draft"))
+    await flush()
+    expect(store.getState().isStreaming).toBe(false)
+    expect(store.getState().runs[0]).toMatchObject({
+      status: "error",
+      errorMessage: "AI limit reached: Out of credits.",
+    })
+  })
+})

@@ -22,6 +22,8 @@ import { AliasMap, compressRows } from "../lib/agent/compress"
 import { runGuardedSql, type SqlVarContext } from "../lib/agent/sql-guard"
 import { stageEvents, type AgentProposal, type EmitStageContext } from "../lib/agent/emit-stage"
 import { getCookbook } from "../lib/agent/docs"
+import { readModelTurn, type ToolCall, type UpstreamMessage } from "../lib/agent/upstream"
+import { compactConvo, loadSession, saveSession, type StoredMessage } from "../lib/agent/sessions"
 import { parseAquiferOp } from "../lib/agent/aquifer-guard"
 import { aquiferSearch, aquiferReadPage, type AquiferCitation } from "../lib/aquifer/client"
 import { isBibleResourcesEnabled } from "../lib/aquifer/gate"
@@ -72,12 +74,13 @@ export interface AquiferPublishProposal {
 }
 
 type AgentFrame =
-  | { type: "run_start"; runId: string }
+  | { type: "run_start"; runId: string; sessionId?: string }
   | { type: "assistant_delta"; text: string }
   | { type: "code_start"; step: number; kind: CodeKind; summary: string }
   | { type: "code_result"; step: number; ok: boolean; summary: string }
   | { type: "proposal"; proposal: AgentProposal }
   | { type: "aquifer_proposal"; proposal: AquiferPublishProposal }
+  | { type: "progress"; label: string; done: number; total: number }
   | { type: "usage"; promptTokens: number; completionTokens: number; costCents: number }
   | { type: "done"; runId: string; status: "ok" | "capped" | "error" }
   | { type: "error"; message: string }
@@ -152,6 +155,10 @@ const translatorProfileSchema = z
 
 const runRequestSchema = z.object({
   projectId: z.string().min(1),
+  /** Session-native (v2): the server holds the conversation (incl. tool
+   *  results) under this client-generated UUID; `messages` then carries only
+   *  the new user turn. Absent → v1 behavior (client sends the whole convo). */
+  sessionId: z.string().uuid().optional(),
   messages: z
     .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string() }))
     .min(1)
@@ -161,28 +168,10 @@ const runRequestSchema = z.object({
 })
 
 // ── OpenRouter message plumbing ─────────────────────────────────────────────
+// ToolCall / UpstreamMessage and the streaming/JSON turn reader live in
+// lib/agent/upstream.ts; the persisted-session shapes in lib/agent/sessions.ts.
 
-interface ToolCall {
-  id: string
-  type: string
-  function: { name: string; arguments: string }
-}
-
-interface UpstreamMessage {
-  role: string
-  content: string | null
-  tool_calls?: ToolCall[]
-}
-
-interface UpstreamResponse {
-  choices?: { message?: UpstreamMessage }[]
-  usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number }
-}
-
-type ConvoMessage =
-  | { role: "system" | "user" | "assistant"; content: string }
-  | (UpstreamMessage & { role: "assistant" })
-  | { role: "tool"; tool_call_id: string; content: string }
+type ConvoMessage = { role: "system"; content: string } | StoredMessage
 
 // ── Route ───────────────────────────────────────────────────────────────────
 
@@ -230,6 +219,18 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
     )
   }
 
+  // Session-native conversation (v2): load the stored convo — including tool
+  // results — so a follow-up reuses what prior runs discovered. Ownership is
+  // enforced here; an unknown id just starts a fresh session under that id.
+  let storedConvo: StoredMessage[] = []
+  if (body.sessionId) {
+    const session = await loadSession(c.env.AQUILLA_PG, body.sessionId)
+    if (session && (session.projectId !== body.projectId || session.userId !== user.id)) {
+      return c.json({ error: "forbidden", message: "Session belongs to another project or user" }, 403)
+    }
+    storedConvo = session?.convo ?? []
+  }
+
   // The request-scoped AQUILLA_PG shim is closed when this Response returns
   // (index.ts finally) — before the SSE body finishes. The run owns its own
   // connection for the loop's lifetime; tests (no PG_CONNECTION_STRING)
@@ -247,6 +248,7 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
     username: user.username,
     prompt: lastUserMessage?.content ?? "",
     model: agentModel,
+    sessionId: body.sessionId ?? null,
   })
 
   const encoder = new TextEncoder()
@@ -255,7 +257,7 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
       const send = (frame: AgentFrame) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`))
       }
-      runAgentLoop({ env, body, user: { id: user.id, username: user.username }, roleLevel: role.level, runId, orgId, model: agentModel, signal, send })
+      runAgentLoop({ env, body, storedConvo, user: { id: user.id, username: user.username }, roleLevel: role.level, runId, orgId, model: agentModel, signal, send })
         .catch((err) => {
           // Last-resort: surface, then settle the ledger as error.
           try {
@@ -295,6 +297,8 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
 interface LoopArgs {
   env: Env
   body: z.infer<typeof runRequestSchema>
+  /** Prior turns from agent_sessions (incl. tool results); [] when sessionless. */
+  storedConvo: StoredMessage[]
   user: { id: number; username: string }
   roleLevel: number
   runId: string
@@ -304,7 +308,7 @@ interface LoopArgs {
   send: (frame: AgentFrame) => void
 }
 
-async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, model, signal, send }: LoopArgs): Promise<void> {
+async function runAgentLoop({ env, body, storedConvo, user, roleLevel, runId, orgId, model, signal, send }: LoopArgs): Promise<void> {
   const aliases = new AliasMap()
   const sqlVars: SqlVarContext = {
     projectId: body.projectId,
@@ -363,7 +367,7 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, model, s
 
   const convo: ConvoMessage[] = [
     {
-      role: "system",
+      role: "system" as const,
       content: buildSystemPrompt({
         projectId: body.projectId,
         username: user.username,
@@ -384,6 +388,7 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, model, s
         briefSummary,
       }),
     },
+    ...storedConvo,
     ...body.messages,
   ]
 
@@ -393,7 +398,7 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, model, s
   let steps = 0
   let status: "ok" | "capped" | "error" = "ok"
 
-  send({ type: "run_start", runId })
+  send({ type: "run_start", runId, ...(body.sessionId ? { sessionId: body.sessionId } : {}) })
 
   try {
     let iteration = 0
@@ -423,7 +428,7 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, model, s
           model,
           messages: convo,
           tools: [EXECUTE_TOOL],
-          stream: false,
+          stream: true,
           usage: { include: true },
           reasoning: { effort: "none" },
         }),
@@ -437,21 +442,20 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, model, s
         break
       }
 
-      const data = (await upstream.json()) as UpstreamResponse
-      promptTokens += data.usage?.prompt_tokens ?? 0
-      completionTokens += data.usage?.completion_tokens ?? 0
-      costCents += (data.usage?.cost ?? 0) * 100
-
-      const message = data.choices?.[0]?.message
-      if (!message) {
-        send({ type: "error", message: "openrouter returned no message" })
+      // Streaming (SSE) upstream forwards prose token by token; JSON bodies
+      // (scripted mocks) forward the whole content once. Either way `message`
+      // is the complete assistant turn for the transcript.
+      let message: UpstreamMessage
+      try {
+        const turn = await readModelTurn(upstream, (text) => send({ type: "assistant_delta", text }))
+        message = turn.message
+        promptTokens += turn.usage?.prompt_tokens ?? 0
+        completionTokens += turn.usage?.completion_tokens ?? 0
+        costCents += (turn.usage?.cost ?? 0) * 100
+      } catch (err) {
+        send({ type: "error", message: err instanceof Error ? err.message : String(err) })
         status = "error"
         break
-      }
-
-      // Acceptable v1: buffer model text per step, one assistant_delta per step.
-      if (message.content) {
-        send({ type: "assistant_delta", text: message.content })
       }
 
       convo.push({ ...message, role: "assistant" })
@@ -499,6 +503,23 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, model, s
     await finishAgentRun(env.AQUILLA_PG, { runId, status, promptTokens, completionTokens, costCents, steps })
   } catch (err) {
     console.error("[agent] failed to finalise agent_runs row:", err)
+  }
+
+  // Persist the session convo (minus the per-run system prompt), compacted so
+  // old tool results shrink to digests. Best-effort — a failed save costs the
+  // next turn its shared context, never the run itself.
+  if (body.sessionId) {
+    try {
+      const stored = convo.filter((m): m is StoredMessage => m.role !== "system")
+      await saveSession(env.AQUILLA_PG, {
+        sessionId: body.sessionId,
+        projectId: body.projectId,
+        userId: user.id,
+        convo: compactConvo(stored),
+      })
+    } catch (err) {
+      console.error("[agent] failed to persist agent_sessions row:", err)
+    }
   }
 
   // Record agent cost in org credit ledger (graceful-degrade — never throws).

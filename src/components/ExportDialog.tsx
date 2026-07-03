@@ -243,6 +243,15 @@ export function ExportDialog({
     setCustomBaseName((activeFileName ?? "export").replace(/\.[^.]+$/, ""))
   }, [activeFileName])
 
+  // Keep the format in sync when the active file changes: the dialog stays
+  // mounted across file switches, so the mount-time initializer above goes
+  // stale — a leftover "usfm"/"docx" selection is filtered out of the radio
+  // list (nothing appears selected) yet still drives handleExport down the
+  // wrong side-car path for the new file.
+  useEffect(() => {
+    setFormat(isUsfmFile ? "usfm" : isDocxFile ? "docx" : "tsv")
+  }, [activeFileId, isUsfmFile, isDocxFile])
+
   // audio-by-character, vtt, docx, and plain-text-dump only support file scope.
   const fileOnlyFormats = ["audio-by-character", "vtt", "docx", "plain-text-dump"] as const
   const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
@@ -253,6 +262,12 @@ export function ExportDialog({
   // SDBH XML export needs the original MARBLE edition as the skeleton.
   const [sdbhSkeleton, setSdbhSkeleton] = useState<File | null>(null)
   const hasSdbhFiles = projectFiles.some((f) => f.type === "sdbh")
+
+  // A selected format can also vanish without a file switch (sdbh-xml is
+  // offered per-project, not per-file) — fall back to the always-visible tsv.
+  useEffect(() => {
+    if (format === "sdbh-xml" && !hasSdbhFiles) setFormat("tsv")
+  }, [format, hasSdbhFiles])
 
   // Reset scope to "file" when switching to a file-only format.
   useEffect(() => {

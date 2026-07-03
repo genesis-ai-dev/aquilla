@@ -108,9 +108,9 @@ export function CellActionRail({
     <div
       className={cn(
         "flex items-center justify-end gap-0.5 rounded-full px-1 py-0.5",
-        // Soft raised pill only when revealed, so the rail lifts off the cell
-        // surface as a neumorphic cluster instead of competing with text.
-        revealed && "bg-card shadow-neu-sm",
+        // Filled pill only when revealed, so the rail reads as a distinct
+        // cluster off the cell surface instead of competing with text.
+        revealed && "bg-card",
       )}
       style={{ transition: "background-color 200ms ease-out, box-shadow 200ms ease-out" }}
     >
@@ -155,7 +155,7 @@ export function CellActionRail({
           onClick={onToggleExpanded}
           dot={expansionAttentionDot ?? undefined}
           toneClass={expanded
-            ? "bg-card text-foreground shadow-neu-pressed"
+            ? "bg-card text-foreground"
             : "text-muted-foreground/70 hover:text-foreground"}
         />
       </div>

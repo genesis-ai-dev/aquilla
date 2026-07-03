@@ -3009,7 +3009,7 @@ function EditorRow({
                 <PopoverContent
                   side="right"
                   align="start"
-                  className="w-72 rounded-xl p-2 shadow-neu-lg"
+                  className="w-72 rounded-xl p-2 shadow-lg"
                 >
                   <ul className="space-y-0.5">
                     <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -3337,7 +3337,7 @@ function EditorRow({
                     /* Pre-stream spinner — centered so it doesn't overlap
                        any existing target text peeking through the dimmed
                        editor underneath. */
-                    <div className="m-auto flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-muted-foreground shadow-neu-sm">
+                    <div className="m-auto flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-muted-foreground">
                       <Spinner className="size-3.5" aria-hidden />
                       <span>
                         {loadingPhase === "searching"
@@ -3400,7 +3400,7 @@ function EditorRow({
               <div
                 role="alert"
                 aria-live="assertive"
-                className="mt-1 flex items-start justify-between gap-2 rounded-xl bg-destructive/10 px-2.5 py-1.5 text-[11px] text-destructive shadow-neu-sm dark:bg-destructive/20"
+                className="mt-1 flex items-start justify-between gap-2 rounded-xl bg-destructive/10 px-2.5 py-1.5 text-[11px] text-destructive dark:bg-destructive/20"
               >
                 <span>{writeError}</span>
                 <button
@@ -3944,7 +3944,7 @@ function EditorRow({
                           type="button"
                           onClick={() => onOpenRecording?.(cell.id)}
                           disabled={!editable || !onOpenRecording}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground shadow-neu-sm transition-all hover:shadow-neu active:shadow-neu-pressed disabled:cursor-not-allowed disabled:opacity-40"
+                          className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-all disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Mic className="h-3 w-3" />
                           Re-record
@@ -3953,7 +3953,7 @@ function EditorRow({
                           type="button"
                           onClick={handleTranscribe}
                           disabled={!editable || isTranscribing}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground shadow-neu-sm transition-all hover:shadow-neu active:shadow-neu-pressed disabled:cursor-not-allowed disabled:opacity-40"
+                          className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-all disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Sparkles
                             className={cn(
@@ -4018,7 +4018,7 @@ function EditorRow({
                           type="button"
                           onClick={() => onOpenRecording?.(cell.id)}
                           disabled={!editable || !onOpenRecording}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground shadow-neu-sm transition-all hover:shadow-neu active:shadow-neu-pressed disabled:cursor-not-allowed disabled:opacity-40"
+                          className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-all disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Mic className="h-3 w-3" />
                           Record over
@@ -4077,7 +4077,7 @@ function EditorRow({
                             key={inf.ruleId}
                             type="button"
                             onClick={() => setOpenRuleId(inf.ruleId)}
-                            className="neu-flat flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-all hover:shadow-neu active:shadow-neu-pressed"
+                            className="bg-card flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-all"
                           >
                             <Icon
                               className={cn(
@@ -4109,7 +4109,7 @@ function EditorRow({
                                 key={`waived-${inf.ruleId}`}
                                 type="button"
                                 onClick={() => setOpenRuleId(inf.ruleId)}
-                                className="neu-inset flex w-full items-start gap-2 rounded-xl px-2.5 py-1.5 text-left text-xs text-muted-foreground/70 transition-all hover:shadow-neu-sm"
+                                className="bg-muted flex w-full items-start gap-2 rounded-xl px-2.5 py-1.5 text-left text-xs text-muted-foreground/70 transition-all"
                               >
                                 <Check className="mt-0.5 h-3 w-3 shrink-0" />
                                 <span className="flex-1">
@@ -4149,12 +4149,12 @@ function EditorRow({
                         type="button"
                         onClick={() => onOpenHistory?.(cell.id)}
                         disabled={!onOpenHistory}
-                        className="self-start inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground shadow-neu-sm transition-all hover:shadow-neu active:shadow-neu-pressed disabled:cursor-not-allowed disabled:opacity-40"
+                        className="self-start inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-all disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <HistoryIcon className="h-3 w-3" />
                         Open full history
                       </button>
-                      <ul className="neu-inset divide-y divide-border/40 rounded-lg">
+                      <ul className="bg-muted divide-y divide-border/40 rounded-lg">
                         {[...fetchedHistory].slice(-5).reverse().map((entry, i) => {
                           const date = new Date(entry.timestamp).toLocaleString(undefined, {
                             month: "short",

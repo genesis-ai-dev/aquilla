@@ -115,7 +115,7 @@ export function CellWaveform({
     <AppTooltip content={waveformTooltip} disabled={peaksState === "error"}>
       <div
         className={cn(
-          "group/wf neu-inset relative w-full select-none rounded-xl transition-shadow",
+          "group/wf bg-muted relative w-full select-none rounded-xl transition-shadow",
           hasPeaks ? "cursor-pointer" : "cursor-default",
           peaksState === "error" && "ring-1 ring-amber-500/30 ring-inset",
           className,

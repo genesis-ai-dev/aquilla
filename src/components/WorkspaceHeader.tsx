@@ -29,7 +29,7 @@ export function WorkspaceHeader({ project, onBack, children, extraMenuItems, ove
     <header className="relative z-30 flex items-center gap-3 px-4 py-2">
       <nav className="flex items-center gap-1.5 text-sm min-w-0">
         <button
-          className="rounded-full px-2.5 py-1 text-muted-foreground transition-all hover:bg-card hover:text-foreground hover:shadow-neu-xs truncate"
+          className="rounded-full px-2.5 py-1 text-muted-foreground transition-all hover:bg-card hover:text-foreground truncate"
           onClick={onBack}
         >
           Dashboard
@@ -37,7 +37,7 @@ export function WorkspaceHeader({ project, onBack, children, extraMenuItems, ove
         <span className="text-muted-foreground/60">/</span>
         {overviewHref ? (
           <button
-            className="rounded-full px-2.5 py-1 font-medium truncate hover:bg-card hover:shadow-neu-xs transition-all"
+            className="rounded-full px-2.5 py-1 font-medium truncate hover:bg-card transition-all"
             onClick={() => navigate(overviewHref)}
             aria-label={`Open project overview for ${project.name}`}
           >

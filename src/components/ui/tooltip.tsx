@@ -63,18 +63,19 @@ function TooltipContent({
   )
 }
 
+// Hover delay is owned by the single app-wide <TooltipProvider> (see App.tsx),
+// so this wrapper no longer mounts its own provider — that keeps Base UI's
+// delay-grouping working across adjacent tooltips instead of resetting per site.
 function AppTooltip({
   children,
   content,
   side = "top",
-  delay = 300,
   disabled = false,
   className,
 }: {
   children: ReactElement
   content: ReactNode
   side?: "top" | "bottom" | "left" | "right"
-  delay?: number
   disabled?: boolean
   className?: string
 }) {
@@ -89,14 +90,12 @@ function AppTooltip({
       : children
 
   return (
-    <TooltipProvider delay={delay}>
-      <Tooltip>
-        <TooltipTrigger render={trigger} />
-        <TooltipContent side={side} className={className}>
-          {content}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger render={trigger} />
+      <TooltipContent side={side} className={className}>
+        {content}
+      </TooltipContent>
+    </Tooltip>
   )
 }
 

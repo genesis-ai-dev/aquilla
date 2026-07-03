@@ -15,7 +15,6 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { createProject } from "@/lib/store/project-index"
@@ -236,24 +235,22 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
 
 function LanguageFieldHint() {
   return (
-    <TooltipProvider delay={150}>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <button
-              type="button"
-              aria-label="What can I enter here?"
-              className="text-muted-foreground hover:text-foreground"
-            />
-          }
-        >
-          <Info className="h-3.5 w-3.5" aria-hidden="true" />
-        </TooltipTrigger>
-        <TooltipContent className="max-w-xs">
-          Any label works — a BCP-47 tag, a language name, or a register
-          description (e.g. "Grade 7 English", "conversational Swahili").
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label="What can I enter here?"
+            className="text-muted-foreground hover:text-foreground"
+          />
+        }
+      >
+        <Info className="h-3.5 w-3.5" aria-hidden="true" />
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">
+        Any label works — a BCP-47 tag, a language name, or a register
+        description (e.g. "Grade 7 English", "conversational Swahili").
+      </TooltipContent>
+    </Tooltip>
   )
 }

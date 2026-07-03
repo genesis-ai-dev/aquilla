@@ -132,7 +132,7 @@ import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
 import { CompletionBulkProgressBanner } from "./CompletionBulkProgressBanner"
-import { AppTooltip, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { AppTooltip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
 import { AiSetupDialog } from "./AiSetupDialog"
 import {
@@ -3299,24 +3299,22 @@ export function ProjectWorkspace() {
                     it's present in every tab, not just this Files panel. */}
                 {checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
                   <div className="mt-auto border-t px-2 pb-2 pt-2">
-                    <TooltipProvider delay={0}>
-                      <Tooltip open={showChipTooltip} onOpenChange={setShowChipTooltip}>
-                        <TooltipTrigger
-                          render={
-                            <button
-                              onClick={() => { setShowChipTooltip(false); setChecklistOpen(true) }}
-                              className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-                            />
-                          }
-                        >
-                          <ClipboardList className="h-3 w-3" />
-                          Setup: {checklistState.completedCount}/{checklistState.totalCount}
-                        </TooltipTrigger>
-                        <TooltipContent side="right">
-                          Reopen the setup checklist anytime from here.
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
+                    <Tooltip open={showChipTooltip} onOpenChange={setShowChipTooltip}>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            onClick={() => { setShowChipTooltip(false); setChecklistOpen(true) }}
+                            className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                          />
+                        }
+                      >
+                        <ClipboardList className="h-3 w-3" />
+                        Setup: {checklistState.completedCount}/{checklistState.totalCount}
+                      </TooltipTrigger>
+                      <TooltipContent side="right">
+                        Reopen the setup checklist anytime from here.
+                      </TooltipContent>
+                    </Tooltip>
                   </div>
                 )}
               </div>
@@ -4141,7 +4139,7 @@ export function ProjectWorkspace() {
         />
       )}
       {undo && (
-        <div className="fixed bottom-4 right-4 z-60 flex items-center gap-2 rounded-lg bg-card px-3 py-2 text-sm shadow-neu">
+        <div className="fixed bottom-4 right-4 z-60 flex items-center gap-2 rounded-lg bg-card px-3 py-2 text-sm">
           <span>Applied renames.</span>
           <Button size="sm" variant="outline" onClick={() => {
             if (!project || !undo) return
@@ -4199,7 +4197,7 @@ function MoveToCorpusDialog({
         <select
           value={selection}
           onChange={(e) => setSelection(e.target.value)}
-          className="neu-inset w-full rounded px-2 py-1.5 text-sm"
+            className="bg-muted w-full rounded px-2 py-1.5 text-sm"
         >
           <option value="">Ungrouped</option>
           {existingMarkers.map((m) => <option key={m} value={m}>{m}</option>)}
@@ -4211,7 +4209,7 @@ function MoveToCorpusDialog({
             value={customValue}
             onChange={(e) => setCustomValue(e.target.value)}
             placeholder="New corpus name"
-            className="neu-inset mt-2 w-full rounded px-2 py-1 text-sm"
+              className="bg-muted mt-2 w-full rounded px-2 py-1 text-sm"
           />
         )}
         <DialogFooter>
@@ -4311,7 +4309,7 @@ function TrashedProjectScreen({ project, onClose, onRestore }: TrashedProjectScr
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-6">
-      <div className="neu-raised max-w-md rounded-2xl p-8 text-center">
+        <div className="bg-card max-w-md rounded-2xl p-8 text-center">
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
           <Trash2 className="h-6 w-6 text-muted-foreground" />
         </div>

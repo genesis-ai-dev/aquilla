@@ -48,7 +48,7 @@ export function PrimaryActionButton({ ctx, run }: Props) {
     <div
       ref={rootRef}
       data-slot="button-group"
-      className="relative inline-flex rounded-lg shadow-neu-sm hover:shadow-neu active:shadow-neu-pressed transition-shadow"
+      className="relative inline-flex rounded-lg transition-shadow"
     >
       <Button
         size="sm"

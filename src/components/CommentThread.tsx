@@ -84,7 +84,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
   return (
     <div
       className={cn(
-        "neu-flat rounded-lg p-2 text-sm",
+        "bg-card rounded-lg p-2 text-sm",
         thread.status === "resolved" && "opacity-60"
       )}
     >
@@ -111,7 +111,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
 
       <ul className="space-y-2">
         {thread.messages.map((m) => (
-          <li key={m.id} className="neu-inset rounded-lg p-2">
+          <li key={m.id} className="bg-muted rounded-lg p-2">
             <div className="flex items-baseline gap-1.5 text-xs">
               <span className="font-medium">{m.author}</span>
               <span className="text-muted-foreground">{formatTimestamp(m.timestamp)}</span>

@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils"
  *
  * Design notes (see docs/swarm/DESIGN-LANGUAGE.md):
  * - Sections carry an explicit `border` because in dark mode --card, --surface,
- *   and --background resolve to the SAME color, so a borderless neu-raised card
+ *   and --background resolve to the SAME color, so a borderless bg-card surface
  *   is invisible on these pages. The border is the separator in both themes.
  * - Radius is `rounded-2xl` to match the canonical Card primitive (card.tsx),
  *   not the tighter `rounded-lg` the old hand-rolled sections used.

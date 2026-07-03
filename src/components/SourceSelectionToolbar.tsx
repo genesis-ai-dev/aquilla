@@ -1,5 +1,5 @@
 // Floating action cluster shown above a SOURCE selection. Mirrors the
-// CellActionRail aesthetic (rounded neumorphic pill, muted icons). Buttons:
+// CellActionRail aesthetic (rounded pill, muted icons). Buttons:
 // Ask AI (push the selection into the agent chat as a chip) and Add to terms
 // (existing terminology flow). A "View term" lookup appears when the selection
 // matches an active concept.
@@ -55,7 +55,7 @@ export function SourceSelectionToolbar({
 
   return (
     <div
-      className="absolute right-1 top-0 z-10 flex items-center gap-0.5 rounded-full bg-card px-1 py-0.5 shadow-neu-sm"
+      className="absolute right-1 top-0 z-10 flex items-center gap-0.5 rounded-full bg-card px-1 py-0.5"
       dir="ltr"
       onMouseUp={onToolbarMouseUp}
       onMouseLeave={onToolbarMouseUp}

@@ -92,7 +92,7 @@ export function ExpandableFileList({
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter files..."
-            className="h-7 w-full rounded-xl bg-background pl-7 pr-7 text-xs shadow-neu-inset outline-none"
+            className="h-7 w-full rounded-xl bg-background pl-7 pr-7 text-xs outline-none"
           />
           {filter && (
             <button
@@ -146,7 +146,7 @@ export function ExpandableFileList({
                             if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur() }
                             else if (e.key === "Escape") { e.preventDefault(); setEditingCorpus(null) }
                           }}
-                          className="flex-1 rounded-lg bg-background px-1.5 text-[11px] normal-case tracking-normal shadow-neu-inset outline-none"
+                          className="flex-1 rounded-lg bg-background px-1.5 text-[11px] normal-case tracking-normal outline-none"
                         />
                       ) : (
                         <span>{group.label}</span>
@@ -155,7 +155,7 @@ export function ExpandableFileList({
                     {canEditCorpus && !isEditingCorpus && (
                       <AppTooltip content={`Rename ${group.label}`} side="right">
                         <button
-                          className="rounded-full p-0.5 opacity-0 transition-shadow group-hover/corpus:opacity-100 hover:shadow-neu-xs"
+                          className="rounded-full p-0.5 opacity-0 transition-shadow group-hover/corpus:opacity-100"
                           onClick={(e) => { e.stopPropagation(); setEditingCorpus(group.label) }}
                           aria-label={`Rename ${group.label}`}
                         >

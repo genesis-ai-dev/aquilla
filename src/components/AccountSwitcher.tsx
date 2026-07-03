@@ -145,10 +145,10 @@ export function AccountSwitcher({
       <>
         <button
           className={cn(
-            "flex items-center gap-2 rounded-xl bg-card text-sm transition-shadow hover:shadow-neu-xs",
+            "flex items-center gap-2 rounded-xl bg-card text-sm transition-shadow",
             compact ? "h-8 w-8 justify-center p-0" : "px-2 py-1.5",
             !isHeader && !compact && "w-full",
-            isHeader && "shadow-neu-sm h-9",
+            isHeader && "h-9",
           )}
           aria-label="Log in"
           onClick={() => setLoginOpen(true)}
@@ -173,7 +173,7 @@ export function AccountSwitcher({
       <button
         ref={btnRef}
         className={cn(
-          "flex items-center gap-2 rounded-xl bg-card text-sm transition-shadow hover:shadow-neu-xs",
+          "flex items-center gap-2 rounded-xl bg-card text-sm transition-shadow",
           compact ? "h-8 w-8 justify-center p-0" : "px-2 py-1.5",
           !isHeader && !compact && "w-full",
           isHeader && "h-9",
@@ -200,7 +200,7 @@ export function AccountSwitcher({
           side={isHeader ? "bottom" : "top"}
           align={isHeader ? "end" : "start"}
           sideOffset={8}
-          className="neu-raised w-60 p-1.5"
+          className="bg-card w-60 p-1.5"
         >
           <div className="px-2 py-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
             Signed in
@@ -225,20 +225,20 @@ export function AccountSwitcher({
           <Link
             to="/preferences"
             onClick={() => setOpen(false)}
-            className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow hover:shadow-neu-xs"
+            className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow"
           >
             <Settings2 className="h-4 w-4" />
             <span>Preferences</span>
           </Link>
           <button
-            className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow hover:shadow-neu-xs"
+            className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow"
             onClick={() => { setOpen(false); setLoginOpen(true) }}
           >
             <UserPlus className="h-4 w-4" />
             <span>Add another account…</span>
           </button>
           <button
-            className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow hover:shadow-neu-xs"
+            className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow"
             onClick={() => handleLogout("single")}
           >
             <LogOut className="h-4 w-4" />
@@ -246,7 +246,7 @@ export function AccountSwitcher({
           </button>
           {sessions.length > 1 && (
             <button
-              className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm text-destructive transition-shadow hover:shadow-neu-xs"
+              className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm text-destructive transition-shadow"
               onClick={() => handleLogout("all")}
             >
               <LogOut className="h-4 w-4" />
@@ -313,8 +313,7 @@ function Entry({
     <div
       className={cn(
         "group flex items-center gap-2 rounded-xl px-2 py-1.5 text-sm",
-        !summary.active && "bg-card cursor-pointer transition-shadow hover:shadow-neu-xs",
-        summary.active && "shadow-neu-inset",
+        !summary.active && "bg-card cursor-pointer transition-shadow",
       )}
       onClick={onClick}
     >

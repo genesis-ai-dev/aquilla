@@ -36,19 +36,19 @@ export function FileSectionGrid({ projectId, fileId, validationCount, getTokenFo
               type="button"
               className={cn(
                 "flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1 text-left text-[11px] transition-shadow",
-                "text-muted-foreground hover:text-foreground hover:shadow-neu-xs",
+                "text-muted-foreground hover:text-foreground",
               )}
               onClick={() => onSectionClick(section.label)}
             >
               <span className="flex-1 min-w-0 truncate">{section.label}</span>
               <span className="flex items-center gap-0.5 shrink-0">
-                <span className="h-1.5 w-5 rounded-full bg-muted overflow-hidden shadow-neu-inset">
+                <span className="h-1.5 w-5 rounded-full bg-muted overflow-hidden">
                   <span
                     className="block h-full bg-amber-500 transition-all"
                     style={{ width: `${completed}%` }}
                   />
                 </span>
-                <span className="h-1.5 w-5 rounded-full bg-muted overflow-hidden shadow-neu-inset">
+                <span className="h-1.5 w-5 rounded-full bg-muted overflow-hidden">
                   <span
                     className="block h-full bg-emerald-500 transition-all"
                     style={{ width: `${validated}%` }}

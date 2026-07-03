@@ -33,7 +33,6 @@ import {
   AppTooltip,
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { useLivingMemory } from "@/hooks/useLivingMemory"
@@ -266,23 +265,21 @@ function RoleLockTooltip({ reason }: { reason: "offline" | "role" | null }) {
       ? "You are offline. Reconnect to edit."
       : "Editing requires Maintainer role (600) or above."
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <span
-              aria-label={message}
-              className="inline-flex items-center text-muted-foreground/50"
-            />
-          }
-        >
-          <Lock className="h-3 w-3" aria-hidden="true" />
-        </TooltipTrigger>
-        <TooltipContent side="left" className="max-w-[200px] text-xs">
-          {message}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            aria-label={message}
+            className="inline-flex items-center text-muted-foreground/50"
+          />
+        }
+      >
+        <Lock className="h-3 w-3" aria-hidden="true" />
+      </TooltipTrigger>
+      <TooltipContent side="left" className="max-w-[200px] text-xs">
+        {message}
+      </TooltipContent>
+    </Tooltip>
   )
 }
 

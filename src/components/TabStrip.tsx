@@ -86,7 +86,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
                 onClose(tab.id)
               }}
               aria-label={`Close ${name}`}
-              className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-muted-foreground/60 opacity-0 transition-all hover:text-foreground hover:shadow-neu-xs group-hover/tab:opacity-100 aria-[selected=true]:opacity-100"
+              className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-muted-foreground/60 opacity-0 transition-all hover:text-foreground group-hover/tab:opacity-100 aria-[selected=true]:opacity-100"
             >
               <X className="h-3 w-3" />
             </button>
@@ -104,7 +104,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
             type="button"
             onClick={surfaceTab.onClose}
             aria-label={`Close ${surfaceTab.label}`}
-            className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-muted-foreground/60 transition-all hover:text-foreground hover:shadow-neu-xs"
+            className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-muted-foreground/60 transition-all hover:text-foreground"
           >
             <X className="h-3 w-3" />
           </button>

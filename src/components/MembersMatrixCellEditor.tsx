@@ -7,7 +7,6 @@ import { Spinner } from "@/components/ui/spinner"
 import {
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import {
@@ -177,51 +176,47 @@ export function MembersMatrixCellEditor({
             </span>
             <div className="flex items-center gap-0.5 shrink-0">
               {sourceBadge && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <span
-                          className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[9px] font-bold cursor-default ${
-                            BADGE_CLASSES[sourceBadge] ?? "bg-muted text-muted-foreground"
-                          }`}
-                          aria-label={sourceHint}
-                        />
-                      }
-                    >
-                      {sourceBadge}
-                    </TooltipTrigger>
-                    <TooltipContent side="top">
-                      {sourceHint}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span
+                        className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[9px] font-bold cursor-default ${
+                          BADGE_CLASSES[sourceBadge] ?? "bg-muted text-muted-foreground"
+                        }`}
+                        aria-label={sourceHint}
+                      />
+                    }
+                  >
+                    {sourceBadge}
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    {sourceHint}
+                  </TooltipContent>
+                </Tooltip>
               )}
               {secondarySources.length > 0 && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <span
-                          className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded cursor-default text-muted-foreground hover:text-foreground"
-                          aria-label="Also has access via other paths"
-                        />
-                      }
-                    >
-                      <GitMerge className="h-2.5 w-2.5" />
-                    </TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-[200px]">
-                      <p className="font-medium mb-1 text-[10px]">Also has access via:</p>
-                      <ul className="space-y-0.5">
-                        {secondarySources.map((s) => (
-                          <li key={s.source} className="text-[10px] capitalize">
-                            {SOURCE_LABEL[s.source]} · {s.name.replace(/_/g, " ")}
-                          </li>
-                        ))}
-                      </ul>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span
+                        className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded cursor-default text-muted-foreground hover:text-foreground"
+                        aria-label="Also has access via other paths"
+                      />
+                    }
+                  >
+                    <GitMerge className="h-2.5 w-2.5" />
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-[200px]">
+                    <p className="font-medium mb-1 text-[10px]">Also has access via:</p>
+                    <ul className="space-y-0.5">
+                      {secondarySources.map((s) => (
+                        <li key={s.source} className="text-[10px] capitalize">
+                          {SOURCE_LABEL[s.source]} · {s.name.replace(/_/g, " ")}
+                        </li>
+                      ))}
+                    </ul>
+                  </TooltipContent>
+                </Tooltip>
               )}
             </div>
           </div>

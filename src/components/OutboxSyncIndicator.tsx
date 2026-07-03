@@ -77,7 +77,7 @@ const ChipButton = forwardRef<HTMLButtonElement, ChipProps>(function ChipButton(
       aria-label={title}
       className={cn(
         "rounded-full px-2 py-0.5 text-xs tabular-nums transition-all",
-        "hover:bg-card hover:shadow-neu-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         tone === "warning" && "text-destructive",
         tone === "stuck" && "text-amber-600 dark:text-amber-500",
         tone === "queued" && "text-foreground",

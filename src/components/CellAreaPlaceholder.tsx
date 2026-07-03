@@ -61,7 +61,7 @@ function SkeletonRows({ caption }: { caption: string }) {
     <div className="flex h-full flex-col">
       <div className="flex-1 space-y-2 overflow-hidden p-4" aria-label={caption}>
         {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className={`neu-flat grid ${GRID_COLS} items-start gap-3 rounded-2xl px-4 py-3`}>
+          <div key={i} className={`bg-card grid ${GRID_COLS} items-start gap-3 rounded-2xl px-4 py-3`}>
             <Skeleton className="h-6 w-10" />
             <Skeleton className="h-16 w-full" />
             <Skeleton className="h-16 w-full" />
@@ -114,7 +114,7 @@ function NoFileEmpty({
             <button
               type="button"
               onClick={onImportClick}
-              className="inline-flex items-center gap-1.5 rounded-full bg-card px-3 py-1.5 text-sm shadow-neu-sm transition-all hover:shadow-neu active:shadow-neu-pressed"
+              className="inline-flex items-center gap-1.5 rounded-full bg-card px-3 py-1.5 text-sm transition-all"
             >
               <Upload className="h-4 w-4" aria-hidden />
               Import a file
@@ -150,7 +150,7 @@ function ReadyEmpty({
           <button
             type="button"
             onClick={onImportClick}
-            className="inline-flex items-center gap-1.5 rounded-full bg-card px-3 py-1.5 text-sm shadow-neu-sm transition-all hover:shadow-neu active:shadow-neu-pressed"
+            className="inline-flex items-center gap-1.5 rounded-full bg-card px-3 py-1.5 text-sm transition-all"
           >
             <Sparkles className="h-4 w-4" aria-hidden />
             Import content

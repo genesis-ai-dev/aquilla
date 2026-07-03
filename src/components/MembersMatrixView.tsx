@@ -10,7 +10,6 @@ import {
   AppTooltip,
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
@@ -98,31 +97,29 @@ export function MembersMatrixView() {
                 <div className="flex items-center gap-1">
                   <span>Member</span>
                   {/* On-demand model explainer — opens a tooltip with the full explanation */}
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <button
-                            type="button"
-                            className="inline-flex items-center text-muted-foreground hover:text-foreground focus-visible:outline-none"
-                            aria-label="How access is resolved"
-                          />
-                        }
-                      >
-                        <HelpCircle className="h-3 w-3" aria-hidden />
-                      </TooltipTrigger>
-                      <TooltipContent
-                        side="bottom"
-                        className="max-w-xs leading-snug"
-                      >
-                        Every member's access is the highest role they hold across
-                        up to four paths: a direct project grant, any group attached
-                        to this project, their org-wide role, or creator status.
-                        Adding a lower grant never reduces access — to fully remove
-                        someone, all contributing paths must be cleared.
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          className="inline-flex items-center text-muted-foreground hover:text-foreground focus-visible:outline-none"
+                          aria-label="How access is resolved"
+                        />
+                      }
+                    >
+                      <HelpCircle className="h-3 w-3" aria-hidden />
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side="bottom"
+                      className="max-w-xs leading-snug"
+                    >
+                      Every member's access is the highest role they hold across
+                      up to four paths: a direct project grant, any group attached
+                      to this project, their org-wide role, or creator status.
+                      Adding a lower grant never reduces access — to fully remove
+                      someone, all contributing paths must be cleared.
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
               </th>
               {matrix.projects.map((p) => (

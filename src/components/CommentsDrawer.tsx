@@ -86,7 +86,7 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
   }
 
   return (
-    <div className="neu-flat relative z-10 flex h-full w-96 flex-col" data-testid="comments-drawer">
+    <div className="bg-card relative z-10 flex h-full w-96 flex-col" data-testid="comments-drawer">
       <div className="flex items-center justify-between border-b px-3 py-2">
         <h3 className="text-sm font-semibold">
           Comments {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}

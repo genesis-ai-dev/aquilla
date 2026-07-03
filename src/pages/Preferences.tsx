@@ -78,7 +78,7 @@ function WorkspaceSection() {
           </p>
         </div>
         <div
-          className="neu-inset inline-flex items-center gap-0.5 rounded-full p-1 text-xs"
+          className="bg-muted inline-flex items-center gap-0.5 rounded-full p-1 text-xs"
           role="group"
           aria-label="Sidebar tab layout"
         >
@@ -93,7 +93,7 @@ function WorkspaceSection() {
                 className={cn(
                   "rounded-full px-3 py-1.5 transition-all",
                   active
-                    ? "bg-card font-medium text-foreground shadow-neu-xs"
+                    ? "bg-card font-medium text-foreground"
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >

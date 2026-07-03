@@ -17,10 +17,11 @@
 
 import { useState, useEffect, type FormEvent } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { Eye, EyeOff, Check, X } from "lucide-react"
+import { Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { RevealableInput } from "@/components/ui/revealable-input"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
   verifyResetToken,
@@ -177,7 +178,6 @@ export function ResetPassword() {
 
   const [verifyState, setVerifyState] = useState<VerifyState>("loading")
   const [password, setPassword] = useState("")
-  const [showPassword, setShowPassword] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -244,30 +244,14 @@ export function ResetPassword() {
           <form onSubmit={onSubmit} className="space-y-4">
             <div>
               <Label htmlFor="rp-new-password">New password</Label>
-              <div className="relative">
-                <Input
-                  id="rp-new-password"
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="new-password"
-                  minLength={8}
-                  className="pr-10"
-                  autoFocus
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                  className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground"
-                >
-                  {showPassword ? (
-                    <EyeOff className="h-4 w-4" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
-                </button>
-              </div>
+              <RevealableInput
+                id="rp-new-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="new-password"
+                minLength={8}
+                autoFocus
+              />
               <PasswordChecklist password={password} />
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}

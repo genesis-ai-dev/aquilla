@@ -413,7 +413,7 @@ function CharacterModalBody({
           <div className="space-y-3 rounded-xl border border-border bg-muted/30 p-3 dark:border-border dark:bg-muted/30">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <Label className="flex items-center gap-1.5">
+                <Label layout="inline" className="flex items-center gap-1.5">
                   <Sparkles className="h-3.5 w-3.5 text-muted-foreground" /> Clone a voice (optional)
                 </Label>
                 {isCloned && (

@@ -12,7 +12,7 @@ import { useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEve
 import { ChevronLeft, ChevronRight, Clock } from "lucide-react"
 import { useNavHistory, type NavEntry, type NavHistoryValue } from "@/context/NavHistoryContext"
 import { Popover, PopoverContent } from "@/components/ui/popover"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 const HOLD_MS = 350
@@ -21,12 +21,10 @@ export function NavHistoryControls() {
   const nav = useNavHistory()
   if (!nav) return null
   return (
-    <TooltipProvider delay={400}>
-      <div className="flex items-center gap-0.5" role="group" aria-label="Page history">
-        <NavArrowButton direction="back" nav={nav} />
-        <NavArrowButton direction="forward" nav={nav} />
-      </div>
-    </TooltipProvider>
+    <div className="flex items-center gap-0.5" role="group" aria-label="Page history">
+      <NavArrowButton direction="back" nav={nav} />
+      <NavArrowButton direction="forward" nav={nav} />
+    </div>
   )
 }
 

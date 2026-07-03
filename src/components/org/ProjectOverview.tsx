@@ -101,7 +101,7 @@ function StatBar({ label, value, total, fillClass, suffix }: {
     <div className="flex items-center gap-3">
       <span className="w-20 shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
       <div className="flex flex-1 items-center gap-2">
-        <span className="h-2 flex-1 rounded-full bg-muted overflow-hidden shadow-neu-inset">
+        <span className="h-2 flex-1 rounded-full bg-muted overflow-hidden">
           <span className={`block h-full rounded-full transition-all ${fillClass}`} style={{ width: `${pct}%` }} />
         </span>
         <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
@@ -120,10 +120,10 @@ function StatBar({ label, value, total, fillClass, suffix }: {
 function FileProgressBars({ tPct, vPct }: { tPct: number; vPct: number }) {
   return (
     <span className="flex flex-1 flex-col gap-[3px]">
-      <span className="block h-1.5 rounded-full bg-muted overflow-hidden shadow-neu-inset">
+      <span className="block h-1.5 rounded-full bg-muted overflow-hidden">
         <span className="block h-full rounded-full bg-amber-500 transition-all" style={{ width: `${tPct}%` }} />
       </span>
-      <span className="block h-1.5 rounded-full bg-muted overflow-hidden shadow-neu-inset">
+      <span className="block h-1.5 rounded-full bg-muted overflow-hidden">
         <span className="block h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${vPct}%` }} />
       </span>
     </span>

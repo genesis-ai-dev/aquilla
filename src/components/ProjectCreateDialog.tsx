@@ -15,7 +15,6 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { createProject } from "@/lib/store/project-index"
@@ -151,7 +150,7 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
 
           <div className="space-y-2">
             <div className="flex items-center gap-1.5">
-              <Label htmlFor="source">Source language</Label>
+              <Label htmlFor="source" layout="inline">Source language</Label>
               <LanguageFieldHint />
             </div>
             <Input
@@ -166,7 +165,7 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
           {shape !== "source-only" && (
             <div className="space-y-2">
               <div className="flex items-center gap-1.5">
-                <Label htmlFor="target">Target language</Label>
+                <Label htmlFor="target" layout="inline">Target language</Label>
                 <LanguageFieldHint />
               </div>
               <Input
@@ -236,24 +235,22 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
 
 function LanguageFieldHint() {
   return (
-    <TooltipProvider delay={150}>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <button
-              type="button"
-              aria-label="What can I enter here?"
-              className="text-muted-foreground hover:text-foreground"
-            />
-          }
-        >
-          <Info className="h-3.5 w-3.5" aria-hidden="true" />
-        </TooltipTrigger>
-        <TooltipContent className="max-w-xs">
-          Any label works — a BCP-47 tag, a language name, or a register
-          description (e.g. "Grade 7 English", "conversational Swahili").
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label="What can I enter here?"
+            className="text-muted-foreground hover:text-foreground"
+          />
+        }
+      >
+        <Info className="h-3.5 w-3.5" aria-hidden="true" />
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">
+        Any label works — a BCP-47 tag, a language name, or a register
+        description (e.g. "Grade 7 English", "conversational Swahili").
+      </TooltipContent>
+    </Tooltip>
   )
 }

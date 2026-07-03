@@ -136,6 +136,20 @@ describe("Login page — error handling", () => {
   })
 })
 
+describe("Login page — show/hide password", () => {
+  it("toggles password visibility via the eye button", () => {
+    renderLogin()
+    const passInput = screen.getByLabelText("Password")
+    expect(passInput).toHaveAttribute("type", "password")
+
+    fireEvent.click(screen.getByRole("button", { name: /show password/i }))
+    expect(passInput).toHaveAttribute("type", "text")
+
+    fireEvent.click(screen.getByRole("button", { name: /hide password/i }))
+    expect(passInput).toHaveAttribute("type", "password")
+  })
+})
+
 describe("Login page — forgot password flow", () => {
   it("switches to forgot-password mode when link is clicked", () => {
     renderLogin()

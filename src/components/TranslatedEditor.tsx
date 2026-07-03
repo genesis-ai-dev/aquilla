@@ -266,9 +266,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         "aria-multiline": "true",
         ...(ariaLabel ? { "aria-label": ariaLabel } : {}),
         class: cn(
-          // The surrounding neu-inset well in EditorTable already reads as an
+          // The surrounding bg-muted well in EditorTable already reads as an
           // input, so the editor surface itself stays transparent — no flat
-          // background tints competing with the soft recess.
+          // background tints competing with the recessed fill.
           // No fixed text-* class: font size inherits from the target column
           // wrapper, which carries the per-file font-size pref inline.
           compactHeight
@@ -676,7 +676,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         </div>
       )}
       {remoteChangedDuringEdit && onDiscardLocal && (
-        <div className="mb-1 flex items-center justify-between gap-2 rounded-xl bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 shadow-neu-sm dark:bg-amber-950 dark:text-amber-300">
+        <div className="mb-1 flex items-center justify-between gap-2 rounded-xl bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 dark:bg-amber-950 dark:text-amber-300">
           <span>This cell changed elsewhere while you were editing.</span>
           <button
             type="button"
@@ -688,7 +688,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         </div>
       )}
       {pendingFootnoteDelete && (
-        <div className="absolute right-2 top-2 z-20 flex items-center gap-2 rounded-lg border border-destructive/20 bg-background px-2 py-1 text-[11px] shadow-neu-sm">
+        <div className="absolute right-2 top-2 z-20 flex items-center gap-2 rounded-lg border border-destructive/20 bg-background px-2 py-1 text-[11px]">
           <span className="text-muted-foreground">
             Delete footnote {pendingFootnoteDelete.label}?
           </span>
@@ -717,7 +717,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       >
         <div
           data-testid="formatting-bubble-menu"
-          className="flex gap-0.5 rounded-lg bg-card p-0.5 shadow-neu-sm"
+          className="flex gap-0.5 rounded-lg bg-card p-0.5"
           onMouseDown={handleFormattingToolbarMouseDown}
         >
           <AppTooltip content="Bold (Cmd+B)">

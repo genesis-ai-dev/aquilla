@@ -139,7 +139,7 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
               </Button>
             </div>
             <div className="flex items-center gap-2">
-              <Label htmlFor="vstart" className="text-xs whitespace-nowrap">
+              <Label htmlFor="vstart" layout="inline" className="text-xs whitespace-nowrap">
                 Start offset (s)
               </Label>
               <Input

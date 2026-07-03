@@ -128,7 +128,7 @@ export function DenoiseButton(props: Props) {
             onClick={() => void handleRevert()}
             disabled={!editable || reverting || !session?.jwt}
             title="Switch back to the original recording"
-            className={cn(PILL, "bg-card text-foreground shadow-neu-sm hover:shadow-neu active:shadow-neu-pressed")}
+            className={cn(PILL, "bg-card text-foreground")}
           >
             {reverting ? <Spinner className="size-3" /> : <RotateCcw className="h-3 w-3" />}
             Revert
@@ -150,7 +150,7 @@ export function DenoiseButton(props: Props) {
             ? "Noise removal isn't supported in this browser"
             : "Remove background noise (on-device) — adds a cleaned take"
         }
-        className={cn(PILL, "bg-card text-foreground shadow-neu-sm hover:shadow-neu active:shadow-neu-pressed")}
+        className={cn(PILL, "bg-card text-foreground")}
       >
         <Bird className={cn("h-3 w-3", processing && "animate-pulse")} />
         {processing ? "Removing noise…" : error ? "Retry noise removal" : "Remove noise"}

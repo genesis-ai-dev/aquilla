@@ -22,14 +22,14 @@ export function EditorModeToggle({ lens, onChange, timeOrdered = false }: Props)
   const secondLabel = timeOrdered ? "Media" : "Audio"
   const SecondIcon = timeOrdered ? AudioWaveform : Mic2
   return (
-    <div className="neu-inset flex items-center gap-0.5 rounded-full p-1 text-xs">
+    <div className="bg-muted flex items-center gap-0.5 rounded-full p-1 text-xs">
       <button
         type="button"
         onClick={() => lens !== "text" && onChange("text")}
         className={cn(
           "flex items-center gap-1 rounded-full px-2.5 py-1 transition-all",
           lens === "text"
-            ? "bg-card font-medium text-foreground shadow-neu-xs"
+            ? "bg-card font-medium text-foreground"
             : "text-muted-foreground hover:text-foreground",
         )}
         aria-pressed={lens === "text"}
@@ -42,7 +42,7 @@ export function EditorModeToggle({ lens, onChange, timeOrdered = false }: Props)
         className={cn(
           "flex items-center gap-1 rounded-full px-2.5 py-1 transition-all",
           lens === "audio"
-            ? "bg-card font-medium text-foreground shadow-neu-xs"
+            ? "bg-card font-medium text-foreground"
             : "text-muted-foreground hover:text-foreground",
         )}
         aria-pressed={lens === "audio"}

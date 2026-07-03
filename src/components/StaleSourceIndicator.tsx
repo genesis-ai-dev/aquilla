@@ -19,7 +19,6 @@ import { AlertTriangle } from "lucide-react"
 import {
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
@@ -103,24 +102,22 @@ function StaleBadge({
 }) {
   if (!visible) return null
   return (
-    <TooltipProvider delay={0}>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <span
-              role="img"
-              aria-label="Source changed since last revision"
-              className="inline-flex items-center text-amber-600 dark:text-amber-400"
-              data-testid="stale-source-indicator"
-            />
-          }
-        >
-          <AlertTriangle className={iconClassName ?? "h-3 w-3"} />
-        </TooltipTrigger>
-        <TooltipContent side="top">
-          {tooltipText ?? DEFAULT_TOOLTIP}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            role="img"
+            aria-label="Source changed since last revision"
+            className="inline-flex items-center text-amber-600 dark:text-amber-400"
+            data-testid="stale-source-indicator"
+          />
+        }
+      >
+        <AlertTriangle className={iconClassName ?? "h-3 w-3"} />
+      </TooltipTrigger>
+      <TooltipContent side="top">
+        {tooltipText ?? DEFAULT_TOOLTIP}
+      </TooltipContent>
+    </Tooltip>
   )
 }

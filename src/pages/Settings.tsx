@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Page, PageHeader, Section, StatTile, EmptyState } from "@/components/ui/page"
-import { NavList, NavRow } from "@/components/ui/nav-list"
+import { NavList, NavRow, BackLink } from "@/components/ui/nav-list"
 import {
   Select,
   SelectContent,
@@ -307,12 +307,19 @@ export function Settings() {
   } else if (section && !activeTitle) {
     // Unknown detail slug — bounce back to the index.
     body = <Navigate to="/settings" replace />
-  } else if (section === "identity") {
-    body = identityBody
-  } else if (section === "export") {
-    body = exportBody
-  } else if (section === "providers") {
-    body = <OrgProviderSection orgSettings={orgSettings} />
+  } else if (activeTitle) {
+    // Detail sub-page: a back link to the general settings sits at the top-left,
+    // above the section's own titled card.
+    const detail =
+      section === "identity" ? identityBody
+      : section === "export" ? exportBody
+      : <OrgProviderSection orgSettings={orgSettings} />
+    body = (
+      <div className="space-y-4">
+        <BackLink to="/settings" label="Settings" />
+        {detail}
+      </div>
+    )
   } else {
     body = indexBody
   }

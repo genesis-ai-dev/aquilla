@@ -8,7 +8,7 @@
  * owns only presentation wiring: composer, context pin, proposal Apply.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Bot } from "lucide-react"
 import { ChatComposer, type ChatComposerHandle, type SuggestedAction } from "@/components/chat/ChatComposer"
 import { ChatContextPin } from "@/components/chat/ChatContextPin"
@@ -19,6 +19,7 @@ import { getTranslatorProfile, profileForPrompt } from "@/lib/translator-profile
 import type { CellData } from "@/hooks/useCells"
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { ApplyContext } from "@/lib/agent/apply"
+import type { AgentProposal } from "@/lib/agent/protocol"
 import { useAgentSession } from "@/lib/agent/session-store"
 import {
   MessageScroller,
@@ -64,6 +65,10 @@ export interface AgentDockViewProps {
   pendingChip?: ContextChip | null
   /** Called once the pending chip has been inserted, so the parent clears it. */
   onPendingChipConsumed?: () => void
+  /** Workbench seam: render a proposal compactly (receipt) instead of the
+   *  full ProposalCard. Return null to fall back to the card (e.g. for
+   *  proposals the working set can't review). */
+  renderProposalOverride?: (proposal: AgentProposal) => ReactNode | null
 }
 
 export function AgentDockView({
@@ -82,6 +87,7 @@ export function AgentDockView({
   onPendingPromptConsumed,
   pendingChip,
   onPendingChipConsumed,
+  renderProposalOverride,
 }: AgentDockViewProps) {
   const { state, send, stop } = useAgentSession(projectId)
   const [includeContext, setIncludeContext] = useState(true)
@@ -175,17 +181,19 @@ export function AgentDockView({
                   <MessageScrollerItem key={run.localId} messageId={run.localId} scrollAnchor>
                     <AgentRunView
                       run={run}
-                      renderProposal={(proposal) => (
-                        <ProposalCard
-                          key={proposal.proposalId}
-                          proposal={proposal}
-                          roleLevel={roleLevel}
-                          rules={rules}
-                          resolveCell={resolveCell}
-                          applyContext={applyContext}
-                          onApplied={onApplied}
-                        />
-                      )}
+                      renderProposal={(proposal) =>
+                        renderProposalOverride?.(proposal) ?? (
+                          <ProposalCard
+                            key={proposal.proposalId}
+                            proposal={proposal}
+                            roleLevel={roleLevel}
+                            rules={rules}
+                            resolveCell={resolveCell}
+                            applyContext={applyContext}
+                            onApplied={onApplied}
+                          />
+                        )
+                      }
                       renderAquiferProposal={(proposal) => (
                         <AquiferProposalCard
                           key={proposal.proposalId}

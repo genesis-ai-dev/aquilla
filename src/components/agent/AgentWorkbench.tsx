@@ -1,22 +1,34 @@
 /**
  * AgentWorkbench.tsx — the full-screen agent surface (/project/:id/agent).
  *
- * Two regions: the conversation (the SAME store-backed AgentDockView the
- * dock renders — expanding mid-run loses nothing) and the working set — the
- * cells the agent is touching, live from typed tool results, with staged
- * drafts reviewable per row. A job header shows bulk-run progress with Stop,
- * plus session controls (new session, back to editor).
+ * Surface ownership (agent-mode-v2 review-loop redesign): the chat is a
+ * NARROW RAIL that narrates — proposals render there as compact receipts
+ * with live counters — and the working set is the single review surface,
+ * with draft text editable in place before accepting. Accept commits what's
+ * in the box (the human post-edits the machine draft), through the same
+ * staged-apply outbox path as ever. A job header shows bulk-run progress
+ * with Stop, plus session controls (new session, back to editor).
  */
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 import { Bot, Minimize2, RotateCcw, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
+import type { AgentProposal } from "@/lib/agent/protocol"
 import { useAgentSession } from "@/lib/agent/session-store"
-import { deriveWorkingSet, proposalRowKey, type WorkingSetRow } from "@/lib/agent/working-set"
+import {
+  deriveWorkingSet,
+  pendingRows,
+  proposalRowKey,
+  type RowDecision,
+  type WorkingSetRow,
+} from "@/lib/agent/working-set"
+import { checkRulesForCell } from "@/lib/rules/rule-engine"
 import { AgentDockView, type AgentDockViewProps } from "./AgentDockView"
-import { WorkingSetPanel } from "./WorkingSetPanel"
+import { lintCellFor } from "./ProposalCard"
+import { ProposalReceipt } from "./ProposalReceipt"
+import { WorkingSetPanel, type WorkingSetPanelHandle } from "./WorkingSetPanel"
 
 export interface AgentWorkbenchProps {
   /** Same wiring the dock panel gets — one source of truth in ProjectWorkspace. */
@@ -29,11 +41,14 @@ export interface AgentWorkbenchProps {
 
 export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchProps) {
   const { state, stop, reset } = useAgentSession(agent.projectId)
-  // Locally decided (applied or rejected) proposal rows — key: proposalId:cellId.
-  const [decided, setDecided] = useState<ReadonlySet<string>>(new Set())
+  // Local decisions per proposal row — key: proposalId:cellId. Rows keep
+  // their outcome (accepted / edited / rejected) so the grid stays a record.
+  const [decided, setDecided] = useState<ReadonlyMap<string, RowDecision>>(new Map())
   const [applying, setApplying] = useState(false)
+  const panelRef = useRef<WorkingSetPanelHandle>(null)
 
   const rows = useMemo(() => deriveWorkingSet(state.runs, decided), [state.runs, decided])
+  const pending = useMemo(() => pendingRows(rows), [rows])
 
   const activeRun = state.runs.find((r) => r.status === "running")
   const progress = activeRun?.progress
@@ -54,31 +69,97 @@ export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchP
     [agent.projectId, agent.author, agent.resolveCell],
   )
 
-  const markDecided = useCallback((keys: string[]) => {
-    setDecided((prev) => {
-      const next = new Set(prev)
-      for (const k of keys) next.add(k)
-      return next
-    })
-  }, [])
+  // ── Rule lint (same engine as the editor / ProposalCard) ────────────────
+  const enabledRules = useMemo(() => agent.rules.filter((r) => r.enabled), [agent.rules])
+  const lintRow = useCallback(
+    (row: WorkingSetRow, text: string): string[] => {
+      if (!row.stagedEvent || enabledRules.length === 0) return []
+      const cell = lintCellFor(row.stagedEvent, agent.resolveCell, text)
+      return checkRulesForCell(cell, row.stagedEvent.fileId ?? row.fileId ?? "", enabledRules).map(
+        (inf) => inf.message,
+      )
+    },
+    [enabledRules, agent.resolveCell],
+  )
 
+  // ── Accept / reject ──────────────────────────────────────────────────────
   const acceptRows = useCallback(
-    async (toApply: WorkingSetRow[]) => {
-      const events = toApply.flatMap((r) => (r.stagedEvent ? [r.stagedEvent] : []))
-      if (events.length === 0) return
+    async (toApply: { row: WorkingSetRow; value: string }[]) => {
+      const staged = toApply.filter(({ row }) => row.stagedEvent && row.proposalId)
+      if (staged.length === 0) return
+      // Accept commits what's in the box: clone each staged event with the
+      // (possibly edited) text before it goes through the apply path.
+      const events = staged.map(({ row, value }) => ({
+        ...row.stagedEvent!,
+        payload: { ...row.stagedEvent!.payload, value },
+        display: { ...row.stagedEvent!.display, after: value },
+      }))
       setApplying(true)
       try {
         const eventIds = await applyStagedEvents(events, applyContext)
-        markDecided(toApply.map((r) => proposalRowKey(r.proposalId!, r.cellId)))
-        await agent.onApplied?.(eventIds, toApply.map((r) => r.cellId))
+        setDecided((prev) => {
+          const next = new Map(prev)
+          for (const { row, value } of staged) {
+            next.set(proposalRowKey(row.proposalId!, row.cellId), {
+              outcome: value === row.proposed ? "accepted" : "edited",
+              value,
+            })
+          }
+          return next
+        })
+        await agent.onApplied?.(eventIds, staged.map(({ row }) => row.cellId))
       } finally {
         setApplying(false)
       }
     },
-    [applyContext, markDecided, agent],
+    [applyContext, agent],
   )
 
-  const pending = rows.filter((r) => r.proposed !== undefined && r.stagedEvent)
+  const rejectRow = useCallback((row: WorkingSetRow) => {
+    if (!row.proposalId) return
+    setDecided((prev) =>
+      new Map(prev).set(proposalRowKey(row.proposalId!, row.cellId), { outcome: "rejected" }),
+    )
+  }, [])
+
+  // ── Receipt rendering (chat shows counters, not a second diff) ──────────
+  const renderProposalOverride = useCallback(
+    (proposal: AgentProposal) => {
+      const commits = proposal.events.filter((ev) => ev.kind === "target.cell.commit" && ev.cellId)
+      // Mixed/non-commit proposals aren't reviewable in the grid — fall back
+      // to the full card (returning null does that).
+      if (commits.length === 0 || commits.length !== proposal.events.length) return null
+      let accepted = 0
+      let edited = 0
+      let rejected = 0
+      let pendingCount = 0
+      let checks = 0
+      for (const ev of commits) {
+        const decision = decided.get(proposalRowKey(proposal.proposalId, ev.cellId!))
+        if (!decision) {
+          pendingCount++
+          if (enabledRules.length > 0) {
+            checks += checkRulesForCell(
+              lintCellFor(ev, agent.resolveCell),
+              ev.fileId ?? "",
+              enabledRules,
+            ).length
+          }
+        } else if (decision.outcome === "accepted") accepted++
+        else if (decision.outcome === "edited") edited++
+        else rejected++
+      }
+      return (
+        <ProposalReceipt
+          key={proposal.proposalId}
+          proposal={proposal}
+          counts={{ accepted, edited, rejected, pending: pendingCount, checks }}
+          onReview={() => panelRef.current?.focusFirstPending()}
+        />
+      )
+    },
+    [decided, enabledRules, agent.resolveCell],
+  )
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -109,7 +190,7 @@ export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchP
             className="h-6 text-[11px] text-muted-foreground"
             onClick={() => {
               reset()
-              setDecided(new Set())
+              setDecided(new Map())
             }}
             title="Drop this conversation and start a fresh session"
           >
@@ -131,18 +212,23 @@ export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchP
         </span>
       </div>
 
-      {/* Two regions */}
+      {/* Chat rail + review grid: the conversation narrates from the side;
+          the working set (the artifact) gets the space. */}
       <div className="flex min-h-0 flex-1">
-        <div className="flex w-[46%] min-w-[360px] max-w-[640px] flex-col border-r">
-          <AgentDockView {...agent} />
+        <div className="flex w-[380px] min-w-[320px] flex-none flex-col border-r">
+          <AgentDockView {...agent} renderProposalOverride={renderProposalOverride} />
         </div>
         <div className="min-w-0 flex-1">
           <WorkingSetPanel
+            ref={panelRef}
             rows={rows}
             busy={applying}
-            onAccept={(row) => acceptRows([row])}
-            onAcceptAll={() => acceptRows(pending)}
-            onReject={(row) => markDecided([proposalRowKey(row.proposalId!, row.cellId)])}
+            lintRow={lintRow}
+            onAccept={(row, value) => acceptRows([{ row, value }])}
+            onAcceptAll={(valueFor) =>
+              acceptRows(pending.map((row) => ({ row, value: valueFor(row) })))
+            }
+            onReject={rejectRow}
             onJumpToCell={onJumpToCell}
           />
         </div>

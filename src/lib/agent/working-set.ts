@@ -4,12 +4,23 @@
  * The working set is "the cells the agent is currently touching": every
  * PassageRow a tool result surfaced (read/draft/search data) merged, in
  * first-seen order, with staged target.cell.commit proposals overlaid as
- * pending diffs (proposed vs current). Pure derivation from AgentRunUi[] so
- * it needs no extra state and is unit-testable.
+ * pending diffs (proposed vs current). Decided rows keep their outcome
+ * (accepted / edited & accepted / rejected) so the grid reads as a record of
+ * the session, not just a queue. Pure derivation from AgentRunUi[] so it
+ * needs no extra state and is unit-testable.
  */
 
 import type { PassageRow, StagedEvent } from "./protocol"
 import type { AgentRunUi } from "./run-state"
+
+/** How a pending row was decided. "edited" = accepted with user changes. */
+export type RowOutcome = "accepted" | "edited" | "rejected"
+
+export interface RowDecision {
+  outcome: RowOutcome
+  /** The committed text (post-edit) for accepted/edited rows. */
+  value?: string
+}
 
 export interface WorkingSetRow extends PassageRow {
   /** Staged-but-unapplied target.cell.commit value, when one exists. */
@@ -18,6 +29,8 @@ export interface WorkingSetRow extends PassageRow {
   proposalId?: string
   /** The staged event itself — handed to applyStagedEvents on accept. */
   stagedEvent?: StagedEvent
+  /** Set once the user decided this row; the pending overlay is gone. */
+  outcome?: RowOutcome
 }
 
 /** Stable per-proposal-row key for local accept/reject bookkeeping. */
@@ -28,11 +41,12 @@ export function proposalRowKey(proposalId: string, cellId: string): string {
 /**
  * Fold a session's runs (oldest → newest) into working-set rows. Later
  * sightings of a cell update its text/status; staged commits overlay a
- * `proposed` value until `decided` (applied or rejected locally) hides them.
+ * `proposed` value until decided, after which the row carries the outcome
+ * (and, for accepts, the committed text — a later server read still wins).
  */
 export function deriveWorkingSet(
   runs: AgentRunUi[],
-  decided: ReadonlySet<string> = new Set(),
+  decided: ReadonlyMap<string, RowDecision> = new Map(),
 ): WorkingSetRow[] {
   const rows = new Map<string, WorkingSetRow>()
 
@@ -55,11 +69,21 @@ export function deriveWorkingSet(
       if (item.kind === "proposal") {
         for (const ev of item.proposal.events) {
           if (ev.kind !== "target.cell.commit" || !ev.cellId) continue
-          const key = proposalRowKey(item.proposal.proposalId, ev.cellId)
-          if (decided.has(key)) {
-            // Applied or rejected — the pending overlay disappears; an applied
-            // value will come back as `target` on the next read/revalidate.
-            upsert(ev.cellId, { proposed: undefined, proposalId: undefined, stagedEvent: undefined })
+          const decision = decided.get(proposalRowKey(item.proposal.proposalId, ev.cellId))
+          if (decision) {
+            // Decided — drop the pending overlay but keep the outcome. For
+            // accepts, show the committed text until a fresh read replaces it.
+            upsert(ev.cellId, {
+              ...(ev.fileId ? { fileId: ev.fileId } : {}),
+              ...(ev.display.canonicalRef ? { ref: ev.display.canonicalRef } : {}),
+              proposed: undefined,
+              proposalId: undefined,
+              stagedEvent: undefined,
+              outcome: decision.outcome,
+              ...(decision.outcome !== "rejected" && decision.value !== undefined
+                ? { target: decision.value }
+                : {}),
+            })
             continue
           }
           upsert(ev.cellId, {
@@ -68,6 +92,7 @@ export function deriveWorkingSet(
             proposed: typeof ev.payload.value === "string" ? ev.payload.value : ev.display.after ?? "",
             proposalId: item.proposal.proposalId,
             stagedEvent: ev,
+            outcome: undefined,
           })
         }
       }

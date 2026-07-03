@@ -47,7 +47,7 @@ test("agent drafts the open file; workbench accept-all lands in the editor", asy
   await expect(alice).toHaveURL(/\/agent$/)
 
   // The working set shows the staged drafts as pending rows; accept them all.
-  const acceptAll = alice.getByRole("button", { name: /Accept all/ })
+  const acceptAll = alice.getByRole("button", { name: /Accept remaining/ })
   await expect(acceptAll).toBeVisible({ timeout: 10_000 })
   await acceptAll.click()
   await expect(acceptAll).toBeHidden({ timeout: 15_000 })

@@ -70,11 +70,27 @@ describe("deriveWorkingSet", () => {
     expect(rows[0]).toMatchObject({ cellId: "c9", ref: "MRK 4:3", proposed: "nuevo", fileId: "f1" })
   })
 
-  it("decided rows lose their pending overlay", () => {
+  it("accepted rows lose the overlay and carry the committed value + outcome", () => {
     const runs = [run([readItem([{ cellId: "c3", source: "s3", target: "" }]), proposalItem("p1", "c3", "borrador")])]
-    const decided = new Set([proposalRowKey("p1", "c3")])
+    const decided = new Map([[proposalRowKey("p1", "c3"), { outcome: "accepted" as const, value: "borrador" }]])
     const rows = deriveWorkingSet(runs, decided)
     expect(rows[0].proposed).toBeUndefined()
+    expect(rows[0]).toMatchObject({ outcome: "accepted", target: "borrador" })
+    expect(pendingRows(rows)).toHaveLength(0)
+  })
+
+  it("edited rows carry the USER'S text, not the agent's draft", () => {
+    const runs = [run([proposalItem("p1", "c3", "borrador")])]
+    const decided = new Map([[proposalRowKey("p1", "c3"), { outcome: "edited" as const, value: "borrador corregido" }]])
+    const rows = deriveWorkingSet(runs, decided)
+    expect(rows[0]).toMatchObject({ outcome: "edited", target: "borrador corregido" })
+  })
+
+  it("rejected rows keep their outcome but never gain the draft as target", () => {
+    const runs = [run([readItem([{ cellId: "c3", source: "s3", target: "" }]), proposalItem("p1", "c3", "borrador")])]
+    const decided = new Map([[proposalRowKey("p1", "c3"), { outcome: "rejected" as const }]])
+    const rows = deriveWorkingSet(runs, decided)
+    expect(rows[0]).toMatchObject({ outcome: "rejected", target: "" })
     expect(pendingRows(rows)).toHaveLength(0)
   })
 

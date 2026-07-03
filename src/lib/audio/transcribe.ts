@@ -172,13 +172,25 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
   const audioId = cell.selectedAudioId
   if (!audioId) return 0
 
+  // Early guards write an error status instead of returning silently — the
+  // Recording tab renders these via CellTranscribeBadge, and a bare `return 0`
+  // left the user with a button that did nothing and no explanation.
   const attachment = cell.attachments?.[audioId]
   const attachmentUrl = attachment?.url
-  if (!attachmentUrl) return 0
+  if (!attachmentUrl) {
+    setTranscribeStatus(audioId, { kind: "error", message: "This recording has no downloadable audio yet. Try again after it finishes syncing." })
+    return 0
+  }
 
   const frontier = parseFrontierAudioUrl(attachmentUrl)
-  if (!frontier) return 0
-  if (!session?.jwt) return 0
+  if (!frontier) {
+    setTranscribeStatus(audioId, { kind: "error", message: "This audio isn't stored in a transcribable location." })
+    return 0
+  }
+  if (!session?.jwt) {
+    setTranscribeStatus(audioId, { kind: "error", message: "Sign in to transcribe audio." })
+    return 0
+  }
 
   const getSyncToken = makeAudioSyncTokenFetcher(() => session)
 

@@ -34,6 +34,7 @@ import { DenoiseButton } from "./audio/DenoiseButton"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
+import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { CellExpansion } from "./CellExpansion"
 import { tokenizeWords } from "@/lib/audio/timings"
@@ -4565,6 +4566,16 @@ function EditorRow({
                           />
                           {isTranscribing ? "Transcribing…" : "Transcribe"}
                         </button>
+                        {/* Surfaces model-download %, failures (click-to-expand
+                            with Retry), and a success flash. Errors previously
+                            existed in transcribe-status but were rendered
+                            nowhere — the button just reverted to "Transcribe". */}
+                        <CellTranscribeBadge
+                          audioId={cell.selectedAudioId}
+                          hasTimings={(cellAudioTimings?.length ?? 0) > 0}
+                          onJumpToTranscript={() => transcriptPreviewRef.current?.scrollIntoView({ block: "nearest" })}
+                          onRetry={handleTranscribe}
+                        />
                         {cell.selectedAudioId && selectedAudio && (
                           <DenoiseButton
                             projectId={project.id}

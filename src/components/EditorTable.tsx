@@ -733,7 +733,37 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       }
     },
     focusCellEditorIndex: focusCellEditorByIndex,
-    getCurrentIndex: () => 0,
+    getCurrentIndex: () => {
+      // First visible row, mapped from display space (the virtual list's
+      // order, which differs in time-ordered mode) back to the `cells` prop
+      // space that ProjectWorkspace's "Next unfinished" search indexes into.
+      // Was stubbed to `() => 0`, which pinned the button to the file's
+      // first unfinished cell forever instead of advancing from the viewport.
+      const display = displayCellsRef.current
+      if (display.length === 0) return 0
+      const state = listRef.current?.getState()
+      const scrollEl = parentRef.current ?? listRootRef.current
+      const scroll = state?.scroll ?? scrollEl?.scrollTop ?? 0
+      let displayIdx = 0
+      if (state) {
+        for (let index = 0; index < display.length; index += 1) {
+          const start = state.positionAtIndex(index)
+          const size = state.sizeAtIndex(index) || ESTIMATED_ROW_HEIGHT_PX
+          if (start + size > scroll) {
+            displayIdx = index
+            break
+          }
+        }
+      } else {
+        displayIdx = Math.min(
+          display.length - 1,
+          Math.max(0, Math.round(scroll / ESTIMATED_ROW_HEIGHT_PX)),
+        )
+      }
+      const id = display[displayIdx]?.id
+      const cellIdx = id ? cellsRef.current.findIndex((c) => c.id === id) : -1
+      return cellIdx >= 0 ? cellIdx : 0
+    },
     flashCell(cellId, _searchTerm) {
       // Defer to next frame: the list may still be scrolling, so the
       // DOM node we want might not exist yet.

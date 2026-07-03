@@ -40,10 +40,13 @@ export interface AgentDockPanelProps {
   onPendingChipConsumed?: () => void
   /** Opens the full-screen workbench (same session — nothing is lost). */
   onExpand?: () => void
+  /** True while the workbench route is showing the same session in the center.
+   *  The dock then renders a pointer back to it instead of a second chat. */
+  expanded?: boolean
 }
 
 export function AgentDockPanel({
-  currentCell, agent, bibleSummary, pendingChip, onPendingChipConsumed, onExpand,
+  currentCell, agent, bibleSummary, pendingChip, onPendingChipConsumed, onExpand, expanded,
 }: AgentDockPanelProps) {
   // A summary prompt queued by a button tap; AgentDockView runs it once.
   const [pendingAgentPrompt, setPendingAgentPrompt] = useState<string | null>(null)
@@ -78,7 +81,7 @@ export function AgentDockPanel({
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <Bot className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-xs font-medium">AI Agent</span>
-        {onExpand && (
+        {onExpand && !expanded && (
           <button
             type="button"
             onClick={onExpand}
@@ -91,15 +94,26 @@ export function AgentDockPanel({
         )}
       </div>
 
-      <AgentDockView
-        {...agent}
-        currentCell={currentCell}
-        suggestedActions={summaryActions}
-        pendingPrompt={pendingAgentPrompt}
-        onPendingPromptConsumed={() => setPendingAgentPrompt(null)}
-        pendingChip={pendingChip}
-        onPendingChipConsumed={onPendingChipConsumed}
-      />
+      {expanded ? (
+        // The workbench route is rendering this same session in the center —
+        // a second live chat here would double the composer and confuse focus.
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-4 text-center">
+          <Bot className="h-6 w-6 text-muted-foreground" />
+          <p className="text-xs text-muted-foreground">
+            The agent is open in the full-screen workbench.
+          </p>
+        </div>
+      ) : (
+        <AgentDockView
+          {...agent}
+          currentCell={currentCell}
+          suggestedActions={summaryActions}
+          pendingPrompt={pendingAgentPrompt}
+          onPendingPromptConsumed={() => setPendingAgentPrompt(null)}
+          pendingChip={pendingChip}
+          onPendingChipConsumed={onPendingChipConsumed}
+        />
+      )}
     </div>
   )
 }

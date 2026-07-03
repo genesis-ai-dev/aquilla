@@ -558,6 +558,23 @@ export function ProjectWorkspace() {
   const [shareOpen, setShareOpen] = useState(false)
   // FRO-308: left dock active tab (null = collapsed rail only)
   const [dockTab, setDockTab] = useState<DockTab | null>("files")
+  // Agent workbench (agent-mode-v2 §4) is a takeover surface: collapse the
+  // dock to the rail on entry (a second agent chat beside the workbench is
+  // confusing) and restore the user's tab on exit. Manual reopen still wins —
+  // this only fires on surface transitions.
+  const dockTabBeforeAgentRef = useRef<DockTab | null>("files")
+  const prevSurfaceRef = useRef(centerSurface)
+  useEffect(() => {
+    const prev = prevSurfaceRef.current
+    prevSurfaceRef.current = centerSurface
+    if (centerSurface === "agent" && prev !== "agent") {
+      dockTabBeforeAgentRef.current = dockTab
+      setDockTab(null)
+    } else if (centerSurface !== "agent" && prev === "agent") {
+      setDockTab((cur) => cur ?? dockTabBeforeAgentRef.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dockTab read on transition only
+  }, [centerSurface])
   // A source selection the user sent to the agent via "Ask AI". Opens the
   // Agent dock and is inserted into the composer as a context chip.
   const [pendingChip, setPendingChip] = useState<ContextChip | null>(null)
@@ -3354,6 +3371,7 @@ export function ProjectWorkspace() {
                 pendingChip={pendingChip}
                 onPendingChipConsumed={() => setPendingChip(null)}
                 onExpand={() => navigate(`/project/${projectId}/agent`)}
+                expanded={centerSurface === "agent"}
               />
             }
             searchPanel={
@@ -3455,7 +3473,10 @@ export function ProjectWorkspace() {
         }
         beforeMain={
           <>
-            <TabStrip
+            {/* Agent workbench is a takeover surface: file tabs and the
+                selection bar belong to the editor and only add competing
+                chrome above the workbench. Banners below still render. */}
+            {centerSurface !== "agent" && <TabStrip
               tabs={workspaceTabs.tabs}
               // While a non-editor surface (Rules) is showing, no file tab is
               // "active" even though selectedFileId still remembers the last
@@ -3489,8 +3510,8 @@ export function ProjectWorkspace() {
                   />
                 ) : undefined
               }
-            />
-            {project && activeFileId && (
+            />}
+            {project && activeFileId && centerSurface !== "agent" && (
               <>
                 <SelectionBar
                   project={project}
@@ -3546,7 +3567,7 @@ export function ProjectWorkspace() {
             <div className="px-3 py-1 empty:hidden">
               <CompletionBulkProgressBanner />
             </div>
-            {isSubtitleFile && videoSrc && (
+            {isSubtitleFile && videoSrc && centerSurface !== "agent" && (
               <ResizableVideoPanel>
                 {(height) => (
                   <VideoPlayer
@@ -3908,7 +3929,7 @@ export function ProjectWorkspace() {
         }
         statusBar={
           <>
-            {lens === "audio" && project && (
+            {lens === "audio" && project && centerSurface !== "agent" && (
               <VoicePlaybackBar
                 cells={cells}
                 projectId={project.id}
@@ -3932,13 +3953,18 @@ export function ProjectWorkspace() {
                 </div>
               }
             />
-            <StatusBar
-              cells={cells}
-              projectHealth={projectHealth}
-              healthMap={healthMap}
-              staleSourceCount={staleCellIds.size}
-              onJumpToCell={jumpToCellId}
-            />
+            {/* File translation stats belong to the editor; the workbench has
+                its own working-set summary. Sync/outbox status above stays —
+                agent Apply flushes through the same outbox. */}
+            {centerSurface !== "agent" && (
+              <StatusBar
+                cells={cells}
+                projectHealth={projectHealth}
+                healthMap={healthMap}
+                staleSourceCount={staleCellIds.size}
+                onJumpToCell={jumpToCellId}
+              />
+            )}
           </>
         }
       />

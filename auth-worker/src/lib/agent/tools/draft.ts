@@ -221,14 +221,11 @@ export async function executeDraft(
   if (missed.length > 0) lines.push(`No draft returned for: ${missed.join(", ")} — re-run draft with their cellIds.`)
   if (remaining > 0) lines.push(`${remaining} more untranslated cells remain in scope — call draft again to continue.`)
 
-  // Working-set rows show the DRAFTED values (status drafted), for the panel.
-  const draftedRows = work
-    .filter((_, i) => drafts.has(i + 1))
-    .map((p) => {
-      const row = pairToRow(p, scope.fileId)
-      const value = emits.find((e) => e.cellId === p.cellId)?.payload.value ?? row.target
-      return { ...row, target: value, status: "drafted" as const }
-    })
+  // Working-set rows carry the cells' CURRENT committed state — the drafted
+  // values ride the proposal frame as the pending overlay. Echoing the draft
+  // into `target` here made the panel show it as the crossed-out "old value"
+  // above the identical proposed text.
+  const draftedRows = work.filter((_, i) => drafts.has(i + 1)).map((p) => pairToRow(p, scope.fileId))
 
   return {
     ok: proposal !== null,

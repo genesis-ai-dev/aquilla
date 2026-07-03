@@ -142,7 +142,10 @@ export function WorkingSetPanel({ rows, onAccept, onReject, onAcceptAll, onJumpT
               <div className="flex min-w-0 flex-col gap-1">
                 {isPending ? (
                   <>
-                    {row.target && (
+                    {/* Strikethrough = the value being replaced. Skip it when
+                        the cell is empty or already equals the proposal —
+                        repeating the new text crossed out reads as noise. */}
+                    {row.target && row.target !== row.proposed && (
                       <span className="whitespace-pre-wrap break-words text-muted-foreground line-through decoration-destructive/40">
                         {row.target}
                       </span>

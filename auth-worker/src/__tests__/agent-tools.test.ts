@@ -260,7 +260,11 @@ describe("executeDraft", () => {
       cellId: cellId("c3"),
       payload: { ai_suggestion: true, agent_run_id: "run-1" },
     })
-    expect(out.data?.cells?.map((c) => c.status)).toEqual(["drafted", "drafted"])
+    // Rows report the CURRENT committed state — the drafted values ride the
+    // proposal overlay only. Echoing them into `target` duplicated the text
+    // in the working set (crossed-out new value above the identical proposal).
+    expect(out.data?.cells?.map((c) => c.status)).toEqual(["untranslated", "untranslated"])
+    expect(out.data?.cells?.every((c) => c.target === "")).toBe(true)
     expect(progress).toEqual([
       { label: "Drafting 2 cells", done: 0, total: 2 },
       { label: "Drafting 2 cells", done: 2, total: 2 },

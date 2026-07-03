@@ -18,6 +18,13 @@ export interface RangeHighlight {
   ruleId: string
 }
 
+/** When two ranges start at the same offset, the more severe one owns the span. */
+const KIND_PRECEDENCE: Record<RangeHighlight["kind"], number> = {
+  "violation-major": 0,
+  "violation-minor": 1,
+  "violation-waived": 2,
+}
+
 interface HighlightedTextProps {
   text: string
   /** Token-level evidence highlights (examples). Rendered only when
@@ -42,7 +49,10 @@ export function HighlightedText({
   }, [highlights])
 
   const sortedRanges = useMemo(
-    () => [...ranges].sort((a, b) => a.start - b.start),
+    () =>
+      [...ranges].sort(
+        (a, b) => a.start - b.start || KIND_PRECEDENCE[a.kind] - KIND_PRECEDENCE[b.kind],
+      ),
     [ranges],
   )
 
@@ -50,11 +60,19 @@ export function HighlightedText({
 
   // First split into chunks honoring ranges; then in non-ranged chunks apply
   // token-level evidence highlights when showEvidence is true.
+  //
+  // Ranges from different rules can overlap (EditorTable concatenates spans
+  // from every rule without merging), so each range is clamped to the cursor:
+  // the first range by start (severity-tiebroken) owns the shared sub-span,
+  // later ranges keep only their uncovered tail. Without the clamp the
+  // overlapping characters were emitted twice.
   const chunks: Array<{ text: string; start: number; range?: RangeHighlight }> = []
   let cursor = 0
   for (const r of sortedRanges) {
     if (r.start > cursor) chunks.push({ text: text.slice(cursor, r.start), start: cursor })
-    chunks.push({ text: text.slice(r.start, r.end), start: r.start, range: r })
+    const start = Math.max(r.start, cursor)
+    if (r.end <= start) continue // fully covered by an earlier range
+    chunks.push({ text: text.slice(start, r.end), start, range: r })
     cursor = r.end
   }
   if (cursor < text.length) chunks.push({ text: text.slice(cursor), start: cursor })
@@ -94,7 +112,11 @@ function EvidenceTokens({ text, highlightMap }: { text: string; highlightMap: Ma
     <>
       {parts.map((part, i) => {
         if (/^\s+$/.test(part)) return <span key={i}>{part}</span>
-        const token = part.toLowerCase().replace(/[^\w]/g, "")
+        // Unicode-aware: \w is ASCII-only and stripped accented/non-Latin
+        // letters ("más" → "ms", "θεός" → ""), so highlights never matched
+        // outside plain English. \p{M} keeps combining marks (niqqud etc.)
+        // so the token matches what tokenizeText produces.
+        const token = part.toLowerCase().replace(/[^\p{L}\p{M}\p{N}]/gu, "")
         const colorIdx = highlightMap.get(token)
         if (colorIdx !== undefined) {
           const color = EXAMPLE_COLORS[colorIdx % EXAMPLE_COLORS.length]

@@ -150,7 +150,7 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
 
           <div className="space-y-2">
             <div className="flex items-center gap-1.5">
-              <Label htmlFor="source">Source language</Label>
+              <Label htmlFor="source" layout="inline">Source language</Label>
               <LanguageFieldHint />
             </div>
             <Input
@@ -165,7 +165,7 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
           {shape !== "source-only" && (
             <div className="space-y-2">
               <div className="flex items-center gap-1.5">
-                <Label htmlFor="target">Target language</Label>
+                <Label htmlFor="target" layout="inline">Target language</Label>
                 <LanguageFieldHint />
               </div>
               <Input

@@ -2508,8 +2508,9 @@ export function ProjectWorkspace() {
 
   const handleTrayFootnoteSave = useCallback((cellId: string, footnoteIndex: number, newText: string) => {
     const cell = cellsRef.current.find((candidate) => candidate.id === cellId)
-    if (!cell) return
+    if (!cell) return false
     const updated = spliceFootnoteText(cell.translated ?? "", footnoteIndex, newText)
+    if (updated === null) return false // stale index — keep the editor open (FRO-472)
     void commitTrayFootnoteText(cellId, updated)
   }, [commitTrayFootnoteText])
 

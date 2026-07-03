@@ -1,3 +1,5 @@
+"use client"
+
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 import { cloneElement } from "react"
 import type { ReactElement, ReactNode } from "react"
@@ -99,4 +101,4 @@ function AppTooltip({
   )
 }
 
-export { AppTooltip, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger }
+export { AppTooltip, Tooltip, TooltipTrigger, TooltipContent, TooltipProvider }

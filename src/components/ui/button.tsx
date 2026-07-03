@@ -1,9 +1,6 @@
 import { Button as ButtonPrimitive } from "@base-ui/react/button"
 import { cva, type VariantProps } from "class-variance-authority"
-import { Children, isValidElement } from "react"
-import type { ReactNode } from "react"
 
-import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
@@ -43,58 +40,19 @@ const buttonVariants = cva(
   }
 )
 
-function hasTextContent(children: ReactNode): boolean {
-  let found = false
-
-  Children.forEach(children, (child) => {
-    if (found) return
-    if (typeof child === "string") {
-      found = child.trim().length > 0
-      return
-    }
-    if (typeof child === "number") {
-      found = true
-      return
-    }
-    if (isValidElement<{ children?: ReactNode }>(child)) {
-      found = hasTextContent(child.props.children)
-    }
-  })
-
-  return found
-}
-
 function Button({
   className,
   variant = "default",
   size = "default",
-  title,
   ...props
 }: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
-  const ariaLabel =
-    title && props["aria-label"] == null && !hasTextContent(props.children) ? title : props["aria-label"]
-  const buttonProps = ariaLabel == null ? props : { ...props, "aria-label": ariaLabel }
-  const button = (
+  return (
     <ButtonPrimitive
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
-      {...buttonProps}
+      {...props}
     />
   )
-
-  if (!title) return button
-
-  if (props.disabled) {
-    return (
-      <AppTooltip content={title}>
-        <span className="inline-flex cursor-not-allowed">
-          {button}
-        </span>
-      </AppTooltip>
-    )
-  }
-
-  return <AppTooltip content={title}>{button}</AppTooltip>
 }
 
 export { Button, buttonVariants }

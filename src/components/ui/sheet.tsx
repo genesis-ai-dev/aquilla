@@ -1,20 +1,37 @@
 import * as React from "react"
-import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
-import { XIcon } from "lucide-react"
+import { Dialog as SheetPrimitive } from "@base-ui/react/dialog"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { XIcon } from "lucide-react"
 
-function Sheet({ ...props }: DialogPrimitive.Root.Props) {
-  return <DialogPrimitive.Root data-slot="sheet" {...props} />
+function Sheet({ ...props }: SheetPrimitive.Root.Props) {
+  return <SheetPrimitive.Root data-slot="sheet" {...props} />
 }
 
-function SheetTrigger({ ...props }: DialogPrimitive.Trigger.Props) {
-  return <DialogPrimitive.Trigger data-slot="sheet-trigger" {...props} />
+function SheetTrigger({ ...props }: SheetPrimitive.Trigger.Props) {
+  return <SheetPrimitive.Trigger data-slot="sheet-trigger" {...props} />
 }
 
-function SheetClose({ ...props }: DialogPrimitive.Close.Props) {
-  return <DialogPrimitive.Close data-slot="sheet-close" {...props} />
+function SheetClose({ ...props }: SheetPrimitive.Close.Props) {
+  return <SheetPrimitive.Close data-slot="sheet-close" {...props} />
+}
+
+function SheetPortal({ ...props }: SheetPrimitive.Portal.Props) {
+  return <SheetPrimitive.Portal data-slot="sheet-portal" {...props} />
+}
+
+function SheetOverlay({ className, ...props }: SheetPrimitive.Backdrop.Props) {
+  return (
+    <SheetPrimitive.Backdrop
+      data-slot="sheet-overlay"
+      className={cn(
+        "fixed inset-0 z-50 bg-black/10 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0 supports-backdrop-filter:backdrop-blur-xs",
+        className
+      )}
+      {...props}
+    />
+  )
 }
 
 function SheetContent({
@@ -23,50 +40,41 @@ function SheetContent({
   side = "right",
   showCloseButton = true,
   ...props
-}: DialogPrimitive.Popup.Props & {
-  side?: "right" | "left"
+}: SheetPrimitive.Popup.Props & {
+  side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
 }) {
-  // No animation classes — tw-animate-css's `animate-out` keyframe doesn't
-  // use `animation-fill-mode: forwards`, so after the exit animation runs
-  // the element reverts to its natural (visible) state and Base UI never
-  // removes it from the DOM. Dropping animations makes close instant but
-  // correct; visual polish can be added later if the underlying CSS gets
-  // fixed.
-  const sideClasses = side === "right" ? "right-0" : "left-0"
   return (
-    <DialogPrimitive.Portal>
-      <DialogPrimitive.Backdrop
-        data-slot="sheet-overlay"
-        className="fixed inset-0 z-50 bg-black/20 data-closed:pointer-events-none data-closed:opacity-0"
-      />
-      <DialogPrimitive.Popup
+    <SheetPortal>
+      <SheetOverlay />
+      <SheetPrimitive.Popup
         data-slot="sheet-content"
+        data-side={side}
         className={cn(
-          "fixed top-0 z-50 flex h-full w-80 flex-col bg-background shadow-soft-lg outline-none",
-          "data-closed:pointer-events-none data-closed:opacity-0",
-          sideClasses,
+          "fixed z-50 flex flex-col gap-4 bg-popover bg-clip-padding text-sm text-popover-foreground shadow-lg transition duration-200 ease-in-out data-ending-style:opacity-0 data-starting-style:opacity-0 data-[side=bottom]:inset-x-0 data-[side=bottom]:bottom-0 data-[side=bottom]:h-auto data-[side=bottom]:border-t data-[side=bottom]:data-ending-style:translate-y-[2.5rem] data-[side=bottom]:data-starting-style:translate-y-[2.5rem] data-[side=left]:inset-y-0 data-[side=left]:left-0 data-[side=left]:h-full data-[side=left]:w-3/4 data-[side=left]:border-r data-[side=left]:data-ending-style:translate-x-[-2.5rem] data-[side=left]:data-starting-style:translate-x-[-2.5rem] data-[side=right]:inset-y-0 data-[side=right]:right-0 data-[side=right]:h-full data-[side=right]:w-3/4 data-[side=right]:border-l data-[side=right]:data-ending-style:translate-x-[2.5rem] data-[side=right]:data-starting-style:translate-x-[2.5rem] data-[side=top]:inset-x-0 data-[side=top]:top-0 data-[side=top]:h-auto data-[side=top]:border-b data-[side=top]:data-ending-style:translate-y-[-2.5rem] data-[side=top]:data-starting-style:translate-y-[-2.5rem] data-[side=left]:sm:max-w-sm data-[side=right]:sm:max-w-sm",
           className
         )}
         {...props}
       >
         {children}
         {showCloseButton && (
-          <DialogPrimitive.Close
+          <SheetPrimitive.Close
+            data-slot="sheet-close"
             render={
               <Button
                 variant="ghost"
-                size="icon-sm"
                 className="absolute top-3 right-3"
-                aria-label="Close"
+                size="icon-sm"
               />
             }
           >
-            <XIcon className="h-4 w-4" />
-          </DialogPrimitive.Close>
+            <XIcon
+            />
+            <span className="sr-only">Close</span>
+          </SheetPrimitive.Close>
         )}
-      </DialogPrimitive.Popup>
-    </DialogPrimitive.Portal>
+      </SheetPrimitive.Popup>
+    </SheetPortal>
   )
 }
 
@@ -74,7 +82,7 @@ function SheetHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="sheet-header"
-      className={cn("flex flex-col gap-1 border-b px-4 py-3", className)}
+      className={cn("flex flex-col gap-0.5 p-4", className)}
       {...props}
     />
   )
@@ -84,17 +92,20 @@ function SheetFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="sheet-footer"
-      className={cn("border-t p-4", className)}
+      className={cn("mt-auto flex flex-col gap-2 p-4", className)}
       {...props}
     />
   )
 }
 
-function SheetTitle({ className, ...props }: DialogPrimitive.Title.Props) {
+function SheetTitle({ className, ...props }: SheetPrimitive.Title.Props) {
   return (
-    <DialogPrimitive.Title
+    <SheetPrimitive.Title
       data-slot="sheet-title"
-      className={cn("text-sm font-semibold", className)}
+      className={cn(
+        "font-heading text-base font-medium text-foreground",
+        className
+      )}
       {...props}
     />
   )
@@ -103,11 +114,11 @@ function SheetTitle({ className, ...props }: DialogPrimitive.Title.Props) {
 function SheetDescription({
   className,
   ...props
-}: DialogPrimitive.Description.Props) {
+}: SheetPrimitive.Description.Props) {
   return (
-    <DialogPrimitive.Description
+    <SheetPrimitive.Description
       data-slot="sheet-description"
-      className={cn("text-xs text-muted-foreground", className)}
+      className={cn("text-sm text-muted-foreground", className)}
       {...props}
     />
   )

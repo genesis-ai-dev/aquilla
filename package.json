@@ -61,7 +61,8 @@
     "neon:check": "tsx scripts/check-schema-migrations.ts",
     "neon:status": "tsx scripts/neon-migrate.ts status",
     "neon:apply": "tsx scripts/neon-migrate.ts apply",
-    "neon:baseline": "tsx scripts/neon-migrate.ts baseline"
+    "neon:baseline": "tsx scripts/neon-migrate.ts baseline",
+    "neon:refresh-dev": "tsx scripts/refresh-dev-neon.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.0",

@@ -78,11 +78,18 @@ export function OrgSwitcher() {
     }
   }
 
+  function handleOpenOrgSwitcher() {
+    setOpen((o) => !o)
+    if (!open) {
+      setShowCreate(false)
+    }
+  }
+
   return (
     <div className="relative">
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => handleOpenOrgSwitcher()}
         className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent"
       >
         <span className="min-w-0">
@@ -161,7 +168,7 @@ export function OrgSwitcher() {
 
           <div className="border-t px-2 py-1.5">
             {showCreate ? (
-              <div className="flex gap-1">
+              <div className="flex flex-col gap-1">
                 <input
                   className="flex-1 rounded border px-1.5 py-0.5 text-xs"
                   value={createName}

@@ -129,6 +129,36 @@ describe("executeRead", () => {
     expect(out.ok).toBe(true)
     expect(out.data?.cells?.[0].ref).toBe("MRK 4:1")
   })
+
+  // The import pipeline never populates files.book_code (file.create projects
+  // it as NULL), so ref-scope resolution MUST work without it: fall back to a
+  // book-code-shaped file name, then to the file whose cells carry "MRK …"
+  // canonical refs.
+  it("resolves by file name when book_code is null (name = book code)", async () => {
+    await seedWorld()
+    await env.AQUILLA_PG.prepare(`UPDATE files SET book_code = NULL, name = 'MRK.usfm' WHERE id = ?`)
+      .bind(FILE)
+      .run()
+    const out = await executeRead(env.AQUILLA_PG, { ref: "MRK 4:1" }, {
+      projectId: PROJECT,
+      aliases: new AliasMap(),
+    })
+    expect(out.ok).toBe(true)
+    expect(out.data?.cells?.[0].ref).toBe("MRK 4:1")
+  })
+
+  it("resolves by cells' canonical refs when neither book_code nor name match", async () => {
+    await seedWorld()
+    await env.AQUILLA_PG.prepare(`UPDATE files SET book_code = NULL, name = 'Gospel of Mark' WHERE id = ?`)
+      .bind(FILE)
+      .run()
+    const out = await executeRead(env.AQUILLA_PG, { ref: "MRK 4" }, {
+      projectId: PROJECT,
+      aliases: new AliasMap(),
+    })
+    expect(out.ok).toBe(true)
+    expect(out.data?.cells?.map((c) => c.ref)).toEqual(["MRK 4:1", "MRK 4:2", "MRK 4:3", "MRK 4:10"])
+  })
 })
 
 describe("executeExamples", () => {

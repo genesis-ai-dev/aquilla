@@ -145,21 +145,53 @@ interface PairRow {
   has_target: number | null
 }
 
-/** Resolve a scope with no fileId by the range's book code (files.book_code). */
+/**
+ * Resolve a scope with no fileId by the range's book code. `files.book_code`
+ * is authoritative when set, but the current import pipeline never populates
+ * it, so fall back to (a) a file NAMED like the book ("MRK", "MRK.usfm",
+ * "Mark of MRK"), then (b) the file whose cells actually carry "MRK …"
+ * canonical refs — that one always works for imported scripture.
+ */
 export async function resolveFileByBook(
   db: AquillaDb,
   projectId: string,
   book: string,
 ): Promise<{ id: string; name: string } | null> {
-  const row = await db
+  const code = book.toUpperCase()
+  const byCode = await db
     .prepare(
       `SELECT id, name FROM files
        WHERE project_id = ? AND deleted_at IS NULL AND upper(book_code) = ?
        ORDER BY role = 'target' DESC LIMIT 1`,
     )
-    .bind(projectId, book.toUpperCase())
+    .bind(projectId, code)
     .first<{ id: string; name: string }>()
-  return row ?? null
+  if (byCode) return byCode
+  const byName = await db
+    .prepare(
+      `SELECT id, name FROM files
+       WHERE project_id = ? AND deleted_at IS NULL
+         AND (upper(name) = ? OR upper(name) LIKE ? OR upper(name) LIKE ?)
+       ORDER BY length(name) ASC LIMIT 1`,
+    )
+    .bind(projectId, code, `${code}.%`, `%${code}%`)
+    .first<{ id: string; name: string }>()
+  if (byName) return byName
+  const byRefs = await db
+    .prepare(
+      `SELECT f.id, f.name FROM files f
+       WHERE f.project_id = ? AND f.deleted_at IS NULL
+         AND EXISTS (
+           SELECT 1 FROM cells c
+           WHERE c.project_id = f.project_id AND c.file_id = f.id
+             AND c.side = 'source'
+             AND upper(c.canonical_ref) LIKE ?
+         )
+       LIMIT 1`,
+    )
+    .bind(projectId, `${code} %`)
+    .first<{ id: string; name: string }>()
+  return byRefs ?? null
 }
 
 /**

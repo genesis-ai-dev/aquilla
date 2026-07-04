@@ -166,3 +166,16 @@ throughput far under bar; F6 canaries zero leaks; default suite 3385 green; tsc 
 BATCH_ENDPOINT_CONTRACT.md, CHANGES.md, QA_TEST_PLAN.md, PARITY_FINAL_REPORT.md, this log.
 Wall clock at close ≈ 2h40m of 10h. Remaining gaps and review priorities are in
 PARITY_FINAL_REPORT.md (§gaps, §risk areas).
+
+## Cycle 11 — user-facing round-trip exports (principal directive, part 2)
+- The parity adapters were using the structured exporters but the USER-facing
+  ExportDialog/project-zip still called the legacy one-way ones — exactly the gap the
+  principal's "output users expect" message targets. Switched txt/md/xlf/tmx to the
+  structured exporters, added SRT as an export option, refreshed option descriptions.
+- VTT deliberately stays on the cast-aware legacy exporter (the TTS/cast voice-tag workflow
+  is a product behavior, not an accident); fidelity warnings still fire on tag mismatches.
+- **F5 ledger:** one pre-existing assertion modified WITH justification (project-zip md test
+  pinned anchor comments, which are incompatible with round-trip re-import; new assertion
+  pins the anchor-free output; legacy exportMarkdown + its own tests untouched).
+- **C7 ledger:** this changes default export output by explicit principal direction —
+  logged as a sanctioned deviation (same as the warnings panel).

@@ -42,10 +42,15 @@ No other dependencies added. No external paid resources used (C3).
 - **Export fidelity report in ExportDialog**: additive UI (amber warning list
   after a successful export), enabled by default **at the principal's explicit
   direction** ("warnings about inline style mismatches… critical") — a logged
-  deviation from the C7 default-off convention. No export byte output changed.
-- All legacy exporters (`exportPlainText`, `exportMarkdown`, `exportXliff`,
-  `exportTmx`, `exportVtt`) are byte-identical; round-trip behavior ships as
-  NEW sibling functions (C7).
+  deviation from the C7 default-off convention.
+- **User-facing exports are now round-trip (cycle 11, principal directive):**
+  ExportDialog and the project-zip path call the structured exporters for
+  txt/md/xlf/tmx and gain an SRT option. This CHANGES default export output —
+  a second logged C7 deviation, sanctioned by the same directive. VTT stays on
+  the cast-aware exporter (TTS voice-tag workflow). The legacy exporter
+  functions themselves are untouched and keep their tests; one pre-existing
+  project-zip assertion was updated with justification (md anchors are
+  incompatible with round-trip re-import; see ITERATION_LOG cycle 11).
 
 ## ADRs (C5)
 
@@ -107,6 +112,16 @@ existing public interfaces (`TranslatableString.metadata`, exporter modules).
 - `src/lib/parsers/sbv.ts` (A) + tests: YouTube SBV subtitles (import).
 - `src/lib/import.ts` (M): `arrayBufferToBase64` exported (Download-Original
   acceptance); no behavior change.
+
+### User-facing export wiring (cycle 11)
+- `src/components/ExportDialog.tsx` (M): txt/md/xlf/tmx now call
+  `exportPlainTextStructured` / `exportMarkdownStructured` /
+  `exportXliff12Structured` / `exportTmxStructured`; new "SRT (subtitles)"
+  option; format descriptions refreshed.
+- `src/lib/export/project-zip-export.ts` (M): same exporter switch for project
+  zips + `srt` in `TextExportFormat`.
+- `src/lib/export/project-zip-export.test.ts` (M): one assertion updated with
+  justification (anchor-free md output).
 
 ### Export fidelity (block styles + inline-style warnings)
 - `src/lib/export/fidelity.ts` (A): `compareBlockStyles` (round-trip block

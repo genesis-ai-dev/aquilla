@@ -27,7 +27,8 @@ import { extractSrtStrings, extractVttStrings } from "@/lib/parsers/subtitle"
 import { extractDocxStrings } from "@/lib/parsers/docx"
 import { extractPptxStrings } from "@/lib/parsers/pptx"
 import { parseXlsxToSheets } from "@/lib/parsers/spreadsheet"
-import { exportXliff } from "@/lib/export/exporters/xliff"
+import { exportXliff12Structured } from "@/lib/export/exporters/xliff12-structured"
+import { exportXliff20 } from "@/lib/export/exporters/xliff20"
 import { exportTmx } from "@/lib/export/exporters/tmx"
 import { exportCsv } from "@/lib/export/exporters/csv"
 import { exportTsv } from "@/lib/export/exporters/tsv"
@@ -87,6 +88,7 @@ const toCells = (strings: TranslatableString[]): CellData[] =>
         startTime: s.start,
         endTime: s.end,
         speaker: s.speaker,
+        metadata: s.metadata,
       }) as unknown as CellData,
   )
 
@@ -94,10 +96,11 @@ export async function buildAdapters(): Promise<Record<string, FormatAdapter>> {
   const adapters: Record<string, FormatAdapter> = {
     xliff12: {
       parse: async (b) => toSegments(parseXliff(text(b))),
-      export: async (b) => toBytes(exportXliff(toCells(parseXliff(text(b))), "en-US", "fr-FR")),
+      export: async (b) => toBytes(exportXliff12Structured(toCells(parseXliff(text(b))), "en-US", "fr-FR")),
     },
     xliff20: {
       parse: async (b) => toSegments(parseXliff(text(b))),
+      export: async (b) => toBytes(exportXliff20(toCells(parseXliff(text(b))), "en-US", "fr-FR")),
     },
     tmx: {
       parse: async (b) => toSegments(parseTmx(text(b))),

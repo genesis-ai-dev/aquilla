@@ -1,8 +1,8 @@
 {
   "set": "dev",
-  "generatedAt": "2026-07-04T16:55:55.357Z",
+  "generatedAt": "2026-07-04T16:59:53.214Z",
   "total": 122,
-  "passed": 76,
+  "passed": 86,
   "perFormat": {
     "csv": {
       "pass": 7,
@@ -65,7 +65,7 @@
       "total": 12
     },
     "xliff20": {
-      "pass": 0,
+      "pass": 10,
       "total": 10
     },
     "xlsx": {
@@ -899,112 +899,62 @@
     {
       "file": "xliff20/xliff20-001.xlf",
       "format": "xliff20",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "xliff20/xliff20-002.xlf",
       "format": "xliff20",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "xliff20/xliff20-003.xlf",
       "format": "xliff20",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "xliff20/xliff20-004.xlf",
       "format": "xliff20",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "xliff20/xliff20-005.xlf",
       "format": "xliff20",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "xliff20/xliff20-006.xlf",
       "format": "xliff20",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "xliff20/xliff20-008.xlf",
       "format": "xliff20",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "xliff20/xliff20-010.xlf",
       "format": "xliff20",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "xliff20/xliff20-011.xlf",
       "format": "xliff20",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "xliff20/xliff20-015.xlf",
       "format": "xliff20",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "xlsx/xlsx-002.xlsx",

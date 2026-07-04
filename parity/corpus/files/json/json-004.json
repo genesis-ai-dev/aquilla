@@ -1,0 +1,29 @@
+{
+    "app": {
+        "title": "Enter your 6-digit verification code to continue.",
+        "subtitle": "Mesures de sécurité : portez des gants et des lunettes de protection."
+    },
+    "buttons": {
+        "save": "Save",
+        "cancel": "Cancel",
+        "delete": "Der Vertrag tritt am ersten Tag des Folgemonats in Kraft."
+    },
+    "messages": [
+        "Battery life: up to 18 hours of continuous video playback.",
+        "This warranty does not cover damage caused by misuse or unauthorized repair."
+    ],
+    "meta": {
+        "version": 3,
+        "active": true,
+        "ratio": 0.5,
+        "nothing": null
+    },
+    "weird \"key\" with quotes": "This section intentionally left blank.",
+    "nested": {
+        "deep": {
+            "deeper": {
+                "value": "La configuración se guardará automáticamente cada 5 minutos."
+            }
+        }
+    }
+}

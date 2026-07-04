@@ -1,0 +1,22 @@
+{
+    "app": {
+        "title": "Les données personnelles sont traitées conformément au RGPD.",
+        "subtitle": "Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F)."
+    },
+    "buttons": {
+        "save": "Save",
+        "cancel": "Cancel",
+        "delete": "Die maximale Zuladung beträgt 750 kg einschließlich Fahrer."
+    },
+    "messages": [
+        "Adverse reactions may include nausea, dizziness, and <severe> headaches.",
+        "Uptime SLA of 99.95% measured monthly, excluding scheduled maintenance."
+    ],
+    "meta": {
+        "version": 3,
+        "active": true,
+        "ratio": 0.5,
+        "nothing": null
+    },
+    "weird \"key\" with quotes": "Warning: contents may be hot. Handle with care."
+}

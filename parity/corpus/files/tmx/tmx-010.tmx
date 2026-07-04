@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tmx SYSTEM "tmx14.dtd">
+<tmx version="1.4">
+<header creationtool="corpus-gen" creationtoolversion="1.0" segtype="sentence" o-tmf="none" adminlang="en-US" srclang="en-US" datatype="plaintext"/>
+<body>
+<tu tuid="tu-9-0"><tuv xml:lang="en-US"><seg>Take 2 tablets daily with food; do not exceed 6 tablets in 24 hours.</seg></tuv><tuv xml:lang="ja-JP"><seg>Установите п<ph x="1">{0}</ph>риложение и войдите в свою учетную запись.</seg></tuv></tu>
+<tu tuid="tu-9-1"><tuv xml:lang="en-US"><seg>Der Vertrag tritt am ersten Tag des Folgemonats in Kraft.</seg></tuv><tuv xml:lang="ja-JP"><seg>This warranty does not cover damage caused by misuse or unauthorized repair.</seg></tuv></tu>
+<tu tuid="tu-9-2"><tuv xml:lang="en-US"><seg><![CDATA[Añada 250 ml de agua y mezcle hasta obtener una masa homogénea.]]></seg></tuv><tuv xml:lang="ja-JP"><seg>Take 2 table<ph x="1">{0}</ph>ts daily with food; do not exceed 6 tablets in 24 hours.</seg></tuv></tu>
+<tu tuid="tu-9-3"><tuv xml:lang="en-US"><seg>Session expired — please sign in again to continue where you left off.</seg></tuv><tuv xml:lang="ja-JP"><seg>Adverse reac<ph x="1">{0}</ph>tions may include nausea, dizziness, and &lt;severe&gt; headaches.</seg></tuv></tu>
+<tu tuid="tu-9-4"><tuv xml:lang="en-US"><seg>Ensure the device is powered off before removing the battery cover.</seg></tuv><tuv xml:lang="ja-JP"><seg>Error 404: the requested resource could not be found on this server.</seg></tuv></tu>
+<tu tuid="tu-9-5"><prop type="x-domain">legal</prop><tuv xml:lang="en-US"><seg>Warning: contents may be hot. Handle with care.</seg></tuv><tuv xml:lang="ja-JP"><seg>Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).</seg></tuv></tu>
+<tu tuid="tu-9-6"><note>reviewed</note><tuv xml:lang="en-US"><seg><![CDATA[The undersigned parties agree to the terms & conditions set forth herein.]]></seg></tuv><tuv xml:lang="ja-JP"><seg>This warranty does not cover damage caused by misuse or unauthorized repair.</seg></tuv></tu>
+<tu tuid="tu-9-7"><prop type="x-domain">legal</prop><note>reviewed</note><tuv xml:lang="en-US"><seg>Der Vertrag tritt am ersten Tag des Folgemonats in Kraft.</seg></tuv><tuv xml:lang="ja-JP"><seg>Use the &lt;b&gt;bold&lt;/b&gt; toggle to emphasize key phrases.</seg></tuv></tu>
+</body>
+</tmx>

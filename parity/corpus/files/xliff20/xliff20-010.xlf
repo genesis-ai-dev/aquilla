@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" version="2.0" srcLang="en-US" trgLang="de-DE">
+  <file id="f1">
+    <unit id="u1">
+      <segment id="s0-0" state="initial">
+        <source>Rinse thoroughly with lukewarm water for at least 15 minutes.</source>
+      </segment>
+    </unit>
+    <unit id="u2">
+      <segment id="s1-0" state="initial">
+        <source><pc id="pc1-0">This warranty does not cover damage caused by misuse or unauthorized repair.</pc></source>
+      </segment>
+    </unit>
+    <unit id="u3">
+      <segment id="s2-0" state="final">
+        <source><pc id="pc2-0">El usuario acepta las condiciones al hacer clic en “Continuar”.</pc></source>
+        <target><pc id="pc2-0">El usuario acepta las condiciones al hacer clic en “Continuar”.</pc></target>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s2-1" state="final">
+        <source>Take 2 t<ph id="ph2-1"/>ablets daily with food; do not exceed 6 tablets in 24 hours.</source>
+        <target>Take 2 t<ph id="ph2-1"/>ablets daily with food; do not exceed 6 tablets in 24 hours.</target>
+      </segment>
+    </unit>
+    <unit id="u4">
+      <segment id="s3-0" state="initial">
+        <source><pc id="pc3-0">Congratulations! You have unlocked the &quot;Explorer&quot; achievement 🎉.</pc></source>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s3-1" state="initial">
+        <source>This warranty does not cover damage caused by misuse or unauthorized repair.</source>
+      </segment>
+    </unit>
+    <unit id="u5">
+      <segment id="s4-0" state="final">
+        <source>製品の仕様は予告なく変更されることがあります。</source>
+        <target>製品の仕様は予告なく変更されることがあります。</target>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s4-1" state="final">
+        <source>Free shipping on orders over $50 — terms apply.</source>
+        <target>Free shipping on orders over $50 — terms apply.</target>
+      </segment>
+    </unit>
+    <unit id="u6">
+      <segment id="s5-0" state="translated">
+        <source>Warning: contents may be hot. Handle with care.</source>
+        <target>Warning: contents may be hot. Handle with care.</target>
+      </segment>
+    </unit>
+    <unit id="u7">
+      <segment id="s6-0" state="initial">
+        <source><pc id="pc6-0">Use the &lt;b&gt;bold&lt;/b&gt; toggle to emphasize key phrases.</pc></source>
+      </segment>
+    </unit>
+    <unit id="u8">
+      <segment id="s7-0" state="initial">
+        <source>Congratulations! You have unlocked the &quot;Explorer&quot; achievement 🎉.</source>
+      </segment>
+    </unit>
+    <unit id="u9">
+      <segment id="s8-0" state="initial">
+        <source>Enter yo<ph id="ph8-0"/>ur 6-digit verification code to continue.</source>
+      </segment>
+    </unit>
+  </file>
+</xliff>

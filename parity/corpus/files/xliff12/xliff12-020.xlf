@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="fr-FR" target-language="en-US" datatype="plaintext" original="doc0.txt">
+    <body>
+      <trans-unit id="u1">
+        <source><g id="g1">Установите приложение и войдите в свою учетную запись.</g></source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u2">
+        <source><bpt id="b2">&lt;b&gt;</bpt>Mesures de sécurité : portez des gants et des lunettes de protection.<ept id="b2">&lt;/b&gt;</ept></source>
+        <target state="final"><bpt id="b2">&lt;b&gt;</bpt>Mesures de sécurité : portez des gants et des lunettes de protection.<ept id="b2">&lt;/b&gt;</ept></target>
+        <note>ctx-2</note>
+      </trans-unit>
+      <trans-unit id="u3">
+        <source>Third-party integrations require an Enterprise plan subscription.</source>
+        <target state="final">Third-party integrations require an Enterprise plan subscription.</target>
+      </trans-unit>
+      <trans-unit id="u4">
+        <source>Our team d<x id="x4"/>elivers world-class localization at scale — 24/7 support included.</source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u5">
+        <source>A load-bearing wall shall not be modified without engineering approval.</source>
+        <target state="final">A load-bearing wall shall not be modified without engineering approval.</target>
+      </trans-unit>
+      <trans-unit id="u6">
+        <source>Take 2 tablets daily with food; do not exceed 6 tablets in 24 hours.</source>
+        <target state="final">Take 2 tablets daily with food; do not exceed 6 tablets in 24 hours.</target>
+      </trans-unit>
+      <trans-unit id="u7">
+        <source><g id="g7">Session expired — please sign in again to continue where you left off.</g></source>
+        <target state="new"></target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

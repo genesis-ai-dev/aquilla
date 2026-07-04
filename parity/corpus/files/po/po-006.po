@@ -1,0 +1,39 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: corpus 5\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Free shipping on orders over $50 — terms apply."
+msgstr ""
+
+#. developer note 1
+#: src/app.ts:11
+msgid "Error 404: the requested resource could not be found on this server."
+msgstr "All prices include VAT at the applicable rate of 21%."
+
+msgid "El usuario acepta las condiciones al hacer clic en “Continuar”."
+msgid_plural "El usuario acepta las condiciones al hacer clic en “Continuar”. (plural)"
+msgstr[0] "Third-party integrations require an Enterprise plan subscription."
+msgstr[1] "Third-party integrations require an Enterprise plan subscription."
+
+#. developer note 3
+#: src/app.ts:13
+msgid "La configuración se guardará automáticamente cada 5 minutos."
+msgstr "All prices include VAT at the applicable rate of 21%."
+
+msgid "Don't share your password with anyone, including support staff."
+msgid_plural "Don't share your password with anyone, including support staff. (plural)"
+msgstr[0] "The API returns HTTP 429 when the rate limit of 100 req/min is exceeded."
+msgstr[1] "The API returns HTTP 429 when the rate limit of 100 req/min is exceeded."
+
+#. developer note 5
+#: src/app.ts:15
+msgid "Ensure the device is powered off before removing the battery cover."
+msgstr "Les données personnelles sont traitées conformément au RGPD."
+
+msgid "La configuración se guardará automáticamente cada 5 minutos."
+msgstr ""
+
+msgid "Don't share your password with anyone, including support staff."
+msgstr "Our team delivers world-class localization at scale — 24/7 support included."

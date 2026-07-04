@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tmx SYSTEM "tmx14.dtd">
+<tmx version="1.4">
+<header creationtool="corpus-gen" creationtoolversion="1.0" segtype="sentence" o-tmf="none" adminlang="en-US" srclang="en-US" datatype="plaintext"/>
+<body>
+<tu tuid="tu-4-0"><prop type="x-domain">legal</prop><note>reviewed</note><tuv xml:lang="en-US"><seg>Session expired — please sign in again to continue where you left off.</seg></tuv><tuv xml:lang="de-DE"><seg>The quarterly report shows a 12.5% increase in recurring revenue.</seg></tuv></tu>
+<tu tuid="tu-4-1"><prop type="x-domain">legal</prop><tuv xml:lang="en-US"><seg>Session expired — please sign in again to continue where you left off.</seg></tuv><tuv xml:lang="de-DE"><seg>Ensure the device is powered off before removing the battery cover.</seg></tuv></tu>
+<tu tuid="tu-4-2"><tuv xml:lang="en-US"><seg>A load-bearing wall shall not be modified without engineering approval.</seg></tuv><tuv xml:lang="de-DE"><seg>Our team del<ph x="1">{0}</ph>ivers world-class localization at scale — 24/7 support included.</seg></tuv></tu>
+<tu tuid="tu-4-3"><tuv xml:lang="en-US"><seg>Net weight: 454 g (16 oz). Packaged in a facility that handles nuts.</seg></tuv><tuv xml:lang="de-DE"><seg>Rinse thoroughly with lukewarm water for at least 15 minutes.</seg></tuv></tu>
+<tu tuid="tu-4-4"><tuv xml:lang="en-US"><seg><![CDATA[Refunds are processed within 5–10 business days of approval.]]></seg></tuv><tuv xml:lang="de-DE"><seg>Añada 250 ml de agua y mezcle hasta obtener una masa homogénea.</seg></tuv></tu>
+<tu tuid="tu-4-5"><prop type="x-domain">legal</prop><tuv xml:lang="en-US"><seg>Please review the attached invoice before the payment deadline.</seg></tuv><tuv xml:lang="de-DE"><seg>Les données <ph x="1">{0}</ph>personnelles sont traitées conformément au RGPD.</seg></tuv></tu>
+<tu tuid="tu-4-6"><tuv xml:lang="en-US"><seg>Añada 250 ml de agua y mezcle hasta obtener una masa homogénea.</seg></tuv><tuv xml:lang="de-DE"><seg>The API retu<ph x="1">{0}</ph>rns HTTP 429 when the rate limit of 100 req/min is exceeded.</seg></tuv></tu>
+<tu tuid="tu-4-7"><tuv xml:lang="en-US"><seg>Установите приложение и войдите в свою учетную запись.</seg></tuv><tuv xml:lang="de-DE"><seg>Der Vertrag <ph x="1">{0}</ph>tritt am ersten Tag des Folgemonats in Kraft.</seg></tuv></tu>
+<tu tuid="tu-4-8"><tuv xml:lang="en-US"><seg>Take 2 tablets daily with food; do not exceed 6 tablets in 24 hours.</seg></tuv><tuv xml:lang="de-DE"><seg>This warrant<ph x="1">{0}</ph>y does not cover damage caused by misuse or unauthorized repair.</seg></tuv></tu>
+<tu tuid="tu-4-9"><tuv xml:lang="en-US"><seg>Der Vertrag tritt am ersten Tag des Folgemonats in Kraft.</seg></tuv><tuv xml:lang="de-DE"><seg>The quarterly report shows a 12.5% increase in recurring revenue.</seg></tuv></tu>
+<tu tuid="tu-4-10"><tuv xml:lang="en-US"><seg>La configuración se guardará automáticamente cada 5 minutos.</seg></tuv><tuv xml:lang="de-DE"><seg>Free shipping on orders over $50 — terms apply.</seg></tuv></tu>
+<tu tuid="tu-4-11"><prop type="x-domain">legal</prop><tuv xml:lang="en-US"><seg><![CDATA[Enter your 6-digit verification code to continue.]]></seg></tuv><tuv xml:lang="de-DE"><seg>Установите приложение и войдите в свою учетную запись.</seg></tuv></tu>
+<tu tuid="tu-4-12"><prop type="x-domain">legal</prop><tuv xml:lang="en-US"><seg><![CDATA[Uptime SLA of 99.95% measured monthly, excluding scheduled maintenance.]]></seg></tuv><tuv xml:lang="de-DE"><seg>製品の仕様は予告なく変更されることがあります。</seg></tuv></tu>
+</body>
+</tmx>

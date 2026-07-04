@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tmx SYSTEM "tmx14.dtd">
+<tmx version="1.4">
+<header creationtool="corpus-gen" creationtoolversion="1.0" segtype="sentence" o-tmf="none" adminlang="en-US" srclang="de-DE" datatype="plaintext"/>
+<body>
+<tu tuid="tu-15-0"><note>reviewed</note><tuv xml:lang="de-DE"><seg>Adverse reactions may include nausea, dizziness, and &lt;severe&gt; headaches.</seg></tuv><tuv xml:lang="it-IT"><seg>Backup completed successfully at 02:00 UTC; 1,284 files archived.</seg></tuv></tu>
+<tu tuid="tu-15-1"><tuv xml:lang="de-DE"><seg><![CDATA[The API returns HTTP 429 when the rate limit of 100 req/min is exceeded.]]></seg></tuv><tuv xml:lang="it-IT"><seg>Error 404: the requested resource could not be found on this server.</seg></tuv></tu>
+<tu tuid="tu-15-2"><tuv xml:lang="de-DE"><seg>Net weight: 454 g (16 oz). Packaged in a facility that handles nuts.</seg></tuv><tuv xml:lang="it-IT"><seg>A load-beari<ph x="1">{0}</ph>ng wall shall not be modified without engineering approval.</seg></tuv></tu>
+<tu tuid="tu-15-3"><prop type="x-domain">legal</prop><tuv xml:lang="de-DE"><seg>Battery life: up to 18 hours of continuous video playback.</seg></tuv><tuv xml:lang="it-IT"><seg>Mesures de sécurité : portez des gants et des lunettes de protection.</seg></tuv></tu>
+<tu tuid="tu-15-4"><tuv xml:lang="de-DE"><seg>All prices include VAT at the applicable rate of 21%.</seg></tuv><tuv xml:lang="it-IT"><seg>請在使用前仔細閱讀本說明<ph x="1">{0}</ph>書。</seg></tuv></tu>
+<tu tuid="tu-15-5"><note>reviewed</note><tuv xml:lang="de-DE"><seg>Backup completed successfully at 02:00 UTC; 1,284 files archived.</seg></tuv><tuv xml:lang="it-IT"><seg>This warrant<ph x="1">{0}</ph>y does not cover damage caused by misuse or unauthorized repair.</seg></tuv></tu>
+<tu tuid="tu-15-6"><prop type="x-domain">legal</prop><tuv xml:lang="de-DE"><seg><![CDATA[The quarterly report shows a 12.5% increase in recurring revenue.]]></seg></tuv><tuv xml:lang="it-IT"><seg>All prices i<ph x="1">{0}</ph>nclude VAT at the applicable rate of 21%.</seg></tuv></tu>
+</body>
+</tmx>

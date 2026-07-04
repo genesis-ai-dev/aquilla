@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" version="2.0" srcLang="fr-FR" trgLang="en-US">
+  <file id="f1">
+    <unit id="u1">
+      <segment id="s0-0" state="translated">
+        <source>Ensure t<ph id="ph0-0"/>he device is powered off before removing the battery cover.</source>
+        <target>Ensure t<ph id="ph0-0"/>he device is powered off before removing the battery cover.</target>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s0-1" state="initial">
+        <source>Les données personnelles sont traitées conformément au RGPD.</source>
+      </segment>
+    </unit>
+    <unit id="u2">
+      <segment id="s1-0" state="translated">
+        <source>Backup completed successfully at 02:00 UTC; 1,284 files archived.</source>
+        <target>Backup completed successfully at 02:00 UTC; 1,284 files archived.</target>
+      </segment>
+    </unit>
+    <unit id="u3">
+      <segment id="s2-0" state="translated">
+        <source>By signi<ph id="ph2-0"/>ng below, the lessee acknowledges receipt of the premises.</source>
+        <target>By signi<ph id="ph2-0"/>ng below, the lessee acknowledges receipt of the premises.</target>
+      </segment>
+    </unit>
+    <unit id="u4">
+      <segment id="s3-0" state="initial">
+        <source>Session expired — please sign in again to continue where you left off.</source>
+      </segment>
+    </unit>
+    <unit id="u5">
+      <segment id="s4-0" state="translated">
+        <source>Click &quot;Save&quot; to apply your changes, or press Cancel to discard them.</source>
+        <target>Click &quot;Save&quot; to apply your changes, or press Cancel to discard them.</target>
+      </segment>
+    </unit>
+    <unit id="u6">
+      <segment id="s5-0" state="initial">
+        <source><pc id="pc5-0">Session expired — please sign in again to continue where you left off.</pc></source>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s5-1" state="translated">
+        <source>Battery life: up to 18 hours of continuous video playback.</source>
+        <target>Battery life: up to 18 hours of continuous video playback.</target>
+      </segment>
+    </unit>
+    <unit id="u7">
+      <segment id="s6-0" state="initial">
+        <source>Uptime SLA of 99.95% measured monthly, excluding scheduled maintenance.</source>
+      </segment>
+    </unit>
+    <unit id="u8">
+      <segment id="s7-0" state="final">
+        <source>請在使用前仔細閱讀本說明書。</source>
+        <target>請在使用前仔細閱讀本說明書。</target>
+      </segment>
+    </unit>
+  </file>
+</xliff>

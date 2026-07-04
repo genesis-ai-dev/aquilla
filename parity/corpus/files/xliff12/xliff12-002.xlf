@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="en-GB" target-language="es-ES" datatype="plaintext" original="doc0.txt">
+    <body>
+      <trans-unit id="u1">
+        <source>Click &quot;Save&quot; to apply your changes, or press Cancel to discard them.</source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u2">
+        <source><g id="g2">Mesures de sécurité : portez des gants et des lunettes de protection.</g></source>
+        <target state="final"><g id="g2">Mesures de sécurité : portez des gants et des lunettes de protection.</g></target>
+      </trans-unit>
+      <trans-unit id="u3">
+        <source>Please rev<x id="x3"/>iew the attached invoice before the payment deadline.</source>
+        <target state="final">Please rev<x id="x3"/>iew the attached invoice before the payment deadline.</target>
+      </trans-unit>
+      <trans-unit id="u4">
+        <source><g id="g4">This section intentionally left blank.</g></source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u5">
+        <source><bpt id="b5">&lt;b&gt;</bpt>Error 404: the requested resource could not be found on this server.<ept id="b5">&lt;/b&gt;</ept></source>
+        <target state="final"><bpt id="b5">&lt;b&gt;</bpt>Error 404: the requested resource could not be found on this server.<ept id="b5">&lt;/b&gt;</ept></target>
+        <note>ctx-5</note>
+      </trans-unit>
+      <trans-unit id="u6">
+        <source>Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).</source>
+        <target state="final">Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).</target>
+        <note>ctx-6</note>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

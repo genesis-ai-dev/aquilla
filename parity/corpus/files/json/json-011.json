@@ -1,0 +1,23 @@
+{
+  "app": {
+    "title": "Third-party integrations require an Enterprise plan subscription.",
+    "subtitle": "La configuración se guardará automáticamente cada 5 minutos."
+  },
+  "buttons": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "請在使用前仔細閱讀本說明書。"
+  },
+  "messages": [
+    "Session expired — please sign in again to continue where you left off.",
+    "The undersigned parties agree to the terms & conditions set forth herein.",
+    "Les données personnelles sont traitées conformément au RGPD."
+  ],
+  "meta": {
+    "version": 3,
+    "active": true,
+    "ratio": 0.5,
+    "nothing": null
+  },
+  "weird \"key\" with quotes": "Congratulations! You have unlocked the \"Explorer\" achievement 🎉."
+}

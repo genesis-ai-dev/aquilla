@@ -1,0 +1,52 @@
+1
+00:00:01,040 --> 00:00:03,007
+<i>製品の仕様は予告なく変更されることがあります。
+This warranty does not cover damage caused by misuse or unauthorized repair.</i>
+
+2
+00:00:04,146 --> 00:00:08,360
+Rinse thoroughly with lukewarm water for at least 15 minutes.
+
+3
+00:00:09,734 --> 00:00:12,181
+<i>Añada 250 ml de agua y mezcle hasta obtener una masa homogénea.
+Refunds are processed within 5–10 business days of approval.</i>
+
+4
+00:00:13,395 --> 00:00:15,017
+Refunds are processed within 5–10 business days of approval.
+
+5
+00:00:16,171 --> 00:00:18,057
+Rinse thoroughly with lukewarm water for at least 15 minutes.
+
+6
+00:00:18,124 --> 00:00:21,332
+All prices include VAT at the applicable rate of 21%.
+
+7
+00:00:22,491 --> 00:00:26,378
+Mesures de sécurité : portez des gants et des lunettes de protection.
+
+8
+00:00:27,468 --> 00:00:32,045
+Mesures de sécurité : portez des gants et des lunettes de protection.
+Añada 250 ml de agua y mezcle hasta obtener una masa homogénea.
+
+9
+00:00:32,739 --> 00:00:37,160
+<i>Die maximale Zuladung beträgt 750 kg einschließlich Fahrer.
+This section intentionally left blank.</i>
+
+10
+00:00:39,035 --> 00:00:41,126
+This section intentionally left blank.
+
+11
+00:00:42,805 --> 00:00:44,338
+Ensure the device is powered off before removing the battery cover.
+
+12
+00:00:45,095 --> 00:00:46,904
+Battery life: up to 18 hours of continuous video playback.
+The API returns HTTP 429 when the rate limit of 100 req/min is exceeded.

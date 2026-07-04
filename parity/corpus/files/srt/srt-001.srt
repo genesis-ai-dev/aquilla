@@ -1,0 +1,64 @@
+1
+00:00:02,844 --> 00:00:04,471
+<i>Añada 250 ml de agua y mezcle hasta obtener una masa homogénea.</i>
+
+2
+00:00:05,667 --> 00:00:09,668
+Enter your 6-digit verification code to continue.
+
+3
+00:00:10,798 --> 00:00:15,429
+Battery life: up to 18 hours of continuous video playback.
+
+4
+00:00:15,847 --> 00:00:19,127
+Die maximale Zuladung beträgt 750 kg einschließlich Fahrer.
+
+5
+00:00:20,050 --> 00:00:24,762
+Refunds are processed within 5–10 business days of approval.
+
+6
+00:00:25,723 --> 00:00:27,185
+Free shipping on orders over $50 — terms apply.
+The API returns HTTP 429 when the rate limit of 100 req/min is exceeded.
+
+7
+00:00:28,286 --> 00:00:32,282
+Rinse thoroughly with lukewarm water for at least 15 minutes.
+
+8
+00:00:32,608 --> 00:00:37,514
+Use the <b>bold</b> toggle to emphasize key phrases.
+
+9
+00:00:39,129 --> 00:00:43,498
+請在使用前仔細閱讀本說明書。
+
+10
+00:00:43,870 --> 00:00:46,363
+Warning: contents may be hot. Handle with care.
+Warning: contents may be hot. Handle with care.
+
+11
+00:00:48,099 --> 00:00:50,513
+Ensure the device is powered off before removing the battery cover.
+
+12
+00:00:52,015 --> 00:00:55,715
+Take 2 tablets daily with food; do not exceed 6 tablets in 24 hours.
+Der Vertrag tritt am ersten Tag des Folgemonats in Kraft.
+
+13
+00:00:55,949 --> 00:00:59,038
+By signing below, the lessee acknowledges receipt of the premises.
+
+14
+00:00:59,173 --> 00:01:02,823
+請在使用前仔細閱讀本說明書。
+Congratulations! You have unlocked the "Explorer" achievement 🎉.
+
+15
+00:01:04,663 --> 00:01:08,640
+La configuración se guardará automáticamente cada 5 minutos.
+Free shipping on orders over $50 — terms apply.

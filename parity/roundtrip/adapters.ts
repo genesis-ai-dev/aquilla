@@ -31,9 +31,10 @@ import { exportXliff } from "@/lib/export/exporters/xliff"
 import { exportTmx } from "@/lib/export/exporters/tmx"
 import { exportCsv } from "@/lib/export/exporters/csv"
 import { exportTsv } from "@/lib/export/exporters/tsv"
-import { exportPlainText } from "@/lib/export/exporters/plaintext"
-import { exportMarkdown } from "@/lib/export/exporters/markdown"
-import { exportVtt } from "@/lib/export/exporters/vtt"
+import { exportPlainTextStructured } from "@/lib/export/exporters/plaintext"
+import { exportMarkdownStructured } from "@/lib/export/exporters/markdown"
+import { exportVttStructured } from "@/lib/export/exporters/vtt-structured"
+import { exportSrt } from "@/lib/export/exporters/srt"
 import { exportDocx } from "@/lib/export/exporters/docx"
 
 export interface AdapterSegment {
@@ -112,18 +113,19 @@ export async function buildAdapters(): Promise<Record<string, FormatAdapter>> {
     },
     txt: {
       parse: async (b) => toSegments(extractPlaintextStrings(text(b))),
-      export: async (b) => toBytes(exportPlainText(toCells(extractPlaintextStrings(text(b))))),
+      export: async (b) => toBytes(exportPlainTextStructured(toCells(extractPlaintextStrings(text(b))))),
     },
     md: {
       parse: async (b) => toSegments(extractMarkdownStrings(text(b))),
-      export: async (b) => toBytes(exportMarkdown(toCells(extractMarkdownStrings(text(b))))),
+      export: async (b) => toBytes(exportMarkdownStructured(toCells(extractMarkdownStrings(text(b))))),
     },
     srt: {
       parse: async (b) => toSegments(extractSrtStrings(text(b))),
+      export: async (b) => toBytes(exportSrt(toCells(extractSrtStrings(text(b))))),
     },
     vtt: {
       parse: async (b) => toSegments(extractVttStrings(text(b))),
-      export: async (b) => toBytes(exportVtt(toCells(extractVttStrings(text(b))), undefined)),
+      export: async (b) => toBytes(exportVttStructured(toCells(extractVttStrings(text(b))))),
     },
     docx: {
       parse: async (b) => toSegments(await extractDocxStrings(buf(b))),

@@ -1,8 +1,8 @@
 {
   "set": "dev",
-  "generatedAt": "2026-07-04T16:48:47.461Z",
+  "generatedAt": "2026-07-04T16:55:55.357Z",
   "total": 122,
-  "passed": 57,
+  "passed": 76,
   "perFormat": {
     "csv": {
       "pass": 7,
@@ -21,7 +21,7 @@
       "total": 7
     },
     "md": {
-      "pass": 0,
+      "pass": 7,
       "total": 7
     },
     "po": {
@@ -41,7 +41,7 @@
       "total": 5
     },
     "srt": {
-      "pass": 0,
+      "pass": 7,
       "total": 7
     },
     "tmx": {
@@ -53,11 +53,11 @@
       "total": 6
     },
     "txt": {
-      "pass": 3,
+      "pass": 7,
       "total": 7
     },
     "vtt": {
-      "pass": 6,
+      "pass": 7,
       "total": 7
     },
     "xliff12": {
@@ -321,79 +321,44 @@
     {
       "file": "md/md-004.md",
       "format": "md",
-      "pass": false,
-      "failures": [
-        {
-          "check": "reparse-sources",
-          "detail": "distinct 8 vs 9"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "md/md-005.md",
       "format": "md",
-      "pass": false,
-      "failures": [
-        {
-          "check": "reparse-sources",
-          "detail": "count mismatch for a segment (1 vs 0)"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "md/md-006.md",
       "format": "md",
-      "pass": false,
-      "failures": [
-        {
-          "check": "reparse-sources",
-          "detail": "count mismatch for a segment (1 vs 0)"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "md/md-007.md",
       "format": "md",
-      "pass": false,
-      "failures": [
-        {
-          "check": "reparse-sources",
-          "detail": "count mismatch for a segment (1 vs 0)"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "md/md-009.md",
       "format": "md",
-      "pass": false,
-      "failures": [
-        {
-          "check": "reparse-sources",
-          "detail": "distinct 6 vs 7"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "md/md-010.md",
       "format": "md",
-      "pass": false,
-      "failures": [
-        {
-          "check": "reparse-sources",
-          "detail": "count mismatch for a segment (1 vs 0)"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "md/md-011.md",
       "format": "md",
-      "pass": false,
-      "failures": [
-        {
-          "check": "reparse-sources",
-          "detail": "distinct 7 vs 8"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "po/po-001.po",
@@ -640,79 +605,44 @@
     {
       "file": "srt/srt-002.srt",
       "format": "srt",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "srt/srt-005.srt",
       "format": "srt",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "srt/srt-006.srt",
       "format": "srt",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "srt/srt-007.srt",
       "format": "srt",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "srt/srt-010.srt",
       "format": "srt",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "srt/srt-011.srt",
       "format": "srt",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "srt/srt-012.srt",
       "format": "srt",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "tmx/tmx-003.tmx",
@@ -819,32 +749,14 @@
     {
       "file": "txt/txt-003.txt",
       "format": "txt",
-      "pass": false,
-      "failures": [
-        {
-          "check": "reparse-sources",
-          "detail": "distinct 7 vs 4"
-        },
-        {
-          "check": "reparse-count",
-          "detail": "8 segments in, 4 after roundtrip"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "txt/txt-005.txt",
       "format": "txt",
-      "pass": false,
-      "failures": [
-        {
-          "check": "reparse-sources",
-          "detail": "distinct 9 vs 5"
-        },
-        {
-          "check": "reparse-count",
-          "detail": "9 segments in, 5 after roundtrip"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "txt/txt-006.txt",
@@ -855,17 +767,8 @@
     {
       "file": "txt/txt-008.txt",
       "format": "txt",
-      "pass": false,
-      "failures": [
-        {
-          "check": "reparse-sources",
-          "detail": "distinct 8 vs 5"
-        },
-        {
-          "check": "reparse-count",
-          "detail": "9 segments in, 5 after roundtrip"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "txt/txt-009.txt",
@@ -876,17 +779,8 @@
     {
       "file": "txt/txt-010.txt",
       "format": "txt",
-      "pass": false,
-      "failures": [
-        {
-          "check": "reparse-sources",
-          "detail": "distinct 6 vs 3"
-        },
-        {
-          "check": "reparse-count",
-          "detail": "6 segments in, 3 after roundtrip"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "vtt/vtt-002.vtt",
@@ -921,13 +815,8 @@
     {
       "file": "vtt/vtt-011.vtt",
       "format": "vtt",
-      "pass": false,
-      "failures": [
-        {
-          "check": "reparse-sources",
-          "detail": "count mismatch for a segment (1 vs 0)"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "vtt/vtt-012.vtt",

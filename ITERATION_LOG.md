@@ -154,3 +154,15 @@ yet; spend/pace healthy (P0 cleared at ~2h elapsed of 10h).
   metadata, originalHtml, tag multisets), not on any corpus/test content. The comparator was
   verified to actually catch degradation (ol→ul fault-injection assertion), so the check is
   falsifiable, not decorative.
+
+---
+
+## Run close-out (2026-07-04 ~17:50Z)
+
+Final instruments: parity 100.0% weighted (P0 33/33, P1 15/15, P2 3/3, EXCEEDS 5/5);
+roundtrip dev 122/122 and holdout 82/82 (post-refresh); batch contract 10/10 with
+throughput far under bar; F6 canaries zero leaks; default suite 3385 green; tsc clean;
+1 pre-existing eslint error (EditorTable.tsx, untouched). Deliverables: PARITY_MATRIX.yaml,
+BATCH_ENDPOINT_CONTRACT.md, CHANGES.md, QA_TEST_PLAN.md, PARITY_FINAL_REPORT.md, this log.
+Wall clock at close ≈ 2h40m of 10h. Remaining gaps and review priorities are in
+PARITY_FINAL_REPORT.md (§gaps, §risk areas).

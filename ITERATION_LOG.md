@@ -52,3 +52,54 @@ what was tried, diagnostic result, metric delta, overfit reflection (F1–F7 che
   cat-roundtrip.test.ts / exporters.test.ts that pin the old (one-way) behavior — F5 requires
   logging any assertion change here: changes will be strictly strengthening (one-way → true
   round-trip), never loosening.
+
+- **Result (c1):** roundtrip dev 46.7% → 62.3%; txt/md/srt/vtt 100%. Root causes were real
+  product gaps (paragraph structure dropped on export, no SRT exporter, VTT tags stripped,
+  CRLF import bug) — not corpus quirks. All pre-existing tests stayed green; new exporters
+  additive per C7. Overfit reflection: fixes are format-spec-driven, none keyed to corpus
+  content. No F-violations.
+
+---
+
+## Cycle 2 — XLIFF 1.2/2.0 block
+- **Hypothesis:** capturing an inline-tag skeleton at import (metadata.xliff) lets exporters
+  re-emit tags verbatim; schema-valid 1.2 + 2.0 exporters flip 7 P0 rows.
+- **Result:** roundtrip dev 62.3% → 70.5% (xliff20 0→100%). One design correction mid-cycle:
+  "unedited" detection must compare against the imported TARGET text, not the source.
+  8 tagged acceptance tests green; xmllint/OASIS XSD validation used throughout (F4).
+- **Overfit reflection:** skeleton capture is spec-shaped (works for any XLIFF), not
+  corpus-shaped. No enumeration lists added (F3 clean).
+
+## Cycle 3 — TMX + DOCX + Download-Original P0 rows
+- **Result:** TMX skeleton + keep/strip-tags export variants (DTD-validated); code-aware text
+  extraction (bpt/ept/ph/it content is native code per spec — excluded from segment text,
+  <sub> re-enters). My own new fixture initially encoded the WRONG expectation ({0} in text);
+  corrected the test, not the spec. fmt.export.original pinned to the real 512KB sidecar
+  boundary — the >512KB gap is documented, not hidden. Full default suite 3311 green.
+- **F5 note:** no pre-existing assertions changed in c1–c3; only additive tests.
+
+## Cycle 4+5 — analysis + QA libraries
+- **Result:** wordcount (CJK chars/URLs/numbers/punctuation rules), repetition +
+  internal-fuzzy bucketing (windowed Dice), frozen payable rate table w/ custom models;
+  QA checks tags/whitespace/symbols/numbers/conflicts. 16 acceptance tests green first run.
+
+## Cycle 6 — batch pipeline
+- **Result:** BatchService + stub implementing the frozen contract; 10 contract tests green;
+  throughput 10k segments ≈ instant vs 5-min bar. Cursor encoding rewritten without Buffer
+  (Workers/browser compat).
+
+## Cycle 7 — TM governance (F6/C8)
+- **Result:** P0 31/31 (100%) — weighted 40.5% → 78.6%. Global-TM index with read-path
+  enterprise + opt-out exclusion (non-bypassable, defense-in-depth vs legacy rows), write
+  gate, billing-stubbed entitlement (default contribute=TRUE; opt-out requires paid feature).
+  500 seeded property queries + red-team probes: zero canary leaks.
+- **Overfit reflection:** canaries/queries are synthetic and seeded; exclusion logic filters by
+  org/project resolvers, not by canary patterns — a new enterprise org is excluded without
+  code change. No eval-shaped artifacts.
+
+## Knob audit (5-cycle checkpoint)
+Highest effort-to-gain so far: (1) corpus generator OOXML plumbing (large upfront cost, paid
+off across docx/pptx/xlsx rows — keep, already sunk); (2) chasing per-file dev failures one
+at a time in c1 (switch: batch by failure-check histogram first); (3) hand-writing long
+acceptance fixtures (keep minimal fixtures; prefer spec-driven cases). No change type banned
+yet; spend/pace healthy (P0 cleared at ~2h elapsed of 10h).

@@ -7,8 +7,7 @@
 // (initial | translated | reviewed | final) — Matecat documents that custom
 // state values are ignored, so none are emitted.
 import type { CellData } from "@/hooks/useCells"
-import type { XliffSegmentMeta } from "@/lib/parsers/xliff"
-import { inlineXmlText } from "./xliff12-structured"
+import { fragmentText, type XliffSegmentMeta } from "@/lib/parsers/xliff"
 
 const xmlEscape = (s: string): string =>
   s
@@ -63,9 +62,9 @@ export function exportXliff20(cells: CellData[], sourceLanguage = "en", targetLa
     const sourceXml = meta?.version === "2.0" && meta.sourceXml ? meta.sourceXml : xmlEscape(c.original)
     let targetXml = translated ? xmlEscape(translated) : ""
     if (meta?.version === "2.0") {
-      if (meta.targetXml != null && translated === inlineXmlText(meta.targetXml)) {
+      if (meta.targetXml != null && translated === fragmentText(meta.targetXml)) {
         targetXml = meta.targetXml
-      } else if (translated === inlineXmlText(meta.sourceXml)) {
+      } else if (translated === fragmentText(meta.sourceXml)) {
         targetXml = meta.sourceXml
       }
     }

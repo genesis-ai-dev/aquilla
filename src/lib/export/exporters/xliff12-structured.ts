@@ -12,7 +12,7 @@
 //      convention — empty → "new", unvalidated → "translated",
 //      validated → "final".
 import type { CellData } from "@/hooks/useCells"
-import type { XliffSegmentMeta } from "@/lib/parsers/xliff"
+import { fragmentText, type XliffSegmentMeta } from "@/lib/parsers/xliff"
 
 const xmlEscape = (s: string): string =>
   s
@@ -26,17 +26,7 @@ interface MetaCell extends CellData {
   metadata?: { xliff?: XliffSegmentMeta }
 }
 
-/** Text content of an inline-XML fragment (tags dropped, entities unescaped) —
- *  used to detect whether a cell's text still matches its imported skeleton. */
-export const inlineXmlText = (xml: string): string =>
-  xml
-    .replace(/<[^>]+>/g, "")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, "&")
-    .trim()
+
 
 export const statusToXliffState = (cell: Pick<CellData, "status" | "translated">): string => {
   if (cell.status === "validated") return "final"
@@ -64,9 +54,9 @@ export function exportXliff12Structured(
     // target stays an empty element (valid per the 1.2 schema).
     let targetXml = translated ? xmlEscape(translated) : ""
     if (meta) {
-      if (meta.targetXml != null && translated === inlineXmlText(meta.targetXml)) {
+      if (meta.targetXml != null && translated === fragmentText(meta.targetXml)) {
         targetXml = meta.targetXml
-      } else if (translated === inlineXmlText(meta.sourceXml)) {
+      } else if (translated === fragmentText(meta.sourceXml)) {
         targetXml = meta.sourceXml
       }
     }

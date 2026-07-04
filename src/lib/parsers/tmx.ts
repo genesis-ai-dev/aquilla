@@ -20,6 +20,18 @@
 
 import { v4 as uuid } from "uuid"
 import type { TranslatableString } from "./types"
+import { serializeInner, codeAwareTextContent } from "./xliff"
+
+/** Round-trip metadata captured per <tu> on TMX import. */
+export interface TmxSegmentMeta {
+  tuid?: string
+  srcLang: string
+  tgtLang?: string
+  /** Inner XML of the source <seg> with inline tags (bpt/ept/ph/it/hi) verbatim. */
+  srcSegXml: string
+  /** Inner XML of the target <seg>, when present. */
+  tgtSegXml?: string
+}
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -125,8 +137,8 @@ export function parseTmx(xmlText: string): TranslatableString[] {
       ? Array.from(tgtTuv.children).find((c) => c.localName === "seg")
       : null
 
-    const original = srcSeg ? textContent(srcSeg).trim() : ""
-    const translated = tgtSeg ? textContent(tgtSeg).trim() : ""
+    const original = srcSeg ? codeAwareTextContent(srcSeg).trim() : ""
+    const translated = tgtSeg ? codeAwareTextContent(tgtSeg).trim() : ""
 
     if (!original) continue
 
@@ -139,6 +151,14 @@ export function parseTmx(xmlText: string): TranslatableString[] {
     const noteEl = Array.from(tu.children).find((c) => c.localName === "note")
     const note = noteEl ? textContent(noteEl).trim() : ""
 
+    const meta: TmxSegmentMeta = {
+      ...(tuId ? { tuid: tuId } : {}),
+      srcLang: srcTuv ? tuvLang(srcTuv) : srclang,
+      ...(tgtTuv ? { tgtLang: tuvLang(tgtTuv) } : {}),
+      srcSegXml: srcSeg ? serializeInner(srcSeg) : "",
+      ...(tgtSeg ? { tgtSegXml: serializeInner(tgtSeg) } : {}),
+    }
+
     results.push({
       id: uuid(),
       original,
@@ -146,6 +166,7 @@ export function parseTmx(xmlText: string): TranslatableString[] {
       context: note ? `${context} — ${note}` : context,
       group: tuId || context,
       type: "text",
+      metadata: { tmx: meta },
     })
   }
 

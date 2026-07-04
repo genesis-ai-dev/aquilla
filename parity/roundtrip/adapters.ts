@@ -29,7 +29,7 @@ import { extractPptxStrings } from "@/lib/parsers/pptx"
 import { parseXlsxToSheets } from "@/lib/parsers/spreadsheet"
 import { exportXliff12Structured } from "@/lib/export/exporters/xliff12-structured"
 import { exportXliff20 } from "@/lib/export/exporters/xliff20"
-import { exportTmx } from "@/lib/export/exporters/tmx"
+import { exportTmxStructured } from "@/lib/export/exporters/tmx-structured"
 import { exportCsv } from "@/lib/export/exporters/csv"
 import { exportTsv } from "@/lib/export/exporters/tsv"
 import { exportPlainTextStructured } from "@/lib/export/exporters/plaintext"
@@ -104,7 +104,7 @@ export async function buildAdapters(): Promise<Record<string, FormatAdapter>> {
     },
     tmx: {
       parse: async (b) => toSegments(parseTmx(text(b))),
-      export: async (b) => toBytes(exportTmx(toCells(parseTmx(text(b))), "en-US", "fr-FR")),
+      export: async (b) => toBytes(exportTmxStructured(toCells(parseTmx(text(b))), "en-US", "fr-FR")),
     },
     csv: {
       parse: async (b) => toSegments(parseCsvBilingual(text(b))),

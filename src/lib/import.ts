@@ -304,7 +304,7 @@ export interface TnProgress {
  * (a TEXT column); the export route decodes it to reconstruct the original
  * file with translations substituted.
  */
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
+export function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer)
   let binary = ""
   for (let i = 0; i < bytes.byteLength; i++) {

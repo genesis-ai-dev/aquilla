@@ -35,6 +35,51 @@ function textContent(el: Element): string {
 }
 
 /**
+ * Inline-code elements whose character data is NATIVE FORMAT CODE, not
+ * translatable text (XLIFF 1.2 bpt/ept/ph/it, TMX adds ut). Their content is
+ * excluded from extracted text; a nested <sub> re-enters translatable text
+ * per both specs.
+ */
+const CODE_ELEMENT_NAMES = new Set(["bpt", "ept", "ph", "it", "ut"])
+
+/**
+ * Text content of an element, skipping native-code data inside inline code
+ * elements (but descending into their <sub> sub-flows). Used by the XLIFF 1.2
+ * and TMX importers so exported-format markup never leaks into segment text.
+ */
+export function codeAwareTextContent(el: Element): string {
+  let out = ""
+  for (const node of Array.from(el.childNodes)) {
+    if (node.nodeType === 3 || node.nodeType === 4) {
+      out += node.textContent ?? ""
+    } else if (node.nodeType === 1) {
+      const child = node as Element
+      if (CODE_ELEMENT_NAMES.has(child.localName)) {
+        for (const sub of Array.from(child.children)) {
+          if (sub.localName === "sub") out += codeAwareTextContent(sub)
+        }
+      } else {
+        out += codeAwareTextContent(child)
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * Code-aware text of a serialized inline-XML fragment (as captured in
+ * round-trip metadata). Wraps the fragment and applies codeAwareTextContent —
+ * exporters use this to decide whether a cell's text still matches its
+ * imported skeleton.
+ */
+export function fragmentText(xml: string): string {
+  const doc = new DOMParser().parseFromString(`<root>${xml}</root>`, "application/xml")
+  const root = doc.documentElement
+  if (root.querySelector("parsererror")) return xml
+  return codeAwareTextContent(root).trim()
+}
+
+/**
  * Deep-first query: find the first element with this local name anywhere
  * inside `root`.
  */
@@ -70,7 +115,7 @@ function xmlEscapeText(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
-function serializeInner(el: Element): string {
+export function serializeInner(el: Element): string {
   let out = ""
   for (const node of Array.from(el.childNodes)) {
     if (node.nodeType === 3) {
@@ -124,8 +169,8 @@ function parseXliff12(doc: Document): TranslatableString[] {
     const sourceEl = findByLocalName(tu, "source")
     const targetEl = findByLocalName(tu, "target")
 
-    const original = sourceEl ? textContent(sourceEl).trim() : ""
-    const translated = targetEl ? textContent(targetEl).trim() : ""
+    const original = sourceEl ? codeAwareTextContent(sourceEl).trim() : ""
+    const translated = targetEl ? codeAwareTextContent(targetEl).trim() : ""
 
     // <note> becomes context if present
     const noteEl = findByLocalName(tu, "note")

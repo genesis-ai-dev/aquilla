@@ -18,12 +18,12 @@ import {
 } from "./types"
 
 export class BatchApiError extends Error {
-  constructor(
-    public httpStatus: number,
-    public code: string,
-    message: string,
-  ) {
+  httpStatus: number
+  code: string
+  constructor(httpStatus: number, code: string, message: string) {
     super(message)
+    this.httpStatus = httpStatus
+    this.code = code
   }
 }
 
@@ -95,7 +95,11 @@ export class BatchService {
   private idempotency = new Map<string, { bodyHash: number; response: CreateBatchResponse }>()
   private queue: string[] = []
 
-  constructor(private deps: BatchDeps) {}
+  private deps: BatchDeps
+
+  constructor(deps: BatchDeps) {
+    this.deps = deps
+  }
 
   create(body: unknown, idempotencyKey?: string): CreateBatchResponse {
     const request = validateCreateRequest(body)

@@ -98,10 +98,13 @@ const diceSimilarity = (a: string[], b: string[]): number => {
 }
 
 export class GlobalTmIndex {
-  constructor(
-    private store: GlobalTmStore,
-    private governance: GovernanceResolvers,
-  ) {}
+  private store: GlobalTmStore
+  private governance: GovernanceResolvers
+
+  constructor(store: GlobalTmStore, governance: GovernanceResolvers) {
+    this.store = store
+    this.governance = governance
+  }
 
   /** Write gate (C8): refuses contributions from opted-out projects. */
   contribute(entry: GlobalTmEntry, ctx: ContributionContext): boolean {

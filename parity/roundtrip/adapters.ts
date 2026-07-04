@@ -37,6 +37,11 @@ import { exportMarkdownStructured } from "@/lib/export/exporters/markdown"
 import { exportVttStructured } from "@/lib/export/exporters/vtt-structured"
 import { exportSrt } from "@/lib/export/exporters/srt"
 import { exportDocx } from "@/lib/export/exporters/docx"
+import { exportPptx } from "@/lib/export/exporters/pptx"
+import { extractHtmlStrings, exportHtml } from "@/lib/parsers/html"
+import { extractJsonStrings, exportJson } from "@/lib/parsers/json-i18n"
+import { extractPropertiesStrings, exportProperties } from "@/lib/parsers/properties"
+import { extractSbvStrings } from "@/lib/parsers/sbv"
 
 export interface AdapterSegment {
   source: string
@@ -139,6 +144,10 @@ export async function buildAdapters(): Promise<Record<string, FormatAdapter>> {
     },
     pptx: {
       parse: async (b) => toSegments(await extractPptxStrings(buf(b))),
+      export: async (b) => {
+        const result = await exportPptx(buf(b), toCells(await extractPptxStrings(buf(b))))
+        return toBytes(result.blob)
+      },
     },
     xlsx: {
       parse: async (b) => {
@@ -149,6 +158,21 @@ export async function buildAdapters(): Promise<Record<string, FormatAdapter>> {
           ),
         )
       },
+    },
+    html: {
+      parse: async (b) => toSegments(extractHtmlStrings(text(b))),
+      export: async (b) => toBytes(exportHtml(text(b), toCells(extractHtmlStrings(text(b))))),
+    },
+    json: {
+      parse: async (b) => toSegments(extractJsonStrings(text(b))),
+      export: async (b) => toBytes(exportJson(text(b), toCells(extractJsonStrings(text(b))))),
+    },
+    properties: {
+      parse: async (b) => toSegments(extractPropertiesStrings(text(b))),
+      export: async (b) => toBytes(exportProperties(text(b), toCells(extractPropertiesStrings(text(b))))),
+    },
+    sbv: {
+      parse: async (b) => toSegments(extractSbvStrings(text(b))),
     },
   }
 

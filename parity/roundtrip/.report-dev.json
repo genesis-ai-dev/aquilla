@@ -1,8 +1,8 @@
 {
   "set": "dev",
-  "generatedAt": "2026-07-04T17:04:50.824Z",
+  "generatedAt": "2026-07-04T17:22:32.267Z",
   "total": 122,
-  "passed": 86,
+  "passed": 116,
   "perFormat": {
     "csv": {
       "pass": 7,
@@ -13,11 +13,11 @@
       "total": 8
     },
     "html": {
-      "pass": 0,
+      "pass": 7,
       "total": 7
     },
     "json": {
-      "pass": 0,
+      "pass": 7,
       "total": 7
     },
     "md": {
@@ -29,15 +29,15 @@
       "total": 6
     },
     "pptx": {
-      "pass": 0,
+      "pass": 6,
       "total": 6
     },
     "properties": {
-      "pass": 0,
+      "pass": 5,
       "total": 5
     },
     "sbv": {
-      "pass": 0,
+      "pass": 5,
       "total": 5
     },
     "srt": {
@@ -167,156 +167,86 @@
     {
       "file": "html/html-001.html",
       "format": "html",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "html/html-003.html",
       "format": "html",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "html/html-004.html",
       "format": "html",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "html/html-005.html",
       "format": "html",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "html/html-006.html",
       "format": "html",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "html/html-008.html",
       "format": "html",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "html/html-009.html",
       "format": "html",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "json/json-002.json",
       "format": "json",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "json/json-003.json",
       "format": "json",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "json/json-005.json",
       "format": "json",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "json/json-006.json",
       "format": "json",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "json/json-007.json",
       "format": "json",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "json/json-008.json",
       "format": "json",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "json/json-009.json",
       "format": "json",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "md/md-004.md",
@@ -429,178 +359,98 @@
     {
       "file": "pptx/pptx-003.pptx",
       "format": "pptx",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "pptx/pptx-004.pptx",
       "format": "pptx",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "pptx/pptx-006.pptx",
       "format": "pptx",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "pptx/pptx-007.pptx",
       "format": "pptx",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "pptx/pptx-008.pptx",
       "format": "pptx",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "pptx/pptx-010.pptx",
       "format": "pptx",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-exporter",
-          "detail": "format has no exporter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "properties/properties-001.properties",
       "format": "properties",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "properties/properties-002.properties",
       "format": "properties",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "properties/properties-004.properties",
       "format": "properties",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "properties/properties-007.properties",
       "format": "properties",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "properties/properties-008.properties",
       "format": "properties",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "sbv/sbv-001.sbv",
       "format": "sbv",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "sbv/sbv-002.sbv",
       "format": "sbv",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "sbv/sbv-003.sbv",
       "format": "sbv",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "sbv/sbv-004.sbv",
       "format": "sbv",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "sbv/sbv-008.sbv",
       "format": "sbv",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "srt/srt-002.srt",

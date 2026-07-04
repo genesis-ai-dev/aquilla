@@ -19,20 +19,27 @@ export function exportMarkdown(cells: CellData[]): Blob {
 
 // Structure-preserving markdown exporter for CAT round-trip use. Reconstructs
 // the block markup the importer parsed away: heading level from the cell's
-// "Heading N" context, "- " for list items, "> " for blockquotes. Cells that
-// share a `group` are sub-segments of one block and are rejoined with a
-// space. Known, accepted loss: ordered lists re-emit as unordered ("- ") —
-// the importer does not record list numbering. No anchor comments are emitted
-// (they would parse back as paragraph text on re-import).
+// "Heading N" context, list markers ("- ", or "N. " for ordered lists via the
+// importer's metadata.md record), "> " for blockquotes. Cells that share a
+// `group` are sub-segments of one block and are rejoined with a space.
+// Consecutive list items of the same kind are grouped without blank lines so
+// they re-import as one list. No anchor comments are emitted (they would
+// parse back as paragraph text on re-import).
 // exportMarkdown above is untouched (C7: existing output stays byte-identical).
+interface MdMetaCell extends CellData {
+  metadata?: { md?: { listKind?: "ordered" | "unordered"; index?: number } }
+}
+
 export function exportMarkdownStructured(cells: CellData[]): Blob {
   interface Block {
     prefix: string
     texts: string[]
+    listKind?: "ordered" | "unordered"
   }
   const blocks: Block[] = []
   let currentGroup: string | null = null
-  for (const c of cells) {
+  let orderedCounter = 0
+  for (const c of cells as MdMetaCell[]) {
     const text = (c.translated || c.original || "").trim()
     if (!text) continue
     if (c.group && c.group === currentGroup && blocks.length > 0) {
@@ -41,16 +48,35 @@ export function exportMarkdownStructured(cells: CellData[]): Blob {
     }
     currentGroup = c.group || null
     let prefix = ""
+    let listKind: Block["listKind"]
     if (c.type === "heading") {
       const level = Number(/^Heading (\d)$/.exec(c.context ?? "")?.[1] ?? 1)
       prefix = `${"#".repeat(Math.min(6, Math.max(1, level)))} `
     } else if (c.type === "list") {
-      prefix = "- "
+      listKind = c.metadata?.md?.listKind === "ordered" ? "ordered" : "unordered"
+      if (listKind === "ordered") {
+        const prev = blocks[blocks.length - 1]
+        orderedCounter = prev?.listKind === "ordered" ? orderedCounter + 1 : 1
+        prefix = `${orderedCounter}. `
+      } else {
+        prefix = "- "
+      }
     } else if (c.type === "blockquote") {
       prefix = "> "
     }
-    blocks.push({ prefix, texts: [text] })
+    blocks.push({ prefix, texts: [text], ...(listKind ? { listKind } : {}) })
   }
-  const body = blocks.map((b) => `${b.prefix}${b.texts.join(" ")}`).join("\n\n")
+  // Adjacent list items of the same kind join with single newlines (one list);
+  // everything else separates with a blank line.
+  let body = ""
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i]
+    if (i > 0) {
+      const prev = blocks[i - 1]
+      const sameList = b.listKind != null && prev.listKind === b.listKind
+      body += sameList ? "\n" : "\n\n"
+    }
+    body += `${b.prefix}${b.texts.join(" ")}`
+  }
   return new Blob([body ? `${body}\n` : ""], { type: "text/markdown;charset=utf-8" })
 }

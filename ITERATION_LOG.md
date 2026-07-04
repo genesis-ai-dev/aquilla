@@ -103,3 +103,54 @@ off across docx/pptx/xlsx rows — keep, already sunk); (2) chasing per-file dev
 at a time in c1 (switch: batch by failure-check histogram first); (3) hand-writing long
 acceptance fixtures (keep minimal fixtures; prefer spec-driven cases). No change type banned
 yet; spend/pace healthy (P0 cleared at ~2h elapsed of 10h).
+
+## Cycle 8 — P1 format sweep (parallel subagents) + workflow/glossary libs
+- **Hypothesis:** the five remaining format modules (html, json-i18n, po, properties+sbv,
+  pptx exporter) are independent; parallel subagents with tight specs clear them in one
+  wall-clock cycle while the main loop implements workflow/glossary/termbase/reimport rows.
+- **Result:** roundtrip dev 70.5% → 95.1% (all formats but PO green), then 100% once the PO
+  agent landed. One scorer-interaction incident, resolved on the exporter side: blanked PPTX
+  runs serialized self-closing (<a:t/>) and dropped out of the frozen validator's element
+  count — fixed by emitting paired empty tags, which is what ECMA-376 producers write anyway.
+  Scorer untouched (F7).
+- **Overfit reflection:** the <a:t/> normalization is the closest this run came to an
+  eval-shaped change; judged legitimate because it aligns the exporter with real-producer
+  convention rather than special-casing corpus content. No enumeration lists anywhere (F3).
+
+## Cycle 9 — PO lands; exit criteria met; holdout checkpoint
+- **parity:score 100.0% weighted** (P0 31/31, P1 15/15, P2 3/3, EXCEEDS 5/5).
+- **roundtrip dev 122/122 = 100%; holdout 82/82 = 100%** — and still 82/82 after the
+  mandated 10% holdout refresh with a fresh sub-seed (cycle-8 refresh, seed 1584035895),
+  so the number is not memorized aggregates.
+- Full default suite 3385 green; lint errors introduced by the run fixed; the single
+  remaining lint error is pre-existing (src/components/EditorTable.tsx, untouched).
+- **Elapsed at exit-criteria-met: 2h21m of 10h.** Remaining budget goes to deliverables and
+  stabilization, per plan.
+
+## Cycle 10 — principal directive: block-style round trips + inline-style warnings
+- **Trigger:** user message mid-run: "make sure the import/export loops are *round trips*
+  with full fidelity checks for block styles and warnings about inline style mismatches."
+- **Matrix change:** APPENDED two P0 rows (fmt.blockstyle.fidelity, qa.inline-warnings) —
+  append-only rule respected; justification: explicit principal scope addition. Weighted
+  score recomputes over the larger denominator (score may drop until rows pass — expected).
+- **Known real gaps this targets:** (1) markdown ordered lists re-export as "- " unordered;
+  (2) docx mixed-run inline formatting silently simplified; (3) pptx multi-run paragraphs
+  collapse to first-run styling; (4) xliff/tmx edited targets lose inline tags with no
+  user-visible signal; (5) html translated blocks lose inline markup silently.
+- **Plan:** md parser records list kind/index additively (metadata.md) + exporter re-emits
+  ordered markers; new src/lib/export/fidelity.ts (block-style comparator + inline-style
+  warning collector); docx/pptx export results gain additive `warnings`; ExportDialog renders
+  the report (additive UI; default ON at the principal's direction — logged deviation from
+  the C7 default-off convention for this one surface).
+- **Result (c10):** both appended rows GREEN — P0 33/33, weighted 100% over the enlarged
+  matrix. Implemented: markdown ordered-list round-trip (metadata.md.listKind + numbered
+  markers, adjacent items joined as one list), html list-kind capture, fidelity module
+  (block-style comparator + inline-style warning collector covering XLIFF/TMX skeletons,
+  originalHtml blocks, subtitle payload tags), docx/pptx exporters now return per-paragraph
+  mixed-formatting warnings (additive result field), and ExportDialog renders the fidelity
+  report after every export (docx, single-file, and project-zip paths). Full suite 3385
+  green; roundtrip dev 100% unchanged; tsc/eslint clean (1 pre-existing EditorTable error).
+- **Overfit reflection:** the warning collector keys on structural properties (skeleton
+  metadata, originalHtml, tag multisets), not on any corpus/test content. The comparator was
+  verified to actually catch degradation (ol→ul fault-injection assertion), so the check is
+  falsifiable, not decorative.

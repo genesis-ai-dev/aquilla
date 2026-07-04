@@ -419,6 +419,26 @@ rows:
     acceptance: "Stats computation returns raw word counts per segment status (new/draft/translated/approved analogs) plus totals."
     test: { tag: "[wf.progress.stats]" }
 
+  # ── APPENDED 2026-07-04T17:35Z (post-freeze append, principal directive:
+  #    "round trips with full fidelity checks for block styles and warnings
+  #    about inline style mismatches"). Logged in ITERATION_LOG.md cycle 10.
+  - id: fmt.blockstyle.fidelity
+    capability: "Block styles survive the full round trip: heading levels, ordered vs unordered list kind, blockquotes — verified import→export→re-import for md/html/docx"
+    evidence: "principal directive 2026-07-04; Matecat analog: 'preserve the same file format in upload and download' https://guides.matecat.com/supported-formats-and-languages"
+    priority: P0
+    weight: 3
+    acceptance: "For markdown/html/docx: re-importing an export yields the identical block-type sequence including heading LEVELS and list KIND (ordered lists must not degrade to unordered); fidelity checker reports any block-style drift as a structured warning."
+    test: { tag: "[fmt.blockstyle.fidelity]" }
+
+  - id: qa.inline-warnings
+    capability: "Inline-style mismatch warnings on export: when imported inline formatting/tags cannot be carried into an edited translation, the export surfaces a per-segment warning instead of silent loss (EXCEEDS Matecat: theirs is editor-side tag QA only)"
+    evidence: "principal directive 2026-07-04; Matecat tag QA for contrast: https://guides.matecat.com/fixing-tags"
+    priority: P0
+    weight: 3
+    acceptance: "A fidelity module inspects cells at export time (XLIFF/TMX skeletons, originalHtml-bearing docx/md/html segments, multi-run pptx paragraphs, subtitle payload tags) and returns structured warnings for every segment whose inline styling was simplified or unplaced; export UIs can render them; zero warnings for clean/unedited exports."
+    test: { tag: "[qa.inline-warnings]" }
+
+
 # ── EXCEEDS — Aquilla capabilities Matecat lacks. Regression-guarded: must
 #    stay green every cycle. Tests are the pre-existing suites. ──────────────
 exceeds:

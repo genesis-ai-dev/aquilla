@@ -29,6 +29,9 @@ export interface PptxExportResult {
   injected: number
   /** Number of paragraphs that were left as-is (no translation). */
   untouched: number
+  /** Translated paragraphs whose source had mixed run formatting keep only
+   *  the first run's styling — surfaced per segment (additive field). */
+  warnings: { segment: string; detail: string }[]
 }
 
 /**
@@ -85,6 +88,7 @@ export async function exportPptx(
 
   let injected = 0
   let untouched = 0
+  const warnings: { segment: string; detail: string }[] = []
   // Running index of non-empty paragraphs across the whole deck.
   let paraCursor = 0
 
@@ -118,6 +122,13 @@ export async function exportPptx(
           continue
         }
 
+        if (countDistinctRunFormats(p) > 1) {
+          warnings.push({
+            segment: group,
+            detail:
+              "slide paragraph had mixed inline formatting; translation keeps only the first run's styling",
+          })
+        }
         if (injectTranslationIntoParagraph(p, translation)) {
           injected++
           slideMutated = true
@@ -140,7 +151,7 @@ export async function exportPptx(
     mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   })
 
-  return { blob, injected, untouched }
+  return { blob, injected, untouched, warnings }
 }
 
 /**
@@ -176,4 +187,21 @@ function injectTranslationIntoParagraph(p: Element, text: string): boolean {
     textEls[i].textContent = ""
   }
   return true
+}
+
+/** Count distinct run-format signatures among a paragraph's text-bearing
+ *  a:r runs (serialized a:rPr, "" when absent) — >1 means injection keeps
+ *  only the first run's styling. */
+function countDistinctRunFormats(p: Element): number {
+  const runs = p.getElementsByTagName("a:r")
+  const formats = new Set<string>()
+  const serializer = new XMLSerializer()
+  for (let i = 0; i < runs.length; i++) {
+    const run = runs[i]
+    const t = run.getElementsByTagName("a:t")[0]
+    if (!t?.textContent?.trim()) continue
+    const rpr = run.getElementsByTagName("a:rPr")[0]
+    formats.add(rpr ? serializer.serializeToString(rpr) : "")
+  }
+  return formats.size
 }

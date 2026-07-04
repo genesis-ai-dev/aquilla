@@ -100,6 +100,12 @@ export function extractHtmlStrings(content: string): TranslatableString[] {
     // Keep inline markup (<strong>, <a>, …) only when the element actually
     // contains child elements — plain-text blocks carry no originalHtml.
     const html = collapseWhitespace(el.innerHTML)
+    // Block-style fidelity: list items record their list KIND so round-trip
+    // checks can verify ordered lists stay ordered (the export skeleton
+    // preserves the <ol>/<ul> itself; this makes the kind visible to
+    // comparators and downstream exporters).
+    const listKind =
+      type === "list" ? (el.closest("ol") ? "ordered" : "unordered") : undefined
     results.push({
       id: uuid(),
       original,
@@ -108,6 +114,7 @@ export function extractHtmlStrings(content: string): TranslatableString[] {
       context,
       group: uuid(),
       type,
+      ...(listKind ? { metadata: { html: { listKind } } } : {}),
       sourceLocation: { file: "html", blockPath: String(index) },
     })
   }

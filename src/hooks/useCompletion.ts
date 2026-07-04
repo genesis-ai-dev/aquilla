@@ -53,7 +53,9 @@ const MAX_CELLS_PER_CALL = 30
 
 // Default settings for projects that haven't customized anything yet.
 // Frontier provider + default system prompt, no custom endpoint.
-const FALLBACK_SETTINGS: CompletionSettings = {
+// Exported for other LLM call sites (e.g. back-translation) that must apply
+// the same "project settings else Frontier default" precedence.
+export const FALLBACK_COMPLETION_SETTINGS: CompletionSettings = {
   provider: "frontier",
   endpoint: "",
   model: "",
@@ -112,7 +114,7 @@ export function useCompletion(
 
   // Missing settings means "Frontier default with in-memory fallback" — we
   // don't persist anything until the user customizes.
-  const effectiveSettings = settings ?? FALLBACK_SETTINGS
+  const effectiveSettings = settings ?? FALLBACK_COMPLETION_SETTINGS
   // A per-device override (user Settings) always beats the project settings.
   // Mirror the same precedence that complete() applies so isConfigured is
   // consistent with what the request will actually use.

@@ -9,7 +9,7 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity, NotebookPen, Info, Pencil,
+  ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
@@ -436,11 +436,15 @@ interface EditorTableProps {
   // onInfractionClick moved to EditorActionsContext (FRO perf cleanup) — pure
   // pass-through, never consumed above the row.
   isBacktranslationConfigured?: boolean
-  onBacktranslate?: (cell: CellData, polish?: boolean) => void
+  /** Generate the cell's back-translation with the configured LLM. */
+  onBacktranslate?: (cell: CellData) => void
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
   /** Called when user saves a BT edit. Parent emits `cell.backtranslation.set`. */
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
+  /** On-demand statistical gloss (corpus-derived, never persisted) for the BT
+   *  tab's collapsed reference section. */
+  getStatisticalBt?: (translatedText: string) => string
   cellOpenCommentCount?: Map<string, number>
   // onOpenComments/onOpenHistory moved to EditorActionsContext (FRO perf
   // cleanup) — pure pass-through, never consumed above the row.
@@ -514,7 +518,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onCompleteSingle, onCompleteBatch, healthMap,
   infractions = new Map(), rules = [],
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
-  onSaveBacktranslation,
+  onSaveBacktranslation, getStatisticalBt,
   cellOpenCommentCount,
   activeCueIndex, onSeekToCue,
   lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
@@ -1185,6 +1189,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           backtranslationErrors={backtranslationErrors}
           onBacktranslate={onBacktranslate}
           onSaveBacktranslation={onSaveBacktranslation}
+          getStatisticalBt={getStatisticalBt}
           cellOpenCommentCount={cellOpenCommentCount}
           activeCueIndex={activeCueIndex}
           onSeekToCue={onSeekToCue}
@@ -1249,6 +1254,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     footnoteViewMode,
     getTokenForFile,
     getAlignmentModel,
+    getStatisticalBt,
     getVoiceTakeCells,
     gridCols,
     handleDragEnter,
@@ -1425,8 +1431,9 @@ interface MemoizedRowProps {
   isBacktranslationConfigured?: boolean
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
-  onBacktranslate?: (cell: CellData, polish?: boolean) => void
+  onBacktranslate?: (cell: CellData) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
+  getStatisticalBt?: (translatedText: string) => string
   cellOpenCommentCount?: Map<string, number>
   activeCueIndex?: number
   onSeekToCue?: (cellId: string) => void
@@ -1509,7 +1516,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onDeactivateEditor,
     project, username, editable, canValidate, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle,
-    isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation,
+    isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
     onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
     sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
@@ -1621,6 +1628,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         backtranslationError={backtranslationError}
         onBacktranslate={onBacktranslate}
         onSaveBacktranslation={onSaveBacktranslation}
+        getStatisticalBt={getStatisticalBt}
         openCommentCount={openCommentCount}
         isActiveCue={isActiveCue}
         onSeekToCue={onSeekToCue}
@@ -1715,8 +1723,9 @@ interface EditorRowProps {
   isBacktranslationConfigured?: boolean
   isBacktranslating?: boolean
   backtranslationError?: string
-  onBacktranslate?: (cell: CellData, polish?: boolean) => void
+  onBacktranslate?: (cell: CellData) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
+  getStatisticalBt?: (translatedText: string) => string
   /** FRO-207: Lazily returns the interlinear alignment model. */
   getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
   /** FRO-207: Called when user confirms/invalidates an alignment. */
@@ -2435,6 +2444,7 @@ function EditorRow({
   cellInfractions, waivedInfractions, ruleMap,
   onCompleteSingle,
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate, onSaveBacktranslation,
+  getStatisticalBt,
   openCommentCount,
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
@@ -3268,8 +3278,15 @@ function EditorRow({
   // ── BT tab edit state ─────────────────────────────────────────────────────
   const [btEditing, setBtEditing] = useState(false)
   const [btEditValue, setBtEditValue] = useState("")
-  const [btPolishOn, setBtPolishOn] = useState(false)
   const [btSaving, setBtSaving] = useState(false)
+  // Collapsed-by-default statistical reference. The gloss is corpus-derived
+  // and local-only — computed lazily when the section is opened, never
+  // persisted as the cell's back-translation.
+  const [btStatsOpen, setBtStatsOpen] = useState(false)
+  const statisticalGloss = useMemo(() => {
+    if (!btStatsOpen || !cell.translated.trim()) return ""
+    return getStatisticalBt?.(cell.translated) ?? ""
+  }, [btStatsOpen, cell.translated, getStatisticalBt])
 
   // When editing starts, seed the input with the current BT text.
   const handleBtEditStart = useCallback(() => {
@@ -3284,12 +3301,14 @@ function EditorRow({
     }
     setBtSaving(true)
     try {
-      onSaveBacktranslation?.(cell, btEditValue.trim(), btPolishOn)
+      // A hand-edited BT is the human's wording, not the model's — persist
+      // it unpolished so corrected readings re-seed the statistical glosser.
+      onSaveBacktranslation?.(cell, btEditValue.trim(), false)
     } finally {
       setBtSaving(false)
       setBtEditing(false)
     }
-  }, [btEditValue, btPolishOn, cell, onSaveBacktranslation])
+  }, [btEditValue, cell, onSaveBacktranslation])
 
   const handleBtCancel = useCallback(() => {
     setBtEditing(false)
@@ -4248,41 +4267,29 @@ function EditorRow({
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs font-medium text-foreground">Back-translation</span>
-                      <AppTooltip content="A plain reading of your translation back in your reference language. Use it to check the meaning carried over.">
+                      <AppTooltip content="An AI reading of your translation back in your reference language. Use it to check the meaning carried over — the AI can misread, so treat it as a second opinion, not proof.">
                         <Info className="h-3 w-3 cursor-help text-muted-foreground/50 transition-colors hover:text-muted-foreground" />
                       </AppTooltip>
                     </div>
                     {/* Controls appear only when there's a reading to act on. */}
                     {cell.backtranslation && !btEditing && (
                       <div className="flex items-center gap-0.5">
-                        {/* Refine — replaces the old "Polish"/"statistical" jargon.
-                            On = AI-refined wording; off = plain word-for-word.
-                            Toggling regenerates so the text matches the mode. */}
+                        {/* Regenerate — re-runs the AI on the current translation.
+                            Contributor+ only (persisting a BT is a project write). */}
                         {editable && (
                           <AppTooltip content={
                             !isBacktranslationConfigured
-                              ? "Add an AI model in project settings to refine the wording"
-                              : btPolishOn
-                                ? "Refined with AI — turn off for a plain word-for-word reading"
-                                : "Refine the wording with AI for a more natural reading"
+                              ? "Sign in or add an AI model in project settings to generate back-translations"
+                              : "Regenerate with AI"
                           }>
                             <button
                               type="button"
                               disabled={!isBacktranslationConfigured || isBacktranslating}
-                              onClick={() => {
-                                const next = !btPolishOn
-                                setBtPolishOn(next)
-                                onBacktranslate?.(cell, next)
-                              }}
-                              className={cn(
-                                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-                                btPolishOn
-                                  ? "bg-violet-500/12 text-violet-700 hover:bg-violet-500/20 dark:text-violet-300"
-                                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                              )}
+                              onClick={() => onBacktranslate?.(cell)}
+                              aria-label="Regenerate the back-translation"
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                             >
-                              <Sparkles className={cn("h-3 w-3", isBacktranslating && btPolishOn && "animate-pulse")} />
-                              Refine
+                              <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
                             </button>
                           </AppTooltip>
                         )}
@@ -4328,15 +4335,17 @@ function EditorRow({
                             <AlertTriangle className="h-3 w-3 shrink-0" />
                             Your translation changed since this was written
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => onBacktranslate?.(cell, btPolishOn)}
-                            disabled={isBacktranslating || cell.translated.trim().length === 0}
-                            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 transition-colors hover:bg-amber-500/25 dark:text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
-                            Refresh
-                          </button>
+                          {editable && (
+                            <button
+                              type="button"
+                              onClick={() => onBacktranslate?.(cell)}
+                              disabled={!isBacktranslationConfigured || isBacktranslating || cell.translated.trim().length === 0}
+                              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 transition-colors hover:bg-amber-500/25 dark:text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
+                              Refresh
+                            </button>
+                          )}
                         </div>
                       )}
                       {btEditing ? (
@@ -4384,23 +4393,71 @@ function EditorRow({
                       )}
                     </>
                   ) : (
-                    /* No reading yet — friendly, with one clear primary. */
+                    /* No reading yet — friendly, with one clear primary.
+                       Generation is AI-only and on-demand: nothing runs
+                       automatically when the translation is committed. */
                     <div className="flex flex-col items-center gap-2.5 rounded-xl bg-muted/40 px-3 py-6 text-center">
                       <p className="max-w-[34ch] text-xs leading-relaxed text-muted-foreground">
                         See what your translation says when read back, so you can check the meaning carried over.
                       </p>
+                      {editable ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => onBacktranslate?.(cell)}
+                            disabled={!isBacktranslationConfigured || isBacktranslating || cell.translated.trim().length === 0}
+                            className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {isBacktranslating ? (
+                              <><RefreshCw className="h-3 w-3 animate-spin" /> Reading it back…</>
+                            ) : (
+                              <><Sparkles className="h-3 w-3" /> Read it back with AI</>
+                            )}
+                          </button>
+                          {!isBacktranslationConfigured && (
+                            <p className="text-[11px] text-muted-foreground/70">
+                              Sign in or add an AI model in project settings to generate one.
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-[11px] text-muted-foreground/70">
+                          A contributor can generate one with AI.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {/* ── Statistical reference — collapsed by default. A rough
+                      corpus-derived gloss kept as a cross-check on the AI
+                      reading; local-only, never saved as the cell's BT. ──── */}
+                  {cell.translated.trim().length > 0 && getStatisticalBt && !btEditing && (
+                    <div className="rounded-lg border border-border/60">
                       <button
                         type="button"
-                        onClick={() => onBacktranslate?.(cell, btPolishOn)}
-                        disabled={isBacktranslating || cell.translated.trim().length === 0}
-                        className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+                        onClick={() => setBtStatsOpen((v) => !v)}
+                        aria-expanded={btStatsOpen}
+                        className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
                       >
-                        {isBacktranslating ? (
-                          <><RefreshCw className="h-3 w-3 animate-spin" /> Reading it back…</>
-                        ) : (
-                          <><Sparkles className="h-3 w-3" /> Read it back</>
-                        )}
+                        <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", btStatsOpen && "rotate-90")} />
+                        Statistical gloss
+                        <span className="font-normal text-muted-foreground/60">— word-for-word, from this project's own pairs</span>
                       </button>
+                      {btStatsOpen && (
+                        <div className="flex flex-col gap-1.5 px-2.5 pb-2.5">
+                          {statisticalGloss.trim() ? (
+                            <p className="text-[13px] leading-relaxed text-foreground/80">{statisticalGloss}</p>
+                          ) : (
+                            <p className="text-[11px] italic text-muted-foreground">
+                              Not enough translated pairs in this project to build a gloss yet.
+                            </p>
+                          )}
+                          <p className="text-[10px] leading-relaxed text-muted-foreground/70">
+                            Built statistically from this project's translated pairs — no AI involved.
+                            It's only as good as the corpus so far: expect rough, literal, sometimes
+                            wrong word choices. Use it as a hint, not a reading.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
                   {/* ── FRO-207: Interlinear alignment panel ──────────────── */}

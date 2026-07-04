@@ -1,9 +1,8 @@
 import { describe, it, expect } from "vitest"
-import { resolveBtTargetEventId, shouldAutoRecomputeBt } from "./bt-auto"
+import { resolveBtTargetEventId } from "./bt-auto"
 
-// FRO-203 regression: a back-translation produced automatically right after a
-// `target.cell.commit` must be pinned to the event id of THAT commit (the text
-// it describes), not to the cell's currently-projected head.
+// FRO-203 regression: a back-translation must be pinned to the event id of the
+// commit whose text it describes, not to the cell's currently-projected head.
 //
 // The trap: `applyOptimisticTargetEdit` updates the row's text but NOT its
 // `event_id`, so for a full server round-trip after a commit the cells
@@ -17,9 +16,9 @@ describe("resolveBtTargetEventId — stale-BT pin", () => {
     expect(resolveBtTargetEventId("E1", "E0")).toBe("E1")
   })
 
-  it("falls back to the projected head when no commit id is known (manual Generate/Polish)", () => {
-    // The Generate/Regenerate/Polish button path has no in-flight commit; the
-    // cell's projected targetEventId is already the current head and correct.
+  it("falls back to the projected head when no commit id is known (manual Generate)", () => {
+    // The Generate/Refresh button path has no in-flight commit; the cell's
+    // projected targetEventId is already the current head and correct.
     expect(resolveBtTargetEventId(undefined, "E5")).toBe("E5")
   })
 
@@ -29,15 +28,5 @@ describe("resolveBtTargetEventId — stale-BT pin", () => {
 
   it("ignores an empty committed id and uses the projected head", () => {
     expect(resolveBtTargetEventId("", "E2")).toBe("E2")
-  })
-})
-
-describe("shouldAutoRecomputeBt", () => {
-  it("recomputes when there is no cached BT", () => {
-    expect(shouldAutoRecomputeBt("hello world", undefined)).toBe(true)
-  })
-
-  it("does not recompute for empty translated text", () => {
-    expect(shouldAutoRecomputeBt("  ", "anything")).toBe(false)
   })
 })

@@ -14,7 +14,7 @@ import { languagesEqual } from "@/lib/language-normalize"
 import { useCells } from "@/hooks/useCells"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
-import { useCompletion } from "@/hooks/useCompletion"
+import { useCompletion, FALLBACK_COMPLETION_SETTINGS } from "@/hooks/useCompletion"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { fetchBranchingSearch } from "@/lib/sync/branching-search-read"
 import { fetchBranchingSearchPassages } from "@/lib/sync/branching-search-passages-read"
@@ -144,7 +144,7 @@ import type { Concept } from "@/lib/terminology/types"
 import { buildGlosser, type BtSeed, type Glosser } from "@/lib/completion/bt-glosser"
 import { memMark } from "@/lib/perf-log"
 import { buildAlignmentModel, type AlignmentModel } from "@/lib/completion/interlinear"
-import { buildStatisticalBt, resolveBtTargetEventId } from "@/lib/completion/bt-auto"
+import { resolveBtTargetEventId } from "@/lib/completion/bt-auto"
 // FRO-192: assignment work-pickup UI
 import { AssignModal } from "./AssignModal"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
@@ -777,23 +777,18 @@ export function ProjectWorkspace() {
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
   })
 
-  // ── Auto-BT on target commit ─────────────────────────────────────────────
-  // Track the last cell that received an optimistic target edit so we can
-  // recompute its statistical BT when `handleCellCommitted` fires (after the
-  // outbox flush). EditorTable calls applyOptimisticTargetEdit immediately
-  // before emitting the commit event, so this ref is always up-to-date by
-  // the time onCellCommitted fires.
-  const lastOptimisticEditRef = useRef<{ cellId: string; translatedText: string } | null>(null)
+  // Track the last cell that received an optimistic target edit so
+  // `handleCellCommitted` can fall back to a targeted revalidate when the
+  // caller didn't pass a cellId. EditorTable calls applyOptimisticTargetEdit
+  // immediately before emitting the commit event, so this ref is always
+  // up-to-date by the time onCellCommitted fires.
+  const lastOptimisticEditRef = useRef<{ cellId: string } | null>(null)
 
   // RACE-3/QW-2: per-cell pending event id for the AI completion commit path.
   // Mirrors the per-row pendingTargetEventIdRef in EditorRow. Keyed by cellId
   // so concurrent completions on different cells don't cross-contaminate.
   const pendingCompletionEventIdRef = useRef<Map<string, string>>(new Map())
 
-  // Stable refs so that callbacks declared BEFORE glosser/persistBt (in React
-  // hook order) can still call the latest version without stale-closure issues.
-  // Updated unconditionally each render — refs never cause re-renders.
-  const getGlosserRef = useRef<(() => Glosser) | null>(null)
   const glosserCacheRef = useRef<{
     corpusCells: CellData[]
     backtranslationCache: Map<string, string>
@@ -805,9 +800,6 @@ export function ProjectWorkspace() {
     alignmentSeeds: ProjectRecord["alignmentSeeds"] | undefined
     model: AlignmentModel
   } | null>(null)
-  const persistBtRef = useRef<((cell: CellData, btText: string, polished: boolean, committedEventId?: string) => void) | null>(null)
-  // cellsRef is already declared later in the file (line ~689) — we reuse it.
-  const setBacktranslationCacheRef = useRef<React.Dispatch<React.SetStateAction<Map<string, string>>> | null>(null)
 
   // Wrap applyOptimisticTargetEdit to capture which cell was last edited.
   // We pass this wrapped version to EditorTable so we intercept without
@@ -815,7 +807,7 @@ export function ProjectWorkspace() {
   const applyOptimisticTargetEditWithCapture = useCallback(
     (cellId: string, patch: { value: string; valueHtml?: string }) => {
       if (patch.value) {
-        lastOptimisticEditRef.current = { cellId, translatedText: patch.value }
+        lastOptimisticEditRef.current = { cellId }
       }
       applyOptimisticTargetEdit(cellId, patch)
     },
@@ -1397,21 +1389,6 @@ export function ProjectWorkspace() {
     // confirms; the WS event.applied also pokes the same cell (coalesced).
     revalidateCellStats(cell.id)
     revalidateCell(cell.id)
-
-    // ── Auto statistical BT after AI completion commit (FRO-203) ───────────
-    // Runs synchronously — no network, no extra loading state. LLM polish
-    // remains opt-in via runBacktranslation (the Generate button path).
-    // Uses stable refs so this callback doesn't need glosser/persistBt in
-    // its dep array (they are declared later in hook order).
-    const getGlosser = getGlosserRef.current
-    if (text.trim() && getGlosser && persistBtRef.current && setBacktranslationCacheRef.current) {
-      const btText = buildStatisticalBt(getGlosser(), text)
-      if (btText) {
-        setBacktranslationCacheRef.current((prev) => new Map(prev).set(cell.id, btText))
-        // Pin to the just-committed event id (the projection still lags here).
-        persistBtRef.current(cell, btText, false, eventId)
-      }
-    }
   }, [project?.id, applyOptimisticTargetEdit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
   /**
@@ -1468,12 +1445,14 @@ export function ProjectWorkspace() {
     [getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell],
   )
 
-  // ── Back-translation: statistical primary path + optional LLM polish ────────
+  // ── Back-translation: LLM generation on demand ─────────────────────────────
   //
-  // Generation strategy (per spec):
-  //  1. Statistical Markov glosser over all translated (source↔target) pairs.
-  //     Runs synchronously — no network, always succeeds.
-  //  2. Optional LLM polish step when `polished: true` — calls generateBacktranslation.
+  // Generation strategy:
+  //  1. The BT of record is LLM-generated, and ONLY when the user asks for it
+  //     (the Generate/Refresh buttons in the BT tab). Nothing auto-runs on commit.
+  //  2. The statistical Markov glosser survives as a read-only, on-demand
+  //     reference (collapsed section in the BT tab) — computed locally, never
+  //     persisted.
   //
   // Persistence:
   //  - On generate: emit `cell.backtranslation.set` via outbox (non-chain-mutating).
@@ -1531,7 +1510,10 @@ export function ProjectWorkspace() {
     return () => { cancelled = true }
   }, [project?.id, activeFileId, getTokenForFile])
 
-  const isBacktranslationConfigured = Boolean(project?.completionSettings && isConfigured)
+  // Same gate as the AI-completion sparkle: a signed-in Frontier session or a
+  // custom endpoint+model (project settings or per-device override) counts as
+  // configured — BT generation no longer requires project-level customization.
+  const isBacktranslationConfigured = isConfigured
 
   // Build the glosser lazily from translated pairs. This used to run on every
   // workspace open after corpusCells settled, allocating a large temporary
@@ -1633,12 +1615,10 @@ export function ProjectWorkspace() {
     cell: CellData,
     btText: string,
     polished: boolean,
-    committedEventId?: string,
   ) => {
-    // The BT must pin to the commit it describes. Right after a target commit
-    // the cell projection still reports the PRE-commit head, so prefer the
-    // just-committed event id when the caller has it (auto-BT-on-commit path).
-    const pinnedTargetEventId = resolveBtTargetEventId(committedEventId, cell.targetEventId)
+    // The BT pins to the commit it describes. Generation is manual-only, so
+    // there is never an in-flight commit here — the projected head is current.
+    const pinnedTargetEventId = resolveBtTargetEventId(undefined, cell.targetEventId)
 
     // 1. In-memory cache
     setBacktranslationCache((prev) => new Map(prev).set(cell.id, btText))
@@ -1676,77 +1656,61 @@ export function ProjectWorkspace() {
     })
   }, [project?.id, currentUsername, setBtWriteError])
 
-  // ── Keep stable refs in sync every render (FRO-203) ────────────────────
-  // These allow commitCompletedCell / handleCellCommitted (declared earlier or
-  // later in hook order) to always call the latest glosser builder + persistBt without
-  // circular dependency issues in useCallback deps arrays.
-  getGlosserRef.current = getGlosser
-  persistBtRef.current = persistBt
-  // cellsRef.current is kept in sync by the useEffect at ~line 690 — no update needed here.
-  setBacktranslationCacheRef.current = setBacktranslationCache
-
   /**
-   * Re-runs statistical BT on demand + optional AI polish. Called by the BT
-   * tab's Generate/Regenerate buttons and the Polish toggle. Statistical BT is
-   * always computed first; the AI step only runs when the caller requests
-   * `polish` AND an AI model is configured (`isBacktranslationConfigured`).
-   *
-   * The Polish toggle passes its on/off state as `polish`, so turning it on
-   * regenerates with AI and turning it off regenerates statistical-only —
-   * keeping the displayed text in sync with the polished/statistical label.
-   *
-   * Auto-BT (on every target commit) uses `buildStatisticalBt` directly and
-   * does NOT call this function — that path lives in handleCellCommitted and
-   * commitCompletedCell (FRO-203).
+   * Generate the cell's back-translation with the configured LLM. Called by
+   * the BT tab's Generate/Refresh buttons — this is the ONLY generation path
+   * that persists a BT; nothing runs automatically on commit. The statistical
+   * glosser is a separate read-only reference surfaced on demand via
+   * `getStatisticalBt` (never persisted).
    */
-  const runBacktranslation = useCallback(async (cell: CellData, polish = false) => {
-    if (!cell.translated?.trim()) return
+  const runBacktranslation = useCallback(async (cell: CellData) => {
+    if (!cell.translated?.trim() || !isBacktranslationConfigured) return
     const cellId = cell.id
     setBacktranslatingState((prev) => new Set(prev).add(cellId))
     setBacktranslationErrorsState((prev) => { const n = new Map(prev); n.delete(cellId); return n })
     try {
-      // Step 1: statistical gloss (always runs)
-      let btText = getGlosser().gloss(cell.translated)
-      if (!btText.trim()) {
-        btText = cell.translated // last-resort literal fallback
-      }
-
-      // Step 2: AI polish — only when the caller asked for it (Polish toggle on)
-      // and a model is configured. The polished result replaces the statistical
-      // gloss and renders above the substring-alignment panel.
-      let polished = false
-      if (polish && isBacktranslationConfigured && project?.completionSettings) {
-        try {
-          btText = await generateBacktranslation({
-            settings: project.completionSettings,
-            session: frontierSession,
-            sourceLanguage: project.sourceLanguage || "English",
-            targetLanguage: project.targetLanguage || "Unknown",
-            targetText: cell.translated,
-            examples: [],
-            // btseed-glue: seed terminology so the literal BT surfaces the
-            // controlled-vocabulary source headwords for the renderings the
-            // translator chose. The service derives the relevant hints from
-            // the cell's source text; behavior is unchanged when nothing matches.
-            concepts: project.terminology ?? [],
-            sourceText: cell.original,
-          })
-          polished = true
-        } catch (polishErr) {
-          // Polish failed — keep statistical result, surface a non-fatal warning
-          console.warn("[bt] LLM polish failed, using statistical result:", polishErr)
-        }
-      }
-
-      setBacktranslationCache((prev) => new Map(prev).set(cellId, btText))
-      persistBt(cell, btText, polished)
+      const btText = await generateBacktranslation({
+        // Same precedence as the AI-completion path: project settings when
+        // customized, Frontier defaults otherwise. complete() layers the
+        // per-device provider override on top.
+        settings: project?.completionSettings ?? FALLBACK_COMPLETION_SETTINGS,
+        session: frontierSession,
+        sourceLanguage: project?.sourceLanguage || "English",
+        targetLanguage: project?.targetLanguage || "Unknown",
+        targetText: cell.translated,
+        examples: [],
+        // btseed-glue: seed terminology so the literal BT surfaces the
+        // controlled-vocabulary source headwords for the renderings the
+        // translator chose. The service derives the relevant hints from
+        // the cell's source text; behavior is unchanged when nothing matches.
+        concepts: project?.terminology ?? [],
+        sourceText: cell.original,
+      })
+      if (!btText.trim()) throw new Error("The model returned an empty back-translation.")
+      persistBt(cell, btText, true)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setBacktranslationErrorsState((prev) => new Map(prev).set(cellId, msg))
     } finally {
       setBacktranslatingState((prev) => { const n = new Set(prev); n.delete(cellId); return n })
     }
-  }, [getGlosser, isBacktranslationConfigured, project?.completionSettings, project?.sourceLanguage, project?.targetLanguage, project?.terminology, frontierSession, persistBt])
+  }, [isBacktranslationConfigured, project?.completionSettings, project?.sourceLanguage, project?.targetLanguage, project?.terminology, frontierSession, persistBt])
+
+  /**
+   * On-demand statistical gloss for the BT tab's collapsed "statistical
+   * reference" section. Computed from the project's own translation pairs,
+   * never persisted — it's a rough corpus-derived hint, not the BT of record.
+   */
+  const getStatisticalBt = useCallback((translatedText: string): string => {
+    if (!translatedText.trim()) return ""
+    const gloss = getGlosser().gloss(translatedText).trim()
+    // A gloss that only echoes the translation back is the glosser's
+    // no-corpus fallback (unknown tokens pass through) — return "" so the
+    // BT tab can say "not enough pairs yet" instead of presenting the
+    // translation as its own reading.
+    const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()
+    return norm(gloss) === norm(translatedText) ? "" : gloss
+  }, [getGlosser])
 
   // Add-from-selection: create a DRAFT concept from a source-side selection in
   // the editor and persist it via the same project-settings sync path the
@@ -2930,9 +2894,9 @@ export function ProjectWorkspace() {
     navigate,
   }), [activeFileId, completeBatch, cells, project, frontierSession, currentUsername, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell])
 
-  const handleCellCommitted = useCallback(async (cellId?: string, committedEventId?: string) => {
+  const handleCellCommitted = useCallback(async (cellId?: string, _committedEventId?: string) => {
     // Capture before async work — another edit could arrive during the flush.
-    const pendingBt = lastOptimisticEditRef.current
+    const pendingEdit = lastOptimisticEditRef.current
     lastOptimisticEditRef.current = null
 
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
@@ -2941,32 +2905,13 @@ export function ProjectWorkspace() {
     // only that row's stats and cell data instead of re-fetching the whole
     // file. Fall back to a full revalidate if the caller didn't pass a
     // cellId (older call sites).
-    const changed = cellId ?? pendingBt?.cellId
+    const changed = cellId ?? pendingEdit?.cellId
     if (changed) {
       revalidateCellStats(changed)
       revalidateCell(changed)
     } else {
       revalidateAuditStats()
       revalidateCells()
-    }
-
-    // ── Auto statistical BT on target commit (FRO-203) ─────────────────────
-    // Run synchronously after the flush so the BT reflects the committed text.
-    // LLM polish is NOT triggered here — it remains opt-in via runBacktranslation.
-    // Uses stable refs so this callback doesn't need getGlosser/cells/persistBt
-    // in its dep array (they are declared earlier or later in hook order).
-    const getGlosser = getGlosserRef.current
-    if (pendingBt?.translatedText && getGlosser && setBacktranslationCacheRef.current) {
-      const { cellId, translatedText } = pendingBt
-      const btText = buildStatisticalBt(getGlosser(), translatedText)
-      if (btText) {
-        const cell = cellsRef.current.find((c) => c.id === cellId)
-        setBacktranslationCacheRef.current((prev) => new Map(prev).set(cellId, btText))
-        if (cell && persistBtRef.current) {
-          // Pin to the just-committed event id (the projection still lags here).
-          persistBtRef.current(cell, btText, false, committedEventId)
-        }
-      }
     }
   }, [getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCellStats, revalidateCell, revalidateCells])
 
@@ -3812,6 +3757,7 @@ export function ProjectWorkspace() {
             cellOpenCommentCount={cellOpenCommentCount}
             getTokenForFile={getTokenForFile}
             getAlignmentModel={getAlignmentModel}
+            getStatisticalBt={getStatisticalBt}
             onAlignmentSeedChange={handleAlignmentSeedChange}
             activeCueIndex={activeCueIndex >= 0 ? activeCueIndex : undefined}
             onSeekToCue={isSubtitleFile ? handleCueSeek : undefined}

@@ -190,6 +190,11 @@ export default defineConfig(({ mode }) => ({
       "auth-worker/**",
       "sync-worker/**",
       "worker/**",
+      // Parity-run acceptance/roundtrip suites run via `pnpm parity:score` /
+      // `pnpm roundtrip:score` with parity/vitest.config.ts — rows there are
+      // red by design until implemented, so they must not fail the default
+      // suite.
+      "parity/**",
     ],
   },
 }))

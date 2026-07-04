@@ -7,7 +7,7 @@
   "stopOpeningNewRowsAtUtc": "2026-07-04T23:12:09Z",
   "matrixFrozen": true,
   "matrixFrozenAtUtc": "2026-07-04T15:27:00Z",
-  "scorerFrozen": false,
-  "scorerFrozenAtUtc": null,
-  "holdoutSeed": null
+  "scorerFrozen": true,
+  "scorerFrozenAtUtc": "2026-07-04T16:50:00Z",
+  "holdoutSeed": 20260704
 }

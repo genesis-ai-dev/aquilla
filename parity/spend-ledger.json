@@ -1,0 +1,13 @@
+{
+  "note": "I4 — token/spend accounting. One entry appended per cycle. Token counts are self-reported estimates from the agent loop (the harness does not expose exact counters to the run); the trend, not the absolute value, feeds the stall rule. No external paid resources may be used without human approval; none used so far.",
+  "externalPaidResourcesApproved": [],
+  "entries": [
+    {
+      "cycle": 0,
+      "label": "phase0-research",
+      "startedAtUtc": "2026-07-04T15:12:09Z",
+      "estTokensThisCycle": 250000,
+      "notes": "4 parallel research/recon subagents (Matecat docs x3, codebase map x1) + scaffolding."
+    }
+  ]
+}

@@ -1,0 +1,448 @@
+# PARITY_MATRIX — Aquilla vs Matecat commercial translation surface
+#
+# Status: FROZEN 2026-07-04T15:27Z. Rows are APPEND-ONLY from this point.
+# No edits, removals, reweights, or reprioritizations of existing rows.
+# Every append must be logged in ITERATION_LOG.md with justification.
+#
+# Provenance (C1 clean-room): every `evidence` URL is a PUBLIC Matecat doc,
+# guide, or marketing page. No Matecat source code was read by this run.
+#
+# Scoring: `pnpm parity:score` (parity/instruments/parity-score.ts).
+#   - A row with `test.tag` passes iff ≥1 vitest test whose title contains the
+#     tag exists AND all tests carrying the tag pass.
+#   - A row with `test.files` passes iff every listed vitest file passes fully.
+#   - weight: P0=3, P1=2, P2=1. Exit bar: 100% of P0, ≥90% of P1 (by row count).
+#   - EXCEEDS rows are regression guards: they must stay green every cycle.
+
+meta:
+  run: matecat-parity-2026-07-04
+  frozen: true
+  frozenAt: "2026-07-04T15:27:00Z"
+  appendLog: []
+
+rows:
+  # ── Importers / exporters (round-trip file surface) ────────────────────────
+  - id: fmt.xliff12.import
+    capability: "XLIFF 1.2 bilingual import (trans-units, target states, notes; inline tags preserved, not stripped)"
+    evidence: "https://filters.matecat.com/formats.html ; https://guides.matecat.com/file-import"
+    priority: P0
+    weight: 3
+    acceptance: "Import a spec-conformant XLIFF 1.2 file: every trans-unit becomes a segment; source/target text exact; target state mapped to segment status; inline tags (g/x/bpt/ept/ph) preserved in a round-trippable form."
+    test: { tag: "[fmt.xliff12.import]" }
+
+  - id: fmt.xliff12.export
+    capability: "XLIFF 1.2 bilingual export that validates against the official OASIS xliff-core-1.2 schema (external validator, F4)"
+    evidence: "https://guides.matecat.com/finalising-a-project ; https://site.matecat.com/support/advanced-features/segment-status-xliff-files-exported-matecat/"
+    priority: P0
+    weight: 3
+    acceptance: "Exported XLIFF validates against the official OASIS XLIFF 1.2 transitional XSD via an independent XML validator; segment statuses map to target/@state (new|translated|final) per Matecat's documented convention."
+    test: { tag: "[fmt.xliff12.export]" }
+
+  - id: fmt.xliff12.roundtrip
+    capability: "XLIFF 1.2 round-trip: import → translate → export preserves unit ids, order, source text, notes, and inline tag structure"
+    evidence: "https://guides.matecat.com/translating-offline"
+    priority: P0
+    weight: 3
+    acceptance: "For dev-corpus XLIFF 1.2 files: import then export; re-import of the export yields identical unit ids, order, source text and tag skeleton (structural comparison, not string diff)."
+    test: { tag: "[fmt.xliff12.roundtrip]" }
+
+  - id: fmt.xliff20.import
+    capability: "XLIFF 2.0 import (units/segments, states, multi-segment units, ignorables skipped)"
+    evidence: "https://guides.matecat.com/file-import ; https://guides.matecat.com/matecat-release-notes"
+    priority: P0
+    weight: 3
+    acceptance: "Import a spec-conformant XLIFF 2.0 file: one segment per <segment>; states mapped (initial|translated|reviewed|final); <ignorable> skipped; inline tags (pc/ph) preserved round-trippably."
+    test: { tag: "[fmt.xliff20.import]" }
+
+  - id: fmt.xliff20.export
+    capability: "XLIFF 2.0 export that validates against the official OASIS XLIFF 2.0 core schema (external validator, F4)"
+    evidence: "https://guides.matecat.com/matecat-release-notes"
+    priority: P0
+    weight: 3
+    acceptance: "Exported XLIFF 2.0 validates against the official OASIS xliff_core_2.0.xsd via an independent XML validator; segment states written per spec enum only."
+    test: { tag: "[fmt.xliff20.export]" }
+
+  - id: fmt.xliff20.roundtrip
+    capability: "XLIFF 2.0 round-trip preserving unit/segment structure"
+    evidence: "https://guides.matecat.com/matecat-release-notes"
+    priority: P0
+    weight: 3
+    acceptance: "Import→export→re-import on dev-corpus XLIFF 2.0 files preserves unit ids, segment granularity, source text, and tag skeleton."
+    test: { tag: "[fmt.xliff20.roundtrip]" }
+
+  - id: fmt.tmx.import
+    capability: "TMX 1.4 import (tu/tuv/seg, multi-language, inline tag text extraction, header srclang)"
+    evidence: "https://guides.matecat.com/importing/exporting"
+    priority: P0
+    weight: 3
+    acceptance: "Import TMX 1.4 files: every tu yields a source/target pair for the requested language pair; CDATA and inline <bpt>/<ept>/<ph> content preserved as text; header srclang respected."
+    test: { tag: "[fmt.tmx.import]" }
+
+  - id: fmt.tmx.export
+    capability: "TMX 1.4 export (with-tags and without-tags variants) that validates against the official TMX 1.4 DTD (external validator, F4)"
+    evidence: "https://guides.matecat.com/importing/exporting"
+    priority: P0
+    weight: 3
+    acceptance: "Exported TMX validates against the official TMX 1.4b DTD via an independent XML validator; both strip-tags and keep-tags variants supported (Matecat 'Export TMX … with or without tags')."
+    test: { tag: "[fmt.tmx.export]" }
+
+  - id: fmt.txt.roundtrip
+    capability: "Plain text import/export round-trip preserving line/paragraph structure"
+    evidence: "https://filters.matecat.com/formats.html"
+    priority: P0
+    weight: 3
+    acceptance: "Import .txt, export translation as .txt: segment order and blank-line paragraph structure preserved; untranslated segments fall back to source."
+    test: { tag: "[fmt.txt.roundtrip]" }
+
+  - id: fmt.csv.roundtrip
+    capability: "Bilingual CSV import/export round-trip (quoting, embedded commas/newlines)"
+    evidence: "https://filters.matecat.com/formats.html"
+    priority: P0
+    weight: 3
+    acceptance: "CSV with quoted fields, embedded commas, quotes and newlines survives import→export→import with identical source/target values."
+    test: { tag: "[fmt.csv.roundtrip]" }
+
+  - id: fmt.tsv.roundtrip
+    capability: "Bilingual TSV import/export round-trip"
+    evidence: "https://filters.matecat.com/formats.html"
+    priority: P0
+    weight: 3
+    acceptance: "TSV files survive import→export→import with identical source/target values; tabs/newlines in content escaped safely."
+    test: { tag: "[fmt.tsv.roundtrip]" }
+
+  - id: fmt.srt.roundtrip
+    capability: "SRT subtitle import/export round-trip (cue indices, timecodes, multi-line cues)"
+    evidence: "https://filters.matecat.com/formats.html"
+    priority: P0
+    weight: 3
+    acceptance: "SRT files survive import→export: cue count, order, and start/end timecodes identical to the original (millisecond precision); translated text replaces source per cue."
+    test: { tag: "[fmt.srt.roundtrip]" }
+
+  - id: fmt.vtt.roundtrip
+    capability: "WebVTT import/export round-trip (timecodes, voice tags, cue text)"
+    evidence: "https://filters.matecat.com/formats.html"
+    priority: P0
+    weight: 3
+    acceptance: "VTT files survive import→export: WEBVTT header, cue timecodes and <v Speaker> voice tags preserved; translated text replaces source per cue."
+    test: { tag: "[fmt.vtt.roundtrip]" }
+
+  - id: fmt.md.roundtrip
+    capability: "Markdown import/export round-trip (headings, lists, blockquotes)"
+    evidence: "https://filters.matecat.com/formats.html"
+    priority: P0
+    weight: 3
+    acceptance: "Markdown files survive import→export: block structure (headings/lists/blockquotes) reconstructed; translated text replaces source per block."
+    test: { tag: "[fmt.md.roundtrip]" }
+
+  - id: fmt.docx.roundtrip
+    capability: "DOCX import + translated-DOCX export in the ORIGINAL document (skeleton-based, structure preserved — Matecat 'same format in upload and in download')"
+    evidence: "https://guides.matecat.com/supported-formats-and-languages ; https://filters.matecat.com/formats.html"
+    priority: P0
+    weight: 3
+    acceptance: "Import a real .docx; export produces a valid .docx built from the ORIGINAL file's zip (skeleton) with paragraph runs replaced by translations; structural tree-diff (independent zip/XML reader) shows identical part list and paragraph count; untranslated paragraphs keep source."
+    test: { tag: "[fmt.docx.roundtrip]" }
+
+  - id: fmt.export.original
+    capability: "Download Original — source file returned exactly as uploaded"
+    evidence: "https://guides.matecat.com/finalising-a-project"
+    priority: P0
+    weight: 3
+    acceptance: "The original uploaded bytes are retrievable byte-identical after import (source-blob sidecar store)."
+    test: { tag: "[fmt.export.original]" }
+
+  - id: fmt.xliff.states
+    capability: "Segment status ↔ XLIFF state mapping on export (Matecat documents new/draft→'new', translated→'translated', approved→'final')"
+    evidence: "https://site.matecat.com/support/advanced-features/segment-status-xliff-files-exported-matecat/"
+    priority: P0
+    weight: 3
+    acceptance: "Exported XLIFF target/@state reflects segment status deterministically for empty/unvalidated/validated cells in both 1.2 (state) and 2.0 (segment/@state) dialects."
+    test: { tag: "[fmt.xliff.states]" }
+
+  - id: fmt.offline.reimport
+    capability: "Offline round-trip: exported bilingual XLIFF, translated externally, re-imports and updates matching segments (Matecat 'XLIFF to Target' analog)"
+    evidence: "https://guides.matecat.com/translating-offline"
+    priority: P1
+    weight: 2
+    acceptance: "Export XLIFF, modify targets externally, re-import: segments matched by unit id get the new translations; unmatched units reported, not silently dropped."
+    test: { tag: "[fmt.offline.reimport]" }
+
+  - id: fmt.pptx.roundtrip
+    capability: "PPTX import + translated-PPTX export from original skeleton"
+    evidence: "https://filters.matecat.com/formats.html"
+    priority: P1
+    weight: 2
+    acceptance: "Import a real .pptx; export rebuilds the original zip with text runs replaced; independent structural diff shows identical slide/part structure."
+    test: { tag: "[fmt.pptx.roundtrip]" }
+
+  - id: fmt.xlsx.import
+    capability: "XLSX import (shared strings, multiple sheets, column mapping)"
+    evidence: "https://filters.matecat.com/formats.html"
+    priority: P1
+    weight: 2
+    acceptance: "Import .xlsx: all sheets and cell strings extracted correctly, including shared-string and inline-string variants."
+    test: { tag: "[fmt.xlsx.import]" }
+
+  - id: fmt.html.roundtrip
+    capability: "HTML import/export round-trip (translatable text extracted; markup skeleton preserved)"
+    evidence: "https://filters.matecat.com/formats.html"
+    priority: P1
+    weight: 2
+    acceptance: "Import .html: block-level text nodes become segments; export reproduces the original markup with text replaced; script/style content untouched."
+    test: { tag: "[fmt.html.roundtrip]" }
+
+  - id: fmt.json.roundtrip
+    capability: "JSON i18n resource import/export round-trip (string values translatable, keys/structure preserved)"
+    evidence: "https://filters.matecat.com/formats.html ; https://guides.matecat.com/file-import"
+    priority: P1
+    weight: 2
+    acceptance: "Import nested JSON: leaf string values become segments keyed by JSON path; export reproduces identical structure (key order, non-string values untouched) with translations substituted."
+    test: { tag: "[fmt.json.roundtrip]" }
+
+  - id: fmt.po.roundtrip
+    capability: "GNU gettext PO import/export round-trip (msgid/msgstr, comments, plural forms preserved structurally)"
+    evidence: "https://filters.matecat.com/formats.html"
+    priority: P1
+    weight: 2
+    acceptance: "Import .po: msgid/msgstr pairs become segments; headers/comments/flags preserved on export; plural entries handled without corruption."
+    test: { tag: "[fmt.po.roundtrip]" }
+
+  - id: fmt.properties.roundtrip
+    capability: "Java .properties import/export round-trip (keys preserved, escapes handled)"
+    evidence: "https://filters.matecat.com/formats.html"
+    priority: P2
+    weight: 1
+    acceptance: "Import .properties: values become segments keyed by property key; export preserves keys, comments and escape sequences."
+    test: { tag: "[fmt.properties.roundtrip]" }
+
+  - id: fmt.srt.sbv
+    capability: "SBV subtitle import (YouTube caption format)"
+    evidence: "https://filters.matecat.com/formats.html"
+    priority: P2
+    weight: 1
+    acceptance: "Import .sbv: cues with 0:00:00.000,0:00:00.000 timecodes parsed into segments with start/end."
+    test: { tag: "[fmt.srt.sbv]" }
+
+  - id: fmt.zip.package
+    capability: "Multi-file project download as a single zip mirroring original structure"
+    evidence: "https://guides.matecat.com/finalising-a-project"
+    priority: P1
+    weight: 2
+    acceptance: "Exporting a multi-file project yields one zip whose entries correspond to the project files with translated content in original formats."
+    test: { tag: "[fmt.zip.package]" }
+
+  # ── Analysis / word counts ─────────────────────────────────────────────────
+  - id: analysis.wordcount
+    capability: "Raw word-count analysis per file and per project (words for space-delimited scripts, chars for CJK; numbers count once; Unicode punctuation excluded)"
+    evidence: "https://guides.matecat.com/volume-analysis-page"
+    priority: P0
+    weight: 3
+    acceptance: "Word counter matches documented rules on a fixture set (Latin words, CJK characters, numbers, URLs count as one word, punctuation excluded); totals aggregate per file and project."
+    test: { tag: "[analysis.wordcount]" }
+
+  - id: analysis.repetitions
+    capability: "Repetition detection: repeated identical source segments counted in a Repetitions bucket"
+    evidence: "https://guides.matecat.com/how-matecat-calculates-payable-words"
+    priority: P0
+    weight: 3
+    acceptance: "In a batch of segments, second and later occurrences of an identical normalized source land in the Repetitions bucket; first occurrence stays New."
+    test: { tag: "[analysis.repetitions]" }
+
+  - id: analysis.internal-fuzzy
+    capability: "Internal (document-internal) fuzzy matches 75–99% bucketed separately"
+    evidence: "https://guides.matecat.com/how-matecat-calculates-payable-words"
+    priority: P1
+    weight: 2
+    acceptance: "Segments similar (75–99% by a documented similarity measure) to an earlier segment in the same batch land in the internal-fuzzy bucket."
+    test: { tag: "[analysis.internal-fuzzy]" }
+
+  - id: analysis.payable
+    capability: "Payable/weighted words: per-bucket rates (New 100%, Repetitions 30%, Internal 75–99% 60%, TM 100% 30%, ICE 0%, MT band ~77%) with per-band breakdown"
+    evidence: "https://guides.matecat.com/how-matecat-calculates-payable-words"
+    priority: P0
+    weight: 3
+    acceptance: "Payable-word computation applies the frozen default rate table to bucket counts and reports per-band breakdown + discount %; rates configurable per project (custom billing model)."
+    test: { tag: "[analysis.payable]" }
+
+  # ── Batch translation pipeline (C4 contract) ───────────────────────────────
+  - id: batch.contract
+    capability: "Batch translation API implementing BATCH_ENDPOINT_CONTRACT.md (create/status/results/cancel, auth, error semantics)"
+    evidence: "https://www.matecat.com/api/docs (async 'detached mode' creation + polled status; contract is Aquilla's, informed by docs only)"
+    priority: P0
+    weight: 3
+    acceptance: "Contract test suite (parity/batch/contract.test.ts) passes against the stub: auth rejection, schema validation, 202 create, status transitions, per-segment errors, cancel idempotency."
+    test: { tag: "[batch.contract]" }
+
+  - id: batch.idempotency
+    capability: "Idempotent batch creation via idempotency-key (replay-safe, conflict on body mismatch)"
+    evidence: "https://www.matecat.com/api/docs (capability-handle pattern; idempotency is a contract-frozen Aquilla requirement)"
+    priority: P0
+    weight: 3
+    acceptance: "Same key + same body returns the original batchId; same key + different body returns 409 idempotency_conflict."
+    test: { tag: "[batch.idempotency]" }
+
+  - id: batch.pagination
+    capability: "Cursor-paginated batch results, readable while running"
+    evidence: "https://www.matecat.com/api/docs (paginated project listing pattern)"
+    priority: P0
+    weight: 3
+    acceptance: "Results endpoint pages stably by submission order with opaque cursors; partial results visible while status=running."
+    test: { tag: "[batch.pagination]" }
+
+  - id: batch.throughput
+    capability: "Sustained pipeline throughput ≥2,000 segments/min with no-op translator (frozen bar, contract §4)"
+    evidence: "https://guides.matecat.com/step-2-adding-files-to-translate (70k-segment files processed async; pipeline must not bottleneck)"
+    priority: P0
+    weight: 3
+    acceptance: "10,000 segments flow create→process→results in ≤5 min of pipeline time with a no-op translator (parity/batch/throughput.test.ts)."
+    test: { tag: "[batch.throughput]" }
+
+  - id: batch.fewshot
+    capability: "Batch pipeline retrieves few-shot examples per segment from the global validated-translation index and reports examplesUsed"
+    evidence: "https://guides.matecat.com/public-tm-and-translation-memory-key-tm-key (MyMemory global-TM analog)"
+    priority: P0
+    weight: 3
+    acceptance: "With useGlobalExamples=true, each segment's prompt assembly receives ≤maxExamplesPerSegment validated examples from the global index; examplesUsed reflects the post-exclusion count."
+    test: { tag: "[batch.fewshot]" }
+
+  # ── Global TM governance (F6, C8) ──────────────────────────────────────────
+  - id: tm.enterprise.exclusion
+    capability: "Few-shot retrieval NEVER returns examples originating from organizations flagged enterprise (adversarial, F6)"
+    evidence: "internal requirement (goal §3); Matecat analog: private-TM visibility https://guides.matecat.com/public-tm-and-translation-memory-key-tm-key"
+    priority: P0
+    weight: 3
+    acceptance: "Property-based randomized queries + red-team canary queries (exact, near-match, cross-language) over a seeded DB with enterprise-org canary strings return ZERO enterprise-origin results. One leak = row fails."
+    test: { tag: "[tm.enterprise.exclusion]" }
+
+  - id: tm.optout.write-gate
+    capability: "contribute_to_global_tm=false projects contribute zero writes to the global retrieval index (write-path gate)"
+    evidence: "internal requirement (goal §4); Matecat analog: per-resource Lookup/Update flags https://guides.matecat.com/activ"
+    priority: P0
+    weight: 3
+    acceptance: "With the flag false, validated translations from the project never enter the global index (write-path assertion); flag default TRUE; flag is a paid entitlement (billing stub) gated in the entitlement layer."
+    test: { tag: "[tm.optout.write-gate]" }
+
+  - id: tm.optout.leak-test
+    capability: "Read-side leak verification for opted-out projects (canary strings unreachable via any retrieval query)"
+    evidence: "internal requirement (goal §4)"
+    priority: P0
+    weight: 3
+    acceptance: "Canary strings seeded in an opted-out project are unreachable via exact, near-match and cross-language retrieval queries."
+    test: { tag: "[tm.optout.leak-test]" }
+
+  - id: tm.tmx.to-index
+    capability: "Imported TMX populates the project's retrieval memory (validated pairs usable as few-shot examples)"
+    evidence: "https://guides.matecat.com/importing/exporting"
+    priority: P1
+    weight: 2
+    acceptance: "After TMX import, the pairs are retrievable as examples for matching source queries within the project scope, honoring the TM-contribution flag for global scope."
+    test: { tag: "[tm.tmx.to-index]" }
+
+  # ── QA checks ──────────────────────────────────────────────────────────────
+  - id: qa.tags
+    capability: "Tag-consistency QA: missing/mismatched inline tags between source and target detected; file-breaking mismatches marked blocking"
+    evidence: "https://guides.matecat.com/fixing-tags"
+    priority: P0
+    weight: 3
+    acceptance: "QA check flags target segments whose tag multiset differs from source (missing, extra, order for paired tags); severity distinguishes blocking (missing/unclosed) from warning (order)."
+    test: { tag: "[qa.tags]" }
+
+  - id: qa.whitespace
+    capability: "Whitespace QA: newline/tab/leading-trailing whitespace mismatches between source and target"
+    evidence: "https://guides.matecat.com/qa-messages"
+    priority: P0
+    weight: 3
+    acceptance: "QA flags mismatched newline/tab counts and leading/trailing whitespace differences; non-blocking severity."
+    test: { tag: "[qa.whitespace]" }
+
+  - id: qa.symbols
+    capability: "Special-symbol QA: $ # @ £ % = * count mismatches between source and target"
+    evidence: "https://guides.matecat.com/qa-messages"
+    priority: P0
+    weight: 3
+    acceptance: "QA flags segments where documented special-symbol counts differ between source and target."
+    test: { tag: "[qa.symbols]" }
+
+  - id: qa.numbers
+    capability: "Number consistency QA (digits/dates in source must appear in target)"
+    evidence: "https://guides.matecat.com/matecat-qa-with-lexiqa"
+    priority: P1
+    weight: 2
+    acceptance: "QA flags segments where numeric tokens in source are absent from target (format-tolerant: 1,000 vs 1000 vs 1.000)."
+    test: { tag: "[qa.numbers]" }
+
+  - id: qa.conflicts
+    capability: "Translation-conflict QA: identical source segments with differing targets detected project-wide"
+    evidence: "https://guides.matecat.com/qa-messages"
+    priority: P1
+    weight: 2
+    acceptance: "Given a set of segments, identical normalized sources with ≥2 distinct targets are reported as conflicts with the conflicting values."
+    test: { tag: "[qa.conflicts]" }
+
+  - id: qa.glossary
+    capability: "Glossary QA: source term present but approved target term missing → flagged; forbidden terms in target → flagged"
+    evidence: "https://guides.matecat.com/work-with-the-termbase-while-translating"
+    priority: P1
+    weight: 2
+    acceptance: "With a termbase loaded, QA flags segments missing the approved target term and segments containing forbidden terms."
+    test: { tag: "[qa.glossary]" }
+
+  - id: qa.termbase.import
+    capability: "Termbase upload in spreadsheet form (≥2 locale columns; optional forbidden/definition/notes columns)"
+    evidence: "https://guides.matecat.com/termbase-file-format"
+    priority: P1
+    weight: 2
+    acceptance: "Parse an XLSX/CSV termbase with locale columns + forbidden markers into a glossary structure usable by qa.glossary."
+    test: { tag: "[qa.termbase.import]" }
+
+  # ── Workflow ───────────────────────────────────────────────────────────────
+  - id: wf.segment-status
+    capability: "Segment lifecycle statuses with per-status counts (Matecat New/Draft/Translated/Approved analog: empty/unvalidated/validated + validation levels)"
+    evidence: "https://guides.matecat.com/segment-status"
+    priority: P1
+    weight: 2
+    acceptance: "Status model exposes per-status segment counts for a file/project suitable for progress reporting (stats analog of Matecat /api/v3 jobs stats)."
+    test: { tag: "[wf.segment-status]" }
+
+  - id: wf.autopropagation
+    capability: "Repetition auto-propagation: confirming a translation propagates to identical-source segments"
+    evidence: "https://guides.matecat.com/autopropagation"
+    priority: P1
+    weight: 2
+    acceptance: "Pure propagation engine: given a confirmed (source→target) and a segment set, all identical normalized sources receive the translation, marked as propagated, excluding already-validated cells."
+    test: { tag: "[wf.autopropagation]" }
+
+  - id: wf.progress.stats
+    capability: "Per-state raw/weighted word-count progress stats (Matecat stats.raw/equivalent analog)"
+    evidence: "https://www.matecat.com/api/docs (ExtendedJob.stats)"
+    priority: P2
+    weight: 1
+    acceptance: "Stats computation returns raw word counts per segment status (new/draft/translated/approved analogs) plus totals."
+    test: { tag: "[wf.progress.stats]" }
+
+# ── EXCEEDS — Aquilla capabilities Matecat lacks. Regression-guarded: must
+#    stay green every cycle. Tests are the pre-existing suites. ──────────────
+exceeds:
+  - id: ex.multimodel
+    capability: "Multi-model LLM translation with per-cell model attribution (Matecat: single MT engine per project, fixed at creation)"
+    evidence: "https://guides.matecat.com/mt-settings (MT settings 'cannot be modified' after creation — Aquilla switches models per request)"
+    test: { files: ["src/lib/completion/completion-service.test.ts", "src/lib/completion/batch-completion.test.ts"] }
+
+  - id: ex.health
+    capability: "Translation health scoring (Matecat has no per-project health model)"
+    evidence: "aquilla src/lib/health/"
+    test: { files: ["src/lib/health/decay-engine.test.ts", "src/lib/health/decay-settings.test.ts"] }
+
+  - id: ex.provenance
+    capability: "Append-only event-log provenance: every edit traceable via parent chain (Matecat exposes only revision history in the Quality Report)"
+    evidence: "aquilla AD-2 event grammar"
+    test: { files: ["src/lib/event-names.test.ts"] }
+
+  - id: ex.offline-sync
+    capability: "Offline-first outbox sync with reconciliation (Matecat is documented online-only: 'you always need an internet connection')"
+    evidence: "https://guides.matecat.com/translating-offline"
+    test: { files: ["src/lib/sync/outbox.test.ts"] }
+
+  - id: ex.subtitles-av
+    capability: "Native audio/video subtitle workflows incl. voice tags and speaker mapping (Matecat: srt/vtt as plain files only)"
+    evidence: "https://filters.matecat.com/formats.html"
+    test: { files: ["src/lib/parsers/subtitle.test.ts", "src/lib/export/vtt-voice.test.ts"] }

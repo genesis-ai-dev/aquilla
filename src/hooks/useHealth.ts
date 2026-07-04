@@ -249,7 +249,7 @@ export function useHealth(
 
   // Structural stability: if the raw result is semantically unchanged from
   // last render, return the previous reference so React.memo on downstream
-  // consumers (every row in the virtualizer) can hold. A no-rule keystroke
+  // consumers (every row in the virtualized list) can hold. A no-rule keystroke
   // finishes the equality walk in a few ms and saves a full re-render of
   // every visible row.
   const prevRef = useRef<HealthStats | null>(null)

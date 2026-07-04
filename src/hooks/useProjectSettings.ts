@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getProject, patchProject } from "@/lib/store/project-index"
 import { ROLE } from "@/lib/frontier/roles"
@@ -55,6 +55,38 @@ export interface UseProjectSettings {
    *  MAINTAINER (600). Server-forbidden writes are surfaced as blocked and
    *  the optimistic overlay is rolled back — no silent local divergence. */
   patch: (partial: ProjectWideSettings) => Promise<PatchOutcome>
+}
+
+function settingsValueEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (a == null || b == null) return a == null && b == null
+  if (typeof a !== "object" || typeof b !== "object") return false
+  try {
+    return JSON.stringify(a) === JSON.stringify(b)
+  } catch {
+    return false
+  }
+}
+
+function projectWideSettingsEqual(a: ProjectWideSettings, b: ProjectWideSettings): boolean {
+  if (a === b) return true
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)] as (keyof ProjectWideSettings)[])
+  for (const key of keys) {
+    if (!settingsValueEqual(a[key], b[key])) return false
+  }
+  return true
+}
+
+function mergeProjectWideSettings(local: ProjectWideSettings, server: ProjectWideSettings): ProjectWideSettings {
+  if (Object.keys(server).length === 0) return local
+  let changed = false
+  for (const key of Object.keys(server) as (keyof ProjectWideSettings)[]) {
+    if (!settingsValueEqual(local[key], server[key])) {
+      changed = true
+      break
+    }
+  }
+  return changed ? { ...local, ...server } : local
 }
 
 function useOnline(): boolean {
@@ -251,7 +283,8 @@ export function useProjectSettings(
     void getProject(projectId)
       .then((rec) => {
         if (!alive) return
-        setLocal(localSettingsFrom(rec))
+        const nextLocal = localSettingsFrom(rec)
+        setLocal((prev) => projectWideSettingsEqual(prev, nextLocal) ? prev : nextLocal)
         // Kick off server fetch after local state is set.
         void refresh()
       })
@@ -272,8 +305,12 @@ export function useProjectSettings(
   }, [isOnline, projectId, jwt, refresh])
 
   // Server values overlay local for keys the server has set (non-empty row).
-  const settings: ProjectWideSettings =
-    server && server.version > 0 ? { ...local, ...server.settings } : local
+  const settings: ProjectWideSettings = useMemo(
+    () => server && server.version > 0
+      ? mergeProjectWideSettings(local, server.settings)
+      : local,
+    [local, server],
+  )
 
   const canEdit = isOnline && roleLevel != null && roleLevel >= EDIT_ROLE_FLOOR
   const reasonCannotEdit: CannotEditReason = canEdit

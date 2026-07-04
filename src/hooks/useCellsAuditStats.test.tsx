@@ -175,6 +175,51 @@ describe("useCellsAuditStats (Phase 2b)", () => {
       expect(result.current.byCellId.size).toBe(2)
     })
 
+    it("prefers target-side stats when a scoped response includes both source and target rows", async () => {
+      global.fetch = vi.fn().mockResolvedValueOnce(
+        new Response(JSON.stringify({ cells: STATS_RESPONSE }), { status: 200 }),
+      ) as unknown as typeof fetch
+
+      const { result } = renderHook(() =>
+        useCellsAuditStats({
+          enabled: true,
+          fileId: "file-abc",
+          getTokenForFile: TOKEN_FN,
+        }),
+      )
+      await waitFor(() => expect(result.current.byCellId.size).toBe(2))
+
+      global.fetch = vi.fn().mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          cells: [
+            {
+              side: "source",
+              cellId: "cell-1",
+              editCount: 1,
+              contentHash: "source-hash",
+              lastEditAt: 1000,
+              lastEditEventId: "source-event",
+              activeValidators: [],
+            },
+            {
+              side: "target",
+              cellId: "cell-1",
+              editCount: 4,
+              contentHash: "target-hash",
+              lastEditAt: 1900,
+              lastEditEventId: "target-event",
+              activeValidators: ["bob"],
+            },
+          ],
+        }), { status: 200 }),
+      ) as unknown as typeof fetch
+
+      act(() => { result.current.revalidateCellStats("cell-1") })
+
+      await waitFor(() => expect(result.current.byCellId.get("cell-1")?.activeValidators).toEqual(["bob"]))
+      expect(result.current.byCellId.get("cell-1")?.lastEditEventId).toBe("target-event")
+    })
+
     it("is a no-op when the server returns no matching row (e.g. a stale cellId)", async () => {
       global.fetch = vi.fn().mockResolvedValueOnce(
         new Response(JSON.stringify({ cells: STATS_RESPONSE }), { status: 200 }),

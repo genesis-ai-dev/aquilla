@@ -66,6 +66,6 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
 
   // Mock LLM's default response is "Traducción de prueba".
   await expect(
-    alice.locator("[data-cell-id]").first().locator("textarea, .ProseMirror"),
+    alice.locator("[data-cell-id]").first().locator('[data-cell-type="target"]'),
   ).toContainText("Traducción de prueba", { timeout: 15_000 })
 })

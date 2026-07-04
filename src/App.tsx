@@ -29,6 +29,7 @@ import { PrivateModeBanner } from "@/components/PrivateModeBanner"
 import { SessionExpiredBanner } from "@/components/SessionExpiredBanner"
 import { VersionBadge } from "@/components/VersionBadge"
 import { UpdateBanner } from "@/components/UpdateBanner"
+import { DelegatedTooltipLayer } from "@/components/ui/tooltip"
 import { hydratePrefetchStatus } from "@/lib/audio/prefetch"
 import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
 import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
@@ -129,6 +130,7 @@ export default function App() {
         {/* FRO-293: session-expiry banner — must be inside Router (uses useLocation) */}
         <SessionExpiredBanner />
         <SyncFreezeOverlay />
+        <DelegatedTooltipLayer />
         <OrgProvider>
           <OutboxProvider>
             {/* FRO-243: ProductTourProvider mounts once here; the tour portal

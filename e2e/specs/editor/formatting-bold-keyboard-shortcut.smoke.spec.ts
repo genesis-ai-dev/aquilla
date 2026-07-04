@@ -1,7 +1,7 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
-import { editorShortcut, selectEditorContents } from "../../helpers/editor-selection"
+import { editorShortcut, formattingBubbleButton, selectEditorContents } from "../../helpers/editor-selection"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -35,16 +35,14 @@ test("formatting bold keyboard shortcut (Ctrl+B) toggles bold mark", async ({ al
   await ws.waitForEditor()
 
   // Click into the first translation cell and type text.
-  const row = ws.cellRow(0)
-  const translationArea = row.locator('[contenteditable="true"]').last()
-  await translationArea.click()
+  const translationArea = await ws.activateTargetCell(0)
   await alice.keyboard.insertText("keyboard bold test")
 
   // Select all text in this editor.
   await selectEditorContents(translationArea)
 
   // The bubble menu should appear. Wait for Bold button.
-  const boldBtn = alice.getByRole("button", { name: "Bold" })
+  const boldBtn = formattingBubbleButton(alice, "Bold")
   await expect(boldBtn).toBeVisible({ timeout: 5_000 })
 
   // Press Ctrl+B (keyboard shortcut — distinct from clicking the button).

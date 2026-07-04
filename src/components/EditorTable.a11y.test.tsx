@@ -137,7 +137,7 @@ describe("TranslatedEditor — FRO-297 Esc key to grid", () => {
 //   Escape           → commit + exit to grid row focus (calls onEscapeToGrid)
 //
 // These key behaviors are wired in EditorRow (grid row) and TranslatedEditor
-// (Enter/Esc). Arrow navigation requires the virtualizer DOM to be present
+// (Enter/Esc). Arrow navigation requires the virtualized list DOM to be present
 // and is covered by E2E (see SWARM-TODO below).
 
 // SWARM-TODO(FRO-297): UI-QA — keyboard-only: traverse cells with arrows,

@@ -12,7 +12,7 @@
 // overlay on top of the server-side ProjectRecord; that's the canonical
 // path for those keys.
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { minimalProjectRecord, resolveCloudProjectResult } from "@/lib/sync/cloud-projects"
@@ -26,33 +26,47 @@ import { getProject } from "@/lib/store/project-index"
  * Mutates a shallow copy — never the input.
  */
 function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): ProjectRecord {
-  const next: ProjectRecord = { ...record }
-  if (settings.sourceLanguage != null) next.sourceLanguage = settings.sourceLanguage
-  if (settings.targetLanguage != null) next.targetLanguage = settings.targetLanguage
-  if (settings.systemPrompt != null) {
-    next.completionSettings = buildCompletionSettings(
-      record.completionSettings,
-      { systemPrompt: settings.systemPrompt },
-    )
+  let next: ProjectRecord | null = null
+  const draft = () => {
+    next ??= { ...record }
+    return next
   }
-  if (settings.rules != null) next.rules = settings.rules
-  if (settings.rulePenalties != null) next.rulePenalties = settings.rulePenalties
-  if (settings.algorithmicChecks != null) next.algorithmicChecks = settings.algorithmicChecks
-  if (settings.terminology != null) next.terminology = settings.terminology
-  if (settings.livingMemoryEntries != null) next.livingMemoryEntries = settings.livingMemoryEntries
-  if (settings.translationBrief != null) next.translationBrief = settings.translationBrief
-  if (settings.validationCount != null) next.validationCount = settings.validationCount
-  if (settings.validationCountAudio != null) next.validationCountAudio = settings.validationCountAudio
-  if (settings.validationRoleFloor != null) next.validationRoleFloor = settings.validationRoleFloor
-  if (settings.validationNamedUsers != null) next.validationNamedUsers = settings.validationNamedUsers
-  if (settings.allowSelfValidation != null) next.allowSelfValidation = settings.allowSelfValidation
-  if (settings.bibleResourcesEnabled != null) next.bibleResourcesEnabled = settings.bibleResourcesEnabled
-  if (settings.draftContext != null) next.draftContext = settings.draftContext
+  const assign = <K extends keyof ProjectRecord>(key: K, value: ProjectRecord[K] | null | undefined) => {
+    if (value == null) return
+    if (record[key] === value) return
+    draft()[key] = value
+  }
+  assign("sourceLanguage", settings.sourceLanguage)
+  assign("targetLanguage", settings.targetLanguage)
+  if (settings.systemPrompt != null) {
+    if (record.completionSettings?.systemPrompt !== settings.systemPrompt) {
+      draft().completionSettings = buildCompletionSettings(
+        record.completionSettings,
+        { systemPrompt: settings.systemPrompt },
+      )
+    }
+  }
+  assign("rules", settings.rules)
+  assign("rulePenalties", settings.rulePenalties)
+  assign("algorithmicChecks", settings.algorithmicChecks)
+  assign("terminology", settings.terminology)
+  assign("livingMemoryEntries", settings.livingMemoryEntries)
+  assign("translationBrief", settings.translationBrief)
+  assign("validationCount", settings.validationCount)
+  assign("validationCountAudio", settings.validationCountAudio)
+  assign("validationRoleFloor", settings.validationRoleFloor)
+  assign("validationNamedUsers", settings.validationNamedUsers)
+  assign("allowSelfValidation", settings.allowSelfValidation)
+  assign("bibleResourcesEnabled", settings.bibleResourcesEnabled)
+  assign("draftContext", settings.draftContext)
   if (settings.ttsSettings != null) {
     // Server carries voice profiles (no apiKey); keep any device-local apiKey.
-    next.ttsSettings = { ...next.ttsSettings, ...settings.ttsSettings }
+    const merged = { ...record.ttsSettings, ...settings.ttsSettings }
+    if (JSON.stringify(record.ttsSettings ?? {}) !== JSON.stringify(merged)) {
+      draft().ttsSettings = merged
+    }
   }
-  return next
+  return next ?? record
 }
 
 async function overlayDeviceLocalSettings(record: ProjectRecord): Promise<ProjectRecord> {
@@ -133,7 +147,10 @@ export function useProject(projectId: string) {
   // per-callsite changes.
   const roleLevel = project?.syncRole?.level ?? null
   const { settings: syncedSettings, patch: patchSettings } = useProjectSettings(projectId, roleLevel)
-  const overlaid = project ? overlaySettings(project, syncedSettings) : null
+  const overlaid = useMemo(
+    () => project ? overlaySettings(project, syncedSettings) : null,
+    [project, syncedSettings],
+  )
 
   return {
     project: overlaid,

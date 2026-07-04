@@ -39,12 +39,19 @@ function targetUrl(): string {
 function parseBundle(raw: Buffer): Map<string, Record<string, unknown>[]> {
   const sections = new Map<string, Record<string, unknown>[]>()
   let current: Record<string, unknown>[] | null = null
-  for (const line of raw.toString("utf8").split("\n")) {
-    if (!line) continue
+  let lineStart = 0
+  const parseLine = (lineEnd: number) => {
+    const line = raw.toString("utf8", lineStart, lineEnd)
+    lineStart = lineEnd + 1
+    if (!line) return
     const obj = JSON.parse(line)
     if (TABLE_HEADER_KEY in obj) { current = []; sections.set(obj[TABLE_HEADER_KEY], current) }
     else current!.push(obj)
   }
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i] === 0x0a) parseLine(i)
+  }
+  if (lineStart < raw.length) parseLine(raw.length)
   return sections
 }
 
@@ -146,14 +153,24 @@ async function main() {
     if (bad) throw new Error(`${bad} table(s) failed count verification`)
     console.log(`✓ loaded + verified ${SEED_TABLES.length} tables`)
 
-    // Optional: grant a local user OWNER membership on every seeded project so the
-    // projects are visible in the dev UI (seeded projects belong to scrubbed users).
+    // Optional: grant a local user OWNER membership on every seeded org and
+    // project so seeded data is visible through both org-scoped dashboards and
+    // direct project membership views (seeded rows belong to scrubbed users).
     const grantTo = flagValue("--grant-to")
     if (grantTo) {
       const u = (await c.query(`SELECT id FROM users WHERE username = $1`, [grantTo])).rows[0]
       if (!u) {
         console.warn(`⚠ --grant-to: no user "${grantTo}" in target (boot the app once to create the dev user, then re-run); skipping grant`)
       } else {
+        const orgIds = idSets.org
+        for (const oid of orgIds) {
+          await c.query(
+            `INSERT INTO org_members (org_id, user_id, role_level, granted_by, granted_at)
+             VALUES ($1, $2, $3, $2, now())
+             ON CONFLICT (org_id, user_id) DO UPDATE SET role_level = EXCLUDED.role_level`,
+            [oid, u.id, OWNER_ROLE],
+          )
+        }
         for (const pid of meta.projectIds) {
           await c.query(
             `INSERT INTO project_members (project_id, user_id, role_level, granted_at)
@@ -162,7 +179,7 @@ async function main() {
             [pid, u.id, OWNER_ROLE],
           )
         }
-        console.log(`✓ granted ${grantTo} (id ${u.id}) OWNER on ${meta.projectIds.length} seeded projects`)
+        console.log(`✓ granted ${grantTo} (id ${u.id}) OWNER on ${orgIds.length} seeded orgs and ${meta.projectIds.length} seeded projects`)
       }
     }
   } catch (e) {

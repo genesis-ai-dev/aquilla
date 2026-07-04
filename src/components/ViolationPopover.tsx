@@ -3,13 +3,20 @@ import { Popover, PopoverContent } from "@/components/ui/popover"
 import type { RuleInfraction, RuleWaiver } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
 
+/** Rect snapshot of the clicked violation blot — the blot's DOM node may be
+ *  detached by re-renders before the popover positions, so callers pass a
+ *  virtual anchor instead of the element itself. */
+export interface ViolationAnchor {
+  getBoundingClientRect: () => DOMRect
+}
+
 interface ViolationPopoverProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   infraction: RuleInfraction
   ruleName: string
   waivers: RuleWaiver[]
-  anchor: HTMLElement | null
+  anchor: ViolationAnchor | null
   onOpenRule: (ruleId: string) => void
   onWaive: (input: { ruleId: string; reason?: string }) => void
   onUnwaive: (ruleId: string) => void

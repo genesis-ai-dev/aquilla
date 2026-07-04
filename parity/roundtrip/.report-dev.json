@@ -1,8 +1,8 @@
 {
   "set": "dev",
-  "generatedAt": "2026-07-04T17:22:32.267Z",
+  "generatedAt": "2026-07-04T17:32:25.912Z",
   "total": 122,
-  "passed": 116,
+  "passed": 122,
   "perFormat": {
     "csv": {
       "pass": 7,
@@ -25,7 +25,7 @@
       "total": 7
     },
     "po": {
-      "pass": 0,
+      "pass": 6,
       "total": 6
     },
     "pptx": {
@@ -293,68 +293,38 @@
     {
       "file": "po/po-001.po",
       "format": "po",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "po/po-004.po",
       "format": "po",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "po/po-005.po",
       "format": "po",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "po/po-008.po",
       "format": "po",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "po/po-009.po",
       "format": "po",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "po/po-010.po",
       "format": "po",
-      "pass": false,
-      "failures": [
-        {
-          "check": "no-adapter",
-          "detail": "format has no parser adapter yet"
-        }
-      ]
+      "pass": true,
+      "failures": []
     },
     {
       "file": "pptx/pptx-003.pptx",

@@ -1,24 +1,25 @@
 msgid ""
 msgstr ""
-"Project-Id-Version: corpus 1\n"
+"Project-Id-Version: corpus 8002\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-msgid "Refunds are processed within 5–10 business days of approval."
-msgstr "請在使用前仔細閱讀本說明書。"
+msgid "Free shipping on orders over $50 — terms apply."
+msgstr ""
 
-msgid "Adverse reactions may include nausea, dizziness, and <severe> headaches."
+msgid "Third-party integrations require an Enterprise plan subscription."
 msgstr ""
 
 #. developer note 2
 #: src/app.ts:12
-msgid "Free shipping on orders over $50 — terms apply."
-msgid_plural "Free shipping on orders over $50 — terms apply. (plural)"
-msgstr[0] "The undersigned parties agree to the terms & conditions set forth herein."
-msgstr[1] "The undersigned parties agree to the terms & conditions set forth herein."
+msgid "This warranty does not cover damage caused by misuse or unauthorized repair."
+msgstr ""
 
-msgid "Take 2 tablets daily with food; do not exceed 6 tablets in 24 hours."
-msgstr "By signing below, the lessee acknowledges receipt of the premises."
+msgid "Warning: contents may be hot. Handle with care."
+msgstr "Warning: contents may be hot. Handle with care."
 
-msgid "Enter your 6-digit verification code to continue."
+msgid "Error 404: the requested resource could not be found on this server."
+msgstr ""
+
+msgid "Mesures de sécurité : portez des gants et des lunettes de protection."
 msgstr ""

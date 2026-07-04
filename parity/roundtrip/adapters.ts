@@ -42,6 +42,7 @@ import { extractHtmlStrings, exportHtml } from "@/lib/parsers/html"
 import { extractJsonStrings, exportJson } from "@/lib/parsers/json-i18n"
 import { extractPropertiesStrings, exportProperties } from "@/lib/parsers/properties"
 import { extractSbvStrings } from "@/lib/parsers/sbv"
+import { extractPoStrings, exportPo } from "@/lib/parsers/po"
 
 export interface AdapterSegment {
   source: string
@@ -173,6 +174,10 @@ export async function buildAdapters(): Promise<Record<string, FormatAdapter>> {
     },
     sbv: {
       parse: async (b) => toSegments(extractSbvStrings(text(b))),
+    },
+    po: {
+      parse: async (b) => toSegments(extractPoStrings(text(b))),
+      export: async (b) => toBytes(exportPo(text(b), toCells(extractPoStrings(text(b))))),
     },
   }
 

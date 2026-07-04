@@ -93,19 +93,20 @@ const MSGSTR_INDEX_RE = /^msgstr\[(\d+)\]$/
 function parsePoEntries(content: string): PoEntry[] {
   const lines = content.split("\n")
   const entries: PoEntry[] = []
-  let cur: PoEntry | null = null
-  let field: Field | null = null
+  // Mutable cursor state. (Object properties rather than locals so the helper
+  // mutations below don't fight TS control-flow narrowing.)
+  const st: { cur: PoEntry | null; field: Field | null } = { cur: null, field: null }
 
   const open = (): PoEntry => {
-    if (!cur) {
-      cur = { references: [], msgstrSlots: [] }
-      entries.push(cur)
+    if (!st.cur) {
+      st.cur = { references: [], msgstrSlots: [] }
+      entries.push(st.cur)
     }
-    return cur
+    return st.cur
   }
   const close = () => {
-    cur = null
-    field = null
+    st.cur = null
+    st.field = null
   }
 
   for (let i = 0; i < lines.length; i++) {
@@ -118,13 +119,13 @@ function parsePoEntries(content: string): PoEntry[] {
 
     if (t.startsWith("#")) {
       // A comment after the msgstr block belongs to the NEXT entry.
-      if (cur && cur.msgstrSlots.length > 0) close()
+      if (st.cur && st.cur.msgstrSlots.length > 0) close()
       const e = open()
       if (t.startsWith("#:")) {
         const refs = t.slice(2).trim().split(/\s+/).filter((r) => r.length > 0)
         e.references.push(...refs)
       }
-      field = null
+      st.field = null
       continue
     }
 
@@ -132,24 +133,25 @@ function parsePoEntries(content: string): PoEntry[] {
     if (kw) {
       const keyword = kw[1]
       const value = parseQuotedPart(kw[2])
+      // msgctxt / msgid start a NEW entry when the current one is already
+      // complete (has msgstr) or already has a msgid (no blank-line separator).
       if (
         (keyword === "msgctxt" || keyword === "msgid") &&
-        cur &&
-        (cur.msgstrSlots.length > 0 || (keyword === "msgctxt" && cur.msgid !== undefined) ||
-          (keyword === "msgid" && cur.msgid !== undefined))
+        st.cur &&
+        (st.cur.msgstrSlots.length > 0 || st.cur.msgid !== undefined)
       ) {
         close()
       }
       const e = open()
       if (keyword === "msgctxt") {
         e.msgctxt = value
-        field = { kind: "msgctxt" }
+        st.field = { kind: "msgctxt" }
       } else if (keyword === "msgid") {
         e.msgid = value
-        field = { kind: "msgid" }
+        st.field = { kind: "msgid" }
       } else if (keyword === "msgid_plural") {
         e.msgidPlural = value
-        field = { kind: "msgid_plural" }
+        st.field = { kind: "msgid_plural" }
       } else {
         const idxMatch = keyword.match(MSGSTR_INDEX_RE)
         const slot: MsgstrSlot = {
@@ -159,23 +161,24 @@ function parsePoEntries(content: string): PoEntry[] {
           lineEnd: i,
         }
         e.msgstrSlots.push(slot)
-        field = { kind: "msgstr", slot }
+        st.field = { kind: "msgstr", slot }
       }
       continue
     }
 
-    if (t.startsWith('"') && cur && field) {
+    if (t.startsWith('"') && st.cur && st.field) {
       // Continuation line: adjacent quoted strings concatenate.
       const value = parseQuotedPart(t)
-      if (field.kind === "msgstr") {
-        field.slot.value += value
-        field.slot.lineEnd = i
-      } else if (field.kind === "msgctxt") {
-        cur.msgctxt = (cur.msgctxt ?? "") + value
-      } else if (field.kind === "msgid") {
-        cur.msgid = (cur.msgid ?? "") + value
+      const f = st.field
+      if (f.kind === "msgstr") {
+        f.slot.value += value
+        f.slot.lineEnd = i
+      } else if (f.kind === "msgctxt") {
+        st.cur.msgctxt = (st.cur.msgctxt ?? "") + value
+      } else if (f.kind === "msgid") {
+        st.cur.msgid = (st.cur.msgid ?? "") + value
       } else {
-        cur.msgidPlural = (cur.msgidPlural ?? "") + value
+        st.cur.msgidPlural = (st.cur.msgidPlural ?? "") + value
       }
       continue
     }

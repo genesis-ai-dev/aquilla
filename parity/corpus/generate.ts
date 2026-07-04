@@ -94,7 +94,7 @@ type Gen = { ext: string; count: number; make: (rng: () => number, i: number) =>
 const eol = (rng: () => number): string => (rng() < 0.3 ? '\r\n' : '\n')
 const maybeBom = (rng: () => number): string => (rng() < 0.2 ? '﻿' : '')
 
-const genXliff12 = (rng: () => number, i: number): string => {
+const genXliff12 = (rng: () => number, _i: number): string => {
   const [src, tgt] = LANG_PAIRS[Math.floor(rng() * LANG_PAIRS.length)]
   const nFiles = rng() < 0.2 ? 2 : 1
   const files: string[] = []
@@ -125,7 +125,7 @@ const genXliff12 = (rng: () => number, i: number): string => {
   return `${maybeBom(rng)}<?xml version="1.0" encoding="UTF-8"?>\n<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">\n${files.join('\n')}\n</xliff>\n`
 }
 
-const genXliff20 = (rng: () => number, i: number): string => {
+const genXliff20 = (rng: () => number, _i: number): string => {
   const [src, tgt] = LANG_PAIRS[Math.floor(rng() * LANG_PAIRS.length)]
   const n = 3 + Math.floor(rng() * 8)
   const units: string[] = []
@@ -192,7 +192,7 @@ const genCsv = (rng: () => number, i: number): string => {
   return maybeBom(rng) + rows.join('\n') + '\n'
 }
 
-const genTsv = (rng: () => number, i: number): string => {
+const genTsv = (rng: () => number, _i: number): string => {
   const n = 4 + Math.floor(rng() * 10)
   const rows: string[] = []
   if (rng() < 0.5) rows.push('source\ttarget')
@@ -283,7 +283,7 @@ const genHtml = (rng: () => number): string => {
   return `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<title>${xml(pick(rng, 1)[0])}</title>\n<style>p { color: #333; }</style>\n</head>\n<body>\n${body.join('\n')}\n</body>\n</html>\n`
 }
 
-const genJson = (rng: () => number, i: number): string => {
+const genJson = (rng: () => number, _i: number): string => {
   const obj: Record<string, unknown> = {
     app: { title: pick(rng, 1)[0], subtitle: pick(rng, 1)[0] },
     buttons: { save: 'Save', cancel: 'Cancel', delete: pick(rng, 1)[0] },

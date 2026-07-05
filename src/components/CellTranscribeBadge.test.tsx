@@ -15,7 +15,7 @@ describe("CellTranscribeBadge error state", () => {
   it("renders a visible failed pill when transcription errors", () => {
     setTranscribeStatus(AUDIO_ID, { kind: "error", message: "model download failed" })
     render(<CellTranscribeBadge audioId={AUDIO_ID} hasTimings={false} />)
-    expect(screen.getByText("asr · failed")).toBeInTheDocument()
+    expect(screen.getByText("Transcription failed")).toBeInTheDocument()
   })
 
   it("offers Retry in the expanded error popover and invokes the callback", () => {
@@ -23,7 +23,7 @@ describe("CellTranscribeBadge error state", () => {
     const onRetry = vi.fn()
     render(<CellTranscribeBadge audioId={AUDIO_ID} hasTimings={false} onRetry={onRetry} />)
 
-    fireEvent.click(screen.getByText("asr · failed"))
+    fireEvent.click(screen.getByText("Transcription failed"))
     fireEvent.click(screen.getByRole("button", { name: /retry/i }))
     expect(onRetry).toHaveBeenCalledTimes(1)
   })

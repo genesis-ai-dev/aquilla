@@ -38,6 +38,7 @@ import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { CellExpansion } from "./CellExpansion"
 import { tokenizeWords } from "@/lib/audio/timings"
+import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { useCellEditHistory } from "@/hooks/useCellEditHistory"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
@@ -552,6 +553,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const [firstVisibleIndex, setFirstVisibleIndex] = useState(0)
   const [viewableIndexes, setViewableIndexes] = useState<number[]>([])
   const [activeEditorCellId, setActiveEditorCellId] = useState<string | null>(null)
+  // Mirror ref so the imperative handle (getCurrentIndex) reads current
+  // values without widening its dependency array — same pattern as
+  // displayCellsRef below.
+  const viewableIndexesRef = useRef(viewableIndexes)
+  viewableIndexesRef.current = viewableIndexes
+  // Last cell whose editor was activated (jump target or clicked-into cell).
+  // Deliberately NOT cleared on blur/deactivate: clicking the "Next
+  // unfinished" menu item blurs the editor before the click lands, and the
+  // user's position shouldn't evaporate at that instant. getCurrentIndex
+  // ignores it once the cell is off screen or no longer rendered.
+  const lastActiveEditorCellIdRef = useRef<string | null>(null)
   const [hoveredFootnote, setHoveredFootnote] = useState<{ cellId: string; index: number } | null>(null)
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
@@ -614,6 +626,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const handleActivateEditor = useCallback((cellId: string) => {
     setActiveEditorCellId(cellId)
+    lastActiveEditorCellIdRef.current = cellId
   }, [])
 
   const handleDeactivateEditor = useCallback((cellId: string) => {
@@ -690,6 +703,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (index < 0 || index >= list.length) return
     const targetId = list[index].id
     setActiveEditorCellId(targetId)
+    lastActiveEditorCellIdRef.current = targetId
     void listRef.current?.scrollToIndex({
       index,
       viewPosition: 0.5,
@@ -735,35 +749,28 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     },
     focusCellEditorIndex: focusCellEditorByIndex,
     getCurrentIndex: () => {
-      // First visible row, mapped from display space (the virtual list's
-      // order, which differs in time-ordered mode) back to the `cells` prop
-      // space that ProjectWorkspace's "Next unfinished" search indexes into.
-      // Was stubbed to `() => 0`, which pinned the button to the file's
-      // first unfinished cell forever instead of advancing from the viewport.
-      const display = displayCellsRef.current
-      if (display.length === 0) return 0
+      // The last-active editor cell when it's on screen (so "Next unfinished"
+      // advances past a just-jumped-to cell instead of re-finding it),
+      // otherwise the first visible row — mapped from display space back to
+      // the `cells` prop space the search indexes into. Pure logic lives in
+      // lib/editor/current-index.ts where it's testable.
       const state = listRef.current?.getState()
       const scrollEl = parentRef.current ?? listRootRef.current
-      const scroll = state?.scroll ?? scrollEl?.scrollTop ?? 0
-      let displayIdx = 0
-      if (state) {
-        for (let index = 0; index < display.length; index += 1) {
-          const start = state.positionAtIndex(index)
-          const size = state.sizeAtIndex(index) || ESTIMATED_ROW_HEIGHT_PX
-          if (start + size > scroll) {
-            displayIdx = index
-            break
-          }
-        }
-      } else {
-        displayIdx = Math.min(
-          display.length - 1,
-          Math.max(0, Math.round(scroll / ESTIMATED_ROW_HEIGHT_PX)),
-        )
-      }
-      const id = display[displayIdx]?.id
-      const cellIdx = id ? cellsRef.current.findIndex((c) => c.id === id) : -1
-      return cellIdx >= 0 ? cellIdx : 0
+      return resolveCurrentCellIndex({
+        displayCells: displayCellsRef.current,
+        cells: cellsRef.current,
+        activeCellId: lastActiveEditorCellIdRef.current,
+        viewableIndexes: viewableIndexesRef.current,
+        measurements: state
+          ? {
+              scroll: state.scroll,
+              positionAtIndex: (index) => state.positionAtIndex(index),
+              sizeAtIndex: (index) => state.sizeAtIndex(index),
+            }
+          : null,
+        fallbackScrollTop: scrollEl?.scrollTop ?? 0,
+        estimatedRowHeight: ESTIMATED_ROW_HEIGHT_PX,
+      })
     },
     flashCell(cellId, _searchTerm) {
       // Defer to next frame: the list may still be scrolling, so the

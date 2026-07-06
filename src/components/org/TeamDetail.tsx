@@ -7,6 +7,11 @@ import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { Page, PageHeader, Section, EmptyState } from "@/components/ui/page"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -650,21 +655,22 @@ function TeamMemberCombobox({
         <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
       </PopoverTrigger>
       <PopoverContent className="w-72 p-2" side="bottom" sideOffset={4}>
-        <div className="relative mb-2">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
+        <InputGroup className="mb-2">
+          <InputGroupAddon>
+            <Search />
+          </InputGroupAddon>
+          <InputGroupInput
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search org members..."
             aria-label="Search org members"
-            className="pl-8"
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="none"
             spellCheck={false}
             autoFocus
           />
-        </div>
+        </InputGroup>
         <div
           id="team-member-combobox-list"
           role="listbox"

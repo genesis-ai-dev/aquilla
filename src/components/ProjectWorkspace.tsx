@@ -132,7 +132,7 @@ import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
 import { CompletionBulkProgressBanner } from "./CompletionBulkProgressBanner"
-import { AppTooltip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { AppTooltip, Tooltip, TooltipContent, TooltipDelegationBoundary, TooltipTrigger } from "@/components/ui/tooltip"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
 import { AiSetupDialog } from "./AiSetupDialog"
 import {
@@ -963,6 +963,11 @@ export function ProjectWorkspace() {
 
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const isSubtitleFile = activeFile?.type === "vtt" || activeFile?.type === "srt"
+
+  const workspaceBreadcrumb = useMemo(() => ({
+    surfaceLabel:
+      centerSurface === "editor" ? "Editor" : deriveNavTitle(location.pathname),
+  }), [centerSurface, location.pathname])
 
   const handleVisibleFootnotesChange = useCallback((entries: VisibleFootnoteEntry[]) => {
     const key = entries
@@ -3334,14 +3339,15 @@ export function ProjectWorkspace() {
         logoAccessory={
           dockTab !== null ? (
             <AppTooltip content="Collapse sidebar" side="right">
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 aria-label="Collapse sidebar"
                 onClick={() => setDockTab(null)}
-                className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
               >
                 <PanelLeftClose className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             </AppTooltip>
           ) : null
         }
@@ -3508,9 +3514,9 @@ export function ProjectWorkspace() {
         header={
           <WorkspaceHeader
             project={project}
-            onBack={goToProjects}
             extraMenuItems={workspaceHeaderMenuItems}
             overviewHref={projectId ? `/projects/${projectId}` : undefined}
+            surfaceLabel={workspaceBreadcrumb.surfaceLabel}
           >
             {project && centerSurface === "rules" && (
               <>
@@ -3538,6 +3544,18 @@ export function ProjectWorkspace() {
                 </Button>
               </>
             )}
+
+            {project && centerSurface === "editor" && activeFileId ? (
+              <EditorModeToggle
+                lens={lens}
+                onChange={(l) => {
+                  setLens(l)
+                  // Surface the Voices tab when entering the Audio lens.
+                  if (l === "audio") setDockTab("voices")
+                }}
+                timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
+              />
+            ) : null}
 
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
 
@@ -3590,21 +3608,6 @@ export function ProjectWorkspace() {
                       onClose: () => navigate(`/project/${projectId}`),
                     }
                   : null
-              }
-              trailing={
-                // Per-file view-mode control — lives with the content it
-                // affects, not in the global header (which holds actions).
-                project && centerSurface === "editor" && activeFileId ? (
-                  <EditorModeToggle
-                    lens={lens}
-                    onChange={(l) => {
-                      setLens(l)
-                      // Surface the Voices tab when entering the Audio lens.
-                      if (l === "audio") setDockTab("voices")
-                    }}
-                    timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
-                  />
-                ) : undefined
               }
             />
             {project && activeFileId && (
@@ -3861,6 +3864,11 @@ export function ProjectWorkspace() {
                 />
               ) : (
               <EditorActionsProvider value={editorActionsValue}>
+              {/* Dense grid: one tooltip-bearing control per cell across
+                  hundreds of cells — opt into the delegated tooltip layer here
+                  (see TooltipDelegationBoundary) instead of mounting a Base UI
+                  tooltip per control. */}
+              <TooltipDelegationBoundary>
               <EditorTable
             ref={editorRef} project={project} cells={cellsWithBacktranslation}
             showFootnotesInline={footnoteViewMode === "inline"}
@@ -3912,6 +3920,7 @@ export function ProjectWorkspace() {
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
           />
+              </TooltipDelegationBoundary>
               </EditorActionsProvider>
               )}
             </div>

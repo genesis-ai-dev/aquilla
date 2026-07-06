@@ -6,7 +6,7 @@ import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Page, PageHeader, Section, StatTile, EmptyState } from "@/components/ui/page"
 import { NavList, NavRow, BackLink } from "@/components/ui/nav-list"
 import {
@@ -172,8 +172,8 @@ export function Settings() {
       }
     >
       {editing ? (
-        <div className="space-y-2">
-          <Label htmlFor="org-name" className="text-sm font-medium">Organization name</Label>
+        <Field>
+          <FieldLabel htmlFor="org-name" className="text-sm font-medium">Organization name</FieldLabel>
           <Input
             id="org-name"
             value={name}
@@ -181,14 +181,14 @@ export function Settings() {
             disabled={busy}
             autoFocus
           />
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {error && <FieldError className="text-xs">{error}</FieldError>}
           <div className="flex gap-2 pt-1">
             <Button size="sm" onClick={handleSave} disabled={busy || !name.trim()}>
               {busy ? "Saving…" : "Save"}
             </Button>
             <Button size="sm" variant="outline" onClick={() => setEditing(false)} disabled={busy}>Cancel</Button>
           </div>
-        </div>
+        </Field>
       ) : (
         <div className="flex items-center gap-3">
           <span className="text-lg font-medium text-foreground">{activeOrg?.name ?? "Untitled organization"}</span>
@@ -205,8 +205,8 @@ export function Settings() {
       title="Export permissions"
       description="Minimum role required to download project deliverables — USFM export and project zip. Defaults to Maintainer."
     >
-      <div className="space-y-2">
-        <Label htmlFor="export-min-role" className="text-sm font-medium">Who can export</Label>
+      <Field>
+        <FieldLabel htmlFor="export-min-role" className="text-sm font-medium">Who can export</FieldLabel>
         <Select
           items={exportRoleOptions.map((opt) => ({ value: String(opt.level), label: opt.label }))}
           value={String(displayedExportMinRole)}
@@ -226,23 +226,23 @@ export function Settings() {
             </SelectGroup>
           </SelectContent>
         </Select>
-        <p className="text-xs text-muted-foreground">
+        <FieldDescription>
           Lower the floor to let translators export their own work; raise it to keep deliverables
           with leads. Client-side formats (CSV, TSV) operate on already-loaded cells and can't be
           enforced here.
-        </p>
+        </FieldDescription>
         {!canEditExportFloor && (
-          <p className="text-xs text-muted-foreground">Only org owners can change the export permission policy.</p>
+          <FieldDescription>Only org owners can change the export permission policy.</FieldDescription>
         )}
         {exportRoleError && (
-          <p className="text-xs text-destructive">{exportRoleError}</p>
+          <FieldError className="text-xs">{exportRoleError}</FieldError>
         )}
         {exportRoleSaved && (
           <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400" role="status" data-testid="export-role-saved">
             <Check className="size-3.5" /> Saved
           </p>
         )}
-      </div>
+      </Field>
     </Section>
   )
 
@@ -275,7 +275,7 @@ export function Settings() {
           <NavRow to="/settings/providers" icon={KeyRound} title="AI provider keys" hint="Org keys" />
         </NavList>
 
-        <NavList label="People & projects">
+        <NavList label="People & Projects">
           <NavRow to="/members" icon={Users} title="Members" hint="Roles & invites" />
           <NavRow to="/teams" icon={UsersRound} title="Teams" hint="Groups" />
           <NavRow to="/projects/archived" icon={Archive} title="Archived projects" hint="Restore" />

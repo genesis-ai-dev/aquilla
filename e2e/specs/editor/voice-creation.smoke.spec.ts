@@ -35,9 +35,9 @@ test("new voice dialog opens in audio mode with New voice heading", async ({ ali
   await ws.waitForEditor()
 
   // Switch to audio mode via the EditorModeToggle.
-  const audioBtn = alice.getByRole("button", { name: /^Audio$/i })
-  await expect(audioBtn).toBeVisible({ timeout: 5_000 })
-  await audioBtn.click()
+  const audioTab = alice.getByRole("tab", { name: /^Audio$/i })
+  await expect(audioTab).toBeVisible({ timeout: 5_000 })
+  await audioTab.click()
 
   // VoiceSidebar renders when lens === "audio". Wait for "+ New voice".
   const newVoiceBtn = alice.getByRole("button", { name: /New voice/i })

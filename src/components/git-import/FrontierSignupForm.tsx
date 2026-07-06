@@ -1,7 +1,12 @@
 import { useState, useEffect, type FormEvent } from "react"
 import { Button } from "@/components/ui/button"
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Check, X } from "lucide-react"
 import { RevealableInput } from "@/components/ui/revealable-input"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -125,39 +130,41 @@ export function FrontierSignupForm({ onSuccess }: { onSuccess: () => void }) {
           You're offline — connect to sign in
         </p>
       )}
-      <div>
-        <Label htmlFor="s-user">Username</Label>
-        <Input
-          id="s-user"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          autoComplete="username"
-          minLength={3}
-          maxLength={50}
-        />
-      </div>
-      <div>
-        <Label htmlFor="s-email">Email</Label>
-        <Input
-          id="s-email"
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          autoComplete="email"
-        />
-      </div>
-      <div>
-        <Label htmlFor="s-pass">Password</Label>
-        <RevealableInput
-          id="s-pass"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoComplete="new-password"
-          minLength={8}
-        />
-        <PasswordChecklist password={password} email={email} />
-      </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="s-user">Username</FieldLabel>
+          <Input
+            id="s-user"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            autoComplete="username"
+            minLength={3}
+            maxLength={50}
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="s-email">Email</FieldLabel>
+          <Input
+            id="s-email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoComplete="email"
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="s-pass">Password</FieldLabel>
+          <RevealableInput
+            id="s-pass"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="new-password"
+            minLength={8}
+          />
+          <PasswordChecklist password={password} email={email} />
+        </Field>
+      </FieldGroup>
+      {error && <FieldError>{error}</FieldError>}
       <Button type="submit" disabled={!canSubmit} className="w-full">
         {busy ? "Creating account…" : "Create account"}
       </Button>

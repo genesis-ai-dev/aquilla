@@ -281,7 +281,7 @@ export function TermbaseSharingSection({ projectId, orgId, roleLevel }: Props) {
                   className="flex items-center gap-2 rounded border bg-card px-2 py-1.5 text-sm"
                 >
                   {canManage && (
-                    <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-muted-foreground" />
+                    <GripVertical className="h-4 w-4 shrink-0 text-muted-foreground" />
                   )}
                   <span className="flex-1 truncate">{s.termbaseName}</span>
                   {!s.published && (

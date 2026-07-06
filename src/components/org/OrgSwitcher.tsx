@@ -8,6 +8,8 @@ import { fetchAccessibleProjects } from "@/lib/sync/cloud-projects"
 import { isOrgScopedRoute } from "./org-route-scope"
 import posthog from "@/lib/posthog"
 import { ORG_CREATED } from "@/lib/event-names"
+import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 export function OrgSwitcher() {
   const { orgs, activeOrg, activeOrgId, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs, refresh } = useActiveOrg()
@@ -97,145 +99,146 @@ export function OrgSwitcher() {
     }
   }
 
-  function handleOpenOrgSwitcher() {
-    setOpen((o) => !o)
-    if (!open) {
+  function handleOpenChange(nextOpen: boolean) {
+    setOpen(nextOpen)
+    if (nextOpen) {
       setShowCreate(false)
     }
   }
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => handleOpenOrgSwitcher()}
-        className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent"
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent"
+          />
+        }
       >
         <span className="min-w-0">
           <span className="block truncate text-sm font-medium">{title}</span>
           <span className="block text-xs text-muted-foreground">{subtitle}</span>
         </span>
         <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
-      </button>
-      {open && (
-        <div className="absolute z-20 mt-1 w-full rounded-md border bg-popover shadow-md">
-          <ul className="max-h-60 overflow-y-auto">
-            {showAllOrgs && (
-              <li>
+      </PopoverTrigger>
+      <PopoverContent side="bottom" align="start" sideOffset={4} className="w-(--anchor-width) p-0">
+        <ul className="max-h-60 overflow-y-auto">
+          {showAllOrgs && (
+            <li>
+              <button
+                type="button"
+                onClick={handleAllOrgs}
+                className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-sm hover:bg-accent"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate">All organizations</span>
+                  <span className="block text-xs text-muted-foreground">All projects</span>
+                </span>
+                {isAllOrgs && <Check className="size-3.5 shrink-0" aria-hidden />}
+              </button>
+            </li>
+          )}
+          {orgs.map((o) => (
+            <li key={o.id}>
+              <button
+                type="button"
+                onClick={() => handleActiveOrg(o.id)}
+                className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-sm hover:bg-accent"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate">{o.name ?? "Workspace"}</span>
+                  <span className="block text-xs text-muted-foreground">{o.role.name}</span>
+                </span>
+                {activeOrgId === o.id && <Check className="size-3.5 shrink-0" aria-hidden />}
+              </button>
+            </li>
+          ))}
+        </ul>
+
+        {guestOrgs.length > 0 && (
+          <ul className="max-h-60 overflow-y-auto border-t" data-testid="guest-orgs">
+            {guestOrgs.map((g) => (
+              <li key={g.id}>
                 <button
                   type="button"
-                  onClick={handleAllOrgs}
+                  onClick={() => void handleGuestOrg(g)}
                   className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-sm hover:bg-accent"
                 >
                   <span className="min-w-0">
-                    <span className="block truncate">All organizations</span>
-                    <span className="block text-xs text-muted-foreground">All projects</span>
+                    <span className="block truncate">{g.name ?? `Org #${g.id}`}</span>
+                    <span className="block text-xs text-muted-foreground">Guest</span>
                   </span>
-                  {isAllOrgs && <Check className="size-3.5 shrink-0" aria-hidden />}
-                </button>
-              </li>
-            )}
-            {orgs.map((o) => (
-              <li key={o.id}>
-                <button
-                  type="button"
-                  onClick={() => handleActiveOrg(o.id)}
-                  className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-sm hover:bg-accent"
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate">{o.name ?? "Workspace"}</span>
-                    <span className="block text-xs text-muted-foreground">{o.role.name}</span>
-                  </span>
-                  {activeOrgId === o.id && <Check className="size-3.5 shrink-0" aria-hidden />}
                 </button>
               </li>
             ))}
           </ul>
+        )}
 
-          {guestOrgs.length > 0 && (
-            <ul className="max-h-60 overflow-y-auto border-t" data-testid="guest-orgs">
-              {guestOrgs.map((g) => (
-                <li key={g.id}>
-                  <button
-                    type="button"
-                    onClick={() => void handleGuestOrg(g)}
-                    className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-sm hover:bg-accent"
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate">{g.name ?? `Org #${g.id}`}</span>
-                      <span className="block text-xs text-muted-foreground">Guest</span>
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {canRename && (
-            <div className="border-t px-2 py-1.5">
-              {showRename ? (
-                <div className="flex gap-1">
-                  <input
-                    className="flex-1 rounded border px-1.5 py-0.5 text-xs"
-                    value={renameName}
-                    onChange={(e) => setRenameName(e.target.value)}
-                    placeholder="New name"
-                    aria-label="Rename org"
-                    autoFocus
-                  />
-                  <button
-                    type="button"
-                    disabled={renaming}
-                    onClick={handleRename}
-                    className="rounded bg-primary px-2 py-0.5 text-xs text-primary-foreground disabled:opacity-50"
-                  >
-                    Save
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => { setRenameName(activeOrg?.name ?? ""); setShowRename(true) }}
-                  className="text-xs text-muted-foreground hover:text-foreground"
-                >
-                  Rename
-                </button>
-              )}
-            </div>
-          )}
-
+        {canRename && (
           <div className="border-t px-2 py-1.5">
-            {showCreate ? (
-              <div className="flex flex-col gap-1">
+            {showRename ? (
+              <div className="flex gap-1">
                 <input
                   className="flex-1 rounded border px-1.5 py-0.5 text-xs"
-                  value={createName}
-                  onChange={(e) => setCreateName(e.target.value)}
-                  placeholder="Org name"
-                  aria-label="New org name"
+                  value={renameName}
+                  onChange={(e) => setRenameName(e.target.value)}
+                  placeholder="New name"
+                  aria-label="Rename org"
                   autoFocus
                 />
-                <button
+                <Button
                   type="button"
-                  disabled={creating}
-                  onClick={handleCreate}
-                  className="rounded bg-primary px-2 py-0.5 text-xs text-primary-foreground disabled:opacity-50"
+                  size="xs"
+                  disabled={renaming}
+                  onClick={() => void handleRename()}
                 >
-                  Create
-                </button>
+                  Save
+                </Button>
               </div>
             ) : (
               <button
                 type="button"
-                onClick={() => setShowCreate(true)}
+                onClick={() => { setRenameName(activeOrg?.name ?? ""); setShowRename(true) }}
                 className="text-xs text-muted-foreground hover:text-foreground"
               >
-                + Create org
+                Rename
               </button>
             )}
           </div>
+        )}
+
+        <div className="border-t px-2 py-1.5">
+          {showCreate ? (
+            <div className="flex flex-col gap-1">
+              <input
+                className="flex-1 rounded border px-1.5 py-0.5 text-xs"
+                value={createName}
+                onChange={(e) => setCreateName(e.target.value)}
+                placeholder="Org name"
+                aria-label="New org name"
+                autoFocus
+              />
+              <Button
+                type="button"
+                size="xs"
+                disabled={creating}
+                onClick={() => void handleCreate()}
+              >
+                Create
+              </Button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowCreate(true)}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              + Create org
+            </button>
+          )}
         </div>
-      )}
-    </div>
+      </PopoverContent>
+    </Popover>
   )
 }

@@ -12,6 +12,7 @@ import {
   ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import { Button } from "@/components/ui/button"
 import type { CellData } from "@/hooks/useCells"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { getCellPref, setCellPref } from "@/lib/store/audio-cell-prefs"
@@ -1318,16 +1319,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   return (
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
       <div className="shrink-0 bg-background">
-        {/* FRO-250: sticky section/chapter indicator strip. Appears above the
-            column header when the file has section-tagged cells. Keeps the
-            reader oriented while scrolling through long Bible chapters. */}
-        {currentSectionLabel && !looksLikeUuid(currentSectionLabel) && (
-          <div className="flex items-center gap-1.5 border-b border-border/40 px-4 py-0.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-              {currentSectionLabel}
-            </span>
-          </div>
-        )}
         {/* FRO-273: role badge — shown for read-only roles (viewer/commenter/reviewer) */}
         {readOnlyLabel && (
           <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
@@ -1336,7 +1327,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </div>
         )}
         <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
-          <div />
+          {/* FRO-250: sticky chapter label — left gutter, does not shift Source */}
+          <div className="flex items-center overflow-visible">
+            {currentSectionLabel && !looksLikeUuid(currentSectionLabel) && (
+              <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                {currentSectionLabel}
+              </span>
+            )}
+          </div>
           {/* In Audio mode the left column carries per-line voice controls, not
               source text, so label it "Controls" (no source-language badge). */}
           <div className="flex items-center gap-2">
@@ -3573,7 +3571,7 @@ function EditorRow({
                 <PopoverContent
                   side="right"
                   align="start"
-                  className="w-72 rounded-xl p-2 shadow-lg"
+                  className="w-72 rounded-xl p-2"
                 >
                   <ul className="space-y-0.5">
                     <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -4027,14 +4025,16 @@ function EditorRow({
                 className="mt-1 flex items-start justify-between gap-2 rounded-xl bg-destructive/10 px-2.5 py-1.5 text-[11px] text-destructive dark:bg-destructive/20"
               >
                 <span>{writeError}</span>
-                <button
+                <Button
                   type="button"
+                  size="icon-xs"
+                  variant="ghost"
                   aria-label="Dismiss"
                   onClick={() => setWriteError(null)}
-                  className="shrink-0 rounded-full px-1.5 py-0.5 text-destructive hover:bg-destructive/20"
+                  className="shrink-0 text-destructive hover:bg-destructive/20"
                 >
                   ✕
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -4602,20 +4602,22 @@ function EditorRow({
                         />
                       )}
                       <div className="flex flex-wrap gap-1.5">
-                        <button
+                        <Button
                           type="button"
+                          size="xs"
+                          variant="outline"
                           onClick={() => onOpenRecording?.(cell.id)}
                           disabled={!editable || !onOpenRecording}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-all disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Mic className="h-3 w-3" />
                           Re-record
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
+                          size="xs"
+                          variant="outline"
                           onClick={handleTranscribe}
                           disabled={!editable || isTranscribing}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-all disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Sparkles
                             className={cn(
@@ -4624,7 +4626,7 @@ function EditorRow({
                             )}
                           />
                           {isTranscribing ? "Transcribing…" : "Transcribe"}
-                        </button>
+                        </Button>
                         {cell.selectedAudioId && selectedAudio && (
                           <DenoiseButton
                             projectId={project.id}
@@ -4676,15 +4678,16 @@ function EditorRow({
                       )}
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="text-[11px] text-muted-foreground">AI generated voice. Drag a voice from the toolbar to regenerate, or:</span>
-                        <button
+                        <Button
                           type="button"
+                          size="xs"
+                          variant="outline"
                           onClick={() => onOpenRecording?.(cell.id)}
                           disabled={!editable || !onOpenRecording}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-all disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Mic className="h-3 w-3" />
                           Record over
-                        </button>
+                        </Button>
                       </div>
                     </>
                   ) : (
@@ -4696,15 +4699,16 @@ function EditorRow({
                         No audio yet. Record below, or drag a voice onto this cell from the toolbar above.
                       </p>
                       <div className="flex flex-wrap items-center justify-center gap-2">
-                        <button
+                        <Button
                           type="button"
+                          size="sm"
+                          variant="default"
                           onClick={() => onOpenRecording?.(cell.id)}
                           disabled={!editable || !onOpenRecording}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Mic className="h-3 w-3" />
                           Record
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   )}
@@ -4807,15 +4811,17 @@ function EditorRow({
                     </p>
                   ) : (
                     <>
-                      <button
+                      <Button
                         type="button"
+                        size="xs"
+                        variant="outline"
                         onClick={() => onOpenHistory?.(cell.id)}
                         disabled={!onOpenHistory}
-                        className="self-start inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-all disabled:cursor-not-allowed disabled:opacity-40"
+                        className="self-start"
                       >
                         <HistoryIcon className="h-3 w-3" />
                         Open full history
-                      </button>
+                      </Button>
                       <ul className="bg-muted divide-y divide-border/40 rounded-lg">
                         {[...fetchedHistory].slice(-5).reverse().map((entry, i) => {
                           const date = new Date(entry.timestamp).toLocaleString(undefined, {
@@ -4934,7 +4940,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
 
 interface GenerateOverwriteDialogProps {
   open: boolean

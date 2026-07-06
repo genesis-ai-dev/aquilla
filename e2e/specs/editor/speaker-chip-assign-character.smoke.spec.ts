@@ -39,9 +39,9 @@ test("clicking a voice chip assigns a line to that voice in audio mode", async (
   await ws.editCell(0, "Bonjour le monde")
 
   // Switch to Audio mode.
-  const audioBtn = alice.getByRole("button", { name: /^Audio$/i })
-  await expect(audioBtn).toBeVisible({ timeout: 5_000 })
-  await audioBtn.click()
+  const audioTab = alice.getByRole("tab", { name: /^Audio$/i })
+  await expect(audioTab).toBeVisible({ timeout: 5_000 })
+  await audioTab.click()
 
   // Create a voice character "Hero".
   const newVoiceBtn = alice.getByRole("button", { name: /New voice/i })

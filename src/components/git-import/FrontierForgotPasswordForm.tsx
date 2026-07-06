@@ -1,7 +1,13 @@
 import { useState, type FormEvent } from "react"
 import { Button } from "@/components/ui/button"
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { requestPasswordReset, FrontierAuthError } from "@/lib/frontier/auth"
 
 export function FrontierForgotPasswordForm({
@@ -48,20 +54,22 @@ export function FrontierForgotPasswordForm({
 
   return (
     <form onSubmit={onSubmit} className="space-y-3">
-      <div>
-        <Label htmlFor="r-email">Email</Label>
-        <Input
-          id="r-email"
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          autoComplete="email"
-        />
-        <p className="mt-1 text-xs text-muted-foreground">
-          We'll send a link to reset your password.
-        </p>
-      </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="r-email">Email</FieldLabel>
+          <Input
+            id="r-email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoComplete="email"
+          />
+          <FieldDescription>
+            We'll send a link to reset your password.
+          </FieldDescription>
+        </Field>
+      </FieldGroup>
+      {error && <FieldError>{error}</FieldError>}
       <Button type="submit" disabled={busy || !emailOk} className="w-full">
         {busy ? "Sending…" : "Send reset link"}
       </Button>

@@ -29,7 +29,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Badge } from "@/components/ui/badge"
 import {
   Select,
@@ -271,10 +271,9 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
           <DialogTitle>{initial ? "Edit concept" : "Add concept"}</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 py-1">
-          {/* Source term */}
-          <div className="space-y-1.5">
-            <Label htmlFor="concept-source-term">Source term</Label>
+        <FieldGroup className="space-y-4 py-1">
+          <Field>
+            <FieldLabel htmlFor="concept-source-term">Source term</FieldLabel>
             <Input
               id="concept-source-term"
               value={sourceTerm}
@@ -282,11 +281,10 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
               placeholder="e.g. πνεῦμα"
               autoFocus
             />
-          </div>
+          </Field>
 
-          {/* Renderings */}
-          <div className="space-y-1.5">
-            <Label>Target renderings</Label>
+          <Field>
+            <FieldLabel>Target renderings</FieldLabel>
             <div className="space-y-2">
               {renderings.map((r, i) => (
                 <RenderingRow
@@ -307,22 +305,20 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
               <Plus className="mr-1 h-3.5 w-3.5" />
               Add rendering
             </Button>
-          </div>
+          </Field>
 
-          {/* Notes */}
-          <div className="space-y-1.5">
-            <Label htmlFor="concept-notes">Notes (optional)</Label>
+          <Field>
+            <FieldLabel htmlFor="concept-notes">Notes (optional)</FieldLabel>
             <Input
               id="concept-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Contextual notes for translators"
             />
-          </div>
+          </Field>
 
-          {/* Status */}
-          <div className="space-y-1.5">
-            <Label htmlFor="concept-status">Status</Label>
+          <Field>
+            <FieldLabel htmlFor="concept-status">Status</FieldLabel>
             <Select
               items={CONCEPT_STATUS_OPTIONS}
               value={status}
@@ -343,11 +339,11 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
                 </SelectGroup>
               </SelectContent>
             </Select>
-          </div>
-        </div>
+          </Field>
+        </FieldGroup>
 
         {error && (
-          <p className="text-sm text-destructive">{error}</p>
+          <FieldError>{error}</FieldError>
         )}
 
         <DialogFooter showCloseButton>
@@ -587,7 +583,7 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
   const hasData = activeConcepts > 0
 
   return (
-    <div className="rounded-lg border bg-card p-4 shadow-sm">
+    <div className="rounded-lg border bg-card p-4">
       <div className="mb-3 flex items-center gap-2">
         <BookOpen className="h-4 w-4 text-muted-foreground" />
         <span className="text-sm font-semibold">Library Overview</span>

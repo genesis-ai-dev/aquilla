@@ -14,6 +14,12 @@ import { useCallback, useEffect, useState } from "react"
 import { UserCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -35,7 +41,6 @@ import type { ProjectMember } from "@/lib/frontier/members"
 import type { FileReference } from "@/lib/parsers/types"
 import { createAssignment, getFileChapters, AssignmentEmitError } from "@/lib/sync/assignments"
 import { ROLE } from "@/lib/frontier/roles"
-import { cn } from "@/lib/utils"
 
 type ScopeKind = "selection" | "verses" | "chapters" | "books"
 
@@ -218,10 +223,9 @@ export function AssignModal({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 py-1">
-          {/* Scope */}
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Scope</label>
+        <FieldGroup className="py-1">
+          <Field>
+            <FieldLabel htmlFor="assign-modal-scope">Scope</FieldLabel>
             <Select
               items={SCOPE_OPTIONS.map((opt) => ({
                 value: opt.value,
@@ -233,7 +237,7 @@ export function AssignModal({
               value={scopeKind}
               onValueChange={(v) => setScopeKind(v as ScopeKind)}
             >
-              <SelectTrigger className="w-full" aria-label="Scope">
+              <SelectTrigger id="assign-modal-scope" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -252,12 +256,11 @@ export function AssignModal({
                 </SelectGroup>
               </SelectContent>
             </Select>
-          </div>
+          </Field>
 
-          {/* Books picker */}
           {scopeKind === "books" && (
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Files / books</label>
+            <Field>
+              <FieldLabel>Files / books</FieldLabel>
               <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-md border p-2">
                 {projectFiles.map((f) => (
                   <label key={f.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-muted/50">
@@ -270,13 +273,12 @@ export function AssignModal({
                   </label>
                 ))}
               </div>
-            </div>
+            </Field>
           )}
 
-          {/* Chapters picker */}
           {scopeKind === "chapters" && (
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Chapters</label>
+            <Field>
+              <FieldLabel>Chapters</FieldLabel>
               {chaptersLoading ? (
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Spinner className="size-3" />
@@ -298,12 +300,11 @@ export function AssignModal({
                   ))}
                 </div>
               )}
-            </div>
+            </Field>
           )}
 
-          {/* Assignee */}
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Assign to</label>
+          <Field>
+            <FieldLabel htmlFor="assign-modal-assignee">Assign to</FieldLabel>
             <Select
               items={[
                 { value: "", label: "Select member…" },
@@ -312,7 +313,7 @@ export function AssignModal({
               value={selectedMemberId}
               onValueChange={(v) => setSelectedMemberId(v ?? "")}
             >
-              <SelectTrigger className="w-full" aria-label="Assign to">
+              <SelectTrigger id="assign-modal-assignee" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -326,24 +327,22 @@ export function AssignModal({
                 </SelectGroup>
               </SelectContent>
             </Select>
-          </div>
+          </Field>
 
-          {/* Optional note */}
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Note (optional)</label>
+          <Field>
+            <FieldLabel htmlFor="assign-modal-note">Note (optional)</FieldLabel>
             <Textarea
+              id="assign-modal-note"
               value={note}
               onChange={(e) => setNote(e.target.value)}
               rows={2}
               className="resize-none"
               placeholder="Any context for the assignee…"
             />
-          </div>
+          </Field>
 
-          {error && (
-            <p className={cn("rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive")}>{error}</p>
-          )}
-        </div>
+          {error && <FieldError>{error}</FieldError>}
+        </FieldGroup>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>

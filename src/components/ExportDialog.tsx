@@ -30,6 +30,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { SegmentTabs } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
@@ -629,37 +630,16 @@ export function ExportDialog({
           <legend className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
             Scope
           </legend>
-          <RadioGroup
+          <SegmentTabs<ExportScope>
             value={effectiveScope}
-            onValueChange={(value) => setScope(value as ExportScope)}
-            className="inline-flex w-auto items-center gap-0.5 rounded-full bg-muted/40 p-0.5 self-start"
             aria-label="Export scope"
-          >
-            {(["file", "project"] as const).map((s) => {
-              const isProjectDisabled = s === "project" && isFileOnlyFormat
-              return (
-                <label
-                  key={s}
-                  className={
-                    "inline-flex h-6 items-center rounded-full px-3 text-[11px] font-medium tracking-tight transition-colors " +
-                    (isProjectDisabled
-                      ? "cursor-not-allowed opacity-40 text-muted-foreground"
-                      : "cursor-pointer ") +
-                    (effectiveScope === s && !isProjectDisabled
-                      ? "bg-background text-foreground shadow-sm ring-1 ring-foreground/5"
-                      : (!isProjectDisabled ? "text-muted-foreground hover:text-foreground" : ""))
-                  }
-                >
-                  <RadioGroupItem
-                    value={s}
-                    disabled={isProjectDisabled}
-                    className="sr-only"
-                  />
-                  {s === "file" ? "Current file" : "Whole project"}
-                </label>
-              )
-            })}
-          </RadioGroup>
+            className="self-start"
+            options={[
+              { label: "Current file", value: "file", disabled: isProjectOnlyFormat },
+              { label: "Whole project", value: "project", disabled: isFileOnlyFormat },
+            ]}
+            onValueChange={setScope}
+          />
           {isFileOnlyFormat && (
             <p className="text-[10px] text-muted-foreground mt-0.5">
               Project scope not supported for this format.

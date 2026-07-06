@@ -1,6 +1,10 @@
 import { useMemo, useState } from "react"
 import { ArrowDown, ArrowUp, ChevronsUpDown, Search } from "lucide-react"
-import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { EmptyState } from "@/components/ui/page"
 import { cn } from "@/lib/utils"
 
@@ -109,16 +113,17 @@ export function AdminDataTable<T>({
       {(searchText || toolbar) && (
         <div className="flex flex-wrap items-center gap-3">
           {searchText && (
-            <div className="relative min-w-0 flex-1 sm:max-w-xs">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
+            <InputGroup className="min-w-0 flex-1 sm:max-w-xs">
+              <InputGroupAddon>
+                <Search />
+              </InputGroupAddon>
+              <InputGroupInput
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={searchPlaceholder}
                 aria-label={searchPlaceholder}
-                className="pl-8"
               />
-            </div>
+            </InputGroup>
           )}
           {toolbar}
           <span className="ml-auto text-xs tabular-nums text-muted-foreground">

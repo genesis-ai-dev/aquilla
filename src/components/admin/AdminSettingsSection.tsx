@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
+import { FieldLabel } from "@/components/ui/field"
 import { Section } from "@/components/ui/page"
 import { ModelListEditor, type ModelListValue } from "./ModelListEditor"
 import { AbResultsPanel } from "./AbResultsPanel"
@@ -154,7 +154,7 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <Label htmlFor="admin-ab-challenger">Challenger model</Label>
+              <FieldLabel htmlFor="admin-ab-challenger">Challenger model</FieldLabel>
               <select
                 id="admin-ab-challenger"
                 value={abChallenger}
@@ -176,7 +176,7 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
               </p>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="admin-ab-traffic">Challenger traffic %</Label>
+              <FieldLabel htmlFor="admin-ab-traffic">Challenger traffic %</FieldLabel>
               <NumberInput
                 id="admin-ab-traffic"
                 value={abTrafficPct}
@@ -200,11 +200,11 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <Label htmlFor="admin-user-limit">User daily limit</Label>
+              <FieldLabel htmlFor="admin-user-limit">User daily limit</FieldLabel>
               <NumberInput id="admin-user-limit" value={userLimit} onChange={setUserLimit} placeholder="default 500" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="admin-global-limit">Global daily limit</Label>
+              <FieldLabel htmlFor="admin-global-limit">Global daily limit</FieldLabel>
               <NumberInput
                 id="admin-global-limit"
                 value={globalLimit}

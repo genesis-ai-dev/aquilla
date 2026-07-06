@@ -176,17 +176,18 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
-      <div className="w-full max-w-2xl rounded-2xl border border-border bg-card p-5 shadow-soft-lg">
+      <div className="w-full max-w-2xl rounded-2xl border border-border bg-card p-5">
         <div className="mb-1 flex items-center justify-between">
           <h2 className="text-sm font-semibold">Split the combined clip by line</h2>
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-sm"
             onClick={onClose}
             aria-label="Close"
-            className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground"
           >
             <X className="h-4 w-4" />
-          </button>
+          </Button>
         </div>
         <p className="mb-4 text-xs text-muted-foreground">
           Drag the dividers so each marker sits at the end of a line. Click a segment to hear just that line.

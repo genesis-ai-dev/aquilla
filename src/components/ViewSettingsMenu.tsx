@@ -115,14 +115,16 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
             Adjust
           </button>
           <AppTooltip content="Dismiss">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={handleDismissHint}
               aria-label="Dismiss"
-              className="flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground/70 transition-all duration-150 ease-out hover:bg-card hover:text-foreground active:scale-[0.92]"
+              className="size-5 rounded-full text-muted-foreground/70"
             >
               <X className="h-3 w-3" />
-            </button>
+            </Button>
           </AppTooltip>
           {/* Arrow pointing to the eye icon */}
           <span
@@ -313,31 +315,31 @@ function FontSizeRow({
       <span>{label}</span>
       <span className="flex items-center gap-1">
         <AppTooltip content={`Decrease ${label.toLowerCase()} font size`}>
-          <span className="inline-flex">
-            <button
-              type="button"
-              aria-label={`Decrease ${label.toLowerCase()} font size`}
-              disabled={disabled || value <= MIN_FONT_SIZE}
-              onClick={() => onChange(Math.max(MIN_FONT_SIZE, value - FONT_SIZE_STEP))}
-              className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 disabled:cursor-not-allowed disabled:opacity-30 transition-colors"
-            >
-              <span className="text-[11px] leading-none select-none">A−</span>
-            </button>
-          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Decrease ${label.toLowerCase()} font size`}
+            disabled={disabled || value <= MIN_FONT_SIZE}
+            onClick={() => onChange(Math.max(MIN_FONT_SIZE, value - FONT_SIZE_STEP))}
+            className="size-5"
+          >
+            <span className="text-[11px] leading-none select-none">A−</span>
+          </Button>
         </AppTooltip>
         <span className="w-9 text-center text-[10px] tabular-nums text-muted-foreground">{value}px</span>
         <AppTooltip content={`Increase ${label.toLowerCase()} font size`}>
-          <span className="inline-flex">
-            <button
-              type="button"
-              aria-label={`Increase ${label.toLowerCase()} font size`}
-              disabled={disabled || value >= MAX_FONT_SIZE}
-              onClick={() => onChange(Math.min(MAX_FONT_SIZE, value + FONT_SIZE_STEP))}
-              className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 disabled:cursor-not-allowed disabled:opacity-30 transition-colors"
-            >
-              <span className="text-[11px] leading-none select-none">A+</span>
-            </button>
-          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Increase ${label.toLowerCase()} font size`}
+            disabled={disabled || value >= MAX_FONT_SIZE}
+            onClick={() => onChange(Math.min(MAX_FONT_SIZE, value + FONT_SIZE_STEP))}
+            className="size-5"
+          >
+            <span className="text-[11px] leading-none select-none">A+</span>
+          </Button>
         </AppTooltip>
       </span>
     </div>

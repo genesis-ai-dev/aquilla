@@ -25,6 +25,7 @@ import type { EditorView } from "@tiptap/pm/view"
 import StarterKit from "@tiptap/starter-kit"
 import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
@@ -721,69 +722,64 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           onMouseDown={handleFormattingToolbarMouseDown}
         >
           <AppTooltip content="Bold (Cmd+B)">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={() => editor.chain().focus().toggleBold().run()}
               aria-label="Bold"
-              className={cn(
-                "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
-                editor.isActive("bold") && "bg-accent"
-              )}
+              className={cn("rounded-full", editor.isActive("bold") && "bg-accent")}
             >
               <Bold className="h-3 w-3" />
-            </button>
+            </Button>
           </AppTooltip>
           <AppTooltip content="Italic (Cmd+I)">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={() => editor.chain().focus().toggleItalic().run()}
               aria-label="Italic"
-              className={cn(
-                "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
-                editor.isActive("italic") && "bg-accent"
-              )}
+              className={cn("rounded-full", editor.isActive("italic") && "bg-accent")}
             >
               <Italic className="h-3 w-3" />
-            </button>
+            </Button>
           </AppTooltip>
           <AppTooltip content="Underline (Cmd+U)">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={() => editor.chain().focus().toggleUnderline().run()}
               aria-label="Underline"
-              className={cn(
-                "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
-                editor.isActive("underline") && "bg-accent"
-              )}
+              className={cn("rounded-full", editor.isActive("underline") && "bg-accent")}
             >
               <UnderlineIcon className="h-3 w-3" />
-            </button>
+            </Button>
           </AppTooltip>
           <AppTooltip content="Strikethrough">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={() => editor.chain().focus().toggleStrike().run()}
               aria-label="Strikethrough"
-              className={cn(
-                "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
-                editor.isActive("strike") && "bg-accent"
-              )}
+              className={cn("rounded-full", editor.isActive("strike") && "bg-accent")}
             >
               <Strikethrough className="h-3 w-3" />
-            </button>
+            </Button>
           </AppTooltip>
           <AppTooltip content="Inline code">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={() => editor.chain().focus().toggleCode().run()}
               aria-label="Inline code"
-              className={cn(
-                "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
-                editor.isActive("code") && "bg-accent"
-              )}
+              className={cn("rounded-full", editor.isActive("code") && "bg-accent")}
             >
               <Code className="h-3 w-3" />
-            </button>
+            </Button>
           </AppTooltip>
         </div>
       </BubbleMenu>

@@ -218,7 +218,7 @@
 | Memory      | Add / edit / delete living memory entry               | `e2e/specs/projects/living-memory-add-entry.smoke.spec.ts` + `living-memory-edit-entry.smoke.spec.ts` + `living-memory-delete-entry.smoke.spec.ts` | ✅ |
 | Memory      | Living memory empty state                             | `e2e/specs/projects/living-memory-empty-state.smoke.spec.ts`  |   ✅   |
 | Memory      | Living memory standards section                       | `e2e/specs/projects/living-memory-standards-section.smoke.spec.ts` |   ✅   |
-| Voice       | Voice creation (NewVoiceModal: Gemini/Clone tabs · name · describe) | `e2e/specs/editor/voice-creation.smoke.spec.ts` | ✅ |
+| Voice       | Voice creation (NewVoiceModal: TTS/Clone tabs · name · 4-engine picker) | `e2e/specs/editor/voice-creation.smoke.spec.ts` | ✅ |
 | Voice       | Voice make default + save                             | `e2e/specs/orgs/voice-make-default.smoke.spec.ts` + `voice-save.smoke.spec.ts` | ✅ |
 | Voice       | Voice Gemini API key toggle                           | `e2e/specs/orgs/voice-gemini-api-key-toggle.smoke.spec.ts`    |   ✅   |
 | Voice       | Audio mode lens toggle in workspace                   | `e2e/specs/orgs/audio-mode.smoke.spec.ts`                     |   ✅   |

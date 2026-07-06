@@ -1,7 +1,7 @@
 // The Audio lens' Voices panel — a pure SELECTOR. One simple job: see your
 // voices, pick which one is active, set the narrator. Making a voice is a single
 // "New voice" button → NewVoiceModal, which carries both ways to make one
-// (Gemini / Clone) behind tabs.
+// (TTS / Clone) behind tabs, seeded with the project's configured engine.
 //
 // Click a row to select it (the active voice — the assign target). Drag a row
 // onto a line to assign it. The row's ⋯ menu edits / sets-narrator / deletes.
@@ -17,9 +17,10 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group"
-import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
+import type { ProjectTtsSettings, TtsProvider, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { PRESET_VOICES } from "@/lib/audio/voices"
+import { providerInfo, resolveTtsProvider } from "@/lib/audio/tts-providers"
 import { NewVoiceModal } from "@/components/voice/NewVoiceModal"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -123,6 +124,10 @@ export function VoiceLibraryPanel({
     return q ? voices.filter((v) => v.name.toLowerCase().includes(q)) : voices
   }, [voices, query])
 
+  // A voice without its own engine follows the project's configured one — the
+  // same fallback generate-voice uses at synthesis time.
+  const projectProvider = resolveTtsProvider(settings)
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Header */}
@@ -157,6 +162,7 @@ export function VoiceLibraryPanel({
             <VoiceRow
               key={voice.id}
               voice={voice}
+              projectProvider={projectProvider}
               active={voice.id === selectedId}
               isDefault={voice.id === defaultVoiceId}
               stats={castStats?.get(voice.id)}
@@ -186,6 +192,7 @@ export function VoiceLibraryPanel({
           open
           onClose={() => setEditing({ kind: "closed" })}
           voice={editing.kind === "edit" ? editing.voice : null}
+          provider={projectProvider}
           targetLanguage={targetLanguage}
           isDefault={editing.kind === "edit" ? editing.voice.id === defaultVoiceId : false}
           paletteIndex={voices.length}
@@ -196,7 +203,7 @@ export function VoiceLibraryPanel({
           onSave={saveVoice}
           onDelete={editing.kind === "edit" ? () => deleteVoice(editing.voice) : undefined}
           onMakeDefault={editing.kind === "edit" ? () => makeDefault(editing.voice) : undefined}
-          initialMode={editing.kind === "clone" ? "clone" : "gemini"}
+          initialMode={editing.kind === "clone" ? "clone" : "tts"}
           seedCellId={editing.kind === "clone" ? editing.seedCellId : null}
         />
       )}
@@ -207,9 +214,10 @@ export function VoiceLibraryPanel({
 /** A single selectable voice row: avatar · name · meta · narrator star ·
  *  selected check · hover ⋯ menu. Click selects; drag assigns onto a line. */
 function VoiceRow({
-  voice, active, isDefault, stats, onSelect, onEdit, onMakeDefault, onDelete,
+  voice, projectProvider, active, isDefault, stats, onSelect, onEdit, onMakeDefault, onDelete,
 }: {
   voice: Voice
+  projectProvider: TtsProvider
   active: boolean
   isDefault: boolean
   stats?: CastMemberStats
@@ -241,7 +249,7 @@ function VoiceRow({
         <span className="block truncate font-medium leading-tight">{voice.name}</span>
         <span className="block truncate text-[10px] leading-tight text-muted-foreground">
           <span className={cn("font-medium", voice.referenceAudioId && "text-emerald-600 dark:text-emerald-400")}>
-            {voice.referenceAudioId ? "Clone" : "Gemini"}
+            {voice.referenceAudioId ? "Clone" : providerInfo(voice.provider ?? projectProvider).shortTitle}
           </span>
           {" · "}
           {stats && stats.assigned > 0

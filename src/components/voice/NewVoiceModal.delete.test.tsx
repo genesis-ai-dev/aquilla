@@ -1,46 +1,20 @@
 /**
- * CharacterModal.delete.test.tsx — FRO-291 delete-confirm guard.
+ * NewVoiceModal.delete.test.tsx — FRO-291 delete-confirm guard.
  *
- * Verifies that the voice character delete action is gated by the
- * checkbox-confirm dialog: instant delete is blocked; cancel preserves the
- * character; onDelete fires only after checkbox+confirm.
+ * Verifies that the voice delete action is gated by the checkbox-confirm
+ * dialog: instant delete is blocked; cancel preserves the voice; onDelete
+ * fires only after checkbox+confirm. (Ported from the retired CharacterModal.)
  */
 
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
-import { CharacterModal } from "./CharacterModal"
+import { NewVoiceModal } from "./NewVoiceModal"
 import type { Voice } from "@/lib/parsers/types"
 
 // ── Stub heavy audio / network dependencies ──────────────────────────────
 
-vi.mock("@/lib/audio/tts", () => ({
-  synthesizeToWavBlob: vi.fn(),
-}))
-vi.mock("@/lib/sync/tts", () => ({
-  synthesizeCellTts: vi.fn(),
-}))
-vi.mock("@/lib/audio/tts-providers", () => ({
-  normalizeVoiceForProvider: vi.fn((v: Voice) => v),
-  defaultVoiceNameForProvider: vi.fn(() => "en-US-Standard-A"),
-  providerInfo: vi.fn(() => ({
-    id: "gemini",
-    tier: "cloud",
-    supportsCloning: true,
-    hasNamedVoices: true,
-    blurb: "",
-  })),
-  TTS_PROVIDER_INFOS: [],
-}))
-vi.mock("@/lib/audio/gemini-tts", () => ({
-  GEMINI_TTS_VOICES: [],
-}))
-vi.mock("@/lib/audio/voices", () => ({
-  newVoiceId: vi.fn(() => "voice-new"),
-  VOICE_PALETTE: ["#e2e8f0"],
-}))
-vi.mock("@/lib/audio/mms-languages", () => ({
-  HAS_EXTENDED_MMS_MODELS: false,
-  POPULAR_MMS_LANGUAGES: [],
+vi.mock("@/components/VoiceCloneSection", () => ({
+  VoiceCloneSection: () => null,
 }))
 vi.mock("@/lib/audio/sync-token-fetcher", () => ({
   audioSyncTokenFetcherForSession: vi.fn(),
@@ -53,9 +27,6 @@ vi.mock("@/lib/audio/upload", () => ({
   parseFrontierAudioUrl: vi.fn(),
   fetchCellAudio: vi.fn(),
 }))
-vi.mock("@/components/VoiceCloneSection", () => ({
-  VoiceCloneSection: () => null,
-}))
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -65,10 +36,10 @@ function makeVoice(overrides: Partial<Voice> = {}): Voice {
     name: "Narrator",
     color: "#e2e8f0",
     provider: "gemini",
-    voiceName: "en-US-Standard-A",
+    voiceName: "Kore",
     builtIn: false,
     ...overrides,
-  } as Voice
+  }
 }
 
 function renderModal({
@@ -83,12 +54,11 @@ function renderModal({
   onClose?: () => void
 } = {}) {
   return render(
-    <CharacterModal
+    <NewVoiceModal
       open
       voice={voice}
-      provider="gemini"
-      apiKey="test-key"
       isDefault={false}
+      paletteIndex={0}
       cells={[]}
       onSave={onSave}
       onDelete={onDelete}
@@ -99,7 +69,7 @@ function renderModal({
 
 // ── Tests ─────────────────────────────────────────────────────────────────
 
-describe("CharacterModal delete confirm (FRO-291)", () => {
+describe("NewVoiceModal delete confirm (FRO-291)", () => {
   let onDeleteMock: Mock<() => void>
 
   beforeEach(() => {
@@ -120,7 +90,7 @@ describe("CharacterModal delete confirm (FRO-291)", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Delete$/i }))
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: /Delete character/i })).toBeInTheDocument()
+      expect(screen.getByRole("heading", { name: /Delete voice/i })).toBeInTheDocument()
     })
     expect(screen.getAllByText(/everyone in the project/i).length).toBeGreaterThan(0)
   })
@@ -143,11 +113,11 @@ describe("CharacterModal delete confirm (FRO-291)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Delete$/i }))
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: /Delete character/i })).toBeInTheDocument()
+      expect(screen.getByRole("heading", { name: /Delete voice/i })).toBeInTheDocument()
     )
 
     // Confirm button is disabled before checkbox
-    const confirmBtn = screen.getByRole("button", { name: /^Delete character$/i })
+    const confirmBtn = screen.getByRole("button", { name: /^Delete voice$/i })
     expect(confirmBtn).toBeDisabled()
 
     // Check the checkbox via its label text: happy-dom re-dispatches
@@ -156,7 +126,7 @@ describe("CharacterModal delete confirm (FRO-291)", () => {
     const checkbox = screen.getByRole("checkbox")
     expect(checkbox).toHaveAttribute("aria-checked", "false")
     fireEvent.click(
-      screen.getByText(/deletes the voice character for everyone/i),
+      screen.getByText(/deletes the voice for everyone/i),
     )
     expect(checkbox).toHaveAttribute("aria-checked", "true")
     expect(confirmBtn).not.toBeDisabled()
@@ -166,10 +136,9 @@ describe("CharacterModal delete confirm (FRO-291)", () => {
     expect(onDeleteMock).toHaveBeenCalledTimes(1)
   })
 
-  it("does not show Delete button for builtIn characters", () => {
+  it("does not show Delete button for builtIn voices", () => {
     renderModal({ voice: makeVoice({ builtIn: true }), onDelete: onDeleteMock })
 
-    // Delete button should not be in DOM for built-in voices
     expect(screen.queryByRole("button", { name: /^Delete$/i })).not.toBeInTheDocument()
   })
 })

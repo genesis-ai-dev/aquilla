@@ -5,7 +5,6 @@ import { test, expect } from "../../helpers/multi-user"
  *
  * The workspace sidebar (and org sidebar) has a button showing the current
  * username with a ChevronsUpDown icon. Clicking it opens a dropdown with:
- *   - "Signed in" label
  *   - Current user entry
  *   - "Preferences" link
  *   - "Add another account…" button
@@ -23,8 +22,8 @@ test("account switcher dropdown opens with session info", async ({ alice }) => {
   await expect(accountBtn).toBeVisible({ timeout: 10_000 })
   await accountBtn.click()
 
-  // Dropdown opens showing "Signed in" header text.
-  await expect(alice.getByText(/Signed in/i).first()).toBeVisible({ timeout: 3_000 })
+  // Dropdown opens showing the active account.
+  await expect(alice.getByText(/alice/i).first()).toBeVisible({ timeout: 3_000 })
 
   // "Add another account…" button is visible.
   await expect(

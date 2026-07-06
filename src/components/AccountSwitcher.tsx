@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { Link, useLocation } from "react-router-dom"
-import { ChevronsUpDown, LogIn, LogOut, UserPlus, Check, Settings2 } from "lucide-react"
+import { ChevronDown, LogIn, LogOut, UserPlus, Check, Settings2 } from "lucide-react"
 import { useAccounts } from "@/hooks/useAccounts"
 import { clearSession, listSessions, removeSession } from "@/lib/frontier/session-store"
 import { clearAllLocalData } from "@/lib/store/project-index"
@@ -9,8 +9,15 @@ import { outboxPendingCount } from "@/lib/sync/outbox"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { FrontierLoginForm } from "./git-import/FrontierLoginForm"
 import { FrontierSignupForm } from "./git-import/FrontierSignupForm"
 import { FrontierForgotPasswordForm } from "./git-import/FrontierForgotPasswordForm"
@@ -83,6 +90,9 @@ function AuthDialogBody({
 
 type LogoutScope = "single" | "all"
 
+const ACCOUNT_MENU_ITEM_CLASS =
+  "grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-0 gap-x-2 px-2 py-1.5"
+
 export function AccountSwitcher({
   variant = "sidebar",
   compact = false,
@@ -148,93 +158,80 @@ export function AccountSwitcher({
     )
   }
 
-  const others = sessions.filter((s) => !s.active)
-  const activeSummary = sessions.find((s) => s.active)
+  const menuContent = (
+    <>
+      <DropdownMenuGroup>
+        {sessions.map((s) => (
+          <AccountMenuEntry
+            key={s.key}
+            summary={s}
+            onSelect={s.active ? undefined : () => { setOpen(false); activate(s.key) }}
+            onRemove={s.active ? undefined : () => remove(s.key)}
+          />
+        ))}
+      </DropdownMenuGroup>
+      <DropdownMenuSeparator className="mx-0 my-1" />
+      <DropdownMenuGroup>
+        <DropdownMenuItem render={<Link to="/preferences" onClick={() => setOpen(false)} />}>
+          <Settings2 />
+          Preferences
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => { setOpen(false); setLoginOpen(true) }}>
+          <UserPlus />
+          Add another account…
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => handleLogout("single")}>
+          <LogOut />
+          Log out
+        </DropdownMenuItem>
+        {sessions.length > 1 && (
+          <DropdownMenuItem variant="destructive" onClick={() => handleLogout("all")}>
+            <LogOut />
+            Sign out of all accounts
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuGroup>
+    </>
+  )
 
   return (
     <>
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger
           render={
             <button
               type="button"
               className={cn(
-                "flex items-center gap-2 rounded-xl bg-card text-sm transition-shadow",
-                compact ? "h-8 w-8 justify-center p-0" : "px-2 py-1.5",
-                !isHeader && !compact && "w-full",
-                isHeader && "h-9",
+                "flex items-center gap-2 text-sm",
+                isHeader
+                  ? "h-9 rounded-xl bg-card px-2 transition-shadow"
+                  : compact
+                    ? "h-8 w-8 justify-center rounded-md p-0 hover:bg-accent"
+                    : "w-full rounded-md px-1.5 py-1.5 hover:bg-accent",
               )}
               aria-label={`Account menu: ${active.username}`}
             />
           }
         >
-          <InitialsAvatar name={active.username} size="xs" />
+          <InitialsAvatar name={active.username} size="xs" shape={isHeader ? "circle" : "square"} />
           {!compact && (
             <>
-              <span className={cn("truncate text-left", !isHeader && "flex-1")}>{active.username}</span>
-              <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className={cn("truncate font-medium", !isHeader && "flex-1 text-left")}>
+                {active.username}
+              </span>
+              <ChevronDown className={cn("size-4 opacity-50", !isHeader && "ml-auto")} />
             </>
           )}
-        </PopoverTrigger>
-        <PopoverContent
-          side={isHeader ? "bottom" : "top"}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          className="w-60 rounded-lg"
+          side="bottom"
           align={isHeader ? "end" : "start"}
-          sideOffset={8}
-          className="bg-card w-60 p-1.5"
+          sideOffset={4}
         >
-          <div className="px-2 py-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-            Signed in
-          </div>
-          {activeSummary && <Entry summary={activeSummary} />}
-          {others.length > 0 && (
-            <>
-              <div className="my-1.5 h-px bg-foreground/5" />
-              <div className="px-2 py-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                Switch to
-              </div>
-              {others.map((s) => (
-                <Entry
-                  key={s.key} summary={s}
-                  onClick={() => { setOpen(false); activate(s.key) }}
-                  onRemove={() => remove(s.key)}
-                />
-              ))}
-            </>
-          )}
-          <div className="my-1.5 h-px bg-foreground/5" />
-          <Link
-            to="/preferences"
-            onClick={() => setOpen(false)}
-            className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow"
-          >
-            <Settings2 className="h-4 w-4" />
-            <span>Preferences</span>
-          </Link>
-          <button
-            className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow"
-            onClick={() => { setOpen(false); setLoginOpen(true) }}
-          >
-            <UserPlus className="h-4 w-4" />
-            <span>Add another account…</span>
-          </button>
-          <button
-            className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow"
-            onClick={() => handleLogout("single")}
-          >
-            <LogOut className="h-4 w-4" />
-            <span>Log out</span>
-          </button>
-          {sessions.length > 1 && (
-            <button
-              className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm text-destructive transition-shadow"
-              onClick={() => handleLogout("all")}
-            >
-              <LogOut className="h-4 w-4" />
-              <span>Sign out of all accounts</span>
-            </button>
-          )}
-        </PopoverContent>
-      </Popover>
+          {menuContent}
+        </DropdownMenuContent>
+      </DropdownMenu>
       <Dialog open={loginOpen} onOpenChange={setLoginOpen}>
         <DialogContent className="max-w-sm">
           <AuthDialogBody isAdditional onDone={() => setLoginOpen(false)} returnTo={returnTo} />
@@ -282,41 +279,50 @@ interface EntrySummary {
   active: boolean
 }
 
-function Entry({
-  summary, onClick, onRemove,
+function AccountMenuEntry({
+  summary,
+  onSelect,
+  onRemove,
 }: {
   summary: EntrySummary
-  onClick?: () => void
+  onSelect?: () => void
   onRemove?: () => void
 }) {
   return (
-    <div
-      className={cn(
-        "group flex items-center gap-2 rounded-xl px-2 py-1.5 text-sm",
-        !summary.active && "bg-card cursor-pointer transition-shadow",
-      )}
-      onClick={onClick}
+    <DropdownMenuItem
+      className={ACCOUNT_MENU_ITEM_CLASS}
+      onClick={onSelect}
+      onSelect={(event) => {
+        if (!onSelect) event.preventDefault()
+      }}
     >
-      <InitialsAvatar name={summary.username} size="xs" className="shrink-0" />
-      <div className="flex flex-col min-w-0 flex-1">
+      <InitialsAvatar name={summary.username} size="xs" shape="square" menuSafe />
+      <div className="flex min-w-0 flex-col">
         <span className="truncate">{summary.username}</span>
         {summary.email && (
-          <span className="truncate text-[10px] text-muted-foreground">{summary.email}</span>
+          <span className="truncate text-xs text-muted-foreground">{summary.email}</span>
         )}
         {ENV_HINT && (
-          <span className="truncate text-[10px] text-amber-600 dark:text-amber-500">{ENV_HINT}</span>
+          <span className="truncate text-xs text-amber-600 dark:text-amber-500">{ENV_HINT}</span>
         )}
       </div>
-      {summary.active && <Check className="h-3.5 w-3.5 text-muted-foreground" />}
-      {onRemove && !summary.active && (
-        <button
-          className="ml-1 rounded-full px-1 text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
-          onClick={(e) => { e.stopPropagation(); onRemove() }}
-          aria-label={`Remove ${summary.username}`}
-        >
-          remove
-        </button>
-      )}
-    </div>
+      <span className="flex shrink-0 items-center gap-1.5">
+        {summary.active && <Check className="size-4 opacity-60" />}
+        {onRemove && !summary.active && (
+          <Button
+            type="button"
+            variant="destructive"
+            size="xs"
+            className="shrink-0"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => { event.stopPropagation(); onRemove() }}
+            aria-label={`Remove ${summary.username}`}
+          >
+            Remove
+          </Button>
+        )}
+        {!summary.active && !onRemove && <span aria-hidden />}
+      </span>
+    </DropdownMenuItem>
   )
 }

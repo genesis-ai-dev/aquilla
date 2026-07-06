@@ -34,6 +34,9 @@ interface Props {
   sidebar?: ReactNode
   header: ReactNode
   statusBar: ReactNode
+  /** Rendered on the chrome frame directly above the main content card
+   *  (e.g. file tabs). Stays outside the card border/background. */
+  aboveCard?: ReactNode
   beforeMain?: ReactNode
   main: ReactNode
   aside?: ReactNode
@@ -49,7 +52,7 @@ interface Props {
   railCollapsed?: boolean
 }
 
-export function AppShell({ leftDock, sidebar, logoSlot, logoAccessory, header, statusBar, beforeMain, main, aside, railCollapsed }: Props) {
+export function AppShell({ leftDock, sidebar, logoSlot, logoAccessory, header, statusBar, aboveCard, beforeMain, main, aside, railCollapsed }: Props) {
   const dockContent = leftDock ?? sidebar
   // Route-keyed so a crash in one page's content doesn't stick around after
   // the user navigates elsewhere — a key change unmounts + remounts the
@@ -129,18 +132,42 @@ export function AppShell({ leftDock, sidebar, logoSlot, logoAccessory, header, s
             pt-2 + 36px logo) so the breadcrumb row lines up with the top of the
             rail. flex-col keeps the header full-width so its right-aligned
             controls still push to the edge. */}
-        <div className="flex min-h-[52px] flex-col justify-center">{header}</div>
-        <div className="m-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background">
-          {beforeMain}
-          <main className="flex min-h-0 flex-1 overflow-hidden">
-            <div className="min-w-0 flex-1 overflow-hidden">
-              <ErrorBoundary key={pathname} compact>
-                {main}
-              </ErrorBoundary>
-            </div>
-            {aside}
-          </main>
+        <div
+          className={cn(
+            "flex min-h-[52px] flex-col",
+            aboveCard ? "justify-end" : "justify-center",
+          )}
+        >
+          {header}
         </div>
+        {aboveCard ? (
+          <div className="mx-2 mb-2 flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="shrink-0 pb-1">{aboveCard}</div>
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background">
+              {beforeMain}
+              <main className="flex min-h-0 flex-1 overflow-hidden">
+                <div className="min-w-0 flex-1 overflow-hidden">
+                  <ErrorBoundary key={pathname} compact>
+                    {main}
+                  </ErrorBoundary>
+                </div>
+                {aside}
+              </main>
+            </div>
+          </div>
+        ) : (
+          <div className="m-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background">
+            {beforeMain}
+            <main className="flex min-h-0 flex-1 overflow-hidden">
+              <div className="min-w-0 flex-1 overflow-hidden">
+                <ErrorBoundary key={pathname} compact>
+                  {main}
+                </ErrorBoundary>
+              </div>
+              {aside}
+            </main>
+          </div>
+        )}
         {statusBar}
       </div>
     </div>

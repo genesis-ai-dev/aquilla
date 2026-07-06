@@ -3520,28 +3520,30 @@ export function ProjectWorkspace() {
             />
           </WorkspaceHeader>
         }
+        aboveCard={
+          <TabStrip
+            tabs={workspaceTabs.tabs}
+            // While a non-editor surface (Rules) is showing, no file tab is
+            // "active" even though selectedFileId still remembers the last
+            // file — the surface tab is the active one.
+            activeTabId={centerSurface === "editor" ? workspaceTabs.activeTabId : null}
+            files={projectFiles}
+            onActivate={workspaceTabs.activateTab}
+            onClose={handleCloseTab}
+            surfaceTab={
+              centerSurface === "rules" && projectId
+                ? {
+                    label: "Rules",
+                    // Navigating to the bare project route lets the
+                    // restore-location effect re-open the last active file.
+                    onClose: () => navigate(`/project/${projectId}`),
+                  }
+                : null
+            }
+          />
+        }
         beforeMain={
           <>
-            <TabStrip
-              tabs={workspaceTabs.tabs}
-              // While a non-editor surface (Rules) is showing, no file tab is
-              // "active" even though selectedFileId still remembers the last
-              // file — the surface tab is the active one.
-              activeTabId={centerSurface === "editor" ? workspaceTabs.activeTabId : null}
-              files={projectFiles}
-              onActivate={workspaceTabs.activateTab}
-              onClose={handleCloseTab}
-              surfaceTab={
-                centerSurface === "rules" && projectId
-                  ? {
-                      label: "Rules",
-                      // Navigating to the bare project route lets the
-                      // restore-location effect re-open the last active file.
-                      onClose: () => navigate(`/project/${projectId}`),
-                    }
-                  : null
-              }
-            />
             {project && activeFileId && (
               <>
                 <SelectionBar

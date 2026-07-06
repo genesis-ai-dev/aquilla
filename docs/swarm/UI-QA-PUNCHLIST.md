@@ -42,3 +42,38 @@
 - Chat completions (OPENROUTER_API_KEY missing)
 - Footnote rendering test (depends on working import)
 - CORS on sync-worker cells endpoint (sync-worker not connected in this stack)
+
+---
+
+## Guest-org swarm QA — 2026-07-06 (live UI, worktree swarm/guest-org-integration @ 07db01e89)
+
+Stack: parallel dev stack from the worktree (vite 5183, auth 8798, sync 8799) against shared aquilla-dev-pg.
+Guest user: **bob** (id 1689) — project_members 400 on `dev-project` (org 36 "Dev Org") + group "Reviewers" (188) → 300 on `dev-project-exodus`; org member only of org 39 ("bob's workspace"). Member-only regression user: **alice** (orgs 32+36, no cross-org grants; NOT platform admin in this stack — ADMIN_EMAILS=dev@local.test only).
+
+### FRO-474
+- A1 **PASS** — as bob, direct nav to /projects/dev-project renders overview (header, Open project, Files, Deadline, Team); no redirect. Progress card absent (accepted degradation).
+- A2 **PASS** — sidebar "Shared with you" lists Dev Project (+Exodus via group grant); click navigates to /projects/dev-project.
+- A3 **PASS** — as dev (org owner), /projects/dev-project unchanged: Progress card populated (92% translated, 31574/34296 cells), Members panel present.
+- A4 **PASS** — as bob, /projects/demo-john (no access) redirects back to /.
+
+### FRO-475
+- B1 **PASS** — as bob with 2 member orgs, all-orgs view shows "Shared with you" with real org annotation pill "Dev Org" (API returns orgName; not "Org #36").
+- B2 **PASS** — clicking the shared row lands and stays on /projects/dev-project.
+- B3 **PASS** — alice (pure org member) in all-orgs mode: no shared-with-you section (data-testid absent).
+
+### FRO-473
+- C1 **PASS** — bob's switcher shows "Dev Org" below member orgs with "Guest" subtitle, no checkmark.
+- C2 **PASS** — single accessible project (group grant temporarily removed): guest click → /projects/dev-project directly. Multi (2 projects): guest click → /?org=all with Shared-with-you visible.
+- C3 **PASS** (single path) — org:active stayed "39" after guest click. Note: multi path lands on /?org=all whose URL-sync sets org:active="all" — the guest org id is never written, but the key does change on that path.
+- C4 **PASS** — alice's switcher: only member orgs (alice's workspace owner, Dev Org maintainer), no Guest section.
+
+### Notes / new observations (not fixed)
+1. **1-member-org guest hits a degenerate /?org=all view**: `isAllOrgs = orgs.length > 1`, so a guest with exactly one member org sent to /?org=all by the multi-project guest-org click gets the "Workspace" active-org fallback — Shared-with-you renders (guest not stranded) but WITHOUT the org annotation pill (line ~919 OrgHome call site passes no orgLabel) and with a confusing "Workspace" heading/empty stats.
+2. **assignments 403 spam for guests**: guest overview load fires GET /api/v2/projects/:id/assignments/all → 403 for a contributor-level guest (Team section degrades gracefully but errors on every load).
+3. Preexisting console noise: /api/v2/admin/me 403 (non-admin), /api/v1/usage/org/:id/credits 403, geist font @fs 403 (worktree symlinked node_modules outside vite fs.allow).
+
+### Seed changes made (all reverted)
+- bob's password_hash → known value for login, then restored from backup (bob & alice originally shared an identical hash; verified restored).
+- alice's password_hash → known value, restored.
+- org_members (32, 1689, 100) inserted for B1, then deleted.
+- group_members (188, 1689) deleted for C2-single, then re-inserted (added_by now NULL — original attribution not captured; row was added_by-less semantics-equivalent).

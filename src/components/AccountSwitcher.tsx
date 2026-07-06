@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { Link, useLocation } from "react-router-dom"
 import { ChevronDown, LogIn, LogOut, UserPlus, Check, Settings2 } from "lucide-react"
 import { useAccounts } from "@/hooks/useAccounts"
-import { clearSession, listSessions, removeSession } from "@/lib/frontier/session-store"
+import { clearSession, removeSession, sessionKey } from "@/lib/frontier/session-store"
 import { clearAllLocalData } from "@/lib/store/project-index"
 import { outboxPendingCount } from "@/lib/sync/outbox"
 import {
@@ -121,10 +121,9 @@ export function AccountSwitcher({
 
   async function doLogout(scope: LogoutScope) {
     if (scope === "all") {
-      const all = await listSessions()
-      for (const s of all) await removeSession(s.key)
-    } else {
       await clearSession()
+    } else if (active) {
+      await removeSession(sessionKey(active))
     }
     await clearAllLocalData()
     // Wipe in-memory query cache so the UI reflects the new auth state —
@@ -178,7 +177,7 @@ export function AccountSwitcher({
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => { setOpen(false); setLoginOpen(true) }}>
           <UserPlus />
-          Add another account…
+          Add another account
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => handleLogout("single")}>
           <LogOut />

@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { ensureAuthState, injectSessions } from "../../helpers/auth"
 
 /**
  * AccountSwitcher dropdown — sidebar username button.
@@ -37,4 +38,23 @@ test("account switcher dropdown opens with session info", async ({ alice }) => {
 
   // Close by pressing Escape or clicking outside.
   await alice.keyboard.press("Escape")
+})
+
+test("logging out promotes another signed-in account", async ({ alice }) => {
+  const [aliceSession, bobSession] = await Promise.all([
+    ensureAuthState("alice"),
+    ensureAuthState("bob"),
+  ])
+
+  await alice.goto("/projects")
+  await injectSessions(alice, [aliceSession, bobSession], "alice")
+
+  const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
+  await expect(accountBtn).toBeVisible({ timeout: 10_000 })
+  await accountBtn.click()
+  await alice.getByRole("button", { name: /^Log out$/i }).click()
+
+  await expect(alice.getByRole("button", { name: /Account menu: bob/i })).toBeVisible({
+    timeout: 10_000,
+  })
 })

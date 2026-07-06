@@ -1,15 +1,16 @@
 import { useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { Check, ChevronsUpDown } from "lucide-react"
-import { useActiveOrg } from "@/context/OrgContext"
+import { useActiveOrg, type GuestOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { createOrg, renameOrg } from "@/lib/frontier/orgs"
+import { fetchAccessibleProjects } from "@/lib/sync/cloud-projects"
 import { isOrgScopedRoute } from "./org-route-scope"
 import posthog from "@/lib/posthog"
 import { ORG_CREATED } from "@/lib/event-names"
 
 export function OrgSwitcher() {
-  const { orgs, activeOrg, activeOrgId, isAllOrgs, setActiveOrg, setAllOrgs, refresh } = useActiveOrg()
+  const { orgs, activeOrg, activeOrgId, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs, refresh } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const location = useLocation()
@@ -27,7 +28,9 @@ export function OrgSwitcher() {
   const [renameName, setRenameName] = useState("")
   const [renaming, setRenaming] = useState(false)
 
-  if (!activeOrg && !isAllOrgs) return null
+  // FRO-473: a project-only invitee has zero member orgs but may still have
+  // guest orgs to switch into — don't hide the whole switcher for them.
+  if (!activeOrg && !isAllOrgs && guestOrgs.length === 0) return null
 
   const showAllOrgs = orgs.length > 1
   const canRename = !isAllOrgs && (activeOrg?.role.level ?? 0) >= 600
@@ -46,6 +49,22 @@ export function OrgSwitcher() {
     if (isOrgScopedRoute(location.pathname) || location.pathname === "/") {
       navigate({ pathname: "/", search: `?org=${orgId}` })
     }
+  }
+
+  // FRO-473: guest orgs are not activatable (no org membership, so
+  // setActiveOrg/org:active would misrepresent the user's role) — clicking
+  // one just navigates. Single accessible project in that org → straight to
+  // it; multiple → the all-orgs overview, which surfaces "Shared with you".
+  async function handleGuestOrg(org: GuestOrg) {
+    setOpen(false)
+    if (jwt) {
+      const projects = await fetchAccessibleProjects(jwt, org.id)
+      if (projects.length === 1) {
+        navigate(`/projects/${projects[0].id}`)
+        return
+      }
+    }
+    navigate({ pathname: "/", search: "?org=all" })
   }
 
   async function handleCreate() {
@@ -132,6 +151,25 @@ export function OrgSwitcher() {
               </li>
             ))}
           </ul>
+
+          {guestOrgs.length > 0 && (
+            <ul className="max-h-60 overflow-y-auto border-t" data-testid="guest-orgs">
+              {guestOrgs.map((g) => (
+                <li key={g.id}>
+                  <button
+                    type="button"
+                    onClick={() => void handleGuestOrg(g)}
+                    className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-sm hover:bg-accent"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate">{g.name ?? `Org #${g.id}`}</span>
+                      <span className="block text-xs text-muted-foreground">Guest</span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
 
           {canRename && (
             <div className="border-t px-2 py-1.5">

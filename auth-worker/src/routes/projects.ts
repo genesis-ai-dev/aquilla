@@ -251,7 +251,7 @@ projects.get("/", authMiddleware, async (c) => {
   //   ?12    : orgFilter (NULL or number) — IS NULL check (no-filter case)
   //   ?13    : orgFilter (NULL or number) — equality check (filter case)
   const rows = await c.env.AQUILLA_PG.prepare(
-    `SELECT p.id, p.name, p.org_id, p.archived_at, p.is_active,
+    `SELECT p.id, p.name, p.org_id, o.name AS org_name, p.archived_at, p.is_active,
             GREATEST(
               COALESCE(pm.role_level, 0),
               COALESCE(gg.max_grant,  0),
@@ -274,6 +274,8 @@ projects.get("/", authMiddleware, async (c) => {
               ELSE 'creator'
             END AS role_source
        FROM projects p
+       LEFT JOIN organizations o
+         ON o.id = p.org_id
        LEFT JOIN project_members pm
          ON pm.project_id = p.id AND pm.user_id = ?
        LEFT JOIN org_members om
@@ -309,6 +311,7 @@ projects.get("/", authMiddleware, async (c) => {
       id: string
       name: string
       org_id: number | null
+      org_name: string | null
       archived_at: string | null
       is_active: boolean
       role_level: number
@@ -340,6 +343,7 @@ projects.get("/", authMiddleware, async (c) => {
         id: row.id,
         name: row.name,
         orgId: row.org_id,
+        orgName: row.org_name,
         archivedAt: row.archived_at,
         isActive: row.is_active,
         role,

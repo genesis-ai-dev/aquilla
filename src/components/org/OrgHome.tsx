@@ -260,9 +260,8 @@ function ProjectTable({
  * invite accept or bulk-add) into an org the caller isn't a member of.
  * Shared across both the active-org and all-orgs views so a zero-org guest
  * never lands on an empty dashboard. `orgLabel` annotates each row with the
- * host org — we only have `orgId` client-side for orgs the caller doesn't
- * belong to (the accessible-projects endpoint doesn't join org name), so the
- * label falls back to "Org #N" rather than fabricating a name.
+ * host org — FRO-473: the accessible-projects endpoint now joins `orgName`,
+ * so the label falls back to "Org #N" only on older servers/absent data.
  */
 function SharedWithYouSection({
   projects,
@@ -791,7 +790,7 @@ export function OrgHome() {
                       a zero-org guest sees a fully empty all-orgs dashboard. */}
                   <SharedWithYouSection
                     projects={sharedProjects}
-                    orgLabel={(p) => (p.orgId != null ? `Org #${p.orgId}` : null)}
+                    orgLabel={(p) => p.orgName ?? (p.orgId != null ? `Org #${p.orgId}` : null)}
                   />
                 </>
               ) : (

@@ -26,6 +26,9 @@ export interface CloudProjectSummary {
   gitlabProjectId: number | null
   /** The org this project belongs to. Present when fetched with an orgId filter. */
   orgId?: number | null
+  /** FRO-473: the host org's display name, joined server-side by the list
+   *  endpoint. Absent on the single-project endpoint or older servers. */
+  orgName?: string | null
   /** Present on the single-project endpoint; list endpoint filters archived rows. */
   archivedAt?: string | null
   /** Present on the single-project endpoint; used to show "archived by X" in Trash. */

@@ -9,14 +9,12 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 }))
 const listMyOrgs = vi.fn()
 const createOrg = vi.fn()
-const renameOrg = vi.fn()
 vi.mock("@/lib/frontier/orgs", () => ({
   listMyOrgs: (...a: unknown[]) => listMyOrgs(...a),
   createOrg: (...a: unknown[]) => createOrg(...a),
-  renameOrg: (...a: unknown[]) => renameOrg(...a),
 }))
 
-beforeEach(() => { localStorage.clear(); listMyOrgs.mockReset(); createOrg.mockReset(); renameOrg.mockReset() })
+beforeEach(() => { localStorage.clear(); listMyOrgs.mockReset(); createOrg.mockReset() })
 afterEach(() => vi.restoreAllMocks())
 
 describe("OrgSwitcher", () => {
@@ -37,7 +35,7 @@ describe("OrgSwitcher", () => {
     await waitFor(() => expect(localStorage.getItem("org:active")).toBe("2"))
   })
 
-  it("create org: opens input, types name, clicks Create, calls createOrg", async () => {
+  it("create org: opens dialog, types name, submits, calls createOrg", async () => {
     listMyOrgs
       .mockResolvedValueOnce([{ id: 1, name: "Acme", role: { level: 700, name: "owner" } }])
       .mockResolvedValue([
@@ -55,38 +53,13 @@ describe("OrgSwitcher", () => {
     // Click "+ Create org"
     await act(async () => { screen.getByRole("button", { name: /\+ create org/i }).click() })
 
-    // Type a name
-    const input = screen.getByRole("textbox", { name: /new org name/i })
+    // Dialog opens with name field
+    const input = await screen.findByLabelText(/organization name/i)
     fireEvent.change(input, { target: { value: "New Org" } })
 
-    // Click Create
-    await act(async () => { screen.getByRole("button", { name: /^create$/i }).click() })
+    // Submit
+    await act(async () => { screen.getByRole("button", { name: /create organization/i }).click() })
 
     await waitFor(() => expect(createOrg).toHaveBeenCalledWith("jwt", "New Org"))
-  })
-
-  it("rename org: owner sees Rename, changes name, Save calls renameOrg", async () => {
-    listMyOrgs.mockResolvedValue([
-      { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
-    ])
-    renameOrg.mockResolvedValue(undefined)
-
-    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
-
-    // Open the switcher
-    await act(async () => { screen.getByRole("button", { name: /acme/i }).click() })
-
-    // Click "Rename"
-    await act(async () => { screen.getByRole("button", { name: /^rename$/i }).click() })
-
-    // Change the name (input is prefilled with "Acme")
-    const input = screen.getByRole("textbox", { name: /rename org/i })
-    fireEvent.change(input, { target: { value: "Acme Renamed" } })
-
-    // Click Save
-    await act(async () => { screen.getByRole("button", { name: /^save$/i }).click() })
-
-    await waitFor(() => expect(renameOrg).toHaveBeenCalledWith("jwt", 1, "Acme Renamed"))
   })
 })

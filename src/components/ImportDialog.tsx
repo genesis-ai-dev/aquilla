@@ -767,7 +767,7 @@ function OptionCard({ option, onSelect }: { option: ImportOption; onSelect: (s: 
         "gap-0 px-3",
         disabled
           ? "cursor-not-allowed opacity-55"
-          : "cursor-pointer transition-shadow hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          : "cursor-pointer transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
       )}
     >
       <div className="flex items-start gap-3">

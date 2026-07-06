@@ -65,7 +65,7 @@ export function AquiferProposalCard({ proposal, projectId, jwt }: AquiferProposa
   }
 
   return (
-    <div className="space-y-2 rounded-lg border bg-card px-2.5 py-2 shadow-sm">
+    <div className="space-y-2 rounded-lg border bg-card px-2.5 py-2">
       <div className="flex items-center gap-1.5">
         <Book className="h-3 w-3 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate text-xs font-medium">{proposal.question}</span>

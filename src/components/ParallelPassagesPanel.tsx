@@ -124,54 +124,9 @@ function Snippet({ html }: { html: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Scope / mode pill toggles
+// Scope / mode tab toggles
 // ---------------------------------------------------------------------------
-function PillToggle<T extends string>({
-  value,
-  options,
-  onChange,
-  disabled,
-  label,
-}: {
-  value: T
-  options: { label: string; value: T; disabled?: boolean }[]
-  onChange: (v: T) => void
-  disabled?: boolean
-  label: string
-}) {
-  return (
-    <div
-      className="inline-flex items-center gap-0.5 rounded-full bg-muted/50 p-0.5"
-      role="group"
-      aria-label={label}
-    >
-      {options.map((opt) => (
-        <AppTooltip key={opt.value} content={opt.disabled ? "Coming soon" : ""}>
-          <span className="inline-flex">
-            <button
-              type="button"
-              disabled={disabled || opt.disabled}
-              onClick={() => onChange(opt.value)}
-              aria-pressed={value === opt.value}
-              className={cn(
-                "inline-flex h-6 items-center rounded-full px-2.5 text-[11px] font-medium tracking-tight transition-colors",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-                "disabled:cursor-not-allowed disabled:opacity-40",
-                value === opt.value
-                  ? "bg-background text-foreground shadow-sm ring-1 ring-foreground/8"
-                  : "text-muted-foreground hover:text-foreground hover:bg-background/50",
-              )}
-            >
-              {opt.label}
-            </button>
-          </span>
-        </AppTooltip>
-      ))}
-    </div>
-  )
-}
 
-// ---------------------------------------------------------------------------
 // Inline diff preview row: shows before (strikethrough red) and after (green).
 // ---------------------------------------------------------------------------
 function DiffPreviewRow({

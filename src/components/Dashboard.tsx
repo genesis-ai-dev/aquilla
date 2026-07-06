@@ -283,7 +283,7 @@ export function Dashboard() {
                     onClick={() => setLifecycleFilter(f)}
                     className={`rounded-md px-2.5 py-1 capitalize transition-colors ${
                       lifecycleFilter === f
-                        ? "bg-background shadow-sm text-foreground"
+                        ? "bg-background text-foreground"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                     aria-pressed={lifecycleFilter === f}

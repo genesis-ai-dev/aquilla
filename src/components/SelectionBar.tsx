@@ -201,7 +201,7 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
       <div
         role="status"
         aria-live="polite"
-        className="pointer-events-none fixed bottom-16 left-1/2 z-40 -translate-x-1/2 rounded-lg bg-card px-4 py-2 text-xs font-medium shadow-lg"
+        className="pointer-events-none fixed bottom-16 left-1/2 z-40 -translate-x-1/2 rounded-lg border bg-card px-4 py-2 text-xs font-medium ring-1 ring-foreground/10"
       >
         {toastMsg}
       </div>
@@ -209,7 +209,7 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
     <div
       className={cn(
         "pointer-events-auto fixed left-1/2 z-30 flex -translate-x-1/2 items-center gap-2",
-        "bottom-4 rounded-full bg-card px-4 py-2 text-xs shadow-lg",
+        "bottom-4 rounded-full border bg-card px-4 py-2 text-xs ring-1 ring-foreground/10",
       )}
       role="toolbar"
       aria-label="Selection actions"

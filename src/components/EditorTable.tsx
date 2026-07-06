@@ -3527,7 +3527,7 @@ function EditorRow({
                 <PopoverContent
                   side="right"
                   align="start"
-                  className="w-72 rounded-xl p-2 shadow-lg"
+                  className="w-72 rounded-xl p-2"
                 >
                   <ul className="space-y-0.5">
                     <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">

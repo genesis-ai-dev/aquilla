@@ -2181,6 +2181,15 @@ export function ProjectWorkspace() {
                 delete next.deletedBy
                 return next
               }).then(() => refresh())
+            } else if (msg.t === "member.removed") {
+              // FRO-346: this user's membership was revoked; the DO closes
+              // the socket right after this frame. Re-fetch the project —
+              // the server now 403s, which flips useProject to "forbidden",
+              // unmounts the editor (project → null tears this reconciler
+              // down via the effect cleanup) and shows the clean
+              // "you no longer have access" state.
+              if (msg.project !== pid || msg.userId !== currentUsername) return
+              refresh()
             }
           },
         },
@@ -3032,6 +3041,18 @@ export function ProjectWorkspace() {
             Retry
           </button>
         </div>
+      </div>
+    )
+  }
+  // FRO-346: revoked / never-granted access gets its own clean state — the
+  // project exists, so "not found" would be misleading (and after a member
+  // removal the removed user must land here on reload, not in the editor).
+  if (status === "forbidden") {
+    return (
+      <div className="p-8 text-muted-foreground" data-testid="project-no-access">
+        You no longer have access to this project. Ask a project maintainer to
+        re-invite you if this is unexpected.{" "}
+        <button className="underline" onClick={goToProjects}>Back to dashboard</button>.
       </div>
     )
   }

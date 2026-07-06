@@ -87,7 +87,8 @@ async function overlayDeviceLocalSettings(record: ProjectRecord): Promise<Projec
 export type ProjectLoadStatus =
   | "loading"
   | "ready"
-  | "not-found"    // server returned 403/404 — project doesn't exist or no access
+  | "not-found"    // server returned 404 — project doesn't exist
+  | "forbidden"    // server returned 403 — project exists but this account has no access (FRO-346)
   | "unreachable"  // network error or 5xx — server is down, not a missing project
   | "no-session"   // no jwt available; can't fetch
 
@@ -123,7 +124,16 @@ export function useProject(projectId: string) {
       if (cancelled) return
       if (!result.ok) {
         setProject(null)
-        setStatus(result.reason === "unreachable" ? "unreachable" : "not-found")
+        // FRO-346: "forbidden" (403 — access revoked / never granted) renders
+        // a clean "you no longer have access" state, distinct from a
+        // genuinely missing project.
+        setStatus(
+          result.reason === "unreachable"
+            ? "unreachable"
+            : result.reason === "forbidden"
+              ? "forbidden"
+              : "not-found",
+        )
         hasLoaded.current = true
         return
       }
@@ -158,7 +168,7 @@ export function useProject(projectId: string) {
     loading: status === "loading",
     /** True when the project is not accessible (403/404). Use `status === "unreachable"`
      *  to distinguish server-down from a genuinely missing/forbidden project. */
-    isError: status === "not-found",
+    isError: status === "not-found" || status === "forbidden",
     /** True when the server could not be reached (network error / 5xx). Shows
      *  "Can't reach the server" rather than "project not found". */
     isUnreachable: status === "unreachable",

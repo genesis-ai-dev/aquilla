@@ -90,6 +90,9 @@ Genesis events (`source.cell.create`, `target.cell.create`, `file.create`) carry
    `POST /events` each batch to the sync-worker with a per-file sync-token JWT.
 4. The sync-worker's `/events` handler:
    - Verifies the JWT (`aud: "sync"`, role check via `requiredRoleFor`).
+   - Re-checks live project membership (FRO-346, `events/membership.ts`) —
+     the JWT only proves membership at mint time; this catches members
+     removed while their ≤15-min token was still valid.
    - Checks idempotency: `INSERT OR IGNORE` on `events.id`.
    - Assigns a monotonic `server_seq`.
    - Runs the **AD-2 first-child-of-parent guard** (FWW conflict resolution).
@@ -99,6 +102,26 @@ Genesis events (`source.cell.create`, `target.cell.create`, `file.create`) carry
      subscribed clients.
 5. Subscribed clients receive an `event.applied` frame and soft-revalidate
    their cell projections (no full refetch — a targeted cache invalidation).
+
+## Membership revocation (FRO-346)
+
+Sync-tokens are bearer JWTs with a 15-minute TTL, so "remove member" must not
+rely on token expiry alone. The enforcement legs, and the documented window
+for each surface:
+
+| Surface | When revocation bites |
+| --- | --- |
+| New token mints (`POST /sync-token`) | Immediately — the role is re-resolved from the DB at mint (`resolveProjectRole`), so reload/reconnect cannot restore access. |
+| Writes (`POST /events`) | Immediately — the handler re-checks live membership per flush (`events/membership.ts`); a removed user's next write 403s `membership revoked` even with a still-valid token. |
+| Live WS session (ProjectSync DO) | Within seconds — identity's removal routes notify `POST /admin/projects/:id/member-removed`; the DO sends a `member.removed` frame, closes the socket (code 4403) and denylists the userId for 16 min (> token TTL) so a cached token can't reconnect. |
+| Reads (`GET /cells` etc.) | Bounded by the token TTL — up to 15 min for an already-minted token (no per-read DB round-trip, same trade-off as the FRO-285 project-freeze reasoning). |
+
+The removal routes only notify the DO when **no** AD-12 grant path survives
+(org / group / creator access is additive; removing the direct row is not a
+demotion). **Platform-admin exemption:** tokens minted via the ADMIN_EMAILS
+allowlist carry `src: "platform"` and skip the write-path membership re-check
+— platform operators have no membership rows to re-check; their access is
+env-configured and survives member removal by design.
 
 ## Conflict resolution: first-write-wins (FWW)
 

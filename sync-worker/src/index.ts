@@ -15,6 +15,7 @@ import { handleDiarizationRequest } from "./diarization"
 import { notifyProjectDo } from "./archive-broadcast"
 import { handleCorsPreflight, withCors } from "./cors"
 import { handleProjectArchiveRequest } from "./project-archive"
+import { handleMemberRemovedRequest, notifyProjectDoMemberRemoved } from "./member-removed"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
 import { handleCellHistoryReadRequest } from "./events/cell-history-read-route"
 import { handleCellsReadRequest } from "./events/cells-read-route"
@@ -194,6 +195,14 @@ export default {
 
     const projectArchiveResponse = await handleProjectArchiveRequest(request, env, notifyProjectDo)
     if (projectArchiveResponse) return projectArchiveResponse
+    // FRO-346: eject a removed member's live WS sessions + denylist their
+    // still-valid tokens on the per-project DO.
+    const memberRemovedResponse = await handleMemberRemovedRequest(
+      request,
+      env,
+      notifyProjectDoMemberRemoved,
+    )
+    if (memberRemovedResponse) return memberRemovedResponse
     const rebuildResponse = await handleRebuildProjectionRequest(request, env)
     if (rebuildResponse) return rebuildResponse
     const rebuildFtsResponse = await handleRebuildFtsRequest(request, env)

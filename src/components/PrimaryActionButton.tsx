@@ -116,31 +116,25 @@ export function PrimaryActionButton({ ctx, run }: Props) {
           onConfirm={() => { pendingConfirm.run(ctx, run); setPendingConfirm(null) }}
         />
       )}
-    </div>
+    </>
   )
 }
 
-function MenuItem({
-  action, isDefault, onClick,
+function ActionMenuItem({
+  action, isDefault, onSelect,
 }: {
   action: WorkspaceAction
   isDefault?: boolean
-  onClick: () => void
+  onSelect: () => void
 }) {
-  const disabled = action.comingSoon
   return (
-    <button
-      className={cn(
-        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm text-left hover:bg-accent",
-        isDefault && "font-medium",
-        disabled && "cursor-not-allowed opacity-50 hover:bg-transparent",
-      )}
-      onClick={onClick}
-      disabled={disabled}
-      aria-disabled={disabled}
+    <DropdownMenuItem
+      className={cn(isDefault && "font-medium")}
+      disabled={action.comingSoon}
+      onClick={onSelect}
     >
-      {action.icon && <action.icon className="h-4 w-4" />}
+      {action.icon && <action.icon />}
       <span>{action.label}</span>
-    </button>
+    </DropdownMenuItem>
   )
 }

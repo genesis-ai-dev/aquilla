@@ -200,7 +200,7 @@ function TranslatorProfileSection() {
           placeholder="Anything else that should shape the summaries you get"
           rows={3}
         />
-      </div>
+      </Field>
       <p className="mt-3 text-xs text-muted-foreground">
         This profile is stored on this device and sent to the AI to tailor your summaries.
       </p>

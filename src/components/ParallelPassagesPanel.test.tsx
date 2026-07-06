@@ -87,7 +87,7 @@ describe("ParallelPassagesPanel — diff preview", () => {
     render(<ParallelPassagesPanel {...baseProps({ results })} />)
 
     // Type a find query that matches the translated text.
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
+    fireEvent.change(getFindInput(), {
       target: { value: "hello" },
     })
     // Type a replace value.
@@ -109,7 +109,7 @@ describe("ParallelPassagesPanel — diff preview", () => {
     ]
     render(<ParallelPassagesPanel {...baseProps({ results })} />)
 
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
+    fireEvent.change(getFindInput(), {
       target: { value: "foo" },
     })
     fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), {
@@ -125,7 +125,7 @@ describe("ParallelPassagesPanel — diff preview", () => {
     ]
     render(<ParallelPassagesPanel {...baseProps({ results })} />)
 
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
+    fireEvent.change(getFindInput(), {
       target: { value: "foo" },
     })
     fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), {
@@ -144,7 +144,7 @@ describe("ParallelPassagesPanel — diff preview", () => {
     ]
     render(<ParallelPassagesPanel {...baseProps({ results })} />)
 
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
+    fireEvent.change(getFindInput(), {
       target: { value: "hello" },
     })
     fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), {
@@ -159,7 +159,7 @@ describe("ParallelPassagesPanel — diff preview", () => {
     const results = [makeResult({ cellId: "c1", translated: "hello world" })]
     render(<ParallelPassagesPanel {...baseProps({ results })} />)
 
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
+    fireEvent.change(getFindInput(), {
       target: { value: "xyz" },
     })
     fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), {
@@ -181,7 +181,7 @@ describe("ParallelPassagesPanel — HTML-spanning skip count", () => {
     ]
     render(<ParallelPassagesPanel {...baseProps({ results })} />)
 
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
+    fireEvent.change(getFindInput(), {
       target: { value: "oo</b>b" },
     })
     fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), {
@@ -195,7 +195,7 @@ describe("ParallelPassagesPanel — HTML-spanning skip count", () => {
     const results = [makeResult({ cellId: "c1", translated: "hello world" })]
     render(<ParallelPassagesPanel {...baseProps({ results })} />)
 
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
+    fireEvent.change(getFindInput(), {
       target: { value: "hello" },
     })
     fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), {
@@ -260,7 +260,7 @@ describe("ParallelPassagesPanel — validation copy (FRO-286)", () => {
       <ParallelPassagesPanel {...baseProps({ results, onReplaceAll })} />,
     )
 
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
+    fireEvent.change(getFindInput(), {
       target: { value: "hello" },
     })
     fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), {
@@ -293,7 +293,7 @@ describe("ParallelPassagesPanel — Replace button state", () => {
     const results = [makeResult({ cellId: "c1", translated: "hello world" })]
     render(<ParallelPassagesPanel {...baseProps({ results, isReadOnly: true })} />)
 
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
+    fireEvent.change(getFindInput(), {
       target: { value: "hello" },
     })
     fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), {
@@ -310,7 +310,7 @@ describe("ParallelPassagesPanel — Replace button state", () => {
     ]
     render(<ParallelPassagesPanel {...baseProps({ results, onReplaceAll })} />)
 
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
+    fireEvent.change(getFindInput(), {
       target: { value: "world" },
     })
     fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), {

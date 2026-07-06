@@ -477,21 +477,22 @@ function VoiceCombobox({
             </span>
             <span className="min-w-0 flex-1 truncate text-left font-medium text-foreground">{active.name}</span>
             <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          </button>
+          </Button>
         }
       />
       <PopoverContent align="start" side="top" className="w-60 p-2">
-        <div className="relative mb-1.5">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
+        <InputGroup className="mb-1.5">
+          <InputGroupAddon>
+            <Search />
+          </InputGroupAddon>
+          <InputGroupInput
             type="text"
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search voices…"
-            className="h-8 w-full rounded-lg border bg-background pl-8 pr-2 text-sm outline-none ring-primary/40 placeholder:text-muted-foreground focus:ring-2"
           />
-        </div>
+        </InputGroup>
         <div className="max-h-56 space-y-0.5 overflow-y-auto">
           {filtered.length === 0 ? (
             <p className="px-2 py-3 text-center text-xs italic text-muted-foreground">No matches</p>

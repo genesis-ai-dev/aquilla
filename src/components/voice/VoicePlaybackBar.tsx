@@ -121,16 +121,18 @@ export function VoicePlaybackBar({ cells: rawCells, projectId, session, settings
           <IconButton title="Previous line" disabled={!canPlay} onClick={skipBack}>
             <SkipBack className="h-4 w-4" />
           </IconButton>
-          <button
+          <Button
             type="button"
+            size="icon"
+            variant="default"
             onClick={onPlayPause}
             disabled={!canPlay}
             title={isPlaying ? "Pause" : "Play all"}
             aria-label={isPlaying ? "Pause" : "Play all"}
-            className="grid h-9 w-9 place-items-center rounded-full bg-foreground text-background transition-opacity hover:opacity-90 disabled:opacity-40"
+            className="bg-foreground text-background hover:bg-foreground/90"
           >
             {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-[1px]" />}
-          </button>
+          </Button>
           <IconButton title="Next line" disabled={!canPlay} onClick={skipForward}>
             <SkipForward className="h-4 w-4" />
           </IconButton>
@@ -157,16 +159,17 @@ function IconButton({
   disabled?: boolean
 }) {
   return (
-    <button
+    <Button
       type="button"
+      size="icon-sm"
+      variant="ghost"
       title={title}
       aria-label={title}
       onClick={onClick}
       disabled={disabled}
-      className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:opacity-40"
     >
       {children}
-    </button>
+    </Button>
   )
 }
 
@@ -209,13 +212,15 @@ function SpeedButton({ rate, onChange }: { rate: number; onChange: (r: number) =
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
-          <button
+          <Button
             type="button"
+            size="sm"
+            variant="ghost"
             title="Playback speed"
-            className="grid h-8 min-w-9 place-items-center rounded-md px-1.5 text-xs font-medium tabular-nums text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+            className="min-w-9 px-1.5 tabular-nums"
           >
             {rate}x
-          </button>
+          </Button>
         }
       />
       <PopoverContent align="center" side="top" className="w-24 p-1">

@@ -25,27 +25,15 @@ interface Props {
 }
 
 export function PrimaryActionButton({ ctx, run }: Props) {
-  const [open, setOpen] = useState(false)
   const [pendingConfirm, setPendingConfirm] = useState<WorkspaceAction | null>(null)
-  const rootRef = useRef<HTMLDivElement>(null)
 
   const defaultAction = getDefaultAction(workspaceActions, ctx)
   const visible = getVisibleActions(workspaceActions, ctx)
   const primary = visible.filter((a) => a.group === "primary")
   const secondary = visible.filter((a) => a.group === "secondary")
 
-  useEffect(() => {
-    if (!open) return
-    function onClick(e: MouseEvent) {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener("mousedown", onClick)
-    return () => document.removeEventListener("mousedown", onClick)
-  }, [open])
-
   function handleRun(action: WorkspaceAction) {
     if (action.comingSoon) return
-    setOpen(false)
     if (action.requiresConfirmation) {
       setPendingConfirm(action)
     } else {

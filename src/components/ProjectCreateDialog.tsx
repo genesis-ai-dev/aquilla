@@ -217,9 +217,9 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
           </details>
 
           {error && (
-            <p className="text-sm text-destructive" role="alert">
+            <FieldError role="alert">
               {error}
-            </p>
+            </FieldError>
           )}
 
           <Button

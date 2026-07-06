@@ -403,7 +403,7 @@ export function OrgHome() {
             </p>
             <Link
               to={`/login?next=${encodeURIComponent("/")}`}
-              className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              className={cn(buttonVariants())}
             >
               Sign in
             </Link>
@@ -471,8 +471,6 @@ export function OrgHome() {
     navigate(`/projects/${project.id}`)
   }
 
-  const projectSearchClassName =
-    "h-9 w-full rounded-md border border-border bg-background px-3 pr-9 text-sm focus-visible:border-muted-foreground/40 focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-sm"
   const projectControlGroupClassName =
     "flex min-w-fit shrink-0 items-center gap-2 whitespace-nowrap"
 
@@ -546,7 +544,7 @@ export function OrgHome() {
                         </div>
                         <Link
                           to={`/join/${inv.token}`}
-                          className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                          className={cn(buttonVariants({ size: "sm" }), "shrink-0")}
                         >
                           Review &amp; accept
                         </Link>

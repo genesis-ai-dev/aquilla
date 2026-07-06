@@ -190,15 +190,15 @@ function SearchResultContent({ result }: { result: WorkspaceSearchResult }) {
           {columnLabel}
         </span>
       </div>
-      <div className="text-sm leading-snug">
+      <div className="w-full text-sm leading-snug">
         <Snippet html={result.snippet || (result.original || result.translated)} />
       </div>
       {result.paired != null && result.paired !== "" && (
-        <div className="mt-1.5 pl-2.5 border-l-2 border-muted text-xs text-muted-foreground leading-snug">
+        <div className="mt-1.5 w-full pl-2.5 border-l-2 border-muted text-xs text-muted-foreground leading-snug">
           {result.paired}
         </div>
       )}
-    </button>
+    </>
   )
 }
 
@@ -422,7 +422,6 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
   const [query, setQuery] = useState("")
   const [side, setSide] = useState<ParallelPanelSide>("both")
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const inputRef = useRef<HTMLInputElement | null>(null)
 
   // When replace mode is opened, auto-switch side to "target".
   useEffect(() => {
@@ -431,12 +430,8 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
     }
   }, [mode])
 
-  // Focus the input when the dialog opens.
   useEffect(() => {
-    if (open) {
-      const t = setTimeout(() => inputRef.current?.focus(), 50)
-      return () => clearTimeout(t)
-    } else {
+    if (!open) {
       setQuery("")
       clearResults?.()
     }
@@ -463,8 +458,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
     [activeFileId, clearResults, onSearch, onSearchPassages],
   )
 
-  const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const v = e.target.value
+  const handleQueryChange = (v: string) => {
     setQuery(v)
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
@@ -497,12 +491,15 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
     }
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       if (debounceRef.current) clearTimeout(debounceRef.current)
       triggerSearch(query, scope, mode, side)
     }
   }
+
+  const dialogTitle =
+    mode === "passages" ? "Parallel passages" : mode === "replace" ? "Search and Replace" : "Search"
 
   const scopeLabel =
     scope === "file"
@@ -591,10 +588,9 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
             </p>
           )}
 
-          {/* Replace section — shown when mode === "replace" */}
           {mode === "replace" && (
-            <div className="rounded-xl border border-border bg-muted/20 px-3 py-3 flex flex-col gap-3">
-              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            <div className="flex flex-col gap-3 rounded-xl border border-border bg-muted/20 px-3 py-3">
+              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Replace (target cells only)
               </div>
               <ReplaceSection

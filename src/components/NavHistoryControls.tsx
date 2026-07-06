@@ -101,15 +101,10 @@ function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav
       onPointerCancel={clearHold}
       onClick={onClick}
       onContextMenu={onContextMenu}
-      className={cn(
-        "flex size-6 items-center justify-center rounded-md transition-colors",
-        enabled
-          ? "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-          : "cursor-default text-muted-foreground/30",
-      )}
+      className={enabled ? undefined : "cursor-default text-muted-foreground/30"}
     >
       <Icon className="size-4" aria-hidden />
-    </button>
+    </Button>
   )
 
   return (

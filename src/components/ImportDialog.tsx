@@ -381,26 +381,18 @@ export function ImportDialog({
               "Re-import detected"
             ) : screen === "preview" ? (
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
+                <ImportDialogBackButton
                   onClick={() => { setPreviewState(null); setScreen("upload") }}
-                  className="rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label="Back to file selection"
-                >
-                  ←
-                </button>
+                  label="Back to file selection"
+                />
                 Preview
               </div>
             ) : (
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
+                <ImportDialogBackButton
                   onClick={() => setScreen("landing")}
-                  className="rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label="Back to import types"
-                >
-                  ←
-                </button>
+                  label="Back to import types"
+                />
                 {screen === "upload" ? "Upload Files"
                   : screen === "helloao" ? "Bible API (helloao.org)"
                   : screen === "obs" ? "Open Bible Stories"

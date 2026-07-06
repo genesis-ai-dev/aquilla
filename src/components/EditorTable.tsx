@@ -4543,7 +4543,7 @@ function EditorRow({
                             )}
                           />
                           {isTranscribing ? "Transcribing…" : "Transcribe"}
-                        </button>
+                        </Button>
                         {cell.selectedAudioId && selectedAudio && (
                           <DenoiseButton
                             projectId={project.id}

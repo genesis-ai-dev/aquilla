@@ -334,7 +334,7 @@ export function ProjectsList() {
             </p>
             <Link
               to={`/login?next=${encodeURIComponent("/projects")}`}
-              className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              className={cn(buttonVariants())}
             >
               Sign in
             </Link>

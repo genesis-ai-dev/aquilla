@@ -320,13 +320,15 @@ function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBu
           <Popover>
             <PopoverTrigger
               render={
-                <button
+                <Button
                   type="button"
-                  className="ml-auto flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="ml-auto size-5"
                   aria-label="Comment actions"
                 >
                   <MoreHorizontal className="h-3 w-3" />
-                </button>
+                </Button>
               }
             />
             <PopoverContent side="bottom" align="end" className="w-28 p-1">

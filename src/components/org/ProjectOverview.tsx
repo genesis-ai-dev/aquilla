@@ -160,13 +160,15 @@ function OverflowMenu({ children }: { children: React.ReactNode }) {
 
   return (
     <div ref={ref} className="relative">
-      <button
+      <Button
+        type="button"
+        size="icon-sm"
+        variant="outline"
         aria-label="More actions"
         onClick={() => setOpen((v) => !v)}
-        className="rounded-md border px-2.5 py-1.5 text-sm font-medium hover:bg-accent/40"
       >
-        ⋯
-      </button>
+        <MoreHorizontal className="h-4 w-4" />
+      </Button>
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1 min-w-40 rounded-md border bg-popover shadow-md py-1">
           {children}
@@ -372,7 +374,7 @@ export function ProjectOverview() {
           ) : (
             <div className="max-w-5xl space-y-4">
               {/* ── Header card ── */}
-              <div className="rounded-xl border bg-card shadow-sm p-6">
+              <div className="rounded-xl border bg-card p-6">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -397,21 +399,14 @@ export function ProjectOverview() {
                     )}
                     <p className="mt-0.5 text-sm text-muted-foreground">{project?.files.length ?? 0} files</p>
                   </div>
-                  <div className="flex shrink-0 gap-2 items-start">
-                    <button
-                      onClick={() => navigate(`/project/${id}`)}
-                      className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground"
-                    >
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Button size="sm" onClick={() => navigate(`/project/${id}`)}>
                       Open project
-                    </button>
+                    </Button>
                     {isOwner && isArchived && (
-                      <button
-                        onClick={handleRestore}
-                        disabled={busy}
-                        className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent/40 disabled:opacity-50"
-                      >
+                      <Button size="sm" variant="outline" onClick={handleRestore} disabled={busy}>
                         Restore
-                      </button>
+                      </Button>
                     )}
                     {/* Archive + Download + Lifecycle moved into overflow menu */}
                     {(canManage || isOwner || canToggleLifecycle) && !isArchived && (
@@ -451,7 +446,7 @@ export function ProjectOverview() {
 
               {/* ── Progress card ── */}
               {audio && audio.totalCells > 0 && (
-                <div className="rounded-xl border bg-card shadow-sm p-5">
+                <div className="rounded-xl border bg-card p-5">
                   <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Progress</h2>
 
                   {/* Big-number tiles lead the section */}
@@ -533,7 +528,7 @@ export function ProjectOverview() {
                 const shown = showAllFiles ? sorted : sorted.slice(0, FILE_ROW_CAP)
                 const hidden = sorted.length - shown.length
                 return (
-                  <div className="rounded-xl border bg-card shadow-sm p-5">
+                  <div className="rounded-xl border bg-card p-5">
                     <div className="mb-3 flex items-center justify-between">
                       <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         Files {!showAllFiles && hidden > 0 ? `(top ${FILE_ROW_CAP} of ${sorted.length})` : `(${sorted.length})`}
@@ -716,7 +711,7 @@ export function ProjectOverview() {
                   surface as the in-project members page, so access can be
                   managed from the overview without opening the workspace. ── */}
               {canManage && !isArchived && (
-                <div className="rounded-xl border bg-card shadow-sm p-5" data-testid="overview-members-card">
+                <div className="rounded-xl border bg-card p-5" data-testid="overview-members-card">
                   <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Members</h2>
                   <MembersTab projectId={id} className="space-y-6" />
                 </div>

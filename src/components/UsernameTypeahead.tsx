@@ -185,7 +185,7 @@ export function UsernameTypeahead({
                   disabled={disabled}
                   className={`rounded px-1.5 py-0.5 ${
                     value.mode === "username"
-                      ? "bg-background shadow-sm text-foreground"
+                      ? "bg-background text-foreground"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
@@ -201,7 +201,7 @@ export function UsernameTypeahead({
                   disabled={disabled}
                   className={`rounded px-1.5 py-0.5 ${
                     value.mode === "email"
-                      ? "bg-background shadow-sm text-foreground"
+                      ? "bg-background text-foreground"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >

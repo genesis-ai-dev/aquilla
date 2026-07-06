@@ -15,6 +15,7 @@ import { FrontierLoginForm } from "./git-import/FrontierLoginForm"
 import { FrontierSignupForm } from "./git-import/FrontierSignupForm"
 import { FrontierForgotPasswordForm } from "./git-import/FrontierForgotPasswordForm"
 import { cn } from "@/lib/utils"
+import { InitialsAvatar } from "@/components/InitialsAvatar"
 
 type AuthMode = "login" | "signup" | "forgot"
 
@@ -78,21 +79,6 @@ function AuthDialogBody({
       )}
     </>
   )
-}
-
-function initials(name: string): string {
-  const t = name.trim()
-  if (!t) return "?"
-  const parts = t.split(/\s+/)
-  if (parts.length === 1) return t.slice(0, 2).toUpperCase()
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-}
-
-function colorFor(name: string): string {
-  let h = 0
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0
-  const hue = Math.abs(h) % 360
-  return `hsl(${hue}, 55%, 45%)`
 }
 
 type LogoutScope = "single" | "all"
@@ -182,12 +168,7 @@ export function AccountSwitcher({
             />
           }
         >
-          <div
-            className="flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-semibold text-white"
-            style={{ backgroundColor: colorFor(active.username) }}
-          >
-            {initials(active.username)}
-          </div>
+          <InitialsAvatar name={active.username} size="xs" />
           {!compact && (
             <>
               <span className={cn("truncate text-left", !isHeader && "flex-1")}>{active.username}</span>
@@ -316,12 +297,7 @@ function Entry({
       )}
       onClick={onClick}
     >
-      <div
-        className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[9px] font-semibold text-white"
-        style={{ backgroundColor: colorFor(summary.username) }}
-      >
-        {initials(summary.username)}
-      </div>
+      <InitialsAvatar name={summary.username} size="xs" className="shrink-0" />
       <div className="flex flex-col min-w-0 flex-1">
         <span className="truncate">{summary.username}</span>
         {summary.email && (

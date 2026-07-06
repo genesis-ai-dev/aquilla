@@ -1,10 +1,39 @@
 import { useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { Check, ChevronsUpDown } from "lucide-react"
+import { Building2, Check, ChevronDown, Plus } from "lucide-react"
 import { useActiveOrg } from "@/context/OrgContext"
 import { isOrgScopedRoute } from "./org-route-scope"
 import { OrgCreateDialog } from "./OrgCreateDialog"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+
+function OrgMark({ name, allOrgs = false }: { name: string; allOrgs?: boolean }) {
+  if (allOrgs) {
+    return (
+      <InitialsAvatar
+        name={name}
+        size="xs"
+        shape="square"
+        menuSafe
+        menuSafeColor="var(--primary-foreground)"
+        fallbackClassName="bg-primary"
+      >
+        <Building2 className="size-3" />
+      </InitialsAvatar>
+    )
+  }
+  return (
+    <InitialsAvatar name={name} size="xs" shape="square" menuSafe />
+  )
+}
 
 export function OrgSwitcher() {
   const { orgs, activeOrg, activeOrgId, isAllOrgs, setActiveOrg, setAllOrgs, refresh } = useActiveOrg()
@@ -18,7 +47,6 @@ export function OrgSwitcher() {
 
   const showAllOrgs = orgs.length > 1
   const title = isAllOrgs ? "All organizations" : activeOrg?.name ?? "Workspace"
-  const subtitle = isAllOrgs ? `${orgs.length} organizations` : activeOrg?.role.name ?? ""
 
   function handleAllOrgs() {
     setAllOrgs()
@@ -49,66 +77,64 @@ export function OrgSwitcher() {
 
   return (
     <>
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger
           render={
             <button
               type="button"
-              className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent"
+              className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-sm hover:bg-accent"
             />
           }
         >
-          <span className="min-w-0">
-            <span className="block truncate text-sm font-medium">{title}</span>
-            <span className="block text-xs text-muted-foreground">{subtitle}</span>
-          </span>
-          <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
-        </PopoverTrigger>
-        <PopoverContent side="bottom" align="start" sideOffset={4} className="w-(--anchor-width) p-0">
-          <ul className="max-h-60 overflow-y-auto">
+          <OrgMark name={title} allOrgs={isAllOrgs} />
+          <span className="truncate font-medium">{title}</span>
+          <ChevronDown className="ml-auto size-4 opacity-50" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent className="w-64 rounded-lg" align="start" side="bottom" sideOffset={4}>
+          <DropdownMenuGroup>
             {showAllOrgs && (
-              <li>
-                <button
-                  type="button"
-                  onClick={handleAllOrgs}
-                  className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-sm hover:bg-accent"
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate">All organizations</span>
-                    <span className="block text-xs text-muted-foreground">All projects</span>
-                  </span>
-                  {isAllOrgs && <Check className="size-3.5 shrink-0" aria-hidden />}
-                </button>
-              </li>
+              <DropdownMenuItem className="gap-2 p-2" onClick={handleAllOrgs}>
+                <OrgMark name="All organizations" allOrgs />
+                <span className="truncate">All organizations</span>
+                <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                  <span className="text-xs text-muted-foreground">All projects</span>
+                  {isAllOrgs && <Check className="size-4 opacity-60" />}
+                </span>
+              </DropdownMenuItem>
             )}
-            {orgs.map((o) => (
-              <li key={o.id}>
-                <button
-                  type="button"
+            {orgs.map((o) => {
+              const name = o.name ?? "Workspace"
+              const selected = activeOrgId === o.id
+              return (
+                <DropdownMenuItem
+                  key={o.id}
+                  className="gap-2 p-2"
                   onClick={() => handleActiveOrg(o.id)}
-                  className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-sm hover:bg-accent"
                 >
-                  <span className="min-w-0">
-                    <span className="block truncate">{o.name ?? "Workspace"}</span>
-                    <span className="block text-xs text-muted-foreground">{o.role.name}</span>
+                  <OrgMark name={name} />
+                  <span className="truncate">{name}</span>
+                  <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                    <span className="text-xs text-muted-foreground">{o.role.name}</span>
+                    {selected && <Check className="size-4 opacity-60" />}
                   </span>
-                  {activeOrgId === o.id && <Check className="size-3.5 shrink-0" aria-hidden />}
-                </button>
-              </li>
-            ))}
-          </ul>
-
-          <div className="border-t px-2 py-1.5">
-            <button
-              type="button"
-              onClick={openCreateDialog}
-              className="text-xs text-muted-foreground hover:text-foreground"
-            >
-              + Create org
-            </button>
-          </div>
-        </PopoverContent>
-      </Popover>
+                </DropdownMenuItem>
+              )
+            })}
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem className="gap-2 p-2" onClick={openCreateDialog}>
+            <Avatar className="size-5 rounded-md after:rounded-md">
+              <AvatarFallback
+                className="rounded-md border bg-background"
+                style={{ color: "var(--muted-foreground)" }}
+              >
+                <Plus className="size-3" />
+              </AvatarFallback>
+            </Avatar>
+            <span className="font-medium text-muted-foreground">Create</span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       <OrgCreateDialog
         open={createDialogOpen}

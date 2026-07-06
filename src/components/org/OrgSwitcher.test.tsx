@@ -31,7 +31,7 @@ describe("OrgSwitcher", () => {
     expect(screen.getByText("Come and See")).toBeInTheDocument()
     expect(screen.getByText(/maintainer/i)).toBeInTheDocument()
     // Selecting an org makes it the active scope and persists it.
-    await act(async () => { screen.getByText("Side Org").click() })
+    await act(async () => { screen.getByRole("menuitem", { name: /side org/i }).click() })
     await waitFor(() => expect(localStorage.getItem("org:active")).toBe("2"))
   })
 
@@ -50,8 +50,9 @@ describe("OrgSwitcher", () => {
     // Open the switcher
     await act(async () => { screen.getByRole("button", { name: /acme/i }).click() })
 
-    // Click "+ Create org"
-    await act(async () => { screen.getByRole("button", { name: /\+ create org/i }).click() })
+    // Click Create in the menu
+    const createItem = await screen.findByRole("menuitem", { name: /^create$/i })
+    await act(async () => { createItem.click() })
 
     // Dialog opens with name field
     const input = await screen.findByLabelText(/organization name/i)

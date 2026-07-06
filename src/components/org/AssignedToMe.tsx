@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
+import { ClipboardList, Building2 } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
+import { EmptyState } from "@/components/ui/page"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -53,18 +55,20 @@ export function AssignedToMe() {
         <div className="h-full overflow-y-auto space-y-4 p-6">
           <h1 className="text-lg font-semibold">Assigned to me</h1>
           {activeOrgId == null ? (
-            <div className="rounded-lg border bg-card p-6 text-center">
-              <p className="text-sm font-medium">Select an organization</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Assignments are scoped to a single organization.
-              </p>
-            </div>
+            <EmptyState
+              icon={Building2}
+              title="Select an organization"
+              description="Assignments are scoped to a single organization."
+            />
           ) : loading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : error ? (
             <p className="text-sm text-destructive">{error}</p>
           ) : rows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">You have no open assignments.</p>
+            <EmptyState
+              icon={ClipboardList}
+              title="You have no open assignments."
+            />
           ) : (
             <div className="divide-y rounded-lg border">
               {rows.map((a) => {

@@ -19,7 +19,8 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { cn } from "@/lib/utils"
-import { Search } from "lucide-react"
+import { FolderOpen, Search } from "lucide-react"
+import { EmptyState } from "@/components/ui/page"
 
 // ── Sort options ─────────────────────────────────────────────────────────────
 type SortKey = "name" | "role"
@@ -445,15 +446,17 @@ export function ProjectsList() {
                 </div>
 
                 {filtered.length === 0 ? (
-                  <div className="px-4 py-10 text-center">
-                    <p className="text-sm text-muted-foreground">
-                      {filter
+                  <EmptyState
+                    className="border-0 bg-transparent py-10"
+                    icon={filter ? Search : FolderOpen}
+                    title={
+                      filter
                         ? "No projects match your filter."
                         : isAllOrgs
                           ? projectLensEmpty
-                          : "No projects in this org yet."}
-                    </p>
-                  </div>
+                          : "No projects in this org yet."
+                    }
+                  />
                 ) : (
                   <ul className="divide-y">
                     {filtered.map((p) => (

@@ -9,10 +9,11 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity, NotebookPen, Info, Pencil,
+  ArrowRight, Activity, NotebookPen, Info, Pencil, Music,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { getCellPref, setCellPref } from "@/lib/store/audio-cell-prefs"
@@ -1365,10 +1366,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             <TimelineAddMedia onAttachFile={onAttachMediaFile} onAttachUrl={onAttachMediaUrl} />
           </div>
         ) : (
-          <div className="flex-1 px-4 py-10 text-center text-sm text-muted-foreground">
-            {audioLens
-              ? "No media segments yet. Import an audio or video file, or record a take, to populate the media layer."
-              : "No text segments in this file."}
+          <div className="flex-1">
+            <EmptyState
+              className="h-full border-0 bg-transparent py-10"
+              icon={audioLens ? Music : FileText}
+              title={audioLens ? "No media segments yet" : "No text segments in this file"}
+              description={
+                audioLens
+                  ? "Import an audio or video file, or record a take, to populate the media layer."
+                  : undefined
+              }
+            />
           </div>
         )
       ) : (

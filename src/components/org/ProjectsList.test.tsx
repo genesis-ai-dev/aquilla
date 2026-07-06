@@ -83,6 +83,27 @@ describe("ProjectsList", () => {
     const link = await screen.findByRole("link", { name: /sign in/i })
     expect(link.getAttribute("href")).toMatch(/\/login\?next=.*projects/)
   })
+
+  // FRO-366: the projects list must scroll natively (h-full + overflow-y-auto
+  // inside AppShell's height-constrained main slot) rather than clip. jsdom
+  // can't compute real layout, so this asserts the structural contract
+  // instead of pixel scroll behavior — see AppShell.tsx / this file for the
+  // flex chain that makes `h-full overflow-y-auto` the correct scroll surface.
+  it("renders the list in a scrollable container (h-full + overflow-y-auto, no fixed/clipped height)", async () => {
+    fetchAccessibleProjectsResultMock.mockResolvedValue({
+      ok: true,
+      projects: [{ id: "p1", name: "John", orgId: 7, role: { level: 700, name: "owner", source: "creator" }, files: [] }],
+    })
+    render(<MemoryRouter><OrgProvider><ProjectsList /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("John")).toBeInTheDocument())
+
+    const scrollContainer = screen.getByTestId("projects-list-scroll")
+    expect(scrollContainer.className).toMatch(/\bh-full\b/)
+    expect(scrollContainer.className).toMatch(/\boverflow-y-auto\b/)
+    // Must not clip via overflow-hidden (the ScrollArea/flex footgun this
+    // guards against — see FRO-164).
+    expect(scrollContainer.className).not.toMatch(/overflow-hidden/)
+  })
 })
 
 // RES-5 follow-up (UI-QA 2026-06-10): when the ORGS fetch fails, activeOrgId

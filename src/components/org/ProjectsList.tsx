@@ -355,7 +355,15 @@ export function ProjectsList() {
       }
       statusBar={null}
       main={
-        <div className="h-full overflow-y-auto p-6">
+        // FRO-366: the AppShell `main` slot is height-constrained by the shell's
+        // flex chain (h-screen -> min-h-0/flex-1/overflow-hidden all the way
+        // down), so `h-full` here resolves against a definite height and
+        // `overflow-y-auto` is the intended (and only) scroll surface for this
+        // list — see FRO-164 for the sibling "one primary scroll" rule.
+        // `overscroll-contain` stops wheel/trackpad momentum from chaining to
+        // (and getting swallowed by) an ancestor once this list's own scroll
+        // is exhausted, which otherwise reads as "scrolling does nothing".
+        <div className="h-full overflow-y-auto overscroll-contain p-6" data-testid="projects-list-scroll">
           {isPageLoading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : unreachable || orgsUnreachable ? (

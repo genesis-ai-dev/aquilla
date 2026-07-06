@@ -226,7 +226,9 @@ export function ProjectOverview() {
   // to "ready" here when they hold a direct grant. Redirecting on org
   // mismatch alone (pre-FRO-474 behavior) sent guests right back to "/".
   useEffect(() => {
-    if (status === "not-found") {
+    // FRO-346: "forbidden" (access revoked) leaves the overview the same way
+    // a missing project does — back to the dashboard.
+    if (status === "not-found" || status === "forbidden") {
       navigate("/", { replace: true })
     }
   }, [status, navigate])

@@ -23,6 +23,7 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { listEffectiveProjectMembers } from "../services/org-permissions"
+import { notifySyncWorkerOfMemberRemoval } from "../services/sync-worker-notify"
 
 const projectMembers = new Hono<AuthHonoEnv>()
 
@@ -138,6 +139,30 @@ projectMembers.post(
         .bind(projectId, targetUserId)
         .run()
       removed = true
+    }
+
+    // FRO-346: when the direct row was removed AND no other grant path
+    // remains, eject the user's live WS sessions + denylist their
+    // still-valid sync tokens. Skipped when an org/group/creator path still
+    // confers access — they are still a member via that path. Best-effort.
+    const survivingPaths = grantPaths.filter((p) => p.source !== "override")
+    if (removed && survivingPaths.length === 0) {
+      const targetUser = await c.env.AQUILLA_PG.prepare(
+        "SELECT username FROM users WHERE id = ?",
+      )
+        .bind(targetUserId)
+        .first<{ username: string }>()
+      const notifyPromise = notifySyncWorkerOfMemberRemoval(c.env, projectId, {
+        userId: targetUserId,
+        username: targetUser?.username,
+      })
+      // waitUntil only exists with a real ExecutionContext (prod); the test
+      // harness has none and the getter throws — let the promise settle.
+      try {
+        c.executionCtx.waitUntil(notifyPromise)
+      } catch {
+        void notifyPromise
+      }
     }
 
     return c.json({ removed, grantPaths })

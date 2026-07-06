@@ -11,6 +11,15 @@ export interface SyncTokenClaims {
   projectId: string
   fileId: string
   role: number
+  /**
+   * FRO-346: role-resolution path that produced `role` at mint time
+   * (`override` | `group` | `org` | `creator` | `platform`). Older tokens
+   * omit it. `"platform"` marks the ADMIN_EMAILS operator path — the ONLY
+   * documented exemption from the live membership re-check on writes
+   * (platform operators have no membership rows to re-check; their access
+   * is env-configured, not data-derived).
+   */
+  src?: string
   aud: "sync"
   iat: number
   exp: number

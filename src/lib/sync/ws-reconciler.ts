@@ -55,6 +55,9 @@ export type ProjectWsServerMessage =
   | { t: "lock.claimed"; cellId: string; by: { userId: string; ts: number } }
   | { t: "lock.released"; cellId: string; by: { userId: string; ts: number } }
   | { t: "project.archived"; project: string; archivedAt?: string; deletedBy?: string }
+  /** FRO-346: this user's membership was revoked; the DO closes the socket
+   *  (code 4403) right after. `userId` is the presence identity (username). */
+  | { t: "member.removed"; project: string; userId: string }
 
 /**
  * True when an `event.applied` frame is the echo of a write THIS client just
@@ -381,6 +384,13 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
       cellId: m.cellId,
       by: { userId: b.userId, ts: b.ts },
     }
+  }
+  if (t === "member.removed") {
+    // FRO-346: the DO sends this to a removed member's sockets right before
+    // closing them; the workspace re-fetches the project (which now 403s)
+    // and lands on the "you no longer have access" state.
+    if (typeof m.project !== "string" || typeof m.userId !== "string") return null
+    return { t: "member.removed", project: m.project, userId: m.userId }
   }
   return null
 }

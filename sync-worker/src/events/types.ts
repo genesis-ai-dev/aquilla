@@ -428,4 +428,10 @@ export interface EventClaims {
   fileId?: string
   /** Numeric role level (100=viewer..700=owner). */
   roleLevel: number
+  /**
+   * FRO-346: role-resolution source stamped at mint time. `"platform"`
+   * exempts the token from the live membership re-check (ADMIN_EMAILS
+   * operators have no membership rows). Absent on older tokens.
+   */
+  src?: string
 }

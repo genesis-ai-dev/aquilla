@@ -116,6 +116,71 @@ describe("AdminCreditsSection — agent spend is visually highlighted", () => {
   })
 })
 
+describe("AdminCreditsSection — FRO-414 regression: each column binds to its own distinct bucket", () => {
+  // WHY: FRO-414 was reported as Day-spend / Agent(day) / Week-spend / Agent(wk)
+  // showing duplicated values. Four distinct fixture numbers make a future
+  // transposition between these columns fail loudly rather than passing by
+  // coincidence (as it could if two of the four happened to share a value).
+  const ORG_DISTINCT: AdminOrgCredits = {
+    orgId: 3,
+    orgName: "Distinct Org",
+    day: {
+      totalCredits: 11, // Day spend
+      byRail: { llm: 0, agent: 33, tts: 0 },
+      agentCredits: 33, // Agent (day)
+    },
+    week: {
+      totalCredits: 99, // Week spend
+      byRail: { llm: 0, agent: 77, tts: 0 },
+      agentCredits: 77, // Agent (wk)
+    },
+    config: {
+      markup: 4,
+      agentMarkup: 5,
+      dailyCap: 1000,
+      weeklyCap: 5000,
+      agentDailyCap: 600,
+      agentWeeklyCap: 3000,
+      enforce: false,
+      showToOrg: false,
+    },
+  }
+
+  it("renders four distinct spend values, each in its correctly-labeled column", async () => {
+    mockList.mockResolvedValue([ORG_DISTINCT])
+    render(<AdminCreditsSection jwt="admin-jwt" />)
+    await waitFor(() => expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument())
+
+    const row = screen.getByText("Distinct Org").closest("tr")
+    expect(row).not.toBeNull()
+    const cells = row!.querySelectorAll("td")
+    // Column order: Org, Day spend, Agent(day), Week spend, Agent(wk), …
+    expect(cells[1]).toHaveTextContent("11 cr")
+    expect(cells[1]).not.toHaveTextContent("33 cr")
+    expect(cells[1]).not.toHaveTextContent("99 cr")
+    expect(cells[1]).not.toHaveTextContent("77 cr")
+
+    expect(cells[2]).toHaveTextContent("33 cr")
+    expect(cells[2]).not.toHaveTextContent("11 cr")
+    expect(cells[2]).not.toHaveTextContent("99 cr")
+    expect(cells[2]).not.toHaveTextContent("77 cr")
+
+    expect(cells[3]).toHaveTextContent("99 cr")
+    expect(cells[3]).not.toHaveTextContent("11 cr")
+    expect(cells[3]).not.toHaveTextContent("33 cr")
+    expect(cells[3]).not.toHaveTextContent("77 cr")
+
+    expect(cells[4]).toHaveTextContent("77 cr")
+    expect(cells[4]).not.toHaveTextContent("11 cr")
+    expect(cells[4]).not.toHaveTextContent("33 cr")
+    expect(cells[4]).not.toHaveTextContent("99 cr")
+
+    // Also assert via the dedicated agent test ids (belt-and-suspenders).
+    expect(screen.getByTestId("agent-day-3")).toHaveTextContent("33 cr")
+    expect(screen.getByTestId("agent-week-3")).toHaveTextContent("77 cr")
+  })
+})
+
 describe("AdminCreditsSection — enforce toggle", () => {
   it("calls setOrgCreditConfig with { enforce: true } when toggled on", async () => {
     // WHY: enforce toggle transitions from log-only to hard-blocking. A broken

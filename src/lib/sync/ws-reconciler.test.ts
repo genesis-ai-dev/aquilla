@@ -140,6 +140,22 @@ describe("parseProjectWsMessage", () => {
     ).toEqual({ t: "event.stale", id: "x", reason: "parent mismatch" })
   })
 
+  it("parses member.removed (FRO-346 eject frame)", () => {
+    // WHY: the DO sends this to a removed member right before closing their
+    // socket. If the parser drops it (returns null), the workspace never
+    // re-fetches the project and the removed user keeps an apparently-live
+    // editor until token expiry — the exact bug FRO-346 fixes.
+    expect(
+      parseProjectWsMessage(
+        JSON.stringify({ t: "member.removed", project: "p", userId: "bob" }),
+      ),
+    ).toEqual({ t: "member.removed", project: "p", userId: "bob" })
+    // Malformed frames still reject.
+    expect(
+      parseProjectWsMessage(JSON.stringify({ t: "member.removed", project: "p" })),
+    ).toBeNull()
+  })
+
   it("parses presence", () => {
     const msg = parseProjectWsMessage(
       JSON.stringify({

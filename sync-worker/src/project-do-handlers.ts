@@ -63,6 +63,17 @@ export interface ServerProjectArchived {
   deletedBy: string | null
 }
 /**
+ * FRO-346: sent to a removed member's own sockets right before the DO
+ * closes them (code 4403). `userId` is the presence identity (username) —
+ * the same identity used in presence/lock frames — so the client can
+ * compare against its currentUsername.
+ */
+export interface ServerMemberRemoved {
+  t: "member.removed"
+  project: string
+  userId: string
+}
+/**
  * FRO-479 push accelerator: notifies a live downstream's connected clients
  * that its upstream committed lane-relevant changes. This is a REALTIME
  * message only — never written to the `events` table, never load-bearing
@@ -94,6 +105,7 @@ export type ProjectDoServerMessage =
   | ServerLockClaimed
   | ServerLockReleased
   | ServerProjectArchived
+  | ServerMemberRemoved
   | ServerLinkUpstreamChanged
 
 /**

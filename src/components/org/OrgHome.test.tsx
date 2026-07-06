@@ -49,6 +49,18 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
 // portfolio-focused assertions below are unaffected.
 vi.mock("@/lib/sync/assignments", () => ({ getWorkload: vi.fn(async () => []) }))
 
+// FRO-335/FRO-416: accessible-projects feed for the "Shared with you" section
+// (and OrgProvider's guest-org derivation). Default empty — the shared-section
+// test overrides it with a foreign-org grant.
+const fetchAccessibleProjectsMock = vi.fn(async (): Promise<unknown[]> => [])
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => {
+  const actual = await importActual<typeof import("@/lib/sync/cloud-projects")>()
+  return {
+    ...actual,
+    fetchAccessibleProjects: () => fetchAccessibleProjectsMock(),
+  }
+})
+
 // FRO-326: pending-invites card data source. Default empty; individual tests
 // override to assert the card renders.
 const listMyPendingInvitesMock = vi.fn(async (): Promise<unknown[]> => [])
@@ -63,6 +75,8 @@ beforeEach(() => {
   // restoreAllMocks does not reset vi.fn implementations, so without this a
   // mockResolvedValue set in one test would leak into the next.
   listMyPendingInvitesMock.mockResolvedValue([])
+  // Same leak-guard for the accessible-projects feed (shared-section test).
+  fetchAccessibleProjectsMock.mockResolvedValue([])
 })
 afterEach(() => vi.restoreAllMocks())
 
@@ -201,6 +215,31 @@ describe("OrgHome", () => {
     })
 
     expect(screen.getByText("No matching projects.")).toBeInTheDocument()
+  })
+
+  // FRO-416: the dashboard's "Shared with you" section (bottom of the org
+  // project list) was the QA repro surface — clicking a shared project
+  // "reloaded the page and went nowhere". Root cause was ProjectOverview's
+  // pre-FRO-474 org-mismatch redirect; the section itself must render each
+  // shared project as a real client-side <Link> to /projects/:id so the
+  // click enters the SPA route (no full-page navigation) and the overview
+  // can resolve access server-side. Pins both the section rendering and the
+  // exact href for a project whose org the caller is NOT a member of.
+  it("renders Shared with you rows as client-side links to /projects/:id for foreign-org grants", async () => {
+    fetchAccessibleProjectsMock.mockResolvedValue([
+      // In the caller's own org (id 1) — must stay OUT of the shared section.
+      { id: "own-1", name: "Legacy Translation", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] },
+      // Foreign-org grant (viewer via invite) — the FRO-416 repro row.
+      { id: "p503", name: "Guest Gospel", orgId: 503, orgName: "Host Org", role: { level: 100, name: "viewer", source: "override" }, files: [] },
+    ])
+
+    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+
+    const shared = await screen.findByTestId("shared-with-you")
+    const link = within(shared).getByRole("link", { name: /guest gospel/i })
+    expect(link.getAttribute("href")).toBe("/projects/p503")
+    // Own-org project must not leak into the shared section.
+    expect(within(shared).queryByText("Legacy Translation")).not.toBeInTheDocument()
   })
 })
 

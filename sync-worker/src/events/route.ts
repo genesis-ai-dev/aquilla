@@ -39,6 +39,7 @@ import {
 } from './chain-claims'
 import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
+import { checkProjectMembership, type MembershipCheck } from './membership'
 import { ROLE } from './role-policy'
 import { sendCommentNotifications, type EmailService } from '../notification-email'
 import { laneRelevantHeadSeq } from './link-sync'
@@ -613,6 +614,24 @@ export async function handleEventsWriteRequest(
     return parsed
   }
 
+  // FRO-346: live membership re-check, once per (project, user) per request.
+  // authorize() proves the token was valid at MINT time; this proves the
+  // author still has a grant path NOW, so removing a member terminates their
+  // write access on the very next flush instead of at token expiry (15 min).
+  // `src: "platform"` tokens (ADMIN_EMAILS operators) are exempt — they have
+  // no membership rows to re-check. See events/membership.ts for the full
+  // enforcement contract.
+  const membershipCache = new Map<string, Promise<MembershipCheck>>()
+  const membershipFor = (projectId: string, userId: number): Promise<MembershipCheck> => {
+    const key = `${projectId} ${userId}`
+    let pending = membershipCache.get(key)
+    if (!pending) {
+      pending = checkProjectMembership(db, projectId, userId)
+      membershipCache.set(key, pending)
+    }
+    return pending
+  }
+
   for (const rawEvent of rawEvents) {
     // Authorize.
     const authResult = await authorize(token, rawEvent, env.SYNC_SECRET_KEY)
@@ -623,6 +642,22 @@ export async function handleEventsWriteRequest(
         reason: authResult.reason,
       })
       continue
+    }
+
+    // FRO-346: revoked-membership gate (see membershipFor above).
+    if (authResult.event.claims.src !== 'platform') {
+      const membership = await membershipFor(
+        authResult.event.claims.projectId,
+        authResult.event.claims.userId,
+      )
+      if (membership === 'revoked') {
+        rejected.push({
+          id: rawEvent.id ?? '(unknown)',
+          status: 403,
+          reason: 'membership revoked',
+        })
+        continue
+      }
     }
 
     // FRO-476 live-mode lock: reject local source.cell.commit on cells the

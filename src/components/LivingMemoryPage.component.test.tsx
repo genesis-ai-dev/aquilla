@@ -111,6 +111,7 @@ describe("LivingMemoryPage — purpose copy", () => {
       status: "ready",
       isError: false,
       isUnreachable: false,
+      roleLevel: null,
       refresh: vi.fn(),
       patchSettings: mockPatch,
     })
@@ -139,6 +140,7 @@ describe("LivingMemoryPage — empty states", () => {
       status: "ready",
       isError: false,
       isUnreachable: false,
+      roleLevel: null,
       refresh: vi.fn(),
       patchSettings: mockPatch,
     })
@@ -182,6 +184,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
       status: "ready",
       isError: false,
       isUnreachable: false,
+      roleLevel: null,
       refresh: vi.fn(),
       patchSettings: mockPatch,
     })
@@ -207,6 +210,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
       status: "ready",
       isError: false,
       isUnreachable: false,
+      roleLevel: null,
       refresh: vi.fn(),
       patchSettings: mockPatch,
     })
@@ -228,6 +232,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
       status: "ready",
       isError: false,
       isUnreachable: false,
+      roleLevel: null,
       refresh: vi.fn(),
       patchSettings: mockPatch,
     })
@@ -254,6 +259,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
       status: "ready",
       isError: false,
       isUnreachable: false,
+      roleLevel: null,
       refresh: vi.fn(),
       patchSettings: mockPatch,
     })
@@ -275,6 +281,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
       status: "loading",
       isError: false,
       isUnreachable: false,
+      roleLevel: null,
       refresh: vi.fn(),
       patchSettings: mockPatch,
     })

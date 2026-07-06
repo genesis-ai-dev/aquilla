@@ -468,6 +468,29 @@ describe("ProjectOverview project-only invitee access (FRO-474)", () => {
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("/", { replace: true }))
   })
+
+  // FRO-416: the overview rendering (no redirect) is necessary but not
+  // sufficient — a guest must be able to actually ENTER the workspace from
+  // here. "Open project" navigates unconditionally to `/project/:id`; this
+  // locks in that the button still fires for a project whose org the caller
+  // does not belong to (the exact "Shared with you" scenario), so a future
+  // regression that guards this button on org membership fails loudly here
+  // instead of only surfacing as a live "clicking does nothing" report.
+  it("clicking Open project navigates into the workspace even when the project's org is foreign to the caller", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, orgId: 99, files: [] }),
+      status: "ready",
+      refresh,
+    })
+    getPortfolio.mockResolvedValue([])
+
+    renderOverview()
+
+    const openButton = await screen.findByRole("button", { name: "Open project" })
+    fireEvent.click(openButton)
+
+    expect(navigate).toHaveBeenCalledWith("/project/p1")
+  })
 })
 
 // ── FRO-292: AI-drafted segment ─────────────────────────────────────────────

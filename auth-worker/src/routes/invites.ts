@@ -22,6 +22,8 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { JWTService } from "../auth/jwt"
+import type { AuthUser, Env } from "../types"
 import {
   INVITE_MIN_ROLE,
   LINK_ROLE_CAP,
@@ -36,6 +38,24 @@ import {
 } from "../services/project-permissions"
 
 const invites = new Hono<AuthHonoEnv>()
+
+/**
+ * FRO-347: best-effort caller identity for the (otherwise public) preview
+ * route. Unlike `authMiddleware`, a missing/invalid/expired token is NOT an
+ * error here — it just means "treat this preview as anonymous", since the
+ * route must stay reachable for signed-out visitors following a share link.
+ */
+async function optionalCaller(env: Env, authHeader: string | null): Promise<AuthUser | null> {
+  if (!authHeader) return null
+  const jwtService = new JWTService(env)
+  const token = jwtService.extractTokenFromHeader(authHeader)
+  if (!token) return null
+  const payload = await jwtService.verifyToken(token)
+  if (!payload) return null
+  const now = Math.floor(Date.now() / 1000)
+  if (payload.exp < now) return null
+  return jwtService.getUserByUsername(payload.sub)
+}
 
 // 30-day default lifetime, matching the single-project invite flow in
 // routes/projects.ts.
@@ -206,6 +226,10 @@ invites.get("/mine", authMiddleware, async (c) => {
 // ──────────────────────────────────────────────────────────────────────────
 
 invites.get("/:token/preview", async (c) => {
+  // Preview responses vary by caller identity (FRO-347 usedByCaller) and 410s
+  // are heuristically cacheable — a browser-cached anonymous 410 would mask
+  // the authed 200 on the very next render. Never cache.
+  c.header("Cache-Control", "no-store")
   const token = c.req.param("token") as string
   if (!token || token.length < 8) {
     return c.json({ error: "Invalid token" }, 404)
@@ -235,7 +259,38 @@ invites.get("/:token/preview", async (c) => {
   }
   // For multi-invites we DO allow re-preview if some rows are unused.
   const allUsed = invitesForToken.every((r) => r.used_at != null)
-  if (allUsed) {
+
+  // FRO-347: a used link isn't necessarily dead for THIS caller. If the
+  // authenticated caller is the original redeemer (used_by === caller.id) on
+  // a row AND is still a member of that row's project, re-clicking the link
+  // should read as "you're already in — continue", not a terminal error.
+  // Only rows the caller redeemed themself qualify — a used-by-someone-else
+  // row never grants this caller a preview. `usedByCaller` distinguishes the
+  // two below: a genuinely fresh row (used_at null) vs. one this caller is
+  // just being let back into.
+  const caller = allUsed ? await optionalCaller(c.env, c.req.header("Authorization") ?? null) : null
+  let callerStillMemberOfAny = false
+  const callerMembership = new Map<string, boolean>() // project_id -> still a member
+  if (allUsed && caller) {
+    const ownRows = invitesForToken.filter((r) => r.used_by === caller.id)
+    if (ownRows.length > 0) {
+      const placeholders = ownRows.map(() => "?").join(",")
+      const memberRows = await c.env.AQUILLA_PG.prepare(
+        `SELECT project_id FROM project_members
+          WHERE user_id = ? AND project_id IN (${placeholders})`,
+      )
+        .bind(caller.id, ...ownRows.map((r) => r.project_id))
+        .all<{ project_id: string }>()
+      const stillMemberIds = new Set((memberRows.results ?? []).map((r) => r.project_id))
+      for (const r of ownRows) {
+        const stillMember = stillMemberIds.has(r.project_id)
+        callerMembership.set(r.project_id, stillMember)
+        if (stillMember) callerStillMemberOfAny = true
+      }
+    }
+  }
+
+  if (allUsed && !callerStillMemberOfAny) {
     return c.json({ error: "Invite already used", code: "used" }, 410)
   }
 
@@ -251,7 +306,14 @@ invites.get("/:token/preview", async (c) => {
   const byId = new Map<string, ProjectRow>()
   for (const p of projectRows.results ?? []) byId.set(p.id, p)
 
-  const projects = invitesForToken
+  // When re-previewing a used-but-still-a-member link, only surface the rows
+  // the caller can actually continue into (their own, still-member rows) —
+  // a multi-project token's other rows may belong to different redeemers.
+  const rowsToShow = allUsed
+    ? invitesForToken.filter((r) => callerMembership.get(r.project_id) === true)
+    : invitesForToken
+
+  const projects = rowsToShow
     .map((r) => {
       const p = byId.get(r.project_id)
       if (!p) return null
@@ -259,7 +321,7 @@ invites.get("/:token/preview", async (c) => {
         projectId: r.project_id,
         projectName: p.name,
         archived: p.archived_at != null,
-        usedByCaller: false, // populated only when authed; safe default
+        usedByCaller: callerMembership.get(r.project_id) === true,
       }
     })
     .filter((x): x is NonNullable<typeof x> => x != null)
@@ -372,6 +434,18 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
       )
         .bind(invite.project_id, user.id)
         .first<{ role_level: number }>()
+
+      // FRO-347: "idempotent-while-member" (option 2). A same-user re-accept
+      // (invite.used_at already set to this user) used to unconditionally
+      // re-grant membership — including after the owner removed them from
+      // this project, turning the old link into a permanent self-service
+      // re-entry pass. Re-redemption by the SAME user is only a no-op
+      // success while they're STILL a member of this project; once removed,
+      // skip this row (same as a different user hitting an already-used
+      // link) rather than re-inserting membership.
+      if (invite.used_at && invite.used_by === user.id && !existing) {
+        continue
+      }
 
       const finalRole = existing
         ? Math.max(existing.role_level, invite.role_level)

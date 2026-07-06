@@ -978,10 +978,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const isAlreadySelected = selectedIds.has(cellId)
     const anchorId = getSelectionAnchorId()
     const anchorIndex = displayCellsRef.current.findIndex((cell) => cell.id === anchorId)
-    const shouldRange =
-      !isAdditive &&
-      anchorIndex >= 0 &&
-      (e.shiftKey || (selectedIds.size > 0 && !isAlreadySelected))
+    // FRO-348: range-select must be an explicit Shift-click. Previously a
+    // plain click on any unselected cell silently extended the range from
+    // the old anchor whenever *something* was already selected — no
+    // modifier, no visual preview. Under concurrent editing the anchor's
+    // row could have shifted since it was set, so the silently-computed
+    // range would land 1-2 rows off, or not start on the clicked cell at
+    // all. A plain click must always mean "select exactly this cell."
+    const shouldRange = !isAdditive && anchorIndex >= 0 && e.shiftKey
     const startIndex = shouldRange ? anchorIndex : rowIndex
 
     selectionDragRef.current = {

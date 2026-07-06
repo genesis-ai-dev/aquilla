@@ -30,6 +30,7 @@ import {
   INVITE_MIN_ROLE,
   LINK_ROLE_CAP,
   ROLE,
+  type AuthUser,
   type ProjectInviteRow,
   type ProjectRow,
 } from "../types"
@@ -52,6 +53,7 @@ import {
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { lookupUserByUsername } from "../services/user-lookup"
 import { sendProjectInviteEmail } from "../services/email"
+import { notifySyncWorkerOfMemberRemoval } from "../services/sync-worker-notify"
 
 const projects = new Hono<AuthHonoEnv>()
 
@@ -752,11 +754,42 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
     )
   }
 
+  // Presence identity for the DO socket match (its presence key is the
+  // username). Full row so resolveProjectRole below can re-resolve.
+  const targetUser = await c.env.AQUILLA_PG.prepare(
+    "SELECT * FROM users WHERE id = ?",
+  )
+    .bind(targetUserId)
+    .first<AuthUser>()
+
   await c.env.AQUILLA_PG.prepare(
     "DELETE FROM project_members WHERE project_id = ? AND user_id = ?",
   )
     .bind(projectId, targetUserId)
     .run()
+
+  // FRO-346: when NO grant path survives the delete (AD-12: org / group /
+  // creator paths are additive and unaffected by removing the direct row),
+  // eject the removed user's live WS sessions + denylist their still-valid
+  // sync tokens. Users who retain access via another path must NOT be
+  // ejected. Best-effort — removal must not fail on it.
+  const surviving = targetUser
+    ? await resolveProjectRole(c.env, targetUser, projectId)
+    : null
+  if (!surviving) {
+    const notifyPromise = notifySyncWorkerOfMemberRemoval(c.env, projectId, {
+      userId: targetUserId,
+      username: targetUser?.username,
+    })
+    // waitUntil only exists with a real ExecutionContext (prod); the test
+    // harness has none and the getter throws, so fall back to letting the
+    // best-effort promise settle on its own.
+    try {
+      c.executionCtx.waitUntil(notifyPromise)
+    } catch {
+      void notifyPromise
+    }
+  }
 
   return c.json({ removed: true })
 })
@@ -1070,6 +1103,17 @@ projects.post(
     )
       .bind(invite.project_id, user.id)
       .first<{ role_level: number }>()
+
+    // FRO-347: "idempotent-while-member" (option 2). A same-user re-click
+    // (invite.used_at already stamped to this user) used to unconditionally
+    // re-grant/re-insert project_members — including after the owner removed
+    // them, turning the old link into a permanent self-service re-entry pass.
+    // Re-redemption by the SAME user is only a no-op success while they are
+    // STILL a member; once membership has been removed, the link is dead for
+    // them too, same as anyone else.
+    if (invite.used_at && invite.used_by === user.id && !existing) {
+      return c.json({ error: "Invite already used", code: "used" }, 410)
+    }
 
     const finalRole = existing
       ? Math.max(existing.role_level, invite.role_level)

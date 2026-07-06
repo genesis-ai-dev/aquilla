@@ -12,17 +12,32 @@ import {
 } from "@/components/ui/sheet"
 import type { ChecklistState } from "@/hooks/useSetupChecklist"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { ROLE } from "@/lib/frontier/roles"
 import { ChecklistItem } from "./checklist/ChecklistItem"
 import { ImportFilesStep } from "./checklist/ImportFilesStep"
 import { AiInstructionsStep } from "./checklist/AiInstructionsStep"
 import { InviteStep } from "./checklist/InviteStep"
 import { ComingSoonStep } from "./checklist/ComingSoonStep"
 import { AiModelsStep } from "./checklist/AiModelsStep"
+import { RoleGatedStep } from "./checklist/RoleGatedStep"
 
 interface SetupChecklistDrawerProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   project: ProjectRecord
+  /**
+   * FRO-334: caller's resolved project role, fresh from this load's
+   * `useProject` resolve (`roleLevel`, NOT `project.syncRole?.level`).
+   * `project.syncRole` is an intentionally stale-tolerant cache (see its doc
+   * comment) stamped by unrelated /sync-token round-trips elsewhere in the
+   * workspace — using it here let a real contributor's checklist render with
+   * `roleLevel == null` (fail-open) whenever that cache hadn't been stamped
+   * yet for this session, showing every step as editable regardless of role.
+   * null here means the project genuinely hasn't resolved a server role
+   * (unsynced/local-only project) — every step stays editable (see
+   * RoleGatedStep doc comment).
+   */
+  roleLevel: number | null
   state: ChecklistState
   onProjectUpdated: (p: ProjectRecord) => void
   onSharesChanged: () => void
@@ -37,6 +52,7 @@ export function SetupChecklistDrawer({
   open,
   onOpenChange,
   project,
+  roleLevel,
   state,
   onProjectUpdated,
   onSharesChanged,
@@ -94,7 +110,13 @@ export function SetupChecklistDrawer({
             description="A short system prompt that shapes tone, formality, and style. Shared with everyone in this project."
             complete={state.aiInstructions}
           >
-            <AiInstructionsStep project={project} onUpdated={onProjectUpdated} />
+            <RoleGatedStep
+              roleLevel={roleLevel}
+              requiredRole={ROLE.MAINTAINER}
+              actionLabel="Editing translation instructions"
+            >
+              <AiInstructionsStep project={project} onUpdated={onProjectUpdated} />
+            </RoleGatedStep>
           </ChecklistItem>
 
           <ChecklistItem
@@ -102,10 +124,16 @@ export function SetupChecklistDrawer({
             description="Translators and reviewers join with the same permissions you choose."
             complete={state.collaborators}
           >
-            <InviteStep
-              projectId={project.id}
-              onSharesChanged={onSharesChanged}
-            />
+            <RoleGatedStep
+              roleLevel={roleLevel}
+              requiredRole={ROLE.PROJECT_LEAD}
+              actionLabel="Inviting collaborators"
+            >
+              <InviteStep
+                projectId={project.id}
+                onSharesChanged={onSharesChanged}
+              />
+            </RoleGatedStep>
           </ChecklistItem>
 
           <ChecklistItem
@@ -113,7 +141,13 @@ export function SetupChecklistDrawer({
             description="Gemini TTS is recommended for voice; Whisper transcription runs locally."
             complete={state.aiModels}
           >
-            <AiModelsStep project={project} onUpdated={onProjectUpdated} />
+            <RoleGatedStep
+              roleLevel={roleLevel}
+              requiredRole={ROLE.MAINTAINER}
+              actionLabel="Configuring voice and transcription"
+            >
+              <AiModelsStep project={project} onUpdated={onProjectUpdated} />
+            </RoleGatedStep>
           </ChecklistItem>
 
           <ComingSoonStep

@@ -208,6 +208,13 @@ export interface SyncTokenClaims {
   projectId: string
   fileId: string
   role: number
+  /**
+   * FRO-346: role-resolution path that produced `role` (RoleResolution.source).
+   * `"platform"` marks ADMIN_EMAILS operators — the documented exemption from
+   * the sync-worker's live membership re-check on writes (platform access is
+   * env-configured, not data-derived, so there is no row to re-check).
+   */
+  src: RoleResolution["source"]
   aud: "sync"
   iat: number
   exp: number

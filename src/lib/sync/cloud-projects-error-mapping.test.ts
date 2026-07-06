@@ -146,6 +146,22 @@ describe("resolveCloudProjectResult", () => {
     expect(result.reason).toBe("not-found")
   })
 
+  it("returns ok:false reason:'forbidden' on 403 + not in list (FRO-346 revoked access)", async () => {
+    // FRO-346: when a removed member reloads, the direct endpoint 403s. That
+    // must NOT collapse into 'not-found' — the project exists; the workspace
+    // must show "you no longer have access", not "project not found".
+    global.fetch = vi.fn(async (input) => {
+      const url = typeof input === "string" ? input : (input as Request).url
+      if (url.includes("/api/v2/projects/p-revoked")) return new Response("", { status: 403 })
+      return new Response(JSON.stringify({ projects: [] }), { status: 200 })
+    }) as unknown as typeof fetch
+
+    const result = await resolveCloudProjectResult("p-revoked", "jwt", API)
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("unreachable")
+    expect(result.reason).toBe("forbidden")
+  })
+
   it("returns ok:false reason:'unreachable' on network error (not 'not-found')", async () => {
     // Critical regression: a network error must NOT map to 'not-found' because
     // that causes useProject to show "project not found" rather than

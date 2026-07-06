@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest"
 import { getDefaultAction, getVisibleActions, workspaceActions } from "./registry"
 import type { WorkspaceAction, WorkspaceActionContext } from "./types"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { ROLE } from "@/lib/frontier/roles"
 
 const project: ProjectRecord = {
   id: "p1", name: "t", sourceLanguage: "en", targetLanguage: "fr",
@@ -95,6 +96,47 @@ describe("export org-policy gate (FRO-253)", () => {
     expect(
       exportAction.isAvailable(ctx({ activeFileId: "f1", canExportByOrgPolicy: true })),
     ).toBe(true)
+  })
+})
+
+describe("FRO-365: header actions hidden for below-floor roles", () => {
+  const runCompletions = workspaceActions.find((a) => a.id === "run-completions")!
+  const completeAll = workspaceActions.find((a) => a.id === "complete-all")!
+  const batchValidate = workspaceActions.find((a) => a.id === "batch-validate")!
+
+  function ctxWithRole(roleLevel: number | null, overrides: Partial<WorkspaceActionContext> = {}) {
+    const projectWithRole: ProjectRecord = roleLevel === null
+      ? project
+      : { ...project, syncRole: { level: roleLevel, name: "test", source: "server", fetchedAt: "2026-01-01T00:00:00Z" } }
+    return ctx({ project: projectWithRole, activeFileId: "f1", ...overrides })
+  }
+
+  it("hides Run AI completions / Complete all / Batch validate for a VIEWER (100)", () => {
+    const c = ctxWithRole(ROLE.VIEWER)
+    expect(runCompletions.isAvailable(c)).toBe(false)
+    expect(completeAll.isAvailable(c)).toBe(false)
+    expect(batchValidate.isAvailable(c)).toBe(false)
+  })
+
+  it("shows Batch validate (floor=reviewer) but hides translate actions (floor=contributor) for a REVIEWER (300)", () => {
+    const c = ctxWithRole(ROLE.REVIEWER)
+    expect(runCompletions.isAvailable(c)).toBe(false)
+    expect(completeAll.isAvailable(c)).toBe(false)
+    expect(batchValidate.isAvailable(c)).toBe(true)
+  })
+
+  it("shows all three for a CONTRIBUTOR (400)", () => {
+    const progress = new Map([["f1", { translated: 5, validated: 0, total: 10 }]])
+    const c = ctxWithRole(ROLE.CONTRIBUTOR, { fileProgress: progress })
+    expect(runCompletions.isAvailable(c)).toBe(true)
+    expect(completeAll.isAvailable(c)).toBe(true)
+    expect(batchValidate.isAvailable(c)).toBe(true)
+  })
+
+  it("fails open (shows) for a local project with no syncRole", () => {
+    const c = ctxWithRole(null)
+    expect(runCompletions.isAvailable(c)).toBe(true)
+    expect(batchValidate.isAvailable(c)).toBe(true)
   })
 })
 

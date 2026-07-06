@@ -308,6 +308,28 @@ describe("readSpend", () => {
     expect(spend.dayCredits).toBe(40)
   })
 
+  it("day/week totals and agent sub-totals are independent accumulators — intent: FRO-414 regression, " +
+    "pin four distinct buckets so a future transposition (e.g. week reading day's column) fails loudly", async () => {
+    // Four distinct raw costs so every derived credit value is unique:
+    //   llm today=1cr, agent today=2cr, llm rest-of-week=4cr, agent rest-of-week=8cr.
+    const day7 = daysAgo(3) // any day inside the 7-day window, not today
+    await insertRawRow(1, 1, today(), "llm", 0.25)   // 0.25 × 4  = 1  credit  (today, non-agent)
+    await insertRawRow(1, 1, today(), "agent", 0.4)  // 0.4  × 5  = 2  credits (today, agent)
+    await insertRawRow(1, 1, day7, "llm", 1)         // 1    × 4  = 4  credits (week-only, non-agent)
+    await insertRawRow(1, 1, day7, "agent", 1.6)     // 1.6  × 5  = 8  credits (week-only, agent)
+
+    const spend = await readSpend(env.AQUILLA_PG, 1, defaultCfg)
+
+    expect(spend.dayCredits).toBe(3)        // 1 (llm) + 2 (agent), today only
+    expect(spend.agentDayCredits).toBe(2)   // agent-only, today
+    expect(spend.weekCredits).toBe(15)      // 1 + 2 + 4 + 8, whole window
+    expect(spend.agentWeekCredits).toBe(10) // 2 + 8, agent-only, whole window
+
+    // All four are pairwise distinct — a swap between any two would be caught.
+    const values = [spend.dayCredits, spend.agentDayCredits, spend.weekCredits, spend.agentWeekCredits]
+    expect(new Set(values).size).toBe(4)
+  })
+
   it("degrades to zeros when table is missing — intent: migration-lag must not 500 the credits endpoint", async () => {
     await pg.exec("DROP TABLE IF EXISTS org_credit_usage_daily")
     const spend = await readSpend(env.AQUILLA_PG, 1, defaultCfg)
@@ -605,5 +627,46 @@ describe("PATCH /api/v2/admin/credits/org/:orgId", () => {
     expect(res.status).toBe(200)
     const cfg = await resolveCreditConfig(env, env.AQUILLA_PG, 2)
     expect(cfg.dailyCap).toBe(200)
+  })
+})
+
+// ── Section E: FRO-414 — chat's org-0 attribution shapes the display bug ────
+//
+// Root cause of FRO-414 ("compute-credits display is mislabeled"): chat.ts
+// hardcodes orgId=0 ("no-org fallback") for every recordCredit call, while
+// agent.ts resolves the REAL project org. So a real org's ledger only ever
+// contains rail='agent' rows — never rail='llm' (chat) rows. Consequently
+// readSpend(realOrgId, ...) degenerates to totalCredits === agentCredits for
+// BOTH windows, which is exactly the "3 of 4 bars show the same number"
+// symptom reported in FRO-414 (Today ≈ Agent today, This week ≈ Agent this
+// week — because for a real org, total IS agent; chat is invisible).
+//
+// This is NOT a crossed-field bug in readSpend/creditsFor (Section B above
+// proves those keep day/week/agent as four independent, correctly-computed
+// accumulators). It's an org-attribution gap: chat has no project/org
+// context, so it can never appear in any real org's credits view. Fixing
+// that (resolving a real org for chat) is a bigger change than a display fix
+// — it would also change what creditGuard enforces against for chat — so
+// FRO-414 ships as a display/labeling fix (see CreditsPanel.tsx /
+// AdminCreditsSection.tsx) plus this pinning test, with the underlying
+// attribution gap flagged as follow-up work.
+describe("FRO-414: chat's orgId=0 write means real orgs never see chat spend", () => {
+  it("chat-shaped recordCredit(orgId=0, rail='llm') does not appear in a real org's readSpend", async () => {
+    // Simulates exactly what chat.ts does today: record llm spend at org 0.
+    await recordCredit(env.AQUILLA_PG, 0, 1, "llm", 100, 1) // 100¢ × 4 = 400 credits, but at org 0
+    // Simulates exactly what agent.ts does today: record agent spend at the real org.
+    await recordCredit(env.AQUILLA_PG, 1, 1, "agent", 10, 1) // 10¢ × 5 = 50 credits, at org 1
+
+    const org1Spend = await readSpend(env.AQUILLA_PG, 1, defaultCfg)
+    // BUG SHAPE: org 1's total equals its agent-only total — chat spend
+    // (400 credits, sitting at org 0) is completely invisible here.
+    expect(org1Spend.dayCredits).toBe(50)
+    expect(org1Spend.agentDayCredits).toBe(50)
+    expect(org1Spend.dayCredits).toBe(org1Spend.agentDayCredits)
+
+    // The chat spend really did land at org 0, not org 1 — proving where it went.
+    const org0Spend = await readSpend(env.AQUILLA_PG, 0, defaultCfg)
+    expect(org0Spend.dayCredits).toBe(400)
+    expect(org0Spend.agentDayCredits).toBe(0) // org 0 has no agent rows in this scenario
   })
 })

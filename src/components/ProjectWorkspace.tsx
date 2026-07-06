@@ -261,7 +261,7 @@ export function ProjectWorkspace() {
       search: isAllOrgs ? "?org=all" : activeOrgId != null ? `?org=${activeOrgId}` : "",
     })
   }, [activeOrgId, isAllOrgs, navigate])
-  const { project: loadedProject, status, refresh, patchSettings } = useProject(projectId!)
+  const { project: loadedProject, status, refresh, patchSettings, roleLevel: serverRoleLevel } = useProject(projectId!)
   // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt)
   // live in IDB; merge them onto the server-fetched record on load and after
   // each local patch so rename suggestions don't loop on every open.
@@ -1417,6 +1417,14 @@ export function ProjectWorkspace() {
 
   const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string) => {
     if (!project?.id) return
+    // FRO-365: defense-in-depth — the selection-island Translate button and
+    // the header "Run AI completions"/"Complete all" actions are already
+    // hidden below the contributor floor (SelectionBar.tsx, registry.ts), and
+    // the server 403s the resulting target.cell.commit regardless. This guard
+    // stops a below-floor caller from getting even a local optimistic echo
+    // (applyOptimisticTargetEdit) of a write the server will refuse, matching
+    // the same mirror-check used by handleEditorCommit/commitTrayFootnoteText.
+    if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
     // Optimistic local patch BEFORE the outbox enqueue. Mirrors what
     // handleEditorCommit in EditorTable does for hand-typed edits, and
     // collapses the race window where `cells.translated` would otherwise
@@ -2275,6 +2283,15 @@ export function ProjectWorkspace() {
                 delete next.deletedBy
                 return next
               }).then(() => refresh())
+            } else if (msg.t === "member.removed") {
+              // FRO-346: this user's membership was revoked; the DO closes
+              // the socket right after this frame. Re-fetch the project —
+              // the server now 403s, which flips useProject to "forbidden",
+              // unmounts the editor (project → null tears this reconciler
+              // down via the effect cleanup) and shows the clean
+              // "you no longer have access" state.
+              if (msg.project !== pid || msg.userId !== currentUsername) return
+              refresh()
             }
           },
         },
@@ -3126,6 +3143,18 @@ export function ProjectWorkspace() {
             Retry
           </button>
         </div>
+      </div>
+    )
+  }
+  // FRO-346: revoked / never-granted access gets its own clean state — the
+  // project exists, so "not found" would be misleading (and after a member
+  // removal the removed user must land here on reload, not in the editor).
+  if (status === "forbidden") {
+    return (
+      <div className="p-8 text-muted-foreground" data-testid="project-no-access">
+        You no longer have access to this project. Ask a project maintainer to
+        re-invite you if this is unexpected.{" "}
+        <button className="underline" onClick={goToProjects}>Back to dashboard</button>.
       </div>
     )
   }
@@ -4013,6 +4042,7 @@ export function ProjectWorkspace() {
           open={checklistOpen}
           onOpenChange={handleChecklistOpenChange}
           project={project}
+          roleLevel={serverRoleLevel}
           state={checklistState}
           onProjectUpdated={handleProjectUpdated}
           onSharesChanged={refreshChecklistShares}

@@ -11,10 +11,10 @@ vi.mock("react-router-dom", async (i) => ({
 }))
 
 vi.mock("@/lib/sync/invites", () => ({
-  acceptServerInvite: vi.fn(async () => ({ projectId: "p1" })),
+  acceptServerInvite: vi.fn(async () => ({ ok: true, data: { projectId: "p1" } })),
   previewServerInvite: vi.fn(async () => ({ ok: true, data: { projectName: "John", role: { level: 400, name: "contributor" }, email: null } })),
   previewMultiInvite: vi.fn(async () => ({ ok: false, reason: "invalid" })),
-  acceptMultiInvite: vi.fn(async () => null),
+  acceptMultiInvite: vi.fn(async () => ({ ok: false, reason: "invalid" })),
 }))
 
 let sessionValue: { session: { jwt: string } | null; loading: boolean } = { session: null, loading: false }
@@ -99,8 +99,11 @@ describe("JoinPage inline auth", () => {
       },
     })
     vi.mocked(acceptMultiInvite).mockResolvedValueOnce({
-      token: "tok",
-      accepted: [{ projectId: "pa", role: 400 }, { projectId: "pb", role: 400 }],
+      ok: true,
+      data: {
+        token: "tok",
+        accepted: [{ projectId: "pa", role: 400 }, { projectId: "pb", role: 400 }],
+      },
     })
     sessionValue = { session: { jwt: "jwt" }, loading: false }
     renderJoin()
@@ -140,6 +143,57 @@ describe("JoinPage expired session", () => {
     expect(await screen.findByRole("button", { name: /accept invitation/i })).toBeInTheDocument()
     expect(screen.queryByText("do-login")).not.toBeInTheDocument()
     expect(screen.queryByText(/your session expired/i)).not.toBeInTheDocument()
+  })
+})
+
+// FRO-364: "Magic-link invite is instantly invalid on accept."
+//
+// Root cause: redeem() collapsed every accept failure into one generic
+// "this invite link is no longer valid" message. A JWT that looks valid
+// client-side (unexpired `exp` claim) can still be rejected by the server
+// (401) — e.g. immediately after signup, before the client's cached session
+// is fully in sync — and that 401 is NOT evidence the invite itself is
+// dead. Before the fix, isJwtExpired(jwt) returned false for such a token
+// (it isn't expired, just rejected), so the code fell through to the
+// dead-invite message even though the invite was perfectly valid.
+describe("JoinPage FRO-364: accept-time failures are classified honestly", () => {
+  it("re-prompts sign-in (not a dead-invite error) when accept returns 401 for a client-side-valid JWT", async () => {
+    sessionValue = { session: { jwt: fakeJwt(3600) }, loading: false } // not expired client-side
+    vi.mocked(acceptMultiInvite).mockResolvedValueOnce({ ok: false, reason: "unauthorized" })
+    vi.mocked(acceptServerInvite).mockResolvedValueOnce({ ok: false, reason: "unauthorized" })
+    renderJoin()
+    fireEvent.click(await screen.findByRole("button", { name: /accept invitation/i }))
+    await waitFor(() => expect(acceptServerInvite).toHaveBeenCalled())
+    // Must NOT show the dead-invite error — the invite is fine, the session wasn't.
+    expect(screen.queryByText("This invite link is no longer valid. Ask the project owner for a fresh link.")).not.toBeInTheDocument()
+    expect(navigate).not.toHaveBeenCalledWith(expect.stringMatching(/^\/project\//))
+  })
+
+  it("shows the dead-invite error when accept returns a definitive 410 (used)", async () => {
+    sessionValue = { session: { jwt: fakeJwt(3600) }, loading: false }
+    vi.mocked(acceptMultiInvite).mockResolvedValueOnce({ ok: false, reason: "used" })
+    vi.mocked(acceptServerInvite).mockResolvedValueOnce({ ok: false, reason: "used" })
+    renderJoin()
+    fireEvent.click(await screen.findByRole("button", { name: /accept invitation/i }))
+    expect(await screen.findByText("This invite link is no longer valid. Ask the project owner for a fresh link.")).toBeInTheDocument()
+  })
+
+  it("shows a network-specific error when accept fails due to a network error", async () => {
+    sessionValue = { session: { jwt: fakeJwt(3600) }, loading: false }
+    vi.mocked(acceptMultiInvite).mockResolvedValueOnce({ ok: false, reason: "network" })
+    vi.mocked(acceptServerInvite).mockResolvedValueOnce({ ok: false, reason: "network" })
+    renderJoin()
+    fireEvent.click(await screen.findByRole("button", { name: /accept invitation/i }))
+    expect(await screen.findByText(/couldn't reach the server/i)).toBeInTheDocument()
+  })
+
+  it("shows the wrong-email error when accept returns 403", async () => {
+    sessionValue = { session: { jwt: fakeJwt(3600) }, loading: false }
+    vi.mocked(acceptMultiInvite).mockResolvedValueOnce({ ok: false, reason: "wrong_email" })
+    vi.mocked(acceptServerInvite).mockResolvedValueOnce({ ok: false, reason: "wrong_email" })
+    renderJoin()
+    fireEvent.click(await screen.findByRole("button", { name: /accept invitation/i }))
+    expect(await screen.findByText("This invite was sent to a different email address.")).toBeInTheDocument()
   })
 })
 

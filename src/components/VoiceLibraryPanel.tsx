@@ -1,7 +1,7 @@
 // The Audio lens' Voices panel — a pure SELECTOR. One simple job: see your
 // voices, pick which one is active, set the narrator. Making a voice is a single
 // "New voice" button → NewVoiceModal, which carries both ways to make one
-// (Gemini / Clone) behind tabs.
+// (TTS / Clone) behind tabs, seeded with the project's configured engine.
 //
 // Click a row to select it (the active voice — the assign target). Drag a row
 // onto a line to assign it. The row's ⋯ menu edits / sets-narrator / deletes.
@@ -17,11 +17,11 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group"
-import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
+import type { ProjectTtsSettings, TtsProvider, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { PRESET_VOICES } from "@/lib/audio/voices"
-import { NewVoiceModal } from "@/components/voice/NewVoiceModal"
 import { providerInfo, resolveTtsProvider } from "@/lib/audio/tts-providers"
+import { NewVoiceModal } from "@/components/voice/NewVoiceModal"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { ROLE } from "@/lib/frontier/roles"
 import { denialMessage } from "@/lib/permissions/denial"
@@ -151,6 +151,10 @@ export function VoiceLibraryPanel({
     return q ? voices.filter((v) => v.name.toLowerCase().includes(q)) : voices
   }, [voices, query])
 
+  // A voice without its own engine follows the project's configured one — the
+  // same fallback generate-voice uses at synthesis time.
+  const projectProvider = resolveTtsProvider(settings)
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Header */}
@@ -185,7 +189,7 @@ export function VoiceLibraryPanel({
             <VoiceRow
               key={voice.id}
               voice={voice}
-              projectProvider={resolveTtsProvider(settings)}
+              projectProvider={projectProvider}
               active={voice.id === selectedId}
               isDefault={voice.id === defaultVoiceId}
               stats={castStats?.get(voice.id)}
@@ -221,6 +225,7 @@ export function VoiceLibraryPanel({
           open
           onClose={() => setEditing({ kind: "closed" })}
           voice={editing.kind === "edit" ? editing.voice : null}
+          provider={projectProvider}
           targetLanguage={targetLanguage}
           isDefault={editing.kind === "edit" ? editing.voice.id === defaultVoiceId : false}
           paletteIndex={voices.length}
@@ -231,7 +236,7 @@ export function VoiceLibraryPanel({
           onSave={saveVoice}
           onDelete={editing.kind === "edit" && canEditVoices ? () => deleteVoice(editing.voice) : undefined}
           onMakeDefault={editing.kind === "edit" && canEditVoices ? () => makeDefault(editing.voice) : undefined}
-          initialMode={editing.kind === "clone" ? "clone" : "gemini"}
+          initialMode={editing.kind === "clone" ? "clone" : "tts"}
           seedCellId={editing.kind === "clone" ? editing.seedCellId : null}
         />
       )}
@@ -247,7 +252,7 @@ function VoiceRow({
   voice: Voice
   /** The project's configured TTS provider — the fallback for voices that
    *  don't carry their own (e.g. cast minted on import). */
-  projectProvider: NonNullable<ProjectTtsSettings["provider"]>
+  projectProvider: TtsProvider
   active: boolean
   isDefault: boolean
   stats?: CastMemberStats

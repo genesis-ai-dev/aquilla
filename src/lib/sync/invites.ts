@@ -361,6 +361,9 @@ export async function previewMultiInvite(
     // 410 used (FRO-347) — without it, a still-member re-click dead-ends.
     const res = await fetch(`${apiUrl}/api/v2/invites/${encodeURIComponent(token)}/preview`, {
       headers: jwt ? { Authorization: `Bearer ${jwt}` } : undefined,
+      // A heuristically-cached anonymous 410 must never answer the authed
+      // refetch (FRO-347 QA finding) — bypass the HTTP cache entirely.
+      cache: "no-store",
     })
     if (!res.ok) {
       let reason: InvitePreviewFailReason

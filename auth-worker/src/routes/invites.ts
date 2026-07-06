@@ -226,6 +226,10 @@ invites.get("/mine", authMiddleware, async (c) => {
 // ──────────────────────────────────────────────────────────────────────────
 
 invites.get("/:token/preview", async (c) => {
+  // Preview responses vary by caller identity (FRO-347 usedByCaller) and 410s
+  // are heuristically cacheable — a browser-cached anonymous 410 would mask
+  // the authed 200 on the very next render. Never cache.
+  c.header("Cache-Control", "no-store")
   const token = c.req.param("token") as string
   if (!token || token.length < 8) {
     return c.json({ error: "Invalid token" }, 404)

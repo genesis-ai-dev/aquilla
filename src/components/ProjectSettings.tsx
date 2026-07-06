@@ -3,10 +3,12 @@ import { useParams, useNavigate } from "react-router-dom"
 import { ArrowLeft, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDriveDownload } from "lucide-react"
 import { Menu } from "@base-ui/react/menu"
 import { Button } from "@/components/ui/button"
+import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
+import { Slider } from "@/components/ui/slider"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
   Select,
@@ -713,36 +715,36 @@ export function ProjectSettings() {
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-30 flex items-center gap-3 border-b bg-background/95 px-4 py-2 backdrop-blur supports-backdrop-filter:bg-background/80">
         {isDirty ? (
-          <div className="flex items-stretch">
+          <ButtonGroup>
             <Button
               size="sm"
               onClick={handleSaveAndClose}
               disabled={saving}
-              className="rounded-r-none"
             >
               {saving ? (
-                <Spinner className="mr-1" />
+                <Spinner data-icon="inline-start" />
               ) : (
-                <Save className="mr-1 h-4 w-4" />
+                <Save data-icon="inline-start" />
               )}
               Save changes
             </Button>
+            <ButtonGroupSeparator />
             <Menu.Root>
               <Menu.Trigger
                 render={
                   <Button
                     size="sm"
                     disabled={saving}
-                    className="rounded-l-none border-l border-primary-foreground/20 px-2"
+                    className="px-2"
                     aria-label="More save options"
                   >
-                    <ChevronDown className="h-4 w-4" />
+                    <ChevronDown />
                   </Button>
                 }
               />
               <Menu.Portal>
                 <Menu.Positioner sideOffset={4} align="start" className="z-40">
-                  <Menu.Popup className="min-w-56 rounded-xl border bg-popover p-1 text-popover-foreground shadow-soft-lg">
+                  <Menu.Popup className="min-w-56 rounded-xl border bg-popover p-1 text-popover-foreground">
                     <Menu.Item onClick={() => setDiscardOpen(true)} className={ITEM_CLASS}>
                       Close without saving
                     </Menu.Item>
@@ -750,7 +752,7 @@ export function ProjectSettings() {
                 </Menu.Positioner>
               </Menu.Portal>
             </Menu.Root>
-          </div>
+          </ButtonGroup>
         ) : (
           <Button variant="ghost" size="sm" onClick={() => requestNavigate(`/project/${id}`)}>
             <ArrowLeft className="mr-1 h-4 w-4" /> Back to Editor

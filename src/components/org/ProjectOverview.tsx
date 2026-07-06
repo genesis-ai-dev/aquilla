@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
+import { MoreHorizontal } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Button } from "@/components/ui/button"
+import { ButtonGroup } from "@/components/ui/button-group"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useProject } from "@/hooks/useProject"
@@ -574,69 +577,91 @@ export function ProjectOverview() {
               })()}
 
               {/* ── Deadline card ── */}
-              <div className="rounded-xl border bg-card shadow-sm p-5">
+              <div className="rounded-xl border bg-card p-5">
                 <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Deadline</h2>
-                {editingDeadline ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      type="date"
-                      value={deadlineInput}
-                      onChange={(e) => setDeadlineInput(e.target.value)}
-                      disabled={busy}
-                      className="rounded-md border bg-background px-2 py-1 text-sm"
-                      aria-label="Project deadline"
-                    />
-                    <button
-                      onClick={() => saveDeadline(deadlineInput || null)}
-                      disabled={busy || !deadlineInput}
-                      className="rounded-md border px-2 py-1 text-xs font-medium hover:bg-accent/40 disabled:opacity-50"
-                    >
-                      Save
-                    </button>
-                    <button
-                      onClick={() => setEditingDeadline(false)}
-                      disabled={busy}
-                      className="rounded-md border px-2 py-1 text-xs font-medium hover:bg-accent/40 disabled:opacity-50"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex flex-wrap items-center gap-2 text-sm">
-                    {audio?.deadlineAt ? (
-                      <span className="flex items-center gap-2 font-medium">
-                        {audio.deadlineAt}
-                        <DeadlineChip status={dstatus} />
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">No deadline set</span>
-                    )}
-                    {canManage && (
-                      <>
-                        <button
-                          onClick={() => { setDeadlineInput(audio?.deadlineAt ?? ""); setEditingDeadline(true) }}
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  {audio?.deadlineAt ? (
+                    <span className="flex items-center gap-2 font-medium">
+                      {audio.deadlineAt}
+                      <DeadlineChip status={dstatus} />
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">No deadline set</span>
+                  )}
+                  {canManage && (
+                    <ButtonGroup>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => {
+                          setDeadlineDate(deadlineStringToDate(audio?.deadlineAt))
+                          setDeadlineDialogOpen(true)
+                        }}
+                      >
+                        {audio?.deadlineAt ? "Change" : "Set deadline"}
+                      </Button>
+                      {audio?.deadlineAt && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
                           disabled={busy}
-                          className="rounded-md border px-2 py-0.5 text-xs hover:bg-accent/40 disabled:opacity-50"
+                          onClick={() => saveDeadline(null)}
                         >
-                          {audio?.deadlineAt ? "Change" : "Set deadline"}
-                        </button>
-                        {audio?.deadlineAt && (
-                          <button
-                            onClick={() => saveDeadline(null)}
-                            disabled={busy}
-                            className="rounded-md border px-2 py-0.5 text-xs hover:bg-accent/40 disabled:opacity-50"
-                          >
-                            Clear
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                )}
+                          Clear
+                        </Button>
+                      )}
+                    </ButtonGroup>
+                  )}
+                </div>
               </div>
 
+              <Dialog open={deadlineDialogOpen} onOpenChange={setDeadlineDialogOpen}>
+                <DialogContent className="sm:max-w-sm">
+                  <DialogHeader>
+                    <DialogTitle>
+                      {audio?.deadlineAt ? "Change project deadline" : "Set project deadline"}
+                    </DialogTitle>
+                    <DialogDescription>
+                      The deadline is inclusive through the end of that day anywhere on Earth.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <FieldGroup>
+                    <Field>
+                      <FieldLabel htmlFor="project-deadline">Deadline date</FieldLabel>
+                      <DatePicker
+                        id="project-deadline"
+                        value={deadlineDate}
+                        onChange={setDeadlineDate}
+                        disabled={busy}
+                        placeholder="July 03, 2026"
+                      />
+                    </Field>
+                  </FieldGroup>
+                  <DialogFooter>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => setDeadlineDialogOpen(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      disabled={busy || !deadlineDate}
+                      onClick={() => saveDeadline(deadlineDate ? dateToDeadlineString(deadlineDate) : null)}
+                    >
+                      Save
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
               {/* ── Team / Assignments card ── */}
-              <div className="rounded-xl border bg-card shadow-sm p-5">
+              <div className="rounded-xl border bg-card p-5">
                 <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</h2>
                 {workload.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No open assignments in this project yet.</p>

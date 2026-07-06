@@ -1,6 +1,15 @@
-import { useRef, useState, useEffect } from "react"
+import { useState } from "react"
 import { ChevronDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { ButtonGroup } from "@/components/ui/button-group"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import {
   workspaceActions, getDefaultAction, getVisibleActions,
@@ -45,48 +54,57 @@ export function PrimaryActionButton({ ctx, run }: Props) {
   }
 
   return (
-    <div
-      ref={rootRef}
-      data-slot="button-group"
-      className="relative inline-flex rounded-lg transition-shadow"
-    >
-      <Button
-        size="sm"
-        variant="outline"
-        className="rounded-r-none shadow-none hover:shadow-none active:shadow-none"
-        onClick={() => handleRun(defaultAction)}
-      >
-        {defaultAction.icon && <defaultAction.icon className="h-4 w-4 mr-1.5 text-primary" />}
-        {defaultAction.label}
-      </Button>
-      <Button
-        size="sm"
-        variant="outline"
-        className="rounded-l-none border-l border-border/60 px-1.5 shadow-none hover:shadow-none active:shadow-none"
-        onClick={() => setOpen((v) => !v)}
-        aria-label="More actions"
-      >
-        <ChevronDown className="h-4 w-4" />
-      </Button>
-      {open && (
-        <div className="absolute right-0 top-full mt-1 z-40 w-56 rounded-md border bg-popover p-1 shadow-md">
-          {primary.map((a) => (
-            <MenuItem
-              key={a.id} action={a}
-              isDefault={a.id === defaultAction.id}
-              onClick={() => handleRun(a)}
-            />
-          ))}
-          {secondary.length > 0 && (
-            <>
-              <div className="my-1 h-px bg-border" />
-              {secondary.map((a) => (
-                <MenuItem key={a.id} action={a} onClick={() => handleRun(a)} />
+    <>
+      <ButtonGroup>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => handleRun(defaultAction)}
+        >
+          {defaultAction.icon && <defaultAction.icon data-icon="inline-start" className="text-primary" />}
+          {defaultAction.label}
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                size="sm"
+                variant="outline"
+                className="px-1.5 [&[aria-expanded=true]_svg]:rotate-180"
+                aria-label="More actions"
+              >
+                <ChevronDown className="transition-transform duration-200" />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="end" className="min-w-56">
+            <DropdownMenuGroup>
+              {primary.map((a) => (
+                <ActionMenuItem
+                  key={a.id}
+                  action={a}
+                  isDefault={a.id === defaultAction.id}
+                  onSelect={() => handleRun(a)}
+                />
               ))}
-            </>
-          )}
-        </div>
-      )}
+            </DropdownMenuGroup>
+            {secondary.length > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  {secondary.map((a) => (
+                    <ActionMenuItem
+                      key={a.id}
+                      action={a}
+                      onSelect={() => handleRun(a)}
+                    />
+                  ))}
+                </DropdownMenuGroup>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </ButtonGroup>
       {pendingConfirm?.requiresConfirmation && (
         <ConfirmActionDialog
           open={true}

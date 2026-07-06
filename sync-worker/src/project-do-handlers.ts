@@ -73,6 +73,31 @@ export interface ServerMemberRemoved {
   project: string
   userId: string
 }
+/**
+ * FRO-479 push accelerator: notifies a live downstream's connected clients
+ * that its upstream committed lane-relevant changes. This is a REALTIME
+ * message only — never written to the `events` table, never load-bearing
+ * (see the linked-projects design spec §8). A missed/dropped frame is
+ * recovered by the existing lazy-pull mirror sync (FRO-476) on next file
+ * open; this frame only shaves the latency down to "seconds" for clients
+ * that are already connected.
+ */
+export interface ServerLinkUpstreamChanged {
+  t: "link.upstream-changed"
+  /** Downstream project this frame targets (the DO's own project id). */
+  project: string
+  /** Upstream project that committed the change. */
+  upstream: string
+  /** Highest upstream server_seq in the committed batch — an upper bound the
+   *  client can compare against its own last-seen cursor (advisory only;
+   *  the authoritative cursor lives server-side in `link-sync.ts`). */
+  untilSeq: number
+  /** Files touched by the batch (uncapped — batches are already request-scoped). */
+  fileIds: string[]
+  /** Cell ids touched by the batch, capped (see route.ts) — enough to hint a
+   *  targeted refetch without growing the frame unbounded for big imports. */
+  cellIds: string[]
+}
 export type ProjectDoServerMessage =
   | ServerEventApplied
   | ServerEventStale
@@ -81,6 +106,7 @@ export type ProjectDoServerMessage =
   | ServerLockReleased
   | ServerProjectArchived
   | ServerMemberRemoved
+  | ServerLinkUpstreamChanged
 
 /**
  * Additive `__broadcast` envelope (PERF-8): POST /events batches all of a

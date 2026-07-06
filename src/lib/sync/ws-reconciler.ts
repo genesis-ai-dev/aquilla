@@ -20,6 +20,13 @@
  *   { t: "lock.claimed", cellId, by: { userId, ts } }
  *   { t: "lock.released", cellId, by: { userId, ts } }
  *       Focus-lock transitions by another user.
+ *   { t: "link.upstream-changed", project, upstream, untilSeq, fileIds, cellIds }
+ *       FRO-479 push accelerator: this project's live upstream committed
+ *       lane-relevant changes. LOSSY — never load-bearing (see
+ *       docs/superpowers/specs/2026-07-06-linked-projects-provenance-invalidation-design.md
+ *       §8). A missed frame self-heals via the FRO-476 lazy-pull mirror sync
+ *       on next file open; this is purely a latency accelerator for
+ *       already-connected clients.
  *
  *   ── Client → server ────────────────────────────────────────────────
  *   { t: "outbox.event", event: OutboxRawEvent }
@@ -58,6 +65,14 @@ export type ProjectWsServerMessage =
   /** FRO-346: this user's membership was revoked; the DO closes the socket
    *  (code 4403) right after. `userId` is the presence identity (username). */
   | { t: "member.removed"; project: string; userId: string }
+  | {
+      t: "link.upstream-changed"
+      project: string
+      upstream: string
+      untilSeq: number
+      fileIds: string[]
+      cellIds: string[]
+    }
 
 /**
  * True when an `event.applied` frame is the echo of a write THIS client just
@@ -392,5 +407,88 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
     if (typeof m.project !== "string" || typeof m.userId !== "string") return null
     return { t: "member.removed", project: m.project, userId: m.userId }
   }
+  if (t === "link.upstream-changed") {
+    if (
+      typeof m.project !== "string" ||
+      typeof m.upstream !== "string" ||
+      typeof m.untilSeq !== "number" ||
+      !Array.isArray(m.fileIds) ||
+      !Array.isArray(m.cellIds)
+    ) {
+      return null
+    }
+    return {
+      t: "link.upstream-changed",
+      project: m.project,
+      upstream: m.upstream,
+      untilSeq: m.untilSeq,
+      fileIds: m.fileIds.filter((f): f is string => typeof f === "string"),
+      cellIds: m.cellIds.filter((c): c is string => typeof c === "string"),
+    }
+  }
   return null
+}
+
+// ── FRO-479 push-accelerator client glue ──────────────────────────────────
+//
+// FRO-479 wiring (done by the swarm orchestrator): ProjectWorkspace.tsx builds
+// `createLinkUpstreamChangedHandler` once per WS connect (revalidate routed
+// through a ref so the once-created onMessage closure always reaches the
+// latest useStaleSourceCells.revalidate, which piggybacks POST /link/sync)
+// and dispatches `link.upstream-changed` frames to it in onMessage.
+// SWARM-TODO(FRO-479) [live-UI verify]: open upstream project A and its live
+// downstream B in two browser windows, edit+commit a source cell in A, and
+// confirm B's stale badge + cell text update within a few seconds, no reload.
+
+export interface LinkUpstreamChangedHandlerOptions {
+  /** Returns the currently open project id, or null if none/not loaded yet.
+   *  Frames for any other project are ignored (a stale reconciler from a
+   *  just-closed project, or — defensively — a server bug). */
+  currentProjectId(): string | null
+  /** Triggers a refetch of stale-source state (`useStaleSourceCells.revalidate`). */
+  revalidateStaleSource(): void
+  /** Fire-and-forget POST /link/sync for the currently open project/file —
+   *  same shape as `useStaleSourceCells.ts`'s existing `triggerLinkSync`. */
+  triggerLinkSync(): void
+  /** Debounce window — bursts of frames (e.g. a large upstream re-import)
+   *  collapse to one sync per project per window (spec: "one sync per 5s
+   *  per project so bursts don't hammer the route"). */
+  debounceMs?: number
+  /** Injectable clock for tests. */
+  now?(): number
+}
+
+const LINK_UPSTREAM_CHANGED_DEFAULT_DEBOUNCE_MS = 5000
+
+/**
+ * Build a handler for `link.upstream-changed` frames. Always calls
+ * `revalidateStaleSource()` immediately (cheap — a GET, and staleness must
+ * reflect the frame as soon as possible), but debounces `triggerLinkSync()`
+ * per the options window so a burst of upstream commits (e.g. a large
+ * re-import) collapses to one `/link/sync` POST instead of hammering the
+ * route once per frame.
+ *
+ * Pure with respect to time: pass `now` in tests to avoid fake timers.
+ */
+export function createLinkUpstreamChangedHandler(
+  options: LinkUpstreamChangedHandlerOptions,
+): (msg: Extract<ProjectWsServerMessage, { t: "link.upstream-changed" }>) => void {
+  const debounceMs = options.debounceMs ?? LINK_UPSTREAM_CHANGED_DEFAULT_DEBOUNCE_MS
+  const now = options.now ?? (() => Date.now())
+  // -Infinity, not 0: with an injected `now: () => t` starting at t=0 (as
+  // tests do), a `lastSyncAt` of 0 would suppress the very first call.
+  let lastSyncAt = -Infinity
+
+  return (msg) => {
+    const pid = options.currentProjectId()
+    if (!pid || msg.project !== pid) return
+
+    // Staleness must reflect the frame immediately — cheap GET, no debounce.
+    options.revalidateStaleSource()
+
+    const t = now()
+    if (t - lastSyncAt < debounceMs) return
+    lastSyncAt = t
+    options.triggerLinkSync()
+  }
 }

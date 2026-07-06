@@ -54,10 +54,23 @@ export async function fetchStaleSourceCells(
   fileId: string,
   jwt: string,
 ): Promise<StaleCellId[]> {
+  const body = await fetchStaleSourceResponse(projectId, fileId, jwt)
+  return body.staleCellIds ?? []
+}
+
+/**
+ * FRO-476: full response — staleCellIds + tombstonedCellIds + behindSeq.
+ * `useStaleSourceCells` uses this to also expose the new fields; callers
+ * that only need membership can keep using `fetchStaleSourceCells` above.
+ */
+export async function fetchStaleSourceResponse(
+  projectId: string,
+  fileId: string,
+  jwt: string,
+): Promise<StaleSourceResponse> {
   const url =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
     `/files/${encodeURIComponent(fileId)}/stale-source`
   const res = await fetch(url, { headers: authHeaders(jwt) })
-  const body = await readJson<StaleSourceResponse>(res)
-  return body.staleCellIds ?? []
+  return readJson<StaleSourceResponse>(res)
 }

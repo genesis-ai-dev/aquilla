@@ -545,6 +545,11 @@ async function main(): Promise<void> {
       "--persist-to", PERSIST_DIR,
       "--var", "WRANGLER_LOCAL:1",
       "--var", "ADMIN_EMAILS:dev@local.test",
+      // identity calls the sync worker server-side (archive/member-removal
+      // notifications, live-link seed sync). Must be --var — process env
+      // never reaches c.env, so the prod URL from wrangler.toml [vars] would
+      // win and local calls would silently hit prod (found independently by
+      // both the linked-projects and PD7 live QA passes).
       "--var", `SYNC_WORKER_URL:http://127.0.0.1:${SYNC_PORT}`,
       "--var", "ENVIRONMENT:development",
     ],

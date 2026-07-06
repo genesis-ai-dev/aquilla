@@ -156,6 +156,18 @@ export function dispatchEvent(
     case 'cell.backtranslation.set':
     case 'cast.assign':
     case 'cell.retime':
+    case 'source.cell.mirror':
+    case 'file.mirror':
+    case 'link.cursor.advance':
+    case 'target.cell.repin':
+      // FRO-476: mirror-engine kinds share the generic cell-event handler.
+      // They are not chain-mutating (see CHAIN_MUTATING_KINDS in
+      // event-projection.ts) so handleCellEvent never takes the chain-claim
+      // path for them; the monotonic upstream_seq guard lives in the
+      // projection SQL itself.
+      // FRO-478: target.cell.repin joins this group for the same reason —
+      // non-chain-mutating, guarded instead by expectedTargetEventId in the
+      // projection SQL (see event-projection.ts).
       return {
         ok: true,
         result: handleCellEvent(

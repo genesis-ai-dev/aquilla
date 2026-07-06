@@ -66,6 +66,11 @@ export type OutboxEventKind =
   | "cell.retime"
   // Timeline editor: set/clear a file's core video URL (stored in files.meta).
   | "file.video.set"
+  // FRO-478: "accept upstream change as-is" (repin). Non-chain-mutating —
+  // updates ONLY the target row's source_event_id; validated/endorsement
+  // state and value are untouched. Guarded server-side by
+  // expectedTargetEventId (silent no-op if a translator re-committed).
+  | "target.cell.repin"
 
 // ── Comment scope ─────────────────────────────────────────────────────────
 
@@ -308,6 +313,16 @@ export interface OutboxEventPayloads {
   // Timeline editor: set/clear a file's core video URL (timeline preview).
   "file.video.set": {
     coreMediaUrl: string | null
+  }
+
+  // FRO-478: repin ("accept upstream change as-is"). cellId rides on the
+  // envelope. See sync-worker/src/events/types.ts for the full contract.
+  "target.cell.repin": {
+    /** The (now-current) source row's event_id to pin the target to. */
+    sourceEventId: string
+    /** The target row's event_id as observed when the reviewer opened the
+     *  review panel — the server no-ops if the head has since moved. */
+    expectedTargetEventId: string
   }
 }
 

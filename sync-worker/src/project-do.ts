@@ -33,6 +33,8 @@ import {
   type ProjectDoServerMessage,
 } from "./project-do-handlers"
 import type { OutboxRawEvent } from "./project-do-types"
+import { mirrorSync, type MirrorSyncResult } from "./events/link-sync"
+import { makePostgres } from "../../db/shim/postgres"
 
 const LEASE_SWEEP_INTERVAL_MS = 5_000
 
@@ -65,6 +67,16 @@ interface DOEnv {
    * but not forwarded.
    */
   SELF?: { fetch(input: Request | string, init?: RequestInit): Promise<Response> }
+  /**
+   * FRO-476: Hyperdrive binding for the mirror sync engine (/__link-sync).
+   * Unlike the worker's top-level fetch, a DO instance does NOT receive the
+   * request-scoped synthesized AQUILLA_PG — it gets its own env from the
+   * Workers runtime bindings, so /__link-sync builds its own short-lived
+   * Postgres connection from HYPERDRIVE, same as index.ts does.
+   */
+  HYPERDRIVE?: { connectionString: string }
+  /** Test seam: inject a fake AquillaDb directly, bypassing HYPERDRIVE. */
+  AQUILLA_PG?: AquillaDb
 }
 
 export class ProjectSync extends DurableObject<DOEnv> {
@@ -78,9 +90,68 @@ export class ProjectSync extends DurableObject<DOEnv> {
    * tokens after an eject. In-memory by design (no durable DO state).
    */
   private removedUsers = new Map<number, number>()
+  /**
+   * FRO-476: single-flight for the mirror sync. One DO instance == one
+   * project, so a single in-flight promise field serializes concurrent
+   * /__link-sync callers (push accelerator + lazy pull racing) — the second
+   * caller awaits the SAME run instead of starting an overlapping fold. This
+   * is what the design spec's "serialized single-flight per downstream
+   * through the ProjectSync DO" means concretely.
+   */
+  private linkSyncInFlight: Promise<MirrorSyncResult> | null = null
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
+
+    // FRO-476: mirror sync trigger, single-flighted per DO instance (see
+    // linkSyncInFlight above). Internal-only, same bearer-secret gate as
+    // /__broadcast. `?project=` is required (the DO doesn't trust
+    // `idFromName`'s internal id string as the project id) — same query-
+    // param convention as /connect, so the caller (link-sync-route.ts)
+    // passes it explicitly.
+    //
+    // SWARM-TODO(FRO-476): verify single-flight against a REAL deployed DO
+    // (vitest can't exercise Cloudflare's actual DO runtime/HYPERDRIVE
+    // binding — the unit tests call mirrorSync() directly and the route
+    // tests stub AQUILLA_PG). On the dev stack: create project A (import a
+    // small USFM), create project B via
+    //   curl -X POST https://<auth>/api/v2/projects/B/link-source \
+    //     -d '{"sourceProjectId":"A","mode":"live"}'
+    // then fire two overlapping
+    //   curl -X POST https://<sync>/api/v1/projects/B/link/sync
+    // calls (e.g. via `xargs -P2`) and confirm via server logs / a DB read
+    // that only one fold ran (the second awaited the first's in-flight
+    // promise) and B's cells match A's head afterward.
+    if (request.method === "POST" && url.pathname === "/__link-sync") {
+      const auth = request.headers.get("Authorization") ?? ""
+      const expected = this.env.SYNC_SECRET_KEY ? `Bearer ${this.env.SYNC_SECRET_KEY}` : null
+      if (!expected || auth !== expected) {
+        return new Response("unauthorized", { status: 401 })
+      }
+      const projectId = url.searchParams.get("project")
+      if (!projectId) {
+        return new Response("missing project query param", { status: 400 })
+      }
+      // Test seam takes priority; otherwise build a short-lived PG connection
+      // from HYPERDRIVE (this DO instance's own env, not the request-scoped
+      // synthesized AQUILLA_PG the worker's top-level fetch uses).
+      const db = this.env.AQUILLA_PG ?? (this.env.HYPERDRIVE && makePostgres(this.env.HYPERDRIVE.connectionString))
+      if (!db) {
+        return new Response("HYPERDRIVE binding not configured", { status: 500 })
+      }
+      if (!this.linkSyncInFlight) {
+        this.linkSyncInFlight = mirrorSync(db as AquillaDb, projectId).finally(() => {
+          this.linkSyncInFlight = null
+          if (!this.env.AQUILLA_PG) void (db as { close(): Promise<void> }).close?.()
+        })
+      }
+      try {
+        const result = await this.linkSyncInFlight
+        return Response.json(result)
+      } catch (err) {
+        return new Response(`mirror sync failed: ${String(err)}`, { status: 500 })
+      }
+    }
 
     // Internal broadcast hook (POST /events fans out to us here). Pre-built
     // ServerMessage; we forward to every connection.

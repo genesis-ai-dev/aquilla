@@ -254,6 +254,7 @@ projects.get("/", authMiddleware, async (c) => {
   //   ?13    : orgFilter (NULL or number) — equality check (filter case)
   const rows = await c.env.AQUILLA_PG.prepare(
     `SELECT p.id, p.name, p.org_id, o.name AS org_name, p.archived_at, p.is_active,
+            p.source_project_id,
             GREATEST(
               COALESCE(pm.role_level, 0),
               COALESCE(gg.max_grant,  0),
@@ -316,6 +317,7 @@ projects.get("/", authMiddleware, async (c) => {
       org_name: string | null
       archived_at: string | null
       is_active: boolean
+      source_project_id: string | null
       role_level: number
       role_source: "creator" | "override" | "org" | "group"
     }>()
@@ -348,6 +350,9 @@ projects.get("/", authMiddleware, async (c) => {
         orgName: row.org_name,
         archivedAt: row.archived_at,
         isActive: row.is_active,
+        // FRO-478: see the single-project route's comment — this field was
+        // declared on CloudProjectSummary but never actually populated.
+        sourceProjectId: row.source_project_id,
         role,
         files: filesByProject.get(row.id) ?? [],
       }
@@ -368,6 +373,8 @@ projects.get("/:projectId", authMiddleware, async (c) => {
 
   const row = await c.env.AQUILLA_PG.prepare(
     `SELECT p.id, p.name, p.org_id, p.archived_at, p.archived_by, p.is_active,
+            p.source_project_id, p.source_link_mode, p.source_link_consumes,
+            p.source_link_gate, p.source_link_cursor,
             u.username AS archived_by_username
        FROM projects p
        LEFT JOIN users u ON u.id = p.archived_by
@@ -382,6 +389,11 @@ projects.get("/:projectId", authMiddleware, async (c) => {
       archived_by: number | null
       archived_by_username: string | null
       is_active: boolean
+      source_project_id: string | null
+      source_link_mode: string | null
+      source_link_consumes: string | null
+      source_link_gate: string | null
+      source_link_cursor: number | string | null
     }>()
 
   if (!row) return c.json({ error: "not found" }, 404)
@@ -398,6 +410,15 @@ projects.get("/:projectId", authMiddleware, async (c) => {
       ? { id: row.archived_by, username: row.archived_by_username }
       : null,
     isActive: row.is_active,
+    // FRO-478: surface the AD-9/FRO-476 link state so the client's
+    // SourceLinkSection actually renders (it gates on sourceProjectId, which
+    // this route previously never selected — the section was effectively
+    // unreachable in production despite the client plumbing existing).
+    sourceProjectId: row.source_project_id,
+    sourceLinkMode: row.source_link_mode,
+    sourceLinkConsumes: row.source_link_consumes,
+    sourceLinkGate: row.source_link_gate,
+    sourceLinkCursor: row.source_link_cursor != null ? Number(row.source_link_cursor) : null,
     role: { level: role.level, name: role.name, source: role.source },
     files,
   })

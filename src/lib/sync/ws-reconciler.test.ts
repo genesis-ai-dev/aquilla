@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import {
   buildProjectWsUrl,
+  createLinkUpstreamChangedHandler,
   createWsReconciler,
   isOwnWriteEcho,
   parseProjectWsMessage,
@@ -177,6 +178,47 @@ describe("parseProjectWsMessage", () => {
     expect(parseProjectWsMessage(JSON.stringify({ t: "unknown" }))).toBeNull()
     expect(parseProjectWsMessage(JSON.stringify({ t: "event.applied", id: 1 }))).toBeNull()
     expect(parseProjectWsMessage(JSON.stringify({ t: "presence", users: "wrong" }))).toBeNull()
+  })
+
+  it("parses link.upstream-changed (FRO-479 push accelerator)", () => {
+    const msg = parseProjectWsMessage(
+      JSON.stringify({
+        t: "link.upstream-changed",
+        project: "proj-down",
+        upstream: "proj-up",
+        untilSeq: 42,
+        fileIds: ["f1", "f2"],
+        cellIds: ["c1", "c2"],
+      }),
+    )
+    expect(msg).toEqual({
+      t: "link.upstream-changed",
+      project: "proj-down",
+      upstream: "proj-up",
+      untilSeq: 42,
+      fileIds: ["f1", "f2"],
+      cellIds: ["c1", "c2"],
+    })
+  })
+
+  it("returns null for a malformed link.upstream-changed frame", () => {
+    expect(
+      parseProjectWsMessage(
+        JSON.stringify({ t: "link.upstream-changed", project: "p", upstream: "u" }),
+      ),
+    ).toBeNull()
+    expect(
+      parseProjectWsMessage(
+        JSON.stringify({
+          t: "link.upstream-changed",
+          project: "p",
+          upstream: "u",
+          untilSeq: "not-a-number",
+          fileIds: [],
+          cellIds: [],
+        }),
+      ),
+    ).toBeNull()
   })
 })
 
@@ -362,5 +404,122 @@ describe("isOwnWriteEcho", () => {
     // keep refetching rather than risk silently dropping a real remote change.
     expect(isOwnWriteEcho({}, "ryder")).toBe(false)
     expect(isOwnWriteEcho({ by: "" }, "ryder")).toBe(false)
+  })
+})
+
+describe("createLinkUpstreamChangedHandler (FRO-479 push accelerator)", () => {
+  function frame(
+    overrides: Partial<Extract<ProjectWsServerMessage, { t: "link.upstream-changed" }>> = {},
+  ): Extract<ProjectWsServerMessage, { t: "link.upstream-changed" }> {
+    return {
+      t: "link.upstream-changed",
+      project: "proj-down",
+      upstream: "proj-up",
+      untilSeq: 1,
+      fileIds: ["f1"],
+      cellIds: ["c1"],
+      ...overrides,
+    }
+  }
+
+  it("revalidates stale-source and triggers link/sync for the current project", () => {
+    const revalidateStaleSource = vi.fn()
+    const triggerLinkSync = vi.fn()
+    const handle = createLinkUpstreamChangedHandler({
+      currentProjectId: () => "proj-down",
+      revalidateStaleSource,
+      triggerLinkSync,
+    })
+
+    handle(frame())
+
+    expect(revalidateStaleSource).toHaveBeenCalledTimes(1)
+    expect(triggerLinkSync).toHaveBeenCalledTimes(1)
+  })
+
+  it("ignores a frame for a project the client isn't currently viewing", () => {
+    // A stale reconciler (or a WS not yet torn down after navigating away)
+    // must not trigger work for a project the user isn't looking at.
+    const revalidateStaleSource = vi.fn()
+    const triggerLinkSync = vi.fn()
+    const handle = createLinkUpstreamChangedHandler({
+      currentProjectId: () => "some-other-project",
+      revalidateStaleSource,
+      triggerLinkSync,
+    })
+
+    handle(frame({ project: "proj-down" }))
+
+    expect(revalidateStaleSource).not.toHaveBeenCalled()
+    expect(triggerLinkSync).not.toHaveBeenCalled()
+  })
+
+  it("ignores a frame when no project is open yet", () => {
+    const revalidateStaleSource = vi.fn()
+    const triggerLinkSync = vi.fn()
+    const handle = createLinkUpstreamChangedHandler({
+      currentProjectId: () => null,
+      revalidateStaleSource,
+      triggerLinkSync,
+    })
+
+    handle(frame())
+
+    expect(revalidateStaleSource).not.toHaveBeenCalled()
+    expect(triggerLinkSync).not.toHaveBeenCalled()
+  })
+
+  it("debounces link/sync triggers to one per window, but always revalidates staleness", () => {
+    // Spec §8 / dispatch note: "Debounce (e.g. one sync per 5s per project)
+    // so bursts don't hammer the route." A large upstream re-import can
+    // produce many frames in quick succession; only the sync POST should
+    // collapse — staleness must still reflect every frame immediately.
+    let t = 0
+    const revalidateStaleSource = vi.fn()
+    const triggerLinkSync = vi.fn()
+    const handle = createLinkUpstreamChangedHandler({
+      currentProjectId: () => "proj-down",
+      revalidateStaleSource,
+      triggerLinkSync,
+      debounceMs: 5000,
+      now: () => t,
+    })
+
+    handle(frame()) // t=0 — fires
+    t = 1000
+    handle(frame()) // t=1000 — within window, suppressed
+    t = 4999
+    handle(frame()) // still within window, suppressed
+    t = 5000
+    handle(frame()) // window elapsed — fires again
+
+    expect(revalidateStaleSource).toHaveBeenCalledTimes(4)
+    expect(triggerLinkSync).toHaveBeenCalledTimes(2)
+  })
+
+  it("tracks debounce state per handler instance, not globally", () => {
+    // Two open projects (or two mounts) must not share a debounce clock —
+    // each ProjectWorkspace mount builds its own handler.
+    let t = 0
+    const syncA = vi.fn()
+    const syncB = vi.fn()
+    const handleA = createLinkUpstreamChangedHandler({
+      currentProjectId: () => "proj-a",
+      revalidateStaleSource: vi.fn(),
+      triggerLinkSync: syncA,
+      now: () => t,
+    })
+    const handleB = createLinkUpstreamChangedHandler({
+      currentProjectId: () => "proj-b",
+      revalidateStaleSource: vi.fn(),
+      triggerLinkSync: syncB,
+      now: () => t,
+    })
+
+    handleA(frame({ project: "proj-a" }))
+    handleB(frame({ project: "proj-b" }))
+
+    expect(syncA).toHaveBeenCalledTimes(1)
+    expect(syncB).toHaveBeenCalledTimes(1)
   })
 })

@@ -41,9 +41,181 @@ import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
 import { ROLE } from './role-policy'
 import { sendCommentNotifications, type EmailService } from '../notification-email'
+import { laneRelevantHeadSeq } from './link-sync'
 
 // Max statements per batch() transaction — a conservative self-imposed cap (Postgres has no hard limit; keeps any single transaction bounded).
 const BATCH_LIMIT = 100
+
+// ── FRO-479 push accelerator: notify live downstreams of upstream commits ──
+//
+// Hard constraint (spec §8): push is a LOSSY ACCELERATOR, never load-bearing.
+// The FRO-476 mirror sync (lazy-pull on file open, `POST /link/sync`) is the
+// deterministic self-healing floor — this hook only shaves the "next open"
+// wait down to "seconds" for downstreams that are already connected. It must
+// never perform an eager fan-out WRITE on the upstream commit path (no events
+// minted here, no DB writes) and must never be awaited before the response.
+//
+// Lane-relevant kinds mirror `LANE_KINDS_SOURCE` in link-sync.ts (not
+// exported there — re-declared per the FRO-479 dispatch note rather than
+// touching a forbidden file). Comments/audio/BT/validation events on a
+// consumes=source link never mirror, so they must never produce a frame —
+// a probe/notify that counted them would make every downstream "blink" on
+// unrelated upstream noise.
+const LINK_NOTIFY_LANE_KINDS: ReadonlySet<string> = new Set([
+  'source.cell.create',
+  'source.cell.commit',
+  'source.cell.delete',
+  'source.cell.mirror',
+  'cell.retime',
+  'cast.assign',
+  'file.create',
+])
+
+/** Per-commit cap on distinct cell ids carried in the frame (spec §8: "capped
+ *  at 64"). The rest converge lazily via the mirror sync's own delta fold —
+ *  this is a hint for a targeted client refetch, not the source of truth. */
+const LINK_NOTIFY_CELL_ID_CAP = 64
+
+/** Per-commit cap on the number of downstream projects notified. At scale
+ *  (spec: up to 600 downstreams) the rest converge lazily on next file open;
+ *  notifying is strictly best-effort so under-notifying is safe. */
+const LINK_NOTIFY_DOWNSTREAM_CAP = 50
+
+/** How long a project's downstream list is cached in-isolate before being
+ *  re-queried (spec §8: "cached in-memory per isolate with short TTL"). Link
+ *  creation/detach is a rare admin action, so a short window trades a little
+ *  staleness on the notify path (never load-bearing) for avoiding a query on
+ *  every single commit. */
+const LINK_NOTIFY_DOWNSTREAM_CACHE_TTL_MS = 30_000
+
+interface DownstreamCacheEntry {
+  downstreamIds: string[]
+  expiresAt: number
+}
+
+// Isolate-lifetime cache — module scope is intentional (mirrors the pattern
+// already used for per-isolate memoization elsewhere in this worker). Keyed
+// by upstream project id.
+const downstreamCache = new Map<string, DownstreamCacheEntry>()
+
+/** Test-only escape hatch: the cache is module-scoped (isolate lifetime) by
+ *  design, which otherwise leaks state between test cases running in the
+ *  same vitest module instance. Not used by production code paths. */
+export function __resetLinkNotifyDownstreamCacheForTests(): void {
+  downstreamCache.clear()
+}
+
+/**
+ * Live (non-clone) downstreams of `upstreamProjectId`. Clone-mode downstreams
+ * never receive push frames (spec: "Clone-mode downstreams receive no
+ * frames") — they have no mirror sync to trigger and no staleness to refetch.
+ */
+async function loadLiveDownstreams(
+  db: AquillaDb,
+  upstreamProjectId: string,
+  now: number,
+): Promise<string[]> {
+  const cached = downstreamCache.get(upstreamProjectId)
+  if (cached && cached.expiresAt > now) return cached.downstreamIds
+
+  const { results } = await db
+    .prepare(
+      `SELECT id FROM projects
+       WHERE source_project_id = ?
+         AND source_link_mode IS NOT NULL
+         AND source_link_mode != 'clone'`,
+    )
+    .bind(upstreamProjectId)
+    .all<{ id: string }>()
+
+  const downstreamIds = results.map((r) => r.id)
+  downstreamCache.set(upstreamProjectId, {
+    downstreamIds,
+    expiresAt: now + LINK_NOTIFY_DOWNSTREAM_CACHE_TTL_MS,
+  })
+  return downstreamIds
+}
+
+/**
+ * Send `link.upstream-changed` frames to every live downstream of every
+ * project that just committed lane-relevant events in this request. Called
+ * via `ctx.waitUntil` AFTER the response is built (see call site) — never
+ * awaited in the request path, so downstream count can never regress
+ * upstream commit latency (spec acceptance criterion).
+ *
+ * `committed` is grouped by upstream (project that committed), each with
+ * the lane-relevant file/cell ids touched.
+ */
+async function notifyLiveDownstreamsOfUpstreamChanges(
+  db: AquillaDb,
+  projectSync: DurableObjectNamespace,
+  secretKey: string,
+  committed: ReadonlyMap<string, { fileIds: Set<string>; cellIds: Set<string> }>,
+): Promise<void> {
+  const now = Date.now()
+  const sends: Promise<void>[] = []
+
+  for (const [upstreamProjectId, delta] of committed) {
+    let downstreamIds: string[]
+    try {
+      downstreamIds = await loadLiveDownstreams(db, upstreamProjectId, now)
+    } catch (err) {
+      console.warn('[events/route] link-notify: downstream lookup failed:', err)
+      continue
+    }
+    if (downstreamIds.length === 0) continue
+
+    // Advisory only — the client never gates on this value, it's an
+    // audit-trail hint (spec §8). Reading it here (post-response, inside
+    // waitUntil) costs nothing on the commit path.
+    let untilSeq = 0
+    try {
+      untilSeq = await laneRelevantHeadSeq(db, upstreamProjectId)
+    } catch (err) {
+      console.warn('[events/route] link-notify: head-seq probe failed:', err)
+    }
+
+    const cellIds = [...delta.cellIds].slice(0, LINK_NOTIFY_CELL_ID_CAP)
+    const fileIds = [...delta.fileIds]
+    const notified = downstreamIds.slice(0, LINK_NOTIFY_DOWNSTREAM_CAP)
+
+    for (const downstreamId of notified) {
+      const frame = {
+        t: 'link.upstream-changed',
+        project: downstreamId,
+        upstream: upstreamProjectId,
+        untilSeq,
+        fileIds,
+        cellIds,
+      }
+      const id = projectSync.idFromName(downstreamId)
+      const stub = projectSync.get(id)
+      sends.push(
+        stub
+          .fetch('http://do.internal/__broadcast', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${secretKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(frame),
+          })
+          .then(async (res) => {
+            if (!res.ok) {
+              console.warn(
+                `[events/route] link-notify broadcast failed for ${downstreamId}: HTTP ${res.status}`,
+              )
+            }
+          })
+          .catch((err) => {
+            console.warn('[events/route] link-notify broadcast error:', err)
+          }),
+      )
+    }
+  }
+
+  await Promise.all(sends)
+}
 
 export interface EventsRouteEnv {
   AQUILLA_PG?: AquillaDb
@@ -1075,6 +1247,43 @@ export async function handleEventsWriteRequest(
         )
       }
       await Promise.all(doFanOut)
+    }
+
+    // FRO-479 push accelerator — see notifyLiveDownstreamsOfUpstreamChanges
+    // above for the full contract. Build the lane-relevant per-upstream-
+    // project delta from what just committed, and fire the notify
+    // fire-and-forget via ctx.waitUntil so it can NEVER delay this response
+    // (the acceptance criterion is "upstream commit latency is not
+    // measurably regressed by having many downstreams"). Skipped entirely
+    // when ProjectSync/ctx aren't bound (dev/test envs without the DO) —
+    // the lazy-pull mirror sync remains the deterministic floor either way.
+    if (ctx && env.ProjectSync && env.SYNC_SECRET_KEY) {
+      const laneDeltaByProject = new Map<
+        string,
+        { fileIds: Set<string>; cellIds: Set<string> }
+      >()
+      for (const entry of committedEntries) {
+        const frame = entry.eventFrame
+        if (!LINK_NOTIFY_LANE_KINDS.has(frame.kind)) continue
+        let delta = laneDeltaByProject.get(frame.project)
+        if (!delta) {
+          delta = { fileIds: new Set(), cellIds: new Set() }
+          laneDeltaByProject.set(frame.project, delta)
+        }
+        if (frame.file) delta.fileIds.add(frame.file)
+        if (frame.cell) delta.cellIds.add(frame.cell)
+      }
+      if (laneDeltaByProject.size > 0) {
+        const projectSync = env.ProjectSync
+        const secretKey = env.SYNC_SECRET_KEY
+        ctx.waitUntil(
+          notifyLiveDownstreamsOfUpstreamChanges(db, projectSync, secretKey, laneDeltaByProject).catch(
+            (err) => {
+              console.warn('[events/route] link-notify hook failed:', err)
+            },
+          ),
+        )
+      }
     }
   }
 

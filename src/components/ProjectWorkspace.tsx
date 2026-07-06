@@ -234,7 +234,7 @@ export function ProjectWorkspace() {
       search: isAllOrgs ? "?org=all" : activeOrgId != null ? `?org=${activeOrgId}` : "",
     })
   }, [activeOrgId, isAllOrgs, navigate])
-  const { project: loadedProject, status, refresh, patchSettings } = useProject(projectId!)
+  const { project: loadedProject, status, refresh, patchSettings, roleLevel: serverRoleLevel } = useProject(projectId!)
   // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt)
   // live in IDB; merge them onto the server-fetched record on load and after
   // each local patch so rename suggestions don't loop on every open.
@@ -3947,6 +3947,7 @@ export function ProjectWorkspace() {
           open={checklistOpen}
           onOpenChange={handleChecklistOpenChange}
           project={project}
+          roleLevel={serverRoleLevel}
           state={checklistState}
           onProjectUpdated={handleProjectUpdated}
           onSharesChanged={refreshChecklistShares}

@@ -95,6 +95,18 @@ export type ProjectLoadStatus =
 export function useProject(projectId: string) {
   const [project, setProject] = useState<ProjectRecord | null>(null)
   const [status, setStatus] = useState<ProjectLoadStatus>("loading")
+  // FRO-334: the caller's role as returned by THIS load's GET /:projectId (or
+  // its list-endpoint fallback) — always populated together with `project` on
+  // a successful resolve. Kept separate from `project.syncRole` because that
+  // field is an intentionally stale-tolerant cache (see its doc comment:
+  // "stale values are tolerable — server re-validates on every archive
+  // call"), stamped independently by any /sync-token round-trip anywhere in
+  // the workspace (see ProjectWorkspace's onRole -> patchProject(IDB)). A
+  // client-only UI gate like the Setup checklist has no server re-validation
+  // on its guarded actions (SWARM-TODO in RoleGatedStep.tsx), so it must not
+  // key off a value that's allowed to be missing or behind. `roleLevel` here
+  // is the fresh, guaranteed-non-null value from the resolve that just ran.
+  const [roleLevel, setRoleLevel] = useState<number | null>(null)
   const hasLoaded = useRef(false)
   const { session, loading: sessionLoading } = useFrontierSession()
 
@@ -116,6 +128,7 @@ export function useProject(projectId: string) {
       if (!session?.jwt) {
         if (cancelled) return
         setProject(null)
+        setRoleLevel(null)
         setStatus("no-session")
         hasLoaded.current = true
         return
@@ -124,6 +137,7 @@ export function useProject(projectId: string) {
       if (cancelled) return
       if (!result.ok) {
         setProject(null)
+        setRoleLevel(null)
         // FRO-346: "forbidden" (403 — access revoked / never granted) renders
         // a clean "you no longer have access" state, distinct from a
         // genuinely missing project.
@@ -140,6 +154,7 @@ export function useProject(projectId: string) {
       const hydrated = await overlayDeviceLocalSettings(minimalProjectRecord(result.project))
       if (cancelled) return
       setProject(hydrated)
+      setRoleLevel(result.project.role.level)
       setStatus("ready")
       hasLoaded.current = true
     })()
@@ -155,7 +170,6 @@ export function useProject(projectId: string) {
   // Overlay synced settings (server-authoritative project-wide fields) onto
   // the hydrated record so existing consumers see merged values without any
   // per-callsite changes.
-  const roleLevel = project?.syncRole?.level ?? null
   const { settings: syncedSettings, patch: patchSettings } = useProjectSettings(projectId, roleLevel)
   const overlaid = useMemo(
     () => project ? overlaySettings(project, syncedSettings) : null,
@@ -172,6 +186,12 @@ export function useProject(projectId: string) {
     /** True when the server could not be reached (network error / 5xx). Shows
      *  "Can't reach the server" rather than "project not found". */
     isUnreachable: status === "unreachable",
+    /** FRO-334: the caller's role from THIS load's resolve, fresh every time
+     *  (not the stale-tolerant `project.syncRole` cache). null only when the
+     *  project hasn't resolved a server role at all (loading, or genuinely
+     *  unsynced/local-only). Prefer this over `project.syncRole?.level` for
+     *  any gate that isn't itself server-revalidated. */
+    roleLevel,
     refresh,
     /** Persist project-wide settings (incl. synced voice profiles) to the server. */
     patchSettings,

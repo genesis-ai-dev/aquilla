@@ -25,6 +25,19 @@ interface SetupChecklistDrawerProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   project: ProjectRecord
+  /**
+   * FRO-334: caller's resolved project role, fresh from this load's
+   * `useProject` resolve (`roleLevel`, NOT `project.syncRole?.level`).
+   * `project.syncRole` is an intentionally stale-tolerant cache (see its doc
+   * comment) stamped by unrelated /sync-token round-trips elsewhere in the
+   * workspace — using it here let a real contributor's checklist render with
+   * `roleLevel == null` (fail-open) whenever that cache hadn't been stamped
+   * yet for this session, showing every step as editable regardless of role.
+   * null here means the project genuinely hasn't resolved a server role
+   * (unsynced/local-only project) — every step stays editable (see
+   * RoleGatedStep doc comment).
+   */
+  roleLevel: number | null
   state: ChecklistState
   onProjectUpdated: (p: ProjectRecord) => void
   onSharesChanged: () => void
@@ -39,6 +52,7 @@ export function SetupChecklistDrawer({
   open,
   onOpenChange,
   project,
+  roleLevel,
   state,
   onProjectUpdated,
   onSharesChanged,
@@ -47,11 +61,6 @@ export function SetupChecklistDrawer({
 }: SetupChecklistDrawerProps) {
   const allDone = state.completedCount === state.totalCount && state.totalCount > 0
   const progress = state.totalCount === 0 ? 0 : state.completedCount / state.totalCount
-
-  // FRO-334: caller's resolved project role (AD-12 max-wins). null means an
-  // unsynced/local-only project — no server floor to gate against, so every
-  // step stays editable (see RoleGatedStep doc comment).
-  const roleLevel = project.syncRole?.level ?? null
 
   // Activation milestone: fire once when the checklist first reaches 100%.
   // Consent-gated at the posthog module level.

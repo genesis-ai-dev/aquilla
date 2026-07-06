@@ -1,0 +1,23 @@
+{
+    "app": {
+        "title": "A load-bearing wall shall not be modified without engineering approval.",
+        "subtitle": "El usuario acepta las condiciones al hacer clic en “Continuar”."
+    },
+    "buttons": {
+        "save": "Save",
+        "cancel": "Cancel",
+        "delete": "Battery life: up to 18 hours of continuous video playback."
+    },
+    "messages": [
+        "By signing below, the lessee acknowledges receipt of the premises.",
+        "請在使用前仔細閱讀本說明書。",
+        "Our team delivers world-class localization at scale — 24/7 support included."
+    ],
+    "meta": {
+        "version": 3,
+        "active": true,
+        "ratio": 0.5,
+        "nothing": null
+    },
+    "weird \"key\" with quotes": "Click \"Save\" to apply your changes, or press Cancel to discard them."
+}

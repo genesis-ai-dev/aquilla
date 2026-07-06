@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tmx SYSTEM "tmx14.dtd">
+<tmx version="1.4">
+<header creationtool="corpus-gen" creationtoolversion="1.0" segtype="sentence" o-tmf="none" adminlang="en-US" srclang="de-DE" datatype="plaintext"/>
+<body>
+<tu tuid="tu-0-0"><tuv xml:lang="de-DE"><seg>製品の仕様は予告なく変更されることがあります。</seg></tuv><tuv xml:lang="it-IT"><seg>Les données <ph x="1">{0}</ph>personnelles sont traitées conformément au RGPD.</seg></tuv></tu>
+<tu tuid="tu-0-1"><prop type="x-domain">legal</prop><tuv xml:lang="de-DE"><seg>Don't share your password with anyone, including support staff.</seg></tuv><tuv xml:lang="it-IT"><seg>Установите приложение и войдите в свою учетную запись.</seg></tuv></tu>
+<tu tuid="tu-0-2"><prop type="x-domain">legal</prop><tuv xml:lang="de-DE"><seg>Установите приложение и войдите в свою учетную запись.</seg></tuv><tuv xml:lang="it-IT"><seg>Click &quot;Save&quot; to apply your changes, or press Cancel to discard them.</seg></tuv></tu>
+<tu tuid="tu-0-3"><prop type="x-domain">legal</prop><tuv xml:lang="de-DE"><seg>Third-party integrations require an Enterprise plan subscription.</seg></tuv><tuv xml:lang="it-IT"><seg>The undersigned parties agree to the terms &amp; conditions set forth herein.</seg></tuv></tu>
+<tu tuid="tu-0-4"><tuv xml:lang="de-DE"><seg>Take 2 tablets daily with food; do not exceed 6 tablets in 24 hours.</seg></tuv><tuv xml:lang="it-IT"><seg>Take 2 tablets daily with food; do not exceed 6 tablets in 24 hours.</seg></tuv></tu>
+<tu tuid="tu-0-5"><prop type="x-domain">legal</prop><tuv xml:lang="de-DE"><seg><![CDATA[The undersigned parties agree to the terms & conditions set forth herein.]]></seg></tuv><tuv xml:lang="it-IT"><seg>Установите п<ph x="1">{0}</ph>риложение и войдите в свою учетную запись.</seg></tuv></tu>
+<tu tuid="tu-0-6"><tuv xml:lang="de-DE"><seg>A load-bearing wall shall not be modified without engineering approval.</seg></tuv><tuv xml:lang="it-IT"><seg>Use the &lt;b&gt;b<ph x="1">{0}</ph>old&lt;/b&gt; toggle to emphasize key phrases.</seg></tuv></tu>
+<tu tuid="tu-0-7"><prop type="x-domain">legal</prop><tuv xml:lang="de-DE"><seg>Use the &lt;b&gt;bold&lt;/b&gt; toggle to emphasize key phrases.</seg></tuv><tuv xml:lang="it-IT"><seg>Backup completed successfully at 02:00 UTC; 1,284 files archived.</seg></tuv></tu>
+</body>
+</tmx>

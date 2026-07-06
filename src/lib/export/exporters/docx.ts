@@ -45,6 +45,10 @@ export interface DocxExportResult {
   injected: number
   /** Number of paragraphs that were left as-is (no translation). */
   untouched: number
+  /** Per-paragraph inline-style warnings: translated paragraphs whose source
+   *  had MIXED run formatting keep only the dominant run's styling —
+   *  surfaced so users know the output was simplified (additive field). */
+  warnings: { segment: string; detail: string }[]
 }
 
 /**
@@ -117,6 +121,7 @@ export async function exportDocx(
 
   let injected = 0
   let untouched = 0
+  const warnings: { segment: string; detail: string }[] = []
 
   // Match non-empty paragraphs to groups positionally.
   for (let i = 0; i < nonEmptyParas.length; i++) {
@@ -134,6 +139,13 @@ export async function exportDocx(
     // Replace paragraph runs with a single run carrying the translated text.
     // We keep the w:pPr (paragraph properties = style) intact.
     const p = nonEmptyParas[i]
+    if (countDistinctRunFormats(p) > 1) {
+      warnings.push({
+        segment: group,
+        detail:
+          "paragraph had mixed inline formatting; translation keeps only the first run's styling",
+      })
+    }
     injectTranslationIntoParagraph(p, translation)
     injected++
   }
@@ -150,7 +162,30 @@ export async function exportDocx(
     mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   })
 
-  return { blob, injected, untouched }
+  return { blob, injected, untouched, warnings }
+}
+
+/** Count distinct run-format signatures among a paragraph's text-bearing runs
+ *  (serialized w:rPr, "" for unformatted) — >1 means injection simplifies. */
+function countDistinctRunFormats(p: Element): number {
+  const runs = p.getElementsByTagName("w:r")
+  const formats = new Set<string>()
+  const serializer = new XMLSerializer()
+  for (let i = 0; i < runs.length; i++) {
+    const run = runs[i]
+    const textEls = run.getElementsByTagName("w:t")
+    let hasText = false
+    for (let j = 0; j < textEls.length; j++) {
+      if (textEls[j].textContent?.trim()) {
+        hasText = true
+        break
+      }
+    }
+    if (!hasText) continue
+    const rpr = run.getElementsByTagName("w:rPr")[0]
+    formats.add(rpr ? serializer.serializeToString(rpr) : "")
+  }
+  return formats.size
 }
 
 /**

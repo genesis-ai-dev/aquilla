@@ -1,0 +1,24 @@
+{
+  "app": {
+    "title": "Session expired — please sign in again to continue where you left off.",
+    "subtitle": "Net weight: 454 g (16 oz). Packaged in a facility that handles nuts."
+  },
+  "buttons": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "A load-bearing wall shall not be modified without engineering approval."
+  },
+  "messages": [
+    "製品の仕様は予告なく変更されることがあります。",
+    "The quarterly report shows a 12.5% increase in recurring revenue.",
+    "Enter your 6-digit verification code to continue.",
+    "The undersigned parties agree to the terms & conditions set forth herein."
+  ],
+  "meta": {
+    "version": 3,
+    "active": true,
+    "ratio": 0.5,
+    "nothing": null
+  },
+  "weird \"key\" with quotes": "Adverse reactions may include nausea, dizziness, and <severe> headaches."
+}

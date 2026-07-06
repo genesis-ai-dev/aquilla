@@ -1,0 +1,29 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: corpus 3\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Third-party integrations require an Enterprise plan subscription."
+msgstr "Please review the attached invoice before the payment deadline."
+
+#. developer note 1
+#: src/app.ts:11
+msgid "Rinse thoroughly with lukewarm water for at least 15 minutes."
+msgstr "Please review the attached invoice before the payment deadline."
+
+#. developer note 2
+#: src/app.ts:12
+msgid "Mesures de sécurité : portez des gants et des lunettes de protection."
+msgstr "Congratulations! You have unlocked the \"Explorer\" achievement 🎉."
+
+msgid "Der Vertrag tritt am ersten Tag des Folgemonats in Kraft."
+msgstr "The undersigned parties agree to the terms & conditions set forth herein."
+
+msgid "Don't share your password with anyone, including support staff."
+msgstr "Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F)."
+
+#. developer note 5
+#: src/app.ts:15
+msgid "Our team delivers world-class localization at scale — 24/7 support included."
+msgstr "La configuración se guardará automáticamente cada 5 minutos."

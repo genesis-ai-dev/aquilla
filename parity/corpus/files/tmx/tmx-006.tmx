@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tmx SYSTEM "tmx14.dtd">
+<tmx version="1.4">
+<header creationtool="corpus-gen" creationtoolversion="1.0" segtype="sentence" o-tmf="none" adminlang="en-US" srclang="en-GB" datatype="plaintext"/>
+<body>
+<tu tuid="tu-5-0"><tuv xml:lang="en-GB"><seg>A load-bearing wall shall not be modified without engineering approval.</seg></tuv><tuv xml:lang="es-ES"><seg>Установите п<ph x="1">{0}</ph>риложение и войдите в свою учетную запись.</seg></tuv></tu>
+<tu tuid="tu-5-1"><prop type="x-domain">legal</prop><note>reviewed</note><tuv xml:lang="en-GB"><seg>Don't share your password with anyone, including support staff.</seg></tuv><tuv xml:lang="es-ES"><seg>Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).</seg></tuv></tu>
+<tu tuid="tu-5-2"><note>reviewed</note><tuv xml:lang="en-GB"><seg>Rinse thoroughly with lukewarm water for at least 15 minutes.</seg></tuv><tuv xml:lang="es-ES"><seg>The undersigned parties agree to the terms &amp; conditions set forth herein.</seg></tuv></tu>
+<tu tuid="tu-5-3"><tuv xml:lang="en-GB"><seg>Refunds are processed within 5–10 business days of approval.</seg></tuv><tuv xml:lang="es-ES"><seg>Ensure the device is powered off before removing the battery cover.</seg></tuv></tu>
+<tu tuid="tu-5-4"><prop type="x-domain">legal</prop><tuv xml:lang="en-GB"><seg>Mesures de sécurité : portez des gants et des lunettes de protection.</seg></tuv><tuv xml:lang="es-ES"><seg>Our team delivers world-class localization at scale — 24/7 support included.</seg></tuv></tu>
+<tu tuid="tu-5-5"><prop type="x-domain">legal</prop><tuv xml:lang="en-GB"><seg>Backup completed successfully at 02:00 UTC; 1,284 files archived.</seg></tuv><tuv xml:lang="es-ES"><seg>Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).</seg></tuv></tu>
+<tu tuid="tu-5-6"><tuv xml:lang="en-GB"><seg>The API returns HTTP 429 when the rate limit of 100 req/min is exceeded.</seg></tuv><tuv xml:lang="es-ES"><seg>Rinse thoroughly with lukewarm water for at least 15 minutes.</seg></tuv></tu>
+</body>
+</tmx>

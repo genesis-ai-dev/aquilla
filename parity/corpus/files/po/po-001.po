@@ -1,0 +1,27 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: corpus 0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#. developer note 0
+#: src/app.ts:10
+msgid "Enter your 6-digit verification code to continue."
+msgstr "El usuario acepta las condiciones al hacer clic en “Continuar”."
+
+msgid "Uptime SLA of 99.95% measured monthly, excluding scheduled maintenance."
+msgid_plural "Uptime SLA of 99.95% measured monthly, excluding scheduled maintenance. (plural)"
+msgstr[0] ""
+msgstr[1] ""
+
+#. developer note 2
+#: src/app.ts:12
+msgid "Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F)."
+msgstr ""
+
+#. developer note 3
+#: src/app.ts:13
+msgid "Third-party integrations require an Enterprise plan subscription."
+msgid_plural "Third-party integrations require an Enterprise plan subscription. (plural)"
+msgstr[0] "Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F)."
+msgstr[1] "Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F)."

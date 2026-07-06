@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tmx SYSTEM "tmx14.dtd">
+<tmx version="1.4">
+<header creationtool="corpus-gen" creationtoolversion="1.0" segtype="sentence" o-tmf="none" adminlang="en-US" srclang="es-ES" datatype="plaintext"/>
+<body>
+<tu tuid="tu-12-0"><prop type="x-domain">legal</prop><tuv xml:lang="es-ES"><seg><![CDATA[This warranty does not cover damage caused by misuse or unauthorized repair.]]></seg></tuv><tuv xml:lang="pt-BR"><seg>Third-party integrations require an Enterprise plan subscription.</seg></tuv></tu>
+<tu tuid="tu-12-1"><tuv xml:lang="es-ES"><seg>This section intentionally left blank.</seg></tuv><tuv xml:lang="pt-BR"><seg>Congratulations! You have unlocked the &quot;Explorer&quot; achievement 🎉.</seg></tuv></tu>
+<tu tuid="tu-12-2"><note>reviewed</note><tuv xml:lang="es-ES"><seg><![CDATA[Error 404: the requested resource could not be found on this server.]]></seg></tuv><tuv xml:lang="pt-BR"><seg>Click &quot;Save&quot; to apply your changes, or press Cancel to discard them.</seg></tuv></tu>
+<tu tuid="tu-12-3"><tuv xml:lang="es-ES"><seg>By signing below, the lessee acknowledges receipt of the premises.</seg></tuv><tuv xml:lang="pt-BR"><seg>Rinse thoroughly with lukewarm water for at least 15 minutes.</seg></tuv></tu>
+<tu tuid="tu-12-4"><prop type="x-domain">legal</prop><tuv xml:lang="es-ES"><seg>Refunds are processed within 5–10 business days of approval.</seg></tuv><tuv xml:lang="pt-BR"><seg>The quarterly report shows a 12.5% increase in recurring revenue.</seg></tuv></tu>
+<tu tuid="tu-12-5"><prop type="x-domain">legal</prop><note>reviewed</note><tuv xml:lang="es-ES"><seg>Enter your 6-digit verification code to continue.</seg></tuv><tuv xml:lang="pt-BR"><seg>All prices include VAT at the applicable rate of 21%.</seg></tuv></tu>
+<tu tuid="tu-12-6"><tuv xml:lang="es-ES"><seg><![CDATA[Congratulations! You have unlocked the "Explorer" achievement 🎉.]]></seg></tuv><tuv xml:lang="pt-BR"><seg>Session expired — please sign in again to continue where you left off.</seg></tuv></tu>
+<tu tuid="tu-12-7"><note>reviewed</note><tuv xml:lang="es-ES"><seg>Take 2 tablets daily with food; do not exceed 6 tablets in 24 hours.</seg></tuv><tuv xml:lang="pt-BR"><seg>Take 2 table<ph x="1">{0}</ph>ts daily with food; do not exceed 6 tablets in 24 hours.</seg></tuv></tu>
+<tu tuid="tu-12-8"><note>reviewed</note><tuv xml:lang="es-ES"><seg>Ensure the device is powered off before removing the battery cover.</seg></tuv><tuv xml:lang="pt-BR"><seg>The quarterly report shows a 12.5% increase in recurring revenue.</seg></tuv></tu>
+</body>
+</tmx>

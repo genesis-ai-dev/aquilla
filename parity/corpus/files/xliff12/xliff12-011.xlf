@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="en-US" target-language="ja-JP" datatype="plaintext" original="doc0.txt">
+    <body>
+      <trans-unit id="u1">
+        <source>Use the &lt;b<x id="x1"/>&gt;bold&lt;/b&gt; toggle to emphasize key phrases.</source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u2">
+        <source>El usuario acepta las condiciones al hacer clic en “Continuar”.</source>
+        <target state="new"></target>
+        <note>ctx-2</note>
+      </trans-unit>
+      <trans-unit id="u3">
+        <source><g id="g3">Warning: contents may be hot. Handle with care.</g></source>
+        <target state="translated"><g id="g3">Warning: contents may be hot. Handle with care.</g></target>
+      </trans-unit>
+      <trans-unit id="u4">
+        <source>Die maximale Zuladung beträgt 750 kg einschließlich Fahrer.</source>
+        <target state="final">Die maximale Zuladung beträgt 750 kg einschließlich Fahrer.</target>
+        <note>ctx-4</note>
+      </trans-unit>
+      <trans-unit id="u5" xml:space="preserve">
+        <source>Les données personnelles sont traitées conformément au RGPD.</source>
+        <target state="new"></target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

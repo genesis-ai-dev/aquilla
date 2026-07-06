@@ -1,0 +1,45 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: corpus 4\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F)."
+msgstr "Congratulations! You have unlocked the \"Explorer\" achievement 🎉."
+
+#. developer note 1
+#: src/app.ts:11
+msgid "The undersigned parties agree to the terms & conditions set forth herein."
+msgstr "The undersigned parties agree to the terms & conditions set forth herein."
+
+msgid "Añada 250 ml de agua y mezcle hasta obtener una masa homogénea."
+msgid_plural "Añada 250 ml de agua y mezcle hasta obtener una masa homogénea. (plural)"
+msgstr[0] ""
+msgstr[1] ""
+
+#. developer note 3
+#: src/app.ts:13
+msgid "Enter your 6-digit verification code to continue."
+msgstr ""
+
+msgid "Rinse thoroughly with lukewarm water for at least 15 minutes."
+msgstr "製品の仕様は予告なく変更されることがあります。"
+
+msgid "製品の仕様は予告なく変更されることがあります。"
+msgid_plural "製品の仕様は予告なく変更されることがあります。 (plural)"
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "Use the <b>bold</b> toggle to emphasize key phrases."
+msgstr ""
+
+msgid "All prices include VAT at the applicable rate of 21%."
+msgstr "Les données personnelles sont traitées conformément au RGPD."
+
+msgid "El usuario acepta las condiciones al hacer clic en “Continuar”."
+msgstr ""
+
+msgid "Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F)."
+msgid_plural "Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F). (plural)"
+msgstr[0] ""
+msgstr[1] ""

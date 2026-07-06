@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" version="2.0" srcLang="en-US" trgLang="zh-CN">
+  <file id="f1">
+    <unit id="u1">
+      <segment id="s0-0" state="initial">
+        <source>Mesures de sécurité : portez des gants et des lunettes de protection.</source>
+      </segment>
+    </unit>
+    <unit id="u2">
+      <segment id="s1-0" state="final">
+        <source>Please review the attached invoice before the payment deadline.</source>
+        <target>Please review the attached invoice before the payment deadline.</target>
+      </segment>
+    </unit>
+    <unit id="u3">
+      <segment id="s2-0" state="initial">
+        <source>Adverse reactions may include nausea, dizziness, and &lt;severe&gt; headaches.</source>
+      </segment>
+    </unit>
+    <unit id="u4">
+      <segment id="s3-0" state="translated">
+        <source>Don't share your password with anyone, including support staff.</source>
+        <target>Don't share your password with anyone, including support staff.</target>
+      </segment>
+    </unit>
+    <unit id="u5">
+      <segment id="s4-0" state="initial">
+        <source>Uptime SLA of 99.95% measured monthly, excluding scheduled maintenance.</source>
+      </segment>
+    </unit>
+    <unit id="u6">
+      <segment id="s5-0" state="initial">
+        <source><pc id="pc5-0">Our team delivers world-class localization at scale — 24/7 support included.</pc></source>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s5-1" state="translated">
+        <source>Der Vertrag tritt am ersten Tag des Folgemonats in Kraft.</source>
+        <target>Der Vertrag tritt am ersten Tag des Folgemonats in Kraft.</target>
+      </segment>
+    </unit>
+  </file>
+</xliff>

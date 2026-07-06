@@ -89,7 +89,7 @@
 | Editor      | Next unfinished navigation basic flow                 | `e2e/specs/editor/next-unfinished.smoke.spec.ts`              |   ✅   |
 | Editor      | "Next unfinished" button enabled after import; navigates without error | `e2e/specs/editor/next-unfinished-button.smoke.spec.ts` | ✅ |
 | Editor      | Cmd+. keyboard shortcut jumps to next unfinished cell | `e2e/specs/editor/next-unfinished-keyboard-shortcut.smoke.spec.ts` | ✅ |
-| Editor      | EditorModeToggle Text↔Audio lens switch (aria-pressed) | `e2e/specs/editor/editor-mode-toggle.smoke.spec.ts`     |   ✅   |
+| Editor      | EditorModeToggle Text↔Audio lens switch (aria-selected) | `e2e/specs/editor/editor-mode-toggle.smoke.spec.ts`     |   ✅   |
 | Editor      | Bold keyboard shortcut (Ctrl+B) toggles bold mark     | `e2e/specs/editor/formatting-bold-keyboard-shortcut.smoke.spec.ts` | ✅ |
 | Editor      | Escape key clears cell selection (no editable focused) | `e2e/specs/editor/selection-clear-escape.smoke.spec.ts`           |   ✅   |
 | Comments    | Submit comment via Ctrl+Enter keyboard shortcut        | `e2e/specs/editor/comment-submit-keyboard.smoke.spec.ts`          |   ✅   |

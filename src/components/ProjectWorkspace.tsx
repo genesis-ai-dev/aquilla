@@ -3476,6 +3476,18 @@ export function ProjectWorkspace() {
               </>
             )}
 
+            {project && centerSurface === "editor" && activeFileId ? (
+              <EditorModeToggle
+                lens={lens}
+                onChange={(l) => {
+                  setLens(l)
+                  // Surface the Voices tab when entering the Audio lens.
+                  if (l === "audio") setDockTab("voices")
+                }}
+                timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
+              />
+            ) : null}
+
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
 
             {/* FRO-331: hidden trigger — opened from ⋯ menu; keeps RTL hint anchored here. */}

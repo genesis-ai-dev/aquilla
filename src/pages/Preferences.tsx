@@ -17,7 +17,7 @@ import { useDockRailPosition } from "@/hooks/useDockRailPosition"
 import { PersonalProviderSection } from "@/components/settings/PersonalProviderSection"
 import { LocalModelsSection } from "@/components/ProjectSettings/LocalModelsSection"
 import { UsageSection } from "@/components/settings/UsageSection"
-import { cn } from "@/lib/utils"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { DockRailPosition } from "@/lib/dock-rail-position"
 import {
   getTranslatorProfile,
@@ -69,40 +69,26 @@ function WorkspaceSection() {
   const { position: railPosition, setPosition: setRailPosition } = useDockRailPosition()
   return (
     <Section title="Workspace" description="Layout choices for the project sidebar.">
-      <div className="space-y-3">
-        <div className="space-y-1">
-          <Label className="text-sm font-medium">Sidebar tab layout</Label>
-          <p className="text-xs text-muted-foreground">
-            Show Files, Chat, and Search as a vertical rail on the left or a horizontal bar
-            across the top of the sidebar.
-          </p>
-        </div>
-        <div
-          className="bg-muted inline-flex items-center gap-0.5 rounded-full p-1 text-xs"
-          role="group"
-          aria-label="Sidebar tab layout"
+      <Field>
+        <FieldLabel className="text-sm font-medium">Sidebar tab layout</FieldLabel>
+        <FieldDescription>
+          Show Files, Chat, and Search as a vertical rail on the left or a horizontal bar
+          across the top of the sidebar.
+        </FieldDescription>
+        <Tabs
+          value={railPosition}
+          onValueChange={(value) => setRailPosition(value as DockRailPosition)}
+          className="gap-0"
         >
-          {RAIL_OPTIONS.map(({ id, label }) => {
-            const active = railPosition === id
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setRailPosition(id)}
-                aria-pressed={active}
-                className={cn(
-                  "rounded-full px-3 py-1.5 transition-all",
-                  active
-                    ? "bg-card font-medium text-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
+          <TabsList aria-label="Sidebar tab layout">
+            {RAIL_OPTIONS.map(({ id, label }) => (
+              <TabsTrigger key={id} value={id}>
                 {label}
-              </button>
-            )
-          })}
-        </div>
-      </div>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      </Field>
     </Section>
   )
 }

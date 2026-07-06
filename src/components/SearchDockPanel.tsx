@@ -15,12 +15,19 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from "react"
-import { Search, Replace, BookOpen, X, Maximize2, Book, ArrowLeft, ExternalLink } from "lucide-react"
-import { Input } from "@/components/ui/input"
+import { Search, Replace, BookOpen, Maximize2, Book, ArrowLeft, ExternalLink } from "lucide-react"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { SegmentTabs } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { cn } from "@/lib/utils"
 import { MarkedSnippet } from "@/components/search/MarkedSnippet"
 import { ChatMarkdown } from "@/components/chat/ChatMarkdown"
 import type { WorkspaceSearchResult } from "@/hooks/useWorkspaceSearch"
@@ -82,7 +89,6 @@ export function SearchDockPanel({
   const [mode, setMode] = useState<SearchDockMode>("search")
   const [query, setQuery] = useState("")
   const [scope, setScope] = useState<"file" | "project">(activeFileId ? "file" : "project")
-  const inputRef = useRef<HTMLInputElement>(null)
 
   // Update scope when file changes
   useEffect(() => {
@@ -111,104 +117,82 @@ export function SearchDockPanel({
     handleSearch(q)
   }
 
-  function handleClear() {
-    setQuery("")
-    onClearResults()
-    inputRef.current?.focus()
-  }
+  const searchPlaceholder = `Search ${scope === "file" && activeFileName ? activeFileName : "project"}…`
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Toolbar */}
       <div className="flex items-center gap-1 border-b px-2 py-1.5">
         <AppTooltip content="Search">
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-xs"
             aria-label="Search"
             aria-pressed={mode === "search"}
             onClick={() => setMode("search")}
-            className={cn(
-              "flex h-6 w-6 items-center justify-center rounded transition-colors",
-              mode === "search"
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:text-foreground",
-            )}
+            className={mode === "search" ? "bg-accent text-foreground" : undefined}
           >
             <Search className="h-3 w-3" />
-          </button>
+          </Button>
         </AppTooltip>
         <AppTooltip content="Find & Replace">
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-xs"
             aria-label="Find & Replace"
             aria-pressed={mode === "replace"}
             onClick={() => setMode("replace")}
-            className={cn(
-              "flex h-6 w-6 items-center justify-center rounded transition-colors",
-              mode === "replace"
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:text-foreground",
-            )}
+            className={mode === "replace" ? "bg-accent text-foreground" : undefined}
           >
             <Replace className="h-3 w-3" />
-          </button>
+          </Button>
         </AppTooltip>
         {bibleResourcesEnabled && (
           <AppTooltip content="Bible resources">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               aria-label="Bible resources"
               aria-pressed={mode === "bible"}
               onClick={() => setMode("bible")}
-              className={cn(
-                "flex h-6 w-6 items-center justify-center rounded transition-colors",
-                mode === "bible"
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
+              className={mode === "bible" ? "bg-accent text-foreground" : undefined}
             >
               <Book className="h-3 w-3" />
-            </button>
+            </Button>
           </AppTooltip>
         )}
 
         {/* Scope toggle — only meaningful for project text search */}
         {mode !== "bible" ? (
         <>
-        <div className="ml-auto flex items-center gap-0.5 rounded-full border px-1 py-0.5 text-[9px] text-muted-foreground">
-          <button
-            type="button"
-            onClick={() => setScope("file")}
-            className={cn(
-              "rounded-full px-1.5 py-0.5 transition-colors",
-              scope === "file" ? "bg-card text-foreground font-medium" : "hover:text-foreground",
-            )}
-          >
-            File
-          </button>
-          <button
-            type="button"
-            onClick={() => setScope("project")}
-            className={cn(
-              "rounded-full px-1.5 py-0.5 transition-colors",
-              scope === "project" ? "bg-card text-foreground font-medium" : "hover:text-foreground",
-            )}
-          >
-            Project
-          </button>
-        </div>
+        <SegmentTabs
+          value={scope}
+          aria-label="Search scope"
+          className="ml-auto"
+          listClassName="text-[10px]"
+          options={[
+            { label: "File", value: "file", disabled: !activeFileId },
+            { label: "Project", value: "project" },
+          ]}
+          onValueChange={setScope}
+        />
 
         {/* Open full panel */}
         {onOpenFullPanel && (
           <AppTooltip content="Open full search panel">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               aria-label="Open full search panel"
               onClick={onOpenFullPanel}
-              className="ml-0.5 flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors"
+              className="ml-0.5"
             >
               <BookOpen className="h-3 w-3" />
-            </button>
+            </Button>
           </AppTooltip>
         )}
         </>
@@ -226,104 +210,94 @@ export function SearchDockPanel({
       )}
 
       {mode !== "bible" && (
-      <>
-      {/* Search input */}
-      <div className="relative px-2 pt-2">
-        <Search className="pointer-events-none absolute left-4 top-3.5 h-3 w-3 text-muted-foreground" />
-        <Input
-          ref={inputRef}
-          value={query}
-          onChange={(e) => handleQueryChange(e.target.value)}
-          placeholder={`Search ${scope === "file" && activeFileName ? activeFileName : "project"}…`}
-          className="h-7 pl-7 pr-6 text-xs"
-        />
-        {query && (
-          <button
-            type="button"
-            onClick={handleClear}
-            className="absolute right-4 top-3 flex h-4 w-4 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-            aria-label="Clear search"
-          >
-            <X className="h-3 w-3" />
-          </button>
-        )}
-      </div>
+      <Command
+        shouldFilter={false}
+        className="flex min-h-0 flex-1 flex-col rounded-none bg-transparent p-0"
+      >
+        <div className="px-2 pt-2">
+          <CommandInput
+            value={query}
+            onValueChange={handleQueryChange}
+            placeholder={searchPlaceholder}
+            aria-label={searchPlaceholder}
+            className="text-xs"
+          />
+        </div>
 
-      {/* Results area */}
-      <div className="flex-1 overflow-y-auto px-2 py-1">
-        {loading && (
-          <p className="py-2 text-center text-[10px] text-muted-foreground">Searching…</p>
-        )}
-        {!loading && query && results.length === 0 && (
-          <p className="py-2 text-center text-[10px] text-muted-foreground">No results</p>
-        )}
-        {!loading && !query && (
-          <p className="py-2 text-center text-[10px] text-muted-foreground">
-            Type to search {scope === "file" ? "this file" : "the project"}
-          </p>
-        )}
-        {results.length > 0 && (
-          <div className="space-y-0.5">
-            {/* FRO-309: Expand-all action */}
-            {onExpandResults && (
-              <div className="flex items-center justify-between pb-0.5 pt-0.5">
-                <span className="text-[10px] text-muted-foreground">
-                  {results.length} result{results.length !== 1 ? "s" : ""}
-                </span>
-                <AppTooltip content="Expand all results in main area">
-                  <button
-                    type="button"
-                    aria-label="Expand all results"
-                    onClick={() => onExpandResults(query)}
-                    className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                  >
-                    <Maximize2 className="h-2.5 w-2.5" />
-                    Expand all
-                  </button>
-                </AppTooltip>
-              </div>
-            )}
-            {results.slice(0, 50).map((r) => (
-              <button
-                key={`${r.fileId}:${r.cellId}`}
-                type="button"
-                onClick={() => onSelect(r, query)}
-                className="w-full rounded px-1.5 py-1 text-left text-xs hover:bg-accent transition-colors"
+        <CommandList className="max-h-none flex-1 overflow-y-auto px-2 py-1">
+          {loading && (
+            <CommandEmpty>Searching…</CommandEmpty>
+          )}
+          {!loading && query && results.length === 0 && (
+            <CommandEmpty>No results</CommandEmpty>
+          )}
+          {!loading && !query && (
+            <CommandEmpty>
+              Type to search {scope === "file" ? "this file" : "the project"}
+            </CommandEmpty>
+          )}
+          {results.length > 0 && (
+            <CommandGroup>
+              {onExpandResults && (
+                <div className="flex items-center justify-between pb-0.5 pt-0.5">
+                  <span className="px-2 text-[10px] text-muted-foreground">
+                    {results.length} result{results.length !== 1 ? "s" : ""}
+                  </span>
+                  <AppTooltip content="Expand all results in main area">
+                    <button
+                      type="button"
+                      aria-label="Expand all results"
+                      onClick={() => onExpandResults(query)}
+                      className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    >
+                      <Maximize2 className="h-2.5 w-2.5" />
+                      Expand all
+                    </button>
+                  </AppTooltip>
+                </div>
+              )}
+              {results.slice(0, 50).map((r) => (
+                <CommandItem
+                  key={`${r.fileId}:${r.cellId}`}
+                  value={`${r.fileId}:${r.cellId}`}
+                  className="flex flex-col items-start rounded px-1.5 py-1 text-xs"
+                  onSelect={() => onSelect(r, query)}
+                >
+                  {r.context && (
+                    <span className="text-[10px] text-muted-foreground">{r.context}</span>
+                  )}
+                  <span className="block w-full truncate">
+                    <MarkedSnippet text={r.snippet || r.original} />
+                  </span>
+                </CommandItem>
+              ))}
+              {results.length > 50 && (
+                <CommandEmpty>
+                  {results.length - 50} more — open full panel for all results
+                </CommandEmpty>
+              )}
+            </CommandGroup>
+          )}
+        </CommandList>
+
+        {mode === "replace" && (
+          <div className="border-t p-2">
+            <p className="mb-1.5 text-[10px] leading-snug text-muted-foreground">
+              Find &amp; Replace with diff preview lives in the full panel.
+            </p>
+            {onOpenFullPanel && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onOpenFullPanel}
+                className="h-6 w-full text-[10px]"
               >
-                {r.context && (
-                  <span className="block text-[10px] text-muted-foreground">{r.context}</span>
-                )}
-                <span className="block truncate"><MarkedSnippet text={r.snippet || r.original} /></span>
-              </button>
-            ))}
-            {results.length > 50 && (
-              <p className="py-1 text-center text-[10px] text-muted-foreground">
-                {results.length - 50} more — open full panel for all results
-              </p>
+                Open Find &amp; Replace
+              </Button>
             )}
           </div>
         )}
-      </div>
-
-      {/* Find & Replace mode: open full panel since diffs are complex */}
-      {mode === "replace" && (
-        <div className="border-t p-2">
-          <p className="mb-1.5 text-[10px] text-muted-foreground leading-snug">
-            Find &amp; Replace with diff preview lives in the full panel.
-          </p>
-          {onOpenFullPanel && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={onOpenFullPanel}
-              className="h-6 w-full text-[10px]"
-            >
-              Open Find &amp; Replace
-            </Button>
-          )}
-        </div>
-      )}
-      </>
+      </Command>
       )}
     </div>
   )

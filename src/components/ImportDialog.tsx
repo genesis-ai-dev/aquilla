@@ -1,21 +1,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
-  Upload, Library, Globe, Table2, Languages, ArrowLeftRight, Tags, StickyNote, Database,
+  Upload, Library, Globe, Table2, Languages, ArrowLeft, ArrowLeftRight, Tags, StickyNote, Database,
   BookImage, BookA, Search,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { ButtonGroup } from "@/components/ui/button-group"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import {
@@ -1664,28 +1678,16 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getT
     <div className="flex flex-col gap-3">
       {/* Mode toggle — only shown when target-import is possible */}
       {sourceCells && sourceCells.length > 0 && (
-        <div className="flex gap-1 rounded-md border p-1 text-xs">
-          <button
-            type="button"
-            onClick={() => setMode("source")}
-            className={cn(
-              "flex-1 rounded px-2 py-1 transition-colors",
-              mode === "source" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            New source file
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("target")}
-            className={cn(
-              "flex-1 rounded px-2 py-1 transition-colors",
-              mode === "target" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            Into target column
-          </button>
-        </div>
+        <Tabs
+          value={mode}
+          onValueChange={(value) => setMode(value as EBiblePanelMode)}
+          className="gap-0"
+        >
+          <TabsList size="lg" className="w-full" aria-label="eBible import mode">
+            <TabsTrigger value="source">New source file</TabsTrigger>
+            <TabsTrigger value="target">Into target column</TabsTrigger>
+          </TabsList>
+        </Tabs>
       )}
 
       <p className="text-xs text-muted-foreground">
@@ -1705,12 +1707,18 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getT
         )}
       </p>
 
-      <Input
-        placeholder="Search by language, title, or id (e.g. 'eng', 'KJV')"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        disabled={!translations || importing}
-      />
+      <InputGroup>
+        <InputGroupAddon>
+          <Search />
+        </InputGroupAddon>
+        <InputGroupInput
+          placeholder="Search by language, title, or id (e.g. 'eng', 'KJV')"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          disabled={!translations || importing}
+          aria-label="Search eBible translations"
+        />
+      </InputGroup>
 
       {loadErr ? (
         <p className="text-sm text-destructive">Failed to load list: {loadErr}</p>
@@ -1960,15 +1968,11 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
     return (
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
-          <button
-            type="button"
+          <ImportDialogBackButton
             disabled={importing}
             onClick={() => setSelected(null)}
-            className="rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors"
-            aria-label="Back to translation list"
-          >
-            ←
-          </button>
+            label="Back to translation list"
+          />
           <div className="min-w-0">
             <p className="truncate text-sm font-medium">{selected.englishName || selected.name}</p>
             <p className="text-xs text-muted-foreground">
@@ -1987,15 +1991,17 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
         ) : (
           <>
             <div className="flex items-center gap-1.5">
-              <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("all")}>
-                Whole bible
-              </Button>
-              <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("OT")}>
-                Old Testament
-              </Button>
-              <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("NT")}>
-                New Testament
-              </Button>
+              <ButtonGroup>
+                <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("all")}>
+                  Whole bible
+                </Button>
+                <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("OT")}>
+                  Old Testament
+                </Button>
+                <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("NT")}>
+                  New Testament
+                </Button>
+              </ButtonGroup>
               <span className="ml-auto text-xs text-muted-foreground">
                 {checkedBooks.size} of {books.length} books
               </span>
@@ -2072,12 +2078,18 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
         bible, a single testament, or individual books.
       </p>
 
-      <Input
-        placeholder="Search by language, name, or id (e.g. 'eng', 'BSB')"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        disabled={!translations}
-      />
+      <InputGroup>
+        <InputGroupAddon>
+          <Search />
+        </InputGroupAddon>
+        <InputGroupInput
+          placeholder="Search by language, name, or id (e.g. 'eng', 'BSB')"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          disabled={!translations}
+          aria-label="Search Bible translations"
+        />
+      </InputGroup>
 
       {loadErr ? (
         <p className="text-sm text-destructive">Failed to load list: {loadErr}</p>
@@ -2161,22 +2173,20 @@ function DirectionPanel({
         We detected the source language from the imported project. Please confirm the
         source and set the target language so back-translation and QA rules work correctly.
       </p>
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground" htmlFor="dl-source">
-            Source language
-          </label>
+      <FieldGroup className="grid grid-cols-2 gap-4">
+        <Field>
+          <FieldLabel htmlFor="dl-source">Source language</FieldLabel>
           <Input
             id="dl-source"
             value={sourceLanguage}
             onChange={(e) => onSourceChange(e.target.value)}
             placeholder="e.g. English, arb, hbo"
           />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground" htmlFor="dl-target">
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="dl-target">
             Target language <span className="text-destructive">*</span>
-          </label>
+          </FieldLabel>
           <Input
             id="dl-target"
             value={targetLanguage}

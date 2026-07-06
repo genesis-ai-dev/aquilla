@@ -204,32 +204,31 @@ describe("ParallelPassagesPanel — HTML-spanning skip count", () => {
 // ── Scope toggle ──────────────────────────────────────────────────────────────
 
 describe("ParallelPassagesPanel — scope toggle", () => {
-  it("renders the Project scope pill as active by default", () => {
+  it("renders the Project scope tab as active by default", () => {
     render(<ParallelPassagesPanel {...baseProps()} />)
-    // aria-pressed=true on the "Project" button in the scope group
-    const scopeGroup = screen.getByRole("group", { name: /search scope/i })
-    const projectBtn = within(scopeGroup).getByRole("button", { name: "Project" })
-    expect(projectBtn).toHaveAttribute("aria-pressed", "true")
+    const scopeTabs = screen.getByRole("tablist", { name: /search scope/i })
+    const projectTab = within(scopeTabs).getByRole("tab", { name: "Project" })
+    expect(projectTab).toHaveAttribute("aria-selected", "true")
   })
 
-  it("calls onScopeChange when a scope pill is clicked", () => {
+  it("calls onScopeChange when a scope tab is clicked", () => {
     const onScopeChange = vi.fn()
     render(
       <ParallelPassagesPanel
         {...baseProps({ onScopeChange, activeFileId: "file-1" })}
       />,
     )
-    const scopeGroup = screen.getByRole("group", { name: /search scope/i })
-    const fileBtn = within(scopeGroup).getByRole("button", { name: "File" })
-    fireEvent.click(fileBtn)
+    const scopeTabs = screen.getByRole("tablist", { name: /search scope/i })
+    const fileTab = within(scopeTabs).getByRole("tab", { name: "File" })
+    fireEvent.click(fileTab)
     expect(onScopeChange).toHaveBeenCalledWith("file")
   })
 
-  it("disables the File scope pill when there is no activeFileId", () => {
+  it("disables the File scope tab when there is no activeFileId", () => {
     render(<ParallelPassagesPanel {...baseProps({ activeFileId: undefined })} />)
-    const scopeGroup = screen.getByRole("group", { name: /search scope/i })
-    const fileBtn = within(scopeGroup).getByRole("button", { name: "File" })
-    expect(fileBtn).toBeDisabled()
+    const scopeTabs = screen.getByRole("tablist", { name: /search scope/i })
+    const fileTab = within(scopeTabs).getByRole("tab", { name: "File" })
+    expect(fileTab).toHaveAttribute("aria-disabled", "true")
   })
 })
 

@@ -6,15 +6,19 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  Command,
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { SegmentTabs } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import type { WorkspaceSearchResult, SearchOptions } from "@/lib/search/workspace-index"
 import { computeReplaceDiffs, type CellReplaceDiff } from "@/lib/search/replace-action"
@@ -581,24 +585,26 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
       : `Search ${scope === "file" ? scopeLabel.toLowerCase() : "project"}…`
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex flex-col gap-0 p-0 sm:max-w-2xl max-h-[85vh] overflow-hidden">
-        {/* Visually-hidden title for screen readers */}
-        <DialogHeader className="sr-only">
-          <DialogTitle>
-            {mode === "passages" ? "Parallel passages" : mode === "replace" ? "Search and Replace" : "Search"} —{" "}
-            {scope === "file" ? scopeLabel : "entire project"}
-          </DialogTitle>
-        </DialogHeader>
-
-        {/* Controls row — pr-10 reserves clearance for the absolute-positioned X close button (size-7 at right-2) */}
+    <CommandDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={`${dialogTitle} — ${scope === "file" ? scopeLabel : "entire project"}`}
+      description={inputPlaceholder}
+      showCloseButton
+      className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
+    >
+      <Command
+        shouldFilter={false}
+        className="flex max-h-[85vh] flex-col gap-0 rounded-none bg-transparent p-0"
+      >
+        {/* Controls row — pr-10 reserves clearance for the absolute-positioned X close button */}
         <div
-          className="flex flex-wrap items-center gap-3 pl-4 pr-10 pt-4 pb-3 shrink-0"
+          className="flex shrink-0 flex-wrap items-center gap-3 pb-3 pl-4 pr-10 pt-4"
           aria-label="Panel controls"
         >
-          <PillToggle<ParallelPanelScope>
+          <SegmentTabs<ParallelPanelScope>
             value={scope}
-            label="Search scope"
+            aria-label="Search scope"
             options={[
               { label: "Project", value: "project" },
               {
@@ -607,41 +613,38 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
                 disabled: !activeFileId,
               },
             ]}
-            onChange={handleScopeChange}
+            onValueChange={handleScopeChange}
           />
-          <PillToggle<ParallelPanelMode>
+          <SegmentTabs<ParallelPanelMode>
             value={mode}
-            label="Search mode"
+            aria-label="Search mode"
             options={[
               { label: "Search", value: "search" },
               { label: "Passages", value: "passages" },
               { label: "Replace", value: "replace" },
             ]}
-            onChange={handleModeChange}
+            onValueChange={handleModeChange}
           />
           {mode !== "replace" && (
-            <PillToggle<ParallelPanelSide>
+            <SegmentTabs<ParallelPanelSide>
               value={side}
-              label="Content side"
+              aria-label="Content side"
               options={[
                 { label: "Both", value: "both" },
                 { label: "Source", value: "source" },
                 { label: "Target", value: "target" },
               ]}
-              onChange={handleSideChange}
+              onValueChange={handleSideChange}
             />
           )}
         </div>
 
-        {/* Search input (find) */}
-        <div className="px-4 pb-3 shrink-0 flex flex-col gap-2">
-          <Input
-            ref={inputRef}
+        <div className="flex shrink-0 flex-col gap-2 px-4 pb-3">
+          <CommandInput
             placeholder={inputPlaceholder}
             value={query}
-            onChange={handleQueryChange}
-            onKeyDown={handleKeyDown}
-            className="h-9 text-sm"
+            onValueChange={handleQueryChange}
+            onKeyDown={handleSearchKeyDown}
             aria-label={inputPlaceholder}
             aria-busy={loading}
           />

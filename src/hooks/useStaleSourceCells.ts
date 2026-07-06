@@ -56,6 +56,11 @@ export interface UseStaleSourceCellsResult {
   isError: boolean
   /** Manual refetch — call after target commits or known upstream edits. */
   revalidate: () => void
+  /** QA-BUG-2: awaits POST /link/sync, THEN revalidates staleness. Callers
+   *  that also need the mirrored cell TEXT to refresh (not just the
+   *  staleness badge) should revalidate cells after this resolves too — see
+   *  ProjectWorkspace's `link.upstream-changed` handler. */
+  syncNow: () => Promise<void>
 }
 
 // SWARM-TODO(FRO-476): verify the lazy-pull trigger end to end — create
@@ -90,15 +95,28 @@ export interface UseStaleSourceCellsResult {
 //      the flag flips from violet to amber (C's mirror advanced; direct
 //      staleness now applies) and clears entirely once C re-commits.
 
-/** Fire-and-forget mirror sync trigger — never blocks the stale-source
- *  fetch, never surfaces an error to the UI (self-healing: the next file
- *  open or the cursor probe on any read catches anything missed). */
-function triggerLinkSync(projectId: string, jwt: string): void {
+/** Mirror sync trigger. Returns a promise that resolves (never rejects) once
+ *  the POST settles, so callers who need the post-sync truth (the delayed
+ *  re-fetch below, and ProjectWorkspace's push-accelerator handler) can wait
+ *  for it — but `doFetch`'s own call to this is still fire-and-forget with
+ *  respect to the stale-source READ (never delays that GET). */
+function triggerLinkSync(projectId: string, jwt: string): Promise<void> {
   const url = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/link/sync`
-  void fetch(url, { method: "POST", headers: { Authorization: `Bearer ${jwt}` } }).catch(() => {
-    /* best-effort; the next lazy-pull trigger or manual sync catches it */
-  })
+  return fetch(url, { method: "POST", headers: { Authorization: `Bearer ${jwt}` } })
+    .then(() => undefined)
+    .catch(() => {
+      /* best-effort; the next lazy-pull trigger or manual sync catches it */
+    })
 }
+
+/** QA-BUG-2/3: how long after firing the lazy-pull sync to schedule ONE
+ *  follow-up stale-source re-fetch. The sync commit and this read are two
+ *  separate round-trips with no shared ordering guarantee — the read can
+ *  land before the mirror's cell writes are visible, showing a transient
+ *  "violet" (ancestry-changed) badge that only settles to the correct
+ *  "amber" (direct-stale) tone on the NEXT read. A single delayed re-fetch
+ *  lands the post-sync truth without user action, cheaper than a poll loop. */
+const POST_SYNC_REFETCH_DELAY_MS = 2500
 
 export function useStaleSourceCells(
   opts: UseStaleSourceCellsOptions,
@@ -133,12 +151,19 @@ export function useStaleSourceCells(
   const tokenRef = useRef(getToken)
   const tokenRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const tokenAttemptsRef = useRef(0)
+  // QA-BUG-3: cancelled on unmount/re-run so a stale generation's delayed
+  // re-fetch never clobbers a newer fetch's result.
+  const postSyncRefetchRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   projectRef.current = projectId
   fileRef.current = fileId
   enabledRef.current = enabled
   tokenRef.current = getToken
 
-  const doFetch = useCallback(async () => {
+  // `triggerSync=false` is used by the QA-BUG-3 delayed post-sync re-fetch
+  // below: it must re-READ without re-triggering (and re-scheduling another
+  // delayed re-fetch off) the lazy-pull sync — otherwise each settle fetch
+  // would perpetually chain into another one every POST_SYNC_REFETCH_DELAY_MS.
+  const doFetch = useCallback(async (triggerSync = true) => {
     const pid = projectRef.current
     const fid = fileRef.current
     const enabled = enabledRef.current
@@ -175,9 +200,22 @@ export function useStaleSourceCells(
         return
       }
       tokenAttemptsRef.current = 0
-      // FRO-476 §7: lazy-pull trigger, fire-and-forget, alongside the
-      // stale-source fetch (not awaited — never delays the read).
-      triggerLinkSync(pid, jwt)
+      if (triggerSync) {
+        // FRO-476 §7: lazy-pull trigger — not awaited here (never delays the
+        // stale-source read below), but QA-BUG-3: schedule ONE delayed
+        // re-fetch after it settles so the post-sync truth lands without a
+        // manual reload (the read below can race the mirror commit and show
+        // a transient wrong-tone badge — see POST_SYNC_REFETCH_DELAY_MS).
+        // That delayed re-fetch passes triggerSync=false so it doesn't
+        // re-trigger + re-schedule itself into a perpetual chain.
+        if (postSyncRefetchRef.current) clearTimeout(postSyncRefetchRef.current)
+        void triggerLinkSync(pid, jwt).then(() => {
+          postSyncRefetchRef.current = setTimeout(() => {
+            postSyncRefetchRef.current = null
+            if (generationRef.current === gen) void doFetch(false)
+          }, POST_SYNC_REFETCH_DELAY_MS)
+        })
+      }
       const body = await fetchStaleSourceResponse(pid, fid, jwt)
       if (generationRef.current !== gen) return
       setStaleCellIds(new Set(body.staleCellIds ?? []))
@@ -211,6 +249,10 @@ export function useStaleSourceCells(
       clearTimeout(tokenRetryRef.current)
       tokenRetryRef.current = null
     }
+    if (postSyncRefetchRef.current) {
+      clearTimeout(postSyncRefetchRef.current)
+      postSyncRefetchRef.current = null
+    }
   }, [])
 
   // Refetch on window focus — same drift mitigation pattern as `useCells`.
@@ -236,6 +278,24 @@ export function useStaleSourceCells(
     }
   }, [doFetch])
 
+  // QA-BUG-2 (FRO-479 push accelerator): awaitable "sync then revalidate".
+  // The `link.upstream-changed` push handler calls this instead of the
+  // fire-and-forget path inside `doFetch` — it needs to know when the mirror
+  // sync has actually landed so it can ALSO revalidate cells (the mirrored
+  // source TEXT), not just staleness. Mints its own token via `getToken`
+  // rather than reusing whatever `doFetch` last saw, since this can be
+  // called independently of the read cycle.
+  const syncNow = useCallback(async (): Promise<void> => {
+    const pid = projectRef.current
+    const fid = fileRef.current
+    const getToken = tokenRef.current
+    if (!pid || !fid || !getToken) return
+    const jwt = await getToken(fid)
+    if (!jwt) return
+    await triggerLinkSync(pid, jwt)
+    void doFetch()
+  }, [doFetch])
+
   return {
     staleCellIds,
     tombstonedCellIds,
@@ -245,5 +305,6 @@ export function useStaleSourceCells(
     isLoading,
     isError,
     revalidate: doFetch,
+    syncNow,
   }
 }

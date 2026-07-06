@@ -131,16 +131,28 @@ sourceLinking.post(
       sourceProjectId,
     })
 
-    // FRO-476: seeding IS the first mirror sync (design spec §5) — only for
-    // live links. Clone links stay on the existing snapshot-at-detach path
-    // (this route never snapshots; clone-mode linking without an immediate
-    // detach is a link with no propagation, matching "one-time snapshot at
-    // creation" only once FRO-478's create-from-template flow calls detach
-    // right after linking, or a future slice adds an explicit "snapshot now"
-    // action — out of scope here). Best-effort; the lazy-pull trigger on
-    // next file-open self-heals if this fails.
+    // FRO-476/QA-BUG-1: seeding must happen at link time — a linked project
+    // born with 0 files/cells has no way to self-heal (live's lazy-pull is
+    // keyed to an open FILE; clone never syncs again after this call).
+    //
+    // - mode='live': trigger the first mirror sync now (§5 — "seeding IS the
+    //   first mirror sync"). Awaited so the response only returns once
+    //   seeding has actually run (or definitively failed) — the client no
+    //   longer has to guess whether content will "just appear".
+    // - mode='clone': run the one-time snapshot synchronously — this IS
+    //   clone semantics (§2: "snapshot at birth"), not a side effect of
+    //   detach. There is no later resync for clones, so this is the only
+    //   chance to seed.
+    let seeded = false
     if (mode === "live") {
-      await triggerLinkSeedSync(c.env, projectId)
+      seeded = await triggerLinkSeedSync(c.env, projectId)
+    } else {
+      const snapshotted = await snapshotSourceCells(c.env, {
+        upstreamProjectId: sourceProjectId,
+        targetProjectId: projectId,
+        authorUsername: user.username,
+      })
+      seeded = snapshotted > 0
     }
 
     return c.json({
@@ -150,6 +162,10 @@ sourceLinking.post(
       consumes,
       gate,
       previousSourceProjectId: project.source_project_id,
+      // FRO-476/QA-BUG-1: best-effort signal — false means the client
+      // should not assume content is present yet (e.g. the sync-worker
+      // call failed) and may fall back to its own self-heal trigger.
+      seeded,
     })
   },
 )

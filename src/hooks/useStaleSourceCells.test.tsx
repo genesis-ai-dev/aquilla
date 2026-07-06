@@ -142,4 +142,86 @@ describe("useStaleSourceCells", () => {
     )
     expect(result.current.isError).toBe(false)
   }, 12_000)
+
+  // QA-BUG-3: the lazy-pull sync and the stale-source read race — the read
+  // can land before the mirror's writes are visible, showing a transient
+  // wrong-tone badge. A single delayed re-fetch after the sync settles lands
+  // the post-sync truth without a manual reload.
+  it("schedules exactly one delayed re-fetch after the lazy-pull sync settles (QA-BUG-3)", async () => {
+    vi.useFakeTimers()
+    try {
+      fetchMock.mockResolvedValueOnce(makeResponse(["c1"], { ancestorBehind: true }))
+      const { result } = renderHook(() =>
+        useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken }),
+      )
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      expect(result.current.ancestorBehind).toBe(true)
+
+      // The sync's mirror commit is now "done" server-side; the next read
+      // should reflect the settled (post-sync) truth.
+      fetchMock.mockResolvedValueOnce(makeResponse([], { ancestorBehind: false }))
+
+      // Advance past POST_SYNC_REFETCH_DELAY_MS (2500ms) — triggerLinkSync's
+      // fetch mock resolves on the next microtask, so flush that first.
+      await vi.advanceTimersByTimeAsync(2600)
+
+      await vi.waitFor(() => expect(result.current.ancestorBehind).toBe(false))
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+
+      // No further re-fetches beyond the one scheduled follow-up.
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("cancels the pending delayed re-fetch on unmount (QA-BUG-3)", async () => {
+    vi.useFakeTimers()
+    try {
+      fetchMock.mockResolvedValueOnce(makeResponse(["c1"]))
+      const { unmount } = renderHook(() =>
+        useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken }),
+      )
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+      unmount()
+      await vi.advanceTimersByTimeAsync(5000)
+
+      // The unmounted hook's scheduled re-fetch must not fire.
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // QA-BUG-2 (FRO-479 push accelerator): syncNow is the awaitable path the
+  // link.upstream-changed handler uses so it can revalidate CELLS after the
+  // sync resolves, not just the staleness badge.
+  it("syncNow() awaits the mirror-sync POST, THEN revalidates staleness", async () => {
+    let resolveFetch!: (value: Response) => void
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      () => new Promise<Response>((resolve) => { resolveFetch = resolve }),
+    )
+    fetchMock.mockResolvedValueOnce(makeResponse([]))
+    const { result } = renderHook(() =>
+      useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken }),
+    )
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+    fetchMock.mockResolvedValueOnce(makeResponse(["c9"]))
+    const syncPromise = result.current.syncNow()
+
+    // The stale-source GET must not have refired yet — syncNow awaits the
+    // POST /link/sync response before revalidating.
+    await new Promise((r) => setTimeout(r, 20))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    resolveFetch(new Response(JSON.stringify({ ranSync: true }), { status: 200 }))
+    await syncPromise
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current.staleCellIds.has("c9")).toBe(true))
+    fetchSpy.mockRestore()
+  })
 })

@@ -43,8 +43,9 @@ vi.mock("@/lib/sync/archive", async (importOriginal) => {
     ...actual,
     linkProjectSource: vi.fn().mockResolvedValue({
       projectId: "new-proj", sourceProjectId: "upstream-1", mode: "live", consumes: "source",
-      gate: "validated", previousSourceProjectId: null,
+      gate: "validated", previousSourceProjectId: null, seeded: true,
     }),
+    triggerLinkSync: vi.fn().mockResolvedValue(true),
   }
 })
 vi.mock("@/lib/store/project-index", () => ({
@@ -53,10 +54,11 @@ vi.mock("@/lib/store/project-index", () => ({
 vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
 
 import { createCloudProject } from "@/lib/sync/cloud-projects"
-import { linkProjectSource } from "@/lib/sync/archive"
+import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"
 
 const mockCreateCloudProject = vi.mocked(createCloudProject)
 const mockLinkProjectSource = vi.mocked(linkProjectSource)
+const mockTriggerLinkSync = vi.mocked(triggerLinkSync)
 
 // Base UI Select renders a combobox trigger; options live in a portaled
 // popup. Clicks on options don't reliably commit a selection under
@@ -80,6 +82,11 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
   beforeEach(() => {
     mockCreateCloudProject.mockClear()
     mockLinkProjectSource.mockClear()
+    mockTriggerLinkSync.mockClear()
+    mockLinkProjectSource.mockResolvedValue({
+      projectId: "new-proj", sourceProjectId: "upstream-1", mode: "live", consumes: "source",
+      gate: "validated", previousSourceProjectId: null, seeded: true,
+    })
   })
 
   it("shows the upstream picker + clone/live + consumes choice only for the linked-target shape", async () => {
@@ -131,6 +138,42 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
       mode: "live",
       consumes: "source",
     })
+
+    // QA-BUG-1: the server reported seeding succeeded — no client-side
+    // self-heal needed.
+    expect(mockTriggerLinkSync).not.toHaveBeenCalled()
+  })
+
+  it("QA-BUG-1: self-heals client-side when the server reports seeding did NOT run (mode=live)", async () => {
+    mockLinkProjectSource.mockResolvedValueOnce({
+      projectId: "new-proj", sourceProjectId: "upstream-1", mode: "live", consumes: "source",
+      gate: "validated", previousSourceProjectId: null, seeded: false,
+    })
+
+    render(<ProjectCreateDialog onCreated={vi.fn()} />)
+    fireEvent.click(screen.getByText("+ New Project"))
+
+    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "French Episode 1" } })
+    fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
+    fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), { target: { value: "French" } })
+
+    fireEvent.click(screen.getByText("Advanced: project shape"))
+    fireEvent.click(screen.getByText(/Linked target/i))
+
+    await pickSelectOption(/Upstream project/i, /English Source/i)
+    fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+
+    await waitFor(() => {
+      expect(mockLinkProjectSource).toHaveBeenCalledTimes(1)
+      expect(mockTriggerLinkSync).toHaveBeenCalledTimes(1)
+    })
+    const [, healedProjectId] = mockTriggerLinkSync.mock.calls[0]!
+    expect(healedProjectId).toEqual(expect.any(String))
+
+    // The self-heal call must follow the failed link call, not precede it.
+    const linkOrder = mockLinkProjectSource.mock.invocationCallOrder[0]!
+    const healOrder = mockTriggerLinkSync.mock.invocationCallOrder[0]!
+    expect(linkOrder).toBeLessThan(healOrder)
   })
 
   it("disables submit until an upstream project is chosen for linked-target", () => {

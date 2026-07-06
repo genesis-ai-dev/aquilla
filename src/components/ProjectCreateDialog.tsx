@@ -28,7 +28,7 @@ import {
 import { createProject } from "@/lib/store/project-index"
 import { createCloudProject } from "@/lib/sync/cloud-projects"
 import { patchProjectSettings } from "@/lib/sync/project-settings"
-import { linkProjectSource } from "@/lib/sync/archive"
+import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectsForNavigation } from "@/hooks/useAccessibleProjects"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -155,11 +155,20 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
       // design spec §5 "seeding IS the first mirror sync") — files/cells
       // arrive with provenance set, so the user lands in a populated project.
       if (shape === "linked-target" && upstreamProjectId) {
-        await linkProjectSource(jwt, project.id, {
+        const linkResult = await linkProjectSource(jwt, project.id, {
           sourceProjectId: upstreamProjectId,
           mode: linkMode,
           consumes: linkConsumes,
         })
+        // QA-BUG-1: the server-side seed is best-effort (sync-worker
+        // reachability, network hiccup). If it reports it didn't run,
+        // self-heal from the client before the user ever opens the project
+        // — otherwise a live-linked project can open with 0 files and no
+        // way to recover (the lazy-pull trigger needs an open FILE, and a
+        // fresh project has none).
+        if (linkResult.seeded === false && linkMode === "live") {
+          await triggerLinkSync(jwt, project.id)
+        }
       }
     } catch (err) {
       console.error("[project-create] failed:", err)

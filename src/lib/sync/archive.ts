@@ -131,6 +131,13 @@ export interface LinkProjectSourceResult {
   consumes: "source" | "target"
   gate: "head" | "validated"
   previousSourceProjectId: string | null
+  /** FRO-476/QA-BUG-1: true if the server-side seed (clone snapshot or the
+   *  first live mirror sync) actually ran. False means the caller should
+   *  fall back to `triggerLinkSync` before assuming content is present —
+   *  older servers that predate this field are treated as `false` (the
+   *  caller's fallback then self-heals unconditionally, which is harmless:
+   *  `/link/sync` no-ops for clone and re-syncing live is idempotent). */
+  seeded?: boolean
 }
 
 /**
@@ -167,6 +174,48 @@ export async function linkProjectSource(
     throw new Error(message)
   }
   return (await res.json()) as LinkProjectSourceResult
+}
+
+/**
+ * FRO-476/QA-BUG-1: client-side seed self-heal for `mode: 'live'` links.
+ * `linkProjectSource` already triggers this server-side and awaits it — this
+ * is the fallback for when that trigger reports `seeded: false` (sync-worker
+ * unreachable, config drift, etc.) or when it's called from a project-open
+ * path where the project has 0 files (see `ProjectWorkspace`'s zero-file
+ * self-heal). Mints a `__project__`-scoped sync-token (the established
+ * sentinel for project-level, non-file-scoped calls — see
+ * useComments/useProjectHealth/outbox-flush) rather than requiring an open
+ * file, since a freshly linked project may have none yet.
+ *
+ * Best-effort: swallows errors (returns false) — staleness/self-heal is a
+ * soft signal, never something that should block navigation into the project.
+ */
+export async function triggerLinkSync(
+  jwt: string,
+  projectId: string,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<boolean> {
+  try {
+    const tokenRes = await fetch(`${apiUrl}/api/v2/sync-token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${jwt}`,
+      },
+      body: JSON.stringify({ projectId, fileId: "__project__" }),
+    })
+    if (!tokenRes.ok) return false
+    const { token } = (await tokenRes.json()) as { token: string }
+
+    const { syncWorkerHttpOrigin } = await import("./sync-worker-url")
+    const syncRes = await fetch(
+      `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/link/sync`,
+      { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+    )
+    return syncRes.ok
+  } catch {
+    return false
+  }
 }
 
 /** Fetches server state for a project, including archive metadata and the

@@ -37,15 +37,18 @@ export function makeEventId(): string {
  * set from birth (never a direct `snapshotSourceCells`-style projection
  * write, which would leave `upstream_event_id` NULL).
  *
- * Best-effort: link/detach success is recorded in `projects.source_project_id`
- * etc. regardless of whether this trigger lands — the lazy-pull trigger on
- * next file-open (useStaleSourceCells) is the self-healing floor per §5.
+ * Best-effort but now AWAITED by the caller (QA-BUG-1: a fire-and-forget
+ * trigger left freshly created live links with 0 files/cells and no client
+ * signal that seeding hadn't happened). Returns true iff the sync-worker
+ * responded 2xx with `ranSync: true` or a mirrored count — false on any
+ * config/network/non-2xx failure, so the route can surface `seeded: false`
+ * and the client can fall back to its own self-heal trigger.
  */
 export async function triggerLinkSeedSync(
   env: Env,
   downstreamProjectId: string,
-): Promise<void> {
-  if (!env.SYNC_WORKER_URL || !env.SYNC_SECRET_KEY) return
+): Promise<boolean> {
+  if (!env.SYNC_WORKER_URL || !env.SYNC_SECRET_KEY) return false
   try {
     const now = Math.floor(Date.now() / 1000)
     const token = await sign(
@@ -64,12 +67,14 @@ export async function triggerLinkSeedSync(
       env.SYNC_SECRET_KEY,
       "HS256",
     )
-    await fetch(
+    const res = await fetch(
       `${env.SYNC_WORKER_URL.replace(/\/$/, "")}/api/v1/projects/${encodeURIComponent(downstreamProjectId)}/link/sync`,
       { method: "POST", headers: { Authorization: `Bearer ${token}` } },
     )
+    return res.ok
   } catch (err) {
     console.warn(`triggerLinkSeedSync failed for ${downstreamProjectId}:`, err)
+    return false
   }
 }
 
@@ -226,16 +231,125 @@ export async function emitLinkSourceEvent(
 }
 
 /**
+ * Copy every `files` row from `upstreamProjectId` onto `targetProjectId`.
+ * `files.id` is a GLOBAL primary key (not scoped by project_id — see
+ * db/postgres/schema.sql), so the target's copy CANNOT reuse the upstream's
+ * file id: doing so collides with `ON CONFLICT (id)` against the upstream's
+ * own row and silently reassigns/no-ops instead of creating a target row
+ * (confirmed while writing this: an earlier version of this function did
+ * exactly that, leaving the target with 0 files despite `copied > 0`-shaped
+ * logic never even running). Each target file gets a freshly minted id;
+ * returns the upstream-id → target-id map so `snapshotSourceCells` can
+ * rewrite `file_id` on the cell rows it copies.
+ *
+ * Idempotent across re-runs by NAME (not id) within one target project — a
+ * second clone/detach snapshot updates the previously-created copy in place
+ * rather than creating a duplicate file, keyed on (project_id, name) since
+ * that's the only stable cross-run identifier available once ids differ.
+ *
+ * Best-effort: returns an empty map on any failure (matches
+ * `snapshotSourceCells`'s defensive posture — missing/legacy schema must not
+ * 500 the caller).
+ */
+export async function snapshotSourceFiles(
+  env: Env,
+  args: { upstreamProjectId: string; targetProjectId: string; authorUsername: string },
+): Promise<Map<string, string>> {
+  const fileIdMap = new Map<string, string>()
+  if (!env.AQUILLA_PG) return fileIdMap
+  const now = Date.now()
+
+  let files: Array<{
+    id: string
+    name: string
+    role: string | null
+    kind: string | null
+    book_code: string | null
+    meta: string | null
+  }> = []
+  try {
+    const rows = await env.AQUILLA_PG.prepare(
+      `SELECT id, name, role, kind, book_code, meta
+         FROM files
+        WHERE project_id = ? AND deleted_at IS NULL`,
+    )
+      .bind(args.upstreamProjectId)
+      .all<{
+        id: string
+        name: string
+        role: string | null
+        kind: string | null
+        book_code: string | null
+        meta: string | null
+      }>()
+    files = rows.results ?? []
+  } catch {
+    return fileIdMap
+  }
+
+  for (const file of files) {
+    try {
+      const existing = await env.AQUILLA_PG.prepare(
+        `SELECT id FROM files WHERE project_id = ? AND name = ?`,
+      )
+        .bind(args.targetProjectId, file.name)
+        .first<{ id: string }>()
+
+      const targetFileId = existing?.id ?? crypto.randomUUID()
+      const eventId = makeEventId()
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO files (
+           id, project_id, name, role, kind, book_code,
+           event_id, created_by, created_at, updated_at, meta
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET
+           name = excluded.name,
+           role = excluded.role,
+           kind = excluded.kind,
+           book_code = excluded.book_code,
+           event_id = excluded.event_id,
+           meta = excluded.meta,
+           updated_at = excluded.updated_at`,
+      )
+        .bind(
+          targetFileId,
+          args.targetProjectId,
+          file.name,
+          file.role,
+          file.kind,
+          file.book_code,
+          eventId,
+          args.authorUsername,
+          now,
+          now,
+          file.meta ?? "{}",
+        )
+        .run()
+      fileIdMap.set(file.id, targetFileId)
+    } catch (err) {
+      console.warn(`snapshotSourceFiles: insert failed for ${file.id}:`, err)
+    }
+  }
+
+  return fileIdMap
+}
+
+/**
  * Snapshot every source-side cell from `upstreamProjectId` as a burst of
  * local source events on `targetProjectId`. Used by the detach flow
- * (project lifecycle step 4): after the link is cleared, the upstream's
- * current source cells become this project's local source.
+ * (project lifecycle step 4) AND by clone-mode linking at creation time
+ * (§2 — "snapshot at birth is exactly clone semantics"): the upstream's
+ * current source content becomes this project's local source, once.
+ *
+ * Copies `files` first (see `snapshotSourceFiles`) so the cell rows below
+ * resolve to a real file — a clone with 0 file rows was BUG-1 in the
+ * 2026-07-06 live-UI QA pass.
  *
  * Existing local source cells receive `source.cell.commit` events chained to
  * their current head; missing rows receive `source.cell.create` genesis
  * events. Events are authored by the detacher.
  *
- * Returns the count of events emitted (0 if the cells projection isn't
+ * Returns the count of cell events emitted (0 if the cells projection isn't
  * available yet — same defensive posture as emitLinkSourceEvent).
  */
 export async function snapshotSourceCells(
@@ -248,6 +362,13 @@ export async function snapshotSourceCells(
 ): Promise<number> {
   if (!env.AQUILLA_PG) return 0
   const now = Date.now()
+
+  // QA-BUG-1: files must be copied (and their upstream id remapped to a
+  // fresh target-owned id — files.id is a GLOBAL PK, see
+  // snapshotSourceFiles's doc comment) BEFORE the cell rows below, which
+  // reference file_id and must point at the target's own file row, not the
+  // upstream's.
+  const fileIdMap = await snapshotSourceFiles(env, args)
 
   // Phase 1A's `cells` table has schema columns:
   //   project_id, file_id, cell_id, side, value, value_html, type,
@@ -294,6 +415,11 @@ export async function snapshotSourceCells(
   // genesis events so a detached project becomes self-contained.
   let emitted = 0
   for (const cell of cells) {
+    // QA-BUG-1: files.id is a global PK, so the target's file copy has its
+    // OWN id (see snapshotSourceFiles) — cell rows must follow that mapping,
+    // not the upstream's file_id, or they'd reference a file row that
+    // belongs to a different project (or doesn't exist under this one).
+    const targetFileId = fileIdMap.get(cell.file_id) ?? cell.file_id
     const id = makeEventId()
     try {
       const existing = await env.AQUILLA_PG.prepare(
@@ -301,7 +427,7 @@ export async function snapshotSourceCells(
            FROM cells
           WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
       )
-        .bind(args.targetProjectId, cell.file_id, cell.cell_id)
+        .bind(args.targetProjectId, targetFileId, cell.cell_id)
         .first<{ event_id: string }>()
 
       const kind = existing ? "source.cell.commit" : "source.cell.create"
@@ -330,7 +456,7 @@ export async function snapshotSourceCells(
         .bind(
           id,
           args.targetProjectId,
-          cell.file_id,
+          targetFileId,
           cell.cell_id,
           existing?.event_id ?? null,
           kind,
@@ -365,7 +491,7 @@ export async function snapshotSourceCells(
             wordCount,
             hash,
             args.targetProjectId,
-            cell.file_id,
+            targetFileId,
             cell.cell_id,
           )
           .run()
@@ -379,7 +505,7 @@ export async function snapshotSourceCells(
         )
           .bind(
             args.targetProjectId,
-            cell.file_id,
+            targetFileId,
             cell.cell_id,
             cell.value,
             cell.value_html,

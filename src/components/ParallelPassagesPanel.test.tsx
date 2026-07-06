@@ -58,6 +58,11 @@ function getApplyButton() {
   return all.find((btn) => btn.hasAttribute("aria-busy"))!
 }
 
+/** CommandInput renders as a combobox (cmdk); happy-dom names it via placeholder. */
+function getFindInput() {
+  return screen.getByPlaceholderText(/find in project/i)
+}
+
 // ── Smoke ─────────────────────────────────────────────────────────────────────
 
 describe("ParallelPassagesPanel — smoke", () => {

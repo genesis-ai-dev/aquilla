@@ -461,70 +461,59 @@ function BibleResourcesPanel({
         </div>
       )}
 
-      {/* Search input */}
-      <div className="relative px-2 pt-2">
-        <Search className="pointer-events-none absolute left-4 top-3.5 h-3 w-3 text-muted-foreground" />
-        <Input
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value)
-            void runSearch(e.target.value)
-          }}
-          placeholder="Search Bible resources…"
-          className="h-7 pl-7 pr-6 text-xs"
-        />
-        {query && (
-          <button
-            type="button"
-            onClick={() => {
-              setQuery("")
-              setResults([])
+      {/* Search */}
+      <Command
+        shouldFilter={false}
+        className="flex min-h-0 flex-1 flex-col rounded-none bg-transparent p-0"
+      >
+        <div className="px-2 pt-2">
+          <CommandInput
+            value={query}
+            onValueChange={(q) => {
+              setQuery(q)
+              void runSearch(q)
             }}
-            className="absolute right-4 top-3 flex h-4 w-4 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-            aria-label="Clear search"
-          >
-            <X className="h-3 w-3" />
-          </button>
-        )}
-      </div>
+            placeholder="Search Bible resources…"
+            aria-label="Search Bible resources"
+            className="text-xs"
+          />
+        </div>
 
-      {/* Results */}
-      <div className="flex-1 overflow-y-auto px-2 py-1">
-        {error && <p className="py-2 text-center text-[10px] text-destructive">{error}</p>}
-        {(searching || pageLoading) && (
-          <p className="py-2 text-center text-[10px] text-muted-foreground">Loading…</p>
-        )}
-        {!searching && !error && query && results.length === 0 && (
-          <p className="py-2 text-center text-[10px] text-muted-foreground">No resources found</p>
-        )}
-        {!searching && !query && results.length === 0 && (
-          <p className="py-2 text-center text-[10px] text-muted-foreground">
-            Search bibletranslation.org for people, places, terms, and translation notes.
-          </p>
-        )}
-        {results.length > 0 && (
-          <div className="space-y-0.5">
-            {results.map((r) => (
-              <button
-                key={r.url}
-                type="button"
-                onClick={() => void openPath(new URL(r.url).pathname)}
-                className="w-full rounded px-1.5 py-1 text-left hover:bg-accent transition-colors"
-              >
-                <span className="flex items-center gap-1.5">
-                  <span className="min-w-0 flex-1 truncate text-xs font-medium">{r.title}</span>
-                  <KindChip kind={r.kind} />
-                </span>
-                {r.description && (
-                  <span className="mt-0.5 block line-clamp-2 text-[10px] text-muted-foreground">
-                    {r.description}
+        <CommandList className="max-h-none flex-1 overflow-y-auto px-2 py-1">
+          {error && <CommandEmpty className="text-destructive">{error}</CommandEmpty>}
+          {(searching || pageLoading) && <CommandEmpty>Loading…</CommandEmpty>}
+          {!searching && !error && query && results.length === 0 && (
+            <CommandEmpty>No resources found</CommandEmpty>
+          )}
+          {!searching && !query && results.length === 0 && (
+            <CommandEmpty>
+              Search bibletranslation.org for people, places, terms, and translation notes.
+            </CommandEmpty>
+          )}
+          {results.length > 0 && (
+            <CommandGroup>
+              {results.map((r) => (
+                <CommandItem
+                  key={r.url}
+                  value={r.url}
+                  className="flex flex-col items-start rounded px-1.5 py-1"
+                  onSelect={() => void openPath(new URL(r.url).pathname)}
+                >
+                  <span className="flex w-full items-center gap-1.5">
+                    <span className="min-w-0 flex-1 truncate text-xs font-medium">{r.title}</span>
+                    <KindChip kind={r.kind} />
                   </span>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+                  {r.description && (
+                    <span className="mt-0.5 line-clamp-2 text-[10px] text-muted-foreground">
+                      {r.description}
+                    </span>
+                  )}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
+        </CommandList>
+      </Command>
     </div>
   )
 }

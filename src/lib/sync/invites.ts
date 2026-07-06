@@ -322,7 +322,18 @@ export interface MultiInvitePreview {
   token: string
   role: { level: number; name: string }
   expiresAt: string | null
-  projects: { projectId: string; projectName: string; archived: boolean }[]
+  /**
+   * `usedByCaller` (FRO-347): true when the signed-in caller is this row's
+   * original redeemer and is still a member — i.e. this preview is a
+   * "continue" for a link they already used, not a fresh invite. The server
+   * only returns already-used rows at all when this is true for at least one
+   * of them (otherwise the whole request 410s) — JoinPage doesn't need to
+   * branch on it today (the normal confirm-card + accept flow already
+   * produces the right friendly no-op redirect), but it's surfaced here so a
+   * future "Welcome back" variant of the confirm card can distinguish the
+   * two cases without another round-trip.
+   */
+  projects: { projectId: string; projectName: string; archived: boolean; usedByCaller?: boolean }[]
 }
 
 export interface MultiInviteAccepted {

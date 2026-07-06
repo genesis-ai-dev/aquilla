@@ -1221,4 +1221,109 @@ describe("FRO-347: idempotent-while-member redeem semantics", () => {
       expect(members?.cnt).toBe(0)
     })
   })
+
+  // ── FRO-347 (preview-side): a still-member re-click must not hard-error ──
+  //
+  // BUG: GET /:token/preview returned 410 code:"used" whenever every row for
+  // the token had used_at set — with no check for "is the caller the
+  // original redeemer, and are they still a member?" — so a signed-in user
+  // simply re-opening their own already-redeemed invite link hit a terminal
+  // "already been used" error before the accept endpoint's idempotent-while-
+  // member no-op logic ever ran (JoinPage renders the preview failure and
+  // never calls accept). Fixed: the preview now recognizes "caller redeemed
+  // this token AND is still a member" and returns the normal preview shape
+  // (with usedByCaller: true) instead of 410.
+  describe("preview: still-member re-click is a friendly continue, not a hard error", () => {
+    async function seedAndRedeem(token: string, projectId: string, leadId: number, memberUsername: string) {
+      await env.AQUILLA_PG.prepare(
+        "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, ?)",
+      )
+        .bind(projectId, "Preview idempotent project", leadId)
+        .run()
+      await env.AQUILLA_PG.prepare(
+        "INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
+      )
+        .bind(token, projectId, 400, leadId, new Date(Date.now() + 86400000).toISOString())
+        .run()
+      const acceptRes = await app.request(
+        `/api/v2/invites/${token}/accept`,
+        { method: "POST", headers: authHeader(await jwtFor(memberUsername)) },
+        env,
+      )
+      expect(acceptRes.status).toBe(200)
+    }
+
+    it("still-member redeemer previewing their own used link gets the continue shape (200, usedByCaller: true)", async () => {
+      await seedUser(60, "lead60")
+      await seedUser(61, "stillmember61")
+      await seedAndRedeem("tok-347-preview-a", "p-fro347-preview-a", 60, "stillmember61")
+
+      const res = await app.request(
+        "/api/v2/invites/tok-347-preview-a/preview",
+        { method: "GET", headers: authHeader(await jwtFor("stillmember61")) },
+        env,
+      )
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as {
+        projects: Array<{ projectId: string; usedByCaller: boolean }>
+      }
+      expect(body.projects).toHaveLength(1)
+      expect(body.projects[0]).toMatchObject({
+        projectId: "p-fro347-preview-a",
+        usedByCaller: true,
+      })
+    })
+
+    it("removed redeemer previewing their old link still gets 410 used", async () => {
+      await seedUser(62, "lead62")
+      await seedUser(63, "removed63b")
+      await seedAndRedeem("tok-347-preview-b", "p-fro347-preview-b", 62, "removed63b")
+
+      await env.AQUILLA_PG.prepare(
+        "DELETE FROM project_members WHERE project_id = ? AND user_id = ?",
+      )
+        .bind("p-fro347-preview-b", 63)
+        .run()
+
+      const res = await app.request(
+        "/api/v2/invites/tok-347-preview-b/preview",
+        { method: "GET", headers: authHeader(await jwtFor("removed63b")) },
+        env,
+      )
+      expect(res.status).toBe(410)
+      const body = (await res.json()) as { code?: string }
+      expect(body.code).toBe("used")
+    })
+
+    it("a different authenticated user previewing someone else's used link still gets 410 used", async () => {
+      await seedUser(64, "lead64")
+      await seedUser(65, "redeemer65")
+      await seedUser(66, "onlooker66")
+      await seedAndRedeem("tok-347-preview-c", "p-fro347-preview-c", 64, "redeemer65")
+
+      const res = await app.request(
+        "/api/v2/invites/tok-347-preview-c/preview",
+        { method: "GET", headers: authHeader(await jwtFor("onlooker66")) },
+        env,
+      )
+      expect(res.status).toBe(410)
+      const body = (await res.json()) as { code?: string }
+      expect(body.code).toBe("used")
+    })
+
+    it("an unauthenticated preview of a used link is unchanged — still 410 used", async () => {
+      await seedUser(67, "lead67")
+      await seedUser(68, "redeemer68")
+      await seedAndRedeem("tok-347-preview-d", "p-fro347-preview-d", 67, "redeemer68")
+
+      const res = await app.request(
+        "/api/v2/invites/tok-347-preview-d/preview",
+        { method: "GET" }, // no Authorization header
+        env,
+      )
+      expect(res.status).toBe(410)
+      const body = (await res.json()) as { code?: string }
+      expect(body.code).toBe("used")
+    })
+  })
 })

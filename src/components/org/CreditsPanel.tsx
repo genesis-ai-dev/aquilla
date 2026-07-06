@@ -62,43 +62,46 @@ export function CreditsPanel({
   return (
     <Section
       title="Compute credits"
-      description="Daily and weekly cap usage"
+      description="Daily and weekly cap usage — project-attributed spend (agent + TTS). Regular chat is not tied to a project and is not included here."
       data-testid="credits-panel"
     >
       <div className="space-y-4">
-        {/* Daily total */}
+        {/* Daily total (agent + tts, all project-attributed rails) */}
         <CapBar
-          label="Today"
+          label="Today (project spend)"
           used={day.totalCredits}
           cap={config.dailyCap}
           pct={dayPct}
           variant="default"
         />
 
-        {/* Weekly total */}
+        {/* Weekly total (agent + tts, all project-attributed rails) */}
         <CapBar
-          label="This week"
+          label="This week (project spend)"
           used={week.totalCredits}
           cap={config.weeklyCap}
           pct={weekPct}
           variant="default"
         />
 
-        {/* Agent sub-cap — visually highlighted as the dangerous rail */}
+        {/* Agent sub-cap — the "Today"/"This week" totals above already
+            include this; it's broken out because agent is the dangerous
+            rail (highest markup, fastest to compound). It is NOT a
+            duplicate — it's a subset shown for visibility. */}
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/40">
           <p className="mb-2 text-xs font-medium text-amber-800 dark:text-amber-300">
-            Agent spend (elevated rail)
+            Agent spend (elevated rail — included in the totals above, broken out for visibility)
           </p>
           <div className="space-y-2">
             <CapBar
-              label="Agent today"
+              label="Agent — today"
               used={day.agentCredits}
               cap={config.agentDailyCap}
               pct={agentDayPct}
               variant="agent"
             />
             <CapBar
-              label="Agent this week"
+              label="Agent — this week"
               used={week.agentCredits}
               cap={config.agentWeeklyCap}
               pct={agentWeekPct}

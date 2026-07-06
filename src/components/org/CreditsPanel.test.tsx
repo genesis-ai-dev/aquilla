@@ -64,13 +64,13 @@ describe("CreditsPanel — renders for maintainer when data is present", () => {
     await waitFor(() => expect(screen.getByTestId("credits-panel")).toBeInTheDocument())
 
     expect(screen.getByText("Compute credits")).toBeInTheDocument()
-    expect(screen.getByText("Today")).toBeInTheDocument()
-    expect(screen.getByText("This week")).toBeInTheDocument()
+    expect(screen.getByText("Today (project spend)")).toBeInTheDocument()
+    expect(screen.getByText("This week (project spend)")).toBeInTheDocument()
     // Agent section headline
-    expect(screen.getByText("Agent spend (elevated rail)")).toBeInTheDocument()
+    expect(screen.getByText(/Agent spend \(elevated rail/)).toBeInTheDocument()
     // Agent sub-bars
-    expect(screen.getByText("Agent today")).toBeInTheDocument()
-    expect(screen.getByText("Agent this week")).toBeInTheDocument()
+    expect(screen.getByText("Agent — today")).toBeInTheDocument()
+    expect(screen.getByText("Agent — this week")).toBeInTheDocument()
     expect(mockGetOrgCredits).toHaveBeenCalledWith("mgr-jwt", 1)
   })
 
@@ -85,6 +85,75 @@ describe("CreditsPanel — renders for maintainer when data is present", () => {
   // NOTE: the "Caps are display-only — enforcement is off" notice was intentionally
   // removed in e92aacc49. The enforce=false state now renders no extra notice, so the
   // former "shows enforcement-off notice" test was dropped rather than weakened.
+})
+
+describe("CreditsPanel — FRO-414 regression: each bar binds to its own distinct bucket", () => {
+  // WHY: FRO-414 was reported as "3 of 4 bars echo the same number" — a
+  // transposed field mapping would make two bars silently render the same
+  // value. Using four DISTINCT fixture numbers means any future swap of
+  // day/week or total/agent fields fails loudly instead of coincidentally
+  // passing (e.g. a swap between two bars that happen to share a value).
+  const DISTINCT_DATA: OrgCredits = {
+    config: {
+      markup: 4,
+      agentMarkup: 5,
+      dailyCap: 1000,
+      weeklyCap: 5000,
+      agentDailyCap: 600,
+      agentWeeklyCap: 3000,
+      enforce: true,
+      showToOrg: true,
+    },
+    day: {
+      totalCredits: 11, // "Today (project spend)"
+      byRail: { llm: 0, agent: 33, tts: 0 },
+      agentCredits: 33, // "Agent — today"
+    },
+    week: {
+      totalCredits: 99, // "This week (project spend)"
+      byRail: { llm: 0, agent: 77, tts: 0 },
+      agentCredits: 77, // "Agent — this week"
+    },
+    remaining: { daily: 989, weekly: 4901, agentDaily: 567, agentWeekly: 2923 },
+  }
+
+  it("renders four distinct values, each in its correctly-labeled bar", async () => {
+    mockGetOrgCredits.mockResolvedValue(DISTINCT_DATA)
+    render(<CreditsPanel jwt="mgr-jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
+    await waitFor(() => expect(screen.getByTestId("credits-panel")).toBeInTheDocument())
+
+    // All four values must appear (sanity: none silently dropped).
+    expect(screen.getByText("11 cr")).toBeInTheDocument()
+    expect(screen.getByText("33 cr")).toBeInTheDocument()
+    expect(screen.getByText("99 cr")).toBeInTheDocument()
+    expect(screen.getByText("77 cr")).toBeInTheDocument()
+
+    // Pin each value to its OWN bar's row, not just "somewhere on the page" —
+    // this is what catches a transposition that a plain getByText can't.
+    const todayRow = screen.getByText("Today (project spend)").closest("div")
+    expect(todayRow).toHaveTextContent("11 cr")
+    expect(todayRow).not.toHaveTextContent("33 cr")
+    expect(todayRow).not.toHaveTextContent("99 cr")
+    expect(todayRow).not.toHaveTextContent("77 cr")
+
+    const weekRow = screen.getByText("This week (project spend)").closest("div")
+    expect(weekRow).toHaveTextContent("99 cr")
+    expect(weekRow).not.toHaveTextContent("11 cr")
+    expect(weekRow).not.toHaveTextContent("33 cr")
+    expect(weekRow).not.toHaveTextContent("77 cr")
+
+    const agentTodayRow = screen.getByText("Agent — today").closest("div")
+    expect(agentTodayRow).toHaveTextContent("33 cr")
+    expect(agentTodayRow).not.toHaveTextContent("11 cr")
+    expect(agentTodayRow).not.toHaveTextContent("99 cr")
+    expect(agentTodayRow).not.toHaveTextContent("77 cr")
+
+    const agentWeekRow = screen.getByText("Agent — this week").closest("div")
+    expect(agentWeekRow).toHaveTextContent("77 cr")
+    expect(agentWeekRow).not.toHaveTextContent("11 cr")
+    expect(agentWeekRow).not.toHaveTextContent("33 cr")
+    expect(agentWeekRow).not.toHaveTextContent("99 cr")
+  })
 })
 
 describe("CreditsPanel — translator-never-sees-it invariant", () => {

@@ -1310,7 +1310,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         )}
         <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
           {/* FRO-250: sticky chapter label — left gutter, does not shift Source */}
-          <div className="flex items-center overflow-visible">
+          <div className="flex w-full items-center justify-center overflow-visible">
             {currentSectionLabel && !looksLikeUuid(currentSectionLabel) && (
               <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
                 {currentSectionLabel}
@@ -3505,7 +3505,7 @@ function EditorRow({
             is the single issue surface (severity tint + title); no
             stripe/dot/warning. Selection lives on the source/target divider so
             range selection follows the text. */}
-        <div className="flex h-full items-start justify-center gap-1 pt-5">
+        <div className="flex h-full w-full items-start justify-center gap-1 pt-5">
           {numberPill}
           {/* Validation circle — single bare icon until validated, with a
               health ring appearing around it once there's a substantive score. */}
@@ -3652,7 +3652,7 @@ function EditorRow({
                 onToolbarMouseUp={handleToolbarMouseUp}
               />
             )}
-            <div className="mb-1 flex h-4 items-center gap-1 text-xs text-muted-foreground" dir="ltr">
+            <div className="mb-1 flex h-4 items-center justify-center gap-1 text-center text-xs text-muted-foreground" dir="ltr">
               <span>{cell.context}</span>
               {showFormattingLossWarning && (
                 <AppTooltip content="Source has inline formatting that the target does not preserve. Formatting will be lost on export." className="max-w-xs">

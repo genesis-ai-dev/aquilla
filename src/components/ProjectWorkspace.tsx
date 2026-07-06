@@ -818,7 +818,10 @@ export function ProjectWorkspace() {
   // editor table can decorate stale rows with the AlertTriangle badge.
   // One fetch per (projectId, fileId) — flattened to a boolean per row
   // inside EditorTable.
-  const { staleCellIds } = useStaleSourceCells({
+  // FRO-477 (§6) — upstreamStaleCellIds surfaces inherited (ancestor-chain)
+  // staleness alongside the existing direct staleCellIds; both flatten to
+  // per-row booleans inside EditorTable the same way.
+  const { staleCellIds, upstreamStaleCellIds } = useStaleSourceCells({
     projectId: project?.id ?? null,
     fileId: activeFileId,
     getToken: getTokenForFile,
@@ -3785,6 +3788,7 @@ export function ProjectWorkspace() {
             onAckRemoteChange={handleAckRemoteChange}
             checkLockHolder={checkLockHolder}
             staleCellIds={staleCellIds}
+            upstreamStaleCellIds={upstreamStaleCellIds}
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
           />

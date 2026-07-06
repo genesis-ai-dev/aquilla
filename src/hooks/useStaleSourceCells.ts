@@ -40,8 +40,18 @@ export interface UseStaleSourceCellsResult {
   staleCellIds: ReadonlySet<string>
   /** FRO-476: membership set of cell ids whose upstream source was deleted. */
   tombstonedCellIds: ReadonlySet<string>
+  /**
+   * FRO-477: membership set of cell ids whose ANCESTRY is stale (design
+   * spec §6's inherited-staleness walk) — distinct from `staleCellIds`
+   * (direct, single-hop). Renders as a second, visually distinct badge
+   * tone in `StaleSourceIndicator`.
+   */
+  upstreamStaleCellIds: ReadonlySet<string>
   /** FRO-476: link-level "you have unmirrored upstream changes" probe. */
   behindSeq: BehindSeq | null
+  /** FRO-477: link-level "an ancestor further upstream is behind ITS
+   *  upstream" signal (§6 step 3) — banner-level, not per-cell. */
+  ancestorBehind: boolean
   isLoading: boolean
   isError: boolean
   /** Manual refetch — call after target commits or known upstream edits. */
@@ -54,6 +64,31 @@ export interface UseStaleSourceCellsResult {
 // open a file in B in the app (or call useStaleSourceCells directly) and
 // confirm (via network tab / a DB read) that
 // POST /api/v1/projects/:B/link/sync fires and B's source cells populate.
+
+// SWARM-TODO(FRO-477): verify the target-consumption chain + inherited
+// staleness end to end in the real dev stack (no UI exists yet to CREATE
+// the link with consumes='target'/gate — use the API directly per FRO-476's
+// TODO above, extended one hop):
+//   1. Create project A (English) — import a small USFM/VTT with 2+ cells,
+//      at least one with startMs/endMs (a timed VTT cell) and a cast label
+//      (cast.assign) so the merge's structural fields are exercised.
+//   2. Create project B (French), POST /api/v2/projects/:B/link-source
+//      { sourceProjectId: A, mode: 'live', consumes: 'source' }.
+//   3. Open B in the app, translate + validate (reviewer role) both cells.
+//   4. Create project C (Chaluba), POST /api/v2/projects/:C/link-source
+//      { sourceProjectId: B, mode: 'live', consumes: 'target', gate: 'validated' }.
+//   5. Open C in the app — confirm C's source lane shows B's validated
+//      French text, with the timed cell's startMs/endMs and cast label
+//      carried over from A's structure (§2 merge). Translate + validate one
+//      cell in C.
+//   6. Edit the English text of ONE cell in A (as project-lead/importer).
+//      Do NOT touch B at all (leave it dormant).
+//   7. Reload C (or open the file) — confirm the EDITED cell's row shows the
+//      violet/dotted StaleSourceIndicator (upstreamStaleCellIds), NOT the
+//      amber one, and that the OTHER (untouched) cell shows no flag at all.
+//   8. In B, re-translate + re-validate the edited cell; reload C — confirm
+//      the flag flips from violet to amber (C's mirror advanced; direct
+//      staleness now applies) and clears entirely once C re-commits.
 
 /** Fire-and-forget mirror sync trigger — never blocks the stale-source
  *  fetch, never surfaces an error to the UI (self-healing: the next file
@@ -73,9 +108,24 @@ export function useStaleSourceCells(
     useState<ReadonlySet<string>>(EMPTY)
   const [tombstonedCellIds, setTombstonedCellIds] =
     useState<ReadonlySet<string>>(EMPTY)
+  const [upstreamStaleCellIds, setUpstreamStaleCellIds] =
+    useState<ReadonlySet<string>>(EMPTY)
   const [behindSeq, setBehindSeq] = useState<BehindSeq | null>(null)
+  const [ancestorBehind, setAncestorBehind] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [isError, setIsError] = useState(false)
+
+  /** Reset every derived field to its empty/quiet steady state — used on
+   *  disable, auth-retry exhaustion, and transient fetch errors (staleness
+   *  is a soft signal; the fallback is always "nothing is stale," never an
+   *  error state that freezes the editor). */
+  const resetToEmpty = useCallback(() => {
+    setStaleCellIds(EMPTY)
+    setTombstonedCellIds(EMPTY)
+    setUpstreamStaleCellIds(EMPTY)
+    setBehindSeq(null)
+    setAncestorBehind(false)
+  }, [])
   const generationRef = useRef(0)
   const projectRef = useRef(projectId)
   const fileRef = useRef(fileId)
@@ -94,9 +144,7 @@ export function useStaleSourceCells(
     const enabled = enabledRef.current
     const getToken = tokenRef.current
     if (!enabled || !pid || !fid) {
-      setStaleCellIds(EMPTY)
-      setTombstonedCellIds(EMPTY)
-      setBehindSeq(null)
+      resetToEmpty()
       setIsLoading(false)
       setIsError(false)
       return
@@ -113,9 +161,7 @@ export function useStaleSourceCells(
         // is the right fallback.
         const attempt = ++tokenAttemptsRef.current
         if (attempt >= 6) {
-          setStaleCellIds(EMPTY)
-          setTombstonedCellIds(EMPTY)
-          setBehindSeq(null)
+          resetToEmpty()
           setIsLoading(false)
           setIsError(false)
           return
@@ -136,7 +182,9 @@ export function useStaleSourceCells(
       if (generationRef.current !== gen) return
       setStaleCellIds(new Set(body.staleCellIds ?? []))
       setTombstonedCellIds(new Set(body.tombstonedCellIds ?? []))
+      setUpstreamStaleCellIds(new Set(body.upstreamStaleCellIds ?? []))
       setBehindSeq(body.behindSeq ?? null)
+      setAncestorBehind(body.ancestorBehind ?? false)
       setIsLoading(false)
     } catch (err) {
       if (generationRef.current !== gen) return
@@ -147,13 +195,11 @@ export function useStaleSourceCells(
       } else {
         console.warn("[useStaleSourceCells] fetch failed:", err)
       }
-      setStaleCellIds(EMPTY)
-      setTombstonedCellIds(EMPTY)
-      setBehindSeq(null)
+      resetToEmpty()
       setIsError(true)
       setIsLoading(false)
     }
-  }, [])
+  }, [resetToEmpty])
 
   useEffect(() => {
     void doFetch()
@@ -190,5 +236,14 @@ export function useStaleSourceCells(
     }
   }, [doFetch])
 
-  return { staleCellIds, tombstonedCellIds, behindSeq, isLoading, isError, revalidate: doFetch }
+  return {
+    staleCellIds,
+    tombstonedCellIds,
+    upstreamStaleCellIds,
+    behindSeq,
+    ancestorBehind,
+    isLoading,
+    isError,
+    revalidate: doFetch,
+  }
 }

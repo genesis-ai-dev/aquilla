@@ -471,6 +471,11 @@ interface EditorTableProps {
    *  StaleSourceIndicator badge next to its validation status. Parent fetches
    *  once per file via `useStaleSourceCells` so we don't issue N requests. */
   staleCellIds?: ReadonlySet<string>
+  /** FRO-477 (§6) — set of cell ids whose ANCESTRY is stale (inherited, a
+   *  further-upstream chain hop changed). Renders the violet/dotted second
+   *  tone on `StaleSourceIndicator`, layered onto the same prop path as
+   *  `staleCellIds` above. */
+  upstreamStaleCellIds?: ReadonlySet<string>
   /** Token fetcher for project-scoped sync reads. Required for the inline
    *  History tab to query the D1 event log on demand. */
   getTokenForFile?: (fileId: string) => Promise<string | null>
@@ -533,6 +538,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   cellsWithRemoteChange,
   onClaimCell, onReleaseCell, onAckRemoteChange,
   staleCellIds,
+  upstreamStaleCellIds,
   getTokenForFile,
   getAlignmentModel,
   onAlignmentSeedChange,
@@ -1164,6 +1170,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onActivateEditor={handleActivateEditor}
           onDeactivateEditor={handleDeactivateEditor}
           isStaleSource={staleCellIds?.has(cell.id) ?? false}
+          isUpstreamStaleSource={upstreamStaleCellIds?.has(cell.id) ?? false}
           username={username}
           editable={canEdit}
           canValidate={canValidate}
@@ -1298,6 +1305,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     sourceFontSize,
     sourceTextDirection,
     staleCellIds,
+    upstreamStaleCellIds,
     targetFontSize,
     targetTextDirection,
     username,
@@ -1411,6 +1419,10 @@ interface MemoizedRowProps {
    *  Resolved once per file by the parent (membership look-up) so this prop
    *  is just a stable boolean — preserves the row's React.memo invariant. */
   isStaleSource: boolean
+  /** FRO-477 (§6): this cell's ANCESTRY is stale (a further-upstream chain
+   *  hop changed). Same "stable boolean, resolved by the parent" shape as
+   *  `isStaleSource` above. */
+  isUpstreamStaleSource: boolean
   onCellCommitted?: (cellId: string, committedEventId?: string) => void | Promise<void>
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
@@ -1524,6 +1536,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onAckRemoteChange,
     isStaleSource,
+    isUpstreamStaleSource,
     assigneeLabel,
     assigneeNote,
     checkLockHolder,
@@ -1610,6 +1623,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         editable={editable}
         canValidate={canValidate}
         isStaleSource={isStaleSource}
+        isUpstreamStaleSource={isUpstreamStaleSource}
         isCompletionConfigured={isCompletionConfigured}
         isCompletionAvailable={isCompletionAvailable}
         isLoading={isLoading}
@@ -1695,6 +1709,10 @@ interface EditorRowProps {
    *  target commit. Renders a small warning badge next to the validation
    *  status. Computed once-per-file by the parent. */
   isStaleSource: boolean
+  /** FRO-477 (§6) — true when this cell's ANCESTRY is stale (a further-
+   *  upstream chain hop changed). Renders the violet/dotted second tone.
+   *  Same once-per-file computation shape as `isStaleSource`. */
+  isUpstreamStaleSource: boolean
   onCellCommitted?: (cellId: string, committedEventId?: string) => void
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
@@ -2455,6 +2473,7 @@ function EditorRow({
   onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onAckRemoteChange,
   isStaleSource,
+  isUpstreamStaleSource,
   getTokenForFile,
   getAlignmentModel,
   onAlignmentSeedChange,
@@ -3596,11 +3615,15 @@ function EditorRow({
               )}
             </AppTooltip>
           )}
-          {/* Stale-source indicator alongside validate button */}
-          {isStaleSource && hasContent && (
+          {/* Stale-source indicator alongside validate button. Both flags
+              are already resolved per-row booleans (see isStaleSource's doc
+              comment) — the singleton Set(s) just adapt them to the
+              indicator's managed-mode membership-set contract. */}
+          {(isStaleSource || isUpstreamStaleSource) && hasContent && (
             <StaleSourceIndicator
               cellId={cell.id}
-              staleCellIds={new Set([cell.id])}
+              staleCellIds={isStaleSource ? new Set([cell.id]) : new Set()}
+              upstreamStaleCellIds={isUpstreamStaleSource ? new Set([cell.id]) : new Set()}
             />
           )}
           {(isSynthBusy || isSynthError) && (

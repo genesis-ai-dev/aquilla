@@ -36,6 +36,19 @@ export interface StaleSourceResponse {
    */
   tombstonedCellIds: StaleCellId[]
   /**
+   * FRO-477: cell ids whose ANCESTRY is stale (design spec §6's per-hop
+   * chain walk) — an ancestor hop above the immediate upstream changed, or
+   * the immediate upstream's own translation is itself stale against its
+   * source (the "dormant middle hop" case: English fixed, French never
+   * re-synced, Chaluba must still flag). Distinct from `staleCellIds`
+   * (direct, single-hop) — the UI renders a second, visually distinct tone
+   * for this set (violet/hollow vs. amber) so a translator can tell "my
+   * immediate source changed" from "something further upstream changed."
+   * A cell can appear in only one of the two sets at a time in the common
+   * case, but the UI should not assume disjointness.
+   */
+  upstreamStaleCellIds: StaleCellId[]
+  /**
    * The upstream project id used for the join, or null when the project
    * is self-contained (in which case the join is against the project's
    * own source side and only meaningful if a `target.cell.commit` was
@@ -48,4 +61,11 @@ export interface StaleSourceResponse {
    * projects, or when the live link has nothing unmirrored.
    */
   behindSeq: BehindSeq | null
+  /**
+   * FRO-477: true iff some ancestor further up the chain (beyond the
+   * immediate upstream) is itself behind ITS upstream. Link-granularity
+   * only (§6 step 3 / §15 — v1 does not attempt per-cell precision for
+   * this case); surfaced as a banner-level signal, not a per-cell flag.
+   */
+  ancestorBehind: boolean
 }

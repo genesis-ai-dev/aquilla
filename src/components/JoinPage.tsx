@@ -105,31 +105,49 @@ export function JoinPage() {
     // Prefer the multi-project accept — it also redeems a single-project token
     // (one row) — then fall back to the legacy single-project accept.
     const multi = await acceptMultiInvite(jwt, token)
-    if (multi && multi.accepted.length > 0) {
+    if (multi.ok && multi.data.accepted.length > 0) {
       posthog.capture(INVITE_REDEEMED, {
         invite_kind: "multi",
-        project_count: multi.accepted.length,
-        project_id: multi.accepted[0].projectId,
+        project_count: multi.data.accepted.length,
+        project_id: multi.data.accepted[0].projectId,
       })
-      navigate(`/project/${multi.accepted[0].projectId}`)
+      navigate(`/project/${multi.data.accepted[0].projectId}`)
       return
     }
     const single = await acceptServerInvite(jwt, token)
-    if (single) {
+    if (single.ok) {
       posthog.capture(INVITE_REDEEMED, {
         invite_kind: "single",
         project_count: 1,
-        project_id: single.projectId,
+        project_id: single.data.projectId,
       })
-      navigate(`/project/${single.projectId}`)
+      navigate(`/project/${single.data.projectId}`)
       return
     }
-    // Both accepts failed. If the session lapsed mid-flow, the failure was a
-    // 401 on an expired token, not a dead invite — fall back to the sign-in
-    // card (which renders because hasValidSession is now false) so the user
-    // can re-auth and accept, instead of seeing a misleading dead-link error.
-    if (isJwtExpired(jwt)) {
+
+    // Both accepts failed. FRO-364: an expired-JWT stored session used to
+    // land here as "invite invalid" — extended to ANY 401/network failure,
+    // since neither is evidence the invite itself is dead. Only a
+    // definitive server verdict (410 used/expired, 404 unknown token, 403
+    // wrong email) should render the "ask for a fresh link" error.
+    //
+    // isJwtExpired(jwt) covers a stored JWT that was already stale before
+    // this call; single.reason === "unauthorized" additionally covers a JWT
+    // that LOOKED valid client-side (unexpired `exp`) but the server still
+    // rejected — e.g. a session that only just finished signing up. Both
+    // re-prompt sign-in instead of showing a dead-invite error.
+    if (isJwtExpired(jwt) || single.reason === "unauthorized") {
       setPhase("initial")
+      return
+    }
+    if (single.reason === "network") {
+      setPhase("error")
+      setError("Couldn't reach the server. Check your connection and try again.")
+      return
+    }
+    if (single.reason === "wrong_email") {
+      setPhase("error")
+      setError("This invite was sent to a different email address.")
       return
     }
     setPhase("error")

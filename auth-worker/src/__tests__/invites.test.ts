@@ -919,3 +919,71 @@ describe("FRO-429: multi-invite preview returns code field distinguishing used v
     expect(body.code).toBe("time_expired")
   })
 })
+
+// ── FRO-364: magic-link invite instantly invalid on accept ──────────────────
+//
+// Repro from the ticket: a project_lead mints a magic-link (email-bound,
+// single-project) invite via POST /:projectId/invites → the invitee clicks
+// "Accept invitation" immediately. JoinPage's redeem() tries the MULTI accept
+// endpoint FIRST (POST /api/v2/invites/:token/accept) for every token —
+// including single-project ones minted by the legacy endpoint — and only
+// falls back to the legacy accept if the multi accept returns nothing
+// accepted. This test drives that exact real path end-to-end.
+describe("FRO-364: magic-link invite accept — real redeem path via JoinPage's endpoint order", () => {
+  it("accepts a freshly-minted email-bound single-project invite via the multi accept endpoint immediately", async () => {
+    await seedUser(20, "lead20") // project_lead, mints the invite
+    await seedUser(21, "invitee21") // email: invitee21@example.com
+
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 20)",
+    )
+      .bind("p-fro364", "FRO-364 project")
+      .run()
+
+    // Mint the magic-link invite exactly as POST /:projectId/invites does:
+    // email-bound, 7-day expiry (mirrors the ticket's "expires in 7 days").
+    const createRes = await app.request(
+      "/api/v2/projects/p-fro364/invites",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("lead20")),
+        body: JSON.stringify({
+          role: 400,
+          email: "invitee21@example.com",
+          expires_in_days: 7,
+        }),
+      },
+      env,
+    )
+    expect(createRes.status).toBe(200)
+    const { token } = (await createRes.json()) as { token: string }
+
+    // Invitee clicks "Accept invitation" immediately — JoinPage's redeem()
+    // tries the multi endpoint first, for every token.
+    const acceptRes = await app.request(
+      `/api/v2/invites/${token}/accept`,
+      { method: "POST", headers: authHeader(await jwtFor("invitee21")) },
+      env,
+    )
+
+    // BUG (FRO-364): the multi accept endpoint queries project_invites by
+    // token and finds the one row (single-project invites share the same
+    // table), but the row's `email` column IS set — so the multi accept's
+    // email-bound guard should pass. Expect success end-to-end: the real
+    // failure mode reported by QA was "invite link no longer valid" (410
+    // "used" or 404), which this assertion pins to fail until fixed.
+    expect(acceptRes.status).toBe(200)
+    const body = (await acceptRes.json()) as {
+      token: string
+      accepted: { projectId: string; role: number }[]
+    }
+    expect(body.accepted).toEqual([{ projectId: "p-fro364", role: 400 }])
+
+    const member = await env.AQUILLA_PG.prepare(
+      "SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ?",
+    )
+      .bind("p-fro364", 21)
+      .first<{ role_level: number }>()
+    expect(member?.role_level).toBe(400)
+  })
+})

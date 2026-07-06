@@ -8,14 +8,14 @@ Base: `dev` @ `03ff391c9`. Integration branch: `swarm/linkedproj-integration`
 NOTE: dev is being advanced by other actors concurrently — re-check dev tip before every promotion
 (memory: concurrent orchestrators churn; promote fast once green, compose don't pick-one on conflicts).
 
-## §0 STOP checklist
-- [ ] FRO-476, FRO-477, FRO-478, FRO-479 each at **Fixed** (verified) or honestly blocked with a Linear note.
-- [ ] Integration green: `npx tsc -b --noEmit` + `npx vitest run`; `npm run build` before promotion.
-- [ ] sync-worker (`cd sync-worker && npx tsc --noEmit && npm test`) and auth-worker green — all four issues touch workers.
-- [ ] Each fix verified on the real dev stack (live UI) before Fixed (one UI-QA singleton per wave).
-- [ ] Migrations added to BOTH auth-worker/sync-worker migrations AND db/postgres/schema.sql (D1↔Neon drift memory).
-- [ ] Promoted to dev only with dev's tree clean; dev tip re-checked at promotion time.
-- [ ] Gaps traced in docs/swarm/LINKEDPROJ-TRACES.md.
+## §0 STOP checklist — ALL GREEN 2026-07-06, swarm converged; promoted to dev @ 4e17594f8
+- [x] FRO-476, FRO-477, FRO-478, FRO-479 each at **Fixed** (verified) or honestly blocked with a Linear note.
+- [x] Integration green: `npx tsc -b --noEmit` + `npx vitest run`; `npm run build` before promotion.
+- [x] sync-worker (`cd sync-worker && npx tsc --noEmit && npm test`) and auth-worker green — all four issues touch workers.
+- [x] Each fix verified on the real dev stack (live UI) before Fixed (one UI-QA singleton per wave).
+- [x] Migrations added to BOTH auth-worker/sync-worker migrations AND db/postgres/schema.sql (D1↔Neon drift memory).
+- [x] Promoted to dev only with dev's tree clean; dev tip re-checked at promotion time.
+- [x] Gaps traced in docs/swarm/LINKEDPROJ-TRACES.md.
 
 ## §EXCLUDED
 - Nothing excluded: all 4 issues eligible (Todo, unassigned, no dirty files on dev at start).
@@ -53,3 +53,9 @@ stale-source-route.ts owned by 477 in wave 2 (478 consumes response client-side 
 - 2026-07-06 · lp-qa-fixes · 2ac232505 (merged) · FULL GATE green: tsc 0 · root 3439 · sync-worker 704 · auth-worker 521 · build OK. Root causes: snapshotSourceCells never copied files + global files.id PK (naive copy mutated UPSTREAM row — fixed w/ fresh file ids + cell remap); seeded flag + client fallback + zero-file self-heal; syncNow() awaits sync then revalidates staleness+cells; single non-retriggering settle-fetch. Linear back up: QA comments posted on FRO-476/479 (statuses stay Fixed, gated on round-2 re-verify). Round-2 scoped live QA dispatched.
 - 2026-07-06 · ROUND-2 LIVE QA: ALL 3 FIXES PASS (punchlist Round 2 @ 6916c7a7f). Live seed at creation ✓ (incl. zero-file self-heal of a pre-fix empty project); clone snapshot-at-birth ✓ (upstream file rows untouched); push badge+TEXT live-update ✓, transient tone gone. Seed path exercised = client fallback; server-side path was locally unreachable due to dev-stack SYNC_WORKER_URL passed as process env (never reaches c.env) → FIXED @ ab5ef543f (--var). Round-2 residual: upstream picker still shows raw UUID (cosmetic, traced).
 - 2026-07-06 · PROMOTION HELD: dev working tree has ANOTHER actor's uncommitted edit to src/components/ProjectCreateDialog.tsx (PD7 swarm, DialogBody scroll refactor) — overlaps our branch; per skill, hold, never clobber. Monitor armed (notify when file clears). Final integration tsc re-run in background (machine contended by PD7's tsc/vitest). All four issues at Fixed in Linear with round-2 evidence.
+
+## §FINAL 2026-07-06
+Promoted to dev @ 4e17594f8 (merge; ProjectCreateDialog conflict composed with PD7's DialogBody refactor;
+post-merge gate: tsc 0, root 3439 pass incl. 4 linked-dialog tests). Agent worktrees removed; branches retained.
+NOT pushed to origin (deliberate — dev push triggers deploy.yml which clobbers prod SPA with the api.dev build; Ryder's call).
+Deploy prerequisites: 0050 migration on live Neon; check SYNC_WORKER_URL config on deployed auth-worker envs.

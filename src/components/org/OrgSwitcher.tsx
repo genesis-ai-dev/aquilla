@@ -5,7 +5,6 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { isOrgScopedRoute } from "./org-route-scope"
 import { OrgCreateDialog } from "./OrgCreateDialog"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,7 +14,32 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
-function OrgMark({ name, allOrgs = false }: { name: string; allOrgs?: boolean }) {
+const ORG_MENU_ITEM_CLASS =
+  "grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-0 gap-x-2 px-2 py-1.5"
+
+function OrgMark({
+  name,
+  allOrgs = false,
+  create = false,
+}: {
+  name: string
+  allOrgs?: boolean
+  create?: boolean
+}) {
+  if (create) {
+    return (
+      <InitialsAvatar
+        name={name}
+        size="xs"
+        shape="square"
+        menuSafe
+        menuSafeColor="var(--muted-foreground)"
+        fallbackClassName="bg-muted"
+      >
+        <Plus className="size-3" />
+      </InitialsAvatar>
+    )
+  }
   if (allOrgs) {
     return (
       <InitialsAvatar
@@ -90,13 +114,13 @@ export function OrgSwitcher() {
           <span className="truncate font-medium">{title}</span>
           <ChevronDown className="ml-auto size-4 opacity-50" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-64 rounded-lg" align="start" side="bottom" sideOffset={4}>
+        <DropdownMenuContent className="w-72 rounded-lg" align="start" side="bottom" sideOffset={4}>
           <DropdownMenuGroup>
             {showAllOrgs && (
-              <DropdownMenuItem className="gap-2 p-2" onClick={handleAllOrgs}>
+              <DropdownMenuItem className={ORG_MENU_ITEM_CLASS} onClick={handleAllOrgs}>
                 <OrgMark name="All organizations" allOrgs />
                 <span className="truncate">All organizations</span>
-                <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                <span className="flex shrink-0 items-center gap-1.5">
                   <span className="text-xs text-muted-foreground">All projects</span>
                   {isAllOrgs && <Check className="size-4 opacity-60" />}
                 </span>
@@ -108,12 +132,12 @@ export function OrgSwitcher() {
               return (
                 <DropdownMenuItem
                   key={o.id}
-                  className="gap-2 p-2"
+                  className={ORG_MENU_ITEM_CLASS}
                   onClick={() => handleActiveOrg(o.id)}
                 >
                   <OrgMark name={name} />
                   <span className="truncate">{name}</span>
-                  <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                  <span className="flex shrink-0 items-center gap-1.5">
                     <span className="text-xs text-muted-foreground">{o.role.name}</span>
                     {selected && <Check className="size-4 opacity-60" />}
                   </span>
@@ -121,17 +145,11 @@ export function OrgSwitcher() {
               )
             })}
           </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem className="gap-2 p-2" onClick={openCreateDialog}>
-            <Avatar className="size-5 rounded-md after:rounded-md">
-              <AvatarFallback
-                className="rounded-md border bg-background"
-                style={{ color: "var(--muted-foreground)" }}
-              >
-                <Plus className="size-3" />
-              </AvatarFallback>
-            </Avatar>
-            <span className="font-medium text-muted-foreground">Create</span>
+          <DropdownMenuSeparator className="mx-0 my-1" />
+          <DropdownMenuItem className={ORG_MENU_ITEM_CLASS} onClick={openCreateDialog}>
+            <OrgMark name="Create" create />
+            <span className="truncate text-muted-foreground">Create</span>
+            <span aria-hidden />
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

@@ -4,6 +4,7 @@ import { Info } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -136,93 +137,101 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
         <DialogHeader>
           <DialogTitle>Create New Project</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="space-y-2">
-            <Label htmlFor="name">Project name</Label>
-            <Input
-              id="name"
-              className={FIELD_CLASS}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="My Translation Project"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center gap-1.5">
-              <Label htmlFor="source" layout="inline">Source language</Label>
-              <LanguageFieldHint />
+        {/* FRO-458-style fix: the fields scroll as one region (DialogBody)
+            while the submit button stays put — the "Advanced" disclosure can
+            push content past max-h-[85dvh], and DialogContent's own
+            overflow-hidden was clipping the lower radio options with no way
+            to reach them. `contents` keeps the <form> out of the flex layout
+            so DialogBody sizes against DialogContent directly. */}
+        <form onSubmit={handleSubmit} className="contents">
+          <DialogBody className="space-y-5">
+            <div className="space-y-2">
+              <Label htmlFor="name">Project name</Label>
+              <Input
+                id="name"
+                className={FIELD_CLASS}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="My Translation Project"
+              />
             </div>
-            <Input
-              id="source"
-              className={FIELD_CLASS}
-              value={sourceLanguage}
-              onChange={(e) => setSourceLanguage(e.target.value)}
-              placeholder="English, Grade 7 English, es-419…"
-            />
-          </div>
 
-          {shape !== "source-only" && (
             <div className="space-y-2">
               <div className="flex items-center gap-1.5">
-                <Label htmlFor="target" layout="inline">Target language</Label>
+                <Label htmlFor="source" layout="inline">Source language</Label>
                 <LanguageFieldHint />
               </div>
               <Input
-                id="target"
+                id="source"
                 className={FIELD_CLASS}
-                value={targetLanguage}
-                onChange={(e) => setTargetLanguage(e.target.value)}
-                placeholder="French, conversational Swahili, zh-Hant…"
+                value={sourceLanguage}
+                onChange={(e) => setSourceLanguage(e.target.value)}
+                placeholder="English, Grade 7 English, es-419…"
               />
             </div>
-          )}
 
-          {/* AD-9 project-shape picker, tucked behind an "Advanced" disclosure
-              and placed after the primary fields so the default create flow is
-              just name + languages. Self-contained is the assumed shape and
-              matches the VS-Code-extension muscle memory. */}
-          <details className="rounded-xl border px-3 py-2.5 [&[open]>summary]:mb-3">
-            <summary className="cursor-pointer text-xs font-medium text-muted-foreground select-none">
-              Advanced: project shape
-            </summary>
-            <RadioGroup
-              value={shape}
-              onValueChange={(value) => pickShape(value as ProjectShape)}
-              className="gap-3 pt-1"
-            >
-              <label className="flex items-start gap-2.5 text-sm">
-                <RadioGroupItem value="self-contained" className="mt-0.5" />
-                <span>
-                  <strong>Self-contained</strong> — owns its source and target.
-                </span>
-              </label>
-              <label className="flex items-start gap-2.5 text-sm">
-                <RadioGroupItem value="source-only" className="mt-0.5" />
-                <span>
-                  <strong>Source-only</strong> — a canonical source others link
-                  against. No target.
-                </span>
-              </label>
-              <label className="flex items-start gap-2.5 text-sm">
-                <RadioGroupItem value="linked-target" className="mt-0.5" />
-                <span>
-                  <strong>Linked target</strong> — reads source from another
-                  project; owns only its target.
-                </span>
-              </label>
-            </RadioGroup>
-          </details>
+            {shape !== "source-only" && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="target" layout="inline">Target language</Label>
+                  <LanguageFieldHint />
+                </div>
+                <Input
+                  id="target"
+                  className={FIELD_CLASS}
+                  value={targetLanguage}
+                  onChange={(e) => setTargetLanguage(e.target.value)}
+                  placeholder="French, conversational Swahili, zh-Hant…"
+                />
+              </div>
+            )}
 
-          {error && (
-            <p className="text-sm text-destructive" role="alert">
-              {error}
-            </p>
-          )}
+            {/* AD-9 project-shape picker, tucked behind an "Advanced" disclosure
+                and placed after the primary fields so the default create flow is
+                just name + languages. Self-contained is the assumed shape and
+                matches the VS-Code-extension muscle memory. */}
+            <details className="rounded-xl border px-3 py-2.5 [&[open]>summary]:mb-3">
+              <summary className="cursor-pointer text-xs font-medium text-muted-foreground select-none">
+                Advanced: project shape
+              </summary>
+              <RadioGroup
+                value={shape}
+                onValueChange={(value) => pickShape(value as ProjectShape)}
+                className="gap-3 pt-1"
+              >
+                <label className="flex items-start gap-2.5 text-sm">
+                  <RadioGroupItem value="self-contained" className="mt-0.5" />
+                  <span>
+                    <strong>Self-contained</strong> — owns its source and target.
+                  </span>
+                </label>
+                <label className="flex items-start gap-2.5 text-sm">
+                  <RadioGroupItem value="source-only" className="mt-0.5" />
+                  <span>
+                    <strong>Source-only</strong> — a canonical source others link
+                    against. No target.
+                  </span>
+                </label>
+                <label className="flex items-start gap-2.5 text-sm">
+                  <RadioGroupItem value="linked-target" className="mt-0.5" />
+                  <span>
+                    <strong>Linked target</strong> — reads source from another
+                    project; owns only its target.
+                  </span>
+                </label>
+              </RadioGroup>
+            </details>
+
+            {error && (
+              <p className="text-sm text-destructive" role="alert">
+                {error}
+              </p>
+            )}
+          </DialogBody>
 
           <Button
             type="submit"
-            className="h-9 w-full"
+            className="h-9 w-full shrink-0"
             disabled={!canSubmit() || submitting}
           >
             {submitting ? "Creating…" : "Create Project"}

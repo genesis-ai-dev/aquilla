@@ -30,6 +30,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { SegmentTabs } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
@@ -47,11 +48,12 @@ import { buildProjectZip } from "@/lib/export/project-zip-export"
 import type { TextExportFormat } from "@/lib/export/project-zip-export"
 import { previewAudioByCharacter } from "@/lib/export/audio-by-character"
 import { exportMetadataCsv } from "@/lib/export/exporters/metadata-csv"
+import { injectSdbhXml } from "@/lib/parsers/sdbh"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "audio-by-character" | "docx" | "plain-text-dump" | "metadata-csv"
+export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "audio-by-character" | "docx" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
 
 interface FormatOption {
@@ -77,6 +79,15 @@ const FORMAT_OPTIONS: FormatOption[] = [
     label: "Word (.docx)",
     ext: ".docx",
     description: "Translations injected back into the original Word document. Paragraph/heading structure is preserved; per-run bold/italic inside translated paragraphs is not preserved. Requires the original file to have been imported after round-trip export support was added (files larger than 512 KB at import may not support this).",
+    lossy: false,
+  },
+  {
+    // SDBH lexicon round-trip: translations reinjected into the MARBLE XML
+    // edition, keyed by LEXID. Only shown when the project has SDBH files.
+    id: "sdbh-xml",
+    label: "SDBH XML (MARBLE)",
+    ext: ".XML",
+    description: "Localized lexicon reinjected into the original MARBLE XML edition — pick the original SDBH-<lang>.XML as the skeleton. Whole-project export across all lexicon files.",
     lossy: false,
   },
   {
@@ -236,7 +247,13 @@ export function ExportDialog({
   // audio-by-character, vtt, docx, and plain-text-dump only support file scope.
   const fileOnlyFormats = ["audio-by-character", "vtt", "docx", "plain-text-dump"] as const
   const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
-  const effectiveScope: ExportScope = isFileOnlyFormat ? "file" : scope
+  // SDBH XML reinjection spans every lexicon file — inherently project scope.
+  const isProjectOnlyFormat = format === "sdbh-xml"
+  const effectiveScope: ExportScope = isProjectOnlyFormat ? "project" : isFileOnlyFormat ? "file" : scope
+
+  // SDBH XML export needs the original MARBLE edition as the skeleton.
+  const [sdbhSkeleton, setSdbhSkeleton] = useState<File | null>(null)
+  const hasSdbhFiles = projectFiles.some((f) => f.type === "sdbh")
 
   // Reset scope to "file" when switching to a file-only format.
   useEffect(() => {
@@ -290,7 +307,7 @@ export function ExportDialog({
   // Load cells for all project files when project scope is selected and the
   // format is a client-side one. Disabled until the user actually picks
   // project scope so we don't fan-out N fetches on dialog open.
-  const projectScopeEnabled = scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "vtt" && format !== "docx" && format !== "plain-text-dump"
+  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "vtt" && format !== "docx" && format !== "plain-text-dump")
 
   const { files: projectFileCells, isLoading: projectCellsLoading, isTruncated } =
     useProjectCells({
@@ -398,6 +415,38 @@ export function ExportDialog({
         downloadBlob(result.blob, `${safe}_audio-by-character.zip`)
         const skippedNote = result.skipped > 0 ? ` (${result.skipped} clip${result.skipped === 1 ? "" : "s"} skipped)` : ""
         setStatus({ kind: "ok", msg: `Exported audio by character${skippedNote}` })
+      } else if (format === "sdbh-xml") {
+        // SDBH round-trip: reinject every translated lexicon cell into the
+        // user-supplied MARBLE XML skeleton, keyed by LEXID-derived cell ids.
+        if (!sdbhSkeleton) {
+          setStatus({ kind: "error", msg: "Choose the original SDBH-<lang>.XML file as the skeleton first." })
+          return
+        }
+        if (projectCellsLoading) {
+          setStatus({ kind: "busy", msg: "Still loading file cells, please wait…" })
+          return
+        }
+        const byCellId = new Map<string, string>()
+        for (const f of projectFileCells) {
+          for (const c of f.cells) {
+            if (c.translated) byCellId.set(c.id, c.translated)
+          }
+        }
+        const skeletonXml = await sdbhSkeleton.text()
+        const lang = targetLanguage && targetLanguage !== "und" ? targetLanguage : undefined
+        const { xml, sensesInjected, warnings } = injectSdbhXml(skeletonXml, {
+          byCellId,
+          languageCode: lang,
+          rewriteDomainLabels: true,
+        })
+        if (sensesInjected === 0) {
+          setStatus({ kind: "error", msg: "No LEXMeaning entries found — is that file a MARBLE SDBH XML edition?" })
+          return
+        }
+        const stem = buildExportStem(true)
+        downloadBlob(new Blob([xml], { type: "application/xml" }), `${stem}.XML`)
+        const warnNote = warnings.length ? ` — ${warnings.length} gloss warning(s), check semicolons` : ""
+        setStatus({ kind: "ok", msg: `Reinjected ${byCellId.size.toLocaleString()} translations into ${sensesInjected.toLocaleString()} senses${warnNote}` })
       } else if (effectiveScope === "project") {
         // Client-side project-scope zip: use already-loaded per-file cells.
         if (projectCellsLoading) {
@@ -512,6 +561,7 @@ export function ExportDialog({
             {FORMAT_OPTIONS.filter((f) => {
               if (f.id === "usfm") return isUsfmFile
               if (f.id === "docx") return isDocxFile // FRO-233: only for docx imports
+              if (f.id === "sdbh-xml") return hasSdbhFiles // SDBH round-trip: only for lexicon projects
               if (f.id === "plain-text-dump") return false // shown in Advanced section only
               return true
             }).map((f) => (
@@ -551,41 +601,44 @@ export function ExportDialog({
           <legend className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
             Scope
           </legend>
-          <RadioGroup
+          <SegmentTabs<ExportScope>
             value={effectiveScope}
-            onValueChange={(value) => setScope(value as ExportScope)}
-            className="inline-flex w-auto items-center gap-0.5 rounded-full bg-muted/40 p-0.5 self-start"
             aria-label="Export scope"
-          >
-            {(["file", "project"] as const).map((s) => {
-              const isProjectDisabled = s === "project" && isFileOnlyFormat
-              return (
-                <label
-                  key={s}
-                  className={
-                    "inline-flex h-6 items-center rounded-full px-3 text-[11px] font-medium tracking-tight transition-colors " +
-                    (isProjectDisabled
-                      ? "cursor-not-allowed opacity-40 text-muted-foreground"
-                      : "cursor-pointer ") +
-                    (effectiveScope === s && !isProjectDisabled
-                      ? "bg-background text-foreground shadow-sm ring-1 ring-foreground/5"
-                      : (!isProjectDisabled ? "text-muted-foreground hover:text-foreground" : ""))
-                  }
-                >
-                  <RadioGroupItem
-                    value={s}
-                    disabled={isProjectDisabled}
-                    className="sr-only"
-                  />
-                  {s === "file" ? "Current file" : "Whole project"}
-                </label>
-              )
-            })}
-          </RadioGroup>
+            className="self-start"
+            options={[
+              { label: "Current file", value: "file", disabled: isProjectOnlyFormat },
+              { label: "Whole project", value: "project", disabled: isFileOnlyFormat },
+            ]}
+            onValueChange={setScope}
+          />
           {isFileOnlyFormat && (
             <p className="text-[10px] text-muted-foreground mt-0.5">
               Project scope not supported for this format.
             </p>
+          )}
+          {isProjectOnlyFormat && (
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              This format always exports the whole project.
+            </p>
+          )}
+
+          {/* SDBH XML skeleton picker — the original MARBLE edition to reinject into. */}
+          {format === "sdbh-xml" && (
+            <div className="mt-1.5 flex flex-col gap-1">
+              <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer self-start" />}>
+                {sdbhSkeleton ? sdbhSkeleton.name : "Choose skeleton (SDBH-<lang>.XML)"}
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".xml,.XML"
+                  onChange={(e) => setSdbhSkeleton(e.target.files?.[0] ?? null)}
+                />
+              </Button>
+              <p className="text-[10px] text-muted-foreground">
+                Usually the same edition you imported — its structure is preserved byte-for-byte; only the
+                localized definition, gloss, comment, and domain-label text is replaced.
+              </p>
+            </div>
           )}
 
           {/* Project-scope notices */}

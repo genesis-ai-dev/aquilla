@@ -9,7 +9,8 @@
     "6ecec038-70e8-5e62-8087-8afbe1bc3548",
     "d51f82a7-a50c-5897-9c38-b4a2272c370a",
     "d04c4f29-a7cb-55e3-9c2b-5fe5eedcfbd2",
-    "40be0415-2364-5ec8-8c5d-e2ad6d99e760"
+    "40be0415-2364-5ec8-8c5d-e2ad6d99e760",
+    "3f4ca834-7cbe-517a-8504-a62108ff3bce"
   ],
   "projectNotes": {
     "41ee4729-6862-51b1-b89c-47401d1a7850": "bestalu-bible (BCS) — flagship large",
@@ -19,7 +20,8 @@
     "6ecec038-70e8-5e62-8087-8afbe1bc3548": "hindi-pilgrims-progress (BCS) — tiny single-file",
     "d51f82a7-a50c-5897-9c38-b4a2272c370a": "commentaries-test (BCS) — smallest, commentary kind",
     "d04c4f29-a7cb-55e3-9c2b-5fe5eedcfbd2": "audio-dubbing-playground (Come and See) — audio surface",
-    "40be0415-2364-5ec8-8c5d-e2ad6d99e760": "Copy-of-test-matthew-audio-dubbing (Chosen-test-playground) — small audio"
+    "40be0415-2364-5ec8-8c5d-e2ad6d99e760": "Copy-of-test-matthew-audio-dubbing (Chosen-test-playground) — small audio",
+    "3f4ca834-7cbe-517a-8504-a62108ff3bce": "gitOld-Algerian — Git import regression test project"
   },
   "scrub": {
     "emailDomain": "example.test",

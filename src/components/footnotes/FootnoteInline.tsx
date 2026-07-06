@@ -8,6 +8,7 @@
 
 import { useState, useEffect, type ReactNode } from "react"
 import { X } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { cn } from "@/lib/utils"
@@ -158,14 +159,15 @@ export function FootnotesTray({
             {visibleFootnoteCount}
           </span>
           {onClose && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-sm"
               aria-label="Close footnotes tray"
-              className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
               onClick={onClose}
             >
               <X className="h-4 w-4" />
-            </button>
+            </Button>
           )}
         </div>
       </div>

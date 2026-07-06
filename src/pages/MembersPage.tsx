@@ -415,7 +415,7 @@ function PendingInviteRow({
           )}
         </div>
         <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-          <span>by {invite.createdBy.username}</span>
+          <span>by {invite.createdBy?.username ?? "unknown"}</span>
           <span>·</span>
           <Clock className="h-2.5 w-2.5" />
           <span>{futureLabel ?? expiresLabel}</span>

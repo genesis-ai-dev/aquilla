@@ -1464,6 +1464,8 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
       throw new Error("eBible translations import via importEBible(), not importFile()")
     case "helloao":
       throw new Error("Hello AO translations import via importHelloao(), not importFile()")
+    case "sdbh":
+      throw new Error("SDBH lexicon editions import via importSdbh(), not importFile()")
     case "audio":
     case "video":
       // Media files have no text parser; importFile() routes them to

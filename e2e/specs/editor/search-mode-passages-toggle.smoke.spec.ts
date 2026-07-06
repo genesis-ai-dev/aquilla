@@ -10,15 +10,12 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 /**
  * ParallelPassagesPanel — Search mode toggle: Search vs Passages.
  *
- * ParallelPassagesPanel has a "Search mode" PillToggle with options:
- *   - "Search" (default, aria-pressed="true")
- *   - "Passages" (aria-pressed="false")
+ * ParallelPassagesPanel has a "Search mode" SegmentTabs with options:
+ *   - "Search" (default, aria-selected="true")
+ *   - "Passages" (aria-selected="false")
  *   - "Replace"
  *
  * Clicking "Passages" makes it the active mode.
- *
- * This spec: open the search panel → verify "Search" mode is pressed →
- * click "Passages" → verify "Passages" is now pressed.
  */
 test("search panel Passages mode toggle changes active mode", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -43,20 +40,20 @@ test("search panel Passages mode toggle changes active mode", async ({ alice }) 
   const panel = alice.getByRole("dialog")
   await expect(panel).toBeVisible({ timeout: 5_000 })
 
-  // "Search" mode pill is pressed by default.
-  const searchPill = panel.getByRole("button", { name: /^Search$/i })
-  await expect(searchPill).toBeVisible({ timeout: 3_000 })
-  await expect(searchPill).toHaveAttribute("aria-pressed", "true")
+  // "Search" mode tab is selected by default.
+  const searchTab = panel.getByRole("tab", { name: /^Search$/i })
+  await expect(searchTab).toBeVisible({ timeout: 3_000 })
+  await expect(searchTab).toHaveAttribute("aria-selected", "true")
 
   // Click "Passages".
-  const passagesPill = panel.getByRole("button", { name: /^Passages$/i })
-  await expect(passagesPill).toBeVisible({ timeout: 3_000 })
-  await expect(passagesPill).toHaveAttribute("aria-pressed", "false")
-  await passagesPill.click()
+  const passagesTab = panel.getByRole("tab", { name: /^Passages$/i })
+  await expect(passagesTab).toBeVisible({ timeout: 3_000 })
+  await expect(passagesTab).toHaveAttribute("aria-selected", "false")
+  await passagesTab.click()
 
-  // "Passages" is now pressed, "Search" is not.
-  await expect(passagesPill).toHaveAttribute("aria-pressed", "true", { timeout: 2_000 })
-  await expect(searchPill).toHaveAttribute("aria-pressed", "false")
+  // "Passages" is now selected, "Search" is not.
+  await expect(passagesTab).toHaveAttribute("aria-selected", "true", { timeout: 2_000 })
+  await expect(searchTab).toHaveAttribute("aria-selected", "false")
 
   // Dismiss.
   await alice.keyboard.press("Escape")

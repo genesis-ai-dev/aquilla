@@ -36,6 +36,7 @@ import { VersionTag } from "@/components/VersionBadge"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Button } from "@/components/ui/button"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -101,7 +102,7 @@ function TabRail({ tabs, activeTab, agentBadge, onTabClick, orientation }: TabRa
     <div
       className={cn(
         isTop
-          ? "mx-2 mt-2 flex min-w-0 items-center gap-0.5 rounded-full p-1 neu-inset"
+          ? "mx-2 mt-2 flex min-w-0 items-center gap-0.5 rounded-full p-1 bg-muted"
           : "flex h-full w-10 shrink-0 flex-col items-center gap-1 pt-2",
       )}
     >
@@ -122,7 +123,7 @@ function TabRail({ tabs, activeTab, agentBadge, onTabClick, orientation }: TabRa
                     // Only the active tab shows its label (and flexes to fill);
                     // the rest collapse to icon-only so 4+ tabs never overflow.
                     isActive
-                      ? "min-w-0 flex-1 bg-card font-medium text-foreground shadow-neu-xs"
+                      ? "min-w-0 flex-1 bg-card font-medium text-foreground"
                       : "shrink-0 text-muted-foreground hover:text-foreground",
                   )
                 : cn(
@@ -273,14 +274,16 @@ export function LeftDock({
   // on the collapsed 40px icon strip.
   const expandButton = (
     <AppTooltip content="Expand sidebar" side="right">
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="icon-sm"
         aria-label="Expand sidebar"
         onClick={() => setActiveTab("files")}
-        className="mt-3 flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+        className="mt-3"
       >
         <PanelLeftOpen className="h-3.5 w-3.5" />
-      </button>
+      </Button>
     </AppTooltip>
   )
 

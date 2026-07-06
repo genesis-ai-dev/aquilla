@@ -1,13 +1,14 @@
-import { useEffect, useState } from "react"
-import { Link } from "react-router-dom"
-import { Check } from "lucide-react"
+import { useEffect, useState, type ReactNode } from "react"
+import { Link, Navigate, useParams } from "react-router-dom"
+import { Archive, Building2, Check, Download, KeyRound, Users, UsersRound } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Page, PageHeader, Section, StatTile, EmptyState } from "@/components/ui/page"
+import { NavList, NavRow, BackLink } from "@/components/ui/nav-list"
 import {
   Select,
   SelectContent,
@@ -30,8 +31,32 @@ import { ROLE } from "@/lib/frontier/roles"
  * /settings page was admin-gated but personal-only; those personal prefs moved
  * to /preferences (reachable by everyone via the AccountSwitcher). This page is
  * the org surface: identity + rename (maintainer+), and at-a-glance facts.
+ *
+ * Rather than stacking every form onto one page, `/settings` is an index of
+ * at-a-glance facts + navigation rows (each hinting its current value); each
+ * row opens a focused detail sub-page at `/settings/:section`. Both routes
+ * render this same component — it branches on the `section` param, so the org
+ * settings hooks are fetched once and shared across index and detail.
  */
+
+/** Short role labels for the export-floor hint on the index row. */
+const FLOOR_LABEL: Record<number, string> = {
+  [ROLE.VIEWER]: "Viewer",
+  [ROLE.CONTRIBUTOR]: "Contributor",
+  [ROLE.PROJECT_LEAD]: "Project lead",
+  [ROLE.MAINTAINER]: "Maintainer",
+  [ROLE.OWNER]: "Owner",
+}
+
+/** Detail sub-pages hosted directly under /settings (vs. rows that link out). */
+const DETAIL_TITLES: Record<string, string> = {
+  identity: "Identity",
+  export: "Export permissions",
+  providers: "AI provider keys",
+}
+
 export function Settings() {
+  const { section } = useParams<{ section?: string }>()
   const { activeOrg, activeOrgId, isLoading, refresh } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -121,152 +146,190 @@ export function Settings() {
     }
   }
 
+  const activeTitle = section ? DETAIL_TITLES[section] : undefined
+  const header = activeTitle ? (
+    <OrgBreadcrumb parent={{ label: "Settings", to: "/settings" }} section={activeTitle} />
+  ) : (
+    <OrgBreadcrumb section="Settings" />
+  )
+
+  // --- Detail bodies (rendered on /settings/:section) -----------------------
+
+  const identityBody = (
+    <Section
+      title="Identity"
+      description="The organization's display name, shown across the workspace."
+      action={
+        !editing && canRename ? (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => { setName(activeOrg?.name ?? ""); setEditing(true) }}
+          >
+            Rename
+          </Button>
+        ) : null
+      }
+    >
+      {editing ? (
+        <Field>
+          <FieldLabel htmlFor="org-name" className="text-sm font-medium">Organization name</FieldLabel>
+          <Input
+            id="org-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            disabled={busy}
+            autoFocus
+          />
+          {error && <FieldError className="text-xs">{error}</FieldError>}
+          <div className="flex gap-2 pt-1">
+            <Button size="sm" onClick={handleSave} disabled={busy || !name.trim()}>
+              {busy ? "Saving…" : "Save"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setEditing(false)} disabled={busy}>Cancel</Button>
+          </div>
+        </Field>
+      ) : (
+        <div className="flex items-center gap-3">
+          <span className="text-lg font-medium text-foreground">{activeOrg?.name ?? "Untitled organization"}</span>
+          <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+            Your role: {activeOrg?.role.name}
+          </span>
+        </div>
+      )}
+    </Section>
+  )
+
+  const exportBody = (
+    <Section
+      title="Export permissions"
+      description="Minimum role required to download project deliverables — USFM export and project zip. Defaults to Maintainer."
+    >
+      <Field>
+        <FieldLabel htmlFor="export-min-role" className="text-sm font-medium">Who can export</FieldLabel>
+        <Select
+          items={exportRoleOptions.map((opt) => ({ value: String(opt.level), label: opt.label }))}
+          value={String(displayedExportMinRole)}
+          onValueChange={(v) => { if (v) void handleExportRoleChange(Number(v)) }}
+          disabled={!canEditExportFloor || exportRoleBusy}
+        >
+          <SelectTrigger id="export-min-role" className="w-full max-w-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {exportRoleOptions.map((opt) => (
+                <SelectItem key={opt.level} value={String(opt.level)}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+        <FieldDescription>
+          Lower the floor to let translators export their own work; raise it to keep deliverables
+          with leads. Client-side formats (CSV, TSV) operate on already-loaded cells and can't be
+          enforced here.
+        </FieldDescription>
+        {!canEditExportFloor && (
+          <FieldDescription>Only org owners can change the export permission policy.</FieldDescription>
+        )}
+        {exportRoleError && (
+          <FieldError className="text-xs">{exportRoleError}</FieldError>
+        )}
+        {exportRoleSaved && (
+          <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400" role="status" data-testid="export-role-saved">
+            <Check className="size-3.5" /> Saved
+          </p>
+        )}
+      </Field>
+    </Section>
+  )
+
+  // --- Index (rendered on /settings) ----------------------------------------
+
+  const indexBody = (
+    <>
+      <PageHeader
+        title="Organization settings"
+        description={
+          <>
+            Manage this organization. Personal preferences moved to{" "}
+            <Link to="/preferences" className="font-medium text-foreground underline underline-offset-4">
+              Preferences
+            </Link>
+            .
+          </>
+        }
+      />
+      <div className="space-y-6">
+        {/* Facts */}
+        <div className="grid grid-cols-2 gap-4">
+          <StatTile label="Members" value={members.length} />
+          <StatTile label="Projects" value={projectCount ?? "—"} />
+        </div>
+
+        <NavList label="Organization">
+          <NavRow to="/settings/identity" icon={Building2} title="Identity" hint={activeOrg?.name ?? "Untitled"} />
+          <NavRow to="/settings/export" icon={Download} title="Export permissions" hint={FLOOR_LABEL[displayedExportMinRole] ?? "Maintainer"} />
+          <NavRow to="/settings/providers" icon={KeyRound} title="AI provider keys" hint="Org keys" />
+        </NavList>
+
+        <NavList label="People & Projects">
+          <NavRow to="/members" icon={Users} title="Members" hint="Roles & invites" />
+          <NavRow to="/teams" icon={UsersRound} title="Teams" hint="Groups" />
+          <NavRow to="/projects/archived" icon={Archive} title="Archived projects" hint="Restore" />
+        </NavList>
+      </div>
+    </>
+  )
+
+  // --- Body selection -------------------------------------------------------
+
+  let body: ReactNode
+  if (isLoading) {
+    body = (
+      <div className="space-y-6">
+        <div className="h-28 animate-pulse rounded-2xl border bg-card" />
+        <div className="grid grid-cols-2 gap-4">
+          <div className="h-24 animate-pulse rounded-2xl border bg-card" />
+          <div className="h-24 animate-pulse rounded-2xl border bg-card" />
+        </div>
+      </div>
+    )
+  } else if (!activeOrg) {
+    body = (
+      <EmptyState
+        title="Select an organization"
+        description="Organization settings are managed within a single organization. Choose one from the switcher to continue."
+      />
+    )
+  } else if (section && !activeTitle) {
+    // Unknown detail slug — bounce back to the index.
+    body = <Navigate to="/settings" replace />
+  } else if (activeTitle) {
+    // Detail sub-page: a back link to the general settings sits at the top-left,
+    // above the section's own titled card.
+    const detail =
+      section === "identity" ? identityBody
+      : section === "export" ? exportBody
+      : <OrgProviderSection orgSettings={orgSettings} />
+    body = (
+      <div className="space-y-4">
+        <BackLink to="/settings" label="Settings" />
+        {detail}
+      </div>
+    )
+  } else {
+    body = indexBody
+  }
+
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section="Settings" />}
+      header={header}
       statusBar={null}
-      main={
-        <Page>
-          <PageHeader
-            title="Organization settings"
-            description={
-              <>
-                Manage this organization. Personal preferences moved to{" "}
-                <Link to="/preferences" className="font-medium text-foreground underline underline-offset-4">
-                  Preferences
-                </Link>
-                .
-              </>
-            }
-          />
-
-          {isLoading ? (
-            <div className="space-y-6">
-              <div className="h-28 animate-pulse rounded-2xl border bg-card" />
-              <div className="grid grid-cols-2 gap-4">
-                <div className="h-24 animate-pulse rounded-2xl border bg-card" />
-                <div className="h-24 animate-pulse rounded-2xl border bg-card" />
-              </div>
-            </div>
-          ) : !activeOrg ? (
-            <EmptyState
-              title="Select an organization"
-              description="Organization settings are managed within a single organization. Choose one from the switcher to continue."
-            />
-          ) : (
-            <div className="space-y-6">
-              {/* Identity */}
-              <Section
-                title="Identity"
-                description="The organization's display name, shown across the workspace."
-                action={
-                  !editing && canRename ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => { setName(activeOrg.name ?? ""); setEditing(true) }}
-                    >
-                      Rename
-                    </Button>
-                  ) : null
-                }
-              >
-                {editing ? (
-                  <div className="space-y-2">
-                    <Label htmlFor="org-name" className="text-sm font-medium">Organization name</Label>
-                    <Input
-                      id="org-name"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      disabled={busy}
-                      autoFocus
-                    />
-                    {error && <p className="text-xs text-destructive">{error}</p>}
-                    <div className="flex gap-2 pt-1">
-                      <Button size="sm" onClick={handleSave} disabled={busy || !name.trim()}>
-                        {busy ? "Saving…" : "Save"}
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => setEditing(false)} disabled={busy}>Cancel</Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-3">
-                    <span className="text-lg font-medium text-foreground">{activeOrg.name ?? "Untitled organization"}</span>
-                    <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
-                      Your role: {activeOrg.role.name}
-                    </span>
-                  </div>
-                )}
-              </Section>
-
-              {/* Facts */}
-              <div className="grid grid-cols-2 gap-4">
-                <StatTile label="Members" value={members.length} />
-                <StatTile label="Projects" value={projectCount ?? "—"} />
-              </div>
-
-              {/* FRO-253: Export permissions */}
-              <Section
-                title="Export permissions"
-                description="Minimum role required to download project deliverables — USFM export and project zip. Defaults to Maintainer."
-              >
-                <div className="space-y-2">
-                  <Label htmlFor="export-min-role" className="text-sm font-medium">Who can export</Label>
-                  <Select
-                    items={exportRoleOptions.map((opt) => ({ value: String(opt.level), label: opt.label }))}
-                    value={String(displayedExportMinRole)}
-                    onValueChange={(v) => { if (v) void handleExportRoleChange(Number(v)) }}
-                    disabled={!canEditExportFloor || exportRoleBusy}
-                  >
-                    <SelectTrigger id="export-min-role" className="w-full max-w-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {exportRoleOptions.map((opt) => (
-                          <SelectItem key={opt.level} value={String(opt.level)}>
-                            {opt.label}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Lower the floor to let translators export their own work; raise it to keep deliverables
-                    with leads. Client-side formats (CSV, TSV) operate on already-loaded cells and can't be
-                    enforced here.
-                  </p>
-                  {!canEditExportFloor && (
-                    <p className="text-xs text-muted-foreground">Only org owners can change the export permission policy.</p>
-                  )}
-                  {exportRoleError && (
-                    <p className="text-xs text-destructive">{exportRoleError}</p>
-                  )}
-                  {exportRoleSaved && (
-                    <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400" role="status" data-testid="export-role-saved">
-                      <Check className="size-3.5" /> Saved
-                    </p>
-                  )}
-                </div>
-              </Section>
-
-              {/* FRO-433: Org-level provider API keys */}
-              <OrgProviderSection orgSettings={orgSettings} />
-
-              {/* Related org surfaces */}
-              <div className="space-y-2">
-                <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Manage</p>
-                <div className="flex flex-wrap gap-2 text-sm">
-                  <Link to="/members" className="rounded-lg border px-3 py-1.5 transition-colors hover:bg-accent/40">Members</Link>
-                  <Link to="/teams" className="rounded-lg border px-3 py-1.5 transition-colors hover:bg-accent/40">Teams</Link>
-                  <Link to="/projects/archived" className="rounded-lg border px-3 py-1.5 transition-colors hover:bg-accent/40">Archived</Link>
-                </div>
-              </div>
-            </div>
-          )}
-        </Page>
-      }
+      main={<Page>{body}</Page>}
     />
   )
 }

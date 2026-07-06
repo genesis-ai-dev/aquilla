@@ -708,13 +708,18 @@ orgs.get("/:orgId/members/:userId/projects", async (c) => {
 })
 
 /**
- * GET /api/v2/orgs/:orgId/invites
+ * GET /api/v2/orgs/:orgId/project-invites
  *
  * List unredeemed, unexpired project_invites for projects in this org.
  * Owner-only — the listing exposes invite tokens, which are bearer
  * credentials. Used by the Roster's "Pending invitations" section.
+ *
+ * Deliberately a distinct path from GET /:orgId/invites (org_invites,
+ * above) — those two routes used to collide on the same path/method, which
+ * silently shadowed this handler and left the Roster rendering org_invites
+ * rows (no createdBy) as if they were project_invites rows.
  */
-orgs.get("/:orgId/invites", async (c) => {
+orgs.get("/:orgId/project-invites", async (c) => {
   const user = c.get("user")
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)

@@ -5,27 +5,6 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Surface helpers for arbitrary panels/divs that aren't shadcn components.
-   "Linear" style: surfaces are FLAT — separated by stepped background lightness
-   and hover/selection overlays, not shadows or borders. neu-raised/neu-flat are
-   now just the content surface (no lift); neu-inset is a recessed well (a step
-   darker fill). Real elevation (shadow) is reserved for floating layers only —
-   popovers, dropdowns, dialogs, modals — via the --shadow-soft-* scale. */
-@utility neu-raised {
-  background-color: var(--card);
-  border: 1px solid transparent;
-}
-
-@utility neu-flat {
-  background-color: var(--card);
-  border: 1px solid transparent;
-}
-
-@utility neu-inset {
-  background-color: var(--muted);
-  border: 1px solid transparent;
-}
-
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: 'Geist Variable', sans-serif;
@@ -72,18 +51,6 @@
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
 
-    /* Elevation — flat "Linear" model. In-page surfaces carry NO shadow; depth
-       comes from stepped background lightness + hover/selection overlays. The
-       neu-* names are kept so the ~70 call sites need no change: the small steps
-       resolve to nothing, and only -lg (used by popovers/floating panels) keeps
-       a real drop shadow. Inset wells rely on their darker fill, not a shadow. */
-    --shadow-neu-xs: none;
-    --shadow-neu-sm: none;
-    --shadow-neu: none;
-    --shadow-neu-lg: var(--shadow-soft-lg);
-    --shadow-neu-inset: none;
-    --shadow-neu-pressed: none;
-
     /* Soft single-direction elevation — for modals, popovers, sheets,
        tooltips, and cards. One slate-tinted shadow at low alpha. */
     --shadow-soft-xs: 0 1px 2px -1px oklch(0.40 0.02 286 / 0.08);
@@ -94,9 +61,8 @@
     --shadow-soft-lg: 0 18px 40px -10px oklch(0.40 0.02 286 / 0.16),
                       0 4px 10px -2px oklch(0.40 0.02 286 / 0.08);
 
-    /* Remap Tailwind's default elevation scale onto the SOFT shadows (not
-       the neumorphic ones). Generic shadow-* utilities now read as a clean
-       drop shadow; neumorphic depth is opt-in via shadow-neu-* only. */
+    /* Remap Tailwind's default elevation scale onto the SOFT shadows. Generic
+       shadow-* utilities read as a clean, single-direction drop shadow. */
     --shadow-2xs: var(--shadow-soft-xs);
     --shadow-xs: var(--shadow-soft-xs);
     --shadow-sm: var(--shadow-soft-sm);
@@ -138,11 +104,10 @@
     --accent-foreground: oklch(0.27 0.008 264);
     --destructive: oklch(0.60 0.16 25);
     --destructive-foreground: oklch(0.97 0.01 250);
+    /* input tracks border, not muted — shadcn contract for tabs, inputs, etc. */
     --border: oklch(0.92 0.002 264);
-    --input: oklch(0.955 0.002 264);
+    --input: oklch(0.92 0.002 264);
     --ring: oklch(0.72 0.09 245);
-    --neu-light: oklch(0.99 0.002 264);
-    --neu-dark: oklch(0.92 0.002 264);
     /* Cool-leaning chart palette: blue / teal / sage / amber / rose. */
     --chart-1: oklch(0.72 0.10 245);
     --chart-2: oklch(0.74 0.09 200);
@@ -160,10 +125,9 @@
   }
 
   :where(html.dark) {
-    /* Dark neumorphism needs a MID grey-blue, not near-black: the surface must
-       be light enough that --neu-dark can still go darker beneath it. Same cool
-       hue (~250), low chroma, soft (not pure-white) foreground, the same muted
-       blue accent — so dark mode reads as the same material dimmed. */
+    /* Dark surface is a MID grey-blue, not near-black. Same cool hue (~250),
+       low chroma, soft (not pure-white) foreground, the same muted blue accent
+       — so dark mode reads as the same material dimmed. */
     --surface: oklch(0.30 0.012 250);
     --background: var(--surface);
     --foreground: oklch(0.92 0.008 250);
@@ -175,17 +139,16 @@
     --primary-foreground: oklch(0.22 0.04 250);
     --secondary: var(--surface);
     --secondary-foreground: oklch(0.88 0.010 250);
-    --muted: oklch(0.34 0.012 250);
+    --muted: oklch(0.30 0.012 250);
     --muted-foreground: oklch(0.66 0.014 250);
     --accent: oklch(0.38 0.04 248);
     --accent-foreground: oklch(0.82 0.09 245);
     --destructive: oklch(0.62 0.15 25);
     --destructive-foreground: oklch(0.95 0.01 250);
-    --border: oklch(0.40 0.014 250);
-    --input: oklch(0.34 0.012 250);
+    /* shadcn dark: alpha overlays so input/border read on muted surfaces (tabs). */
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.74 0.09 245);
-    --neu-light: oklch(0.35 0.014 250);
-    --neu-dark: oklch(0.245 0.008 250);
     --chart-1: oklch(0.74 0.10 245);
     --chart-2: oklch(0.76 0.09 200);
     --chart-3: oklch(0.78 0.07 150);
@@ -197,7 +160,7 @@
     --sidebar-primary-foreground: oklch(0.22 0.04 250);
     --sidebar-accent: oklch(0.38 0.04 248);
     --sidebar-accent-foreground: oklch(0.82 0.09 245);
-    --sidebar-border: oklch(0.40 0.014 250);
+    --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.74 0.09 245);
     /* Dark mode: soft shadows need near-black at higher alpha. */
     --shadow-soft-xs: 0 1px 2px -1px oklch(0.05 0 0 / 0.40);
@@ -207,13 +170,33 @@
                    0 2px 6px -2px oklch(0.05 0 0 / 0.30);
     --shadow-soft-lg: 0 18px 40px -10px oklch(0.05 0 0 / 0.60),
                       0 4px 10px -2px oklch(0.05 0 0 / 0.40);
-    /* Flat model: inset wells rely on their darker fill, not an inner shadow. */
-    --shadow-neu-inset: none;
-    --shadow-neu-pressed: none;
   }
 
   * {
     @apply border-border outline-ring/50;
+    /* Mirror ScrollArea: w-2.5 (10px) track, rounded-full bg-border thumb,
+       transparent track. scrollbar-thin is narrower than ScrollArea on most UAs. */
+    scrollbar-width: auto;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 0.625rem;
+    height: 0.625rem;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border-radius: 9999px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  /* Tailwind scrollbar-none only sets scrollbar-width; hide WebKit too. */
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
   }
   body {
     @apply bg-background text-foreground;
@@ -224,6 +207,28 @@
   html.dark {
     color-scheme: dark;
   }
+
+  /* Linear-style: hover/selection signals affordance — not the pointer hand. */
+  :where(
+    button,
+    [role="button"],
+    [role="menuitem"],
+    [role="tab"],
+    [role="option"],
+    summary,
+    a,
+    label
+  ) {
+    cursor: default;
+  }
+}
+
+/* Linear-style: neutralize explicit pointer/grab utilities on chrome actions.
+   Unlayered so this wins over Tailwind's cursor-* utilities. */
+.cursor-pointer,
+.cursor-grab,
+.active\:cursor-grabbing:active {
+  cursor: default;
 }
 
 /* ── Color-theme presets ─────────────────────────────────────────────
@@ -252,10 +257,8 @@ html[data-color-theme="warm"] {
     --accent-foreground: oklch(0.38 0.05 80);
     --destructive-foreground: oklch(0.97 0.01 90);
     --border: oklch(0.86 0.01 88);
-    --input: oklch(0.90 0.008 90);
+    --input: oklch(0.86 0.01 88);
     --ring: oklch(0.76 0.09 85);
-    --neu-light: oklch(0.985 0.004 90);
-    --neu-dark: oklch(0.83 0.012 88);
     --chart-1: oklch(0.80 0.09 85);
     --chart-2: oklch(0.72 0.08 60);
     --chart-3: oklch(0.76 0.06 130);
@@ -287,11 +290,9 @@ html[data-color-theme="warm"] {
     --accent: oklch(0.37 0.035 85);
     --accent-foreground: oklch(0.82 0.07 85);
     --destructive-foreground: oklch(0.95 0.01 85);
-    --border: oklch(0.40 0.008 85);
-    --input: oklch(0.34 0.008 85);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.74 0.09 85);
-    --neu-light: oklch(0.35 0.008 85);
-    --neu-dark: oklch(0.245 0.005 85);
     --chart-1: oklch(0.80 0.09 85);
     --chart-2: oklch(0.74 0.08 60);
     --chart-3: oklch(0.78 0.06 130);
@@ -302,7 +303,7 @@ html[data-color-theme="warm"] {
     --sidebar-primary-foreground: oklch(0.26 0.03 80);
     --sidebar-accent: oklch(0.37 0.035 85);
     --sidebar-accent-foreground: oklch(0.82 0.07 85);
-    --sidebar-border: oklch(0.40 0.008 85);
+    --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.74 0.09 85);
   }
 
@@ -327,8 +328,6 @@ html[data-color-theme="warm"] {
     --border: oklch(0.88 0.014 150);
     --input: oklch(0.92 0.012 150);
     --ring: oklch(0.72 0.09 150);
-    --neu-light: oklch(0.99 0.005 150);
-    --neu-dark: oklch(0.86 0.018 150);
     --sidebar-foreground: oklch(0.34 0.018 150);
     --sidebar-primary: oklch(0.78 0.07 150);
     --sidebar-primary-foreground: oklch(0.28 0.04 150);
@@ -355,17 +354,15 @@ html[data-color-theme="warm"] {
     --accent: oklch(0.38 0.04 150);
     --accent-foreground: oklch(0.82 0.09 150);
     --destructive-foreground: oklch(0.95 0.01 150);
-    --border: oklch(0.40 0.014 150);
-    --input: oklch(0.34 0.012 150);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.74 0.09 150);
-    --neu-light: oklch(0.35 0.014 150);
-    --neu-dark: oklch(0.245 0.008 150);
     --sidebar-foreground: oklch(0.92 0.008 150);
     --sidebar-primary: oklch(0.78 0.09 150);
     --sidebar-primary-foreground: oklch(0.22 0.04 150);
     --sidebar-accent: oklch(0.38 0.04 150);
     --sidebar-accent-foreground: oklch(0.82 0.09 150);
-    --sidebar-border: oklch(0.40 0.014 150);
+    --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.74 0.09 150);
   }
 
@@ -390,8 +387,6 @@ html[data-color-theme="warm"] {
     --border: oklch(0.88 0.014 20);
     --input: oklch(0.92 0.012 20);
     --ring: oklch(0.72 0.10 20);
-    --neu-light: oklch(0.99 0.005 20);
-    --neu-dark: oklch(0.86 0.018 20);
     --sidebar-foreground: oklch(0.34 0.018 20);
     --sidebar-primary: oklch(0.78 0.08 20);
     --sidebar-primary-foreground: oklch(0.28 0.04 20);
@@ -418,17 +413,15 @@ html.dark[data-color-theme="rose"] {
   --accent: oklch(0.38 0.05 20);
   --accent-foreground: oklch(0.82 0.10 20);
   --destructive-foreground: oklch(0.95 0.01 20);
-  --border: oklch(0.40 0.014 20);
-  --input: oklch(0.34 0.012 20);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.74 0.10 20);
-  --neu-light: oklch(0.35 0.014 20);
-  --neu-dark: oklch(0.245 0.008 20);
   --sidebar-foreground: oklch(0.92 0.008 20);
   --sidebar-primary: oklch(0.78 0.10 20);
   --sidebar-primary-foreground: oklch(0.22 0.04 20);
   --sidebar-accent: oklch(0.38 0.05 20);
   --sidebar-accent-foreground: oklch(0.82 0.10 20);
-  --sidebar-border: oklch(0.40 0.014 20);
+  --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.74 0.10 20);
 }
 
@@ -437,7 +430,6 @@ html.dark[data-color-theme="rose"] {
   text-decoration-style: wavy;
   text-decoration-skip-ink: none;
   text-underline-offset: 3px;
-  cursor: pointer;
 }
 .violation-blot-major { text-decoration-color: var(--color-red-500, oklch(0.637 0.237 25.331)); }
 .violation-blot-minor { text-decoration-color: var(--color-amber-500, oklch(0.769 0.188 70.08)); }
@@ -479,7 +471,6 @@ html.dark[data-color-theme="rose"] {
   height: 5px;
   border-radius: 50%;
   pointer-events: auto;
-  cursor: pointer;
   /* Prevent chip from affecting flow */
   display: inline-block;
   vertical-align: baseline;
@@ -517,7 +508,6 @@ html.dark[data-color-theme="rose"] {
   line-height: 1;
   vertical-align: super;
   pointer-events: auto;
-  cursor: pointer;
 }
 
 /* Safari mis-paints native text-selection rectangles around our

@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react"
 import { Search } from "lucide-react"
-import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 
 export interface SettingsSection {
   id: string
@@ -31,16 +35,18 @@ export function SettingsNav({ sections, activeId, onSearch, searchQuery }: Setti
 
   return (
     <nav className="flex flex-col gap-1" aria-label="Settings sections">
-      <div className="relative mb-2">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-        <Input
+      <InputGroup className="mb-2 h-8">
+        <InputGroupAddon>
+          <Search />
+        </InputGroupAddon>
+        <InputGroupInput
           value={searchQuery}
           onChange={(e) => onSearch(e.target.value)}
           placeholder="Search settings…"
-          className="h-8 pl-8 text-xs"
+          className="text-xs"
           aria-label="Search settings"
         />
-      </div>
+      </InputGroup>
       {visibleSections.map((s) => (
         <button
           key={s.id}

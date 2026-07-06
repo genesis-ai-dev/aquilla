@@ -8,22 +8,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * ParallelPassagesPanel — scope and side toggle pills.
+ * ParallelPassagesPanel — scope and side tab toggles.
  *
- * The search panel (ParallelPassagesPanel) has three PillToggle groups in
- * the "Panel controls" row:
+ * The search panel has three SegmentTabs groups in the "Panel controls" row:
  *   - "Search scope" (Project, File)
  *   - "Search mode" (Search, Passages, Replace)
  *   - "Content side" (Both, Source, Target)
  *
- * Each pill has aria-pressed reflecting the current value.
+ * Each tab has aria-selected reflecting the current value.
  *
- * This spec: opens the panel via Cmd/Ctrl+K (project-wide search shortcut —
- * FRO-308 removed the toolbar button) → verifies "Project" is pressed →
- * clicks "Both" content side → verifies it's pressed → clicks "Source" →
- * "Source" becomes pressed.
+ * This spec: opens the panel via Cmd/Ctrl+K → verifies "Project" is selected →
+ * clicks "Both" content side → verifies it's selected → clicks "Source" →
+ * "Source" becomes selected.
  */
-test("search panel content side toggle changes aria-pressed", async ({ alice }) => {
+test("search panel content side toggle changes aria-selected", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `SearchScope ${Date.now()}`
@@ -43,25 +41,25 @@ test("search panel content side toggle changes aria-pressed", async ({ alice }) 
   const panel = alice.getByRole("dialog")
   await expect(panel).toBeVisible({ timeout: 5_000 })
 
-  // "Project" scope pill is pressed (Cmd+K contract: project-wide search).
-  const projectPill = panel.getByRole("button", { name: /^Project$/i })
-  await expect(projectPill).toBeVisible({ timeout: 3_000 })
-  await expect(projectPill).toHaveAttribute("aria-pressed", "true")
+  // "Project" scope tab is selected (Cmd+K contract: project-wide search).
+  const projectTab = panel.getByRole("tab", { name: /^Project$/i })
+  await expect(projectTab).toBeVisible({ timeout: 3_000 })
+  await expect(projectTab).toHaveAttribute("aria-selected", "true")
 
-  // Content side: "Both" is pressed by default.
-  const bothPill = panel.getByRole("button", { name: /^Both$/i })
-  await expect(bothPill).toHaveAttribute("aria-pressed", "true", { timeout: 3_000 })
+  // Content side: "Both" is selected by default.
+  const bothTab = panel.getByRole("tab", { name: /^Both$/i })
+  await expect(bothTab).toHaveAttribute("aria-selected", "true", { timeout: 3_000 })
 
   // Click "Source".
-  const sourcePill = panel.getByRole("button", { name: /^Source$/i })
-  await expect(sourcePill).toBeVisible({ timeout: 3_000 })
-  await sourcePill.click()
-  await expect(sourcePill).toHaveAttribute("aria-pressed", "true", { timeout: 2_000 })
-  await expect(bothPill).toHaveAttribute("aria-pressed", "false")
+  const sourceTab = panel.getByRole("tab", { name: /^Source$/i })
+  await expect(sourceTab).toBeVisible({ timeout: 3_000 })
+  await sourceTab.click()
+  await expect(sourceTab).toHaveAttribute("aria-selected", "true", { timeout: 2_000 })
+  await expect(bothTab).toHaveAttribute("aria-selected", "false")
 
   // Restore Both.
-  await bothPill.click()
-  await expect(bothPill).toHaveAttribute("aria-pressed", "true", { timeout: 2_000 })
+  await bothTab.click()
+  await expect(bothTab).toHaveAttribute("aria-selected", "true", { timeout: 2_000 })
 
   // Dismiss.
   await alice.keyboard.press("Escape")

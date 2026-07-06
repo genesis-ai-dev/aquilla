@@ -80,14 +80,13 @@ test("term lookup Apply rendering inserts the rendering into target cell", async
   await expect(applyBtn).toBeVisible({ timeout: 3_000 })
   await applyBtn.click()
 
-  // After applying, the rendering text appears in the target editor of the
+  // After applying, the rendering text appears in the target cell of the
   // ROW THAT OWNS THE CHIP (the row whose source cell contains the bare
-  // word "content"). Target editors are TipTap (.ProseMirror
-  // contenteditable), so assert on text content, not value.
+  // word "content").
   const chipRow = alice
     .locator("[data-cell-id]")
     .filter({ has: alice.locator("span.cursor-pointer.underline").filter({ hasText: /^content$/i }) })
     .first()
-  const targetCell = chipRow.locator('[contenteditable="true"]').first()
+  const targetCell = chipRow.locator('[data-cell-type="target"]').first()
   await expect(targetCell).toContainText(/échantillon/, { timeout: 5_000 })
 })

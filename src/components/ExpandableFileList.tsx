@@ -9,6 +9,12 @@ import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import { useEditorScroll } from "@/context/EditorScrollContext"
 import { FileSectionGrid } from "./sidebar/FileSectionGrid"
 import { cn } from "@/lib/utils"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { AppTooltip } from "@/components/ui/tooltip"
 import {
   downloadSourceFile,
@@ -27,7 +33,7 @@ interface Props {
   suggestionFileIds: Set<string>
   validationCount: number
   getTokenForFile: (fileId: string) => Promise<string | null>
-  onSelectFile: (fileId: string) => void
+  onSelectFile: (fileId: string, opts?: { sectionLabel?: string }) => void
   onRename: (fileId: string, newName: string) => void
   onMove: (fileId: string) => void
   /** FRO-271: Optional — pass undefined to hide delete for roles below project_lead (500). */
@@ -76,9 +82,11 @@ export function ExpandableFileList({
   return (
     <>
       <div className="px-2 py-2">
-        <div className="relative">
-          <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
+        <InputGroup className="h-7 rounded-xl">
+          <InputGroupAddon>
+            <SearchIcon />
+          </InputGroupAddon>
+          <InputGroupInput
             type="text"
             role="searchbox"
             name="aquilla-file-filter-query"
@@ -92,18 +100,21 @@ export function ExpandableFileList({
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter files..."
-            className="h-7 w-full rounded-xl bg-background pl-7 pr-7 text-xs shadow-neu-inset outline-none"
+            className="text-xs"
           />
           {filter && (
-            <button
-              onClick={() => setFilter("")}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground transition-colors hover:text-foreground"
-              aria-label="Clear filter"
-            >
-              <X className="h-3 w-3" />
-            </button>
+            <InputGroupAddon align="inline-end">
+              <InputGroupButton
+                type="button"
+                size="icon-xs"
+                onClick={() => setFilter("")}
+                aria-label="Clear filter"
+              >
+                <X />
+              </InputGroupButton>
+            </InputGroupAddon>
           )}
-        </div>
+        </InputGroup>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="p-2 space-y-2">
@@ -146,7 +157,7 @@ export function ExpandableFileList({
                             if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur() }
                             else if (e.key === "Escape") { e.preventDefault(); setEditingCorpus(null) }
                           }}
-                          className="flex-1 rounded-lg bg-background px-1.5 text-[11px] normal-case tracking-normal shadow-neu-inset outline-none"
+                          className="flex-1 rounded-lg bg-background px-1.5 text-[11px] normal-case tracking-normal outline-none"
                         />
                       ) : (
                         <span>{group.label}</span>
@@ -155,7 +166,7 @@ export function ExpandableFileList({
                     {canEditCorpus && !isEditingCorpus && (
                       <AppTooltip content={`Rename ${group.label}`} side="right">
                         <button
-                          className="rounded-full p-0.5 opacity-0 transition-shadow group-hover/corpus:opacity-100 hover:shadow-neu-xs"
+                          className="rounded-full p-0.5 opacity-0 transition-shadow group-hover/corpus:opacity-100"
                           onClick={(e) => { e.stopPropagation(); setEditingCorpus(group.label) }}
                           aria-label={`Rename ${group.label}`}
                         >
@@ -201,11 +212,12 @@ export function ExpandableFileList({
                               getTokenForFile={getTokenForFile}
                               onSectionClick={(label) => {
                                 if (file.id !== activeFileId) {
-                                  onSelectFile(file.id)
+                                  onSelectFile(file.id, { sectionLabel: label })
                                   // FRO-250/254: stamp the fileId so ScrollToGroupHandler
                                   // skips this request if cells still belong to the OLD file.
                                   setTimeout(() => requestScrollToSection(label, file.id), 100)
                                 } else {
+                                  onSelectFile(file.id, { sectionLabel: label })
                                   requestScrollToSection(label, file.id)
                                 }
                               }}

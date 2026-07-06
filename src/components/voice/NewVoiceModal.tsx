@@ -13,10 +13,11 @@ import { AudioLines, Check, Plus, Sparkles, Star, Trash2, UserRound } from "luci
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { Button } from "@/components/ui/button"
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Spinner } from "@/components/ui/spinner"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { VoiceCloneSection } from "@/components/VoiceCloneSection"
 import { cn } from "@/lib/utils"
 import { newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
@@ -166,30 +167,28 @@ function NewVoiceModalBody({
             {isNew ? "New voice" : "Edit voice"}
           </h2>
 
-          <div className="space-y-4 pt-1">
-            {/* Kind tabs — hidden while editing (a voice's kind is fixed). */}
-            {isNew && (
-              <div className="grid grid-cols-2 gap-1 rounded-xl border bg-muted/40 p-1">
-                <TabButton
-                  active={mode === "gemini"}
-                  onClick={() => setMode("gemini")}
-                  icon={Sparkles}
-                  label="Gemini voice"
-                  tone="primary"
-                />
-                <TabButton
-                  active={mode === "clone"}
-                  onClick={() => setMode("clone")}
-                  icon={UserRound}
-                  label="Clone voice"
-                  tone="emerald"
-                />
-              </div>
-            )}
+          {/* Kind tabs — hidden while editing (a voice's kind is fixed). */}
+          {isNew && (
+            <Tabs
+              value={mode}
+              onValueChange={(value) => setMode(value as Mode)}
+              className="gap-0"
+            >
+              <TabsList size="lg" className="w-full" aria-label="Voice kind">
+                <TabsTrigger value="gemini">
+                  <Sparkles /> Gemini voice
+                </TabsTrigger>
+                <TabsTrigger value="clone">
+                  <UserRound /> Clone voice
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          )}
 
+          <FieldGroup className="space-y-4 pt-1">
             {/* Name */}
-            <div className="space-y-1.5">
-              <Label htmlFor="voice-name">Name</Label>
+            <Field>
+              <FieldLabel htmlFor="voice-name">Name</FieldLabel>
               <Input
                 id="voice-name"
                 value={draft.name}
@@ -199,12 +198,11 @@ function NewVoiceModalBody({
                 aria-label="Voice name"
                 autoFocus
               />
-            </div>
+            </Field>
 
             {mode === "gemini" ? (
-              /* Describe how it sounds → Gemini voice direction (Voice.prompt). */
-              <div className="space-y-1.5">
-                <Label htmlFor="voice-describe">Describe the voice</Label>
+              <Field>
+                <FieldLabel htmlFor="voice-describe">Describe the voice</FieldLabel>
                 <Textarea
                   id="voice-describe"
                   value={draft.prompt ?? ""}
@@ -212,11 +210,10 @@ function NewVoiceModalBody({
                   rows={3}
                   placeholder="e.g. a warm older man, calm and clear"
                 />
-              </div>
+              </Field>
             ) : (
-              /* Clone: capture a reference clip. */
-              <div className="space-y-2">
-                <Label>Reference audio</Label>
+              <Field>
+                <FieldLabel>Reference audio</FieldLabel>
                 <VoiceCloneSection
                   voice={draft}
                   projectId={projectId}
@@ -224,9 +221,9 @@ function NewVoiceModalBody({
                   session={session}
                   onChange={update}
                 />
-                <p className="text-xs text-muted-foreground">
+                <FieldDescription>
                   A short clip is enough — we generate a base voice and clone it to match.
-                </p>
+                </FieldDescription>
 
                 {/* Or reuse audio already in the project. */}
                 {takes.length > 0 && (
@@ -277,9 +274,9 @@ function NewVoiceModalBody({
                     </div>
                   </details>
                 )}
-              </div>
+              </Field>
             )}
-          </div>
+          </FieldGroup>
 
           {/* Footer */}
           <div className="-mx-5 -mb-5 mt-2 flex flex-wrap items-center gap-2 rounded-b-3xl bg-muted/40 p-5">
@@ -331,32 +328,5 @@ function NewVoiceModalBody({
         />
       )}
     </>
-  )
-}
-
-function TabButton({
-  active, onClick, icon: Icon, label, tone,
-}: {
-  active: boolean
-  onClick: () => void
-  icon: typeof Sparkles
-  label: string
-  tone: "primary" | "emerald"
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-        !active && "text-muted-foreground hover:text-foreground",
-        active && tone === "primary" && "bg-primary text-primary-foreground shadow-sm",
-        active && tone === "emerald" && "bg-emerald-500 text-white shadow-sm",
-      )}
-    >
-      <Icon className="h-4 w-4" />
-      {label}
-    </button>
   )
 }

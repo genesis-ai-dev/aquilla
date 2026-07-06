@@ -97,9 +97,33 @@ export class Workspace {
   }
 
   private editableTarget(index: number): Locator {
-    return this.cellRow(index)
+    return this.targetColumn(index)
       .locator('textarea, .ProseMirror[contenteditable="true"], [contenteditable="true"]')
       .first()
+  }
+
+  private targetColumn(index: number): Locator {
+    return this.cellRow(index).locator('[data-cell-type="target"]').first()
+  }
+
+  private targetReadView(index: number): Locator {
+    return this.targetColumn(index).locator("[data-target-read-view]").first()
+  }
+
+  async activateTargetCell(index: number): Promise<Locator> {
+    const row = this.cellRow(index)
+    await row.scrollIntoViewIfNeeded()
+
+    const target = this.editableTarget(index)
+    if (!(await target.isVisible({ timeout: 250 }).catch(() => false))) {
+      const readView = this.targetReadView(index)
+      await expect(readView).toBeVisible({ timeout: 10_000 })
+      await readView.click()
+    }
+
+    await expect(target).toBeVisible({ timeout: 10_000 })
+    await target.click()
+    return target
   }
 
   /** Click into a cell, type text, blur. Persists on blur per editor design.
@@ -114,11 +138,7 @@ export class Workspace {
    * TipTap editor inside the row also has a few non-editable contenteditable
    * children we don't want to match. */
   async editCell(index: number, text: string): Promise<void> {
-    const row = this.cellRow(index)
-    await row.scrollIntoViewIfNeeded()
-    const target = this.editableTarget(index)
-    await target.waitFor({ state: "visible", timeout: 10_000 })
-    await target.click()
+    await this.activateTargetCell(index)
     await this.page.keyboard.type(text)
     await this.page.locator("aside").click() // blur outside editor
     // Wait for the async IDB commit pipeline to complete (emitTargetCellCommit

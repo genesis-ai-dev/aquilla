@@ -9,13 +9,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { createProject } from "@/lib/store/project-index"
@@ -138,46 +137,48 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
           <DialogTitle>Create New Project</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="space-y-2">
-            <Label htmlFor="name">Project name</Label>
-            <Input
-              id="name"
-              className={FIELD_CLASS}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="My Translation Project"
-            />
-          </div>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="name">Project name</FieldLabel>
+              <Input
+                id="name"
+                className={FIELD_CLASS}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="My Translation Project"
+              />
+            </Field>
 
-          <div className="space-y-2">
-            <div className="flex items-center gap-1.5">
-              <Label htmlFor="source">Source language</Label>
-              <LanguageFieldHint />
-            </div>
-            <Input
-              id="source"
-              className={FIELD_CLASS}
-              value={sourceLanguage}
-              onChange={(e) => setSourceLanguage(e.target.value)}
-              placeholder="English, Grade 7 English, es-419…"
-            />
-          </div>
-
-          {shape !== "source-only" && (
-            <div className="space-y-2">
+            <Field>
               <div className="flex items-center gap-1.5">
-                <Label htmlFor="target">Target language</Label>
+                <FieldLabel htmlFor="source">Source language</FieldLabel>
                 <LanguageFieldHint />
               </div>
               <Input
-                id="target"
+                id="source"
                 className={FIELD_CLASS}
-                value={targetLanguage}
-                onChange={(e) => setTargetLanguage(e.target.value)}
-                placeholder="French, conversational Swahili, zh-Hant…"
+                value={sourceLanguage}
+                onChange={(e) => setSourceLanguage(e.target.value)}
+                placeholder="English, Grade 7 English, es-419…"
               />
-            </div>
-          )}
+            </Field>
+
+            {shape !== "source-only" && (
+              <Field>
+                <div className="flex items-center gap-1.5">
+                  <FieldLabel htmlFor="target">Target language</FieldLabel>
+                  <LanguageFieldHint />
+                </div>
+                <Input
+                  id="target"
+                  className={FIELD_CLASS}
+                  value={targetLanguage}
+                  onChange={(e) => setTargetLanguage(e.target.value)}
+                  placeholder="French, conversational Swahili, zh-Hant…"
+                />
+              </Field>
+            )}
+          </FieldGroup>
 
           {/* AD-9 project-shape picker, tucked behind an "Advanced" disclosure
               and placed after the primary fields so the default create flow is
@@ -216,9 +217,9 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
           </details>
 
           {error && (
-            <p className="text-sm text-destructive" role="alert">
+            <FieldError role="alert">
               {error}
-            </p>
+            </FieldError>
           )}
 
           <Button
@@ -236,24 +237,22 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
 
 function LanguageFieldHint() {
   return (
-    <TooltipProvider delay={150}>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <button
-              type="button"
-              aria-label="What can I enter here?"
-              className="text-muted-foreground hover:text-foreground"
-            />
-          }
-        >
-          <Info className="h-3.5 w-3.5" aria-hidden="true" />
-        </TooltipTrigger>
-        <TooltipContent className="max-w-xs">
-          Any label works — a BCP-47 tag, a language name, or a register
-          description (e.g. "Grade 7 English", "conversational Swahili").
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label="What can I enter here?"
+            className="text-muted-foreground hover:text-foreground"
+          />
+        }
+      >
+        <Info className="h-3.5 w-3.5" aria-hidden="true" />
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">
+        Any label works — a BCP-47 tag, a language name, or a register
+        description (e.g. "Grade 7 English", "conversational Swahili").
+      </TooltipContent>
+    </Tooltip>
   )
 }

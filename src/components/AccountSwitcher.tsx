@@ -1,4 +1,4 @@
-import { useState, useRef } from "react"
+import { useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { Link, useLocation } from "react-router-dom"
 import { ChevronsUpDown, LogIn, LogOut, UserPlus, Check, Settings2 } from "lucide-react"
@@ -9,7 +9,7 @@ import { outboxPendingCount } from "@/lib/sync/outbox"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog"
-import { Popover, PopoverContent } from "@/components/ui/popover"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
 import { FrontierLoginForm } from "./git-import/FrontierLoginForm"
 import { FrontierSignupForm } from "./git-import/FrontierSignupForm"
@@ -107,9 +107,6 @@ export function AccountSwitcher({
   const [open, setOpen] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
   const [pendingLogout, setPendingLogout] = useState<{ count: number; scope: LogoutScope } | null>(null)
-  // Anchor the (portaled) dropdown to the trigger button. Portaling escapes the
-  // sidebar's overflow-hidden so the menu isn't clipped to the collapsed rail.
-  const btnRef = useRef<HTMLButtonElement>(null)
   // Capture the destination before showing the login dialog so the user
   // returns to the same page after reset → login.
   const returnTo = location.pathname !== "/" ? location.pathname + location.search : undefined
@@ -145,10 +142,10 @@ export function AccountSwitcher({
       <>
         <button
           className={cn(
-            "flex items-center gap-2 rounded-xl bg-card text-sm transition-shadow hover:shadow-neu-xs",
+            "flex items-center gap-2 rounded-xl bg-card text-sm transition-shadow",
             compact ? "h-8 w-8 justify-center p-0" : "px-2 py-1.5",
             !isHeader && !compact && "w-full",
-            isHeader && "shadow-neu-sm h-9",
+            isHeader && "h-9",
           )}
           aria-label="Log in"
           onClick={() => setLoginOpen(true)}
@@ -169,38 +166,40 @@ export function AccountSwitcher({
   const activeSummary = sessions.find((s) => s.active)
 
   return (
-    <div className="relative">
-      <button
-        ref={btnRef}
-        className={cn(
-          "flex items-center gap-2 rounded-xl bg-card text-sm transition-shadow hover:shadow-neu-xs",
-          compact ? "h-8 w-8 justify-center p-0" : "px-2 py-1.5",
-          !isHeader && !compact && "w-full",
-          isHeader && "h-9",
-        )}
-        aria-label={`Account menu: ${active.username}`}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <div
-          className="flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-semibold text-white"
-          style={{ backgroundColor: colorFor(active.username) }}
-        >
-          {initials(active.username)}
-        </div>
-        {!compact && (
-          <>
-            <span className={cn("truncate text-left", !isHeader && "flex-1")}>{active.username}</span>
-            <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground" />
-          </>
-        )}
-      </button>
+    <>
       <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger
+          render={
+            <button
+              type="button"
+              className={cn(
+                "flex items-center gap-2 rounded-xl bg-card text-sm transition-shadow",
+                compact ? "h-8 w-8 justify-center p-0" : "px-2 py-1.5",
+                !isHeader && !compact && "w-full",
+                isHeader && "h-9",
+              )}
+              aria-label={`Account menu: ${active.username}`}
+            />
+          }
+        >
+          <div
+            className="flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-semibold text-white"
+            style={{ backgroundColor: colorFor(active.username) }}
+          >
+            {initials(active.username)}
+          </div>
+          {!compact && (
+            <>
+              <span className={cn("truncate text-left", !isHeader && "flex-1")}>{active.username}</span>
+              <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+            </>
+          )}
+        </PopoverTrigger>
         <PopoverContent
-          anchor={btnRef}
           side={isHeader ? "bottom" : "top"}
           align={isHeader ? "end" : "start"}
           sideOffset={8}
-          className="neu-raised w-60 p-1.5"
+          className="bg-card w-60 p-1.5"
         >
           <div className="px-2 py-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
             Signed in
@@ -225,20 +224,20 @@ export function AccountSwitcher({
           <Link
             to="/preferences"
             onClick={() => setOpen(false)}
-            className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow hover:shadow-neu-xs"
+            className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow"
           >
             <Settings2 className="h-4 w-4" />
             <span>Preferences</span>
           </Link>
           <button
-            className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow hover:shadow-neu-xs"
+            className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow"
             onClick={() => { setOpen(false); setLoginOpen(true) }}
           >
             <UserPlus className="h-4 w-4" />
             <span>Add another account…</span>
           </button>
           <button
-            className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow hover:shadow-neu-xs"
+            className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow"
             onClick={() => handleLogout("single")}
           >
             <LogOut className="h-4 w-4" />
@@ -246,7 +245,7 @@ export function AccountSwitcher({
           </button>
           {sessions.length > 1 && (
             <button
-              className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm text-destructive transition-shadow hover:shadow-neu-xs"
+              className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm text-destructive transition-shadow"
               onClick={() => handleLogout("all")}
             >
               <LogOut className="h-4 w-4" />
@@ -283,7 +282,7 @@ export function AccountSwitcher({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   )
 }
 
@@ -313,8 +312,7 @@ function Entry({
     <div
       className={cn(
         "group flex items-center gap-2 rounded-xl px-2 py-1.5 text-sm",
-        !summary.active && "bg-card cursor-pointer transition-shadow hover:shadow-neu-xs",
-        summary.active && "shadow-neu-inset",
+        !summary.active && "bg-card cursor-pointer transition-shadow",
       )}
       onClick={onClick}
     >

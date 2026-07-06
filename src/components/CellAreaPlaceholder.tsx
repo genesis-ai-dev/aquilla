@@ -1,9 +1,18 @@
-// Renders the non-"ready" branches of the editor cell area: skeleton rows
+import type { ComponentType } from "react"
 // while a file hydrates, empty states when nothing is selected or the file
 // has no cells yet. Mirrors the EditorTable's grid columns so there's no
 // layout shift when real rows arrive.
 
 import { FileText, FolderOpen, Sparkles, Upload } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { CellAreaState } from "@/lib/editor/cell-area-state"
 
@@ -61,7 +70,7 @@ function SkeletonRows({ caption }: { caption: string }) {
     <div className="flex h-full flex-col">
       <div className="flex-1 space-y-2 overflow-hidden p-4" aria-label={caption}>
         {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className={`neu-flat grid ${GRID_COLS} items-start gap-3 rounded-2xl px-4 py-3`}>
+          <div key={i} className={`bg-card grid ${GRID_COLS} items-start gap-3 rounded-2xl px-4 py-3`}>
             <Skeleton className="h-6 w-10" />
             <Skeleton className="h-16 w-full" />
             <Skeleton className="h-16 w-full" />
@@ -94,7 +103,7 @@ function NoFileEmpty({
   if (!filesLoaded) {
     return (
       <EmptyState
-        icon={<FolderOpen className="h-10 w-10" aria-hidden />}
+        icon={FolderOpen}
         title="No file selected"
         description="Pick a file from the sidebar to start translating."
       />
@@ -106,27 +115,23 @@ function NoFileEmpty({
   if (!hasFiles) {
     return (
       <EmptyState
-        icon={<Upload className="h-10 w-10" aria-hidden />}
+        icon={Upload}
         title="No files yet"
         description="Import a file to get started."
         action={
-          onImportClick && (
-            <button
-              type="button"
-              onClick={onImportClick}
-              className="inline-flex items-center gap-1.5 rounded-full bg-card px-3 py-1.5 text-sm shadow-neu-sm transition-all hover:shadow-neu active:shadow-neu-pressed"
-            >
-              <Upload className="h-4 w-4" aria-hidden />
+          onImportClick ? (
+            <Button size="sm" onClick={onImportClick}>
+              <Upload data-icon="inline-start" />
               Import a file
-            </button>
-          )
+            </Button>
+          ) : undefined
         }
       />
     )
   }
   return (
     <EmptyState
-      icon={<FolderOpen className="h-10 w-10" aria-hidden />}
+      icon={FolderOpen}
       title="No file selected"
       description="Pick a file from the sidebar to start translating."
     />
@@ -142,44 +147,42 @@ function ReadyEmpty({
 }) {
   return (
     <EmptyState
-      icon={<FileText className="h-10 w-10" aria-hidden />}
+      icon={FileText}
       title={fileName ? `${fileName} is empty` : "This file has no cells yet"}
       description="Import content, or start typing in the first cell."
       action={
-        onImportClick && (
-          <button
-            type="button"
-            onClick={onImportClick}
-            className="inline-flex items-center gap-1.5 rounded-full bg-card px-3 py-1.5 text-sm shadow-neu-sm transition-all hover:shadow-neu active:shadow-neu-pressed"
-          >
-            <Sparkles className="h-4 w-4" aria-hidden />
+        onImportClick ? (
+          <Button size="sm" onClick={onImportClick}>
+            <Sparkles data-icon="inline-start" />
             Import content
-          </button>
-        )
+          </Button>
+        ) : undefined
       }
     />
   )
 }
 
 function EmptyState({
-  icon,
+  icon: Icon,
   title,
   description,
   action,
 }: {
-  icon: React.ReactNode
+  icon: ComponentType<{ className?: string }>
   title: string
   description: string
   action?: React.ReactNode
 }) {
   return (
-    <div className="flex h-full items-center justify-center p-8">
-      <div className="flex max-w-sm flex-col items-center gap-2 text-center">
-        <div className="text-muted-foreground">{icon}</div>
-        <h3 className="text-base font-medium">{title}</h3>
-        <p className="text-sm text-muted-foreground">{description}</p>
-        {action && <div className="mt-2">{action}</div>}
-      </div>
-    </div>
+    <Empty className="h-full border-0 p-8">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <Icon />
+        </EmptyMedia>
+        <EmptyTitle>{title}</EmptyTitle>
+        <EmptyDescription>{description}</EmptyDescription>
+      </EmptyHeader>
+      {action ? <EmptyContent>{action}</EmptyContent> : null}
+    </Empty>
   )
 }

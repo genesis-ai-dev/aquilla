@@ -2,7 +2,6 @@ import type { ReactNode } from "react"
 import {
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 
@@ -22,11 +21,9 @@ export function DisabledFieldTooltip({
 }) {
   if (!disabled || !tooltip) return <>{children}</>
   return (
-    <TooltipProvider delay={200}>
-      <Tooltip>
-        <TooltipTrigger render={<span className="block" />}>{children}</TooltipTrigger>
-        <TooltipContent>{tooltip}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger render={<span className="block" />}>{children}</TooltipTrigger>
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
   )
 }

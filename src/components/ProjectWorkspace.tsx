@@ -13,7 +13,6 @@ import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
 import { useCells } from "@/hooks/useCells"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
-import { useSearchIndex } from "@/hooks/useSearchIndex"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useCompletion } from "@/hooks/useCompletion"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
@@ -133,7 +132,7 @@ import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
 import { CompletionBulkProgressBanner } from "./CompletionBulkProgressBanner"
-import { AppTooltip, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { AppTooltip, Tooltip, TooltipContent, TooltipDelegationBoundary, TooltipTrigger } from "@/components/ui/tooltip"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
 import { AiSetupDialog } from "./AiSetupDialog"
 import {
@@ -143,9 +142,9 @@ import {
 import { generateBacktranslation } from "@/lib/completion/backtranslation-service"
 import { addConcept } from "@/lib/terminology/store"
 import type { Concept } from "@/lib/terminology/types"
-import { buildGlosser, type BtSeed } from "@/lib/completion/bt-glosser"
+import { buildGlosser, type BtSeed, type Glosser } from "@/lib/completion/bt-glosser"
 import { memMark } from "@/lib/perf-log"
-import { buildAlignmentModel } from "@/lib/completion/interlinear"
+import { buildAlignmentModel, type AlignmentModel } from "@/lib/completion/interlinear"
 import { buildStatisticalBt, resolveBtTargetEventId } from "@/lib/completion/bt-auto"
 // FRO-192: assignment work-pickup UI
 import { AssignModal } from "./AssignModal"
@@ -199,6 +198,16 @@ const ProjectMembersPageContent = lazy(() =>
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _lastImportWrite: Promise<any> = Promise.resolve(undefined)
 
+function projectRecordsEquivalent(a: ProjectRecord | null, b: ProjectRecord | null): boolean {
+  if (a === b) return true
+  if (!a || !b) return a === b
+  try {
+    return JSON.stringify(a) === JSON.stringify(b)
+  } catch {
+    return false
+  }
+}
+
 // ── FRO-234: pure guard — exported for unit testing ───────────────────────────
 /**
  * Returns true iff the completion-settings save should actually patch
@@ -234,13 +243,14 @@ export function ProjectWorkspace() {
 
   useEffect(() => {
     if (!loadedProject) {
-      setClientProject(null)
+      setClientProject((current) => current === null ? current : null)
       return
     }
     let cancelled = false
     void getProject(loadedProject.id).then((local) => {
       if (cancelled) return
-      setClientProject(mergeServerProjectWithLocalCache(loadedProject, local))
+      const next = mergeServerProjectWithLocalCache(loadedProject, local)
+      setClientProject((current) => projectRecordsEquivalent(current, next) ? current : next)
     })
     return () => { cancelled = true }
   }, [loadedProject])
@@ -803,7 +813,18 @@ export function ProjectWorkspace() {
   // Stable refs so that callbacks declared BEFORE glosser/persistBt (in React
   // hook order) can still call the latest version without stale-closure issues.
   // Updated unconditionally each render — refs never cause re-renders.
-  const glosserRef = useRef<import("@/lib/completion/bt-glosser").Glosser | null>(null)
+  const getGlosserRef = useRef<(() => Glosser) | null>(null)
+  const glosserCacheRef = useRef<{
+    corpusCells: CellData[]
+    backtranslationCache: Map<string, string>
+    terminology: ProjectRecord["terminology"] | undefined
+    glosser: Glosser
+  } | null>(null)
+  const alignmentModelCacheRef = useRef<{
+    corpusCells: CellData[]
+    alignmentSeeds: ProjectRecord["alignmentSeeds"] | undefined
+    model: AlignmentModel
+  } | null>(null)
   const persistBtRef = useRef<((cell: CellData, btText: string, polished: boolean, committedEventId?: string) => void) | null>(null)
   // cellsRef is already declared later in the file (line ~689) — we reuse it.
   const setBacktranslationCacheRef = useRef<React.Dispatch<React.SetStateAction<Map<string, string>>> | null>(null)
@@ -889,7 +910,7 @@ export function ProjectWorkspace() {
   const handleJumpNextUnfinished = useCallback(() => {
     const currentIndex = editorRef.current?.getCurrentIndex?.() ?? 0
     const next = findNextUnfinished(currentIndex)
-    if (next >= 0) editorRef.current?.scrollToCellIndex(next)
+    if (next >= 0) editorRef.current?.focusCellEditorIndex(next)
   }, [findNextUnfinished])
   const fileMeta = useFileMeta(activeFileId, project?.sourceLanguage, project?.targetLanguage)
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
@@ -902,6 +923,11 @@ export function ProjectWorkspace() {
 
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const isSubtitleFile = activeFile?.type === "vtt" || activeFile?.type === "srt"
+
+  const workspaceBreadcrumb = useMemo(() => ({
+    surfaceLabel:
+      centerSurface === "editor" ? "Editor" : deriveNavTitle(location.pathname),
+  }), [centerSurface, location.pathname])
 
   const handleVisibleFootnotesChange = useCallback((entries: VisibleFootnoteEntry[]) => {
     const key = entries
@@ -1268,8 +1294,6 @@ export function ProjectWorkspace() {
     original: c.original,
   })), [cells])
 
-  const { search, searchPassages } = useSearchIndex(project?.files || [], corpusCells)
-
   // AD-13 branching-search adapters — single-cell completion's few-shot
   // retrieval (`branchingSearch`) and the batch completion's passage
   // retrieval (`branchingSearchPassages`). Replace the in-memory dual-
@@ -1289,9 +1313,9 @@ export function ProjectWorkspace() {
     ): Promise<ScoredPair[]> => {
       const pid = project?.id
       const fid = activeFileId
-      if (!pid || !fid) return search(query, limit, excludeId)
+      if (!pid || !fid) return []
       const jwt = await getTokenForFile(fid)
-      if (!jwt) return search(query, limit, excludeId)
+      if (!jwt) return []
       try {
         const res = await fetchBranchingSearch({
           projectId: pid,
@@ -1310,11 +1334,11 @@ export function ProjectWorkspace() {
           coverageWeight: r.queryCoverage,
         }))
       } catch (err) {
-        console.warn("[ProjectWorkspace] branching-search fetch failed, falling back to local index:", err)
-        return search(query, limit, excludeId)
+        console.warn("[ProjectWorkspace] branching-search fetch failed:", err)
+        return []
       }
     },
-    [project?.id, activeFileId, getTokenForFile, search],
+    [project?.id, activeFileId, getTokenForFile],
   )
 
   const branchingSearchPassages = useCallback(
@@ -1325,9 +1349,9 @@ export function ProjectWorkspace() {
     ): Promise<PassageHit[]> => {
       const pid = project?.id
       const fid = activeFileId
-      if (!pid || !fid) return Promise.resolve(searchPassages(query, hits, radius))
+      if (!pid || !fid) return Promise.resolve([])
       const jwt = await getTokenForFile(fid)
-      if (!jwt) return Promise.resolve(searchPassages(query, hits, radius))
+      if (!jwt) return Promise.resolve([])
       try {
         const res = await fetchBranchingSearchPassages({
           projectId: pid,
@@ -1349,11 +1373,11 @@ export function ProjectWorkspace() {
           })),
         }))
       } catch (err) {
-        console.warn("[ProjectWorkspace] branching-search-passages fetch failed, falling back to local index:", err)
-        return searchPassages(query, hits, radius)
+        console.warn("[ProjectWorkspace] branching-search-passages fetch failed:", err)
+        return []
       }
     },
-    [project?.id, activeFileId, getTokenForFile, searchPassages],
+    [project?.id, activeFileId, getTokenForFile],
   )
 
   const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string) => {
@@ -1364,7 +1388,7 @@ export function ProjectWorkspace() {
     // stay at the old value until `revalidateCells` fetched from the
     // server. Without this, TipTap's `initialPlain` is briefly stale and
     // any TipTap-side commit fired during that window (DOM reflow when
-    // the loading overlay vanishes, a virtualizer remount, a focus
+    // the loading overlay vanishes, a virtualized-list remount, a focus
     // bounce) chains a *revert* event with the pre-gen text onto the
     // gen — producing the "two events at 5:08, second one identical to
     // 2:28" history pattern.
@@ -1404,8 +1428,9 @@ export function ProjectWorkspace() {
     // remains opt-in via runBacktranslation (the Generate button path).
     // Uses stable refs so this callback doesn't need glosser/persistBt in
     // its dep array (they are declared later in hook order).
-    if (text.trim() && glosserRef.current && persistBtRef.current && setBacktranslationCacheRef.current) {
-      const btText = buildStatisticalBt(glosserRef.current, text)
+    const getGlosser = getGlosserRef.current
+    if (text.trim() && getGlosser && persistBtRef.current && setBacktranslationCacheRef.current) {
+      const btText = buildStatisticalBt(getGlosser(), text)
       if (btText) {
         setBacktranslationCacheRef.current((prev) => new Map(prev).set(cell.id, btText))
         // Pin to the just-committed event id (the projection still lags here).
@@ -1533,10 +1558,22 @@ export function ProjectWorkspace() {
 
   const isBacktranslationConfigured = Boolean(project?.completionSettings && isConfigured)
 
-  // Build the glosser from ALL translated pairs in the project. Memoized on the
-  // DEBOUNCED corpus (corpusCells) so a "complete all" batch rebuilds it once on
-  // pause instead of ~twice per committed cell.
-  const glosser = useMemo(() => {
+  // Build the glosser lazily from translated pairs. This used to run on every
+  // workspace open after corpusCells settled, allocating a large temporary
+  // target-ngram x source-ngram graph even when the user only wanted to scroll.
+  // Keep it cached for feature paths that actually need BT generation.
+  const getGlosser = useCallback((): Glosser => {
+    const terminology = project?.terminology
+    const cached = glosserCacheRef.current
+    if (
+      cached &&
+      cached.corpusCells === corpusCells &&
+      cached.backtranslationCache === backtranslationCache &&
+      cached.terminology === terminology
+    ) {
+      return cached.glosser
+    }
+
     const pairs = corpusCells
       .filter((c) => c.original?.trim() && c.translated?.trim())
       .map((c) => ({ source: c.original!, target: c.translated }))
@@ -1544,8 +1581,9 @@ export function ProjectWorkspace() {
     // Corrected BTs (saved via onSaveBacktranslation) are re-fed as seeds so
     // future glosses reflect the reviewer's intent.
     const seeds: BtSeed[] = []
+    const corpusByCellId = new Map(corpusCells.map((c) => [c.id, c]))
     for (const [cellId, btText] of backtranslationCache) {
-      const cell = corpusCells.find((c) => c.id === cellId)
+      const cell = corpusByCellId.get(cellId)
       if (cell?.translated) {
         seeds.push({ source: btText, target: cell.translated, weight: 3 })
       }
@@ -1564,18 +1602,39 @@ export function ProjectWorkspace() {
     }
     const g = buildGlosser(pairs, seeds)
     memMark(`glosser.build(${pairs.length}p)`)
+    glosserCacheRef.current = {
+      corpusCells,
+      backtranslationCache,
+      terminology,
+      glosser: g,
+    }
     return g
   }, [corpusCells, backtranslationCache, project?.terminology])
 
-  // Build the interlinear alignment model from the same corpus, seeded with the
-  // user's confirmed/invalidated alignments (FRO-207). Memoized on the corpus +
-  // persisted alignmentSeeds so it only rebuilds when either changes.
-  const alignmentModel = useMemo(() => {
+  // Build the interlinear alignment model lazily. It is only used inside an
+  // expanded row's BT tab, so constructing it on workspace open just burns heap
+  // before the user asks for that surface.
+  const getAlignmentModel = useCallback((): AlignmentModel => {
+    const alignmentSeeds = project?.alignmentSeeds
+    const cached = alignmentModelCacheRef.current
+    if (
+      cached &&
+      cached.corpusCells === corpusCells &&
+      cached.alignmentSeeds === alignmentSeeds
+    ) {
+      return cached.model
+    }
+
     const pairs = corpusCells
       .filter((c) => c.original?.trim() && c.translated?.trim())
       .map((c) => ({ source: c.original!, target: c.translated }))
-    const m = buildAlignmentModel(pairs, project?.alignmentSeeds ?? [])
+    const m = buildAlignmentModel(pairs, alignmentSeeds ?? [])
     memMark(`alignmentModel.build(${pairs.length}p)`)
+    alignmentModelCacheRef.current = {
+      corpusCells,
+      alignmentSeeds,
+      model: m,
+    }
     return m
   }, [corpusCells, project?.alignmentSeeds])
 
@@ -1644,9 +1703,9 @@ export function ProjectWorkspace() {
 
   // ── Keep stable refs in sync every render (FRO-203) ────────────────────
   // These allow commitCompletedCell / handleCellCommitted (declared earlier or
-  // later in hook order) to always call the latest glosser + persistBt without
+  // later in hook order) to always call the latest glosser builder + persistBt without
   // circular dependency issues in useCallback deps arrays.
-  glosserRef.current = glosser
+  getGlosserRef.current = getGlosser
   persistBtRef.current = persistBt
   // cellsRef.current is kept in sync by the useEffect at ~line 690 — no update needed here.
   setBacktranslationCacheRef.current = setBacktranslationCache
@@ -1672,7 +1731,7 @@ export function ProjectWorkspace() {
     setBacktranslationErrorsState((prev) => { const n = new Map(prev); n.delete(cellId); return n })
     try {
       // Step 1: statistical gloss (always runs)
-      let btText = glosser.gloss(cell.translated)
+      let btText = getGlosser().gloss(cell.translated)
       if (!btText.trim()) {
         btText = cell.translated // last-resort literal fallback
       }
@@ -1712,7 +1771,7 @@ export function ProjectWorkspace() {
     } finally {
       setBacktranslatingState((prev) => { const n = new Set(prev); n.delete(cellId); return n })
     }
-  }, [glosser, isBacktranslationConfigured, project?.completionSettings, project?.sourceLanguage, project?.targetLanguage, project?.terminology, frontierSession, persistBt])
+  }, [getGlosser, isBacktranslationConfigured, project?.completionSettings, project?.sourceLanguage, project?.targetLanguage, project?.terminology, frontierSession, persistBt])
 
   // Add-from-selection: create a DRAFT concept from a source-side selection in
   // the editor and persist it via the same project-settings sync path the
@@ -2919,11 +2978,12 @@ export function ProjectWorkspace() {
     // ── Auto statistical BT on target commit (FRO-203) ─────────────────────
     // Run synchronously after the flush so the BT reflects the committed text.
     // LLM polish is NOT triggered here — it remains opt-in via runBacktranslation.
-    // Uses stable refs so this callback doesn't need glosser/cells/persistBt
+    // Uses stable refs so this callback doesn't need getGlosser/cells/persistBt
     // in its dep array (they are declared earlier or later in hook order).
-    if (pendingBt?.translatedText && glosserRef.current && setBacktranslationCacheRef.current) {
+    const getGlosser = getGlosserRef.current
+    if (pendingBt?.translatedText && getGlosser && setBacktranslationCacheRef.current) {
       const { cellId, translatedText } = pendingBt
-      const btText = buildStatisticalBt(glosserRef.current, translatedText)
+      const btText = buildStatisticalBt(getGlosser(), translatedText)
       if (btText) {
         const cell = cellsRef.current.find((c) => c.id === cellId)
         setBacktranslationCacheRef.current((prev) => new Map(prev).set(cellId, btText))
@@ -3231,14 +3291,15 @@ export function ProjectWorkspace() {
         logoAccessory={
           dockTab !== null ? (
             <AppTooltip content="Collapse sidebar" side="right">
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 aria-label="Collapse sidebar"
                 onClick={() => setDockTab(null)}
-                className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
               >
                 <PanelLeftClose className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             </AppTooltip>
           ) : null
         }
@@ -3319,24 +3380,22 @@ export function ProjectWorkspace() {
                     it's present in every tab, not just this Files panel. */}
                 {checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
                   <div className="mt-auto border-t px-2 pb-2 pt-2">
-                    <TooltipProvider delay={0}>
-                      <Tooltip open={showChipTooltip} onOpenChange={setShowChipTooltip}>
-                        <TooltipTrigger
-                          render={
-                            <button
-                              onClick={() => { setShowChipTooltip(false); setChecklistOpen(true) }}
-                              className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-                            />
-                          }
-                        >
-                          <ClipboardList className="h-3 w-3" />
-                          Setup: {checklistState.completedCount}/{checklistState.totalCount}
-                        </TooltipTrigger>
-                        <TooltipContent side="right">
-                          Reopen the setup checklist anytime from here.
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
+                    <Tooltip open={showChipTooltip} onOpenChange={setShowChipTooltip}>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            onClick={() => { setShowChipTooltip(false); setChecklistOpen(true) }}
+                            className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                          />
+                        }
+                      >
+                        <ClipboardList className="h-3 w-3" />
+                        Setup: {checklistState.completedCount}/{checklistState.totalCount}
+                      </TooltipTrigger>
+                      <TooltipContent side="right">
+                        Reopen the setup checklist anytime from here.
+                      </TooltipContent>
+                    </Tooltip>
                   </div>
                 )}
               </div>
@@ -3409,9 +3468,9 @@ export function ProjectWorkspace() {
         header={
           <WorkspaceHeader
             project={project}
-            onBack={goToProjects}
             extraMenuItems={workspaceHeaderMenuItems}
             overviewHref={projectId ? `/projects/${projectId}` : undefined}
+            surfaceLabel={workspaceBreadcrumb.surfaceLabel}
           >
             {project && centerSurface === "rules" && (
               <>
@@ -3439,6 +3498,18 @@ export function ProjectWorkspace() {
                 </Button>
               </>
             )}
+
+            {project && centerSurface === "editor" && activeFileId ? (
+              <EditorModeToggle
+                lens={lens}
+                onChange={(l) => {
+                  setLens(l)
+                  // Surface the Voices tab when entering the Audio lens.
+                  if (l === "audio") setDockTab("voices")
+                }}
+                timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
+              />
+            ) : null}
 
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
 
@@ -3789,6 +3860,11 @@ export function ProjectWorkspace() {
                 />
               ) : (
               <EditorActionsProvider value={editorActionsValue}>
+              {/* Dense grid: one tooltip-bearing control per cell across
+                  hundreds of cells — opt into the delegated tooltip layer here
+                  (see TooltipDelegationBoundary) instead of mounting a Base UI
+                  tooltip per control. */}
+              <TooltipDelegationBoundary>
               <EditorTable
             ref={editorRef} project={project} cells={cellsWithBacktranslation}
             showFootnotesInline={footnoteViewMode === "inline"}
@@ -3807,7 +3883,7 @@ export function ProjectWorkspace() {
             backtranslationErrors={backtranslationErrors}
             cellOpenCommentCount={cellOpenCommentCount}
             getTokenForFile={getTokenForFile}
-            alignmentModel={alignmentModel}
+            getAlignmentModel={getAlignmentModel}
             onAlignmentSeedChange={handleAlignmentSeedChange}
             activeCueIndex={activeCueIndex >= 0 ? activeCueIndex : undefined}
             onSeekToCue={isSubtitleFile ? handleCueSeek : undefined}
@@ -3838,6 +3914,7 @@ export function ProjectWorkspace() {
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
           />
+              </TooltipDelegationBoundary>
               </EditorActionsProvider>
               )}
             </div>
@@ -4195,7 +4272,7 @@ export function ProjectWorkspace() {
         />
       )}
       {undo && (
-        <div className="fixed bottom-4 right-4 z-60 flex items-center gap-2 rounded-lg bg-card px-3 py-2 text-sm shadow-neu">
+        <div className="fixed bottom-4 right-4 z-60 flex items-center gap-2 rounded-lg bg-card px-3 py-2 text-sm">
           <span>Applied renames.</span>
           <Button size="sm" variant="outline" onClick={() => {
             if (!project || !undo) return
@@ -4253,7 +4330,7 @@ function MoveToCorpusDialog({
         <select
           value={selection}
           onChange={(e) => setSelection(e.target.value)}
-          className="neu-inset w-full rounded px-2 py-1.5 text-sm"
+            className="bg-muted w-full rounded px-2 py-1.5 text-sm"
         >
           <option value="">Ungrouped</option>
           {existingMarkers.map((m) => <option key={m} value={m}>{m}</option>)}
@@ -4265,7 +4342,7 @@ function MoveToCorpusDialog({
             value={customValue}
             onChange={(e) => setCustomValue(e.target.value)}
             placeholder="New corpus name"
-            className="neu-inset mt-2 w-full rounded px-2 py-1 text-sm"
+              className="bg-muted mt-2 w-full rounded px-2 py-1 text-sm"
           />
         )}
         <DialogFooter>
@@ -4339,7 +4416,7 @@ function ScrollToGroupHandler({ cells, editorRef }: ScrollToGroupHandlerProps) {
     }
 
     if (idx >= 0) {
-      // Defer a tick so the virtualizer has the latest cell list after any
+      // Defer a tick so the virtualized list has the latest cell list after any
       // file-switch that preceded this request.
       setTimeout(() => {
         editorRef.current?.scrollToCellIndex(idx)
@@ -4365,7 +4442,7 @@ function TrashedProjectScreen({ project, onClose, onRestore }: TrashedProjectScr
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-6">
-      <div className="neu-raised max-w-md rounded-2xl p-8 text-center">
+        <div className="bg-card max-w-md rounded-2xl p-8 text-center">
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
           <Trash2 className="h-6 w-6 text-muted-foreground" />
         </div>

@@ -1,4 +1,4 @@
-import { Label } from "@/components/ui/label"
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { AppTooltip } from "@/components/ui/tooltip"
 import type { DecaySettings } from "@/lib/parsers/types"
@@ -40,46 +40,48 @@ export function DecaySettingsSection({
           example-retrieval graph. Cells that are far from validated neighbors are considered stale.
         </p>
 
-        <div>
-          <Label htmlFor="decay-max-hops">Max hops</Label>
-          <Input
-            id="decay-max-hops"
-            type="number"
-            min={1}
-            max={20}
-            step={1}
-            value={maxHops}
-            disabled={disabled}
-            onChange={(e) => {
-              const v = Math.min(20, Math.max(1, Math.round(Number(e.target.value) || 0)))
-              onChange({ ...settings, maxHops: v })
-            }}
-          />
-          <p className="mt-1 text-xs text-muted-foreground">
-            Propagation radius from validated cells. Larger values let confidence
-            ripple further through the retrieval graph. Default {DEFAULT_MAX_HOPS}.
-          </p>
-        </div>
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="decay-max-hops">Max hops</FieldLabel>
+            <Input
+              id="decay-max-hops"
+              type="number"
+              min={1}
+              max={20}
+              step={1}
+              value={maxHops}
+              disabled={disabled}
+              onChange={(e) => {
+                const v = Math.min(20, Math.max(1, Math.round(Number(e.target.value) || 0)))
+                onChange({ ...settings, maxHops: v })
+              }}
+            />
+            <FieldDescription>
+              Propagation radius from validated cells. Larger values let confidence
+              ripple further through the retrieval graph. Default {DEFAULT_MAX_HOPS}.
+            </FieldDescription>
+          </Field>
 
-        <div>
-          <Label htmlFor="decay-warn">Attention threshold</Label>
-          <Input
-            id="decay-warn"
-            type="number"
-            min={0}
-            max={1}
-            step={0.01}
-            value={decayWarnThreshold}
-            disabled={disabled}
-            onChange={(e) => {
-              const v = Math.min(1, Math.max(0, Number(e.target.value) || 0))
-              onChange({ ...settings, decayWarnThreshold: v })
-            }}
-          />
-          <p className="mt-1 text-xs text-muted-foreground">
-            Staleness above this threshold shows the cell&apos;s &quot;needs attention&quot; marker (0–1). Default {DECAY_DEFAULTS.decayWarnThreshold}.
-          </p>
-        </div>
+          <Field>
+            <FieldLabel htmlFor="decay-warn">Attention threshold</FieldLabel>
+            <Input
+              id="decay-warn"
+              type="number"
+              min={0}
+              max={1}
+              step={0.01}
+              value={decayWarnThreshold}
+              disabled={disabled}
+              onChange={(e) => {
+                const v = Math.min(1, Math.max(0, Number(e.target.value) || 0))
+                onChange({ ...settings, decayWarnThreshold: v })
+              }}
+            />
+            <FieldDescription>
+              Staleness above this threshold shows the cell&apos;s &quot;needs attention&quot; marker (0–1). Default {DECAY_DEFAULTS.decayWarnThreshold}.
+            </FieldDescription>
+          </Field>
+        </FieldGroup>
       </div>
     </details>
   )

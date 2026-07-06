@@ -90,7 +90,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
         <div
           className={cn(
             "absolute right-full top-1/2 z-30 mr-2 flex -translate-y-1/2 items-center gap-2 whitespace-nowrap",
-            "neu-raised rounded-2xl bg-card px-3 py-2 text-xs",
+            "rounded-2xl bg-card px-3 py-2 text-xs",
             "animate-in fade-in-0 slide-in-from-right-2 duration-200",
           )}
           role="status"
@@ -110,19 +110,21 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               setMenuOpen(true)
               handleDismissHint()
             }}
-            className="rounded-full px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card hover:shadow-neu-xs active:scale-[0.95]"
+            className="rounded-full px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card active:scale-[0.95]"
           >
             Adjust
           </button>
           <AppTooltip content="Dismiss">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={handleDismissHint}
               aria-label="Dismiss"
-              className="flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground/70 transition-all duration-150 ease-out hover:bg-card hover:text-foreground hover:shadow-neu-xs active:scale-[0.92]"
+              className="size-5 rounded-full text-muted-foreground/70"
             >
               <X className="h-3 w-3" />
-            </button>
+            </Button>
           </AppTooltip>
           {/* Arrow pointing to the eye icon */}
           <span
@@ -155,7 +157,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
         <Menu.Portal>
           {/* z-40 on Positioner, not Popup — see ui/tooltip.tsx for rationale. */}
           <Menu.Positioner sideOffset={4} className="z-40">
-            <Menu.Popup className="neu-raised min-w-60 rounded-2xl bg-card p-1.5 text-popover-foreground">
+            <Menu.Popup className="min-w-60 rounded-2xl bg-card p-1.5 text-popover-foreground">
               <Menu.Item
                 disabled={!fileOpen}
                 onClick={() => onLineNumbersChange(!lineNumbersEnabled)}
@@ -180,7 +182,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               </Menu.Item>
               {onFootnoteViewModeChange && (
                 <>
-                  <div className="-mx-1 my-1.5 h-px rounded-full shadow-neu-inset" role="separator" />
+                  <div className="-mx-1 my-1.5 h-px rounded-full" role="separator" />
                   <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                     Footnotes
                   </div>
@@ -204,7 +206,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
                   />
                 </>
               )}
-              <div className="-mx-1 my-1.5 h-px rounded-full shadow-neu-inset" role="separator" />
+              <div className="-mx-1 my-1.5 h-px rounded-full" role="separator" />
               <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                 Text Direction
               </div>
@@ -224,7 +226,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
                 <span>Target</span>
                 <DirPill dir={targetTextDirection} />
               </Menu.Item>
-              <div className="-mx-1 my-1.5 h-px rounded-full shadow-neu-inset" role="separator" />
+              <div className="-mx-1 my-1.5 h-px rounded-full" role="separator" />
               <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                 Font Size
               </div>
@@ -284,7 +286,7 @@ function FootnoteModeItem({
       <span
         className={cn(
           "h-2 w-2 rounded-full",
-          active ? "bg-primary" : "bg-muted shadow-neu-inset",
+          active ? "bg-primary" : "bg-muted",
         )}
         aria-hidden="true"
       />
@@ -313,31 +315,31 @@ function FontSizeRow({
       <span>{label}</span>
       <span className="flex items-center gap-1">
         <AppTooltip content={`Decrease ${label.toLowerCase()} font size`}>
-          <span className="inline-flex">
-            <button
-              type="button"
-              aria-label={`Decrease ${label.toLowerCase()} font size`}
-              disabled={disabled || value <= MIN_FONT_SIZE}
-              onClick={() => onChange(Math.max(MIN_FONT_SIZE, value - FONT_SIZE_STEP))}
-              className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 disabled:cursor-not-allowed disabled:opacity-30 transition-colors"
-            >
-              <span className="text-[11px] leading-none select-none">A−</span>
-            </button>
-          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Decrease ${label.toLowerCase()} font size`}
+            disabled={disabled || value <= MIN_FONT_SIZE}
+            onClick={() => onChange(Math.max(MIN_FONT_SIZE, value - FONT_SIZE_STEP))}
+            className="size-5"
+          >
+            <span className="text-[11px] leading-none select-none">A−</span>
+          </Button>
         </AppTooltip>
         <span className="w-9 text-center text-[10px] tabular-nums text-muted-foreground">{value}px</span>
         <AppTooltip content={`Increase ${label.toLowerCase()} font size`}>
-          <span className="inline-flex">
-            <button
-              type="button"
-              aria-label={`Increase ${label.toLowerCase()} font size`}
-              disabled={disabled || value >= MAX_FONT_SIZE}
-              onClick={() => onChange(Math.min(MAX_FONT_SIZE, value + FONT_SIZE_STEP))}
-              className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 disabled:cursor-not-allowed disabled:opacity-30 transition-colors"
-            >
-              <span className="text-[11px] leading-none select-none">A+</span>
-            </button>
-          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Increase ${label.toLowerCase()} font size`}
+            disabled={disabled || value >= MAX_FONT_SIZE}
+            onClick={() => onChange(Math.min(MAX_FONT_SIZE, value + FONT_SIZE_STEP))}
+            className="size-5"
+          >
+            <span className="text-[11px] leading-none select-none">A+</span>
+          </Button>
         </AppTooltip>
       </span>
     </div>

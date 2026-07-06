@@ -120,6 +120,89 @@ const EMPTY_HISTORY: CellHistoryEntry[] = []
 const EMPTY_THREADS: CommentThread[] = []
 const EMPTY_WAIVERS: import("@/lib/parsers/types").RuleWaiver[] = []
 
+function stringArraysEqual(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
+  if (a === b) return true
+  if (!a || !b) return !a?.length && !b?.length
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+function waiversEqual(
+  a: readonly import("@/lib/parsers/types").RuleWaiver[] | undefined,
+  b: readonly import("@/lib/parsers/types").RuleWaiver[] | undefined,
+): boolean {
+  if (a === b) return true
+  if (!a || !b) return !a?.length && !b?.length
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].ruleId !== b[i].ruleId) return false
+    if (a[i].reason !== b[i].reason) return false
+    if (a[i].waivedAt !== b[i].waivedAt) return false
+    if (a[i].waivedBy !== b[i].waivedBy) return false
+  }
+  return true
+}
+
+function cellsEqual(a: CellData, b: CellData): boolean {
+  return (
+    a.id === b.id &&
+    a.fileId === b.fileId &&
+    a.hasPendingEdit === b.hasPendingEdit &&
+    a.cellLabel === b.cellLabel &&
+    a.original === b.original &&
+    a.originalHtml === b.originalHtml &&
+    a.translated === b.translated &&
+    a.translatedHtml === b.translatedHtml &&
+    a.targetEventId === b.targetEventId &&
+    a.targetSourceEventId === b.targetSourceEventId &&
+    a.sourceEventId === b.sourceEventId &&
+    a.context === b.context &&
+    a.group === b.group &&
+    a.section === b.section &&
+    a.type === b.type &&
+    a.status === b.status &&
+    a.validationStatus === b.validationStatus &&
+    a.endorsementCount === b.endorsementCount &&
+    a.lastEditAt === b.lastEditAt &&
+    a.startTime === b.startTime &&
+    a.endTime === b.endTime &&
+    a.sequenceIndex === b.sequenceIndex &&
+    a.medium === b.medium &&
+    a.transcription === b.transcription &&
+    a.cameraState === b.cameraState &&
+    a.metadata === b.metadata &&
+    stringArraysEqual(a.activeValidators, b.activeValidators) &&
+    stringArraysEqual(a.globalReferences, b.globalReferences) &&
+    waiversEqual(a.waivers, b.waivers)
+  )
+}
+
+function cellArraysEqual(a: readonly CellData[], b: readonly CellData[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (!cellsEqual(a[i], b[i])) return false
+  }
+  return true
+}
+
+function pendingOverlayMapsEqual(
+  a: ReadonlyMap<string, { value: string; valueHtml?: string }>,
+  b: ReadonlyMap<string, { value: string; valueHtml?: string }>,
+): boolean {
+  if (a === b) return true
+  if (a.size !== b.size) return false
+  for (const [cellId, av] of a) {
+    const bv = b.get(cellId)
+    if (!bv) return false
+    if (av.value !== bv.value || av.valueHtml !== bv.valueHtml) return false
+  }
+  return true
+}
+
 function classifyValidators(
   active: string[],
   currentUsername: string,
@@ -408,7 +491,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     const rows = rowsRef.current
     const overlay = pendingOverlayRef.current
     if (rows.length === 0 && overlay.size === 0) {
-      setCells([])
+      setCells((prev) => prev.length === 0 ? prev : [])
       return
     }
     const { ordered, sources, targets } = joinSourceAndTarget(rows)
@@ -453,7 +536,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         cell.hasPendingEdit = true
       }
     }
-    setCells(out)
+    setCells((prev) => cellArraysEqual(prev, out) ? prev : out)
   }, [])
 
   // Drop optimistic-edit shadows that a server fetch has confirmed: if the
@@ -848,6 +931,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       if (cancelled) return
       const fid = fileRef.current
       const next = new Map<string, { value: string; valueHtml?: string }>()
+      let shadowChanged = false
       for (const r of all) {
         if (fid && r.event.fileId !== fid) continue
         const k = r.event.kind
@@ -869,6 +953,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
             // cell reverts to the server projection. A different value means
             // the user already made a superseding edit; leave that shadow alone.
             optimisticEditsRef.current.delete(cellId)
+            shadowChanged = true
           }
           continue
         }
@@ -876,8 +961,9 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         if (typeof p.value !== "string") continue
         next.set(cellId, { value: p.value, valueHtml: p.valueHtml })
       }
-      pendingOverlayRef.current = next
-      rebuildFromCache()
+      const overlayChanged = !pendingOverlayMapsEqual(pendingOverlayRef.current, next)
+      if (overlayChanged) pendingOverlayRef.current = next
+      if (overlayChanged || shadowChanged) rebuildFromCache()
     }
     void refresh()
     const unsub = subscribeToOutbox(refresh)

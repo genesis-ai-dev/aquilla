@@ -19,6 +19,13 @@ import { BookOpen, Users, AlertTriangle, Plus, Pencil, Trash2, Lock, ExternalLin
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -33,7 +40,6 @@ import {
   AppTooltip,
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { useLivingMemory } from "@/hooks/useLivingMemory"
@@ -106,23 +112,23 @@ function LivingMemorySkeleton() {
 
 function RecentExamplesEmpty() {
   return (
-    <div
-      className="flex flex-col items-center justify-center gap-4 py-12 text-muted-foreground"
+    <Empty
+      className="border-0 py-12"
       role="status"
       aria-label="No validated translations"
     >
-      <div className="rounded-2xl bg-muted/50 p-4">
-        <BookOpen className="h-8 w-8 opacity-40" aria-hidden="true" />
-      </div>
-      <div className="flex flex-col items-center gap-1.5 text-center">
-        <p className="text-sm font-medium text-foreground/70">No validated translations yet</p>
-        <p className="text-xs text-muted-foreground max-w-xs leading-relaxed">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <BookOpen />
+        </EmptyMedia>
+        <EmptyTitle className="text-foreground/70">No validated translations yet</EmptyTitle>
+        <EmptyDescription className="max-w-xs text-xs leading-relaxed">
           When translators and reviewers reach the required validation threshold on a cell, that
           source&thinsp;&rarr;&thinsp;target pair appears here. The AI draws on these pairs in
           every subsequent draft.
-        </p>
-      </div>
-    </div>
+        </EmptyDescription>
+      </EmptyHeader>
+    </Empty>
   )
 }
 
@@ -130,7 +136,7 @@ function RecentExamplesEmpty() {
 
 function ValidatedCellCard({ cell }: { cell: LivingMemoryCell }) {
   return (
-    <Card className="overflow-hidden transition-shadow hover:shadow-sm">
+    <Card className="overflow-hidden transition-colors hover:bg-muted/50">
       <CardContent className="p-3 flex flex-col gap-1.5">
         {/* Reference label */}
         {cell.group && (
@@ -266,23 +272,21 @@ function RoleLockTooltip({ reason }: { reason: "offline" | "role" | null }) {
       ? "You are offline. Reconnect to edit."
       : "Editing requires Maintainer role (600) or above."
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <span
-              aria-label={message}
-              className="inline-flex items-center text-muted-foreground/50"
-            />
-          }
-        >
-          <Lock className="h-3 w-3" aria-hidden="true" />
-        </TooltipTrigger>
-        <TooltipContent side="left" className="max-w-[200px] text-xs">
-          {message}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            aria-label={message}
+            className="inline-flex items-center text-muted-foreground/50"
+          />
+        }
+      >
+        <Lock className="h-3 w-3" aria-hidden="true" />
+      </TooltipTrigger>
+      <TooltipContent side="left" className="max-w-[200px] text-xs">
+        {message}
+      </TooltipContent>
+    </Tooltip>
   )
 }
 

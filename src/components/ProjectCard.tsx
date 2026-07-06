@@ -88,7 +88,7 @@ export function ProjectCard({
 
   return (
     <Card
-      className={`${isTrashed ? "opacity-70" : "cursor-pointer hover:shadow-neu-lg"} ${isInactive && !isTrashed ? "opacity-60" : ""} transition-shadow`}
+      className={`${isTrashed ? "opacity-70" : "cursor-pointer hover:bg-muted/50"} ${isInactive && !isTrashed ? "opacity-60" : ""} transition-colors`}
       onClick={isTrashed ? undefined : onClick}
       data-testid={isInactive && !isTrashed ? "inactive-project-card" : undefined}
     >
@@ -131,7 +131,7 @@ export function ProjectCard({
               </AppTooltip>
             )}
             {isGit && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-neu-inset">
+              <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                 <GitBranch className="h-3 w-3" /> git
               </span>
             )}

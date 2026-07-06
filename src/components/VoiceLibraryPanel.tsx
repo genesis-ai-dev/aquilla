@@ -12,6 +12,11 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { cn } from "@/lib/utils"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { PRESET_VOICES } from "@/lib/audio/voices"
@@ -128,16 +133,17 @@ export function VoiceLibraryPanel({
 
       {/* Search */}
       <div className="px-3 pb-2">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
+        <InputGroup>
+          <InputGroupAddon>
+            <Search />
+          </InputGroupAddon>
+          <InputGroupInput
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search voices…"
-            className="h-8 w-full rounded-lg border bg-background pl-8 pr-2 text-sm outline-none ring-primary/40 placeholder:text-muted-foreground focus:ring-2"
           />
-        </div>
+        </InputGroup>
       </div>
 
       {/* The selector list */}
@@ -226,7 +232,7 @@ function VoiceRow({
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect() } }}
       title="Click to select · drag onto a line to assign"
       className={cn(
-        "group flex cursor-grab items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors active:cursor-grabbing",
+        "group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors",
         active ? "bg-primary/10" : "hover:bg-accent/50",
       )}
     >
@@ -254,15 +260,17 @@ function VoiceRow({
       <Popover open={menuOpen} onOpenChange={setMenuOpen}>
         <PopoverTrigger
           render={
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={(e) => e.stopPropagation()}
               title="More"
               aria-label="More voice actions"
-              className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus:opacity-100 group-hover:opacity-100 data-[popup-open]:opacity-100"
+              className="shrink-0 opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100 data-[popup-open]:opacity-100"
             >
               <MoreHorizontal className="h-4 w-4" />
-            </button>
+            </Button>
           }
         />
         <PopoverContent align="end" side="bottom" className="w-44 p-1" onClick={(e) => e.stopPropagation()}>

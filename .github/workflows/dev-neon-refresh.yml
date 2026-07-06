@@ -1,0 +1,63 @@
+name: Refresh Dev Neon Branch
+
+on:
+  workflow_dispatch:
+  schedule:
+    # GitHub cron is UTC. These two schedules cover 4:07 a.m. Eastern during
+    # daylight and standard time; the first step gates execution to the 4 a.m.
+    # America/New_York hour so the non-matching run exits without changes.
+    - cron: "7 8 * * *"
+    - cron: "7 9 * * *"
+
+concurrency:
+  group: dev-neon-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Gate scheduled run to 4 a.m. Eastern
+        id: eastern_gate
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          eastern_hour="$(TZ=America/New_York date +%H)"
+          if [ "$eastern_hour" = "04" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping: current America/New_York hour is $eastern_hour, not 04."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.eastern_gate.outputs.should_run == 'true'
+
+      - uses: pnpm/action-setup@v4
+        if: steps.eastern_gate.outputs.should_run == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.eastern_gate.outputs.should_run == 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+        if: steps.eastern_gate.outputs.should_run == 'true'
+
+      - name: Restore dev branch from production and apply dev migrations
+        if: steps.eastern_gate.outputs.should_run == 'true'
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: sweet-paper-88472094
+          NEON_DEV_BRANCH: dev
+          NEON_SOURCE_BRANCH: production
+          NEON_DEV_DATABASE: neondb
+          NEON_DEV_ROLE: neondb_owner
+          DEV_API_HEALTH_URL: https://api.dev.aquilla.app/identity/api/v2/health
+        run: pnpm neon:refresh-dev

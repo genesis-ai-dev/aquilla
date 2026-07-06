@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
-import { MemoryRouter } from "react-router-dom"
+import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { Settings } from "./Settings"
 import { renameOrg, listMyOrgs } from "@/lib/frontier/orgs"
@@ -62,13 +62,22 @@ async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
   fireEvent.keyDown(option, { key: "Enter" })
 }
 
-function renderSettings() {
-  return render(<MemoryRouter><OrgProvider><Settings /></OrgProvider></MemoryRouter>)
+function renderSettings(path = "/settings") {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <OrgProvider>
+        <Routes>
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/settings/:section" element={<Settings />} />
+        </Routes>
+      </OrgProvider>
+    </MemoryRouter>,
+  )
 }
 
 describe("Org Settings", () => {
   it("shows the org name and an owner can rename it", async () => {
-    renderSettings()
+    renderSettings("/settings/identity")
     await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))
     fireEvent.click(screen.getByRole("button", { name: /rename/i }))
     const input = screen.getByLabelText(/organization name/i)
@@ -86,7 +95,7 @@ describe("Org Settings", () => {
 
   it("hides the rename control for a non-admin", async () => {
     vi.mocked(listMyOrgs).mockResolvedValueOnce([{ id: 1, name: "Come and See", role: { level: 100, name: "viewer" } }])
-    renderSettings()
+    renderSettings("/settings/identity")
     await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))
     expect(screen.queryByRole("button", { name: /rename/i })).not.toBeInTheDocument()
   })
@@ -95,7 +104,7 @@ describe("Org Settings", () => {
 describe("Export policy saved acknowledgment", () => {
   it("shows Saved after a successful export-role change", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "ok", value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })
-    renderSettings()
+    renderSettings("/settings/export")
     // Wait for the export permissions section to appear.
     await waitFor(() => expect(screen.getByLabelText(/who can export/i)).toBeDefined())
 
@@ -107,7 +116,7 @@ describe("Export policy saved acknowledgment", () => {
 
   it("does not show Saved when the save fails", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "error" as const, status: 500, message: "Server error" })
-    renderSettings()
+    renderSettings("/settings/export")
     await waitFor(() => expect(screen.getByLabelText(/who can export/i)).toBeDefined())
 
     await pickSelectOption(/who can export/i, /contributor \(400\)/i)

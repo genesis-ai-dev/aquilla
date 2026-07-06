@@ -25,8 +25,9 @@ import type { EditorView } from "@tiptap/pm/view"
 import StarterKit from "@tiptap/starter-kit"
 import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { createViolationDecorationExtension, violationPluginKey } from "@/lib/richtext/violation-decoration-plugin"
 import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } from "@/lib/richtext/karaoke-plugin"
@@ -36,9 +37,9 @@ import { UsfmFootnote } from "@/lib/richtext/footnote-node"
 import {
   FOOTNOTE_NODE_NAME,
   buildUsfmPlainTextMap,
-  injectFootnoteSpans,
   pmToPlainOffset,
 } from "@/lib/richtext/usfm-plain-text"
+import { prepareEditorContent, sanitizeEditorHtml } from "@/lib/richtext/editor-content"
 import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
 import type { Concept } from "@/lib/terminology/types"
 import { findActiveTimingIndex } from "@/lib/audio/timings"
@@ -211,7 +212,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   // plain text. Either form may carry raw `\f...\f*` (legacy) or footnote spans
   // (our own serialisation); prepareEditorContent normalises both into the
   // <span data-usfm-footnote> form that parses into footnote nodes.
-  const initialContent = prepareEditorContent(initialHtml, initialPlain)
+  const initialContent = useMemo(
+    () => prepareEditorContent(initialHtml, initialPlain),
+    [initialHtml, initialPlain],
+  )
 
   const isReadOnly = !editable || Boolean(heldByLabel)
 
@@ -263,9 +267,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         "aria-multiline": "true",
         ...(ariaLabel ? { "aria-label": ariaLabel } : {}),
         class: cn(
-          // The surrounding neu-inset well in EditorTable already reads as an
+          // The surrounding bg-muted well in EditorTable already reads as an
           // input, so the editor surface itself stays transparent — no flat
-          // background tints competing with the soft recess.
+          // background tints competing with the recessed fill.
           // No fixed text-* class: font size inherits from the target column
           // wrapper, which carries the per-file font-size pref inline.
           compactHeight
@@ -276,7 +280,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         ),
       },
       transformPastedHTML(html: string) {
-        return stripToAllowedHtml(html)
+        return sanitizeEditorHtml(html)
       },
       handleDoubleClick(view, pos, event) {
         const didSelect = selectVisibleWord(view, pos)
@@ -575,6 +579,21 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     editor?.setEditable(!isReadOnly)
   }, [editor, isReadOnly])
 
+  const handleEditorKeyDownCapture = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Tab") return
+    const target = event.target as HTMLElement | null
+    if (!target?.closest(".ProseMirror")) return
+    const navigate = onNavigateCellRef.current
+    if (!navigate) return
+    event.preventDefault()
+    event.stopPropagation()
+    navigate(event.shiftKey ? "prev" : "next")
+  }, [])
+
+  const handleFormattingToolbarMouseDown = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault()
+  }, [])
+
   useEffect(() => {
     latestViolationStateRef.current = {
       infractions: infractions ?? [],
@@ -658,7 +677,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         </div>
       )}
       {remoteChangedDuringEdit && onDiscardLocal && (
-        <div className="mb-1 flex items-center justify-between gap-2 rounded-xl bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 shadow-neu-sm dark:bg-amber-950 dark:text-amber-300">
+        <div className="mb-1 flex items-center justify-between gap-2 rounded-xl bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 dark:bg-amber-950 dark:text-amber-300">
           <span>This cell changed elsewhere while you were editing.</span>
           <button
             type="button"
@@ -670,7 +689,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         </div>
       )}
       {pendingFootnoteDelete && (
-        <div className="absolute right-2 top-2 z-20 flex items-center gap-2 rounded-lg border border-destructive/20 bg-background px-2 py-1 text-[11px] shadow-neu-sm">
+        <div className="absolute right-2 top-2 z-20 flex items-center gap-2 rounded-lg border border-destructive/20 bg-background px-2 py-1 text-[11px]">
           <span className="text-muted-foreground">
             Delete footnote {pendingFootnoteDelete.label}?
           </span>
@@ -697,76 +716,76 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         shouldShow={({ editor, from, to }) => editor.isFocused && from !== to}
         options={{ placement: "top" }}
       >
-        <div className="flex gap-0.5 rounded-lg bg-card p-0.5 shadow-neu-sm">
+        <div
+          data-testid="formatting-bubble-menu"
+          className="flex gap-0.5 rounded-lg bg-card p-0.5"
+          onMouseDown={handleFormattingToolbarMouseDown}
+        >
           <AppTooltip content="Bold (Cmd+B)">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={() => editor.chain().focus().toggleBold().run()}
               aria-label="Bold"
-              className={cn(
-                "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
-                editor.isActive("bold") && "bg-accent"
-              )}
+              className={cn("rounded-full", editor.isActive("bold") && "bg-accent")}
             >
               <Bold className="h-3 w-3" />
-            </button>
+            </Button>
           </AppTooltip>
           <AppTooltip content="Italic (Cmd+I)">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={() => editor.chain().focus().toggleItalic().run()}
               aria-label="Italic"
-              className={cn(
-                "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
-                editor.isActive("italic") && "bg-accent"
-              )}
+              className={cn("rounded-full", editor.isActive("italic") && "bg-accent")}
             >
               <Italic className="h-3 w-3" />
-            </button>
+            </Button>
           </AppTooltip>
           <AppTooltip content="Underline (Cmd+U)">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={() => editor.chain().focus().toggleUnderline().run()}
               aria-label="Underline"
-              className={cn(
-                "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
-                editor.isActive("underline") && "bg-accent"
-              )}
+              className={cn("rounded-full", editor.isActive("underline") && "bg-accent")}
             >
               <UnderlineIcon className="h-3 w-3" />
-            </button>
+            </Button>
           </AppTooltip>
           <AppTooltip content="Strikethrough">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={() => editor.chain().focus().toggleStrike().run()}
               aria-label="Strikethrough"
-              className={cn(
-                "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
-                editor.isActive("strike") && "bg-accent"
-              )}
+              className={cn("rounded-full", editor.isActive("strike") && "bg-accent")}
             >
               <Strikethrough className="h-3 w-3" />
-            </button>
+            </Button>
           </AppTooltip>
           <AppTooltip content="Inline code">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={() => editor.chain().focus().toggleCode().run()}
               aria-label="Inline code"
-              className={cn(
-                "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
-                editor.isActive("code") && "bg-accent"
-              )}
+              className={cn("rounded-full", editor.isActive("code") && "bg-accent")}
             >
               <Code className="h-3 w-3" />
-            </button>
+            </Button>
           </AppTooltip>
         </div>
       </BubbleMenu>
       <div
         className={cn(compactHeight ? "" : "h-full")}
+        onKeyDownCapture={handleEditorKeyDownCapture}
         onClick={(e) => {
           const target = e.target as HTMLElement
           // FRO-204: term chip click → open TermLookupPopover via caller
@@ -1025,52 +1044,4 @@ function normalizeAnchorPreview(value: string): string {
   const normalized = value.replace(/\s+/g, " ").trim()
   if (normalized.length <= 80) return normalized
   return `${normalized.slice(0, 77).trimEnd()}...`
-}
-
-// Normalise stored content (HTML or plain) into the form TipTap hydrates from:
-// allowed inline marks only, with raw `\f...\f*` turned into footnote-node spans.
-function prepareEditorContent(html: string | undefined, plain: string): string {
-  const base = html && html.length > 0 ? stripToAllowedHtml(html) : plain
-  return injectFootnoteSpans(base)
-}
-
-// Strip pasted HTML to only the marks we support.
-// Allowed tags: b, strong, i, em, u, s, strike, del, code, p, br
-// Footnote markers (<span data-usfm-footnote>) are preserved so they re-parse
-// into footnote nodes. Everything else is removed (content preserved).
-function stripToAllowedHtml(html: string): string {
-  const parser = new DOMParser()
-  const doc = parser.parseFromString(`<body>${html}</body>`, "text/html")
-  walkAndStrip(doc.body)
-  return doc.body.innerHTML
-}
-
-const ALLOWED_TAGS = new Set(["B", "STRONG", "I", "EM", "U", "S", "STRIKE", "DEL", "CODE", "P", "BR"])
-
-function walkAndStrip(el: Element): void {
-  const children = Array.from(el.childNodes)
-  for (const child of children) {
-    if (child.nodeType === 1) {
-      const elChild = child as Element
-      // Preserve footnote markers verbatim (drop every attribute except the
-      // raw payload); they carry no text content to recurse into.
-      if (elChild.tagName === "SPAN" && elChild.hasAttribute("data-usfm-footnote")) {
-        const raw = elChild.getAttribute("data-usfm-footnote") ?? ""
-        for (const attr of Array.from(elChild.attributes)) elChild.removeAttribute(attr.name)
-        elChild.setAttribute("data-usfm-footnote", raw)
-        continue
-      }
-      walkAndStrip(elChild)
-      if (!ALLOWED_TAGS.has(elChild.tagName)) {
-        const parent = elChild.parentNode
-        if (parent) {
-          while (elChild.firstChild) parent.insertBefore(elChild.firstChild, elChild)
-          parent.removeChild(elChild)
-        }
-      } else {
-        const attrs = Array.from(elChild.attributes)
-        for (const attr of attrs) elChild.removeAttribute(attr.name)
-      }
-    }
-  }
 }

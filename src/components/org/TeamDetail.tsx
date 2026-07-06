@@ -5,7 +5,13 @@ import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { Page, PageHeader, Section, EmptyState } from "@/components/ui/page"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -101,6 +107,7 @@ export function TeamDetail() {
 
   // Delete confirm state
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   // Add member UI state
   const [addingMember, setAddingMember] = useState(false)
@@ -166,8 +173,13 @@ export function TeamDetail() {
 
   async function handleDelete() {
     if (!jwt || activeOrgId == null || groupIdNum == null) return
-    await deleteTeam(jwt, activeOrgId, groupIdNum)
-    navigate("/teams")
+    setDeleting(true)
+    try {
+      await deleteTeam(jwt, activeOrgId, groupIdNum)
+      navigate("/teams")
+    } finally {
+      setDeleting(false)
+    }
   }
 
   async function handleAddMember() {
@@ -237,9 +249,9 @@ export function TeamDetail() {
               {/* Header / rename / delete */}
               <PageHeader
                 title={team.name}
-                description={!editing && team.description ? team.description : undefined}
+                description={team.description || undefined}
                 actions={
-                  isAdmin && !editing ? (
+                  isAdmin ? (
                     <>
                       <Button
                         type="button"
@@ -262,35 +274,61 @@ export function TeamDetail() {
                 }
               />
 
-              {isAdmin && editing && (
-                <Section className="mb-6" title="Edit team" description="Update the team name or description.">
-                  <div className="space-y-2">
-                    <Input
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      placeholder="Team name"
-                    />
-                    <Input
-                      value={editDescription}
-                      onChange={(e) => setEditDescription(e.target.value)}
-                      placeholder="Description (optional)"
-                    />
-                    <div className="flex gap-2 pt-1">
-                      <Button type="button" size="sm" onClick={handleSave}>Save</Button>
-                      <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
-                    </div>
-                  </div>
-                </Section>
+              {isAdmin && (
+                <Dialog open={editing} onOpenChange={(o) => { if (!o) setEditing(false) }}>
+                  <DialogContent className="max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>Edit team</DialogTitle>
+                    </DialogHeader>
+                    <form
+                      id="edit-team-form"
+                      onSubmit={async (e) => {
+                        e.preventDefault()
+                        await handleSave()
+                      }}
+                      className="space-y-2"
+                    >
+                      <Input
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        placeholder="Team name"
+                        autoFocus
+                      />
+                      <Input
+                        value={editDescription}
+                        onChange={(e) => setEditDescription(e.target.value)}
+                        placeholder="Description (optional)"
+                      />
+                    </form>
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={() => setEditing(false)}>
+                        Cancel
+                      </Button>
+                      <Button type="submit" form="edit-team-form" disabled={!editName.trim()}>Save</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               )}
 
-              {isAdmin && confirmDelete && (
-                <div className="mb-6 space-y-2 rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-sm">
-                  <p>Delete &apos;{team.name}&apos;? This removes the team and all its grants.</p>
-                  <div className="flex gap-2">
-                    <Button type="button" size="sm" variant="destructive" onClick={handleDelete}>Confirm</Button>
-                    <Button type="button" size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Button>
-                  </div>
-                </div>
+              {isAdmin && (
+                <Dialog open={confirmDelete} onOpenChange={(o) => { if (!o) setConfirmDelete(false) }}>
+                  <DialogContent className="max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>Delete &apos;{team.name}&apos;?</DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm text-muted-foreground">
+                      This removes the team and all its grants.
+                    </p>
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={() => setConfirmDelete(false)} disabled={deleting}>
+                        Cancel
+                      </Button>
+                      <Button type="button" variant="destructive" onClick={handleDelete} disabled={deleting}>
+                        {deleting ? "Deleting…" : "Confirm"}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               )}
 
               {/* Members section */}
@@ -311,7 +349,7 @@ export function TeamDetail() {
                     </span>
                   }
                   action={
-                    isAdmin && !addingMember ? (
+                    isAdmin ? (
                       <Button
                         type="button"
                         size="sm"
@@ -323,36 +361,37 @@ export function TeamDetail() {
                     ) : null
                   }
                 >
-                  {isAdmin && addingMember && (
-                    <div className="mb-3 flex flex-wrap items-center gap-2">
-                      <TeamMemberCombobox
-                        members={availableOrgMembers}
-                        value={selectedUsername}
-                        onChange={setSelectedUsername}
-                        disabled={availableOrgMembers.length === 0}
-                      />
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={handleAddMember}
-                        disabled={!selectedUsername || availableOrgMembers.length === 0}
-                      >
-                        Add
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => { setAddingMember(false); setSelectedUsername("") }}
-                      >
-                        Cancel
-                      </Button>
-                      {availableOrgMembers.length === 0 && (
-                        <p className="basis-full text-xs text-muted-foreground">
-                          All org members are already in this team.
-                        </p>
-                      )}
-                    </div>
+                  {isAdmin && (
+                    <Dialog open={addingMember} onOpenChange={(o) => { if (!o) { setAddingMember(false); setSelectedUsername("") } }}>
+                      <DialogContent className="max-w-md">
+                        <DialogHeader>
+                          <DialogTitle>Add member to &apos;{team.name}&apos;</DialogTitle>
+                        </DialogHeader>
+                        <TeamMemberCombobox
+                          members={availableOrgMembers}
+                          value={selectedUsername}
+                          onChange={setSelectedUsername}
+                          disabled={availableOrgMembers.length === 0}
+                        />
+                        {availableOrgMembers.length === 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            All org members are already in this team.
+                          </p>
+                        )}
+                        <DialogFooter>
+                          <Button type="button" variant="outline" onClick={() => { setAddingMember(false); setSelectedUsername("") }}>
+                            Cancel
+                          </Button>
+                          <Button
+                            type="button"
+                            onClick={handleAddMember}
+                            disabled={!selectedUsername || availableOrgMembers.length === 0}
+                          >
+                            Add
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
                   )}
 
                   {team.members.length === 0 ? (
@@ -616,21 +655,22 @@ function TeamMemberCombobox({
         <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
       </PopoverTrigger>
       <PopoverContent className="w-72 p-2" side="bottom" sideOffset={4}>
-        <div className="relative mb-2">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
+        <InputGroup className="mb-2">
+          <InputGroupAddon>
+            <Search />
+          </InputGroupAddon>
+          <InputGroupInput
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search org members..."
             aria-label="Search org members"
-            className="pl-8"
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="none"
             spellCheck={false}
             autoFocus
           />
-        </div>
+        </InputGroup>
         <div
           id="team-member-combobox-list"
           role="listbox"

@@ -1,5 +1,13 @@
 import * as React from "react"
 
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { cn } from "@/lib/utils"
 
 /**
@@ -11,7 +19,7 @@ import { cn } from "@/lib/utils"
  *
  * Design notes (see docs/swarm/DESIGN-LANGUAGE.md):
  * - Sections carry an explicit `border` because in dark mode --card, --surface,
- *   and --background resolve to the SAME color, so a borderless neu-raised card
+ *   and --background resolve to the SAME color, so a borderless bg-card surface
  *   is invisible on these pages. The border is the separator in both themes.
  * - Radius is `rounded-2xl` to match the canonical Card primitive (card.tsx),
  *   not the tighter `rounded-lg` the old hand-rolled sections used.
@@ -172,6 +180,7 @@ function StatTile({
 /**
  * A composed empty state — a beat of guidance instead of a blank panel.
  * Dashed border distinguishes "nothing here yet" from a populated Section.
+ * Wraps the shadcn `Empty` primitives so org/account/admin surfaces share one API.
  */
 function EmptyState({
   icon: Icon,
@@ -187,23 +196,25 @@ function EmptyState({
   className?: string
 }) {
   return (
-    <div
+    <Empty
       className={cn(
-        "flex flex-col items-center justify-center rounded-2xl border border-dashed bg-card/40 px-6 py-12 text-center",
+        "rounded-2xl border bg-card/40 px-6 py-12",
         className,
       )}
     >
-      {Icon ? (
-        <div className="mb-3 flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
-          <Icon className="size-5" />
-        </div>
-      ) : null}
-      <p className="text-sm font-medium text-foreground">{title}</p>
-      {description ? (
-        <p className="mt-1 max-w-sm text-sm text-muted-foreground">{description}</p>
-      ) : null}
-      {action ? <div className="mt-4">{action}</div> : null}
-    </div>
+      <EmptyHeader>
+        {Icon ? (
+          <EmptyMedia variant="icon">
+            <Icon />
+          </EmptyMedia>
+        ) : null}
+        <EmptyTitle className="text-foreground">{title}</EmptyTitle>
+        {description ? (
+          <EmptyDescription className="max-w-sm">{description}</EmptyDescription>
+        ) : null}
+      </EmptyHeader>
+      {action ? <EmptyContent>{action}</EmptyContent> : null}
+    </Empty>
   )
 }
 

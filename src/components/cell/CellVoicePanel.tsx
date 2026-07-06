@@ -20,12 +20,19 @@ import {
   Check, ChevronsUpDown, Pause, Play, Search, UserPlus, Volume2, VolumeX,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { useVoiceRecency, touchVoice } from "@/lib/store/voice-recency"
 import { CropButton } from "./CropEditor"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Slider } from "@/components/ui/slider"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { useCellAudio } from "@/hooks/useCellAudio"
@@ -138,27 +145,28 @@ function VolumeButton({ volume, onChange }: { volume: number; onChange: (v: numb
     <Popover>
       <PopoverTrigger
         render={
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-sm"
             aria-label="Volume"
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+            className="shrink-0"
           >
             {volume === 0 ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
-          </button>
+          </Button>
         }
       />
       <PopoverContent align="end" side="top" className="w-44 p-2.5">
         <div className="flex items-center gap-2">
           <VolumeX className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <input
-            type="range"
+          <Slider
             min={0}
             max={1}
             step={0.01}
-            value={volume}
-            onChange={(e) => onChange(Number(e.target.value))}
-            className="h-1 flex-1 accent-primary"
+            value={[volume]}
+            onValueChange={(next) => onChange(Array.isArray(next) ? next[0] : next)}
             aria-label="Volume level"
+            className="flex-1"
           />
           <Volume2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </div>
@@ -181,15 +189,17 @@ function HeaderIconButton({
 }) {
   return (
     <AppTooltip content={title}>
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="icon-sm"
         onClick={onClick}
         disabled={disabled}
         aria-label={title}
-        className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:opacity-40"
+        className="shrink-0"
       >
         {children}
-      </button>
+      </Button>
     </AppTooltip>
   )
 }
@@ -379,14 +389,16 @@ export function CellVoicePanel({
           <div className="relative mb-2 h-12">
             <WaveScrubber fraction={fraction} onSeek={(f) => seek(effStart + f * effDur)} seed={cell.id} />
             <AppTooltip content={primaryTitle}>
-              <button
+              <Button
                 type="button"
+                size="icon-lg"
+                variant="default"
                 onClick={onPrimary}
                 aria-label={primaryTitle}
-                className="absolute left-1/2 top-1/2 grid h-10 w-10 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-primary text-primary-foreground shadow-md ring-4 ring-background transition-transform hover:scale-105"
+                className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shadow-md ring-4 ring-background transition-transform hover:scale-105"
               >
                 {loading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-[1px]" />}
-              </button>
+              </Button>
             </AppTooltip>
             <span className="pointer-events-none absolute bottom-0 left-0 rounded bg-background/70 px-1 text-[10px] tabular-nums text-muted-foreground">
               {isVoicing ? "Voicing…" : `${fmtTime(effCurrent)} / ${effDur > 0 ? fmtTime(effDur) : "–:––"}`}
@@ -446,12 +458,14 @@ function VoiceCombobox({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
-          <button
+          <Button
             type="button"
+            size="xs"
+            variant="outline"
             disabled={busy}
             title="Choose a voice"
             aria-label={`Voice: ${active.name}. Choose a voice`}
-            className="flex w-full items-center gap-1.5 rounded-full border border-border px-2 py-1 text-xs transition-colors hover:bg-accent/50 disabled:cursor-default disabled:opacity-60 data-[popup-open]:bg-accent/50"
+            className="w-full justify-start gap-1.5"
           >
             <span className="relative shrink-0">
               <VoiceAvatar voice={active} size={18} />
@@ -463,21 +477,22 @@ function VoiceCombobox({
             </span>
             <span className="min-w-0 flex-1 truncate text-left font-medium text-foreground">{active.name}</span>
             <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          </button>
+          </Button>
         }
       />
       <PopoverContent align="start" side="top" className="w-60 p-2">
-        <div className="relative mb-1.5">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
+        <InputGroup className="mb-1.5">
+          <InputGroupAddon>
+            <Search />
+          </InputGroupAddon>
+          <InputGroupInput
             type="text"
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search voices…"
-            className="h-8 w-full rounded-lg border bg-background pl-8 pr-2 text-sm outline-none ring-primary/40 placeholder:text-muted-foreground focus:ring-2"
           />
-        </div>
+        </InputGroup>
         <div className="max-h-56 space-y-0.5 overflow-y-auto">
           {filtered.length === 0 ? (
             <p className="px-2 py-3 text-center text-xs italic text-muted-foreground">No matches</p>

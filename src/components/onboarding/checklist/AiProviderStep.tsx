@@ -2,7 +2,7 @@ import { useState } from "react"
 import { Sparkles, Server, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { FieldLabel } from "@/components/ui/field"
 import { FRONTIER_CHAT_URL } from "@/hooks/useCompletionSettings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { ProjectRecord, CompletionProvider } from "@/lib/parsers/types"
@@ -83,9 +83,9 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
       {selected === "custom" && (
         <div className="ml-7 space-y-2 rounded-md bg-muted/30 p-2">
           <div>
-            <Label htmlFor="ai-endpoint" className="text-xs">
+            <FieldLabel htmlFor="ai-endpoint" className="text-xs">
               Endpoint URL
-            </Label>
+            </FieldLabel>
             <Input
               id="ai-endpoint"
               value={customEndpoint}
@@ -95,9 +95,9 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
             />
           </div>
           <div>
-            <Label htmlFor="ai-model" className="text-xs">
+            <FieldLabel htmlFor="ai-model" className="text-xs">
               Model <span className="text-muted-foreground/70">(optional)</span>
-            </Label>
+            </FieldLabel>
             <Input
               id="ai-model"
               value={customModel}

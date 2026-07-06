@@ -25,7 +25,12 @@ import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
 import {
   Select,
   SelectContent,
@@ -328,8 +333,8 @@ function CharacterModalBody({
 
           {/* Engine — per-voice. Cloud engines first; on-device demoted below.
               Switching resets the base voice to that engine's default. */}
-          <div className="space-y-2">
-            <Label>Engine</Label>
+          <Field>
+            <FieldLabel>Engine</FieldLabel>
             {(["cloud", "device"] as const).map((tier) => (
               <div key={tier} className="space-y-1.5">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -368,20 +373,20 @@ function CharacterModalBody({
                 </div>
               </div>
             ))}
-          </div>
+          </Field>
 
           {/* Base voice — driven by the draft's engine. OmniVoice has no named
               voices (its timbre comes from the optional clone below). */}
           {activeInfo.hasNamedVoices ? (
-            <div className="space-y-2">
-              <Label>Base voice</Label>
+            <Field>
+              <FieldLabel>Base voice</FieldLabel>
               <PresetPicker
                 isGemini={isGemini}
                 isMms={isMms}
                 value={effectiveVoice.voiceName ?? ""}
                 onChange={(v) => update({ voiceName: v || undefined })}
               />
-            </div>
+            </Field>
           ) : (
             <p className="text-xs text-muted-foreground">
               OmniVoice uses a single neural voice. Add a reference recording below to
@@ -393,8 +398,8 @@ function CharacterModalBody({
               Only Gemini is promptable, so this field only appears for Gemini
               characters; MMS/Kokoro ignore prose direction entirely. */}
           {isGemini && (
-            <div className="space-y-1.5">
-              <Label htmlFor="character-guidance">Guidance</Label>
+            <Field>
+              <FieldLabel htmlFor="character-guidance">Guidance</FieldLabel>
               <Textarea
                 id="character-guidance"
                 value={draft.prompt ?? ""}
@@ -402,10 +407,10 @@ function CharacterModalBody({
                 rows={3}
                 placeholder="calm, warm, elderly; coastal Swahili reading"
               />
-              <p className="text-xs text-muted-foreground">
+              <FieldDescription>
                 Describe how this character should sound and read. Shapes generation.
-              </p>
-            </div>
+              </FieldDescription>
+            </Field>
           )}
 
           {/* Clone layer — optional. Layer a reference recording on top of the
@@ -413,9 +418,9 @@ function CharacterModalBody({
           <div className="space-y-3 rounded-xl border border-border bg-muted/30 p-3 dark:border-border dark:bg-muted/30">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <Label className="flex items-center gap-1.5">
+                <FieldLabel className="flex items-center gap-1.5">
                   <Sparkles className="h-3.5 w-3.5 text-muted-foreground" /> Clone a voice (optional)
-                </Label>
+                </FieldLabel>
                 {isCloned && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground dark:bg-muted dark:text-muted-foreground">
                     <Sparkles className="h-2.5 w-2.5" /> Cloned
@@ -607,9 +612,9 @@ function PresetPicker({
       ...(HAS_EXTENDED_MMS_MODELS ? [{ value: "__other__", label: "Other MMS code" }] : []),
     ]
     return (
-      <div className="space-y-3">
-        <div>
-          <Label htmlFor="character-mms-lang">Language</Label>
+      <FieldGroup className="space-y-3">
+        <Field>
+          <FieldLabel htmlFor="character-mms-lang">Language</FieldLabel>
           <Select
             items={mmsOptions.map((o) => ({ value: o.value, label: o.label }))}
             value={selectValue}
@@ -618,7 +623,7 @@ function PresetPicker({
               onChange(next === "__other__" ? "" : next)
             }}
           >
-            <SelectTrigger id="character-mms-lang" className="mt-1 w-full">
+            <SelectTrigger id="character-mms-lang" className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -631,27 +636,27 @@ function PresetPicker({
               </SelectGroup>
             </SelectContent>
           </Select>
-        </div>
+        </Field>
         {HAS_EXTENDED_MMS_MODELS && (
-          <div>
-            <Label htmlFor="character-mms-code">MMS code</Label>
+          <Field>
+            <FieldLabel htmlFor="character-mms-code">MMS code</FieldLabel>
             <Input
               id="character-mms-code"
               value={value}
               onChange={(e) => onChange(e.target.value.trim().toLowerCase())}
               placeholder="ita"
-              className="mt-1 font-mono"
+              className="font-mono"
             />
-          </div>
+          </Field>
         )}
-      </div>
+      </FieldGroup>
     )
   }
 
   if (isGemini) {
     return (
-      <div>
-        <Label htmlFor="character-gemini-voice">Gemini voice</Label>
+      <Field>
+        <FieldLabel htmlFor="character-gemini-voice">Gemini voice</FieldLabel>
         <Select
           items={GEMINI_TTS_VOICES.map((v) => ({
             value: v.name,
@@ -660,7 +665,7 @@ function PresetPicker({
           value={value}
           onValueChange={(next) => onChange(next ?? "")}
         >
-          <SelectTrigger id="character-gemini-voice" className="mt-1 w-full">
+          <SelectTrigger id="character-gemini-voice" className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -673,21 +678,21 @@ function PresetPicker({
             </SelectGroup>
           </SelectContent>
         </Select>
-      </div>
+      </Field>
     )
   }
 
   return (
-    <div>
-      <Label htmlFor="character-kokoro-voice">Kokoro voice id</Label>
+    <Field>
+      <FieldLabel htmlFor="character-kokoro-voice">Kokoro voice id</FieldLabel>
       <Input
         id="character-kokoro-voice"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder="e.g. af_bella"
-        className="mt-1 font-mono"
+        className="font-mono"
       />
-    </div>
+    </Field>
   )
 }
 

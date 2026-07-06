@@ -112,8 +112,8 @@ async function main() {
     // assignments → ids + assignee/creator
     const asg = (await c.query(`SELECT assignment_id, assignee_user_id, created_by FROM assignments WHERE project_id = ANY($1)`, [projectIds])).rows
     for (const a of asg) { assignmentIds.add(String(a.assignment_id)); for (const u of [a.assignee_user_id, a.created_by]) if (u != null) userIds.add(String(u)) }
-    // checkpoints / snapshots creators
-    for (const t of ["checkpoints", "snapshots"]) for (const v of await distinct(c, `SELECT created_by FROM ${t} WHERE project_id = ANY($1) AND created_by IS NOT NULL`, [projectIds])) userIds.add(v)
+    // checkpoints creators
+    for (const v of await distinct(c, `SELECT created_by FROM checkpoints WHERE project_id = ANY($1) AND created_by IS NOT NULL`, [projectIds])) userIds.add(v)
     // authors referenced by username (text) across content
     for (const v of await distinct(c, `SELECT DISTINCT author FROM events WHERE project_id = ANY($1)`, [projectIds])) usernames.add(v)
     for (const v of await distinct(c, `SELECT DISTINCT last_editor FROM cells WHERE project_id = ANY($1) AND last_editor IS NOT NULL`, [projectIds])) usernames.add(v)

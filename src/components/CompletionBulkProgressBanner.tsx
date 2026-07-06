@@ -17,7 +17,7 @@ export function CompletionBulkProgressBanner() {
   const pct = total > 0 ? Math.round((done / total) * 100) : 0
 
   return (
-    <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm shadow-sm">
+    <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm">
       <span className="font-medium">Translating</span>
       <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
         <div

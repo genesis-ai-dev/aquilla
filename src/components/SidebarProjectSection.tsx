@@ -32,7 +32,7 @@ function NavRow({ item, onAfterClick }: { item: ProjectNavItem; onAfterClick?: (
       <item.icon className="h-3.5 w-3.5 shrink-0" />
       <span className="flex-1 truncate text-left">{item.label}</span>
       {item.badge != null && item.badge > 0 && (
-        <span className="rounded-full px-1.5 text-[10px] tabular-nums text-primary shadow-neu-inset">
+        <span className="rounded-full px-1.5 text-[10px] tabular-nums text-primary">
           {item.badge}
         </span>
       )}
@@ -71,7 +71,7 @@ export function SidebarProjectSection({ items }: Props) {
                   <MoreHorizontal className="h-3.5 w-3.5 shrink-0" />
                   <span className="flex-1 truncate text-left">More</span>
                   {overflowBadge > 0 && (
-                    <span className="rounded-full px-1.5 text-[10px] tabular-nums text-primary shadow-neu-inset">
+                    <span className="rounded-full px-1.5 text-[10px] tabular-nums text-primary">
                       {overflowBadge}
                     </span>
                   )}

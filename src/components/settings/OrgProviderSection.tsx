@@ -8,10 +8,10 @@
 //   project key > user (localStorage) key > org key (this section)
 
 import { useState } from "react"
-import { Check, Eye, EyeOff } from "lucide-react"
+import { Check } from "lucide-react"
+import { RevealableInput } from "@/components/ui/revealable-input"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { FieldLabel } from "@/components/ui/field"
 import { Section } from "@/components/ui/page"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 
@@ -26,7 +26,6 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
   const keys = orgProviderKeys ?? {}
   const currentGeminiKey = keys["gemini-tts"] ?? ""
   const [draft, setDraft] = useState<string | null>(null)
-  const [show, setShow] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
@@ -90,32 +89,20 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
       <div className="space-y-4">
         {/* Gemini TTS */}
         <div className="space-y-2">
-          <Label htmlFor="org-gemini-tts-key" className="text-sm font-medium">
+          <FieldLabel htmlFor="org-gemini-tts-key" className="text-sm font-medium">
             Gemini TTS API key
-          </Label>
-          <div className="flex gap-2">
-            <Input
-              id="org-gemini-tts-key"
-              type={show ? "text" : "password"}
-              value={displayed}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder={canEditOrgKeys ? "Paste Gemini API key…" : currentGeminiKey ? "(set by org admin)" : "(not set)"}
-              disabled={!canEditOrgKeys || busy}
-              autoComplete="off"
-              spellCheck={false}
-              className="flex-1 font-mono"
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setShow((v) => !v)}
-              aria-label={show ? "Hide key" : "Show key"}
-              disabled={!canEditOrgKeys}
-            >
-              {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-            </Button>
-          </div>
+          </FieldLabel>
+          <RevealableInput
+            id="org-gemini-tts-key"
+            revealKind="key"
+            value={displayed}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={canEditOrgKeys ? "Paste Gemini API key…" : currentGeminiKey ? "(set by org admin)" : "(not set)"}
+            disabled={!canEditOrgKeys || busy}
+            autoComplete="off"
+            spellCheck={false}
+            className="font-mono"
+          />
           <p className="text-xs text-muted-foreground">
             Used by Gemini TTS synthesis for all org members when no project or
             personal key is present.

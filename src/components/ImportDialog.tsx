@@ -1,21 +1,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
-  Upload, Library, Globe, Table2, Languages, ArrowLeftRight, Tags, StickyNote, Database,
-  BookImage,
+  Upload, Library, Globe, Table2, Languages, ArrowLeft, ArrowLeftRight, Tags, StickyNote, Database,
+  BookImage, BookA, Search,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { ButtonGroup } from "@/components/ui/button-group"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import {
@@ -41,6 +55,7 @@ import {
   type SourceCellRef,
   type ImportResult,
 } from "@/lib/import"
+import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { PreviewPanel } from "@/components/import/PreviewPanel"
 import type { FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
 import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
@@ -78,7 +93,7 @@ import { SpreadsheetImportPanel } from "@/components/import/SpreadsheetImportPan
 import { LabelImportPanel } from "@/components/import/LabelImportPanel"
 import { PairedImportPanel } from "@/components/import/PairedImportPanel"
 
-type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "direction" | "result" | "collision" | "spreadsheet" | "labels" | "paired"
+type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "direction" | "result" | "collision" | "spreadsheet" | "labels" | "paired" | "sdbh"
 
 interface ImportDialogProps {
   open: boolean
@@ -366,26 +381,18 @@ export function ImportDialog({
               "Re-import detected"
             ) : screen === "preview" ? (
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
+                <ImportDialogBackButton
                   onClick={() => { setPreviewState(null); setScreen("upload") }}
-                  className="rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label="Back to file selection"
-                >
-                  ←
-                </button>
+                  label="Back to file selection"
+                />
                 Preview
               </div>
             ) : (
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
+                <ImportDialogBackButton
                   onClick={() => setScreen("landing")}
-                  className="rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label="Back to import types"
-                >
-                  ←
-                </button>
+                  label="Back to import types"
+                />
                 {screen === "upload" ? "Upload Files"
                   : screen === "helloao" ? "Bible API (helloao.org)"
                   : screen === "obs" ? "Open Bible Stories"
@@ -394,13 +401,14 @@ export function ImportDialog({
                   : screen === "spreadsheet" ? "Spreadsheet (CSV / XLSX)"
                   : screen === "labels" ? "Cell Labels / Cast"
                   : screen === "paired" ? "Paired Translation Import"
+                  : screen === "sdbh" ? "SDBH Hebrew Lexicon"
                   : "eBible Corpus"}
               </div>
             )}
           </DialogTitle>
         </DialogHeader>
 
-        <div className="min-h-0 overflow-y-auto">
+        <DialogBody>
 
         {screen === "landing" && (
           <ImportLanding
@@ -507,6 +515,17 @@ export function ImportDialog({
             getToken={getToken}
             onImported={async (ref) => {
               await handleChildImported([ref])
+            }}
+          />
+        )}
+
+        {screen === "sdbh" && (
+          <SdbhPanel
+            projectId={projectId}
+            username={username}
+            getToken={getToken}
+            onImported={async (refs, inferredLanguages) => {
+              await handleChildImported(refs, inferredLanguages)
             }}
           />
         )}
@@ -643,7 +662,7 @@ export function ImportDialog({
             }}
           />
         )}
-        </div>
+        </DialogBody>
       </DialogContent>
     </Dialog>
   )
@@ -698,6 +717,8 @@ const SPECIALIZED_OPTIONS: ImportOption[] = [
     description: "unfoldingWord notes, shown beside the matching verse as you translate." },
   { id: "obs", title: "Open Bible Stories", hint: "door43", icon: BookImage, badge: "beta",
     description: "Narrative stories with reference images, from unfoldingWord/door43." },
+  { id: "sdbh", title: "SDBH Hebrew Lexicon", hint: "UBS MARBLE", icon: BookA, badge: "beta",
+    description: "Semantic Dictionary of Biblical Hebrew — localize definitions and glosses by semantic domain, with lossless export back to the MARBLE XML." },
   { title: "Translation Memory", hint: "TMX", icon: Database, badge: "soon", disabled: true,
     description: "Reuse prior translations from TMX memory files." },
 ]
@@ -738,7 +759,7 @@ function OptionCard({ option, onSelect }: { option: ImportOption; onSelect: (s: 
         "gap-0 px-3",
         disabled
           ? "cursor-not-allowed opacity-55"
-          : "cursor-pointer transition-shadow hover:shadow-neu-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          : "cursor-pointer transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
       )}
     >
       <div className="flex items-start gap-3">
@@ -776,6 +797,15 @@ interface ImportLandingProps {
 }
 
 function ImportLanding({ onSelect }: ImportLandingProps) {
+  // The specialized tier is a growing catalogue of domain-specific importers —
+  // filterable so it stays scannable as entries accumulate.
+  const [filter, setFilter] = useState("")
+  const q = filter.trim().toLowerCase()
+  const specialized = q
+    ? SPECIALIZED_OPTIONS.filter((o) =>
+        [o.title, o.hint ?? "", o.description].some((t) => t.toLowerCase().includes(q)),
+      )
+    : SPECIALIZED_OPTIONS
   return (
     <div className="space-y-5 py-1">
       <p className="text-sm text-muted-foreground">Choose the format that matches your files.</p>
@@ -784,11 +814,34 @@ function ImportLanding({ onSelect }: ImportLandingProps) {
           <OptionCard key={o.title} option={o} onSelect={onSelect} />
         ))}
       </ImportSection>
-      <ImportSection label="Specialized">
-        {SPECIALIZED_OPTIONS.map((o) => (
-          <OptionCard key={o.title} option={o} onSelect={onSelect} />
-        ))}
-      </ImportSection>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="px-0.5 text-xs font-medium uppercase tracking-wider text-muted-foreground/70">Specialized</h3>
+          <InputGroup className="h-7 w-44">
+            <InputGroupAddon>
+              <Search className="text-muted-foreground/60" />
+            </InputGroupAddon>
+            <InputGroupInput
+              type="search"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter importers…"
+              aria-label="Filter specialized importers"
+              className="text-xs placeholder:text-muted-foreground/60"
+            />
+          </InputGroup>
+        </div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {specialized.map((o) => (
+            <OptionCard key={o.title} option={o} onSelect={onSelect} />
+          ))}
+          {specialized.length === 0 && (
+            <p className="col-span-full px-0.5 py-2 text-xs text-muted-foreground">
+              No importer matches “{filter}”.
+            </p>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
@@ -1302,7 +1355,17 @@ function ParatextChoice({
         <p className="text-xs text-muted-foreground">
           It just needs to be close — verses align by reference (e.g. MAT 1:1). Verses missing on either side stay blank.
         </p>
-        <Input placeholder="Search translations (language, name, code)…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <InputGroup>
+          <InputGroupAddon>
+            <Search />
+          </InputGroupAddon>
+          <InputGroupInput
+            placeholder="Search translations (language, name, code)…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="Search translations"
+          />
+        </InputGroup>
         <ScrollArea className="h-64 rounded border">
           {!translations ? (
             <p className="p-3 text-sm text-muted-foreground">Loading source list…</p>
@@ -1619,28 +1682,16 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getT
     <div className="flex flex-col gap-3">
       {/* Mode toggle — only shown when target-import is possible */}
       {sourceCells && sourceCells.length > 0 && (
-        <div className="flex gap-1 rounded-md border p-1 text-xs">
-          <button
-            type="button"
-            onClick={() => setMode("source")}
-            className={cn(
-              "flex-1 rounded px-2 py-1 transition-colors",
-              mode === "source" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            New source file
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("target")}
-            className={cn(
-              "flex-1 rounded px-2 py-1 transition-colors",
-              mode === "target" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            Into target column
-          </button>
-        </div>
+        <Tabs
+          value={mode}
+          onValueChange={(value) => setMode(value as EBiblePanelMode)}
+          className="gap-0"
+        >
+          <TabsList size="lg" className="w-full" aria-label="eBible import mode">
+            <TabsTrigger value="source">New source file</TabsTrigger>
+            <TabsTrigger value="target">Into target column</TabsTrigger>
+          </TabsList>
+        </Tabs>
       )}
 
       <p className="text-xs text-muted-foreground">
@@ -1660,12 +1711,18 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getT
         )}
       </p>
 
-      <Input
-        placeholder="Search by language, title, or id (e.g. 'eng', 'KJV')"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        disabled={!translations || importing}
-      />
+      <InputGroup>
+        <InputGroupAddon>
+          <Search />
+        </InputGroupAddon>
+        <InputGroupInput
+          placeholder="Search by language, title, or id (e.g. 'eng', 'KJV')"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          disabled={!translations || importing}
+          aria-label="Search eBible translations"
+        />
+      </InputGroup>
 
       {loadErr ? (
         <p className="text-sm text-destructive">Failed to load list: {loadErr}</p>
@@ -1915,15 +1972,11 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
     return (
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
-          <button
-            type="button"
+          <ImportDialogBackButton
             disabled={importing}
             onClick={() => setSelected(null)}
-            className="rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors"
-            aria-label="Back to translation list"
-          >
-            ←
-          </button>
+            label="Back to translation list"
+          />
           <div className="min-w-0">
             <p className="truncate text-sm font-medium">{selected.englishName || selected.name}</p>
             <p className="text-xs text-muted-foreground">
@@ -1942,15 +1995,17 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
         ) : (
           <>
             <div className="flex items-center gap-1.5">
-              <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("all")}>
-                Whole bible
-              </Button>
-              <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("OT")}>
-                Old Testament
-              </Button>
-              <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("NT")}>
-                New Testament
-              </Button>
+              <ButtonGroup>
+                <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("all")}>
+                  Whole bible
+                </Button>
+                <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("OT")}>
+                  Old Testament
+                </Button>
+                <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("NT")}>
+                  New Testament
+                </Button>
+              </ButtonGroup>
               <span className="ml-auto text-xs text-muted-foreground">
                 {checkedBooks.size} of {books.length} books
               </span>
@@ -2027,12 +2082,18 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
         bible, a single testament, or individual books.
       </p>
 
-      <Input
-        placeholder="Search by language, name, or id (e.g. 'eng', 'BSB')"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        disabled={!translations}
-      />
+      <InputGroup>
+        <InputGroupAddon>
+          <Search />
+        </InputGroupAddon>
+        <InputGroupInput
+          placeholder="Search by language, name, or id (e.g. 'eng', 'BSB')"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          disabled={!translations}
+          aria-label="Search Bible translations"
+        />
+      </InputGroup>
 
       {loadErr ? (
         <p className="text-sm text-destructive">Failed to load list: {loadErr}</p>
@@ -2116,22 +2177,20 @@ function DirectionPanel({
         We detected the source language from the imported project. Please confirm the
         source and set the target language so back-translation and QA rules work correctly.
       </p>
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground" htmlFor="dl-source">
-            Source language
-          </label>
+      <FieldGroup className="grid grid-cols-2 gap-4">
+        <Field>
+          <FieldLabel htmlFor="dl-source">Source language</FieldLabel>
           <Input
             id="dl-source"
             value={sourceLanguage}
             onChange={(e) => onSourceChange(e.target.value)}
             placeholder="e.g. English, arb, hbo"
           />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground" htmlFor="dl-target">
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="dl-target">
             Target language <span className="text-destructive">*</span>
-          </label>
+          </FieldLabel>
           <Input
             id="dl-target"
             value={targetLanguage}
@@ -2139,13 +2198,13 @@ function DirectionPanel({
             placeholder="e.g. Spanish, fra, swh"
             autoFocus
           />
-        </div>
-      </div>
+        </Field>
+      </FieldGroup>
       <p className="text-xs text-muted-foreground">
         You can change these later in <strong>Project Settings → Project Info</strong>.
       </p>
       {/* FRO-249: restore direction screen on failure so the user can retry */}
-      {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
+      {error && <FieldError role="alert">{error}</FieldError>}
       <div className="flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onSkip} disabled={confirming}>
           Skip for now
@@ -2504,6 +2563,135 @@ function ObsPanel({ projectId, username, sourceLanguage, targetLanguage, getToke
 }
 
 // ---------------------------------------------------------------------------
+// SDBH Hebrew Lexicon panel — UBS MARBLE editions. The master (usually
+// English) edition supplies structure + source text; an optional localized
+// edition pre-fills the target column. Cell ids are the shared LEXIDs, so the
+// localization can later be exported losslessly back into the MARBLE XML.
+// ---------------------------------------------------------------------------
+
+interface SdbhPanelProps {
+  projectId: string
+  username: string
+  getToken: (fileId: string) => Promise<string | null>
+  onImported: (
+    refs: FileReference[],
+    inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string },
+  ) => void | Promise<void>
+}
+
+function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps) {
+  const [masterFile, setMasterFile] = useState<File | null>(null)
+  const [localizedFile, setLocalizedFile] = useState<File | null>(null)
+  const [importing, setImporting] = useState(false)
+  const [progress, setProgress] = useState<SdbhImportProgress | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    return () => abortRef.current?.abort()
+  }, [])
+
+  async function handleImport() {
+    if (!masterFile || importing) return
+    setImporting(true)
+    setError(null)
+    setProgress({ phase: "parse" })
+    abortRef.current = new AbortController()
+    try {
+      const masterJson = await masterFile.text()
+      const localizedJson = localizedFile ? await localizedFile.text() : null
+      const summary = await importSdbh(
+        masterJson,
+        localizedJson,
+        { projectId, author: username, getToken, signal: abortRef.current.signal },
+        setProgress,
+      )
+      await onImported(summary.refs, {
+        sourceLanguage: "hbo",
+        ...(summary.targetLanguageCode ? { targetLanguage: summary.targetLanguageCode } : {}),
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed")
+    } finally {
+      setImporting(false)
+      setProgress(null)
+      abortRef.current = null
+    }
+  }
+
+  const pct =
+    progress?.cellsTotal && progress.cellsTotal > 0
+      ? Math.round(((progress.cellsEnqueued ?? 0) / progress.cellsTotal) * 100)
+      : 0
+
+  return (
+    <div className="flex flex-col gap-4 py-2">
+      <p className="text-xs text-muted-foreground">
+        Import the UBS MARBLE <span className="font-medium">Semantic Dictionary of Biblical Hebrew</span>.
+        Choose the master edition (usually <code>SDBH-en.JSON</code>) as the source; optionally add a
+        localized edition (e.g. <code>SDBH-es.JSON</code>) to pre-fill the target column with the
+        translation so far. Entries import one file per Hebrew letter plus a semantic-domain label
+        file; each sense groups as one paragraph with a cell per definition, gloss list, and comment.
+      </p>
+      <div className="flex flex-col gap-2">
+        <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+          {masterFile ? masterFile.name : "Choose master edition (SDBH-en.JSON)"}
+          <input
+            type="file"
+            className="hidden"
+            accept=".json,.JSON"
+            onChange={(e) => {
+              setMasterFile(e.target.files?.[0] ?? null)
+              setError(null)
+            }}
+            disabled={importing}
+          />
+        </Button>
+        <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+          {localizedFile ? localizedFile.name : "Choose localized edition (optional)"}
+          <input
+            type="file"
+            className="hidden"
+            accept=".json,.JSON"
+            onChange={(e) => {
+              setLocalizedFile(e.target.files?.[0] ?? null)
+              setError(null)
+            }}
+            disabled={importing}
+          />
+        </Button>
+      </div>
+      {progress && (
+        <div className="text-xs text-muted-foreground">
+          {progress.phase === "parse" ? (
+            <p>Parsing lexicon…</p>
+          ) : (
+            <>
+              <p>
+                {progress.phase === "source" ? "Uploading source" : "Pre-filling translations"}
+                {progress.fileIndex ? ` — file ${progress.fileIndex} / ${progress.fileCount}` : ""}
+                {progress.cellsTotal
+                  ? `: ${(progress.cellsEnqueued ?? 0).toLocaleString()} / ${progress.cellsTotal.toLocaleString()} cells`
+                  : ""}
+              </p>
+              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div className="h-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+              </div>
+            </>
+          )}
+        </div>
+      )}
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      <div className="flex justify-end">
+        <Button onClick={handleImport} disabled={!masterFile || importing}>
+          {importing ? "Importing…" : "Import"}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Macula Hebrew + Greek panel (FRO-178)
 // ---------------------------------------------------------------------------
 
@@ -2693,6 +2881,30 @@ function TnPanel({ projectId, username, getToken, onImported }: TnPanelProps) {
         </Button>
       </div>
     </div>
+  )
+}
+
+function ImportDialogBackButton({
+  label,
+  onClick,
+  disabled,
+}: {
+  label: string
+  onClick: () => void
+  disabled?: boolean
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-sm"
+      disabled={disabled}
+      onClick={onClick}
+      aria-label={label}
+      className="-ml-2"
+    >
+      <ArrowLeft />
+    </Button>
   )
 }
 

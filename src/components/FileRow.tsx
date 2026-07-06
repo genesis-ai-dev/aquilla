@@ -103,7 +103,7 @@ export function FileRow(props: FileRowProps) {
               if (e.key === "Enter") { e.preventDefault(); onEditCommit(draft) }
               else if (e.key === "Escape") { e.preventDefault(); onEditCancel() }
             }}
-            className="w-full rounded-lg bg-background px-2 py-0.5 text-sm shadow-neu-inset outline-none"
+            className="w-full rounded-lg bg-background px-2 py-0.5 text-sm outline-none"
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
@@ -124,10 +124,10 @@ export function FileRow(props: FileRowProps) {
       </div>
       {progress && progress.total > 0 && !editing && (
         <div className="flex items-center gap-0.5 shrink-0" aria-label={`${translatedPct}% translated, ${validatedPct}% validated`}>
-          <span className="h-2 w-6 rounded-full bg-muted overflow-hidden shadow-neu-inset">
+          <span className="h-2 w-6 rounded-full bg-muted overflow-hidden">
             <span className="block h-full bg-amber-500" style={{ width: `${translatedPct}%` }} />
           </span>
-          <span className="h-2 w-6 rounded-full bg-muted overflow-hidden shadow-neu-inset">
+          <span className="h-2 w-6 rounded-full bg-muted overflow-hidden">
             <span className="block h-full bg-emerald-500" style={{ width: `${validatedPct}%` }} />
           </span>
         </div>

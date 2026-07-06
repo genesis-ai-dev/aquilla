@@ -190,7 +190,7 @@ export function LabelImportPanel({
       <div className="rounded-lg border p-4 flex flex-col gap-2">
         <p className="text-xs font-semibold">Step 2 — Upload filled template</p>
         <label className="cursor-pointer">
-          <span className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium shadow-sm hover:bg-accent transition-colors">
+          <span className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors">
             Choose file
           </span>
           <input

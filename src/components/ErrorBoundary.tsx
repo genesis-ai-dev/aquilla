@@ -15,7 +15,9 @@
 
 import { Component, type ErrorInfo, type ReactNode } from "react"
 import { AlertTriangle } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import posthog from "@/lib/posthog"
+import { cn } from "@/lib/utils"
 
 // ---------------------------------------------------------------------------
 // Dev-only crash trigger: appending ?__crash=1 to any URL while
@@ -111,17 +113,22 @@ if (typeof window !== "undefined") {
 // Fallback screen — styled to match existing empty-state pattern from
 // CellAreaPlaceholder.tsx (centred icon + title + description + action button).
 // Uses min-h-screen + document scroll per the scroll-model rule (not h-screen
-// flex tricks).
+// flex tricks) for the root boundary. `compact` renders the same content at
+// h-full instead, for boundaries nested inside AppShell's bounded content
+// card (AppShell.tsx) — a min-h-screen fallback there would blow past the
+// card's rounded border.
 // ---------------------------------------------------------------------------
 function ErrorFallback({
   onReload,
   isChunkError,
+  compact,
 }: {
   onReload: () => void
   isChunkError?: boolean
+  compact?: boolean
 }) {
   return (
-    <div className="min-h-screen flex items-center justify-center p-8">
+    <div className={cn("flex items-center justify-center p-8", compact ? "h-full" : "min-h-screen")}>
       <div className="flex max-w-sm flex-col items-center gap-2 text-center">
         <div className="text-muted-foreground">
           <AlertTriangle className="h-10 w-10" aria-hidden />
@@ -135,13 +142,9 @@ function ErrorFallback({
             : "An unexpected error occurred. Your work is saved locally — reload to continue."}
         </p>
         <div className="mt-2">
-          <button
-            type="button"
-            onClick={onReload}
-            className="inline-flex items-center gap-1.5 rounded-full bg-card px-3 py-1.5 text-sm shadow-neu-sm transition-all hover:shadow-neu active:shadow-neu-pressed"
-          >
+          <Button type="button" size="sm" variant="outline" onClick={onReload}>
             Reload
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -153,6 +156,10 @@ function ErrorFallback({
 // ---------------------------------------------------------------------------
 interface Props {
   children: ReactNode
+  /** Render the fallback at h-full instead of min-h-screen, for boundaries
+   * nested inside bounded chrome (e.g. AppShell's main content card) rather
+   * than at the app root. */
+  compact?: boolean
 }
 
 interface State {
@@ -192,6 +199,7 @@ export class ErrorBoundary extends Component<Props, State> {
         <ErrorFallback
           onReload={this.handleReload}
           isChunkError={this.state.isChunkError}
+          compact={this.props.compact}
         />
       )
     }

@@ -1,11 +1,18 @@
 import { useState } from "react"
-import { HelpCircle, MessageCircle, Mail } from "lucide-react"
+import { HelpCircle, ExternalLink, Mail } from "lucide-react"
+import { Discord } from "@/components/icons/Discord"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
-// Configured at build time. The Discord link is only shown when an invite URL
-// is set, so we never ship a dead "community" link. Support email has a sane
-// default so there is always a way to reach a human.
+// Configured at build time with sane defaults so help links always work.
 const DISCORD_URL =
-  (import.meta.env.VITE_DISCORD_INVITE_URL as string | undefined)?.trim() || ""
+  (import.meta.env.VITE_DISCORD_INVITE_URL as string | undefined)?.trim() ||
+  "https://discord.gg/T2EndwXe4W"
 const SUPPORT_EMAIL =
   (import.meta.env.VITE_SUPPORT_EMAIL as string | undefined)?.trim() ||
   "support@aquilla.app"
@@ -20,44 +27,50 @@ export function HelpMenu() {
   const [open, setOpen] = useState(false)
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger
+        render={
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground data-popup-open:bg-accent/60 data-popup-open:text-foreground"
+          />
+        }
       >
         <HelpCircle className="h-3.5 w-3.5" aria-hidden />
         Help &amp; community
-      </button>
-      {open && (
-        <div
-          role="menu"
-          className="absolute bottom-full left-0 z-20 mb-1 w-full rounded-md border bg-popover p-1 shadow-md"
-        >
-          {DISCORD_URL && (
-            <a
-              role="menuitem"
-              href={DISCORD_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => setOpen(false)}
-              className="flex items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-accent"
-            >
-              <MessageCircle className="h-3.5 w-3.5" aria-hidden /> Join our community
-            </a>
-          )}
-          <a
-            role="menuitem"
-            href={`mailto:${SUPPORT_EMAIL}`}
-            onClick={() => setOpen(false)}
-            className="flex items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-accent"
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        className="w-(--anchor-width) rounded-lg"
+        side="top"
+        align="start"
+        sideOffset={4}
+      >
+        <DropdownMenuGroup>
+          <DropdownMenuItem
+            render={
+              <a
+                href={DISCORD_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setOpen(false)}
+              />
+            }
           >
-            <Mail className="h-3.5 w-3.5" aria-hidden /> Contact support
-          </a>
-        </div>
-      )}
-    </div>
+            <Discord className="size-4 shrink-0" />
+            Discord server
+            <ExternalLink className="ml-auto opacity-60" />
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            render={
+              <a href={`mailto:${SUPPORT_EMAIL}`} onClick={() => setOpen(false)} />
+            }
+          >
+            <Mail />
+            Contact support
+            <ExternalLink className="ml-auto opacity-60" />
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

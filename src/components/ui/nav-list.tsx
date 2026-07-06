@@ -15,8 +15,8 @@ import { cn } from "@/lib/utils"
  */
 
 /**
- * A group of NavRows in a single bordered card, with an optional uppercase
- * group label above it (like Linear's settings groupings).
+ * A group of NavRows in a single bordered card, with an optional group label
+ * above it — smaller than the page title, same foreground color.
  */
 function NavList({
   label,
@@ -30,7 +30,7 @@ function NavList({
   return (
     <div className={cn("space-y-2", className)}>
       {label ? (
-        <p className="px-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        <p className="px-1 font-heading text-base font-medium tracking-tight text-foreground">
           {label}
         </p>
       ) : null}
@@ -64,12 +64,12 @@ function NavRow({
     <Link
       to={to}
       className={cn(
-        "group flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset",
+        "flex items-center gap-3 px-4 py-3.5 hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset",
         className,
       )}
     >
       {Icon ? (
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl border bg-muted/40 text-muted-foreground transition-colors group-hover:text-foreground">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl border bg-muted/40 text-muted-foreground">
           <Icon className="size-5" />
         </span>
       ) : null}
@@ -84,7 +84,7 @@ function NavRow({
           {hint}
         </span>
       ) : null}
-      <ChevronRight className="size-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5" />
+      <ChevronRight className="size-4 shrink-0 text-muted-foreground/50" />
     </Link>
   )
 }
@@ -108,11 +108,11 @@ function BackLink({
     <Link
       to={to}
       className={cn(
-        "group -ml-1.5 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        "group -ml-1.5 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-sm text-muted-foreground hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         className,
       )}
     >
-      <ChevronLeft className="size-4 transition-transform group-hover:-translate-x-0.5" />
+      <ChevronLeft className="size-4" />
       {label}
     </Link>
   )

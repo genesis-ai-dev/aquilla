@@ -232,7 +232,7 @@ function VoiceRow({
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect() } }}
       title="Click to select · drag onto a line to assign"
       className={cn(
-        "group flex cursor-grab items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors active:cursor-grabbing",
+        "group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors",
         active ? "bg-primary/10" : "hover:bg-accent/50",
       )}
     >

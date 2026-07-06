@@ -171,6 +171,43 @@ export function __setTranslationsCacheForTest(
   translationsCache = cache
 }
 
+// HTTP statuses worth retrying: transient auth hiccups, rate-limiting, and
+// upstream/server errors. 404 is deliberately excluded — fetchTranslationsList()
+// already filters to downloadable=True, so a 404 here means a real mismatch
+// (bad slug), not a transient condition, and retrying it would just waste time.
+const RETRYABLE_STATUSES = new Set([401, 403, 408, 429, 500, 502, 503, 504])
+
+const MAX_DOWNLOAD_ATTEMPTS = 4
+const RETRY_BASE_DELAY_MS = 500
+
+function isRetryableStatus(status: number): boolean {
+  return RETRYABLE_STATUSES.has(status)
+}
+
+function describeUpstreamFailure(id: string, status: number, statusText: string): string {
+  if (status === 401 || status === 403) {
+    return (
+      `Couldn't reach the eBible Corpus: upstream returned HTTP ${status} for '${id}'. ` +
+      `This is usually a temporary rate-limit from raw.githubusercontent.com, not a problem ` +
+      `with your session — please try the import again in a minute.`
+    )
+  }
+  if (status === 429) {
+    return (
+      `The eBible Corpus is rate-limiting downloads (HTTP 429) for '${id}'. ` +
+      `Please wait a minute and try again.`
+    )
+  }
+  if (status === 404) {
+    return `Translation '${id}' was not found in the eBible Corpus (HTTP 404).`
+  }
+  return `Failed to download translation '${id}' (HTTP ${status}${statusText ? ` ${statusText}` : ""}).`
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 // Streams a corpus text file, calling onProgress with (bytesReceived, totalBytes)
 // where totalBytes is 0 if the server didn't send a Content-Length.
 //
@@ -178,6 +215,14 @@ export function __setTranslationsCacheForTest(
 // The 13 non-downloadable entries in translations.csv correspond to translations whose
 // corpus .txt files are absent from the BibleNLP/ebible GitHub repo — fetching them
 // returns a 404. Filtering on the `downloadable` column eliminates all known 404 cases.
+//
+// This fetch goes straight to GitHub's raw-content CDN with no auth of ours involved
+// (no sync token, no session JWT) — a 401/403 here is an upstream rate-limit/abuse
+// heuristic, not our auth expiring. Both the initial request and a failure mid-stream
+// (the reader loop throwing) are retried with backoff before giving up; each retry
+// restarts the byte counter (raw.githubusercontent.com's Range support for a browser
+// fetch is not reliable enough to depend on for resume), but a large majority of
+// failures are transient and succeed well within MAX_DOWNLOAD_ATTEMPTS.
 export async function fetchTranslationText(
   id: string,
   onProgress?: (received: number, total: number) => void,
@@ -189,9 +234,56 @@ export async function fetchTranslationText(
   //      id "abt-abt-maprik" → file "abt-abt_maprik.txt"
   const [langCode, ...rest] = id.split('-')
   const fileSlug = `${langCode}-${rest.join('_')}`
-  const res = await fetch(`${CORPUS_BASE}/corpus/${fileSlug}.txt`, { signal })
+  const url = `${CORPUS_BASE}/corpus/${fileSlug}.txt`
+
+  let lastError: Error | null = null
+
+  for (let attempt = 1; attempt <= MAX_DOWNLOAD_ATTEMPTS; attempt++) {
+    if (signal?.aborted) throw new Error("Import cancelled")
+
+    try {
+      return await attemptDownload(url, id, onProgress, signal)
+    } catch (err) {
+      if (signal?.aborted) throw new Error("Import cancelled")
+
+      const retryable = err instanceof RetryableDownloadError
+      lastError = err instanceof Error ? err : new Error(String(err))
+
+      if (!retryable || attempt === MAX_DOWNLOAD_ATTEMPTS) {
+        if (retryable) {
+          // Exhausted retries on a recoverable condition — say so explicitly
+          // rather than surfacing the last raw attempt's message alone.
+          throw new Error(
+            `${lastError.message} Retried ${MAX_DOWNLOAD_ATTEMPTS} times without success — ` +
+            `please check your connection and try again.`
+          )
+        }
+        throw lastError
+      }
+
+      // Exponential backoff before the next attempt.
+      await sleep(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1))
+    }
+  }
+
+  // Unreachable (loop always returns or throws), but keeps TS satisfied.
+  throw lastError ?? new Error(`Failed to download translation '${id}'`)
+}
+
+/** Marks a thrown error as safe to retry (transient upstream condition). */
+class RetryableDownloadError extends Error {}
+
+async function attemptDownload(
+  url: string,
+  id: string,
+  onProgress: ((received: number, total: number) => void) | undefined,
+  signal: AbortSignal | undefined,
+): Promise<string> {
+  const res = await fetch(url, { signal })
   if (!res.ok) {
-    throw new Error(`Failed to download translation '${id}' (${res.status})`)
+    const message = describeUpstreamFailure(id, res.status, res.statusText)
+    if (isRetryableStatus(res.status)) throw new RetryableDownloadError(message)
+    throw new Error(message)
   }
 
   const total = Number(res.headers.get("Content-Length") ?? 0)
@@ -204,13 +296,24 @@ export async function fetchTranslationText(
   const chunks: string[] = []
   let received = 0
 
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    received += value.byteLength
-    chunks.push(decoder.decode(value, { stream: true }))
-    onProgress(received, total)
+  try {
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      received += value.byteLength
+      chunks.push(decoder.decode(value, { stream: true }))
+      onProgress(received, total)
+    }
+  } catch (err) {
+    // A stream can fail mid-read (connection reset, upstream cutting the
+    // response short) even after a 200 — treat this the same as a retryable
+    // upstream hiccup rather than surfacing a raw reader exception.
+    if (signal?.aborted) throw err
+    const detail = err instanceof Error ? err.message : String(err)
+    throw new RetryableDownloadError(
+      `Connection to the eBible Corpus was interrupted while downloading '${id}' (${detail}).`
+    )
   }
   chunks.push(decoder.decode())
   return chunks.join("")

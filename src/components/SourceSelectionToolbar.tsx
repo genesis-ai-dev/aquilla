@@ -5,7 +5,7 @@
 // matches an active concept.
 import { useMemo } from "react"
 import { BookOpen, Sparkles } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import type { Concept } from "@/lib/terminology/types"
 import { TermLookupPopover } from "./TermLookupPopover"
 
@@ -20,12 +20,6 @@ export interface SourceSelectionToolbarProps {
   /** FRO-260: called on mouseup/mouseleave so the parent resets the guard. */
   onToolbarMouseUp?: () => void
 }
-
-const PILL =
-  "inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium " +
-  "text-muted-foreground/80 transition-[transform,color,background-color] duration-150 " +
-  "hover:bg-muted/80 hover:text-foreground active:scale-[0.92] " +
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
 
 export function SourceSelectionToolbar({
   sourceSelection,
@@ -62,28 +56,29 @@ export function SourceSelectionToolbar({
     >
       {hasMatch && (
         <TermLookupPopover sourceTerm={sourceSelection} concepts={activeConcepts} onApply={onTermApply}>
-          <button type="button" onMouseDown={handleButtonMouseDown} className={cn(PILL)}>
+          <Button type="button" size="xs" variant="ghost" onMouseDown={handleButtonMouseDown}>
             <BookOpen className="size-3" aria-hidden />
             View term
-          </button>
+          </Button>
         </TermLookupPopover>
       )}
 
-      <button type="button" onMouseDown={handleButtonMouseDown} onClick={onAskAi} className={cn(PILL)}>
+      <Button type="button" size="xs" variant="ghost" onMouseDown={handleButtonMouseDown} onClick={onAskAi}>
         <Sparkles className="size-3" aria-hidden />
         Ask AI
-      </button>
+      </Button>
 
       {onAddToTermbase && (
-        <button
+        <Button
           type="button"
+          size="xs"
+          variant="ghost"
           onMouseDown={handleButtonMouseDown}
           onClick={onAddToTermbase}
-          className={cn(PILL)}
         >
           <BookOpen className="size-3" aria-hidden />
           Add to termbase
-        </button>
+        </Button>
       )}
     </div>
   )

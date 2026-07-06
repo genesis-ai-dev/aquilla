@@ -404,25 +404,27 @@ function BibleResourcesPanel({
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex items-center gap-1.5 border-b px-2 py-1.5">
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-xs"
             onClick={() => setPage(null)}
-            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground"
             aria-label="Back to results"
           >
             <ArrowLeft className="h-3 w-3" />
-          </button>
+          </Button>
           <span className="min-w-0 flex-1 truncate text-xs font-medium">{page.title}</span>
           <AppTooltip content="Open on bibletranslation.org">
-            <a
-              href={page.url}
-              target="_blank"
-              rel="noreferrer"
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              render={
+                <a href={page.url} target="_blank" rel="noreferrer" />
+              }
               aria-label="Open on bibletranslation.org"
-              className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground"
             >
               <ExternalLink className="h-3 w-3" />
-            </a>
+            </Button>
           </AppTooltip>
         </div>
         <div className="flex-1 overflow-y-auto px-2 py-2 text-xs">

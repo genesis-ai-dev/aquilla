@@ -6,6 +6,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchArchivedProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { unarchiveProjectRemote } from "@/lib/sync/archive"
+import { Button } from "@/components/ui/button"
 
 export function ArchivedProjects() {
   const { activeOrgId } = useActiveOrg()
@@ -68,12 +69,14 @@ export function ArchivedProjects() {
               {projects.map((p) => (
                 <div key={p.id} className="flex items-center justify-between gap-4 p-4">
                   <span className="font-medium">{p.name}</span>
-                  <button
-                    onClick={() => handleRestore(p.id)}
-                    className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent/40"
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void handleRestore(p.id)}
                   >
                     Restore
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>

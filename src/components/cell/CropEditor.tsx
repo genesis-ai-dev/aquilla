@@ -6,6 +6,7 @@
 
 import { useRef } from "react"
 import { Pause, Play, RotateCcw, Scissors } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { CellWaveform } from "@/components/CellWaveform"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
@@ -37,16 +38,15 @@ export function CropButton({
     <Popover>
       <PopoverTrigger
         render={
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-sm"
             aria-label="Crop audio"
-            className={cn(
-              "grid h-7 w-7 shrink-0 place-items-center rounded-md transition-colors hover:bg-accent/50 hover:text-foreground",
-              trimmed ? "text-foreground" : "text-muted-foreground",
-            )}
+            className={cn("shrink-0", trimmed ? "text-foreground" : undefined)}
           >
             <Scissors className="h-3.5 w-3.5" />
-          </button>
+          </Button>
         }
       />
       <PopoverContent align="end" side="top" className="w-80 p-3">
@@ -158,14 +158,15 @@ function CropPanel({ controller, trim, onChange }: {
       </div>
 
       <div className="flex items-center justify-between gap-2">
-        <button
+        <Button
           type="button"
+          size="xs"
+          variant="outline"
           onClick={() => { if (isPlaying) pause(); else void play() }}
-          className="inline-flex h-7 items-center gap-1 rounded-full border border-border px-2.5 text-xs hover:bg-accent/50"
         >
           {isPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
           {isPlaying ? "Pause" : "Preview"}
-        </button>
+        </Button>
         <span className="text-[10px] tabular-nums text-muted-foreground">
           {fmt(start)} – {dur > 0 ? fmt(end) : "–:––"} · {fmt(Math.max(0, end - start))}
         </span>

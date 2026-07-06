@@ -88,9 +88,11 @@ function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav
   const nearest = list[0]?.entry.title
 
   const button = (
-    <button
+    <Button
       ref={btnRef}
       type="button"
+      variant="ghost"
+      size="icon-xs"
       disabled={!enabled}
       aria-label={enabled && nearest ? `${label} to ${nearest}` : label}
       onPointerDown={onPointerDown}

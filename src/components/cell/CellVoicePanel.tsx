@@ -189,15 +189,17 @@ function HeaderIconButton({
 }) {
   return (
     <AppTooltip content={title}>
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="icon-sm"
         onClick={onClick}
         disabled={disabled}
         aria-label={title}
-        className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:opacity-40"
+        className="shrink-0"
       >
         {children}
-      </button>
+      </Button>
     </AppTooltip>
   )
 }
@@ -387,14 +389,16 @@ export function CellVoicePanel({
           <div className="relative mb-2 h-12">
             <WaveScrubber fraction={fraction} onSeek={(f) => seek(effStart + f * effDur)} seed={cell.id} />
             <AppTooltip content={primaryTitle}>
-              <button
+              <Button
                 type="button"
+                size="icon-lg"
+                variant="default"
                 onClick={onPrimary}
                 aria-label={primaryTitle}
-                className="absolute left-1/2 top-1/2 grid h-10 w-10 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-primary text-primary-foreground shadow-md ring-4 ring-background transition-transform hover:scale-105"
+                className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shadow-md ring-4 ring-background transition-transform hover:scale-105"
               >
                 {loading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-[1px]" />}
-              </button>
+              </Button>
             </AppTooltip>
             <span className="pointer-events-none absolute bottom-0 left-0 rounded bg-background/70 px-1 text-[10px] tabular-nums text-muted-foreground">
               {isVoicing ? "Voicing…" : `${fmtTime(effCurrent)} / ${effDur > 0 ? fmtTime(effDur) : "–:––"}`}
@@ -454,12 +458,14 @@ function VoiceCombobox({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
-          <button
+          <Button
             type="button"
+            size="xs"
+            variant="outline"
             disabled={busy}
             title="Choose a voice"
             aria-label={`Voice: ${active.name}. Choose a voice`}
-            className="flex w-full items-center gap-1.5 rounded-full border border-border px-2 py-1 text-xs transition-colors hover:bg-accent/50 disabled:cursor-default disabled:opacity-60 data-[popup-open]:bg-accent/50"
+            className="w-full justify-start gap-1.5"
           >
             <span className="relative shrink-0">
               <VoiceAvatar voice={active} size={18} />

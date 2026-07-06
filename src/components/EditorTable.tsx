@@ -12,6 +12,7 @@ import {
   ArrowRight, Activity, NotebookPen, Info, Pencil,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import { Button } from "@/components/ui/button"
 import type { CellData } from "@/hooks/useCells"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { getCellPref, setCellPref } from "@/lib/store/audio-cell-prefs"
@@ -3975,14 +3976,16 @@ function EditorRow({
                 className="mt-1 flex items-start justify-between gap-2 rounded-xl bg-destructive/10 px-2.5 py-1.5 text-[11px] text-destructive dark:bg-destructive/20"
               >
                 <span>{writeError}</span>
-                <button
+                <Button
                   type="button"
+                  size="icon-xs"
+                  variant="ghost"
                   aria-label="Dismiss"
                   onClick={() => setWriteError(null)}
-                  className="shrink-0 rounded-full px-1.5 py-0.5 text-destructive hover:bg-destructive/20"
+                  className="shrink-0 text-destructive hover:bg-destructive/20"
                 >
                   ✕
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -4266,37 +4269,39 @@ function EditorRow({
                                 ? "Refined with AI — turn off for a plain word-for-word reading"
                                 : "Refine the wording with AI for a more natural reading"
                           }>
-                            <button
+                            <Button
                               type="button"
+                              size="xs"
+                              variant={btPolishOn ? "secondary" : "ghost"}
                               disabled={!isBacktranslationConfigured || isBacktranslating}
                               onClick={() => {
                                 const next = !btPolishOn
                                 setBtPolishOn(next)
                                 onBacktranslate?.(cell, next)
                               }}
-                              className={cn(
-                                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+                              className={
                                 btPolishOn
                                   ? "bg-violet-500/12 text-violet-700 hover:bg-violet-500/20 dark:text-violet-300"
-                                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                              )}
+                                  : undefined
+                              }
                             >
                               <Sparkles className={cn("h-3 w-3", isBacktranslating && btPolishOn && "animate-pulse")} />
                               Refine
-                            </button>
+                            </Button>
                           </AppTooltip>
                         )}
                         {/* Edit — contributor+ only. A quiet icon, not a labelled pill. */}
                         {editable ? (
                           <AppTooltip content="Edit the back-translation">
-                            <button
+                            <Button
                               type="button"
+                              size="icon-xs"
+                              variant="ghost"
                               onClick={handleBtEditStart}
                               aria-label="Edit the back-translation"
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                             >
                               <Pencil className="h-3 w-3" />
-                            </button>
+                            </Button>
                           </AppTooltip>
                         ) : (
                           <AppTooltip content="Contributor+ required to edit back-translations">
@@ -4328,15 +4333,17 @@ function EditorRow({
                             <AlertTriangle className="h-3 w-3 shrink-0" />
                             Your translation changed since this was written
                           </span>
-                          <button
+                          <Button
                             type="button"
+                            size="xs"
+                            variant="outline"
                             onClick={() => onBacktranslate?.(cell, btPolishOn)}
                             disabled={isBacktranslating || cell.translated.trim().length === 0}
-                            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 transition-colors hover:bg-amber-500/25 dark:text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="shrink-0 border-amber-500/30 bg-amber-500/15 text-amber-800 hover:bg-amber-500/25 dark:text-amber-200"
                           >
                             <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
                             Refresh
-                          </button>
+                          </Button>
                         </div>
                       )}
                       {btEditing ? (
@@ -4354,21 +4361,23 @@ function EditorRow({
                             className="w-full resize-none rounded-lg border border-border bg-background px-3.5 py-3 text-[15px] leading-relaxed text-foreground outline-none focus:ring-1 focus:ring-ring"
                           />
                           <div className="flex items-center justify-end gap-1.5">
-                            <button
+                            <Button
                               type="button"
+                              size="xs"
+                              variant="ghost"
                               onClick={handleBtCancel}
-                              className="rounded-full px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted"
                             >
                               Cancel
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                               type="button"
+                              size="xs"
+                              variant="default"
                               onClick={handleBtSave}
                               disabled={btSaving || !btEditValue.trim()}
-                              className="rounded-full bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               {btSaving ? "Saving…" : "Save"}
-                            </button>
+                            </Button>
                           </div>
                         </div>
                       ) : (
@@ -4389,18 +4398,19 @@ function EditorRow({
                       <p className="max-w-[34ch] text-xs leading-relaxed text-muted-foreground">
                         See what your translation says when read back, so you can check the meaning carried over.
                       </p>
-                      <button
+                      <Button
                         type="button"
+                        size="sm"
+                        variant="default"
                         onClick={() => onBacktranslate?.(cell, btPolishOn)}
                         disabled={isBacktranslating || cell.translated.trim().length === 0}
-                        className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         {isBacktranslating ? (
                           <><RefreshCw className="h-3 w-3 animate-spin" /> Reading it back…</>
                         ) : (
                           <><Sparkles className="h-3 w-3" /> Read it back</>
                         )}
-                      </button>
+                      </Button>
                     </div>
                   )}
                   {/* ── FRO-207: Interlinear alignment panel ──────────────── */}
@@ -4512,20 +4522,22 @@ function EditorRow({
                         />
                       )}
                       <div className="flex flex-wrap gap-1.5">
-                        <button
+                        <Button
                           type="button"
+                          size="xs"
+                          variant="outline"
                           onClick={() => onOpenRecording?.(cell.id)}
                           disabled={!editable || !onOpenRecording}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-all disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Mic className="h-3 w-3" />
                           Re-record
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
+                          size="xs"
+                          variant="outline"
                           onClick={handleTranscribe}
                           disabled={!editable || isTranscribing}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-all disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Sparkles
                             className={cn(
@@ -4586,15 +4598,16 @@ function EditorRow({
                       )}
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="text-[11px] text-muted-foreground">AI generated voice. Drag a voice from the toolbar to regenerate, or:</span>
-                        <button
+                        <Button
                           type="button"
+                          size="xs"
+                          variant="outline"
                           onClick={() => onOpenRecording?.(cell.id)}
                           disabled={!editable || !onOpenRecording}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-all disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Mic className="h-3 w-3" />
                           Record over
-                        </button>
+                        </Button>
                       </div>
                     </>
                   ) : (
@@ -4606,15 +4619,16 @@ function EditorRow({
                         No audio yet. Record below, or drag a voice onto this cell from the toolbar above.
                       </p>
                       <div className="flex flex-wrap items-center justify-center gap-2">
-                        <button
+                        <Button
                           type="button"
+                          size="sm"
+                          variant="default"
                           onClick={() => onOpenRecording?.(cell.id)}
                           disabled={!editable || !onOpenRecording}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Mic className="h-3 w-3" />
                           Record
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   )}
@@ -4717,15 +4731,17 @@ function EditorRow({
                     </p>
                   ) : (
                     <>
-                      <button
+                      <Button
                         type="button"
+                        size="xs"
+                        variant="outline"
                         onClick={() => onOpenHistory?.(cell.id)}
                         disabled={!onOpenHistory}
-                        className="self-start inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-all disabled:cursor-not-allowed disabled:opacity-40"
+                        className="self-start"
                       >
                         <HistoryIcon className="h-3 w-3" />
                         Open full history
-                      </button>
+                      </Button>
                       <ul className="bg-muted divide-y divide-border/40 rounded-lg">
                         {[...fetchedHistory].slice(-5).reverse().map((entry, i) => {
                           const date = new Date(entry.timestamp).toLocaleString(undefined, {
@@ -4844,7 +4860,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
 
 interface GenerateOverwriteDialogProps {
   open: boolean

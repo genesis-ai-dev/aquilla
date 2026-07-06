@@ -3271,14 +3271,15 @@ export function ProjectWorkspace() {
         logoAccessory={
           dockTab !== null ? (
             <AppTooltip content="Collapse sidebar" side="right">
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 aria-label="Collapse sidebar"
                 onClick={() => setDockTab(null)}
-                className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
               >
                 <PanelLeftClose className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             </AppTooltip>
           ) : null
         }

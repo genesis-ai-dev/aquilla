@@ -13,6 +13,7 @@ import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
 import { useCells } from "@/hooks/useCells"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
+import { triggerLinkSync } from "@/lib/sync/archive"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useCompletion, FALLBACK_COMPLETION_SETTINGS } from "@/hooks/useCompletion"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
@@ -222,6 +223,32 @@ export function shouldPatchSystemPrompt(
 ): boolean {
   if (!systemPrompt || systemPrompt.trim().length === 0) return false
   return roleLevel >= ROLE.MAINTAINER
+}
+
+// ── QA-BUG-1: pure guard — exported for unit testing ─────────────────────────
+/**
+ * Returns true iff the zero-file self-heal should fire a `/link/sync`
+ * trigger for the current project. Only live-linked projects can be
+ * self-healed this way (clone links never sync again after creation — the
+ * QA-flagged gap there is closed at link time in the auth-worker route, not
+ * here). Guards against re-firing for a project that already has files (the
+ * common case, and the state right after a successful heal) and against
+ * re-firing for the SAME project id more than once per mount (the caller
+ * tracks `alreadyAttemptedProjectId` across renders via a ref).
+ */
+export function shouldSelfHealZeroFileLink(args: {
+  projectId: string | null | undefined
+  jwt: string | null | undefined
+  sourceLinkMode: "clone" | "live" | null | undefined
+  fileCount: number
+  alreadyAttemptedProjectId: string | null
+}): boolean {
+  const { projectId, jwt, sourceLinkMode, fileCount, alreadyAttemptedProjectId } = args
+  if (!projectId || !jwt) return false
+  if (sourceLinkMode !== "live") return false
+  if (fileCount > 0) return false
+  if (alreadyAttemptedProjectId === projectId) return false
+  return true
 }
 
 export function ProjectWorkspace() {
@@ -777,6 +804,32 @@ export function ProjectWorkspace() {
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
   })
 
+  // QA-BUG-1: zero-file self-heal for live-linked projects. The lazy-pull
+  // trigger in useStaleSourceCells only fires once a FILE is open — a
+  // freshly linked (or link-time-seed-failed) project has none, so there was
+  // no client path that could ever recover it. Fire /link/sync once per
+  // project load when the project is live-linked and its file list is
+  // empty; on success, `refresh()` pulls the now-populated file list. Clone
+  // links correctly no-op server-side (mirrorSync short-circuits for
+  // mode='clone') so this is safe to fire unconditionally for any live link.
+  const zeroFileHealAttemptedRef = useRef<string | null>(null)
+  useEffect(() => {
+    const pid = project?.id ?? null
+    const jwt = frontierSession?.jwt ?? null
+    if (!shouldSelfHealZeroFileLink({
+      projectId: pid,
+      jwt,
+      sourceLinkMode: project?.sourceLinkMode,
+      fileCount: projectFiles.length,
+      alreadyAttemptedProjectId: zeroFileHealAttemptedRef.current,
+    })) return
+    zeroFileHealAttemptedRef.current = pid
+    void (async () => {
+      const ok = await triggerLinkSync(jwt!, pid!)
+      if (ok) refresh()
+    })()
+  }, [project?.id, project?.sourceLinkMode, projectFiles.length, frontierSession?.jwt, refresh])
+
   // Track the last cell that received an optimistic target edit so
   // `handleCellCommitted` can fall back to a targeted revalidate when the
   // caller didn't pass a cellId. EditorTable calls applyOptimisticTargetEdit
@@ -818,12 +871,27 @@ export function ProjectWorkspace() {
   // editor table can decorate stale rows with the AlertTriangle badge.
   // One fetch per (projectId, fileId) — flattened to a boolean per row
   // inside EditorTable.
-  const { staleCellIds } = useStaleSourceCells({
+  // FRO-477 (§6) — upstreamStaleCellIds surfaces inherited (ancestor-chain)
+  // staleness alongside the existing direct staleCellIds; both flatten to
+  // per-row booleans inside EditorTable the same way.
+  const { staleCellIds, upstreamStaleCellIds, revalidate: revalidateStaleSource, syncNow: syncStaleSourceNow } = useStaleSourceCells({
     projectId: project?.id ?? null,
     fileId: activeFileId,
     getToken: getTokenForFile,
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
   })
+  // FRO-479: the WS connect effect's onMessage closure is created once, before
+  // staleness state settles — route link.upstream-changed frames through a ref
+  // so the handler always reaches the latest revalidate (which piggybacks the
+  // fire-and-forget POST /link/sync, single-flighted server-side).
+  const staleSourceRevalidateRef = useRef<() => void>(() => {})
+  staleSourceRevalidateRef.current = revalidateStaleSource
+  // QA-BUG-2: awaitable sync — the push handler awaits this THEN revalidates
+  // cells too, so the mirrored source TEXT updates live (not just the badge).
+  const syncStaleSourceNowRef = useRef<() => Promise<void>>(async () => {})
+  syncStaleSourceNowRef.current = syncStaleSourceNow
+  const revalidateCellsRef = useRef<() => void>(() => {})
+  revalidateCellsRef.current = revalidateCells
 
   // Audio lens: TTS settings (engine, voice library, cast) hydrated from IDB
   // and overlaid onto the project so generation uses the real engine/key/cast.
@@ -2050,10 +2118,30 @@ export function ProjectWorkspace() {
     let cancelled = false
     let reconciler: import("@/lib/sync/ws-reconciler").WsReconciler | null = null
     void (async () => {
-      const { createWsReconciler, isOwnWriteEcho } = await import("@/lib/sync/ws-reconciler")
+      const { createWsReconciler, isOwnWriteEcho, createLinkUpstreamChangedHandler } =
+        await import("@/lib/sync/ws-reconciler")
       const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
       if (cancelled || !project?.id) return
       const pid = project.id
+      // FRO-479: link.upstream-changed frames → refetch staleness immediately
+      // (cheap GET, reflects the frame as soon as possible), and — debounced —
+      // AWAIT the mirror sync, then revalidate BOTH staleness and cells.
+      // QA-BUG-2: previously `triggerLinkSync` just re-ran the fire-and-forget
+      // stale-source fetch, which raced the mirror commit and never refreshed
+      // cells at all — the badge went live but the mirrored source TEXT only
+      // updated on a manual reload. Sequencing the revalidates AFTER the sync
+      // POST resolves (syncStaleSourceNow awaits it) fixes both: cells finally
+      // refetch post-commit, and staleness settles on the correct tone
+      // instead of the transient pre-sync "violet" (QA-BUG-3's other half).
+      const handleLinkUpstreamChanged = createLinkUpstreamChangedHandler({
+        currentProjectId: () => pid,
+        revalidateStaleSource: () => staleSourceRevalidateRef.current(),
+        triggerLinkSync: () => {
+          void syncStaleSourceNowRef.current().then(() => {
+            revalidateCellsRef.current()
+          })
+        },
+      })
       reconciler = createWsReconciler(
         {
           projectId: pid,
@@ -2129,6 +2217,12 @@ export function ProjectWorkspace() {
                   return next
                 })
               }
+            } else if (msg.t === "link.upstream-changed") {
+              // FRO-479: an upstream live-link project committed lane-relevant
+              // changes. Refetch staleness immediately; the handler debounces
+              // the mirror-sync trigger (push is a lossy accelerator — the
+              // lazy pull on file open remains the self-healing floor).
+              handleLinkUpstreamChanged(msg)
             } else if (msg.t === "presence") {
               // FRO-288: forward presence snapshots to the focus-lock hook so
               // it can update heldBy when another user holds our focused cell.
@@ -3785,6 +3879,7 @@ export function ProjectWorkspace() {
             onAckRemoteChange={handleAckRemoteChange}
             checkLockHolder={checkLockHolder}
             staleCellIds={staleCellIds}
+            upstreamStaleCellIds={upstreamStaleCellIds}
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
           />

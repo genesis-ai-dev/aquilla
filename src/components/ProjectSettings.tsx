@@ -48,6 +48,8 @@ import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
+import { UpstreamChangesPanel } from "./linked/UpstreamChangesPanel"
+import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useOrg } from "@/hooks/useOrg"
 import { ApiKeyField } from "./ApiKeyField"
 import { SettingsNav, useScrollSpy, type SettingsSection } from "./ProjectSettings/SettingsNav"
@@ -232,6 +234,13 @@ export function ProjectSettings() {
     getJwt,
     enabled: isCloudProject && !!id,
   })
+
+  // FRO-478: file-scoped sync-token minter for the Upstream-changes panel
+  // (mirrors ProjectWorkspace's getTokenForFile — per-file JWTs, cached).
+  const getTokenForUpstreamPanel = useMemo(
+    () => buildFileScopedTokenFetcher(getJwt, id ?? "", {}),
+    [getJwt, id],
+  )
 
   // Server enforces MAINTAINER (600) for settings writes — show the correct
   // floor in the read-only tooltip so users know what role they need.
@@ -673,8 +682,13 @@ export function ProjectSettings() {
   const hasGitOrigin = project?.origin?.kind === "git"
   const hasSourceLink = typeof project?.sourceProjectId === "string" && !!project.sourceProjectId
 
+  // FRO-478: only meaningful for a LIVE link (a clone never drifts from its
+  // upstream — see the mirror-sync short-circuit in stale-source-route.ts).
+  const hasLiveSourceLink = hasSourceLink && project?.sourceLinkMode !== "clone"
+
   const ALL_SECTIONS: SettingsSection[] = [
     { id: "section-source-link", label: "Source link", keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
+    { id: "section-upstream-changes", label: "Upstream changes", keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
     { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language"] },
     { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
@@ -807,8 +821,21 @@ export function ProjectSettings() {
           <SourceLinkSection
             projectId={id!}
             sourceProjectId={project.sourceProjectId}
+            sourceLinkMode={project.sourceLinkMode}
+            sourceLinkConsumes={project.sourceLinkConsumes}
+            sourceLinkGate={project.sourceLinkGate}
+            sourceLinkCursor={project.sourceLinkCursor}
             onDetached={refresh}
             roleLevel={project?.syncRole?.level ?? null}
+          />
+        )}
+        {hasLiveSourceLink && visibleSections.some((s) => s.id === "section-upstream-changes") && (
+          <UpstreamChangesPanel
+            projectId={id!}
+            files={project?.files ?? []}
+            getToken={getTokenForUpstreamPanel}
+            roleLevel={project?.syncRole?.level ?? null}
+            username={session?.username ?? "local"}
           />
         )}
         {visibleSections.some((s) => s.id === "section-project-info") && (

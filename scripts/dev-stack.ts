@@ -518,10 +518,6 @@ async function main(): Promise<void> {
     port: IDENTITY_PORT,
     label: "identity",
     env: {
-      // identity calls the sync worker for archive notifications etc.
-      // Point that at the local sync (not the prod workers.dev URL from
-      // wrangler.toml [vars]).
-      SYNC_WORKER_URL: `http://127.0.0.1:${SYNC_PORT}`,
       // Loud env tag so logs make it obvious this is the local dev stack.
       ENVIRONMENT: "development",
       // Local Hyperdrive emulation → the local Postgres ensured above.
@@ -540,6 +536,11 @@ async function main(): Promise<void> {
       "--persist-to", PERSIST_DIR,
       "--var", "WRANGLER_LOCAL:1",
       "--var", "ADMIN_EMAILS:dev@local.test",
+      // identity calls the sync worker server-side (archive notifications,
+      // live-link seed sync). Must be --var — process env never reaches
+      // c.env, so the prod URL from wrangler.toml [vars] would win and
+      // local link attempts would silently hit prod (found by live QA).
+      "--var", `SYNC_WORKER_URL:http://127.0.0.1:${SYNC_PORT}`,
     ],
     logFile: openLogFile(path.join(LOG_DIR, "identity.log")),
     streamToParent: VERBOSE,

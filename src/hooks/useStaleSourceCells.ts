@@ -1,6 +1,10 @@
 // Phase 5 / AD-9. Fetches the set of cell ids whose source has advanced
 // since the translator's last commit (the AD-9 pointer-comparison query
-// run server-side).
+// run server-side). Extended FRO-476 §6/§7: also surfaces tombstoned cell
+// ids + the link-level `behindSeq` probe, and fires the mirror sync
+// lazy-pull trigger (POST /link/sync, fire-and-forget) alongside the
+// stale-source fetch — the cheap place to catch a dormant live-linked
+// project up when its file is opened.
 //
 // Returns a Set for O(1) membership; consumers (`StaleSourceIndicator`,
 // future cell-row integration) call `.has(cellId)` per cell.
@@ -13,9 +17,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
-  fetchStaleSourceCells,
+  fetchStaleSourceResponse,
   StaleSourceError,
 } from "@/lib/sync/stale-source-read"
+import type { BehindSeq } from "@/lib/sync/stale-source-read-types"
+import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
 
 const EMPTY: ReadonlySet<string> = new Set()
 
@@ -32,11 +38,85 @@ export interface UseStaleSourceCellsOptions {
 export interface UseStaleSourceCellsResult {
   /** Membership set of cell ids whose source has advanced since commit. */
   staleCellIds: ReadonlySet<string>
+  /** FRO-476: membership set of cell ids whose upstream source was deleted. */
+  tombstonedCellIds: ReadonlySet<string>
+  /**
+   * FRO-477: membership set of cell ids whose ANCESTRY is stale (design
+   * spec §6's inherited-staleness walk) — distinct from `staleCellIds`
+   * (direct, single-hop). Renders as a second, visually distinct badge
+   * tone in `StaleSourceIndicator`.
+   */
+  upstreamStaleCellIds: ReadonlySet<string>
+  /** FRO-476: link-level "you have unmirrored upstream changes" probe. */
+  behindSeq: BehindSeq | null
+  /** FRO-477: link-level "an ancestor further upstream is behind ITS
+   *  upstream" signal (§6 step 3) — banner-level, not per-cell. */
+  ancestorBehind: boolean
   isLoading: boolean
   isError: boolean
   /** Manual refetch — call after target commits or known upstream edits. */
   revalidate: () => void
+  /** QA-BUG-2: awaits POST /link/sync, THEN revalidates staleness. Callers
+   *  that also need the mirrored cell TEXT to refresh (not just the
+   *  staleness badge) should revalidate cells after this resolves too — see
+   *  ProjectWorkspace's `link.upstream-changed` handler. */
+  syncNow: () => Promise<void>
 }
+
+// SWARM-TODO(FRO-476): verify the lazy-pull trigger end to end — create
+// project A (import a small USFM), create project B linked live to A via
+// POST /api/v2/projects/:B/link-source { sourceProjectId: A, mode: 'live' },
+// open a file in B in the app (or call useStaleSourceCells directly) and
+// confirm (via network tab / a DB read) that
+// POST /api/v1/projects/:B/link/sync fires and B's source cells populate.
+
+// SWARM-TODO(FRO-477): verify the target-consumption chain + inherited
+// staleness end to end in the real dev stack (no UI exists yet to CREATE
+// the link with consumes='target'/gate — use the API directly per FRO-476's
+// TODO above, extended one hop):
+//   1. Create project A (English) — import a small USFM/VTT with 2+ cells,
+//      at least one with startMs/endMs (a timed VTT cell) and a cast label
+//      (cast.assign) so the merge's structural fields are exercised.
+//   2. Create project B (French), POST /api/v2/projects/:B/link-source
+//      { sourceProjectId: A, mode: 'live', consumes: 'source' }.
+//   3. Open B in the app, translate + validate (reviewer role) both cells.
+//   4. Create project C (Chaluba), POST /api/v2/projects/:C/link-source
+//      { sourceProjectId: B, mode: 'live', consumes: 'target', gate: 'validated' }.
+//   5. Open C in the app — confirm C's source lane shows B's validated
+//      French text, with the timed cell's startMs/endMs and cast label
+//      carried over from A's structure (§2 merge). Translate + validate one
+//      cell in C.
+//   6. Edit the English text of ONE cell in A (as project-lead/importer).
+//      Do NOT touch B at all (leave it dormant).
+//   7. Reload C (or open the file) — confirm the EDITED cell's row shows the
+//      violet/dotted StaleSourceIndicator (upstreamStaleCellIds), NOT the
+//      amber one, and that the OTHER (untouched) cell shows no flag at all.
+//   8. In B, re-translate + re-validate the edited cell; reload C — confirm
+//      the flag flips from violet to amber (C's mirror advanced; direct
+//      staleness now applies) and clears entirely once C re-commits.
+
+/** Mirror sync trigger. Returns a promise that resolves (never rejects) once
+ *  the POST settles, so callers who need the post-sync truth (the delayed
+ *  re-fetch below, and ProjectWorkspace's push-accelerator handler) can wait
+ *  for it — but `doFetch`'s own call to this is still fire-and-forget with
+ *  respect to the stale-source READ (never delays that GET). */
+function triggerLinkSync(projectId: string, jwt: string): Promise<void> {
+  const url = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/link/sync`
+  return fetch(url, { method: "POST", headers: { Authorization: `Bearer ${jwt}` } })
+    .then(() => undefined)
+    .catch(() => {
+      /* best-effort; the next lazy-pull trigger or manual sync catches it */
+    })
+}
+
+/** QA-BUG-2/3: how long after firing the lazy-pull sync to schedule ONE
+ *  follow-up stale-source re-fetch. The sync commit and this read are two
+ *  separate round-trips with no shared ordering guarantee — the read can
+ *  land before the mirror's cell writes are visible, showing a transient
+ *  "violet" (ancestry-changed) badge that only settles to the correct
+ *  "amber" (direct-stale) tone on the NEXT read. A single delayed re-fetch
+ *  lands the post-sync truth without user action, cheaper than a poll loop. */
+const POST_SYNC_REFETCH_DELAY_MS = 2500
 
 export function useStaleSourceCells(
   opts: UseStaleSourceCellsOptions,
@@ -44,8 +124,26 @@ export function useStaleSourceCells(
   const { projectId, fileId, getToken, enabled = true } = opts
   const [staleCellIds, setStaleCellIds] =
     useState<ReadonlySet<string>>(EMPTY)
+  const [tombstonedCellIds, setTombstonedCellIds] =
+    useState<ReadonlySet<string>>(EMPTY)
+  const [upstreamStaleCellIds, setUpstreamStaleCellIds] =
+    useState<ReadonlySet<string>>(EMPTY)
+  const [behindSeq, setBehindSeq] = useState<BehindSeq | null>(null)
+  const [ancestorBehind, setAncestorBehind] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [isError, setIsError] = useState(false)
+
+  /** Reset every derived field to its empty/quiet steady state — used on
+   *  disable, auth-retry exhaustion, and transient fetch errors (staleness
+   *  is a soft signal; the fallback is always "nothing is stale," never an
+   *  error state that freezes the editor). */
+  const resetToEmpty = useCallback(() => {
+    setStaleCellIds(EMPTY)
+    setTombstonedCellIds(EMPTY)
+    setUpstreamStaleCellIds(EMPTY)
+    setBehindSeq(null)
+    setAncestorBehind(false)
+  }, [])
   const generationRef = useRef(0)
   const projectRef = useRef(projectId)
   const fileRef = useRef(fileId)
@@ -53,18 +151,25 @@ export function useStaleSourceCells(
   const tokenRef = useRef(getToken)
   const tokenRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const tokenAttemptsRef = useRef(0)
+  // QA-BUG-3: cancelled on unmount/re-run so a stale generation's delayed
+  // re-fetch never clobbers a newer fetch's result.
+  const postSyncRefetchRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   projectRef.current = projectId
   fileRef.current = fileId
   enabledRef.current = enabled
   tokenRef.current = getToken
 
-  const doFetch = useCallback(async () => {
+  // `triggerSync=false` is used by the QA-BUG-3 delayed post-sync re-fetch
+  // below: it must re-READ without re-triggering (and re-scheduling another
+  // delayed re-fetch off) the lazy-pull sync — otherwise each settle fetch
+  // would perpetually chain into another one every POST_SYNC_REFETCH_DELAY_MS.
+  const doFetch = useCallback(async (triggerSync = true) => {
     const pid = projectRef.current
     const fid = fileRef.current
     const enabled = enabledRef.current
     const getToken = tokenRef.current
     if (!enabled || !pid || !fid) {
-      setStaleCellIds(EMPTY)
+      resetToEmpty()
       setIsLoading(false)
       setIsError(false)
       return
@@ -81,7 +186,7 @@ export function useStaleSourceCells(
         // is the right fallback.
         const attempt = ++tokenAttemptsRef.current
         if (attempt >= 6) {
-          setStaleCellIds(EMPTY)
+          resetToEmpty()
           setIsLoading(false)
           setIsError(false)
           return
@@ -95,9 +200,29 @@ export function useStaleSourceCells(
         return
       }
       tokenAttemptsRef.current = 0
-      const ids = await fetchStaleSourceCells(pid, fid, jwt)
+      if (triggerSync) {
+        // FRO-476 §7: lazy-pull trigger — not awaited here (never delays the
+        // stale-source read below), but QA-BUG-3: schedule ONE delayed
+        // re-fetch after it settles so the post-sync truth lands without a
+        // manual reload (the read below can race the mirror commit and show
+        // a transient wrong-tone badge — see POST_SYNC_REFETCH_DELAY_MS).
+        // That delayed re-fetch passes triggerSync=false so it doesn't
+        // re-trigger + re-schedule itself into a perpetual chain.
+        if (postSyncRefetchRef.current) clearTimeout(postSyncRefetchRef.current)
+        void triggerLinkSync(pid, jwt).then(() => {
+          postSyncRefetchRef.current = setTimeout(() => {
+            postSyncRefetchRef.current = null
+            if (generationRef.current === gen) void doFetch(false)
+          }, POST_SYNC_REFETCH_DELAY_MS)
+        })
+      }
+      const body = await fetchStaleSourceResponse(pid, fid, jwt)
       if (generationRef.current !== gen) return
-      setStaleCellIds(new Set(ids))
+      setStaleCellIds(new Set(body.staleCellIds ?? []))
+      setTombstonedCellIds(new Set(body.tombstonedCellIds ?? []))
+      setUpstreamStaleCellIds(new Set(body.upstreamStaleCellIds ?? []))
+      setBehindSeq(body.behindSeq ?? null)
+      setAncestorBehind(body.ancestorBehind ?? false)
       setIsLoading(false)
     } catch (err) {
       if (generationRef.current !== gen) return
@@ -108,11 +233,11 @@ export function useStaleSourceCells(
       } else {
         console.warn("[useStaleSourceCells] fetch failed:", err)
       }
-      setStaleCellIds(EMPTY)
+      resetToEmpty()
       setIsError(true)
       setIsLoading(false)
     }
-  }, [])
+  }, [resetToEmpty])
 
   useEffect(() => {
     void doFetch()
@@ -123,6 +248,10 @@ export function useStaleSourceCells(
     if (tokenRetryRef.current) {
       clearTimeout(tokenRetryRef.current)
       tokenRetryRef.current = null
+    }
+    if (postSyncRefetchRef.current) {
+      clearTimeout(postSyncRefetchRef.current)
+      postSyncRefetchRef.current = null
     }
   }, [])
 
@@ -149,5 +278,33 @@ export function useStaleSourceCells(
     }
   }, [doFetch])
 
-  return { staleCellIds, isLoading, isError, revalidate: doFetch }
+  // QA-BUG-2 (FRO-479 push accelerator): awaitable "sync then revalidate".
+  // The `link.upstream-changed` push handler calls this instead of the
+  // fire-and-forget path inside `doFetch` — it needs to know when the mirror
+  // sync has actually landed so it can ALSO revalidate cells (the mirrored
+  // source TEXT), not just staleness. Mints its own token via `getToken`
+  // rather than reusing whatever `doFetch` last saw, since this can be
+  // called independently of the read cycle.
+  const syncNow = useCallback(async (): Promise<void> => {
+    const pid = projectRef.current
+    const fid = fileRef.current
+    const getToken = tokenRef.current
+    if (!pid || !fid || !getToken) return
+    const jwt = await getToken(fid)
+    if (!jwt) return
+    await triggerLinkSync(pid, jwt)
+    void doFetch()
+  }, [doFetch])
+
+  return {
+    staleCellIds,
+    tombstonedCellIds,
+    upstreamStaleCellIds,
+    behindSeq,
+    ancestorBehind,
+    isLoading,
+    isError,
+    revalidate: doFetch,
+    syncNow,
+  }
 }

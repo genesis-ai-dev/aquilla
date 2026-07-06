@@ -42,6 +42,7 @@ import { handleRebuildProjectionRequest } from "./events/rebuild"
 import { handleRebuildFtsRequest } from "./events/rebuild-fts"
 import { handleSearchReadRequest, handleSearchPassagesRequest } from "./events/search-route"
 import { handleStaleSourceRequest } from "./events/stale-source-route"
+import { handleLinkSyncRequest } from "./events/link-sync-route"
 import { handleValidatorsReadRequest } from "./events/validators-read-route"
 import { handleBranchingSearchRequest } from "./events/branching-search-route"
 import { handleBranchingSearchPassagesRequest } from "./events/branching-search-passages-route"
@@ -230,6 +231,8 @@ export default {
     if (cellHistoryResponse) return withCors(cellHistoryResponse, request)
     const staleSourceResponse = await handleStaleSourceRequest(request, env)
     if (staleSourceResponse) return withCors(staleSourceResponse, request)
+    const linkSyncResponse = await handleLinkSyncRequest(request, env)
+    if (linkSyncResponse) return withCors(linkSyncResponse, request)
     const commentsReadResponse = await handleCommentsReadRequest(request, env)
     if (commentsReadResponse) return withCors(commentsReadResponse, request)
     const btReadResponse = await handleCellBacktranslationsReadRequest(request, env)

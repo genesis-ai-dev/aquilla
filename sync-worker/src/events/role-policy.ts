@@ -109,6 +109,15 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // Timeline editor: linking a core video to a file — contributor-level, like
   // file.rename (normal editing flow, not a structural change to the inventory).
   'file.video.set': ROLE.CONTRIBUTOR,
+
+  // FRO-476: mirror-engine kinds are server-emitted only (link-sync.ts calls
+  // buildEventProjectionStmts directly in-process — never through the client
+  // POST /events → authorize() path, so this floor is never actually checked
+  // against a caller). Set to MAINTAINER as the nominal "no client may emit
+  // this" floor, matching project.link-source's own-authority precedent.
+  'source.cell.mirror': ROLE.MAINTAINER,
+  'file.mirror': ROLE.MAINTAINER,
+  'link.cursor.advance': ROLE.MAINTAINER,
 }
 
 export function requiredRoleFor(kind: EventKind): number {

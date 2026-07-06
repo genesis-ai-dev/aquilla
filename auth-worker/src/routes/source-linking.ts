@@ -29,14 +29,23 @@ import {
   listDownstreamProjects,
   loadProjectWithSource,
   snapshotSourceCells,
+  triggerLinkSeedSync,
 } from "../services/source-linking"
 
 const sourceLinking = new Hono<AuthHonoEnv>()
 
 const LINK_MIN_ROLE = ROLE.PROJECT_LEAD // 500
 
+// FRO-476: mode/consumes/gate are optional so existing callers (pre-FRO-476
+// clients) keep working — defaulting to 'clone' preserves today's behavior
+// (no mirror sync runs) rather than silently opting an old client into live
+// mirroring. `consumes`/`gate` default per the design spec §2 ('source' /
+// 'validated').
 const linkSourceSchema = z.object({
   sourceProjectId: z.string().min(1).max(256),
+  mode: z.enum(["clone", "live"]).optional(),
+  consumes: z.enum(["source", "target"]).optional(),
+  gate: z.enum(["head", "validated"]).optional(),
 })
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -50,7 +59,12 @@ sourceLinking.post(
   async (c) => {
     const user = c.get("user")
     const projectId = c.req.param("projectId") as string
-    const { sourceProjectId } = c.req.valid("json")
+    const {
+      sourceProjectId,
+      mode = "clone",
+      consumes = "source",
+      gate = "validated",
+    } = c.req.valid("json")
 
     if (sourceProjectId === projectId) {
       return c.json({ error: "a project cannot link to itself" }, 400)
@@ -88,13 +102,21 @@ sourceLinking.post(
     }
 
     try {
+      // FRO-476: persist link metadata alongside source_project_id. Cursor
+      // resets to 0 on (re)link so a fresh live link always seeds from
+      // scratch via the mirror sync (§5 — "seeding IS the first mirror
+      // sync"), regardless of any prior link's cursor position.
       await c.env.AQUILLA_PG.prepare(
         `UPDATE projects
-            SET source_project_id = ?,
-                updated_at        = CURRENT_TIMESTAMP
+            SET source_project_id    = ?,
+                source_link_mode     = ?,
+                source_link_consumes = ?,
+                source_link_gate     = ?,
+                source_link_cursor   = 0,
+                updated_at           = CURRENT_TIMESTAMP
           WHERE id = ?`,
       )
-        .bind(sourceProjectId, projectId)
+        .bind(sourceProjectId, mode, consumes, gate, projectId)
         .run()
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -109,9 +131,24 @@ sourceLinking.post(
       sourceProjectId,
     })
 
+    // FRO-476: seeding IS the first mirror sync (design spec §5) — only for
+    // live links. Clone links stay on the existing snapshot-at-detach path
+    // (this route never snapshots; clone-mode linking without an immediate
+    // detach is a link with no propagation, matching "one-time snapshot at
+    // creation" only once FRO-478's create-from-template flow calls detach
+    // right after linking, or a future slice adds an explicit "snapshot now"
+    // action — out of scope here). Best-effort; the lazy-pull trigger on
+    // next file-open self-heals if this fails.
+    if (mode === "live") {
+      await triggerLinkSeedSync(c.env, projectId)
+    }
+
     return c.json({
       projectId,
       sourceProjectId,
+      mode,
+      consumes,
+      gate,
       previousSourceProjectId: project.source_project_id,
     })
   },
@@ -149,10 +186,17 @@ sourceLinking.post("/:projectId/detach-source", authMiddleware, async (c) => {
   const upstreamId = project.source_project_id
 
   try {
+    // FRO-476: clear link metadata too — detach makes the project fully
+    // self-contained (mode/consumes/gate no longer apply; cursor resets so
+    // a future re-link starts clean).
     await c.env.AQUILLA_PG.prepare(
       `UPDATE projects
-          SET source_project_id = NULL,
-              updated_at        = CURRENT_TIMESTAMP
+          SET source_project_id    = NULL,
+              source_link_mode     = NULL,
+              source_link_consumes = NULL,
+              source_link_gate     = NULL,
+              source_link_cursor   = 0,
+              updated_at           = CURRENT_TIMESTAMP
         WHERE id = ?`,
     )
       .bind(projectId)

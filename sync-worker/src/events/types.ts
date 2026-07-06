@@ -83,6 +83,21 @@ export type EventKind =
   // Timeline editor: set/clear a file's core video URL (timeline preview master
   // clock), stored in files.meta JSON. Non-chain-mutating; file-level.
   | 'file.video.set'
+  // FRO-476: live source links — mirror engine. Server-emitted only (the
+  // mirror sync engine in link-sync.ts; never a client outbox kind). Mirror
+  // events replicate an ordering the UPSTREAM already arbitrated, so they
+  // carry parentId: null and are EXEMPT from CHAIN_MUTATING_KINDS / the
+  // chain-claims gate (see event-projection.ts) — applied instead behind a
+  // monotonic `payload.upstream.seq > cells.upstream_seq` guard in the
+  // projection SQL itself. See the linked-projects design spec §4.
+  | 'source.cell.mirror'
+  // Downstream `files` row for an upstream file created post-seed. Same
+  // server-only, non-chain-mutating status as source.cell.mirror.
+  | 'file.mirror'
+  // Audit-trail record of a non-empty mirror batch (an empty fold advances
+  // `projects.source_link_cursor` directly with no event). No cells
+  // projection — purely a history record for the review panel (FRO-478).
+  | 'link.cursor.advance'
 
 // ── Comment scope ─────────────────────────────────────────────────────────
 
@@ -378,6 +393,61 @@ export interface EventPayloads {
   // in files.meta JSON; null clears it. File-level.
   'file.video.set': {
     coreMediaUrl: string | null
+  }
+
+  // ── FRO-476: live source links — mirror engine (server-emitted) ────────
+  // Advances a downstream source cell to match the upstream. Full
+  // create-grade shape (structural fields for a cell with no local row yet)
+  // PLUS the fields source.cell.commit carries (value/valueHtml) — a mirror
+  // can hit either a brand-new cell (post-seed upstream create) or an
+  // existing one (upstream commit), so the projection is a full UPSERT.
+  'source.cell.mirror': {
+    value: string
+    valueHtml?: string
+    type?: string
+    canonicalRef?: string
+    anchorCellId?: string | null
+    startMs?: number
+    endMs?: number
+    sequenceIndex?: number
+    transcription?: string
+    cameraState?: string
+    medium?: string
+    metadata?: Record<string, unknown>
+    /** True = the upstream deleted this cell. Tombstone (stamp
+     *  cells.tombstoned_at), never delete the downstream row. */
+    deleted?: true
+    /** Provenance: which upstream event/state this mirror reflects. */
+    upstream: {
+      projectId: string
+      cellId: string
+      eventId: string
+      /** The upstream event's server_seq — the monotonic apply-guard key. */
+      seq: number
+      side: 'source' | 'target'
+      contentHash: string
+    }
+  }
+  // Downstream `files` row for an upstream file created post-seed.
+  'file.mirror': {
+    fileId: string
+    name: string
+    /** Passed through to files.meta (JSON) — same shape as file.create's
+     *  language/orderedBy fields, merged rather than replacing wholesale. */
+    meta?: Record<string, unknown>
+    upstream: {
+      projectId: string
+      eventId: string
+      seq: number
+    }
+  }
+  // Audit-trail record of one non-empty mirror sync batch. No cells
+  // projection; purely a history row for the review panel (FRO-478).
+  'link.cursor.advance': {
+    upstreamProjectId: string
+    fromSeq: number
+    toSeq: number
+    cellCount: number
   }
 }
 

@@ -218,6 +218,44 @@ async function prefetchSourceEventIds(
 }
 
 /**
+ * FRO-476 live-mode lock: which of `cells` are mirrored source rows
+ * (`upstream_event_id IS NOT NULL`) in a project whose link is `live` —
+ * these are read-only locally (edits belong upstream); `source.cell.commit`
+ * on them is rejected below. Downstream-added cells (no upstream_event_id)
+ * stay editable. One batched SELECT per request, joined to `projects` so a
+ * clone-mode or unlinked project's cells are never locked even if they
+ * happen to carry a stale upstream_event_id from a prior live link.
+ */
+async function prefetchLiveMirrorLocks(
+  db: AquillaDb,
+  cells: readonly CellKey[],
+): Promise<Set<string>> {
+  const locked = new Set<string>()
+  if (cells.length === 0) return locked
+
+  const placeholders = cells.map(() => '(?, ?, ?)').join(', ')
+  const binds: unknown[] = []
+  for (const c of cells) binds.push(c.projectId, c.fileId, c.cellId)
+
+  const { results } = await db
+    .prepare(
+      `SELECT c.project_id, c.file_id, c.cell_id FROM cells c
+       JOIN projects p ON p.id = c.project_id
+       WHERE c.side = 'source'
+         AND c.upstream_event_id IS NOT NULL
+         AND p.source_link_mode = 'live'
+         AND (c.project_id, c.file_id, c.cell_id) IN (${placeholders})`,
+    )
+    .bind(...binds)
+    .all<{ project_id: string; file_id: string; cell_id: string }>()
+
+  for (const r of results) {
+    locked.add(cellKeyOf(r.project_id, r.file_id, r.cell_id))
+  }
+  return locked
+}
+
+/**
  * POST /events
  *
  * Body: { events: RawEvent[] }
@@ -341,6 +379,7 @@ export async function handleEventsWriteRequest(
   const candidateIds = new Set<string>()
   const chainCells = new Map<string, CellKey>()
   const sourcePinCells = new Map<string, CellKey>()
+  const sourceCommitCells = new Map<string, CellKey>()
   for (const e of rawEvents) {
     if (typeof e.id === 'string') candidateIds.add(e.id)
     if (
@@ -360,11 +399,18 @@ export async function handleEventsWriteRequest(
         sourcePinCells.set(key, { projectId: e.projectId, fileId: e.fileId, cellId: e.cellId })
       }
     }
+    // FRO-476: local source.cell.commit is the kind the live-mode lock
+    // rejects (see prefetchLiveMirrorLocks). source.cell.mirror is exempt —
+    // it's how the lock's own content gets updated.
+    if (e.kind === 'source.cell.commit') {
+      sourceCommitCells.set(key, { projectId: e.projectId, fileId: e.fileId, cellId: e.cellId })
+    }
   }
-  const [existingIds, chainWinners, sourceEventIds] = await Promise.all([
+  const [existingIds, chainWinners, sourceEventIds, liveMirrorLocks] = await Promise.all([
     readExistingEventIds(db, candidateIds),
     prefetchChainWinners(db, [...chainCells.values()]),
     prefetchSourceEventIds(db, [...sourcePinCells.values()]),
+    prefetchLiveMirrorLocks(db, [...sourceCommitCells.values()]),
   ])
 
   // PERF-2: project_settings is read at most once per (request, project).
@@ -403,6 +449,24 @@ export async function handleEventsWriteRequest(
         id: rawEvent.id ?? '(unknown)',
         status: authResult.status,
         reason: authResult.reason,
+      })
+      continue
+    }
+
+    // FRO-476 live-mode lock: reject local source.cell.commit on cells the
+    // mirror sync owns (live link + upstream_event_id set). Downstream-added
+    // cells (no upstream_event_id) and clone-mode/unlinked projects are
+    // unaffected — see prefetchLiveMirrorLocks.
+    if (
+      rawEvent.kind === 'source.cell.commit' &&
+      rawEvent.fileId &&
+      rawEvent.cellId &&
+      liveMirrorLocks.has(cellKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId))
+    ) {
+      rejected.push({
+        id: rawEvent.id ?? '(unknown)',
+        status: 409,
+        reason: 'cell is mirrored from a live-linked upstream source; edits must be made upstream',
       })
       continue
     }

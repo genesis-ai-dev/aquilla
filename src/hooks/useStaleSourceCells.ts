@@ -1,6 +1,10 @@
 // Phase 5 / AD-9. Fetches the set of cell ids whose source has advanced
 // since the translator's last commit (the AD-9 pointer-comparison query
-// run server-side).
+// run server-side). Extended FRO-476 §6/§7: also surfaces tombstoned cell
+// ids + the link-level `behindSeq` probe, and fires the mirror sync
+// lazy-pull trigger (POST /link/sync, fire-and-forget) alongside the
+// stale-source fetch — the cheap place to catch a dormant live-linked
+// project up when its file is opened.
 //
 // Returns a Set for O(1) membership; consumers (`StaleSourceIndicator`,
 // future cell-row integration) call `.has(cellId)` per cell.
@@ -13,9 +17,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
-  fetchStaleSourceCells,
+  fetchStaleSourceResponse,
   StaleSourceError,
 } from "@/lib/sync/stale-source-read"
+import type { BehindSeq } from "@/lib/sync/stale-source-read-types"
+import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
 
 const EMPTY: ReadonlySet<string> = new Set()
 
@@ -32,10 +38,31 @@ export interface UseStaleSourceCellsOptions {
 export interface UseStaleSourceCellsResult {
   /** Membership set of cell ids whose source has advanced since commit. */
   staleCellIds: ReadonlySet<string>
+  /** FRO-476: membership set of cell ids whose upstream source was deleted. */
+  tombstonedCellIds: ReadonlySet<string>
+  /** FRO-476: link-level "you have unmirrored upstream changes" probe. */
+  behindSeq: BehindSeq | null
   isLoading: boolean
   isError: boolean
   /** Manual refetch — call after target commits or known upstream edits. */
   revalidate: () => void
+}
+
+// SWARM-TODO(FRO-476): verify the lazy-pull trigger end to end — create
+// project A (import a small USFM), create project B linked live to A via
+// POST /api/v2/projects/:B/link-source { sourceProjectId: A, mode: 'live' },
+// open a file in B in the app (or call useStaleSourceCells directly) and
+// confirm (via network tab / a DB read) that
+// POST /api/v1/projects/:B/link/sync fires and B's source cells populate.
+
+/** Fire-and-forget mirror sync trigger — never blocks the stale-source
+ *  fetch, never surfaces an error to the UI (self-healing: the next file
+ *  open or the cursor probe on any read catches anything missed). */
+function triggerLinkSync(projectId: string, jwt: string): void {
+  const url = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/link/sync`
+  void fetch(url, { method: "POST", headers: { Authorization: `Bearer ${jwt}` } }).catch(() => {
+    /* best-effort; the next lazy-pull trigger or manual sync catches it */
+  })
 }
 
 export function useStaleSourceCells(
@@ -44,6 +71,9 @@ export function useStaleSourceCells(
   const { projectId, fileId, getToken, enabled = true } = opts
   const [staleCellIds, setStaleCellIds] =
     useState<ReadonlySet<string>>(EMPTY)
+  const [tombstonedCellIds, setTombstonedCellIds] =
+    useState<ReadonlySet<string>>(EMPTY)
+  const [behindSeq, setBehindSeq] = useState<BehindSeq | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isError, setIsError] = useState(false)
   const generationRef = useRef(0)
@@ -65,6 +95,8 @@ export function useStaleSourceCells(
     const getToken = tokenRef.current
     if (!enabled || !pid || !fid) {
       setStaleCellIds(EMPTY)
+      setTombstonedCellIds(EMPTY)
+      setBehindSeq(null)
       setIsLoading(false)
       setIsError(false)
       return
@@ -82,6 +114,8 @@ export function useStaleSourceCells(
         const attempt = ++tokenAttemptsRef.current
         if (attempt >= 6) {
           setStaleCellIds(EMPTY)
+          setTombstonedCellIds(EMPTY)
+          setBehindSeq(null)
           setIsLoading(false)
           setIsError(false)
           return
@@ -95,9 +129,14 @@ export function useStaleSourceCells(
         return
       }
       tokenAttemptsRef.current = 0
-      const ids = await fetchStaleSourceCells(pid, fid, jwt)
+      // FRO-476 §7: lazy-pull trigger, fire-and-forget, alongside the
+      // stale-source fetch (not awaited — never delays the read).
+      triggerLinkSync(pid, jwt)
+      const body = await fetchStaleSourceResponse(pid, fid, jwt)
       if (generationRef.current !== gen) return
-      setStaleCellIds(new Set(ids))
+      setStaleCellIds(new Set(body.staleCellIds ?? []))
+      setTombstonedCellIds(new Set(body.tombstonedCellIds ?? []))
+      setBehindSeq(body.behindSeq ?? null)
       setIsLoading(false)
     } catch (err) {
       if (generationRef.current !== gen) return
@@ -109,6 +148,8 @@ export function useStaleSourceCells(
         console.warn("[useStaleSourceCells] fetch failed:", err)
       }
       setStaleCellIds(EMPTY)
+      setTombstonedCellIds(EMPTY)
+      setBehindSeq(null)
       setIsError(true)
       setIsLoading(false)
     }
@@ -149,5 +190,5 @@ export function useStaleSourceCells(
     }
   }, [doFetch])
 
-  return { staleCellIds, isLoading, isError, revalidate: doFetch }
+  return { staleCellIds, tombstonedCellIds, behindSeq, isLoading, isError, revalidate: doFetch }
 }

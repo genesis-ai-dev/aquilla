@@ -685,6 +685,11 @@ describe('isChainMutatingKind', () => {
     'cast.assign': false,
     'cell.retime': false,
     'file.video.set': false,
+    // FRO-476: mirror events replicate an ordering the upstream already
+    // arbitrated — see CHAIN_MUTATING_KINDS's doc comment.
+    'source.cell.mirror': false,
+    'file.mirror': false,
+    'link.cursor.advance': false,
   }
 
   it('classifies every EventKind exactly as the old route deny-list did', () => {

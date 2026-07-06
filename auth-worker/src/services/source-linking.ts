@@ -20,11 +20,57 @@
 // worker consumes `project.link-source`, `source.cell.create`, and
 // `source.cell.commit` events to keep projections aligned.
 
+import { sign } from "hono/jwt"
 import type { Env } from "../types"
 
 /** Server-generated event id for identity-side maintenance events. */
 export function makeEventId(): string {
   return crypto.randomUUID()
+}
+
+/**
+ * FRO-476: mint a short-lived service sync-token and POST
+ * /api/v1/projects/:projectId/link/sync on the downstream project — this
+ * is "seeding is the first mirror sync" (design spec §5): linking a project
+ * with mode='live' runs the same engine a lazy file-open would, so files +
+ * cells arrive as `file.mirror`/`source.cell.mirror` events with provenance
+ * set from birth (never a direct `snapshotSourceCells`-style projection
+ * write, which would leave `upstream_event_id` NULL).
+ *
+ * Best-effort: link/detach success is recorded in `projects.source_project_id`
+ * etc. regardless of whether this trigger lands — the lazy-pull trigger on
+ * next file-open (useStaleSourceCells) is the self-healing floor per §5.
+ */
+export async function triggerLinkSeedSync(
+  env: Env,
+  downstreamProjectId: string,
+): Promise<void> {
+  if (!env.SYNC_WORKER_URL || !env.SYNC_SECRET_KEY) return
+  try {
+    const now = Math.floor(Date.now() / 1000)
+    const token = await sign(
+      {
+        userId: 0,
+        username: "link-sync-seed",
+        projectId: downstreamProjectId,
+        // Not checked by verifyTokenForProject (project-scoped, not
+        // file-scoped) — placeholder to satisfy the SyncTokenClaims shape.
+        fileId: "__link_seed__",
+        role: 500,
+        aud: "sync",
+        iat: now,
+        exp: now + 300,
+      },
+      env.SYNC_SECRET_KEY,
+      "HS256",
+    )
+    await fetch(
+      `${env.SYNC_WORKER_URL.replace(/\/$/, "")}/api/v1/projects/${encodeURIComponent(downstreamProjectId)}/link/sync`,
+      { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+    )
+  } catch (err) {
+    console.warn(`triggerLinkSeedSync failed for ${downstreamProjectId}:`, err)
+  }
 }
 
 async function nextServerSeq(env: Env, projectId: string): Promise<number> {
@@ -55,6 +101,11 @@ export interface SourceLinkProject {
   source_project_id: string | null
   archived_at: string | null
 }
+
+/** FRO-476: link mode/consumes/gate — see the linked-projects design spec §2. */
+export type SourceLinkMode = "clone" | "live"
+export type SourceLinkConsumes = "source" | "target"
+export type SourceLinkGate = "head" | "validated"
 
 /**
  * Load a project including its `source_project_id`. Returns null if the

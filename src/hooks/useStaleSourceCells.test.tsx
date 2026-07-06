@@ -1,11 +1,24 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, waitFor, act } from "@testing-library/react"
+import type { StaleSourceResponse } from "@/lib/sync/stale-source-read-types"
+
+function makeResponse(staleCellIds: string[], extra: Partial<StaleSourceResponse> = {}): StaleSourceResponse {
+  return {
+    projectId: "p1",
+    fileId: "f1",
+    staleCellIds,
+    tombstonedCellIds: [],
+    upstreamProjectId: null,
+    behindSeq: null,
+    ...extra,
+  }
+}
 
 const fetchMock =
-  vi.fn<(projectId: string, fileId: string, jwt: string) => Promise<string[]>>()
+  vi.fn<(projectId: string, fileId: string, jwt: string) => Promise<StaleSourceResponse>>()
 
 vi.mock("@/lib/sync/stale-source-read", () => ({
-  fetchStaleSourceCells: (...args: unknown[]) =>
+  fetchStaleSourceResponse: (...args: unknown[]) =>
     fetchMock(...(args as Parameters<typeof fetchMock>)),
   StaleSourceError: class StaleSourceError extends Error {
     status: number
@@ -25,11 +38,15 @@ const getToken = async () => "jwt"
 
 beforeEach(() => {
   fetchMock.mockReset()
+  // FRO-476: the hook fires a fire-and-forget lazy-pull trigger
+  // (POST .../link/sync) alongside the stale-source fetch — stub the global
+  // fetch so that call resolves quietly instead of hitting the network.
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }))
 })
 
 describe("useStaleSourceCells", () => {
   it("returns the set of stale cell ids on success", async () => {
-    fetchMock.mockResolvedValueOnce(["c1", "c3", "c7"])
+    fetchMock.mockResolvedValueOnce(makeResponse(["c1", "c3", "c7"]))
     const { result } = renderHook(() =>
       useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken }),
     )
@@ -59,15 +76,37 @@ describe("useStaleSourceCells", () => {
   })
 
   it("revalidate() refetches with the latest data", async () => {
-    fetchMock.mockResolvedValueOnce(["c1"])
+    fetchMock.mockResolvedValueOnce(makeResponse(["c1"]))
     const { result } = renderHook(() =>
       useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken }),
     )
     await waitFor(() => expect(result.current.staleCellIds.has("c1")).toBe(true))
-    fetchMock.mockResolvedValueOnce([])
+    fetchMock.mockResolvedValueOnce(makeResponse([]))
     act(() => { result.current.revalidate() })
     await waitFor(() => expect(result.current.staleCellIds.size).toBe(0))
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("surfaces tombstonedCellIds and behindSeq from the response (FRO-476)", async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeResponse(["c1"], { tombstonedCellIds: ["c9"], behindSeq: { upstream: 10, cursor: 5 } }),
+    )
+    const { result } = renderHook(() =>
+      useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken }),
+    )
+    await waitFor(() => expect(result.current.tombstonedCellIds.has("c9")).toBe(true))
+    expect(result.current.behindSeq).toEqual({ upstream: 10, cursor: 5 })
+  })
+
+  it("fires the mirror-sync lazy-pull trigger alongside the stale-source fetch (FRO-476 §7)", async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse([]))
+    renderHook(() => useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    const triggerCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c) => String(c[0]).includes("/link/sync"),
+    )
+    expect(triggerCall).toBeTruthy()
+    expect((triggerCall![1] as RequestInit).method).toBe("POST")
   })
 
   it("retries on null token without surfacing isError, then falls back quietly", async () => {

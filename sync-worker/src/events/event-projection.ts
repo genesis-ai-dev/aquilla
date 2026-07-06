@@ -1234,6 +1234,196 @@ case 'cell.audio.attach': {
       return ['files']
     }
 
+    case 'source.cell.mirror': {
+      // FRO-476: advance a downstream source cell to match the upstream.
+      // UPSERT (the target.cell.commit INSERT…ON CONFLICT shape), NOT the
+      // UPDATE-only source.cell.commit shape — mirrors routinely hit cells
+      // with no local row yet (new upstream cells post-seed, first-ever
+      // translations in target-consumption mode). Applied only when
+      // payload.upstream.seq > cells.upstream_seq (monotonic, order-
+      // insensitive, replay-safe) — this IS the arbitration; mirror events
+      // are exempt from CHAIN_MUTATING_KINDS/chain-claims (see the const
+      // below and its doc comment).
+      const p = event.payload as EventPayloads['source.cell.mirror']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`source.cell.mirror event ${event.id} is missing fileId or cellId`)
+      }
+      const upstreamSeq = p.upstream.seq
+      // The monotonic guard on INSERT…ON CONFLICT: Postgres always executes
+      // the INSERT's SELECT source first, so a WHERE clause on the source
+      // rows only gates whether a NEW row would be created; it does nothing
+      // against an EXISTING row on conflict. We gate the UPSERT the same way
+      // buildBulkSourceCellCreateStmt/create-case do it for chain claims:
+      // append the guard as an EXISTS-style condition folded into the ON
+      // CONFLICT's DO UPDATE ... WHERE clause (Postgres supports a WHERE on
+      // the DO UPDATE action), so a stale/out-of-order mirror silently no-ops
+      // against a row that's already ahead.
+      if (p.deleted) {
+        // Tombstone: never delete the row (so it stays visible + joinable
+        // for the orphaned-target case) — stamp tombstoned_at instead.
+        // Still monotonic-guarded: an older delete arriving after a newer
+        // mirror already advanced the row must not stomp it.
+        stmts.push(
+          db
+            .prepare(
+              `INSERT INTO cells (
+                project_id, file_id, cell_id, side, value, value_html, type,
+                canonical_ref, anchor_cell_id, event_id, source_event_id,
+                last_editor, last_edit_at, validated, word_count, content_hash,
+                upstream_event_id, upstream_seq, tombstoned_at
+              ) VALUES (?, ?, ?, 'source', ?, NULL, NULL, NULL, NULL, ?, NULL, ?, ?, 0, 0, ?, ?, ?, ?)
+              ON CONFLICT (project_id, file_id, cell_id, side) DO UPDATE SET
+                event_id          = excluded.event_id,
+                last_editor       = excluded.last_editor,
+                last_edit_at      = excluded.last_edit_at,
+                upstream_event_id = excluded.upstream_event_id,
+                upstream_seq      = excluded.upstream_seq,
+                tombstoned_at     = excluded.tombstoned_at
+              WHERE cells.upstream_seq IS NULL OR cells.upstream_seq < excluded.upstream_seq`,
+            )
+            .bind(
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              '', // tombstoned rows carry no live text; value stays as last-known on conflict (not overwritten — see WHERE)
+              event.id,
+              event.author,
+              event.serverTs,
+              contentHash(''),
+              p.upstream.eventId,
+              upstreamSeq,
+              event.serverTs,
+            ),
+        )
+        return ['cells']
+      }
+
+      const value = p.value ?? ''
+      const valueHtml = p.valueHtml ?? null
+      const hash = contentHash(value)
+      const wordCount = countWords(value)
+      stmts.push(
+        db
+          .prepare(
+            `INSERT INTO cells (
+              project_id, file_id, cell_id, side, value, value_html, type,
+              canonical_ref, anchor_cell_id, event_id, source_event_id,
+              last_editor, last_edit_at, validated, word_count, content_hash,
+              start_ms, end_ms, medium, sequence_index, transcription, camera_state, metadata,
+              upstream_event_id, upstream_seq, tombstoned_at
+            ) VALUES (
+              ?, ?, ?, 'source', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?,
+              ?, ?, ?, ?, ?, ?, ?,
+              ?, ?, NULL
+            )
+            ON CONFLICT (project_id, file_id, cell_id, side) DO UPDATE SET
+              value             = excluded.value,
+              value_html        = excluded.value_html,
+              type              = COALESCE(excluded.type, cells.type),
+              canonical_ref     = COALESCE(excluded.canonical_ref, cells.canonical_ref),
+              anchor_cell_id    = COALESCE(excluded.anchor_cell_id, cells.anchor_cell_id),
+              event_id          = excluded.event_id,
+              last_editor       = excluded.last_editor,
+              last_edit_at      = excluded.last_edit_at,
+              word_count        = excluded.word_count,
+              content_hash      = excluded.content_hash,
+              start_ms          = COALESCE(excluded.start_ms, cells.start_ms),
+              end_ms            = COALESCE(excluded.end_ms, cells.end_ms),
+              medium            = COALESCE(excluded.medium, cells.medium),
+              sequence_index    = COALESCE(excluded.sequence_index, cells.sequence_index),
+              transcription     = COALESCE(excluded.transcription, cells.transcription),
+              camera_state      = COALESCE(excluded.camera_state, cells.camera_state),
+              metadata          = COALESCE(excluded.metadata, cells.metadata),
+              upstream_event_id = excluded.upstream_event_id,
+              upstream_seq      = excluded.upstream_seq,
+              tombstoned_at     = NULL
+            WHERE cells.upstream_seq IS NULL OR cells.upstream_seq < excluded.upstream_seq`,
+          )
+          .bind(
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            value,
+            valueHtml,
+            p.type ?? null,
+            p.canonicalRef ?? null,
+            p.anchorCellId ?? null,
+            event.id,
+            event.author,
+            event.serverTs,
+            wordCount,
+            hash,
+            p.startMs ?? null,
+            p.endMs ?? null,
+            p.medium ?? null,
+            p.sequenceIndex ?? null,
+            p.transcription ?? null,
+            p.cameraState ?? null,
+            p.metadata != null ? JSON.stringify(p.metadata) : null,
+            p.upstream.eventId,
+            upstreamSeq,
+          ),
+      )
+      if (!opts?.deferFileCounters)
+        stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
+      return ['cells', 'files']
+    }
+
+    case 'file.mirror': {
+      // FRO-476: downstream `files` row for an upstream file created
+      // post-seed. Idempotent upsert — no per-cell fold can conjure the file
+      // row, so the mirror sync emits this explicitly for any new upstream
+      // file id it hasn't seen. Not chain-mutating; no monotonic guard needed
+      // (file rows have no competing writers other than the mirror itself
+      // and the owning downstream's own file.rename/file.video.set, which
+      // this does not touch).
+      const p = event.payload as EventPayloads['file.mirror']
+      if (!event.fileId) {
+        throw new Error(`file.mirror event ${event.id} is missing fileId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `INSERT INTO files (
+              id, project_id, name,
+              role, kind, book_code, source_file_id, anchor_file_id,
+              event_id,
+              cell_count, approved_count, word_count, last_edit_at,
+              created_by, created_at, updated_at,
+              meta
+            ) VALUES (
+              ?, ?, ?,
+              NULL, NULL, NULL, NULL, NULL,
+              ?,
+              0, 0, 0, NULL,
+              ?, (extract(epoch from now()) * 1000)::bigint, (extract(epoch from now()) * 1000)::bigint,
+              ?
+            )
+            ON CONFLICT (id) DO UPDATE SET
+              name = excluded.name,
+              event_id = excluded.event_id,
+              updated_at = (extract(epoch from now()) * 1000)::bigint`,
+          )
+          .bind(
+            event.fileId,
+            event.projectId,
+            p.name,
+            event.id,
+            event.author,
+            JSON.stringify(p.meta ?? {}),
+          ),
+      )
+      return ['files']
+    }
+
+    case 'link.cursor.advance': {
+      // FRO-476: pure audit-trail record — no cells/files projection. The
+      // events row itself (already inserted by the caller) IS the record;
+      // this case exists only so the exhaustiveness check + dispatch table
+      // stay complete. Nothing to add to `stmts`.
+      return []
+    }
+
     default: {
       // Defensive exhaustiveness check. If a new EventKind is added without
       // a case here this triggers a TS compile error.
@@ -1284,6 +1474,14 @@ export function buildFileVideoSetStmt(
  * Set of event kinds that compete for the cell's chain head (advance
  * `cells.event_id`). Validation and file-level events don't move the
  * chain pointer, so they're excluded from the AD-2 guard.
+ *
+ * FRO-476: `source.cell.mirror` is deliberately NOT in this set. A mirror
+ * replicates an ordering the UPSTREAM already arbitrated — running it
+ * through the downstream's first-child claims would let an older sync's
+ * fold win the chain slot over a newer one's, stranding a cell on stale
+ * content behind an advanced cursor. Mirror events carry parentId: null
+ * and apply under their own monotonic `upstream_seq` guard instead (see
+ * the 'source.cell.mirror' case above).
  */
 export const CHAIN_MUTATING_KINDS = new Set<string>([
   'source.cell.create',

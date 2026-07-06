@@ -13,14 +13,17 @@ the figure is a walkthrough estimate and is labeled as such.
 
 ## 1. Executive summary
 
-**Are we a machine or a workshop?** We are a machine for *getting content in and out losslessly*, and a
-workshop for *keeping it flowing*. The importer problem — the thing that took months in the predecessor
-product — is measurably solved as a compounding asset: the most recent real-publisher format (UBS's
-62 MB SDBH lexicon XML, publisher #2) went from design spec to a working importer **with a
-byte-identity round-trip proof against all 17 real 60–73 MB editions in under two engineer-days**
-(spec: two commits, 2026-06-17 15:09–15:24; implementation: two commits, 2026-07-02 08:36–09:03). It was
-substantially agent-written, like 62% of this codebase (1,487 of 2,389 commits carry AI co-author
-trailers). Publisher #2's importer cost roughly **5% of publisher #1's**, not 80%.
+**Are we a machine or a workshop?** We are a machine for *getting content in and out losslessly* —
+for the format classes we have built — and a workshop for *keeping it flowing*. The importer cost
+curve inside this codebase is measurably compounding: the most recent real-publisher format (UBS's
+62 MB SDBH lexicon XML) went from design spec to a working importer **with a byte-identity round-trip
+proof against all 17 real 60–73 MB editions in under two engineer-days** (spec: two commits,
+2026-06-17 15:09–15:24; implementation: two commits, 2026-07-02 08:36–09:03). It was substantially
+agent-written, like 62% of this codebase (1,487 of 2,389 commits carry AI co-author trailers). One
+scoping caveat, stated up front: the format that took months in the predecessor product — **IDML
+(Adobe InDesign), the print-typesetting case** — has not been rebuilt here; this repo contains zero
+IDML code. §3 argues from the mechanism why it lands in the same 2–5-day class as SDBH, and §8 funds
+a timeboxed spike to prove it rather than assume it.
 
 **The honest finding is that the risk moved.** The repeating cost is no longer "write the importer" —
 it is that **every content update costs the same human clicks, forever**. Of the six links in the
@@ -50,7 +53,7 @@ translator/reviewer. **The Operational column is the churn-risk column.**
 |---|---|---|---|---|
 | 1 | Intake & format analysis | ENG | SDBH: ≤ 0.5 day. The design spec containing measured file facts (7,932 lemmas, 16,934 senses, 23,809 CON nodes) was committed the same afternoon it was written — two commits 15 min apart, 2026-06-17 (`docs/superpowers/specs/2026-06-17-sdbh-importer-design.md`) | Setup, per format |
 | 2 | Importer development | ENG (agent-written, engineer-verified) | SDBH: ~0.5–1 day — parser (387 loc) + lossless exporter + 281-loc test suite + round-trip script landed in two commits 27 min apart on 2026-07-02 (`src/lib/parsers/sdbh.ts`, `scripts/sdbh-roundtrip-check.ts`). Historic worst case in this repo: the USFM/Paratext cluster, 23 commits across 9 files (~2,100 loc + ~1,300 test loc) spread over Apr 13 – Jun 19 ≈ 6–8 active engineer-days | Setup, per format |
-| 3 | Legacy-system data migration | ENG | Come and See: migration tooling built Jun 1–3 (3 active days, `scripts/migrate-all.ts`, `migrate-users.ts`, `migrate-groups.ts`) + supervised runs. **This is pure services work** — GitLab-specific, per-publisher | Setup, per publisher |
+| 3 | Legacy-system data migration | ENG | Come and See is a **desktop-app→web migration**, not a format problem — their formats (subtitle import, per-character audio export) were already in-product. The migration tooling was built Jun 1–3 (3 active days, `scripts/migrate-all.ts`, `migrate-users.ts`, `migrate-groups.ts`) + supervised runs. **This is pure services work** — GitLab-specific, per-publisher | Setup, per publisher |
 | 4 | Org/teams/roles/invites | ADMIN | ~1–2 h in-product (walkthrough estimate; flows at `src/components/SharePanel.tsx`, `MembersPanel.tsx`; journey rows `e2e/JOURNEYS.md:14-22`) | Setup |
 | 5 | Project + AI provider + settings + rules/terminology/brief seeding | ADMIN | ~2–8 h (walkthrough estimate; `ProjectCreateDialog.tsx`, `AiSetupDialog.tsx`, `ProjectSettings/`, `RulesPage.tsx`, `TerminologyPage.tsx`, `BriefBuilder.tsx`) | Setup, grows over time |
 | 6 | Import per content drop | TRANS | 5–15 min per batch: format auto-detected (`detectFileType`, accept list of 30 extensions, `ImportDialog.tsx:1128`); human decides source-vs-target for Paratext, per-book include/exclude preview, collision skip/duplicate, spreadsheet column mapping | **Operational** |
@@ -70,12 +73,31 @@ of it re-runs when the publisher's source changes. That is the machine gap, and 
 
 ## 3. Importer Post-Mortem — the months, dissected
 
-**Where the "months" actually lived.** The months-long importer effort was in the predecessor product —
-the Codex VS Code desktop extension described in `docs/SPEC.md` (separate repository,
-`genesis-ai-dev/codex-editor`). Its commit history is not in this workspace, so the "months" figure is
-**UNVERIFIED here** and I will not lean on it. What is verifiable: this repo was started from scratch
-on 2026-04-13, and **no importer in it has ever taken more than ~8 active engineer-days** — because the
-knowledge from the desktop era arrived as design decisions, not as reusable code.
+**Where the "months" actually lived.** The months-long importer effort was the **IDML (Adobe
+InDesign) importer** in the predecessor product — the Codex VS Code desktop extension described in
+`docs/SPEC.md` (separate repository, `genesis-ai-dev/codex-editor`). Its commit history is not in this
+workspace, so the "months" figure is **UNVERIFIED here** and I will not lean on it. Two verifiable
+facts frame it instead:
+
+1. This repo was started from scratch on 2026-04-13, and **no importer in it has ever taken more than
+   ~8 active engineer-days** — the desktop-era knowledge arrived as design decisions, not reusable code.
+2. **Aquilla contains zero IDML code** — no parser, no doc, no test mentions IDML or InDesign
+   (repo-wide search, 2026-07-06). The months-problem has not been re-solved here; the format class is
+   absent. The cost-curve claim below is therefore scoped to the format classes actually built
+   (scripture/USFM, subtitles, Office, spreadsheets, CAT, lexicon XML), and the IDML class gets a
+   funded experiment in §8, not an extrapolation.
+
+**Why IDML is expected to land in the SDBH class, mechanically (hypothesis, not evidence).** IDML is a
+zip of XML files with stable story/paragraph structure — the same shape as the two hardest things
+already working: DOCX/PPTX (OOXML zip surgery with raw side-car retention, client-side JSZip
+injection, `src/lib/export/exporters/docx.ts`) and SDBH (keyed reinjection into a retained XML
+skeleton, byte-identity checked, `src/lib/parsers/sdbh.ts`). Typesetting intent — the thing that made
+IDML take months to *model* — is exactly what the side-car pattern refuses to model: the original IDML
+stays the canonical structure, translated text is re-injected into its text runs, and the publisher's
+own InDesign toolchain does the typesetting. The failure mode that consumed months in codex-editor
+(reconstructing InDesign semantics) is the approach this architecture was built to avoid. The §8 spike
+(2–5 days, real publisher IDML, byte-identity harness) is the test that turns this paragraph from
+hypothesis into a row in the cost table.
 
 ### Taxonomy of difficulty (from the importers actually built)
 
@@ -118,14 +140,20 @@ into the pipeline.
 
 ### The cost curve
 
-- **Publisher #1 (Come and See, subtitles/dubbing + the whole platform):** 12 weeks of repo history,
-  of which the import/export surface specifically is ~160 commits touching 43 of 84 calendar days.
-- **Publisher #2 (UBS/SDBH, a novel 62 MB proprietary format):** ≤ 2 engineer-days, measured by commit
-  timestamps (§2 rows 1–2), including the correctness proof.
+- **The platform + first format wave (serving Come and See's workflow):** 12 weeks of repo history, of
+  which the import/export surface specifically is ~160 commits touching 43 of 84 calendar days. Come
+  and See itself is a **desktop→web migration**, not a novel-format case — their operational formats
+  shipped in-product early (subtitle import with speaker→cast auto-mint, 2026-04-13 onward;
+  per-character audio-stem export, 2026-05-31, e2e-covered 2026-06-02). Their onboarding cost is §2
+  row 3 (migration scripts), not importer work.
+- **First post-platform novel format (UBS/SDBH, 62 MB proprietary XML):** ≤ 2 engineer-days, measured
+  by commit timestamps (§2 rows 1–2), including the correctness proof.
 
-Importer marginal cost: **~5%, not 80%.** The number that has *not* fallen is §2 row 3 (legacy-system
-migration — services work when a publisher arrives with a legacy system) and the operational rows,
-which don't fall with publisher count at all until §8 bet 1 is built.
+Importer marginal cost for a new format in a built class: **~5% of the first-wave cost, not 80%** —
+with the explicit boundary that the IDML/print class is unproven here (see above) until the §8 spike
+runs. The numbers that have *not* fallen: §2 row 3 (legacy-system migration — services work whenever a
+publisher arrives with an incumbent system) and the operational rows, which don't fall with publisher
+count at all until §8 bet 1 is built.
 
 ---
 
@@ -157,12 +185,14 @@ model the long tail) — but three consequences must be stated plainly:
 2. **A dropped field:** DOCX/PPTX `sourceLocation` (block path) is parsed but never stored — the
    projection binds every column except it (`event-projection.ts:139-181`) — forcing positional
    paragraph matching at export. Cheap to fix; a real leak today.
-3. **The structural limit:** side-car reinjection can only re-emit *the format that came in*. Rendering
-   a **new** output (print PDF, a different subtitle profile) from cells alone requires typesetting
-   semantics the cell model doesn't carry. Today that is moot for delivered outputs (USFM/DOCX/VTT/audio
-   stems all ship), but it caps "any format out" until either the cell model grows or a
-   typesetting-from-source path is built. This is finding #1 for the roadmap, not for today's
-   deliveries.
+3. **The structural limit — narrower than it first looks:** side-car reinjection can only re-emit
+   *the format that came in*. For print publishers this is not the blocker it appears to be, because
+   the format that comes in (IDML) **is** the print format: a translated IDML re-injected into the
+   publisher's own InDesign file is print-ready output in their existing toolchain — no PDF
+   typesetting engine on our side. The limit that remains real: producing an output with *no incoming
+   skeleton* (e.g. typeset print from a plain-text or USFM-only source) requires typesetting semantics
+   the cell model doesn't carry. Today that caps "any format out" only for cross-format rendering, not
+   for round-tripping a publisher's own files.
 
 ---
 
@@ -247,7 +277,7 @@ legacy system, and monthly content updates.
 |---|---|---|
 | Org/teams/projects/AI setup | Day 1, self-serve, ~half a day (ADMIN) | Same, ~half a day |
 | Supported-format content in | Day 1, minutes per batch, self-serve | Same |
-| Novel format importer | 1–3 engineer-days (OUR eng directs agent; SDBH precedent) + one clarifying exchange with the publisher | ≤1 day, publisher-facing harness: upload samples → agent-drafted importer → machine-generated fidelity report; our engineer approves the report, doesn't write code |
+| Novel format importer | 1–3 engineer-days for XML/zip-class formats (OUR eng directs agent; SDBH precedent) + one clarifying exchange with the publisher. IDML-class: unproven here — estimate holds only if the §8 spike confirms it | ≤1 day, publisher-facing harness: upload samples → agent-drafted importer → machine-generated fidelity report; our engineer approves the report, doesn't write code |
 | Legacy-system migration | 2–5 engineer-days of script adaptation (OURS) — the one genuinely services-shaped step | Unchanged by these bets (declines only as fewer publishers arrive with legacy systems; explicitly not solved here) |
 | First full translation pass | Attended browser sessions, ~0.5–2 h per 1,000 cells + review hours | Unattended overnight run; humans spend hours only in review |
 | **Each monthly content update** | **Human re-runs everything: import (15 min) + translate (attended hours) + review + re-export per file + manual delivery** | **Zero-touch to review-ready: delta ingest → stale cells re-drafted → review queue populated → outputs re-rendered on sign-off. Human time = review of changed cells only** |
@@ -273,28 +303,35 @@ pushes a changed source file; a re-drafted, audit-trailed, review-gated output a
 zero human initiation. Touches per content update: 7 → 1. **Cost-curve effect:** flattens the
 *per-update* cost that publisher count multiplies; this is the churn-column killer.
 
-**Bet 2 — Publisher-facing format-onboarding harness. 3 engineer-weeks.** Wrap the proven loop (sample
-files → agent-drafted parser targeting `TranslatableString` + side-car → import→export→diff →
-machine-generated fidelity report) behind the existing import wizard, with our engineer approving the
-report rather than authoring code. **Eliminates:** §2 rows 1–2 from our payroll. **Success criterion:**
-a novel real-publisher format goes sample-to-verified-importer in ≤1 day with 0 engineer hours writing
-parser code; fidelity report auto-published. **Cost-curve effect:** importer marginal cost ~5% → ~1%,
-and moves it off our critical path entirely.
+**Bet 2 — Publisher-facing format-onboarding harness, opened with the IDML spike. 3 engineer-weeks,
+of which week 0 is the spike.** First, the timeboxed IDML spike (2–5 days): point the agent at a real
+publisher IDML with the side-car + keyed-reinjection pattern; success = byte-identity round-trip on
+the untranslated file, and a translated-text reinjection that opens clean in InDesign. This retires
+the report's single biggest unknown — whether the months-in-codex-editor format lands in the SDBH cost
+class — before the harness is generalized. Then wrap the proven loop (sample files → agent-drafted
+parser targeting `TranslatableString` + side-car → import→export→diff → machine-generated fidelity
+report) behind the existing import wizard, with our engineer approving the report rather than
+authoring code. **Eliminates:** §2 rows 1–2 from our payroll, and converts §3's IDML hypothesis into a
+measured number. **Success criterion:** IDML spike green, then a novel real-publisher format goes
+sample-to-verified-importer in ≤1 day with 0 engineer hours writing parser code; fidelity report
+auto-published. **Cost-curve effect:** importer marginal cost ~5% → ~1%, extended to the print class,
+and moved off our critical path entirely.
 
 **Bet 3 — Unattended translation runs. 2 engineer-weeks.** Port the sequential batch loop out of the
 browser tab into a worker-side job (prerequisite pieces from bet 1's queue). **Eliminates:** attended
 hours in §2 row 7. **Success criterion:** a 10,000-cell project drafts overnight with the laptop
 closed; per-1,000-cell attended time 0.5–2 h → 0.
 
-**Not yet:** print/PDF typesetting (finding §4.3 — real, but no current delivery depends on it; build
-it when a publisher's contract does, and decide *then* between enriching the cell model vs. a
-typesetting-from-side-car path); CRDT/collaborative merge (the parent-chain rule is holding at current
+**Not yet:** a typesetting/PDF engine of our own (finding §4.3 — for print publishers the deliverable
+is their own IDML round-tripped, which bet 2 covers; cross-format typesetting from skeleton-less
+sources waits until a contract demands it); CRDT/collaborative merge (the parent-chain rule is holding at current
 concurrency); further white-label brands (each is ~a day when sales needs one); finishing the Postgres
 port beyond the shim (D1 is not the bottleneck in any table above).
 
 **Final honesty check against the loss function:** (1) Effort lives in §2, hours attached, churn column
-flagged. (2) The importer is a compounding asset — measured at ~5% marginal cost, with the compounding
-mechanisms cited — but the *operational loop* is a repeating cost today, said plainly. (3) The
-mechanism is §5/§6: agents already write importers under a byte-identity harness; the continuous loop
-is wiring, not research. (4) The fund is bets 1–3: 10 engineer-weeks total; onboarding 3–8 engineer-days
-→ ~0–1; per-update human touches 7 → 1.
+flagged. (2) The importer is a compounding asset *within the format classes built here* — measured at
+~5% marginal cost, mechanisms cited — while the class that produced the "months" (IDML/print) is
+absent from this codebase and gets a funded spike, not a hand-wave; and the *operational loop* is a
+repeating cost today, said plainly. (3) The mechanism is §5/§6: agents already write importers under a
+byte-identity harness; the continuous loop is wiring, not research. (4) The fund is bets 1–3:
+10 engineer-weeks total; onboarding 3–8 engineer-days → ~0–1; per-update human touches 7 → 1.

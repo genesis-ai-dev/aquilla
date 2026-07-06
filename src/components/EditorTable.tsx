@@ -13,11 +13,13 @@ import {
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
-import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
+import { type CellStore, useCellIds, useCellStoreVersion, useCellView } from "@/hooks/useActiveCellStore"
+import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
+import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { getCellPref, setCellPref } from "@/lib/store/audio-cell-prefs"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy } from "@/lib/parsers/types"
-import { sortByLens, hasTiming } from "@/lib/timeline/derive"
+import { hasTiming } from "@/lib/timeline/derive"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform } from "@/lib/sync/role-policy"
 import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
@@ -115,6 +117,64 @@ const LEGEND_LIST_DRAW_DISTANCE_PX = 240
 function clampIndex(index: number, length: number): number {
   if (length <= 0) return 0
   return Math.max(0, Math.min(length - 1, index))
+}
+
+function applyRowOverlays(
+  cell: CellData,
+  options: {
+    audioEntry?: CellAudioEntry
+    backtranslationText?: string
+    projectId?: string | null
+  },
+): CellData {
+  let next = cell
+
+  if (options.audioEntry) {
+    const attachments: NonNullable<CellData["attachments"]> = {}
+    for (const [audioId, attachment] of Object.entries(options.audioEntry.attachments)) {
+      attachments[audioId] = {
+        url: attachment.url,
+        type: "audio",
+        ...(attachment.voiceId ? { voiceId: attachment.voiceId } : {}),
+        ...(attachment.referenceAudioId ? { referenceAudioId: attachment.referenceAudioId } : {}),
+        ...(attachment.durationMs != null ? { durationMs: attachment.durationMs } : {}),
+      }
+    }
+    next = {
+      ...next,
+      attachments,
+      selectedAudioId: options.audioEntry.selectedAudioId ?? undefined,
+      selectedGeneratedVoiceAudioId: options.audioEntry.selectedGeneratedVoiceAudioId ?? undefined,
+      audioTimings: options.audioEntry.audioTimings as NonNullable<CellData["audioTimings"]>,
+    }
+  }
+
+  if (typeof options.backtranslationText === "string") {
+    next = {
+      ...next,
+      backtranslation: options.backtranslationText,
+      backtranslationForText: next.translated,
+    }
+  } else if (!next.backtranslation && options.projectId) {
+    try {
+      const raw = localStorage.getItem(`bt:${options.projectId}:${next.id}`)
+      if (raw) {
+        const { btText, targetEventId } = JSON.parse(raw) as {
+          btText: string
+          targetEventId: string
+        }
+        next = {
+          ...next,
+          backtranslation: btText,
+          backtranslationForText: targetEventId === next.targetEventId ? next.translated : "",
+        }
+      }
+    } catch {
+      // Ignore private-browsing/quota/parse failures. Server hydration can retry.
+    }
+  }
+
+  return next
 }
 
 function areNumberArraysEqual(a: number[], b: number[]): boolean {
@@ -381,7 +441,7 @@ export interface AudioLensContext {
 
 interface EditorTableProps {
   project: ProjectRecord
-  cells: CellData[]
+  cellStore: CellStore
   username: string
   /** When set, each row shows the Audio-lens strip (speaker chip + generate). */
   audioLens?: AudioLensContext | null
@@ -440,6 +500,7 @@ interface EditorTableProps {
   onBacktranslate?: (cell: CellData) => void
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
+  backtranslationByCellId?: ReadonlyMap<string, string>
   /** Called when user saves a BT edit. Parent emits `cell.backtranslation.set`. */
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   /** On-demand statistical gloss (corpus-derived, never persisted) for the BT
@@ -513,11 +574,12 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cells, username, isCompletionConfigured, isCompletionAvailable,
+  project, cellStore, username, isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews,
   onCompleteSingle, onCompleteBatch, healthMap,
   infractions = new Map(), rules = [],
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
+  backtranslationByCellId,
   onSaveBacktranslation, getStatisticalBt,
   cellOpenCommentCount,
   activeCueIndex, onSeekToCue,
@@ -558,7 +620,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const [hoveredFootnote, setHoveredFootnote] = useState<{ cellId: string; index: number } | null>(null)
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
-  const cellsRef = useRef(cells)
+  const displayCellIds = useCellIds(cellStore, orderedBy, !!audioLens)
+  const displayCellIdsRef = useRef<readonly string[]>(displayCellIds)
   const selectionDragRef = useRef<{
     pointerId: number
     anchorIndex: number
@@ -573,19 +636,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const selectionPointerYRef = useRef<number | null>(null)
   const previousBodyUserSelectRef = useRef<string | null>(null)
 
-  useEffect(() => {
-    cellsRef.current = cells
-  }, [cells])
+  displayCellIdsRef.current = displayCellIds
 
   // Durable cell audio (AD-2 cell.audio.* grammar). Per-file read; overlay each
-  // cell's attachments + selected clips onto CellData so the existing audio
-  // controllers (which read cell.attachments / selectedAudioId) light up.
-  const audioFileId = cells[0]?.fileId ?? null
+  // visible row's attachments + selected clips at render time, rather than
+  // cloning the entire active file into audio-enriched CellData objects.
+  const audioFileId = cellStore.getFileId()
   const { byCellId: audioByCellId } = useFileAudioAttachments(project.id, audioFileId)
-  const cellsWithAudio = useMemo(
-    () => mergeCellsWithAudio(cells, audioByCellId),
-    [cells, audioByCellId],
-  )
 
   // Timeline-segment-model (Scope A): the rendered row list. For a `'time'`-
   // ordered file the Text/Audio toggle is a medium-LAYER switch — Text layer
@@ -594,26 +651,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // (no filter, no reorder), so existing projects are untouched.
   //
   // NOTE: only the virtual row list is filtered here. Index-based voice paths
-  // (getVoiceTakeCells / cellsRef) intentionally stay on the full cell list;
-  // combined-voice-by-index on a time-ordered media layer is a known Part-B
-  // limitation, not exercised by Scope A's single-clip media import.
+  // Combined-voice range lookup resolves through the active store at call time
+  // so the editor does not keep a second full CellData[] just for audio.
   const isTimeOrdered = orderedBy === "time"
-  const displayCells = useMemo(() => {
-    if (!isTimeOrdered) return cellsWithAudio
-    const wantMedia = !!audioLens
-    const filtered = cellsWithAudio.filter((c) =>
-      wantMedia ? c.medium === "media" : (c.medium ?? "text") !== "media"
-    )
-    return sortByLens(filtered, "time")
-  }, [cellsWithAudio, isTimeOrdered, audioLens])
-  const displayCellsRef = useRef(displayCells)
-  displayCellsRef.current = displayCells
+  const cellStoreVersion = useCellStoreVersion(cellStore)
 
   useEffect(() => {
     if (!activeEditorCellId) return
-    if (displayCells.some((cell) => cell.id === activeEditorCellId)) return
+    if (displayCellIds.includes(activeEditorCellId)) return
     setActiveEditorCellId(null)
-  }, [activeEditorCellId, displayCells])
+  }, [activeEditorCellId, displayCellIds])
 
   const handleActivateEditor = useCallback((cellId: string) => {
     setActiveEditorCellId(cellId)
@@ -644,7 +691,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   // FRO-251: per-file, per-side font size. Persisted in localStorage keyed by
   // fileId; adjusted from the View settings (eye) menu in the header.
-  const editorFileId = cells[0]?.fileId ?? null
+  const editorFileId = audioFileId
   const { source: sourceFontSize, target: targetFontSize } = useFileFontSizes(editorFileId)
 
   const setListScrollElement = useCallback((node: unknown) => {
@@ -652,35 +699,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [])
   const getListQueryRoot = useCallback(() => parentRef.current ?? listRootRef.current, [])
 
-  // FRO-250: sticky chapter indicator. Derives the "current section" label from
-  // Legend List's first visible item so the reader always knows which chapter/
-  // section they're in without scrolling back to a section heading.
-  const sectionByIndex = useMemo(() => {
-    const out: string[] = []
-    let lastLabel = ""
-    for (const cell of displayCells) {
-      const firstRef = cell.globalReferences?.find((r) => r && r.trim().length > 0)
-      if (firstRef) {
-        const colon = firstRef.indexOf(":")
-        lastLabel = (colon >= 0 ? firstRef.slice(0, colon) : firstRef).trim()
-      } else if (cell.section?.trim()) {
-        lastLabel = cell.section.trim()
-      }
-      out.push(lastLabel)
-    }
-    return out
-  }, [displayCells])
-
   useEffect(() => {
-    setFirstVisibleIndex((current) => clampIndex(current, displayCells.length))
+    setFirstVisibleIndex((current) => clampIndex(current, displayCellIds.length))
     setViewableIndexes((current) => {
-      const next = current.filter((index) => index >= 0 && index < displayCells.length)
+      const next = current.filter((index) => index >= 0 && index < displayCellIds.length)
       return next.length === current.length ? current : next
     })
-  }, [displayCells.length])
+  }, [displayCellIds.length])
 
   const clampCellIndex = useCallback((index: number) => {
-    const last = cellsRef.current.length - 1
+    const last = displayCellIdsRef.current.length - 1
     if (last < 0) return -1
     return Math.max(0, Math.min(last, index))
   }, [])
@@ -689,9 +717,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // at the end. Legend List may recycle/mount the destination row a frame or
   // two after scrollToIndex, so retry briefly until the DOM node exists.
   const focusCellEditorByIndex = useCallback((index: number) => {
-    const list = displayCellsRef.current
+    const list = displayCellIdsRef.current
     if (index < 0 || index >= list.length) return
-    const targetId = list[index].id
+    const targetId = list[index]
     setActiveEditorCellId(targetId)
     void listRef.current?.scrollToIndex({
       index,
@@ -728,7 +756,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   useImperativeHandle(ref, () => ({
     scrollToCellIndex(index: number) {
-      if (index >= 0 && index < displayCells.length) {
+      if (index >= 0 && index < displayCellIds.length) {
         void listRef.current?.scrollToIndex({
           index,
           viewPosition: 0.5,
@@ -750,15 +778,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         window.setTimeout(() => el.classList.remove("codex-search-flash"), 1800)
       })
     },
-  }), [displayCells.length, focusCellEditorByIndex, getListQueryRoot])
+  }), [displayCellIds.length, focusCellEditorByIndex, getListQueryRoot])
 
   // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.
   // The wrapper div has tabIndex={0} so it can receive programmatic focus.
   const focusGridRowByIndex = useCallback((index: number) => {
-    const list = displayCellsRef.current
+    const list = displayCellIdsRef.current
     if (index < 0 || index >= list.length) return
-    const targetId = list[index].id
+    const targetId = list[index]
     void listRef.current?.scrollToIndex({
       index,
       viewPosition: 0.5,
@@ -786,14 +814,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // Resolve a navigation request from a cell editor (Up/Down/Tab) to the
   // adjacent cell and focus it. Out-of-range steps (top/bottom edge) no-op.
   const handleNavigateCell = useCallback((cellId: string, direction: "prev" | "next") => {
-    const idx = displayCellsRef.current.findIndex((c) => c.id === cellId)
+    const idx = displayCellIdsRef.current.indexOf(cellId)
     if (idx < 0) return
     focusCellEditorByIndex(direction === "next" ? idx + 1 : idx - 1)
   }, [focusCellEditorByIndex])
 
   // FRO-297: Esc from a cell editor — commit-and-return to grid row focus.
   const handleEscapeToGrid = useCallback((cellId: string) => {
-    const idx = displayCellsRef.current.findIndex((c) => c.id === cellId)
+    const idx = displayCellIdsRef.current.indexOf(cellId)
     if (idx < 0) return
     focusGridRowByIndex(idx)
   }, [focusGridRowByIndex])
@@ -801,13 +829,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // FRO-297: Arrow-key (or j/k) navigation within the grid (row focused, not TipTap).
   // This is called from the row's own keydown when focus is on the grid row wrapper.
   const handleGridRowKeyNav = useCallback((cellId: string, direction: "prev" | "next") => {
-    const idx = displayCellsRef.current.findIndex((c) => c.id === cellId)
+    const idx = displayCellIdsRef.current.indexOf(cellId)
     if (idx < 0) return
     focusGridRowByIndex(direction === "next" ? idx + 1 : idx - 1)
   }, [focusGridRowByIndex])
 
   const selectRangeByIndexes = useCallback((anchorIndex: number, focusIndex: number) => {
-    const list = displayCellsRef.current
+    const list = displayCellIdsRef.current
     if (list.length === 0) return
     const anchor = clampIndex(anchorIndex, list.length)
     const focus = clampIndex(focusIndex, list.length)
@@ -819,13 +847,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const end = focus >= anchor
       ? Math.min(focus, anchor + MAX_SELECTED - 1)
       : anchor
-    const ids = list.slice(start, end + 1).map((c) => c.id)
-    setSelection(ids, list[anchor]?.id ?? ids[0] ?? null)
+    const ids = list.slice(start, end + 1)
+    setSelection(ids, list[anchor] ?? ids[0] ?? null)
   }, [])
 
   const getIndexAtClientY = useCallback((clientY: number) => {
     const scrollEl = parentRef.current ?? listRootRef.current
-    const list = displayCellsRef.current
+    const list = displayCellIdsRef.current
     if (!scrollEl || list.length === 0) return -1
 
     const root = getListQueryRoot()
@@ -970,8 +998,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const selectedIds = getSelectedIds()
     const isAdditive = e.metaKey || e.ctrlKey
     const isAlreadySelected = selectedIds.has(cellId)
+    const ids = displayCellIdsRef.current
     const anchorId = getSelectionAnchorId()
-    const anchorIndex = displayCellsRef.current.findIndex((cell) => cell.id === anchorId)
+    const anchorIndex = anchorId ? ids.indexOf(anchorId) : -1
     const shouldRange =
       !isAdditive &&
       anchorIndex >= 0 &&
@@ -980,8 +1009,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
     selectionDragRef.current = {
       pointerId: e.pointerId,
-      anchorIndex: clampIndex(startIndex, displayCellsRef.current.length),
-      lastIndex: clampIndex(rowIndex, displayCellsRef.current.length),
+      anchorIndex: clampIndex(startIndex, ids.length),
+      lastIndex: clampIndex(rowIndex, ids.length),
       startX: e.clientX,
       startY: e.clientY,
       didDrag: false,
@@ -1045,12 +1074,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
-      const selected = cells.filter((c) => dragCells.current.has(c.id))
+      const selectedIds = displayCellIdsRef.current.filter((id) => dragCells.current.has(id))
+      const selected = cellStore.getCellsByIds(selectedIds)
       onCompleteBatch(selected)
     }
     isDragging.current = false
     dragCells.current = new Set()
-  }, [cells, onCompleteBatch])
+  }, [cellStore, onCompleteBatch])
 
   // Stable drag handlers keyed by cellId. Inline closures per row would mint
   // a fresh function every render and defeat React.memo on MemoizedRow.
@@ -1062,43 +1092,33 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (isDragging.current) dragCells.current.add(cellId)
   }, [])
   const getVoiceTakeCells = useCallback((startIndex: number, count: number) => {
-    return cellsRef.current.slice(startIndex, startIndex + count)
-  }, [])
+    return cellStore.getCellsByIds(displayCellIdsRef.current.slice(startIndex, startIndex + count))
+  }, [cellStore])
 
-  const currentSectionLabel = sectionByIndex[firstVisibleIndex] ?? ""
+  const firstVisibleCellId = displayCellIds[firstVisibleIndex] ?? null
+  const currentSectionLabel = firstVisibleCellId ? cellStore.getSectionLabelForCellId(firstVisibleCellId) : ""
 
   // Parallel-bibles sidebar tracking: report the first visible row's canonical
   // ref as the user scrolls. Keyed on the derived ref string
   // so the effect only fires on actual row changes, not every scrolled pixel.
-  const firstVisibleRef = displayCells[firstVisibleIndex]?.group || null
+  const firstVisibleRef = useMemo(() => {
+    if (!firstVisibleCellId) return null
+    return cellStore.getCellView(firstVisibleCellId)?.group || null
+  }, [cellStore, cellStoreVersion, firstVisibleCellId])
   useEffect(() => {
     onVisibleRefChange?.(firstVisibleRef)
   }, [firstVisibleRef, onVisibleRefChange])
 
-  const footnoteNumberOffsets = useMemo(() => {
-    const offsets = new Map<string, { source: number; target: number }>()
-    const countsByScope = new Map<string, { source: number; target: number }>()
-
-    for (const cell of displayCells) {
-      const scopeKey = footnoteScopeKey(cell)
-      const counts = countsByScope.get(scopeKey) ?? { source: 0, target: 0 }
-      offsets.set(cell.id, { source: counts.source, target: counts.target })
-      counts.source += countNumericFootnotes(cell.original ?? "")
-      counts.target += countNumericFootnotes(cell.translated ?? "")
-      countsByScope.set(scopeKey, counts)
-    }
-
-    return offsets
-  }, [displayCells])
-
   const visibleFootnoteEntries = useMemo<VisibleFootnoteEntry[]>(() => {
-    if (!onVisibleFootnotesChange || displayCells.length === 0) return []
+    if (!onVisibleFootnotesChange || displayCellIds.length === 0) return []
 
     const indexes = viewableIndexes.length > 0 ? viewableIndexes : [firstVisibleIndex]
     return indexes
       .map((index) => {
-        const cell = displayCells[index]
+        const cellId = displayCellIds[index]
+        const cell = cellId ? cellStore.getCellView(cellId) : null
         if (!cell) return null
+        const offsets = cellStore.getFootnoteOffsets(cell.id)
         const sourceFootnotes = extractUsfmFootnotes(cell.original ?? "")
         const targetFootnotes = extractUsfmFootnotes(cell.translated ?? "")
         if (sourceFootnotes.length === 0 && targetFootnotes.length === 0) return null
@@ -1111,11 +1131,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           targetFootnotes,
           activeFootnoteIndex: hoveredFootnote?.cellId === cell.id ? hoveredFootnote.index : null,
           isDocx: (cell.fileId ?? "").endsWith(".docx"),
-          numberOffset: footnoteNumberOffsets.get(cell.id)?.target ?? 0,
+          numberOffset: offsets.target,
         }
       })
       .filter((entry): entry is VisibleFootnoteEntry => entry !== null)
-  }, [displayCells, firstVisibleIndex, footnoteNumberOffsets, hoveredFootnote, onVisibleFootnotesChange, viewableIndexes])
+  }, [cellStore, cellStoreVersion, displayCellIds, firstVisibleIndex, hoveredFootnote, onVisibleFootnotesChange, viewableIndexes])
 
   useEffect(() => {
     onVisibleFootnotesChange?.(visibleFootnoteEntries)
@@ -1127,23 +1147,35 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const handleFirstVisibleItemChanged = useCallback((info: {
     index: number
-    item: CellData
+    item: string
     key: string
   }) => {
-    setFirstVisibleIndex(clampIndex(info.index, displayCells.length))
-  }, [displayCells.length])
+    setFirstVisibleIndex(clampIndex(info.index, displayCellIds.length))
+  }, [displayCellIds.length])
 
-  const handleViewableItemsChanged = useCallback((info: OnViewableItemsChangedInfo<CellData>) => {
+  const handleViewableItemsChanged = useCallback((info: OnViewableItemsChangedInfo<string>) => {
     const next = info.viewableItems
       .map((item) => item.index)
-      .filter((index) => index >= 0 && index < displayCells.length)
+      .filter((index) => index >= 0 && index < displayCellIds.length)
       .sort((a, b) => a - b)
     setViewableIndexes((current) => areNumberArraysEqual(current, next) ? current : next)
-  }, [displayCells.length])
+  }, [displayCellIds.length])
 
-  const renderListItem = useCallback(({ item: cell, index }: LegendListRenderItemProps<CellData>) => {
-    const untimedInTimeLens = isTimeOrdered && !hasTiming(cell)
+  const renderListItem = useCallback(({ item: cellId, index }: LegendListRenderItemProps<string>) => {
+    const audioEntry = audioByCellId.get(cellId)
+    const backtranslationText = backtranslationByCellId?.get(cellId)
     return (
+      <CellStoreRow
+        cellId={cellId}
+        cellStore={cellStore}
+        audioEntry={audioEntry}
+        backtranslationText={backtranslationText}
+        projectId={project.id}
+      >
+        {(cell) => {
+          const untimedInTimeLens = isTimeOrdered && !hasTiming(cell)
+          const footnoteOffsets = cellStore.getFootnoteOffsets(cell.id)
+          return (
       <div
         data-cell-id={cell.id}
         data-index={index}
@@ -1228,20 +1260,26 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           footnoteViewMode={footnoteViewMode}
           onFootnoteHoverChange={setHoveredFootnote}
           onFootnoteCreated={onFootnoteCreated}
-          sourceFootnoteNumberOffset={footnoteNumberOffsets.get(cell.id)?.source ?? 0}
-          targetFootnoteNumberOffset={footnoteNumberOffsets.get(cell.id)?.target ?? 0}
+          sourceFootnoteNumberOffset={footnoteOffsets.source}
+          targetFootnoteNumberOffset={footnoteOffsets.target}
         />
       </div>
+          )
+        }}
+      </CellStoreRow>
     )
   }, [
     activeCueIndex,
     activeEditorCellId,
     assignmentsByCellId,
+    audioByCellId,
     audioLens,
+    backtranslationByCellId,
     backtranslating,
     backtranslationErrors,
     canEdit,
     canValidate,
+    cellStore,
     cellLockHolders,
     cellOpenCommentCount,
     cellsWithRemoteChange,
@@ -1249,7 +1287,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     completing,
     errors,
     examples,
-    footnoteNumberOffsets,
     footnotePanelActive,
     footnoteViewMode,
     getTokenForFile,
@@ -1346,15 +1383,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         </div>
       </div>
 
-      {displayCells.length > 0 ? (
+      {displayCellIds.length > 0 ? (
         <div ref={listRootRef} className="flex min-h-0 flex-1">
           <LegendList
             ref={listRef}
             refScrollView={setListScrollElement}
-            data={displayCells}
+            data={displayCellIds}
             renderItem={renderListItem}
             extraData={renderListItem}
-            keyExtractor={(cell) => cell.id}
+            keyExtractor={(cellId) => cellId}
             estimatedItemSize={ESTIMATED_ROW_HEIGHT_PX}
             drawDistance={LEGEND_LIST_DRAW_DISTANCE_PX}
             recycleItems
@@ -1384,6 +1421,33 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     </div>
   )
 })
+
+interface CellStoreRowProps {
+  cellId: string
+  cellStore: CellStore
+  audioEntry?: CellAudioEntry
+  backtranslationText?: string
+  projectId?: string | null
+  children: (cell: CellData) => React.ReactNode
+}
+
+function CellStoreRow({
+  cellId,
+  cellStore,
+  audioEntry,
+  backtranslationText,
+  projectId,
+  children,
+}: CellStoreRowProps) {
+  const cell = useCellView(cellStore, cellId)
+  const hydratedCell = useMemo(() => {
+    if (!cell) return null
+    return applyRowOverlays(cell, { audioEntry, backtranslationText, projectId })
+  }, [audioEntry, backtranslationText, cell, projectId])
+
+  if (!hydratedCell) return null
+  return <>{children(hydratedCell)}</>
+}
 
 /**
  * Memoized row wrapper. Owns every per-cell derivation that used to live in
@@ -1982,41 +2046,10 @@ function defaultFootnoteRef(cell: CellData): string {
   return ""
 }
 
-function footnoteScopeKey(cell: CellData): string {
-  const candidates = [
-    ...(cell.globalReferences ?? []),
-    cell.group,
-    cell.context,
-    cell.cellLabel,
-  ].filter(Boolean)
-
-  for (const candidate of candidates) {
-    const parsed = parseFootnoteChapterScope(String(candidate))
-    if (parsed) return `${cell.fileId}:${parsed}`
-  }
-
-  return `${cell.fileId}:${cell.section || cell.context || "__file__"}`
-}
-
 function humanFootnoteCellRef(cell: CellData): string {
   const value = (cell.group || cell.context || "").trim()
   if (!value || looksLikeUuid(value)) return ""
   return value
-}
-
-function parseFootnoteChapterScope(value: string): string | null {
-  const canonical = value.match(/\b([1-3]?\s?[A-Z][A-Z0-9]{1,4})\s+(\d+):\d+/i)
-  if (canonical) return `${canonical[1].replace(/\s+/g, "").toUpperCase()}:${canonical[2]}`
-  const chapterOnly = value.match(/\b(\d+):\d+\b/)
-  if (chapterOnly) return `chapter:${chapterOnly[1]}`
-  return null
-}
-
-function countNumericFootnotes(text: string): number {
-  return extractUsfmFootnotes(text).filter((footnote) => {
-    const caller = footnote.caller.trim()
-    return caller === "" || caller === "+" || caller === "-" || /^\d+$/.test(caller)
-  }).length
 }
 
 function footnoteMarkerOptions(

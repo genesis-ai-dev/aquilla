@@ -15,8 +15,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
 import { EditorActionsProvider, type EditorActionsContextValue } from "@/context/EditorActionsContext"
-import type { CellData } from "@/hooks/useCells"
+import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import type { CellRow } from "@/lib/sync/cells-read-types"
 
 // happy-dom has no real layout engine, so the real LegendList may decide no
 // rows are visible. Replace it with a trivial "render every row" stand-in —
@@ -30,9 +31,9 @@ vi.mock("@legendapp/list/react", async () => {
       renderItem,
       keyExtractor,
     }: {
-      data: CellData[]
-      renderItem: (props: { item: CellData; index: number }) => ReactNode
-      keyExtractor?: (item: CellData, index: number) => string
+      data: string[]
+      renderItem: (props: { item: string; index: number }) => ReactNode
+      keyExtractor?: (item: string, index: number) => string
     }, ref) {
       React.useImperativeHandle(ref, () => ({
         getState: () => ({
@@ -50,7 +51,7 @@ vi.mock("@legendapp/list/react", async () => {
         data.map((item, index) => (
           React.createElement(
             React.Fragment,
-            { key: keyExtractor?.(item, index) ?? item.id },
+            { key: keyExtractor?.(item, index) ?? item },
             renderItem({ item, index }),
           )
         )),
@@ -69,22 +70,52 @@ const project: ProjectRecord = {
   members: [],
 }
 
-function makeCell(id: string): CellData {
-  return {
-    id,
+function makeRows(id: string): CellRow[] {
+  return [
+    {
+      cellId: id,
+      side: "source",
+      value: "hello",
+      valueHtml: null,
+      type: "text",
+      canonicalRef: "GEN 1:1",
+      anchorCellId: null,
+      eventId: `${id}-source`,
+      sourceEventId: null,
+      lastEditor: null,
+      lastEditAt: 1,
+      validated: false,
+      wordCount: 1,
+    },
+    {
+      cellId: id,
+      side: "target",
+      value: "bonjour",
+      valueHtml: null,
+      type: "text",
+      canonicalRef: "GEN 1:1",
+      anchorCellId: null,
+      eventId: `${id}-target`,
+      sourceEventId: `${id}-source`,
+      lastEditor: "tester",
+      lastEditAt: 2,
+      validated: false,
+      wordCount: 1,
+    },
+  ]
+}
+
+function makeStore(cellId: string): CellStore {
+  const store = new CellStore()
+  store.setRuntime({
+    projectId: project.id,
     fileId: "file-1",
-    original: "hello",
-    translated: "bonjour",
-    context: "GEN 1:1",
-    group: "GEN 1",
-    type: "text",
-    status: "unvalidated",
-    validationStatus: "none",
-    activeValidators: [],
-    validationHistory: [],
-    history: [],
-    threads: [],
-  }
+    username: "tester",
+    requiredValidations: 1,
+    auditStats: new Map(),
+  })
+  store.replaceRows(makeRows(cellId), { full: true, maxServerSeq: 1 })
+  return store
 }
 
 function renderTable(actions: Partial<EditorActionsContextValue>) {
@@ -94,7 +125,7 @@ function renderTable(actions: Partial<EditorActionsContextValue>) {
       <EditorActionsProvider value={actions}>
         <EditorTable
           project={project}
-          cells={[makeCell("cell-1")]}
+          cellStore={makeStore("cell-1")}
           username="tester"
           isCompletionConfigured={false}
           isCompletionAvailable={false}

@@ -352,10 +352,16 @@ export interface MultiInviteAccepted {
  */
 export async function previewMultiInvite(
   token: string,
-  apiUrl: string = AUTH_API_URL
+  apiUrl: string = AUTH_API_URL,
+  jwt?: string | null
 ): Promise<InvitePreviewResult<MultiInvitePreview>> {
   try {
-    const res = await fetch(`${apiUrl}/api/v2/invites/${encodeURIComponent(token)}/preview`)
+    // The Authorization header is what lets the server recognize the caller
+    // as the token's original redeemer and return 200 usedByCaller instead of
+    // 410 used (FRO-347) — without it, a still-member re-click dead-ends.
+    const res = await fetch(`${apiUrl}/api/v2/invites/${encodeURIComponent(token)}/preview`, {
+      headers: jwt ? { Authorization: `Bearer ${jwt}` } : undefined,
+    })
     if (!res.ok) {
       let reason: InvitePreviewFailReason
       if (res.status === 410) {

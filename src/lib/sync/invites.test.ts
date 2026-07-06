@@ -153,6 +153,28 @@ describe("previewMultiInvite", () => {
     expect(result).toEqual({ ok: true, data: payload })
   })
 
+  // FRO-347: the Authorization header is what lets the server recognize the
+  // original redeemer and answer 200 usedByCaller instead of 410 used. A bare
+  // fetch here silently regresses the still-member re-click to a dead link.
+  it("attaches Authorization when a jwt is provided (still-member re-click path)", async () => {
+    const payload = { token: "tok", role: { level: 400, name: "contributor" }, expiresAt: null, projects: [{ projectId: "p1", projectName: "P", archived: false, usedByCaller: true }] }
+    const spy = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify(payload), { status: 200 }))
+    global.fetch = spy as unknown as typeof fetch
+    const result = await previewMultiInvite("tok", API, "jwt-abc")
+    expect(result.ok).toBe(true)
+    const init = spy.mock.calls[0]?.[1]
+    expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer jwt-abc")
+  })
+
+  it("sends no Authorization header when jwt is absent (public preview unchanged)", async () => {
+    const payload = { token: "tok", role: { level: 400, name: "contributor" }, expiresAt: null, projects: [] }
+    const spy = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify(payload), { status: 200 }))
+    global.fetch = spy as unknown as typeof fetch
+    await previewMultiInvite("tok", API)
+    const init = spy.mock.calls[0]?.[1]
+    expect(new Headers(init?.headers ?? {}).get("Authorization")).toBeNull()
+  })
+
   it("returns {ok:false, reason:'expired'} on 410 without code field (legacy server)", async () => {
     global.fetch = mockFetch(410, { error: "expired" }) as unknown as typeof fetch
     const result = await previewMultiInvite("tok", API)

@@ -54,11 +54,14 @@ export function JoinPage() {
   // Fetch invite preview (public). Try the multi-project endpoint first — it
   // returns 1 project for a single-project token too — and fall back to the
   // single-project preview if the multi endpoint has nothing.
+  // The session JWT rides along (and the effect re-runs once the session
+  // loads) so the server can recognize the original redeemer and return the
+  // friendly usedByCaller preview instead of 410 used (FRO-347).
   useEffect(() => {
     if (!token) return
     let cancelled = false
     void (async () => {
-      const multiResult = await previewMultiInvite(token)
+      const multiResult = await previewMultiInvite(token, undefined, session?.jwt ?? null)
       if (cancelled) return
       if (multiResult.ok && multiResult.data.projects.length > 0) {
         setPreview({ kind: "multi", data: multiResult.data })
@@ -84,7 +87,7 @@ export function JoinPage() {
       }
     })()
     return () => { cancelled = true }
-  }, [token])
+  }, [token, session?.jwt])
 
   useEffect(() => {
     if (!token) {

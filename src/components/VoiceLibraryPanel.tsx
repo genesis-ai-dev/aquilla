@@ -12,6 +12,11 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { cn } from "@/lib/utils"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { PRESET_VOICES } from "@/lib/audio/voices"
@@ -128,16 +133,17 @@ export function VoiceLibraryPanel({
 
       {/* Search */}
       <div className="px-3 pb-2">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
+        <InputGroup>
+          <InputGroupAddon>
+            <Search />
+          </InputGroupAddon>
+          <InputGroupInput
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search voices…"
-            className="h-8 w-full rounded-lg border bg-background pl-8 pr-2 text-sm outline-none ring-primary/40 placeholder:text-muted-foreground focus:ring-2"
           />
-        </div>
+        </InputGroup>
       </div>
 
       {/* The selector list */}

@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { Check, AtSign } from "lucide-react"
-import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+  InputGroupText,
+} from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
@@ -207,8 +212,8 @@ export function UsernameTypeahead({
           </div>
         )}
 
-        <div className="relative flex-1">
-          <Input
+        <InputGroup className="flex-1">
+          <InputGroupInput
             id={inputId}
             type={value.mode === "email" ? "email" : "text"}
             inputMode={value.mode === "email" ? "email" : undefined}
@@ -228,13 +233,15 @@ export function UsernameTypeahead({
             }
           />
           {value.mode === "username" && value.resolved && (
-            <AppTooltip content="Verified Aquilla user">
-              <span className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 text-[10px]">
-                <Check className="h-3 w-3" /> verified
-              </span>
-            </AppTooltip>
+            <InputGroupAddon align="inline-end">
+              <AppTooltip content="Verified Aquilla user">
+                <InputGroupText className="rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 text-[10px]">
+                  <Check /> verified
+                </InputGroupText>
+              </AppTooltip>
+            </InputGroupAddon>
           )}
-        </div>
+        </InputGroup>
       </div>
 
       {/* Username suggestions dropdown */}

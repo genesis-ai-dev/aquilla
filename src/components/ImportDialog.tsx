@@ -825,17 +825,19 @@ function ImportLanding({ onSelect }: ImportLandingProps) {
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
           <h3 className="px-0.5 text-xs font-medium uppercase tracking-wider text-muted-foreground/70">Specialized</h3>
-          <div className="relative w-44">
-            <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/60" />
-            <input
+          <InputGroup className="h-7 w-44">
+            <InputGroupAddon>
+              <Search className="text-muted-foreground/60" />
+            </InputGroupAddon>
+            <InputGroupInput
               type="search"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Filter importers…"
               aria-label="Filter specialized importers"
-              className="h-7 w-full rounded-md border border-input bg-transparent pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground/60 focus-visible:ring-2 focus-visible:ring-ring"
+              className="text-xs placeholder:text-muted-foreground/60"
             />
-          </div>
+          </InputGroup>
         </div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {specialized.map((o) => (
@@ -1361,7 +1363,17 @@ function ParatextChoice({
         <p className="text-xs text-muted-foreground">
           It just needs to be close — verses align by reference (e.g. MAT 1:1). Verses missing on either side stay blank.
         </p>
-        <Input placeholder="Search translations (language, name, code)…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <InputGroup>
+          <InputGroupAddon>
+            <Search />
+          </InputGroupAddon>
+          <InputGroupInput
+            placeholder="Search translations (language, name, code)…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="Search translations"
+          />
+        </InputGroup>
         <ScrollArea className="h-64 rounded border">
           {!translations ? (
             <p className="p-3 text-sm text-muted-foreground">Loading source list…</p>

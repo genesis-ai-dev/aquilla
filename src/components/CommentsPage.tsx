@@ -19,7 +19,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { cn } from "@/lib/utils"
 import { useComments } from "@/hooks/useComments"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
@@ -618,15 +622,17 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
     <div className="space-y-2">
       {/* Search bar + expand toggle */}
       <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-          <Input
-            className="pl-8 h-8 text-sm"
+        <InputGroup className="h-8 flex-1">
+          <InputGroupAddon>
+            <Search />
+          </InputGroupAddon>
+          <InputGroupInput
+            className="text-sm"
             placeholder="Search comments…"
             value={filter.search}
             onChange={(e) => onChange({ ...filter, search: e.target.value })}
           />
-        </div>
+        </InputGroup>
         <Button
           size="sm"
           variant={expanded ? "secondary" : "outline"}

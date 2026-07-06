@@ -135,8 +135,6 @@
 | Orgs        | Team attach/detach project                            | `e2e/specs/orgs/team-attach-project.smoke.spec.ts` + `team-detach-project.smoke.spec.ts` | ✅ |
 | Orgs        | Team delete dialog                                    | `e2e/specs/orgs/team-delete.smoke.spec.ts`                    |   ✅   |
 | Orgs        | Teams sort and filter                                 | `e2e/specs/orgs/teams-sort-and-filter.smoke.spec.ts`          |   ✅   |
-| Orgs        | Color theme picker                                    | `e2e/specs/orgs/color-theme-picker.smoke.spec.ts`             |   ✅   |
-| Orgs        | Theme toggle (dark/light)                             | `e2e/specs/orgs/theme-toggle.smoke.spec.ts`                   |   ✅   |
 | Editor      | Cell action popover shows Record audio + Add comment  | `e2e/specs/editor/cell-action-popover.smoke.spec.ts`          |   ✅   |
 | Editor      | Cell details expansion panel tabs (Decay/BT/Issues/History) | `e2e/specs/editor/cell-details.smoke.spec.ts` + `cell-expansion-bt-tab.smoke.spec.ts` + `cell-expansion-decay-tab.smoke.spec.ts` + `cell-expansion-issues-tab.smoke.spec.ts` | ✅ |
 | Editor      | Cell expansion panel closes on Escape key             | `e2e/specs/editor/cell-expansion-escape-close.smoke.spec.ts`  |   ✅   |
@@ -153,9 +151,6 @@
 | Editor      | Decay breakdown popover opens from cell indicator     | `e2e/specs/editor/decay-breakdown-popover.smoke.spec.ts`      |   ✅   |
 | Editor      | Sync status indicator in workspace status bar         | `e2e/specs/editor/sync-status-indicator.smoke.spec.ts`        |   ✅   |
 | Editor      | Workspace status bar shows file progress              | `e2e/specs/editor/workspace-status-bar.smoke.spec.ts`         |   ✅   |
-| Editor      | Workspace breadcrumb back button navigates            | `e2e/specs/editor/workspace-breadcrumb-back.smoke.spec.ts`    |   ✅   |
-| Editor      | Workspace header dashboard link navigates home        | `e2e/specs/editor/workspace-header-dashboard-link.smoke.spec.ts` |   ✅   |
-| Editor      | Workspace overflow close project navigates dashboard  | `e2e/specs/editor/workspace-overflow-close-project.smoke.spec.ts` |   ✅   |
 | Editor      | Tab strip open/close file tabs                        | `e2e/specs/editor/tab-strip.smoke.spec.ts`                    |   ✅   |
 | Editor      | File filter sidebar input narrows file list           | `e2e/specs/editor/file-filter.smoke.spec.ts`                  |   ✅   |
 | Editor      | File move to corpus dialog                            | `e2e/specs/editor/file-move-corpus.smoke.spec.ts`             |   ✅   |

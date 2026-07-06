@@ -904,6 +904,11 @@ export function ProjectWorkspace() {
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const isSubtitleFile = activeFile?.type === "vtt" || activeFile?.type === "srt"
 
+  const workspaceBreadcrumb = useMemo(() => ({
+    surfaceLabel:
+      centerSurface === "editor" ? "Editor" : deriveNavTitle(location.pathname),
+  }), [centerSurface, location.pathname])
+
   const handleVisibleFootnotesChange = useCallback((entries: VisibleFootnoteEntry[]) => {
     const key = entries
       .map((entry) => [
@@ -3440,9 +3445,9 @@ export function ProjectWorkspace() {
         header={
           <WorkspaceHeader
             project={project}
-            onBack={goToProjects}
             extraMenuItems={workspaceHeaderMenuItems}
             overviewHref={projectId ? `/projects/${projectId}` : undefined}
+            surfaceLabel={workspaceBreadcrumb.surfaceLabel}
           >
             {project && centerSurface === "rules" && (
               <>

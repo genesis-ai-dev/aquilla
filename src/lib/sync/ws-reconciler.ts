@@ -421,29 +421,14 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
 
 // ── FRO-479 push-accelerator client glue ──────────────────────────────────
 //
-// SWARM-TODO(FRO-479): wire `createLinkUpstreamChangedHandler` into
-// ProjectWorkspace.tsx's `createWsReconciler({ onMessage })` (the existing
-// `onMessage` handler around line 2075 dispatches on `msg.t`; add a branch:
-//   else if (msg.t === "link.upstream-changed") {
-//     handleLinkUpstreamChanged(msg)
-//   }
-// where `handleLinkUpstreamChanged` is built once per mount via
-// `createLinkUpstreamChangedHandler({ revalidateStaleSource: () =>
-// staleSourceRevalidateRef.current(), triggerLinkSync: () =>
-// triggerLinkSyncForOpenFile(...), currentProjectId: () => project?.id ??
-// null })`. `revalidate` must be destructured from `useStaleSourceCells` at
-// line ~821 (currently only `staleCellIds` is pulled out) and kept in a ref
-// so the onMessage closure (created once, before `project`/`activeFileId`
-// settle) always calls the latest version. `ProjectWorkspace.tsx` is out of
-// this agent's file ownership (src/components/**) — left as a TODO for the
-// owning agent/PR. Two-window manual verification path: open project A
-// (upstream) and its live downstream B in two browser windows, edit+commit a
-// source cell in A, and confirm B's stale badge + cell text update within a
-// few seconds with no reload.
-//
-// This module owns the wire protocol + the pure decision of "should this
-// frame trigger work," so the eventual glue in ProjectWorkspace.tsx is a thin
-// call-through with no new logic to get wrong.
+// FRO-479 wiring (done by the swarm orchestrator): ProjectWorkspace.tsx builds
+// `createLinkUpstreamChangedHandler` once per WS connect (revalidate routed
+// through a ref so the once-created onMessage closure always reaches the
+// latest useStaleSourceCells.revalidate, which piggybacks POST /link/sync)
+// and dispatches `link.upstream-changed` frames to it in onMessage.
+// SWARM-TODO(FRO-479) [live-UI verify]: open upstream project A and its live
+// downstream B in two browser windows, edit+commit a source cell in A, and
+// confirm B's stale badge + cell text update within a few seconds, no reload.
 
 export interface LinkUpstreamChangedHandlerOptions {
   /** Returns the currently open project id, or null if none/not loaded yet.

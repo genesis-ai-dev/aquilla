@@ -821,12 +821,18 @@ export function ProjectWorkspace() {
   // FRO-477 (§6) — upstreamStaleCellIds surfaces inherited (ancestor-chain)
   // staleness alongside the existing direct staleCellIds; both flatten to
   // per-row booleans inside EditorTable the same way.
-  const { staleCellIds, upstreamStaleCellIds } = useStaleSourceCells({
+  const { staleCellIds, upstreamStaleCellIds, revalidate: revalidateStaleSource } = useStaleSourceCells({
     projectId: project?.id ?? null,
     fileId: activeFileId,
     getToken: getTokenForFile,
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
   })
+  // FRO-479: the WS connect effect's onMessage closure is created once, before
+  // staleness state settles — route link.upstream-changed frames through a ref
+  // so the handler always reaches the latest revalidate (which piggybacks the
+  // fire-and-forget POST /link/sync, single-flighted server-side).
+  const staleSourceRevalidateRef = useRef<() => void>(() => {})
+  staleSourceRevalidateRef.current = revalidateStaleSource
 
   // Audio lens: TTS settings (engine, voice library, cast) hydrated from IDB
   // and overlaid onto the project so generation uses the real engine/key/cast.
@@ -2053,10 +2059,20 @@ export function ProjectWorkspace() {
     let cancelled = false
     let reconciler: import("@/lib/sync/ws-reconciler").WsReconciler | null = null
     void (async () => {
-      const { createWsReconciler, isOwnWriteEcho } = await import("@/lib/sync/ws-reconciler")
+      const { createWsReconciler, isOwnWriteEcho, createLinkUpstreamChangedHandler } =
+        await import("@/lib/sync/ws-reconciler")
       const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
       if (cancelled || !project?.id) return
       const pid = project.id
+      // FRO-479: link.upstream-changed frames → refetch staleness now, debounce
+      // the mirror-sync trigger. revalidate() piggybacks POST /link/sync, so
+      // both callbacks route through the same ref (extra debounced call is a
+      // cheap no-op once the cursor is current).
+      const handleLinkUpstreamChanged = createLinkUpstreamChangedHandler({
+        currentProjectId: () => pid,
+        revalidateStaleSource: () => staleSourceRevalidateRef.current(),
+        triggerLinkSync: () => staleSourceRevalidateRef.current(),
+      })
       reconciler = createWsReconciler(
         {
           projectId: pid,
@@ -2132,6 +2148,12 @@ export function ProjectWorkspace() {
                   return next
                 })
               }
+            } else if (msg.t === "link.upstream-changed") {
+              // FRO-479: an upstream live-link project committed lane-relevant
+              // changes. Refetch staleness immediately; the handler debounces
+              // the mirror-sync trigger (push is a lossy accelerator — the
+              // lazy pull on file open remains the self-healing floor).
+              handleLinkUpstreamChanged(msg)
             } else if (msg.t === "presence") {
               // FRO-288: forward presence snapshots to the focus-lock hook so
               // it can update heldBy when another user holds our focused cell.

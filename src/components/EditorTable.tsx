@@ -69,7 +69,7 @@ import { cn } from "@/lib/utils"
 import { looksLikeUuid } from "@/lib/uuid"
 import { isPerfLogEnabled } from "@/lib/perf-log"
 import { partitionInfractions } from "@/lib/rules/waivers"
-import { ViolationPopover } from "./ViolationPopover"
+import { ViolationPopover, type ViolationAnchor } from "./ViolationPopover"
 import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
@@ -2478,7 +2478,7 @@ function EditorRow({
   const hasTranslatedText = Boolean(cell.translated?.trim())
   const showCompletionOverlay = isLoading && !hasTranslatedText
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
-  const [openRuleAnchor, setOpenRuleAnchor] = useState<HTMLElement | null>(null)
+  const [openRuleAnchor, setOpenRuleAnchor] = useState<ViolationAnchor | null>(null)
   const [examplesExpanded, setExamplesExpanded] = useState(false)
   // FRO-204: chip click state for TermLookupPopover on target editor chips.
   const [termChipState, setTermChipState] = useState<{ term: string; anchor: HTMLElement } | null>(null)
@@ -3371,13 +3371,16 @@ function EditorRow({
   }
 
   // Inline rule click → open expansion to issues tab and remember which rule
-  // (and which blot DOM node) is active so the ViolationPopover can anchor to
-  // the blot directly rather than to a stray span at the bottom of the row.
+  // is active so the ViolationPopover can anchor to the clicked blot.
+  // Expanding the row re-renders the editor and detaches the blot's DOM node,
+  // and a detached anchor makes the popover fall back to the viewport origin —
+  // so snapshot the rect and anchor to a virtual element instead.
   const openInlineRule = useCallback((ruleId: string, anchor: HTMLElement) => {
     setExpanded(true)
     setExpansionTab("issues")
     setOpenRuleId(ruleId)
-    setOpenRuleAnchor(anchor)
+    const rect = anchor.getBoundingClientRect()
+    setOpenRuleAnchor({ getBoundingClientRect: () => rect })
   }, [])
 
   const isMultiSelected = useIsSelected(cell.id)

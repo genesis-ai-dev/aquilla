@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tmx SYSTEM "tmx14.dtd">
+<tmx version="1.4">
+<header creationtool="corpus-gen" creationtoolversion="1.0" segtype="sentence" o-tmf="none" adminlang="en-US" srclang="en-GB" datatype="plaintext"/>
+<body>
+<tu tuid="tu-8016-0"><prop type="x-domain">legal</prop><note>reviewed</note><tuv xml:lang="en-GB"><seg>Ensure the device is powered off before removing the battery cover.</seg></tuv><tuv xml:lang="es-ES"><seg>Take 2 tablets daily with food; do not exceed 6 tablets in 24 hours.</seg></tuv></tu>
+<tu tuid="tu-8016-1"><tuv xml:lang="en-GB"><seg><![CDATA[Uptime SLA of 99.95% measured monthly, excluding scheduled maintenance.]]></seg></tuv><tuv xml:lang="es-ES"><seg>Uptime SLA o<ph x="1">{0}</ph>f 99.95% measured monthly, excluding scheduled maintenance.</seg></tuv></tu>
+<tu tuid="tu-8016-2"><prop type="x-domain">legal</prop><tuv xml:lang="en-GB"><seg>Battery life: up to 18 hours of continuous video playback.</seg></tuv><tuv xml:lang="es-ES"><seg>Don't share your password with anyone, including support staff.</seg></tuv></tu>
+<tu tuid="tu-8016-3"><tuv xml:lang="en-GB"><seg>Third-party integrations require an Enterprise plan subscription.</seg></tuv><tuv xml:lang="es-ES"><seg>Free shipping on orders over $50 — terms apply.</seg></tuv></tu>
+<tu tuid="tu-8016-4"><note>reviewed</note><tuv xml:lang="en-GB"><seg>All prices include VAT at the applicable rate of 21%.</seg></tuv><tuv xml:lang="es-ES"><seg>Añada 250 ml de agua y mezcle hasta obtener una masa homogénea.</seg></tuv></tu>
+<tu tuid="tu-8016-5"><prop type="x-domain">legal</prop><tuv xml:lang="en-GB"><seg><![CDATA[This section intentionally left blank.]]></seg></tuv><tuv xml:lang="es-ES"><seg>A load-bearing wall shall not be modified without engineering approval.</seg></tuv></tu>
+</body>
+</tmx>

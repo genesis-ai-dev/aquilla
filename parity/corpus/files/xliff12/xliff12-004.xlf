@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="es-ES" target-language="pt-BR" datatype="plaintext" original="doc0.txt">
+    <body>
+      <trans-unit id="u1" xml:space="preserve">
+        <source><g id="g1">Use the &lt;b&gt;bold&lt;/b&gt; toggle to emphasize key phrases.</g></source>
+        <target state="final"><g id="g1">Use the &lt;b&gt;bold&lt;/b&gt; toggle to emphasize key phrases.</g></target>
+        <note>ctx-1</note>
+      </trans-unit>
+      <trans-unit id="u2">
+        <source>Free shipp<x id="x2"/>ing on orders over $50 — terms apply.</source>
+        <target state="translated">Free shipp<x id="x2"/>ing on orders over $50 — terms apply.</target>
+        <note>ctx-2</note>
+      </trans-unit>
+      <trans-unit id="u3">
+        <source><g id="g3">Rinse thoroughly with lukewarm water for at least 15 minutes.</g></source>
+        <target state="translated"><g id="g3">Rinse thoroughly with lukewarm water for at least 15 minutes.</g></target>
+        <note>ctx-3</note>
+      </trans-unit>
+      <trans-unit id="u4">
+        <source>Use the &lt;b&gt;bold&lt;/b&gt; toggle to emphasize key phrases.</source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u5">
+        <source>By signing<x id="x5"/> below, the lessee acknowledges receipt of the premises.</source>
+        <target state="new"></target>
+        <note>ctx-5</note>
+      </trans-unit>
+      <trans-unit id="u6">
+        <source><g id="g6">Mesures de sécurité : portez des gants et des lunettes de protection.</g></source>
+        <target state="new"></target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="en-US" target-language="ja-JP" datatype="plaintext" original="doc0.txt">
+    <body>
+      <trans-unit id="u1">
+        <source>Warning: c<x id="x1"/>ontents may be hot. Handle with care.</source>
+        <target state="final">Warning: c<x id="x1"/>ontents may be hot. Handle with care.</target>
+      </trans-unit>
+      <trans-unit id="u2">
+        <source>Adverse reactions may include nausea, dizziness, and &lt;severe&gt; headaches.</source>
+        <target state="final">Adverse reactions may include nausea, dizziness, and &lt;severe&gt; headaches.</target>
+      </trans-unit>
+      <trans-unit id="u3">
+        <source>This secti<x id="x3"/>on intentionally left blank.</source>
+        <target state="final">This secti<x id="x3"/>on intentionally left blank.</target>
+      </trans-unit>
+      <trans-unit id="u4">
+        <source><g id="g4">A load-bearing wall shall not be modified without engineering approval.</g></source>
+        <target state="translated"><g id="g4">A load-bearing wall shall not be modified without engineering approval.</g></target>
+      </trans-unit>
+      <trans-unit id="u5">
+        <source>Rinse thoroughly with lukewarm water for at least 15 minutes.</source>
+        <target state="new"></target>
+        <note>ctx-5</note>
+      </trans-unit>
+      <trans-unit id="u6">
+        <source><g id="g6">Session expired — please sign in again to continue where you left off.</g></source>
+        <target state="final"><g id="g6">Session expired — please sign in again to continue where you left off.</g></target>
+      </trans-unit>
+      <trans-unit id="u7" xml:space="preserve">
+        <source><g id="g7">請在使用前仔細閱讀本說明書。</g></source>
+        <target state="final"><g id="g7">請在使用前仔細閱讀本說明書。</g></target>
+      </trans-unit>
+      <trans-unit id="u8" xml:space="preserve">
+        <source>Uptime SLA<x id="x8"/> of 99.95% measured monthly, excluding scheduled maintenance.</source>
+        <target state="final">Uptime SLA<x id="x8"/> of 99.95% measured monthly, excluding scheduled maintenance.</target>
+        <note>ctx-8</note>
+      </trans-unit>
+      <trans-unit id="u9" xml:space="preserve">
+        <source>Third-party integrations require an Enterprise plan subscription.</source>
+        <target state="final">Third-party integrations require an Enterprise plan subscription.</target>
+      </trans-unit>
+      <trans-unit id="u10">
+        <source><bpt id="b10">&lt;b&gt;</bpt>All prices include VAT at the applicable rate of 21%.<ept id="b10">&lt;/b&gt;</ept></source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u11" xml:space="preserve">
+        <source>This warra<x id="x11"/>nty does not cover damage caused by misuse or unauthorized repair.</source>
+        <target state="new"></target>
+        <note>ctx-11</note>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

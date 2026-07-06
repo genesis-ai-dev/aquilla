@@ -1,0 +1,13 @@
+{
+  "runId": "matecat-parity-2026-07-04",
+  "startedAtUtc": "2026-07-04T15:12:09Z",
+  "wallClockBudgetHours": 10,
+  "hardStopUtc": "2026-07-05T01:12:09Z",
+  "phase0DeadlineUtc": "2026-07-04T16:42:09Z",
+  "stopOpeningNewRowsAtUtc": "2026-07-04T23:12:09Z",
+  "matrixFrozen": true,
+  "matrixFrozenAtUtc": "2026-07-04T15:27:00Z",
+  "scorerFrozen": true,
+  "scorerFrozenAtUtc": "2026-07-04T16:50:00Z",
+  "holdoutSeed": 20260704
+}

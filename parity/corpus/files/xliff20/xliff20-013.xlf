@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" version="2.0" srcLang="en-US" trgLang="ja-JP">
+  <file id="f1">
+    <unit id="u1">
+      <segment id="s0-0" state="initial">
+        <source>Free shipping on orders over $50 — terms apply.</source>
+      </segment>
+    </unit>
+    <unit id="u2">
+      <segment id="s1-0" state="translated">
+        <source>Error 404: the requested resource could not be found on this server.</source>
+        <target>Error 404: the requested resource could not be found on this server.</target>
+      </segment>
+    </unit>
+    <unit id="u3">
+      <segment id="s2-0" state="translated">
+        <source>Установите приложение и войдите в свою учетную запись.</source>
+        <target>Установите приложение и войдите в свою учетную запись.</target>
+      </segment>
+    </unit>
+  </file>
+</xliff>

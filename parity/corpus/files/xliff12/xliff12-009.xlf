@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="en-US" target-language="ja-JP" datatype="plaintext" original="doc0.txt">
+    <body>
+      <trans-unit id="u1">
+        <source><g id="g1">Warning: contents may be hot. Handle with care.</g></source>
+        <target state="new"></target>
+        <note>ctx-1</note>
+      </trans-unit>
+      <trans-unit id="u2" xml:space="preserve">
+        <source>Third-party integrations require an Enterprise plan subscription.</source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u3">
+        <source>Congratula<x id="x3"/>tions! You have unlocked the &quot;Explorer&quot; achievement 🎉.</source>
+        <target state="final">Congratula<x id="x3"/>tions! You have unlocked the &quot;Explorer&quot; achievement 🎉.</target>
+      </trans-unit>
+      <trans-unit id="u4">
+        <source><bpt id="b4">&lt;b&gt;</bpt>Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).<ept id="b4">&lt;/b&gt;</ept></source>
+        <target state="translated"><bpt id="b4">&lt;b&gt;</bpt>Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).<ept id="b4">&lt;/b&gt;</ept></target>
+      </trans-unit>
+      <trans-unit id="u5">
+        <source><g id="g5">Session expired — please sign in again to continue where you left off.</g></source>
+        <target state="final"><g id="g5">Session expired — please sign in again to continue where you left off.</g></target>
+      </trans-unit>
+      <trans-unit id="u6" xml:space="preserve">
+        <source><g id="g6">Adverse reactions may include nausea, dizziness, and &lt;severe&gt; headaches.</g></source>
+        <target state="translated"><g id="g6">Adverse reactions may include nausea, dizziness, and &lt;severe&gt; headaches.</g></target>
+        <note>ctx-6</note>
+      </trans-unit>
+      <trans-unit id="u7">
+        <source>Free shipping on orders over $50 — terms apply.</source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u8" xml:space="preserve">
+        <source>Der Vertrag tritt am ersten Tag des Folgemonats in Kraft.</source>
+        <target state="final">Der Vertrag tritt am ersten Tag des Folgemonats in Kraft.</target>
+      </trans-unit>
+      <trans-unit id="u9">
+        <source>The API returns HTTP 429 when the rate limit of 100 req/min is exceeded.</source>
+        <target state="final">The API returns HTTP 429 when the rate limit of 100 req/min is exceeded.</target>
+        <note>ctx-9</note>
+      </trans-unit>
+      <trans-unit id="u10">
+        <source>Session expired — please sign in again to continue where you left off.</source>
+        <target state="final">Session expired — please sign in again to continue where you left off.</target>
+      </trans-unit>
+      <trans-unit id="u11">
+        <source>Установите<x id="x11"/> приложение и войдите в свою учетную запись.</source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u12">
+        <source><g id="g12">Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).</g></source>
+        <target state="new"></target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

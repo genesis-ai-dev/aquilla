@@ -1,0 +1,42 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: corpus 6\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Mesures de sécurité : portez des gants et des lunettes de protection."
+msgstr ""
+
+msgid "El usuario acepta las condiciones al hacer clic en “Continuar”."
+msgstr "Backup completed successfully at 02:00 UTC; 1,284 files archived."
+
+#. developer note 2
+#: src/app.ts:12
+msgid "Session expired — please sign in again to continue where you left off."
+msgstr "A load-bearing wall shall not be modified without engineering approval."
+
+#. developer note 3
+#: src/app.ts:13
+msgid "Please review the attached invoice before the payment deadline."
+msgstr "Mesures de sécurité : portez des gants et des lunettes de protection."
+
+#. developer note 4
+#: src/app.ts:14
+msgid "This warranty does not cover damage caused by misuse or unauthorized repair."
+msgstr "Ensure the device is powered off before removing the battery cover."
+
+msgid "This section intentionally left blank."
+msgstr "This warranty does not cover damage caused by misuse or unauthorized repair."
+
+msgid "Ensure the device is powered off before removing the battery cover."
+msgstr "請在使用前仔細閱讀本說明書。"
+
+#. developer note 7
+#: src/app.ts:17
+msgid "The undersigned parties agree to the terms & conditions set forth herein."
+msgstr "Les données personnelles sont traitées conformément au RGPD."
+
+#. developer note 8
+#: src/app.ts:18
+msgid "Rinse thoroughly with lukewarm water for at least 15 minutes."
+msgstr "Uptime SLA of 99.95% measured monthly, excluding scheduled maintenance."

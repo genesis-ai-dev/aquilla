@@ -1,0 +1,24 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: corpus 2\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Les données personnelles sont traitées conformément au RGPD."
+msgstr "Our team delivers world-class localization at scale — 24/7 support included."
+
+#. developer note 1
+#: src/app.ts:11
+msgid "This section intentionally left blank."
+msgstr ""
+
+msgid "Click \"Save\" to apply your changes, or press Cancel to discard them."
+msgstr ""
+
+msgid "Take 2 tablets daily with food; do not exceed 6 tablets in 24 hours."
+msgstr ""
+
+#. developer note 4
+#: src/app.ts:14
+msgid "Don't share your password with anyone, including support staff."
+msgstr "Refunds are processed within 5–10 business days of approval."

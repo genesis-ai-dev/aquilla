@@ -1,0 +1,22 @@
+{
+  "app": {
+    "title": "Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).",
+    "subtitle": "Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F)."
+  },
+  "buttons": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "The quarterly report shows a 12.5% increase in recurring revenue."
+  },
+  "messages": [
+    "Click \"Save\" to apply your changes, or press Cancel to discard them.",
+    "The undersigned parties agree to the terms & conditions set forth herein."
+  ],
+  "meta": {
+    "version": 3,
+    "active": true,
+    "ratio": 0.5,
+    "nothing": null
+  },
+  "weird \"key\" with quotes": "Adverse reactions may include nausea, dizziness, and <severe> headaches."
+}

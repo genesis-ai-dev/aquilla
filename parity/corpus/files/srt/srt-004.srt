@@ -1,0 +1,17 @@
+1
+00:00:02,302 --> 00:00:07,234
+Adverse reactions may include nausea, dizziness, and <severe> headaches.
+Rinse thoroughly with lukewarm water for at least 15 minutes.
+
+2
+00:00:08,296 --> 00:00:11,375
+<i>Rinse thoroughly with lukewarm water for at least 15 minutes.</i>
+
+3
+00:00:13,159 --> 00:00:16,537
+This section intentionally left blank.
+
+4
+00:00:16,802 --> 00:00:19,821
+Der Vertrag tritt am ersten Tag des Folgemonats in Kraft.
+The undersigned parties agree to the terms & conditions set forth herein.

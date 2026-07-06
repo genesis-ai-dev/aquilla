@@ -35,6 +35,51 @@ function textContent(el: Element): string {
 }
 
 /**
+ * Inline-code elements whose character data is NATIVE FORMAT CODE, not
+ * translatable text (XLIFF 1.2 bpt/ept/ph/it, TMX adds ut). Their content is
+ * excluded from extracted text; a nested <sub> re-enters translatable text
+ * per both specs.
+ */
+const CODE_ELEMENT_NAMES = new Set(["bpt", "ept", "ph", "it", "ut"])
+
+/**
+ * Text content of an element, skipping native-code data inside inline code
+ * elements (but descending into their <sub> sub-flows). Used by the XLIFF 1.2
+ * and TMX importers so exported-format markup never leaks into segment text.
+ */
+export function codeAwareTextContent(el: Element): string {
+  let out = ""
+  for (const node of Array.from(el.childNodes)) {
+    if (node.nodeType === 3 || node.nodeType === 4) {
+      out += node.textContent ?? ""
+    } else if (node.nodeType === 1) {
+      const child = node as Element
+      if (CODE_ELEMENT_NAMES.has(child.localName)) {
+        for (const sub of Array.from(child.children)) {
+          if (sub.localName === "sub") out += codeAwareTextContent(sub)
+        }
+      } else {
+        out += codeAwareTextContent(child)
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * Code-aware text of a serialized inline-XML fragment (as captured in
+ * round-trip metadata). Wraps the fragment and applies codeAwareTextContent —
+ * exporters use this to decide whether a cell's text still matches its
+ * imported skeleton.
+ */
+export function fragmentText(xml: string): string {
+  const doc = new DOMParser().parseFromString(`<root>${xml}</root>`, "application/xml")
+  const root = doc.documentElement
+  if (root.querySelector("parsererror")) return xml
+  return codeAwareTextContent(root).trim()
+}
+
+/**
  * Deep-first query: find the first element with this local name anywhere
  * inside `root`.
  */
@@ -60,6 +105,51 @@ function allByLocalName(root: Element, localName: string): Element[] {
   return out
 }
 
+/**
+ * Serialize an element's child nodes back to an XML string (inline tags kept
+ * verbatim). Used to capture the source/target inline-markup skeleton for
+ * round-trip export — deterministic and environment-independent (no reliance
+ * on XMLSerializer quirks in happy-dom vs browsers).
+ */
+function xmlEscapeText(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+}
+
+export function serializeInner(el: Element): string {
+  let out = ""
+  for (const node of Array.from(el.childNodes)) {
+    if (node.nodeType === 3) {
+      out += xmlEscapeText(node.textContent ?? "")
+    } else if (node.nodeType === 4) {
+      out += xmlEscapeText(node.textContent ?? "")
+    } else if (node.nodeType === 1) {
+      const child = node as Element
+      let attrs = ""
+      for (const attr of Array.from(child.attributes)) {
+        attrs += ` ${attr.name}="${attr.value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;")}"`
+      }
+      const inner = serializeInner(child)
+      out += inner
+        ? `<${child.tagName}${attrs}>${inner}</${child.tagName}>`
+        : `<${child.tagName}${attrs}/>`
+    }
+  }
+  return out
+}
+
+/** Round-trip metadata captured per segment on XLIFF import. */
+export interface XliffSegmentMeta {
+  version: "1.2" | "2.0"
+  unitId: string
+  segId?: string
+  state?: string
+  /** Inner XML of <source> with inline tags (g/x/bpt/ept/ph/pc…) verbatim. */
+  sourceXml: string
+  /** Inner XML of <target>, when present. */
+  targetXml?: string
+  hasNote?: boolean
+}
+
 // ─── XLIFF 1.2 ──────────────────────────────────────────────────────────────
 
 /**
@@ -79,8 +169,8 @@ function parseXliff12(doc: Document): TranslatableString[] {
     const sourceEl = findByLocalName(tu, "source")
     const targetEl = findByLocalName(tu, "target")
 
-    const original = sourceEl ? textContent(sourceEl).trim() : ""
-    const translated = targetEl ? textContent(targetEl).trim() : ""
+    const original = sourceEl ? codeAwareTextContent(sourceEl).trim() : ""
+    const translated = targetEl ? codeAwareTextContent(targetEl).trim() : ""
 
     // <note> becomes context if present
     const noteEl = findByLocalName(tu, "note")
@@ -99,6 +189,16 @@ function parseXliff12(doc: Document): TranslatableString[] {
 
     if (!original) continue  // skip empty source segments
 
+    const targetState = targetEl?.getAttribute("state") ?? undefined
+    const meta: XliffSegmentMeta = {
+      version: "1.2",
+      unitId: id,
+      ...(targetState ? { state: targetState } : {}),
+      sourceXml: sourceEl ? serializeInner(sourceEl) : "",
+      ...(targetEl ? { targetXml: serializeInner(targetEl) } : {}),
+      ...(noteEl ? { hasNote: true } : {}),
+    }
+
     results.push({
       id: uuid(),
       original,
@@ -106,6 +206,7 @@ function parseXliff12(doc: Document): TranslatableString[] {
       context,
       group,
       type: "text",
+      metadata: { xliff: meta },
     })
   }
 
@@ -160,6 +261,15 @@ function parseXliff20(doc: Document): TranslatableString[] {
         const original = srcEl ? textContent(srcEl).trim() : ""
         if (!original) continue
         const translated = tgtEl ? textContent(tgtEl).trim() : ""
+        const segState = seg.getAttribute("state") ?? undefined
+        const meta: XliffSegmentMeta = {
+          version: "2.0",
+          unitId,
+          segId,
+          ...(segState ? { state: segState } : {}),
+          sourceXml: srcEl ? serializeInner(srcEl) : "",
+          ...(tgtEl ? { targetXml: serializeInner(tgtEl) } : {}),
+        }
         results.push({
           id: uuid(),
           original,
@@ -167,6 +277,7 @@ function parseXliff20(doc: Document): TranslatableString[] {
           context: unitContext,
           group: unitId,
           type: "text",
+          metadata: { xliff: meta },
           // Expose segment id for downstream deduplication / round-trip matching.
           sourceLocation: { file: unitId, blockPath: segId },
         })
@@ -179,6 +290,12 @@ function parseXliff20(doc: Document): TranslatableString[] {
       const original = textContent(directSource).trim()
       if (!original) continue
       const translated = directTarget ? textContent(directTarget).trim() : ""
+      const meta: XliffSegmentMeta = {
+        version: "2.0",
+        unitId,
+        sourceXml: serializeInner(directSource),
+        ...(directTarget ? { targetXml: serializeInner(directTarget) } : {}),
+      }
       results.push({
         id: uuid(),
         original,
@@ -186,6 +303,7 @@ function parseXliff20(doc: Document): TranslatableString[] {
         context: unitContext,
         group: unitId,
         type: "text",
+        metadata: { xliff: meta },
       })
     }
   }

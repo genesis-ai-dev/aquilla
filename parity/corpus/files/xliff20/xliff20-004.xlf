@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" version="2.0" srcLang="es-ES" trgLang="pt-BR">
+  <file id="f1">
+    <unit id="u1">
+      <segment id="s0-0" state="initial">
+        <source>Ensure t<ph id="ph0-0"/>he device is powered off before removing the battery cover.</source>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s0-1" state="final">
+        <source><pc id="pc0-1">Take 2 tablets daily with food; do not exceed 6 tablets in 24 hours.</pc></source>
+        <target><pc id="pc0-1">Take 2 tablets daily with food; do not exceed 6 tablets in 24 hours.</pc></target>
+      </segment>
+    </unit>
+    <unit id="u2">
+      <segment id="s1-0" state="initial">
+        <source>Mesures de sécurité : portez des gants et des lunettes de protection.</source>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s1-1" state="final">
+        <source>Ensure t<ph id="ph1-1"/>he device is powered off before removing the battery cover.</source>
+        <target>Ensure t<ph id="ph1-1"/>he device is powered off before removing the battery cover.</target>
+      </segment>
+    </unit>
+    <unit id="u3">
+      <segment id="s2-0" state="final">
+        <source>La configuración se guardará automáticamente cada 5 minutos.</source>
+        <target>La configuración se guardará automáticamente cada 5 minutos.</target>
+      </segment>
+    </unit>
+    <unit id="u4">
+      <segment id="s3-0" state="translated">
+        <source><pc id="pc3-0">Click &quot;Save&quot; to apply your changes, or press Cancel to discard them.</pc></source>
+        <target><pc id="pc3-0">Click &quot;Save&quot; to apply your changes, or press Cancel to discard them.</pc></target>
+      </segment>
+    </unit>
+    <unit id="u5">
+      <segment id="s4-0" state="initial">
+        <source>製品の仕様は予告なく変更されることがあります。</source>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s4-1" state="initial">
+        <source>Uptime SLA of 99.95% measured monthly, excluding scheduled maintenance.</source>
+      </segment>
+    </unit>
+  </file>
+</xliff>

@@ -987,3 +987,238 @@ describe("FRO-364: magic-link invite accept — real redeem path via JoinPage's 
     expect(member?.role_level).toBe(400)
   })
 })
+
+// ── FRO-347: invite link stays redeemable forever by its original redeemer ──
+//
+// Bug: both accept endpoints treated "this user already redeemed this
+// token" (used_by === user.id) as unconditional idempotent success and
+// re-granted/re-inserted project_members — even after the owner explicitly
+// removed that member. Required semantics (option 2, "idempotent-while-
+// member" — see the issue): re-clicking while STILL a member is a friendly
+// no-op that lands them back in the project; once membership has been
+// REMOVED, re-redemption must be refused. Regression tests for what already
+// worked (revoked-unused link, cross-user consumption) are kept alongside.
+describe("FRO-347: idempotent-while-member redeem semantics", () => {
+  describe("legacy single-project accept-invite", () => {
+    it("re-clicking a redeemed link while still a member is a no-op success (option 2)", async () => {
+      await seedUser(40, "lead40")
+      await seedUser(41, "member41")
+      await env.AQUILLA_PG.prepare(
+        "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 40)",
+      )
+        .bind("p-fro347-a", "Idempotent while member")
+        .run()
+      await env.AQUILLA_PG.prepare(
+        "INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
+      )
+        .bind("tok-347-a", "p-fro347-a", 400, 40, new Date(Date.now() + 86400000).toISOString())
+        .run()
+
+      const memberJwt = await jwtFor("member41")
+      const accept = () =>
+        app.request(
+          "/api/v2/projects/accept-invite",
+          { method: "POST", headers: authHeader(memberJwt), body: JSON.stringify({ token: "tok-347-a" }) },
+          env,
+        )
+
+      const first = await accept()
+      expect(first.status).toBe(200)
+
+      // Re-click while still a member: must succeed (no-op redirect), not 410.
+      const second = await accept()
+      expect(second.status).toBe(200)
+      const body = (await second.json()) as { projectId: string; role: number }
+      expect(body).toEqual({ projectId: "p-fro347-a", role: 400 })
+
+      const members = await env.AQUILLA_PG.prepare(
+        "SELECT COUNT(*) as cnt FROM project_members WHERE project_id = 'p-fro347-a' AND user_id = 41",
+      ).first<{ cnt: number }>()
+      expect(members?.cnt).toBe(1)
+    })
+
+    it("refuses re-redemption after the member was removed from the project", async () => {
+      await seedUser(42, "lead42")
+      await seedUser(43, "removed43")
+      await env.AQUILLA_PG.prepare(
+        "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 42)",
+      )
+        .bind("p-fro347-b", "Removed member")
+        .run()
+      await env.AQUILLA_PG.prepare(
+        "INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
+      )
+        .bind("tok-347-b", "p-fro347-b", 400, 42, new Date(Date.now() + 86400000).toISOString())
+        .run()
+
+      const removedJwt = await jwtFor("removed43")
+      const accept = () =>
+        app.request(
+          "/api/v2/projects/accept-invite",
+          { method: "POST", headers: authHeader(removedJwt), body: JSON.stringify({ token: "tok-347-b" }) },
+          env,
+        )
+
+      const first = await accept()
+      expect(first.status).toBe(200)
+
+      // Owner removes the member.
+      await env.AQUILLA_PG.prepare(
+        "DELETE FROM project_members WHERE project_id = ? AND user_id = ?",
+      )
+        .bind("p-fro347-b", 43)
+        .run()
+
+      // BUG (FRO-347): re-clicking the same old link must NOT be a self-service
+      // re-entry pass. The invite is dead for this (already-consumed-by-them,
+      // now-removed) user.
+      const second = await accept()
+      expect(second.status).toBe(410)
+      const body = (await second.json()) as { error: string; code?: string }
+      expect(body.code).toBe("used")
+
+      const members = await env.AQUILLA_PG.prepare(
+        "SELECT COUNT(*) as cnt FROM project_members WHERE project_id = 'p-fro347-b' AND user_id = 43",
+      ).first<{ cnt: number }>()
+      expect(members?.cnt).toBe(0)
+    })
+
+    // Regression: revoke-before-first-use continues to block redemption.
+    it("regression: a revoked (deleted) unused invite is still rejected on click", async () => {
+      await seedUser(44, "lead44")
+      await seedUser(45, "clicker45")
+      await env.AQUILLA_PG.prepare(
+        "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 44)",
+      )
+        .bind("p-fro347-c", "Revoked link")
+        .run()
+      await env.AQUILLA_PG.prepare(
+        "INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
+      )
+        .bind("tok-347-c", "p-fro347-c", 400, 44, new Date(Date.now() + 86400000).toISOString())
+        .run()
+
+      // Revoke before anyone clicks (mirrors DELETE /:projectId/invites/:token).
+      await env.AQUILLA_PG.prepare(
+        "DELETE FROM project_invites WHERE token = ?",
+      )
+        .bind("tok-347-c")
+        .run()
+
+      const res = await app.request(
+        "/api/v2/projects/accept-invite",
+        { method: "POST", headers: authHeader(await jwtFor("clicker45")), body: JSON.stringify({ token: "tok-347-c" }) },
+        env,
+      )
+      expect(res.status).toBe(404)
+    })
+
+    // Regression: a link consumed by one user stays invalid for everyone else.
+    it("regression: a link consumed by one user is invalid for a different user", async () => {
+      await seedUser(46, "lead46")
+      await seedUser(47, "first47")
+      await seedUser(48, "second48")
+      await env.AQUILLA_PG.prepare(
+        "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 46)",
+      )
+        .bind("p-fro347-d", "Cross user")
+        .run()
+      await env.AQUILLA_PG.prepare(
+        "INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
+      )
+        .bind("tok-347-d", "p-fro347-d", 400, 46, new Date(Date.now() + 86400000).toISOString())
+        .run()
+
+      const first = await app.request(
+        "/api/v2/projects/accept-invite",
+        { method: "POST", headers: authHeader(await jwtFor("first47")), body: JSON.stringify({ token: "tok-347-d" }) },
+        env,
+      )
+      expect(first.status).toBe(200)
+
+      const second = await app.request(
+        "/api/v2/projects/accept-invite",
+        { method: "POST", headers: authHeader(await jwtFor("second48")), body: JSON.stringify({ token: "tok-347-d" }) },
+        env,
+      )
+      expect(second.status).toBe(410)
+    })
+  })
+
+  describe("multi-project invite accept (/invites/:token/accept)", () => {
+    async function seedMultiInviteRow(token: string, projectId: string, creatorId: number) {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+        .bind(token, projectId, 400, creatorId, new Date(Date.now() + 86400000).toISOString())
+        .run()
+    }
+
+    it("re-clicking a redeemed multi-invite link while still a member is a no-op success", async () => {
+      await seedUser(50, "lead50")
+      await seedUser(51, "member51")
+      await env.AQUILLA_PG.prepare(
+        "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 50)",
+      )
+        .bind("p-fro347-multi-a", "Multi idempotent")
+        .run()
+      await seedMultiInviteRow("tok-347-multi-a", "p-fro347-multi-a", 50)
+
+      const memberJwt = await jwtFor("member51")
+      const accept = () =>
+        app.request(
+          "/api/v2/invites/tok-347-multi-a/accept",
+          { method: "POST", headers: authHeader(memberJwt) },
+          env,
+        )
+
+      const first = await accept()
+      expect(first.status).toBe(200)
+
+      const second = await accept()
+      expect(second.status).toBe(200)
+      const body = (await second.json()) as { accepted: Array<{ projectId: string }> }
+      expect(body.accepted.some((a) => a.projectId === "p-fro347-multi-a")).toBe(true)
+    })
+
+    it("refuses re-redemption of a multi-invite after the member was removed", async () => {
+      await seedUser(52, "lead52")
+      await seedUser(53, "removed53")
+      await env.AQUILLA_PG.prepare(
+        "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 52)",
+      )
+        .bind("p-fro347-multi-b", "Multi removed")
+        .run()
+      await seedMultiInviteRow("tok-347-multi-b", "p-fro347-multi-b", 52)
+
+      const removedJwt = await jwtFor("removed53")
+      const accept = () =>
+        app.request(
+          "/api/v2/invites/tok-347-multi-b/accept",
+          { method: "POST", headers: authHeader(removedJwt) },
+          env,
+        )
+
+      const first = await accept()
+      expect(first.status).toBe(200)
+
+      await env.AQUILLA_PG.prepare(
+        "DELETE FROM project_members WHERE project_id = ? AND user_id = ?",
+      )
+        .bind("p-fro347-multi-b", 53)
+        .run()
+
+      // BUG (FRO-347): must not silently re-grant access after removal.
+      const second = await accept()
+      expect(second.status).toBe(410)
+      const body = (await second.json()) as { error: string; code?: string }
+      expect(body.code).toBe("used")
+
+      const members = await env.AQUILLA_PG.prepare(
+        "SELECT COUNT(*) as cnt FROM project_members WHERE project_id = 'p-fro347-multi-b' AND user_id = 53",
+      ).first<{ cnt: number }>()
+      expect(members?.cnt).toBe(0)
+    })
+  })
+})

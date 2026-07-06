@@ -1050,6 +1050,17 @@ projects.post(
       .bind(invite.project_id, user.id)
       .first<{ role_level: number }>()
 
+    // FRO-347: "idempotent-while-member" (option 2). A same-user re-click
+    // (invite.used_at already stamped to this user) used to unconditionally
+    // re-grant/re-insert project_members — including after the owner removed
+    // them, turning the old link into a permanent self-service re-entry pass.
+    // Re-redemption by the SAME user is only a no-op success while they are
+    // STILL a member; once membership has been removed, the link is dead for
+    // them too, same as anyone else.
+    if (invite.used_at && invite.used_by === user.id && !existing) {
+      return c.json({ error: "Invite already used", code: "used" }, 410)
+    }
+
     const finalRole = existing
       ? Math.max(existing.role_level, invite.role_level)
       : invite.role_level

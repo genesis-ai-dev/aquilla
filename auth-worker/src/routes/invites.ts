@@ -373,6 +373,18 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
         .bind(invite.project_id, user.id)
         .first<{ role_level: number }>()
 
+      // FRO-347: "idempotent-while-member" (option 2). A same-user re-accept
+      // (invite.used_at already set to this user) used to unconditionally
+      // re-grant membership — including after the owner removed them from
+      // this project, turning the old link into a permanent self-service
+      // re-entry pass. Re-redemption by the SAME user is only a no-op
+      // success while they're STILL a member of this project; once removed,
+      // skip this row (same as a different user hitting an already-used
+      // link) rather than re-inserting membership.
+      if (invite.used_at && invite.used_by === user.id && !existing) {
+        continue
+      }
+
       const finalRole = existing
         ? Math.max(existing.role_level, invite.role_level)
         : invite.role_level

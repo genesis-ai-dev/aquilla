@@ -45,7 +45,14 @@ vi.mock("@/lib/frontier/portfolio", () => ({
   recordedMinutes: (p: { recordedMs: number }) => Math.round(p.recordedMs / 60000),
   deadlineStatus: () => _deadlineStatusResult,
 }))
-vi.mock("@/lib/sync/cloud-projects", () => ({ setProjectDeadline: vi.fn() }))
+vi.mock("@/lib/sync/cloud-projects", () => ({
+  setProjectDeadline: vi.fn(),
+  // OrgSidebar (rendered by ProjectOverview's AppShell) calls
+  // useProjectsForNavigation -> fetchAccessibleProjects for the "Shared with
+  // you" nav section (FRO-474). Default to empty so it never interferes with
+  // pre-existing tests; individual FRO-474 tests override via mockResolvedValue.
+  fetchAccessibleProjects: vi.fn(async () => []),
+}))
 const downloadProjectBundle = vi.fn()
 vi.mock("@/lib/sync/export-bundle", () => ({
   downloadProjectBundle: (...a: unknown[]) => downloadProjectBundle(...a),
@@ -93,9 +100,14 @@ function renderOverview() {
   )
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   localStorage.clear()
   _deadlineStatusResult = null
+  // Some FRO-474 tests override this to simulate a user with no orgs;
+  // vi.clearAllMocks() clears call history but not mockResolvedValue
+  // implementations, so restore the default (single org, auto-selected) here.
+  const { listMyOrgs } = await import("@/lib/frontier/orgs")
+  vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
 })
 afterEach(() => vi.clearAllMocks())
 
@@ -381,6 +393,80 @@ describe("ProjectOverview audio progress (FRO-160)", () => {
     await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
     // Audio should be hidden
     expect(screen.queryByText("Audio")).not.toBeInTheDocument()
+  })
+})
+
+// ── FRO-474: project-only invitee navigation ────────────────────────────────
+
+describe("ProjectOverview project-only invitee access (FRO-474)", () => {
+  // WHY: a user with a direct project_members grant but no org membership
+  // (activeOrgId == null, or an org that doesn't include this project) was
+  // being redirected straight back to "/" — they could never open their own
+  // shared project. useProject is server-verified per-project access, so the
+  // overview must render whenever status === "ready", and only redirect on a
+  // genuine "not-found" (no access).
+
+  it("renders the overview (no redirect) when activeOrgId is null and the user has a direct project grant", async () => {
+    // No orgs at all → OrgProvider resolves activeOrgId to null.
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockResolvedValue([])
+
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, orgId: 99, files: [] }),
+      status: "ready",
+      refresh,
+    })
+    getPortfolio.mockResolvedValue([])
+
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it("renders the overview (no redirect) when the project's orgId does not match activeOrgId", async () => {
+    // OrgProvider auto-selects the single org (id 1) from listMyOrgs (default mock).
+    // The project belongs to org 99 — a mismatch that pre-FRO-474 triggered a redirect.
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, orgId: 99, files: [] }),
+      status: "ready",
+      refresh,
+    })
+    getPortfolio.mockResolvedValue([])
+
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the project's own orgId to load portfolio stats when activeOrgId is null", async () => {
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockResolvedValue([])
+
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, orgId: 99, files: [] }),
+      status: "ready",
+      refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100, filledCells: 50, validatedCells: 20,
+      aiDraftedCells: 0, audioCells: 0, recordedMs: 0, lastEditAt: null, deadlineAt: null,
+    }])
+
+    renderOverview()
+
+    // Portfolio was queried using the project's own orgId (99), not activeOrgId (null).
+    await waitFor(() => expect(getPortfolio).toHaveBeenCalledWith("jwt", 99))
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it("still redirects to / when the user genuinely has no access (status = not-found)", async () => {
+    useProject.mockReturnValue({ project: null, status: "not-found", refresh })
+
+    renderOverview()
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/", { replace: true }))
   })
 })
 

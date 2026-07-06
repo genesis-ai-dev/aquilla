@@ -61,4 +61,39 @@ describe("VoiceLibraryPanel (selector)", () => {
     fireEvent.click(screen.getByRole("button", { name: /New voice/ }))
     expect(screen.getByTestId("new-voice-modal")).toBeTruthy()
   })
+
+  // FRO-360: cast voices minted on subtitle import (buildCastAdditions) carry
+  // no `provider` of their own — they must display the PROJECT's configured
+  // engine, not a hardcoded "Gemini".
+  it("shows the project's configured provider for a voice with no provider of its own (imported cast)", () => {
+    const onSettingsChange = vi.fn()
+    // Imported cast voice: only { id, name, color } — exactly what
+    // buildCastAdditions mints, no `provider` field.
+    const importedCastMember: Voice = { id: "v-imported", name: "Speaker 1", color: "#0d9488" }
+    const settings: ProjectTtsSettings = { provider: "mms", voices: [importedCastMember] }
+    render(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        settings={settings}
+        onSettingsChange={onSettingsChange}
+      />,
+    )
+    expect(screen.getByText("Speaker 1")).toBeTruthy()
+    expect(screen.getByText("MMS")).toBeTruthy()
+    expect(screen.queryByText("Gemini")).toBeNull()
+  })
+
+  it("still labels a voice with its own explicit provider, ignoring the project default", () => {
+    const onSettingsChange = vi.fn()
+    const kokoroVoice = makeVoice({ id: "v-kokoro", name: "Kid", provider: "kokoro", voiceName: "af_heart" })
+    const settings: ProjectTtsSettings = { provider: "omnivoice", voices: [kokoroVoice] }
+    render(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        settings={settings}
+        onSettingsChange={onSettingsChange}
+      />,
+    )
+    expect(screen.getByText("Kokoro")).toBeTruthy()
+  })
 })

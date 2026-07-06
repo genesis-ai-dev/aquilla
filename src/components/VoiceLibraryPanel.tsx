@@ -16,6 +16,7 @@ import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { PRESET_VOICES } from "@/lib/audio/voices"
 import { NewVoiceModal } from "@/components/voice/NewVoiceModal"
+import { providerInfo, resolveTtsProvider } from "@/lib/audio/tts-providers"
 import type { FrontierSession } from "@/lib/frontier/types"
 
 export interface CastMemberStats {
@@ -151,6 +152,7 @@ export function VoiceLibraryPanel({
             <VoiceRow
               key={voice.id}
               voice={voice}
+              projectProvider={resolveTtsProvider(settings)}
               active={voice.id === selectedId}
               isDefault={voice.id === defaultVoiceId}
               stats={castStats?.get(voice.id)}
@@ -201,9 +203,12 @@ export function VoiceLibraryPanel({
 /** A single selectable voice row: avatar · name · meta · narrator star ·
  *  selected check · hover ⋯ menu. Click selects; drag assigns onto a line. */
 function VoiceRow({
-  voice, active, isDefault, stats, onSelect, onEdit, onMakeDefault, onDelete,
+  voice, projectProvider, active, isDefault, stats, onSelect, onEdit, onMakeDefault, onDelete,
 }: {
   voice: Voice
+  /** The project's configured TTS provider — the fallback for voices that
+   *  don't carry their own (e.g. cast minted on import). */
+  projectProvider: NonNullable<ProjectTtsSettings["provider"]>
   active: boolean
   isDefault: boolean
   stats?: CastMemberStats
@@ -212,6 +217,12 @@ function VoiceRow({
   onMakeDefault: () => void
   onDelete: () => void
 }) {
+  // Same resolution the synth path uses (CellTtsButton, generateAndAttachCellVoice):
+  // a voice's own provider wins; an absent one falls back to the project's
+  // configured engine — never a hardcoded "Gemini".
+  const engineLabel = voice.referenceAudioId
+    ? "Clone"
+    : providerInfo(voice.provider ?? projectProvider).shortTitle
   const [menuOpen, setMenuOpen] = useState(false)
   return (
     <div
@@ -235,7 +246,7 @@ function VoiceRow({
         <span className="block truncate font-medium leading-tight">{voice.name}</span>
         <span className="block truncate text-[10px] leading-tight text-muted-foreground">
           <span className={cn("font-medium", voice.referenceAudioId && "text-emerald-600 dark:text-emerald-400")}>
-            {voice.referenceAudioId ? "Clone" : "Gemini"}
+            {engineLabel}
           </span>
           {" · "}
           {stats && stats.assigned > 0

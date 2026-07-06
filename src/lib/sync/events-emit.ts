@@ -873,3 +873,45 @@ export async function emitFileRename(input: FileRenameInput): Promise<string> {
   })
   return eventId
 }
+
+// ── FRO-478: repin ("accept upstream change as-is") ────────────────────────
+
+export interface TargetCellRepinInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The (now-current) source row's event_id to pin the target to. */
+  sourceEventId: string
+  /** The target row's event_id as observed when the reviewer opened the
+   *  review panel. The server no-ops the update if the head has since
+   *  moved (a translator re-committed) — the fresher pin wins. */
+  expectedTargetEventId: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `target.cell.repin` — "translation still correct against the new
+ * source." Non-chain-mutating (`parentId: null`, like `cell.validate`):
+ * updates only `cells.source_event_id` on the target row, never `value`,
+ * `event_id`, `validated`, or `endorsement_count`. Guarded server-side by
+ * `expectedTargetEventId` — see `sync-worker/src/events/event-projection.ts`.
+ * Reviewer (300)+ for a single cell; the Upstream-changes review panel gates
+ * its bulk action higher (project_lead 500) before calling this per cell.
+ */
+export async function emitTargetCellRepin(input: TargetCellRepinInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "target.cell.repin",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      sourceEventId: input.sourceEventId,
+      expectedTargetEventId: input.expectedTargetEventId,
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}

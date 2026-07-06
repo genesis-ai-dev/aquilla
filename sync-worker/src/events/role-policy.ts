@@ -118,6 +118,13 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'source.cell.mirror': ROLE.MAINTAINER,
   'file.mirror': ROLE.MAINTAINER,
   'link.cursor.advance': ROLE.MAINTAINER,
+
+  // FRO-478: repin ("accept upstream change as-is") asserts translation
+  // correctness against a new source — same authority bar as validating,
+  // per the design spec §12 permissions table. Bulk repin is gated higher
+  // (project_lead 500) at the route/UI layer, not here — a single repin's
+  // event-kind floor stays reviewer.
+  'target.cell.repin': ROLE.REVIEWER,
 }
 
 export function requiredRoleFor(kind: EventKind): number {

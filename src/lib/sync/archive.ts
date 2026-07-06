@@ -48,6 +48,17 @@ export interface ProjectStateResponse {
    * means self-contained (or is itself a source).
    */
   sourceProjectId?: string | null
+  /** FRO-476/478: link mode — 'clone' (one-time snapshot) | 'live' (subscribed,
+   *  mirrors upstream changes). Null/absent for self-contained projects. */
+  sourceLinkMode?: "clone" | "live" | null
+  /** FRO-476/478: which upstream lane becomes this project's source —
+   *  'source' (sibling-language case) | 'target' (chain case). */
+  sourceLinkConsumes?: "source" | "target" | null
+  /** FRO-476/478: for target-consumption links, which upstream target state
+   *  propagates — 'head' (every commit) | 'validated' (only validated heads). */
+  sourceLinkGate?: "head" | "validated" | null
+  /** FRO-476/478: max upstream server_seq this project has mirrored so far. */
+  sourceLinkCursor?: number | null
   role: { level: number; name: string; source: string }
   /** Populated by the codex-db.files join. Optional only because old
    *  deployments may not have shipped the join yet — current servers
@@ -111,6 +122,51 @@ export async function unarchiveProjectRemote(
     return { kind: "forbidden", message: await parseError(res) }
   }
   return { kind: "error", status: res.status, message: await parseError(res) }
+}
+
+export interface LinkProjectSourceResult {
+  projectId: string
+  sourceProjectId: string
+  mode: "clone" | "live"
+  consumes: "source" | "target"
+  gate: "head" | "validated"
+  previousSourceProjectId: string | null
+}
+
+/**
+ * FRO-478: POST /api/v2/projects/:id/link-source — create a project link.
+ * project_lead(500)+ on the DOWNSTREAM project (server-enforced). For
+ * `mode: 'live'` the auth-worker seeds the new project via the first mirror
+ * sync (FRO-476 §5) as part of this same call — files/cells arrive with
+ * provenance set. Throws `UserError` on non-2xx (mirrors createCloudProject).
+ */
+export async function linkProjectSource(
+  jwt: string,
+  projectId: string,
+  input: {
+    sourceProjectId: string
+    mode: "clone" | "live"
+    consumes?: "source" | "target"
+    gate?: "head" | "validated"
+  },
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<LinkProjectSourceResult> {
+  const res = await fetch(
+    `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/link-source`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${jwt}`,
+      },
+      body: JSON.stringify(input),
+    },
+  )
+  if (!res.ok) {
+    const message = await parseError(res)
+    throw new Error(message)
+  }
+  return (await res.json()) as LinkProjectSourceResult
 }
 
 /** Fetches server state for a project, including archive metadata and the

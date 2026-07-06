@@ -690,6 +690,9 @@ describe('isChainMutatingKind', () => {
     'source.cell.mirror': false,
     'file.mirror': false,
     'link.cursor.advance': false,
+    // FRO-478: repin is non-chain-mutating — it does not compete for the
+    // chain slot (guarded instead by expectedTargetEventId in the SQL).
+    'target.cell.repin': false,
   }
 
   it('classifies every EventKind exactly as the old route deny-list did', () => {

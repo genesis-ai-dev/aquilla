@@ -98,6 +98,14 @@ export type EventKind =
   // `projects.source_link_cursor` directly with no event). No cells
   // projection — purely a history record for the review panel (FRO-478).
   | 'link.cursor.advance'
+  // FRO-478: "accept upstream change as-is" — reviewer(300)+ asserts a
+  // translation still stands against the new source. Non-chain-mutating:
+  // the chain head does NOT move, so validations/endorsements survive
+  // (deliberate — spec §7). Guarded: the projection only applies when the
+  // target row's CURRENT event_id still equals `expectedTargetEventId`, so
+  // a translator's concurrent re-commit makes this a no-op instead of
+  // clobbering a fresher pin (the route reports skips for bulk repin).
+  | 'target.cell.repin'
 
 // ── Comment scope ─────────────────────────────────────────────────────────
 
@@ -448,6 +456,23 @@ export interface EventPayloads {
     fromSeq: number
     toSeq: number
     cellCount: number
+  }
+
+  // ── FRO-478: repin (accept upstream change as-is) ──────────────────────
+  // Reviewer-level "translation still correct against the new source."
+  // Updates ONLY cells.source_event_id on the target row — never value,
+  // event_id, validated, or endorsement_count. Guarded by
+  // expectedTargetEventId so a race with a translator's concurrent
+  // target.cell.commit resolves to a no-op (the fresher pin wins) rather
+  // than clobbering it. See event-projection.ts's 'target.cell.repin' case.
+  'target.cell.repin': {
+    /** The (now-current) source row's event_id to pin the target to. */
+    sourceEventId: string
+    /** The target row's event_id as observed by the reviewer when they
+     *  opened the review panel. The UPDATE's WHERE clause requires
+     *  cells.event_id to still equal this — if a translator re-committed
+     *  in the meantime, the head moved and this repin silently no-ops. */
+    expectedTargetEventId: string
   }
 }
 

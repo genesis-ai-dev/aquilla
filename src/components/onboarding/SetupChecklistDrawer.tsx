@@ -12,12 +12,14 @@ import {
 } from "@/components/ui/sheet"
 import type { ChecklistState } from "@/hooks/useSetupChecklist"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { ROLE } from "@/lib/frontier/roles"
 import { ChecklistItem } from "./checklist/ChecklistItem"
 import { ImportFilesStep } from "./checklist/ImportFilesStep"
 import { AiInstructionsStep } from "./checklist/AiInstructionsStep"
 import { InviteStep } from "./checklist/InviteStep"
 import { ComingSoonStep } from "./checklist/ComingSoonStep"
 import { AiModelsStep } from "./checklist/AiModelsStep"
+import { RoleGatedStep } from "./checklist/RoleGatedStep"
 
 interface SetupChecklistDrawerProps {
   open: boolean
@@ -45,6 +47,11 @@ export function SetupChecklistDrawer({
 }: SetupChecklistDrawerProps) {
   const allDone = state.completedCount === state.totalCount && state.totalCount > 0
   const progress = state.totalCount === 0 ? 0 : state.completedCount / state.totalCount
+
+  // FRO-334: caller's resolved project role (AD-12 max-wins). null means an
+  // unsynced/local-only project — no server floor to gate against, so every
+  // step stays editable (see RoleGatedStep doc comment).
+  const roleLevel = project.syncRole?.level ?? null
 
   // Activation milestone: fire once when the checklist first reaches 100%.
   // Consent-gated at the posthog module level.
@@ -94,7 +101,13 @@ export function SetupChecklistDrawer({
             description="A short system prompt that shapes tone, formality, and style. Shared with everyone in this project."
             complete={state.aiInstructions}
           >
-            <AiInstructionsStep project={project} onUpdated={onProjectUpdated} />
+            <RoleGatedStep
+              roleLevel={roleLevel}
+              requiredRole={ROLE.MAINTAINER}
+              actionLabel="Editing translation instructions"
+            >
+              <AiInstructionsStep project={project} onUpdated={onProjectUpdated} />
+            </RoleGatedStep>
           </ChecklistItem>
 
           <ChecklistItem
@@ -102,10 +115,16 @@ export function SetupChecklistDrawer({
             description="Translators and reviewers join with the same permissions you choose."
             complete={state.collaborators}
           >
-            <InviteStep
-              projectId={project.id}
-              onSharesChanged={onSharesChanged}
-            />
+            <RoleGatedStep
+              roleLevel={roleLevel}
+              requiredRole={ROLE.PROJECT_LEAD}
+              actionLabel="Inviting collaborators"
+            >
+              <InviteStep
+                projectId={project.id}
+                onSharesChanged={onSharesChanged}
+              />
+            </RoleGatedStep>
           </ChecklistItem>
 
           <ChecklistItem
@@ -113,7 +132,13 @@ export function SetupChecklistDrawer({
             description="Gemini TTS is recommended for voice; Whisper transcription runs locally."
             complete={state.aiModels}
           >
-            <AiModelsStep project={project} onUpdated={onProjectUpdated} />
+            <RoleGatedStep
+              roleLevel={roleLevel}
+              requiredRole={ROLE.MAINTAINER}
+              actionLabel="Configuring voice and transcription"
+            >
+              <AiModelsStep project={project} onUpdated={onProjectUpdated} />
+            </RoleGatedStep>
           </ChecklistItem>
 
           <ComingSoonStep

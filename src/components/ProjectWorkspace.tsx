@@ -1349,6 +1349,14 @@ export function ProjectWorkspace() {
 
   const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string) => {
     if (!project?.id) return
+    // FRO-365: defense-in-depth — the selection-island Translate button and
+    // the header "Run AI completions"/"Complete all" actions are already
+    // hidden below the contributor floor (SelectionBar.tsx, registry.ts), and
+    // the server 403s the resulting target.cell.commit regardless. This guard
+    // stops a below-floor caller from getting even a local optimistic echo
+    // (applyOptimisticTargetEdit) of a write the server will refuse, matching
+    // the same mirror-check used by handleEditorCommit/commitTrayFootnoteText.
+    if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
     // Optimistic local patch BEFORE the outbox enqueue. Mirrors what
     // handleEditorCommit in EditorTable does for hand-typed edits, and
     // collapses the race window where `cells.translated` would otherwise

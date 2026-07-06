@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { clearSelection, MAX_SELECTED, useSelectedIds } from "@/lib/audio/selection"
 import { emitCellValidate, emitCellUnvalidate } from "@/lib/sync/events-emit"
+import { canPerform } from "@/lib/sync/role-policy"
 
 interface Props {
   project: ProjectRecord
@@ -192,6 +193,16 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
       setRunning({ kind: "idle" })
     }
   }, [selectedCells, username, unvalidatableCount, isBusy, project.id])
+
+  // FRO-365: viewers (and any role below the lowest gated action here —
+  // REVIEWER 300, the validate floor) get no selection affordance at all.
+  // canPerform fails OPEN when the role is unknown (local/legacy projects
+  // with no syncRole), so this only suppresses the bar for a KNOWN
+  // sub-reviewer role — never blocks legacy non-cloud projects.
+  const roleLevel = project.syncRole?.level ?? null
+  if (roleLevel != null && !canPerform("cell.validate", roleLevel) && !canPerform("target.cell.commit", roleLevel)) {
+    return null
+  }
 
   if (selectedCells.length === 0) return null
 

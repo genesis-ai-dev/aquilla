@@ -18,6 +18,9 @@ import { PRESET_VOICES } from "@/lib/audio/voices"
 import { NewVoiceModal } from "@/components/voice/NewVoiceModal"
 import { providerInfo, resolveTtsProvider } from "@/lib/audio/tts-providers"
 import type { FrontierSession } from "@/lib/frontier/types"
+import { ROLE } from "@/lib/frontier/roles"
+import { denialMessage } from "@/lib/permissions/denial"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 export interface CastMemberStats {
   /** Lines assigned to this cast member in the current file. */
@@ -43,6 +46,14 @@ interface Props {
   /** The per-cell "clone from this take" seed (opens the clone workflow). */
   seedCellId?: string | null
   seedSignal?: number
+  /**
+   * FRO-365: the caller's resolved project role level (project.syncRole?.level),
+   * or null/undefined for local projects with no live role (fail-open — same
+   * convention as canPerform/resolveEditorCapabilities). Character/voice writes
+   * mirror the server's `PUT/PATCH /projects/:id/settings` floor — maintainer
+   * (600) — since that's the actual route this panel's writes flow through.
+   */
+  roleLevel?: number | null
 }
 
 /** What the focused modal is doing right now. */
@@ -55,6 +66,7 @@ type Editing =
 export function VoiceLibraryPanel({
   targetLanguage, settings, onSettingsChange, projectId, fileId, session,
   selectedVoiceId, onSelectVoice, castStats, cells, seedCellId, seedSignal,
+  roleLevel,
 }: Props) {
   const [voices, setVoices] = useState<Voice[]>([])
   const [defaultVoiceId, setDefaultVoiceId] = useState<string | undefined>(undefined)
@@ -62,6 +74,13 @@ export function VoiceLibraryPanel({
   const seededRef = useRef<string | null>(null)
   const [editing, setEditing] = useState<Editing>({ kind: "closed" })
   const [query, setQuery] = useState("")
+
+  // FRO-365: character/voice writes flow through PUT/PATCH /settings, which
+  // the server gates at maintainer (600). Fail-open (null roleLevel) for
+  // local projects that never resolve a syncRole — same convention as
+  // resolveEditorCapabilities / canPerform.
+  const canEditVoices = roleLevel == null || roleLevel >= ROLE.MAINTAINER
+  const voiceDenialReason = !canEditVoices ? denialMessage(ROLE.MAINTAINER, roleLevel) : null
 
   // Seed the local library once per project.
   useEffect(() => {
@@ -81,15 +100,22 @@ export function VoiceLibraryPanel({
     onSelectVoice?.(id)
   }, [onSelectVoice])
 
+  // FRO-365: writeBack/saveVoice are the character-CRUD write path (mirrors
+  // PUT/PATCH /settings, maintainer-gated server-side). A below-floor caller
+  // must not get even a LOCAL echo of the write — otherwise their own
+  // localStorage/IDB looks like it "saved" even though the server 403s the
+  // sync, which is the false-positive UX this ticket calls out.
   const writeBack = useCallback((nextVoices: Voice[], nextDefault: string | undefined) => {
+    if (!canEditVoices) return
     setVoices(nextVoices)
     setDefaultVoiceId(nextDefault)
     void onSettingsChange({ voices: nextVoices, defaultVoiceId: nextDefault })
-  }, [onSettingsChange])
+  }, [onSettingsChange, canEditVoices])
 
   // Append-or-replace + select. (Computed outside the updater to avoid React's
   // "setState during render" warning.)
   const saveVoice = useCallback((voice: Voice) => {
+    if (!canEditVoices) return
     const exists = voices.some((v) => v.id === voice.id)
     const next = exists ? voices.map((v) => (v.id === voice.id ? voice : v)) : [...voices, voice]
     const nextDefault = defaultVoiceId ?? next[0]?.id
@@ -97,14 +123,15 @@ export function VoiceLibraryPanel({
     setDefaultVoiceId(nextDefault)
     void onSettingsChange({ voices: next, defaultVoiceId: nextDefault })
     select(voice.id)
-  }, [voices, defaultVoiceId, onSettingsChange, select])
+  }, [voices, defaultVoiceId, onSettingsChange, select, canEditVoices])
 
   const deleteVoice = useCallback((voice: Voice) => {
+    if (!canEditVoices) return
     const next = voices.filter((v) => v.id !== voice.id)
     const nextDefault = defaultVoiceId === voice.id ? next[0]?.id : defaultVoiceId
     if (selectedId === voice.id) select(next[0]?.id ?? "")
     writeBack(next, nextDefault)
-  }, [voices, defaultVoiceId, selectedId, writeBack, select])
+  }, [voices, defaultVoiceId, selectedId, writeBack, select, canEditVoices])
 
   const makeDefault = useCallback((voice: Voice) => writeBack(voices, voice.id), [voices, writeBack])
 
@@ -156,6 +183,7 @@ export function VoiceLibraryPanel({
               active={voice.id === selectedId}
               isDefault={voice.id === defaultVoiceId}
               stats={castStats?.get(voice.id)}
+              canEdit={canEditVoices}
               onSelect={() => select(voice.id)}
               onEdit={() => setEditing({ kind: "edit", voice })}
               onMakeDefault={() => makeDefault(voice)}
@@ -165,16 +193,21 @@ export function VoiceLibraryPanel({
         )}
       </div>
 
-      {/* One button — the modal carries both ways to make a voice. */}
+      {/* One button — the modal carries both ways to make a voice.
+          FRO-365: disabled below the maintainer floor (viewers/contributors
+          get a tooltip explaining why, not a silent no-op after a modal). */}
       <div className="border-t p-3">
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full justify-center border-dashed"
-          onClick={() => setEditing({ kind: "create" })}
-        >
-          <Plus className="mr-2 h-4 w-4" /> New voice
-        </Button>
+        <AppTooltip content={voiceDenialReason ?? undefined}>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full justify-center border-dashed"
+            disabled={!canEditVoices}
+            onClick={() => setEditing({ kind: "create" })}
+          >
+            <Plus className="mr-2 h-4 w-4" /> New voice
+          </Button>
+        </AppTooltip>
       </div>
 
       {editing.kind !== "closed" && (
@@ -190,8 +223,8 @@ export function VoiceLibraryPanel({
           session={session}
           cells={cells ?? []}
           onSave={saveVoice}
-          onDelete={editing.kind === "edit" ? () => deleteVoice(editing.voice) : undefined}
-          onMakeDefault={editing.kind === "edit" ? () => makeDefault(editing.voice) : undefined}
+          onDelete={editing.kind === "edit" && canEditVoices ? () => deleteVoice(editing.voice) : undefined}
+          onMakeDefault={editing.kind === "edit" && canEditVoices ? () => makeDefault(editing.voice) : undefined}
           initialMode={editing.kind === "clone" ? "clone" : "gemini"}
           seedCellId={editing.kind === "clone" ? editing.seedCellId : null}
         />
@@ -203,7 +236,7 @@ export function VoiceLibraryPanel({
 /** A single selectable voice row: avatar · name · meta · narrator star ·
  *  selected check · hover ⋯ menu. Click selects; drag assigns onto a line. */
 function VoiceRow({
-  voice, projectProvider, active, isDefault, stats, onSelect, onEdit, onMakeDefault, onDelete,
+  voice, projectProvider, active, isDefault, stats, canEdit, onSelect, onEdit, onMakeDefault, onDelete,
 }: {
   voice: Voice
   /** The project's configured TTS provider — the fallback for voices that
@@ -212,6 +245,10 @@ function VoiceRow({
   active: boolean
   isDefault: boolean
   stats?: CastMemberStats
+  /** FRO-365: whether the caller may edit/delete/set-narrator. Selecting a
+   *  voice (to assign to lines) is always allowed — only the ⋯ menu (character
+   *  CRUD) is gated. */
+  canEdit: boolean
   onSelect: () => void
   onEdit: () => void
   onMakeDefault: () => void
@@ -262,35 +299,41 @@ function VoiceRow({
           <Star className="h-2.5 w-2.5" /> Narrator
         </span>
       )}
-      <Popover open={menuOpen} onOpenChange={setMenuOpen}>
-        <PopoverTrigger
-          render={
-            <button
-              type="button"
-              onClick={(e) => e.stopPropagation()}
-              title="More"
-              aria-label="More voice actions"
-              className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus:opacity-100 group-hover:opacity-100 data-[popup-open]:opacity-100"
-            >
-              <MoreHorizontal className="h-4 w-4" />
-            </button>
-          }
-        />
-        <PopoverContent align="end" side="bottom" className="w-44 p-1" onClick={(e) => e.stopPropagation()}>
-          <MenuItem icon={Pencil} label="Edit" onClick={() => { setMenuOpen(false); onEdit() }} />
-          {!isDefault && (
-            <MenuItem icon={Star} label="Set as narrator" onClick={() => { setMenuOpen(false); onMakeDefault() }} />
-          )}
-          {!voice.builtIn && (
-            <MenuItem
-              icon={Trash2}
-              label="Delete"
-              destructive
-              onClick={() => { setMenuOpen(false); onDelete() }}
-            />
-          )}
-        </PopoverContent>
-      </Popover>
+      {/* FRO-365: the ⋯ menu is character CRUD (edit/set-narrator/delete) —
+          hidden below the maintainer floor. Selecting/dragging a voice to
+          assign it to a line stays available (a separate, lower-floor
+          concern this ticket doesn't touch). */}
+      {canEdit && (
+        <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+          <PopoverTrigger
+            render={
+              <button
+                type="button"
+                onClick={(e) => e.stopPropagation()}
+                title="More"
+                aria-label="More voice actions"
+                className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus:opacity-100 group-hover:opacity-100 data-[popup-open]:opacity-100"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+            }
+          />
+          <PopoverContent align="end" side="bottom" className="w-44 p-1" onClick={(e) => e.stopPropagation()}>
+            <MenuItem icon={Pencil} label="Edit" onClick={() => { setMenuOpen(false); onEdit() }} />
+            {!isDefault && (
+              <MenuItem icon={Star} label="Set as narrator" onClick={() => { setMenuOpen(false); onMakeDefault() }} />
+            )}
+            {!voice.builtIn && (
+              <MenuItem
+                icon={Trash2}
+                label="Delete"
+                destructive
+                onClick={() => { setMenuOpen(false); onDelete() }}
+              />
+            )}
+          </PopoverContent>
+        </Popover>
+      )}
       {active && <Check className="h-4 w-4 shrink-0 text-primary" />}
     </div>
   )

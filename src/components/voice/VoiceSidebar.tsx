@@ -38,9 +38,9 @@ export function VoiceSidebar({
   project, projectId, tts, session, username,
   targetLanguage, fileId, cells, cloneOpen, onCloneOpenChange, cloneSeedCellId,
 }: VoiceSidebarProps) {
-  // `project` and `username` are part of the rail's contract (the studio is
-  // project-scoped) but the cast roster reads everything it needs off `tts`.
-  void project
+  // `username` is part of the rail's contract (the studio is project-scoped)
+  // but the cast roster reads everything else it needs off `tts`.
+  // FRO-365: `project.syncRole?.level` gates character CRUD in VoiceLibraryPanel.
   void username
 
   // Translate the host's open/close clone signal into a monotonically rising
@@ -70,6 +70,7 @@ export function VoiceSidebar({
             cells={cells}
             seedCellId={cloneSeedCellId}
             seedSignal={seedSignal}
+            roleLevel={project.syncRole?.level ?? null}
           />
         </div>
       </div>

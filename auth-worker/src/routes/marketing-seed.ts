@@ -52,7 +52,7 @@ function words(s: string): number {
   return t ? t.split(/\s+/).length : 0
 }
 
-async function seedMarketing(db: D1Database): Promise<{
+async function seedMarketing(db: AquillaDb): Promise<{
   userId: number
   orgId: number
   projectId: string
@@ -215,7 +215,7 @@ function gateOpen(c: { env: AuthHonoEnv["Bindings"] }): boolean {
 marketing.post("/seed", async (c) => {
   if (!gateOpen(c)) return c.json({ error: "Not found" }, 404)
   try {
-    const ids = await seedMarketing(c.env.AQUILLA_DB)
+    const ids = await seedMarketing(c.env.AQUILLA_PG)
     return c.json({ ok: true, user: { id: ids.userId, username: M_USERNAME }, org: { id: ids.orgId, name: M_ORG_NAME }, project: { id: ids.projectId, name: M_PROJECT_NAME } })
   } catch (err) {
     console.error("[marketing-seed] failed:", err)
@@ -229,7 +229,7 @@ marketing.post("/login", async (c) => {
     return c.json({ error: "Authentication is not configured (SECRET_KEY/ALGORITHM)" }, 503)
   }
   try {
-    const ids = await seedMarketing(c.env.AQUILLA_DB)
+    const ids = await seedMarketing(c.env.AQUILLA_PG)
     const jwt = new JWTService(c.env)
     const accessToken = await jwt.createAccessToken(M_USERNAME)
     return c.json({

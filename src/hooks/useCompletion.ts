@@ -33,6 +33,7 @@ import {
   resetBatchCompletionState,
   clearBatchCompletionProgress,
   incrementBatchCompletionDone,
+  incrementBatchCompletionFailed,
   isBatchCompletionCancelled,
   getBatchCompletionSignal,
   cancelBatchCompletion,
@@ -350,46 +351,73 @@ export function useCompletion(
           briefSummary,
         })
 
+        // FRO-361: a sub-batch call gets one retry before it's given up on.
+        // Most failures here are transient (timeout, 5xx, flaky network) and
+        // a single retry clears the large majority without materially
+        // slowing the run.
         let result = ""
-        try {
-          result = await complete({
-            settings: effectiveSettings, session, messages,
-            stream: true,
-            onChunk: (full) => consumeFull(full),
-            // FRO-235 fix: getBatchCompletionSignal(runId) returns an
-            // already-aborted signal when this run has been superseded.
-            signal: getBatchCompletionSignal(runId),
-            // Model A/B: one batch request drafts every cell in the chunk; the
-            // first gesture on any of them reports (server keeps one outcome).
-            onAbAssignment: (ab) => {
-              for (const c of chunk) noteAbAssignment(c.fileId, c.id, ab)
-            },
-          })
-        } catch (err) {
-          // AbortError: user cancelled (or run superseded) — clear all
-          // still-pending cells cleanly.
-          if (err instanceof DOMException && err.name === "AbortError") {
-            for (let i = 0; i < chunk.length; i++) {
-              const c = chunk[i]
-              setPreviews((p) => { const m = new Map(p); m.delete(c.id); return m })
-              setCompleting((p) => { const m = new Map(p); m.delete(c.id); return m })
-            }
+        let chunkFailed = false
+        let lastErr: unknown
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            result = await complete({
+              settings: effectiveSettings, session, messages,
+              stream: true,
+              onChunk: (full) => consumeFull(full),
+              // FRO-235 fix: getBatchCompletionSignal(runId) returns an
+              // already-aborted signal when this run has been superseded.
+              signal: getBatchCompletionSignal(runId),
+              // Model A/B: one batch request drafts every cell in the chunk; the
+              // first gesture on any of them reports (server keeps one outcome).
+              onAbAssignment: (ab) => {
+                for (const c of chunk) noteAbAssignment(c.fileId, c.id, ab)
+              },
+            })
+            lastErr = undefined
             break
+          } catch (err) {
+            // AbortError: user cancelled (or run superseded) — clear all
+            // still-pending cells cleanly and stop the whole run (this is
+            // the one case where not continuing is correct: the user asked
+            // to stop, or a newer run has taken over).
+            if (err instanceof DOMException && err.name === "AbortError") {
+              for (let i = 0; i < chunk.length; i++) {
+                const c = chunk[i]
+                setPreviews((p) => { const m = new Map(p); m.delete(c.id); return m })
+                setCompleting((p) => { const m = new Map(p); m.delete(c.id); return m })
+              }
+              chunkFailed = true
+              lastErr = err
+              break
+            }
+            lastErr = err
+            // First attempt failed on a real error — retry once immediately.
           }
-          // Whole sub-batch failed before any cell received content — mark every
-          // still-generating cell in this chunk as errored and stop. Don't
-          // advance to subsequent sub-batches: if the model/network is down
-          // there's no point trying again 30 cells later.
-          const msg = err instanceof Error ? err.message : "Failed"
+        }
+
+        if (lastErr) {
+          if (lastErr instanceof DOMException && lastErr.name === "AbortError") break
+
+          // FRO-361: sub-batch failed twice (original + one retry). Skip this
+          // chunk — mark its still-uncommitted cells as errored — and CONTINUE
+          // to the next chunk rather than abandoning the rest of the file.
+          // The overall run reports the failure via the progress summary
+          // (see incrementBatchCompletionFailed below) instead of going quiet.
+          const msg = lastErr instanceof Error ? lastErr.message : "Failed"
+          let skippedCount = 0
           for (let i = 0; i < chunk.length; i++) {
             if (filledText.has(i + 1)) continue
             const c = chunk[i]
             setCompleting((p) => new Map(p).set(c.id, "error"))
             setErrors((p) => new Map(p).set(c.id, msg))
+            skippedCount += 1
           }
-          posthog.captureException(err instanceof Error ? err : new Error(String(err)))
-          return
+          if (skippedCount > 0) incrementBatchCompletionFailed(runId, skippedCount)
+          posthog.captureException(lastErr instanceof Error ? lastErr : new Error(String(lastErr)))
+          chunkFailed = true
         }
+
+        if (chunkFailed) continue
 
         consumeFull(result)
 

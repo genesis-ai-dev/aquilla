@@ -12,7 +12,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *
  * TabStrip renders a role="tablist" aria-label="Open files" once a file
  * is opened. Each tab has role="tab" with the filename as title and a
- * close button aria-label="Close <filename>".
+ * Close button aria-label="Close <filename>" — revealed on tab hover.
  *
  * Clicking a second file opens a second tab. Clicking the close button
  * on a tab removes it from the tablist.
@@ -39,7 +39,9 @@ test("TabStrip shows file tab and close button removes it", async ({ alice }) =>
   const tabs = tabList.getByRole("tab")
   await expect(tabs.first()).toBeVisible({ timeout: 3_000 })
 
-  // Close the tab (aria-label="Close sample").
+  // Close button is hover-revealed — hover the tab first.
+  const tab = tabs.first()
+  await tab.hover()
   const closeBtn = tabList.getByRole("button", { name: /^Close /i }).first()
   await expect(closeBtn).toBeVisible({ timeout: 3_000 })
   await closeBtn.click()

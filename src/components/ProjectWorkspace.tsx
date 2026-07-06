@@ -3528,21 +3528,6 @@ export function ProjectWorkspace() {
                     }
                   : null
               }
-              trailing={
-                // Per-file view-mode control — lives with the content it
-                // affects, not in the global header (which holds actions).
-                project && centerSurface === "editor" && activeFileId ? (
-                  <EditorModeToggle
-                    lens={lens}
-                    onChange={(l) => {
-                      setLens(l)
-                      // Surface the Voices tab when entering the Audio lens.
-                      if (l === "audio") setDockTab("voices")
-                    }}
-                    timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
-                  />
-                ) : undefined
-              }
             />
             {project && activeFileId && (
               <>

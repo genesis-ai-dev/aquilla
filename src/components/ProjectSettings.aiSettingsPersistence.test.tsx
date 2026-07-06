@@ -85,10 +85,17 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 // Intentionally NOT mocked: we want the real buildCompletionSettings so a
 // regression in the merge logic itself fails this test.
 
-vi.mock("@/lib/completion/completion-service", () => ({
-  fetchModels: vi.fn().mockResolvedValue([]),
-  resolveProvider: vi.fn(() => "frontier"),
-}))
+vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
+  // Partial mock: other modules in the render tree (e.g. lib/ab/feedback.ts)
+  // import constants like FRONTIER_CHAT_URL from this module — keep the real
+  // exports and stub only the network-touching functions.
+  const actual = await importOriginal<typeof import("@/lib/completion/completion-service")>()
+  return {
+    ...actual,
+    fetchModels: vi.fn().mockResolvedValue([]),
+    resolveProvider: vi.fn(() => "frontier"),
+  }
+})
 
 let lastUpdateProjectArg: ProjectRecord | null = null
 vi.mock("@/lib/store/project-index", () => ({

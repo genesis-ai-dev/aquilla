@@ -1424,6 +1424,44 @@ case 'cell.audio.attach': {
       return []
     }
 
+    case 'target.cell.repin': {
+      // FRO-478: "accept upstream change as-is." Updates ONLY the target
+      // row's source_event_id — value, event_id (chain head), validated,
+      // and endorsement_count are all deliberately untouched (spec §7:
+      // "validators are the scarce bilingual experts; a stale flag plus an
+      // oversight count is the honest signal"). Non-chain-mutating (not in
+      // CHAIN_MUTATING_KINDS): repin doesn't compete for the chain slot.
+      //
+      // Guarded by expectedTargetEventId: the WHERE clause requires the
+      // target row's CURRENT event_id to still equal the head the reviewer
+      // observed when they opened the review panel. If a translator
+      // re-committed in the meantime, cells.event_id has already moved past
+      // expectedTargetEventId and this UPDATE matches zero rows — a silent,
+      // safe no-op (the route/UI layer detects zero-rows-affected and
+      // reports the cell as skipped for bulk repin).
+      const p = event.payload as EventPayloads['target.cell.repin']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`target.cell.repin event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cells
+                SET source_event_id = ?
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'
+                AND event_id = ?`,
+          )
+          .bind(
+            p.sourceEventId,
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            p.expectedTargetEventId,
+          ),
+      )
+      return ['cells']
+    }
+
     default: {
       // Defensive exhaustiveness check. If a new EventKind is added without
       // a case here this triggers a TS compile error.

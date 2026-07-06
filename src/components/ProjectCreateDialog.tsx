@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { v4 as uuid } from "uuid"
 import { Info } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -13,6 +13,14 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -20,7 +28,9 @@ import {
 import { createProject } from "@/lib/store/project-index"
 import { createCloudProject } from "@/lib/sync/cloud-projects"
 import { patchProjectSettings } from "@/lib/sync/project-settings"
+import { linkProjectSource } from "@/lib/sync/archive"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useProjectsForNavigation } from "@/hooks/useAccessibleProjects"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import posthog from "@/lib/posthog"
 
@@ -35,6 +45,21 @@ interface ProjectCreateDialogProps {
  *  - self-contained: owns its source and target (default).
  *  - source-only:    targetLanguage left blank; exists to be linked-against.
  *  - linked-target:  reads source from another project (shape recorded locally).
+ *
+ * FRO-478: "linked-target" now actually links (previously the shape was
+ * recorded locally with no server-side link). See the "linked-target"
+ * branch in handleSubmit below for the create → link-with-seed sequence.
+ *
+ * SWARM-TODO(FRO-478): live-UI walk once FRO-476 is deployed —
+ *   1. + New Project → Advanced: project shape → "Linked target".
+ *   2. Pick an existing project from the "Upstream project" dropdown.
+ *   3. Choose Live (subscribed) vs Clone (one-time snapshot), and — the
+ *      "use its source" vs "use its translations" (consumes) choice.
+ *   4. Submit → confirm the dialog closes and the new project opens with
+ *      the upstream's files/cells ALREADY present (mode='live' seeds via
+ *      the first mirror sync inside the auth-worker's /link-source route).
+ *   5. Open Project Settings → "Source link" section → confirm it shows
+ *      the mode/consumes/gate/cursor badges (not just the upstream id).
  */
 type ProjectShape = "self-contained" | "source-only" | "linked-target"
 
@@ -46,8 +71,15 @@ type ProjectShape = "self-contained" | "source-only" | "linked-target"
  */
 const FIELD_CLASS = "h-9 px-3 focus-visible:ring-2 focus-visible:ring-ring/35"
 
+/** FRO-478: clone vs live — "a checkbox, not a fork" per the design spec §9.2. */
+type LinkMode = "clone" | "live"
+/** Which upstream lane becomes this project's source: sibling-language case
+ *  ("use its source") vs chain case ("use its translations"). */
+type LinkConsumes = "source" | "target"
+
 export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogProps) {
   const { session } = useFrontierSession()
+  const { projects: linkableProjects } = useProjectsForNavigation()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
   const [sourceLanguage, setSourceLanguage] = useState("")
@@ -55,6 +87,16 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
   const [shape, setShape] = useState<ProjectShape>("self-contained")
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+
+  // FRO-478: linked-target creation fields.
+  const [upstreamProjectId, setUpstreamProjectId] = useState("")
+  const [linkMode, setLinkMode] = useState<LinkMode>("live")
+  const [linkConsumes, setLinkConsumes] = useState<LinkConsumes>("source")
+
+  const upstreamOptions = useMemo(
+    () => linkableProjects.filter((p) => !p.archivedAt),
+    [linkableProjects],
+  )
 
   function pickShape(next: ProjectShape) {
     setShape(next)
@@ -64,6 +106,7 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
   function canSubmit(): boolean {
     if (!name.trim() || !sourceLanguage.trim()) return false
     if (shape !== "source-only" && !targetLanguage.trim()) return false
+    if (shape === "linked-target" && !upstreamProjectId) return false
     return true
   }
 
@@ -105,6 +148,19 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
       } catch (err) {
         console.warn("[project-create] settings write failed (non-fatal):", err)
       }
+
+      // FRO-478: linked-target creation — link the fresh project to the
+      // chosen upstream. For mode='live' this ALSO seeds the project (the
+      // auth-worker's link-source route runs the first mirror sync per the
+      // design spec §5 "seeding IS the first mirror sync") — files/cells
+      // arrive with provenance set, so the user lands in a populated project.
+      if (shape === "linked-target" && upstreamProjectId) {
+        await linkProjectSource(jwt, project.id, {
+          sourceProjectId: upstreamProjectId,
+          mode: linkMode,
+          consumes: linkConsumes,
+        })
+      }
     } catch (err) {
       console.error("[project-create] failed:", err)
       setError(err instanceof Error ? err.message : "Failed to create project. Please try again.")
@@ -125,6 +181,9 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
     setSourceLanguage("")
     setTargetLanguage("")
     setShape("self-contained")
+    setUpstreamProjectId("")
+    setLinkMode("live")
+    setLinkConsumes("source")
     setError(null)
     setOpen(false)
   }
@@ -212,6 +271,77 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
                 </span>
               </label>
             </RadioGroup>
+
+            {shape === "linked-target" && (
+              <div className="mt-3 space-y-3 border-t pt-3">
+                <div className="space-y-2">
+                  <Label htmlFor="upstream-project">Upstream project</Label>
+                  <Select value={upstreamProjectId} onValueChange={(value) => setUpstreamProjectId(value ?? "")}>
+                    <SelectTrigger id="upstream-project" className="w-full">
+                      <SelectValue placeholder="Choose a project to link from…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {upstreamOptions.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Clone or live?</Label>
+                  <RadioGroup
+                    value={linkMode}
+                    onValueChange={(value) => setLinkMode(value as LinkMode)}
+                    className="gap-2"
+                  >
+                    <label className="flex items-start gap-2.5 text-sm">
+                      <RadioGroupItem value="live" className="mt-0.5" />
+                      <span>
+                        <strong>Live</strong> — stays subscribed; upstream fixes
+                        propagate here automatically.
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-2.5 text-sm">
+                      <RadioGroupItem value="clone" className="mt-0.5" />
+                      <span>
+                        <strong>Clone</strong> — one-time snapshot; this project
+                        becomes independent immediately.
+                      </span>
+                    </label>
+                  </RadioGroup>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>What should become this project&apos;s source?</Label>
+                  <RadioGroup
+                    value={linkConsumes}
+                    onValueChange={(value) => setLinkConsumes(value as LinkConsumes)}
+                    className="gap-2"
+                  >
+                    <label className="flex items-start gap-2.5 text-sm">
+                      <RadioGroupItem value="source" className="mt-0.5" />
+                      <span>
+                        <strong>Its source</strong> — sibling-translation case
+                        (this project translates the same original text).
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-2.5 text-sm">
+                      <RadioGroupItem value="target" className="mt-0.5" />
+                      <span>
+                        <strong>Its translations</strong> — chain case (this
+                        project translates the upstream project&apos;s target,
+                        e.g. French → Chaluba).
+                      </span>
+                    </label>
+                  </RadioGroup>
+                </div>
+              </div>
+            )}
           </details>
 
           {error && (
@@ -225,7 +355,9 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
             className="h-9 w-full"
             disabled={!canSubmit() || submitting}
           >
-            {submitting ? "Creating…" : "Create Project"}
+            {submitting
+              ? (shape === "linked-target" ? "Creating & linking…" : "Creating…")
+              : (shape === "linked-target" ? "Create & Link" : "Create Project")}
           </Button>
         </form>
       </DialogContent>

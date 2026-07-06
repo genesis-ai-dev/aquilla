@@ -12,8 +12,8 @@ import { useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEve
 import { ChevronLeft, ChevronRight, Clock } from "lucide-react"
 import { useNavHistory, type NavEntry, type NavHistoryValue } from "@/context/NavHistoryContext"
 import { Popover, PopoverContent } from "@/components/ui/popover"
+import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { cn } from "@/lib/utils"
 
 const HOLD_MS = 350
 

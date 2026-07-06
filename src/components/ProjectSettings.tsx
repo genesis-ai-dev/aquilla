@@ -818,7 +818,7 @@ export function ProjectSettings() {
             <CardHeader><CardTitle>Project Info</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               <div>
-                <Label htmlFor="pname">Project Name</Label>
+                <FieldLabel htmlFor="pname">Project Name</FieldLabel>
                 <Input id="pname" value={name} onChange={(e) => setName(e.target.value)} />
               </div>
               {sharedUpdatedBy && sharedUpdatedAt && sharedVersion != null && sharedVersion > 0 && (
@@ -829,13 +829,13 @@ export function ProjectSettings() {
               )}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="sl">Source Language</Label>
+                  <FieldLabel htmlFor="sl">Source Language</FieldLabel>
                   <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
                     <Input id="sl" value={sourceLanguage} onChange={(e) => setSourceLanguage(e.target.value)} disabled={!canEditShared} />
                   </DisabledFieldTooltip>
                 </div>
                 <div>
-                  <Label htmlFor="tl">Target Language</Label>
+                  <FieldLabel htmlFor="tl">Target Language</FieldLabel>
                   <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
                     <Input id="tl" value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value)} disabled={!canEditShared} />
                   </DisabledFieldTooltip>
@@ -854,9 +854,9 @@ export function ProjectSettings() {
               <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-0.5">
-                    <Label htmlFor="bible-resources-enabled" className="text-sm">
+                    <FieldLabel htmlFor="bible-resources-enabled" className="text-sm">
                       Enable Bible resources
-                    </Label>
+                    </FieldLabel>
                     <p className="text-xs text-muted-foreground">
                       Scholarly reference data from bibletranslation.org in Search and the agent.
                     </p>
@@ -894,7 +894,7 @@ export function ProjectSettings() {
           <Card id="section-user">
             <CardHeader><CardTitle>User</CardTitle></CardHeader>
             <CardContent>
-              <Label htmlFor="un">Username</Label>
+              <FieldLabel htmlFor="un">Username</FieldLabel>
               <Input id="un" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="local" />
               <p className="mt-1 text-xs text-muted-foreground">Used as author name in translation history.</p>
             </CardContent>
@@ -929,7 +929,7 @@ export function ProjectSettings() {
 
               <div className="grid grid-cols-1 gap-4 pt-2 sm:grid-cols-2">
                 <div className="space-y-1">
-                  <Label htmlFor="top-k">Examples retrieved (top_k)</Label>
+                  <FieldLabel htmlFor="top-k">Examples retrieved (top_k)</FieldLabel>
                   <Input
                     id="top-k"
                     type="number"
@@ -944,7 +944,7 @@ export function ProjectSettings() {
                 </div>
 
                 <div className="space-y-1">
-                  <Label htmlFor="context-size">Context window</Label>
+                  <FieldLabel htmlFor="context-size">Context window</FieldLabel>
                   <Select
                     items={{
                       small: "Small — tight window",
@@ -971,7 +971,7 @@ export function ProjectSettings() {
                 </div>
 
                 <div className="space-y-1">
-                  <Label htmlFor="main-chat-language">Assistant language</Label>
+                  <FieldLabel htmlFor="main-chat-language">Assistant language</FieldLabel>
                   <Input
                     id="main-chat-language"
                     value={mainChatLanguage}
@@ -991,7 +991,7 @@ export function ProjectSettings() {
                     onCheckedChange={(checked) => setUseOnlyValidatedExamples(checked)}
                   />
                   <div>
-                    <Label htmlFor="validated-only">Validated examples only</Label>
+                    <FieldLabel htmlFor="validated-only">Validated examples only</FieldLabel>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       When on, only human-validated cells are used as reference examples — unvalidated results are excluded.
                     </p>
@@ -999,7 +999,7 @@ export function ProjectSettings() {
                 </div>
 
                 <div className="space-y-1">
-                  <Label htmlFor="few-shot-example-format">Reference example format</Label>
+                  <FieldLabel htmlFor="few-shot-example-format">Reference example format</FieldLabel>
                   <Select
                     items={{
                       "source-and-target": "Source + target (default)",
@@ -1034,7 +1034,7 @@ export function ProjectSettings() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="space-y-1">
-                <Label htmlFor="preceding-target-cells">Preceding committed-target cells</Label>
+                <FieldLabel htmlFor="preceding-target-cells">Preceding committed-target cells</FieldLabel>
                 <Input
                   id="preceding-target-cells"
                   type="number"
@@ -1070,7 +1070,7 @@ export function ProjectSettings() {
             </summary>
             <div className="space-y-4 border-t px-6 py-4">
               <div className="space-y-2">
-                <Label>Provider</Label>
+                <FieldLabel>Provider</FieldLabel>
                 <RadioGroup
                   name="provider"
                   value={provider}
@@ -1097,7 +1097,7 @@ export function ProjectSettings() {
               {provider === "custom" && (
                 <>
                   <div>
-                    <Label htmlFor="preset">Provider preset</Label>
+                    <FieldLabel htmlFor="preset">Provider preset</FieldLabel>
                     <Select
                       items={CUSTOM_PRESETS.map((p) => ({ value: p.id, label: p.label }))}
                       value={presetId}
@@ -1116,7 +1116,7 @@ export function ProjectSettings() {
                     </Select>
                   </div>
                   <div>
-                    <Label htmlFor="ep">Endpoint URL</Label>
+                    <FieldLabel htmlFor="ep">Endpoint URL</FieldLabel>
                     <div className="flex gap-2">
                       <Input
                         id="ep"
@@ -1157,7 +1157,7 @@ export function ProjectSettings() {
                   </p>
                   {models.length > 0 && (
                     <div>
-                      <Label htmlFor="mdl">Model</Label>
+                      <FieldLabel htmlFor="mdl">Model</FieldLabel>
                       <Select value={model} onValueChange={(value) => setModel(value ?? "")}>
                         <SelectTrigger id="mdl" className="w-full">
                           <SelectValue />
@@ -1172,7 +1172,7 @@ export function ProjectSettings() {
                   )}
                   {models.length === 0 && (
                     <div>
-                      <Label htmlFor="mdl-manual">Model (if not listed)</Label>
+                      <FieldLabel htmlFor="mdl-manual">Model (if not listed)</FieldLabel>
                       <Input
                         id="mdl-manual"
                         value={model}
@@ -1189,7 +1189,7 @@ export function ProjectSettings() {
 
               {provider === "frontier" && (
                 <div>
-                  <Label htmlFor="mdl-frontier">Model override (optional)</Label>
+                  <FieldLabel htmlFor="mdl-frontier">Model override (optional)</FieldLabel>
                   <Input
                     id="mdl-frontier"
                     value={model}
@@ -1204,22 +1204,34 @@ export function ProjectSettings() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="mt">Max Tokens</Label>
+                  <FieldLabel htmlFor="mt">Max Tokens</FieldLabel>
                   <Input id="mt" type="number" value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value))} />
                 </div>
-                <div>
-                  <Label>Temperature ({temperature})</Label>
-                  <input type="range" min="0" max="1" step="0.05" value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} className="mt-2 w-full" />
-                </div>
+                <Field>
+                  <FieldLabel>Temperature ({temperature})</FieldLabel>
+                  <Slider
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={[temperature]}
+                    onValueChange={(next) => setTemperature(Array.isArray(next) ? next[0] : next)}
+                  />
+                </Field>
               </div>
 
-              <div>
-                <Label>LLM Health Penalty ({Math.round(llmHealthPenalty * 100)}%)</Label>
-                <input type="range" min="0" max="0.5" step="0.05" value={llmHealthPenalty} onChange={(e) => setLlmHealthPenalty(Number(e.target.value))} className="mt-2 w-full" />
-                <p className="mt-1 text-xs text-muted-foreground">
+              <Field>
+                <FieldLabel>LLM Health Penalty ({Math.round(llmHealthPenalty * 100)}%)</FieldLabel>
+                <Slider
+                  min={0}
+                  max={0.5}
+                  step={0.05}
+                  value={[llmHealthPenalty]}
+                  onValueChange={(next) => setLlmHealthPenalty(Array.isArray(next) ? next[0] : next)}
+                />
+                <FieldDescription>
                   LLM translations are penalized by this amount in health calculations. 0% = full trust, 50% = heavy penalty. Default: 10%.
-                </p>
-              </div>
+                </FieldDescription>
+              </Field>
             </div>
           </details>
         )}
@@ -1322,7 +1334,7 @@ export function ProjectSettings() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="harmonize-min-role">Minimum role to run a harmonization sweep</Label>
+                <FieldLabel htmlFor="harmonize-min-role">Minimum role to run a harmonization sweep</FieldLabel>
                 <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
                   <Select
                     items={{
@@ -1375,7 +1387,7 @@ export function ProjectSettings() {
                   checked={autoSyncEnabled}
                   onCheckedChange={(checked) => setAutoSyncEnabled(checked)}
                 />
-                <Label htmlFor="auto-sync" className="text-sm">Auto-sync every</Label>
+                <FieldLabel htmlFor="auto-sync" className="text-sm">Auto-sync every</FieldLabel>
                 <Input
                   type="number"
                   min={1}

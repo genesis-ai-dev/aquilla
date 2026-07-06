@@ -2206,13 +2206,13 @@ function DirectionPanel({
             placeholder="e.g. Spanish, fra, swh"
             autoFocus
           />
-        </div>
-      </div>
+        </Field>
+      </FieldGroup>
       <p className="text-xs text-muted-foreground">
         You can change these later in <strong>Project Settings → Project Info</strong>.
       </p>
       {/* FRO-249: restore direction screen on failure so the user can retry */}
-      {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
+      {error && <FieldError role="alert">{error}</FieldError>}
       <div className="flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onSkip} disabled={confirming}>
           Skip for now

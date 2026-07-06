@@ -1,6 +1,12 @@
 import { useState } from "react"
 import { Copy } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { createOrgInvite } from "@/lib/frontier/orgs"
 import { ROLE, ORG_ROLE_PICKER, roleName } from "@/lib/frontier/roles"
@@ -71,32 +77,38 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="teammate@example.com (optional)"
-          className="h-9 w-64"
-          aria-label="Invitee email"
-        />
-        <select
-          value={role}
-          onChange={(e) => setRole(Number(e.target.value))}
-          aria-label="Org role"
-          className="h-9 rounded-md border border-border bg-background px-2 text-sm"
-        >
-          {ORG_ROLE_PICKER.map((level) => (
-            <option key={level} value={level}>
-              {roleName(level)}
-            </option>
-          ))}
-        </select>
+      <FieldGroup className="flex-row flex-wrap items-end gap-2">
+        <Field className="w-64">
+          <FieldLabel htmlFor="org-invite-email">Invitee email</FieldLabel>
+          <Input
+            id="org-invite-email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="teammate@example.com (optional)"
+            className="h-9"
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="org-invite-role">Org role</FieldLabel>
+          <select
+            id="org-invite-role"
+            value={role}
+            onChange={(e) => setRole(Number(e.target.value))}
+            className="h-9 rounded-md border border-border bg-background px-2 text-sm"
+          >
+            {ORG_ROLE_PICKER.map((level) => (
+              <option key={level} value={level}>
+                {roleName(level)}
+              </option>
+            ))}
+          </select>
+        </Field>
         <Button size="sm" onClick={submit} disabled={busy}>
           {busy ? "Sending…" : "Send invite"}
         </Button>
-      </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      </FieldGroup>
+      {error && <FieldError className="text-xs">{error}</FieldError>}
       {status && <p className="text-xs text-muted-foreground">{status}</p>}
       {link && (
         <div className="flex items-center gap-2">

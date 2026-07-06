@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { FootnoteTextEditor } from "./FootnoteTextEditor"
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 
 export type FootnoteMarkerStyle = "numbered" | "lettered"
 
@@ -121,8 +122,8 @@ export function AddFootnoteDialog({
             </div>
           </div>
 
-          <label className="grid gap-1.5 text-sm font-medium">
-            Footnote text
+          <Field>
+            <FieldLabel htmlFor="footnote-text">Footnote text</FieldLabel>
             <FootnoteTextEditor
               autoFocus
               rows={6}
@@ -132,15 +133,15 @@ export function AddFootnoteDialog({
               ariaLabel="Footnote text"
               initialSelectionStart={open && initialAnchorPrefix ? initialAnchorPrefix.length : null}
             />
-            <span className="text-xs font-normal text-muted-foreground">
+            <FieldDescription>
               {ref ? (
                 <>
                   Attached to <span className="font-mono text-foreground">{ref}</span>.{" "}
                 </>
               ) : null}
               Include the selected word or phrase before a colon when it helps clarify the note.
-            </span>
-          </label>
+            </FieldDescription>
+          </Field>
 
           {insertionPreview && (
             <div className="grid gap-1.5">

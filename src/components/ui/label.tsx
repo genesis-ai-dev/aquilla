@@ -10,8 +10,8 @@ const labelVariants = cva(
   {
     variants: {
       layout: {
-        /** Stacked above a control — matches Field gap-2 (sign-in page). */
-        stacked: "mb-2",
+        /** Stacked above a control when not wrapped in Field (Field supplies gap). */
+        stacked: "mb-1.5",
         /** Beside a control (checkbox row, Field + FieldLabel, horizontal flex). */
         inline: "",
       },

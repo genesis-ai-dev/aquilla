@@ -1301,16 +1301,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   return (
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
       <div className="shrink-0 bg-background">
-        {/* FRO-250: sticky section/chapter indicator strip. Appears above the
-            column header when the file has section-tagged cells. Keeps the
-            reader oriented while scrolling through long Bible chapters. */}
-        {currentSectionLabel && !looksLikeUuid(currentSectionLabel) && (
-          <div className="flex items-center gap-1.5 border-b border-border/40 px-4 py-0.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-              {currentSectionLabel}
-            </span>
-          </div>
-        )}
         {/* FRO-273: role badge — shown for read-only roles (viewer/commenter/reviewer) */}
         {readOnlyLabel && (
           <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
@@ -1319,7 +1309,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </div>
         )}
         <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
-          <div />
+          {/* FRO-250: sticky chapter label — left gutter, does not shift Source */}
+          <div className="flex items-center overflow-visible">
+            {currentSectionLabel && !looksLikeUuid(currentSectionLabel) && (
+              <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                {currentSectionLabel}
+              </span>
+            )}
+          </div>
           {/* In Audio mode the left column carries per-line voice controls, not
               source text, so label it "Controls" (no source-language badge). */}
           <div className="flex items-center gap-2">

@@ -221,9 +221,9 @@ function NewVoiceModalBody({
                   session={session}
                   onChange={update}
                 />
-                <p className="text-xs text-muted-foreground">
+                <FieldDescription>
                   A short clip is enough — we generate a base voice and clone it to match.
-                </p>
+                </FieldDescription>
 
                 {/* Or reuse audio already in the project. */}
                 {takes.length > 0 && (
@@ -328,32 +328,5 @@ function NewVoiceModalBody({
         />
       )}
     </>
-  )
-}
-
-function TabButton({
-  active, onClick, icon: Icon, label, tone,
-}: {
-  active: boolean
-  onClick: () => void
-  icon: typeof Sparkles
-  label: string
-  tone: "primary" | "emerald"
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-        !active && "text-muted-foreground hover:text-foreground",
-        active && tone === "primary" && "bg-primary text-primary-foreground shadow-sm",
-        active && tone === "emerald" && "bg-emerald-500 text-white shadow-sm",
-      )}
-    >
-      <Icon className="h-4 w-4" />
-      {label}
-    </button>
   )
 }

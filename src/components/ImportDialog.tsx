@@ -416,7 +416,7 @@ export function ImportDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="min-h-0 overflow-y-auto">
+        <DialogBody>
 
         {screen === "landing" && (
           <ImportLanding
@@ -670,7 +670,7 @@ export function ImportDialog({
             }}
           />
         )}
-        </div>
+        </DialogBody>
       </DialogContent>
     </Dialog>
   )
@@ -2889,6 +2889,30 @@ function TnPanel({ projectId, username, getToken, onImported }: TnPanelProps) {
         </Button>
       </div>
     </div>
+  )
+}
+
+function ImportDialogBackButton({
+  label,
+  onClick,
+  disabled,
+}: {
+  label: string
+  onClick: () => void
+  disabled?: boolean
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-sm"
+      disabled={disabled}
+      onClick={onClick}
+      aria-label={label}
+      className="-ml-2"
+    >
+      <ArrowLeft />
+    </Button>
   )
 }
 

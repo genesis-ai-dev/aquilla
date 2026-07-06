@@ -184,6 +184,28 @@
   html.dark {
     color-scheme: dark;
   }
+
+  /* Linear-style: hover/selection signals affordance — not the pointer hand. */
+  :where(
+    button,
+    [role="button"],
+    [role="menuitem"],
+    [role="tab"],
+    [role="option"],
+    summary,
+    a,
+    label
+  ) {
+    cursor: default;
+  }
+}
+
+/* Linear-style: neutralize explicit pointer/grab utilities on chrome actions.
+   Unlayered so this wins over Tailwind's cursor-* utilities. */
+.cursor-pointer,
+.cursor-grab,
+.active\:cursor-grabbing:active {
+  cursor: default;
 }
 
 /* ── Color-theme presets ─────────────────────────────────────────────

@@ -94,6 +94,7 @@
     "postgres": "^3.4.9",
     "posthog-js": "^1.372.5",
     "react": "^19.2.4",
+    "react-day-picker": "^10.0.1",
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
     "react-player": "^3.4.0",

@@ -22,6 +22,16 @@ import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
 import { getProjectAssignments, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { Badge } from "@/components/ui/badge"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { DatePicker, dateToDeadlineString, deadlineStringToDate } from "@/components/ui/date-picker"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 
 /** Max per-file rows shown on the overview; the rest are counted as "+N more". */
 const FILE_ROW_CAP = 12
@@ -197,8 +207,8 @@ export function ProjectOverview() {
   const [error, setError] = useState<string | null>(null)
   const [audio, setAudio] = useState<PortfolioProject | null>(null)
   const [files, setFiles] = useState<FileSummary[]>([])
-  const [editingDeadline, setEditingDeadline] = useState(false)
-  const [deadlineInput, setDeadlineInput] = useState("")
+  const [deadlineDialogOpen, setDeadlineDialogOpen] = useState(false)
+  const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
   const [showAllFiles, setShowAllFiles] = useState(false)
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
 
@@ -279,7 +289,7 @@ export function ProjectOverview() {
     try {
       await setProjectDeadline(jwt, id, value)
       await loadRow()
-      setEditingDeadline(false)
+      setDeadlineDialogOpen(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {

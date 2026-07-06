@@ -9,7 +9,9 @@ import {
   Pause, Play, SkipBack, SkipForward, Volume2, VolumeX,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Slider } from "@/components/ui/slider"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { cn } from "@/lib/utils"
 import {
@@ -239,24 +241,24 @@ function VolumeControl({ volume, onChange }: { volume: number; onChange: (v: num
   const muted = volume === 0
   return (
     <div className="flex items-center gap-2">
-      <button
+      <Button
         type="button"
+        size="icon-sm"
+        variant="ghost"
         title={muted ? "Unmute" : "Mute"}
         aria-label={muted ? "Unmute" : "Mute"}
         onClick={() => onChange(muted ? 1 : 0)}
-        className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
       >
         {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-      </button>
-      <input
-        type="range"
+      </Button>
+      <Slider
         min={0}
         max={1}
         step={0.01}
-        value={volume}
-        onChange={(e) => onChange(Number(e.target.value))}
+        value={[volume]}
+        onValueChange={(next) => onChange(Array.isArray(next) ? next[0] : next)}
         aria-label="Volume"
-        className="hidden h-1 w-24 accent-primary sm:block"
+        className="hidden w-24 sm:block"
       />
     </div>
   )

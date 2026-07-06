@@ -20,12 +20,19 @@ import {
   Check, ChevronsUpDown, Pause, Play, Search, UserPlus, Volume2, VolumeX,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { useVoiceRecency, touchVoice } from "@/lib/store/voice-recency"
 import { CropButton } from "./CropEditor"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Slider } from "@/components/ui/slider"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { useCellAudio } from "@/hooks/useCellAudio"
@@ -138,27 +145,28 @@ function VolumeButton({ volume, onChange }: { volume: number; onChange: (v: numb
     <Popover>
       <PopoverTrigger
         render={
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-sm"
             aria-label="Volume"
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+            className="shrink-0"
           >
             {volume === 0 ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
-          </button>
+          </Button>
         }
       />
       <PopoverContent align="end" side="top" className="w-44 p-2.5">
         <div className="flex items-center gap-2">
           <VolumeX className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <input
-            type="range"
+          <Slider
             min={0}
             max={1}
             step={0.01}
-            value={volume}
-            onChange={(e) => onChange(Number(e.target.value))}
-            className="h-1 flex-1 accent-primary"
+            value={[volume]}
+            onValueChange={(next) => onChange(Array.isArray(next) ? next[0] : next)}
             aria-label="Volume level"
+            className="flex-1"
           />
           <Volume2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </div>

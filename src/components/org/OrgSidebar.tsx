@@ -54,7 +54,7 @@ export function OrgSidebar() {
           <NavLink to="/admin" className={link}>Admin</NavLink>
         </>}
       </nav>
-      <div className="mt-auto pt-2 border-t flex flex-col gap-1">
+      <div className="mt-auto pt-2 flex flex-col gap-1">
         {/* FRO-243: Re-launch product tour */}
         <AppTooltip content="Take the product tour">
           <button

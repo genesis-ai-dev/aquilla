@@ -633,9 +633,9 @@ describe("PATCH /api/v2/admin/credits/org/:orgId", () => {
 // ── Section E: FRO-414 — chat's org-0 attribution shapes the display bug ────
 //
 // Root cause of FRO-414 ("compute-credits display is mislabeled"): chat.ts
-// hardcodes orgId=0 ("no-org fallback") for every recordCredit call, while
+// hardcoded orgId=0 ("no-org fallback") for every recordCredit call, while
 // agent.ts resolves the REAL project org. So a real org's ledger only ever
-// contains rail='agent' rows — never rail='llm' (chat) rows. Consequently
+// contained rail='agent' rows — never rail='llm' (chat) rows. Consequently
 // readSpend(realOrgId, ...) degenerates to totalCredits === agentCredits for
 // BOTH windows, which is exactly the "3 of 4 bars show the same number"
 // symptom reported in FRO-414 (Today ≈ Agent today, This week ≈ Agent this
@@ -643,16 +643,18 @@ describe("PATCH /api/v2/admin/credits/org/:orgId", () => {
 //
 // This is NOT a crossed-field bug in readSpend/creditsFor (Section B above
 // proves those keep day/week/agent as four independent, correctly-computed
-// accumulators). It's an org-attribution gap: chat has no project/org
-// context, so it can never appear in any real org's credits view. Fixing
-// that (resolving a real org for chat) is a bigger change than a display fix
-// — it would also change what creditGuard enforces against for chat — so
-// FRO-414 ships as a display/labeling fix (see CreditsPanel.tsx /
-// AdminCreditsSection.tsx) plus this pinning test, with the underlying
-// attribution gap flagged as follow-up work.
+// accumulators). It's an org-attribution gap: chat had no project/org
+// context, so it could never appear in any real org's credits view.
+//
+// FIXED in the FRO-414 follow-up: chat.ts now accepts an optional projectId
+// and resolves the project's org (membership-gated) for both creditGuard and
+// recordCredit — see chat-guard.test.ts "org credit attribution". Chat with
+// no project context still lands at org 0, so this test remains valid: it
+// pins the ledger-level fact that org-0 rows are invisible to a real org's
+// readSpend (which is why the attribution fix matters).
 describe("FRO-414: chat's orgId=0 write means real orgs never see chat spend", () => {
   it("chat-shaped recordCredit(orgId=0, rail='llm') does not appear in a real org's readSpend", async () => {
-    // Simulates exactly what chat.ts does today: record llm spend at org 0.
+    // Simulates project-less chat: record llm spend at org 0.
     await recordCredit(env.AQUILLA_PG, 0, 1, "llm", 100, 1) // 100¢ × 4 = 400 credits, but at org 0
     // Simulates exactly what agent.ts does today: record agent spend at the real org.
     await recordCredit(env.AQUILLA_PG, 1, 1, "agent", 10, 1) // 10¢ × 5 = 50 credits, at org 1

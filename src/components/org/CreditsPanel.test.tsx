@@ -64,8 +64,8 @@ describe("CreditsPanel — renders for maintainer when data is present", () => {
     await waitFor(() => expect(screen.getByTestId("credits-panel")).toBeInTheDocument())
 
     expect(screen.getByText("Compute credits")).toBeInTheDocument()
-    expect(screen.getByText("Today (project spend)")).toBeInTheDocument()
-    expect(screen.getByText("This week (project spend)")).toBeInTheDocument()
+    expect(screen.getByText("Today")).toBeInTheDocument()
+    expect(screen.getByText("This week")).toBeInTheDocument()
     // Agent section headline
     expect(screen.getByText(/Agent spend \(elevated rail/)).toBeInTheDocument()
     // Agent sub-bars
@@ -105,12 +105,12 @@ describe("CreditsPanel — FRO-414 regression: each bar binds to its own distinc
       showToOrg: true,
     },
     day: {
-      totalCredits: 11, // "Today (project spend)"
+      totalCredits: 11, // "Today"
       byRail: { llm: 0, agent: 33, tts: 0 },
       agentCredits: 33, // "Agent — today"
     },
     week: {
-      totalCredits: 99, // "This week (project spend)"
+      totalCredits: 99, // "This week"
       byRail: { llm: 0, agent: 77, tts: 0 },
       agentCredits: 77, // "Agent — this week"
     },
@@ -130,13 +130,13 @@ describe("CreditsPanel — FRO-414 regression: each bar binds to its own distinc
 
     // Pin each value to its OWN bar's row, not just "somewhere on the page" —
     // this is what catches a transposition that a plain getByText can't.
-    const todayRow = screen.getByText("Today (project spend)").closest("div")
+    const todayRow = screen.getByText("Today").closest("div")
     expect(todayRow).toHaveTextContent("11 cr")
     expect(todayRow).not.toHaveTextContent("33 cr")
     expect(todayRow).not.toHaveTextContent("99 cr")
     expect(todayRow).not.toHaveTextContent("77 cr")
 
-    const weekRow = screen.getByText("This week (project spend)").closest("div")
+    const weekRow = screen.getByText("This week").closest("div")
     expect(weekRow).toHaveTextContent("99 cr")
     expect(weekRow).not.toHaveTextContent("11 cr")
     expect(weekRow).not.toHaveTextContent("33 cr")

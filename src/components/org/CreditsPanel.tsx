@@ -62,22 +62,22 @@ export function CreditsPanel({
   return (
     <Section
       title="Compute credits"
-      description="Daily and weekly cap usage — project-attributed spend (agent + TTS). Regular chat is not tied to a project and is not included here."
+      description="Daily and weekly cap usage across all rails (agent, chat, TTS)"
       data-testid="credits-panel"
     >
       <div className="space-y-4">
-        {/* Daily total (agent + tts, all project-attributed rails) */}
+        {/* Daily total — all rails */}
         <CapBar
-          label="Today (project spend)"
+          label="Today"
           used={day.totalCredits}
           cap={config.dailyCap}
           pct={dayPct}
           variant="default"
         />
 
-        {/* Weekly total (agent + tts, all project-attributed rails) */}
+        {/* Weekly total — all rails */}
         <CapBar
-          label="This week (project spend)"
+          label="This week"
           used={week.totalCredits}
           cap={config.weeklyCap}
           pct={weekPct}
@@ -90,7 +90,7 @@ export function CreditsPanel({
             duplicate — it's a subset shown for visibility. */}
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/40">
           <p className="mb-2 text-xs font-medium text-amber-800 dark:text-amber-300">
-            Agent spend (elevated rail — included in the totals above, broken out for visibility)
+            Agent spend (elevated rail — included in the totals above)
           </p>
           <div className="space-y-2">
             <CapBar

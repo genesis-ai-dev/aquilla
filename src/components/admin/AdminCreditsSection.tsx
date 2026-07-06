@@ -70,22 +70,20 @@ export function AdminCreditsSection({ jwt }: { jwt: string }) {
     <div className="space-y-4">
       <p className="text-xs text-muted-foreground">
         Credit = 1¢ customer-facing price. Agent rail uses elevated markup (5×).
-        Caps are advisory when enforce is off (log + display only). Spend below is
-        project-attributed (agent + TTS) only — regular chat is not tied to a
-        project and is tracked separately, not per-org (see FRO-414).
+        Caps are advisory when enforce is off (log + display only).
       </p>
       <div className="overflow-x-auto rounded-lg border">
         <table className="w-full text-sm" data-testid="admin-credits-table">
           <thead>
             <tr className="bg-muted/40 text-left text-xs text-muted-foreground">
               <th className="px-3 py-2 font-medium">Org</th>
-              <th className="px-3 py-2 font-medium" title="Total project-attributed spend today (agent + TTS). Excludes regular chat.">
+              <th className="px-3 py-2 font-medium" title="Total spend today, all rails (agent + chat + TTS).">
                 Day spend
               </th>
               <th className="px-3 py-2 font-medium text-amber-700 dark:text-amber-400" title="Agent-only spend today — already included in Day spend, broken out for visibility.">
                 Agent (day)
               </th>
-              <th className="px-3 py-2 font-medium" title="Total project-attributed spend this week (agent + TTS). Excludes regular chat.">
+              <th className="px-3 py-2 font-medium" title="Total spend this week, all rails (agent + chat + TTS).">
                 Week spend
               </th>
               <th className="px-3 py-2 font-medium text-amber-700 dark:text-amber-400" title="Agent-only spend this week — already included in Week spend, broken out for visibility.">

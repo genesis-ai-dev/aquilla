@@ -26,6 +26,16 @@ export function buildCompletionSettings(
     temperature: overrides.temperature ?? base?.temperature ?? 0.3,
     systemPrompt: overrides.systemPrompt ?? base?.systemPrompt ?? "",
     llmHealthPenalty: overrides.llmHealthPenalty ?? base?.llmHealthPenalty ?? 0.1,
+    // FRO-408: these v1 retrieval-tuning keys were previously omitted here,
+    // so every save silently reset them to their factory defaults (or, when
+    // called with only e.g. a systemPrompt override, dropped whatever the
+    // user had set entirely) — the ProjectSettings.tsx Save Changes handler
+    // funnels every completion-settings edit through this function.
+    top_k: overrides.top_k ?? base?.top_k ?? 15,
+    contextSize: overrides.contextSize ?? base?.contextSize ?? "medium",
+    useOnlyValidatedExamples: overrides.useOnlyValidatedExamples ?? base?.useOnlyValidatedExamples ?? false,
+    main_chat_language: overrides.main_chat_language ?? base?.main_chat_language ?? "",
+    fewShotExampleFormat: overrides.fewShotExampleFormat ?? base?.fewShotExampleFormat ?? "source-and-target",
   }
 }
 

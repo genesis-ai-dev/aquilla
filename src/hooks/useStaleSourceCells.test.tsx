@@ -8,8 +8,10 @@ function makeResponse(staleCellIds: string[], extra: Partial<StaleSourceResponse
     fileId: "f1",
     staleCellIds,
     tombstonedCellIds: [],
+    upstreamStaleCellIds: [],
     upstreamProjectId: null,
     behindSeq: null,
+    ancestorBehind: false,
     ...extra,
   }
 }
@@ -96,6 +98,18 @@ describe("useStaleSourceCells", () => {
     )
     await waitFor(() => expect(result.current.tombstonedCellIds.has("c9")).toBe(true))
     expect(result.current.behindSeq).toEqual({ upstream: 10, cursor: 5 })
+  })
+
+  it("surfaces upstreamStaleCellIds and ancestorBehind from the response (FRO-477)", async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeResponse(["c1"], { upstreamStaleCellIds: ["c2"], ancestorBehind: true }),
+    )
+    const { result } = renderHook(() =>
+      useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken }),
+    )
+    await waitFor(() => expect(result.current.upstreamStaleCellIds.has("c2")).toBe(true))
+    expect(result.current.staleCellIds.has("c1")).toBe(true)
+    expect(result.current.ancestorBehind).toBe(true)
   })
 
   it("fires the mirror-sync lazy-pull trigger alongside the stale-source fetch (FRO-476 §7)", async () => {

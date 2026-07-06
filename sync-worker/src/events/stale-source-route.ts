@@ -39,6 +39,7 @@
 
 import { verifyTokenForProject } from "../auth"
 import { laneRelevantHeadSeq } from "./link-sync"
+import { computeUpstreamStaleCellIds } from "./inherited-staleness"
 
 export interface StaleSourceEnv {
   AQUILLA_PG?: AquillaDb
@@ -84,20 +85,28 @@ export async function handleStaleSourceRequest(
   // query throws and we fall back to legacy self-contained behavior.
   let upstreamProjectId: string | null = null
   let linkMode: string | null = null
+  let linkConsumes: string | null = null
   let linkCursor = 0
   try {
     const row = await env.AQUILLA_PG.prepare(
-      "SELECT source_project_id, source_link_mode, source_link_cursor FROM projects WHERE id = ?",
+      "SELECT source_project_id, source_link_mode, source_link_consumes, source_link_cursor FROM projects WHERE id = ?",
     )
       .bind(projectId)
-      .first<{ source_project_id: string | null; source_link_mode: string | null; source_link_cursor: number | string }>()
+      .first<{
+        source_project_id: string | null
+        source_link_mode: string | null
+        source_link_consumes: string | null
+        source_link_cursor: number | string
+      }>()
     upstreamProjectId = row?.source_project_id ?? null
     linkMode = row?.source_link_mode ?? null
+    linkConsumes = row?.source_link_consumes ?? null
     linkCursor = Number(row?.source_link_cursor ?? 0)
   } catch {
     // Migration not yet present — fall back to self-contained.
     upstreamProjectId = null
   }
+  const consumes = linkConsumes === "target" ? "target" : "source"
 
   // Clone-mode short-circuit (§2): never show upstream-drift flags.
   if (linkMode === "clone") {
@@ -106,8 +115,10 @@ export async function handleStaleSourceRequest(
       fileId,
       staleCellIds: [],
       tombstonedCellIds: [],
+      upstreamStaleCellIds: [],
       upstreamProjectId,
       behindSeq: null,
+      ancestorBehind: false,
     })
   }
 
@@ -185,7 +196,7 @@ export async function handleStaleSourceRequest(
   let behindSeq: BehindSeq | null = null
   if (upstreamProjectId && linkMode === "live") {
     try {
-      const head = await laneRelevantHeadSeq(env.AQUILLA_PG, upstreamProjectId)
+      const head = await laneRelevantHeadSeq(env.AQUILLA_PG, upstreamProjectId, consumes)
       if (head > linkCursor) {
         behindSeq = { upstream: head, cursor: linkCursor }
       }
@@ -195,12 +206,40 @@ export async function handleStaleSourceRequest(
     }
   }
 
+  // 5. Inherited staleness (FRO-477 §6): the per-hop chain walk. Only
+  // relevant for live-linked projects with at least one ancestor hop above
+  // the immediate upstream — a direct (single-hop) link has nothing to
+  // inherit (its own staleCellIds query above already covers that case).
+  // Scoped to this file's cell ids (reuses whatever cell set the direct
+  // query already touched, via a plain file-scoped id read) so the walk
+  // never scans the whole project.
+  let upstreamStaleCellIds: string[] = []
+  let ancestorBehind = false
+  if (upstreamProjectId && linkMode === "live") {
+    try {
+      const fileCellIdsRes = await env.AQUILLA_PG.prepare(
+        `SELECT DISTINCT cell_id FROM cells WHERE project_id = ? AND file_id = ?`,
+      )
+        .bind(projectId, fileId)
+        .all<{ cell_id: string }>()
+      const fileCellIds = (fileCellIdsRes.results ?? []).map((r) => r.cell_id)
+      const inherited = await computeUpstreamStaleCellIds({ AQUILLA_PG: env.AQUILLA_PG }, projectId, fileCellIds)
+      upstreamStaleCellIds = inherited.upstreamStaleCellIds
+      ancestorBehind = inherited.ancestorBehind
+    } catch (err) {
+      console.warn("upstream-stale (inherited) query failed:", err)
+      upstreamStaleCellIds = []
+    }
+  }
+
   return Response.json({
     projectId,
     fileId,
     staleCellIds,
     tombstonedCellIds,
+    upstreamStaleCellIds,
     upstreamProjectId,
     behindSeq,
+    ancestorBehind,
   })
 }

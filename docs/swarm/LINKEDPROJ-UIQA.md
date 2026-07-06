@@ -142,3 +142,97 @@ Setup: B's file open in the browser, **no reloads**; A's cell 2 edited via `POST
 - Pre-existing, unrelated: vite fs.allow 403 on `@fontsource-variable/geist` woff2 (worktree
   symlinked node_modules) — the single console error on every page; "1 failed" outbox badge on the
   seeded dev-project.
+
+---
+
+## Round 2 (post-fix)
+
+Date: 2026-07-06 · Branch `swarm/linkedproj-integration` @ `2ac232505` (build verified in-app sidebar).
+Same stack recipe as round 1: dev-stack from this worktree on isolated ports **6173/9788/9789**,
+shared PG `aquilla-dev-pg`, dev user via `/__dev/login`. Migration 0050 re-verified before boot
+(`source_project_id`/`source_link_*` on `projects`, `upstream_*`/`tombstoned_at` + partial index on
+`cells` all present). Round-1 projects intact (A/B/D 1 file each, Clone C still 0 files — born pre-fix).
+
+Round-2 projects (left in dev PG):
+
+| Project | id | link |
+|---|---|---|
+| QA2 Upstream A | `1936ea18-ae43-42af-bc13-a3abf37f978a` | none (same 4-cue VTT, file `019f3904-7719-736b-85ea-50838abf3e84`) |
+| QA2 Downstream B | `c72bc51b-d5dc-407e-9498-deb1f52825ae` | live / consumes=source ← A2 (file `d4d89d64…`) |
+| QA2 Clone C | `1e16c19b-7c30-4ff6-b2ad-201da08260c8` | clone ← A2 (file `19c0518c…`) |
+| QA2 SelfHeal E | `aa810f7b-fc89-40c4-9d5b-b8a90b6890ee` | live ← A2, link injected via SQL with 0 files (fabricated pre-fix state) |
+
+### Seed path observed: CLIENT FALLBACK (server-side seed not wired in the local dev stack)
+
+`POST /link-source` (live mode) returned 200 with **`"seeded": false`** and the client immediately
+fired its fallback `POST :9789/api/v1/projects/:B/link/sync` →
+`{"ranSync":true,"cellsMirrored":4,"filesMirrored":1,"fromSeq":0,"toSeq":5}`. Root cause of
+`seeded:false` locally: `scripts/dev-stack.ts` passes `SYNC_WORKER_URL=http://127.0.0.1:9789` as
+**process env**, but its own comment (line ~529) says only `--var` lands values in `c.env` — so the
+auth-worker actually sees wrangler.toml's top-level `[vars]` value **`https://api.aquilla.app/sync`**
+(the PROD sync host). `triggerLinkSeedSync` guards pass (SYNC_SECRET_KEY set in .dev.vars), the fetch
+goes to prod, fails auth/route, returns false, no local log line. So on the local stack the
+**server-side seed path is structurally unexercisable** and the client fallback is what round 2
+verified. NEW ISSUE (dev-stack wiring, not a feature bug): pass SYNC_WORKER_URL via `--var`, both to
+test the primary path locally and to stop the local dev auth-worker calling prod on every live link.
+
+### Check 1 — Seed at creation, live: **PASS** (client-fallback path)
+
+- Created A2 + imported 4-cue VTT (PG: 1 file / 4 cells). Created B2 via ProjectCreateDialog →
+  Linked target → upstream A2 → Live + "Its source" → Create & Link.
+- Landed in B2 with **no manual sync**: mirrored `qa2-source-a.vtt` auto-opened, all 4 source cells
+  visible, footer "4 cells". PG: B2 file row has a **new file id** (`d4d89d64…`), all 4 mirror cells
+  carry `upstream_event_id` provenance (event-sourced mirror, not projection writes).
+- Zero-file self-heal: round-1 B was already healed manually and Clone C never self-heals (by
+  design), so fabricated the pre-fix state — created plain project E, SQL-injected a live link with
+  0 files, opened `/project/E`. **Self-heal fired without reload**: automatic
+  `POST /link/sync` → `cellsMirrored:4, filesMirrored:1`, file auto-opened with all 4 cells; a
+  second automatic link/sync no-oped idempotently (`ranSync:false`).
+
+### Check 2 — Seed at creation, clone: **PASS**
+
+- Created C2 via the same dialog with Clone selected. `POST /link-source` → 200
+  `{"mode":"clone", "seeded":true}` — the snapshot ran **synchronously server-side in auth-worker**
+  (no sync-worker involvement, so the dev-stack wiring gap doesn't affect clones). No client
+  link/sync fired (correct — clones never subscribe).
+- C2 born WITH content: PG 1 file / 4 cells, UI shows all 4 texts. Clone cells have
+  `upstream_event_id` NULL (snapshot projection — fine, clones never re-sync).
+- **Global files.id PK bug fix verified**: C2's file row got a fresh id (`19c0518c…`); A2's row
+  (`019f3904…`) untouched in PG and A2's UI still lists its file with all 4 cells.
+- After A2's cell 1 was edited twice (r2, r3): C2 shows **0 amber / 0 violet** badges and still
+  renders the original text. Clone independence holds, non-vacuously this time.
+
+### Check 3 — Push text race (FRO-479) + first-open tone: **PASS**
+
+- Setup: translated B2 cell 1 (TipTap type + blur); PG target row pinned
+  (`source_event_id = e5ee2d5f…`, B2's mirror event).
+- Push race: with B2's file open and untouched in tab 1, edited A2 cell 1 via raw
+  `POST :9789/events` `source.cell.commit` (`…(REVISED r2)`, accepted id `161cc521…`, parent chained
+  on the import event). Within the observation window (first poll ≲15s after the event), the
+  untouched tab showed **1 amber `stale-source-indicator` on the correct row AND the mirrored source
+  text already updated to "(REVISED r2)"** — no reload. Round-1 BUG-3 (badge-without-text) is fixed.
+  Network trail in that tab confirms the fixed sequence: `link/sync` POST → `stale-source` →
+  `cells?since=6` delta + a targeted `cells?cellIds=30934676…` refetch (the post-sync revalidate).
+- First-open tone (round-1 BUG-2): edited A2 again (`(REVISED r3)`, id `331e6839…`) with B2 closed,
+  then fresh-opened B2's file and sampled badge tones every ~350ms for 12s. Badge rendered **amber
+  from first paint (t≈1.7s); violet never appeared**; text settled to r3 at t≈2.1s. No transient
+  violet, no reload needed.
+- Server gate exact-match: B2 `stale-source` → `staleCellIds:["30934676-…"]`,
+  `upstreamStaleCellIds:[]`, `tombstonedCellIds:[]`, `ancestorBehind:false`.
+- PG cross-check: B2 mirror source at `upstream_seq 6→7` across the two edits, B2 target value and
+  pin untouched by sync.
+
+### Residual notes (not regressions)
+
+- **Round-1 item 4 (cosmetic) still reproduces**: after picking an upstream project the combobox
+  trigger renders the raw project id (`1936ea18-…`), not "QA2 Upstream A". The fixer's code-review
+  claim ("base-ui Select renders the matched item's name") does not hold live — needs a real fix.
+- `gate:"validated"` still stored for consumes=source links (round-1 note 5, unchanged).
+- Console: only the pre-existing worktree-symlink font 403 (round-1 stack incident), zero new errors.
+- Round-1 Clone C (`16b013d8…`) remains empty in dev PG — pre-fix clones have no birth snapshot and
+  no self-heal; if anyone kept a real clone from before 2ac232505 it needs a manual re-create.
+
+**Verdict: all three round-1 defects verified fixed on the live stack.** Caveat: the server-side
+live seed (`seeded:true` for live mode) could not be exercised locally due to the dev-stack
+SYNC_WORKER_URL wiring above — production behavior of that path is untested; the client fallback
+covers it correctly.

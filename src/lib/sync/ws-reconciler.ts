@@ -93,6 +93,18 @@ export function isOwnWriteEcho(msg: { by?: string }, currentUserId: string): boo
   return !!msg.by && msg.by === currentUserId
 }
 
+/**
+ * True when an `event.applied` frame is a validation-state change
+ * (`cell.validate` / `cell.unvalidate`). These events project into the
+ * audit-stats read (`activeValidators` → the validation pill), NOT the
+ * `/files/:fileId/cells` row that the targeted cell refetch pulls — so a
+ * remote validation must also poke the per-cell audit-stats read, or the
+ * pill shows a stale validated-by state until the next full stats poll.
+ */
+export function isValidationEvent(kind: string): boolean {
+  return kind === "cell.validate" || kind === "cell.unvalidate"
+}
+
 export type ProjectWsClientMessage =
   | { t: "outbox.event"; event: OutboxRawEvent }
   | { t: "focus.claim"; cellId: string; leaseMs?: number }

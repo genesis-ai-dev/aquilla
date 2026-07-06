@@ -4,6 +4,7 @@ import {
   createLinkUpstreamChangedHandler,
   createWsReconciler,
   isOwnWriteEcho,
+  isValidationEvent,
   parseProjectWsMessage,
   type ProjectWsServerMessage,
 } from "./ws-reconciler"
@@ -537,5 +538,26 @@ describe("createLinkUpstreamChangedHandler (FRO-479 push accelerator)", () => {
 
     expect(syncA).toHaveBeenCalledTimes(1)
     expect(syncB).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("isValidationEvent", () => {
+  // Validation state (activeValidators → the pill's icon/color) projects into
+  // the audit-stats read, not the /files/:fileId/cells row. When a REMOTE
+  // user validates, the workspace's targeted revalidateCell alone leaves the
+  // pill stale until the next full stats poll — the handler must also poke
+  // revalidateCellStats for these kinds. If this predicate stops matching
+  // them, that multi-user staleness window regresses (investigated under
+  // FRO-348).
+  it("matches cell.validate and cell.unvalidate (so remote validations refresh the pill)", () => {
+    expect(isValidationEvent("cell.validate")).toBe(true)
+    expect(isValidationEvent("cell.unvalidate")).toBe(true)
+  })
+
+  it("does not match other cell events — no extra stats GET per ordinary edit", () => {
+    expect(isValidationEvent("target.cell.commit")).toBe(false)
+    expect(isValidationEvent("source.cell.create")).toBe(false)
+    expect(isValidationEvent("cell.audio.attach")).toBe(false)
+    expect(isValidationEvent("file.create")).toBe(false)
   })
 })

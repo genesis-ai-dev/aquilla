@@ -2126,7 +2126,7 @@ export function ProjectWorkspace() {
     let cancelled = false
     let reconciler: import("@/lib/sync/ws-reconciler").WsReconciler | null = null
     void (async () => {
-      const { createWsReconciler, isOwnWriteEcho, createLinkUpstreamChangedHandler } =
+      const { createWsReconciler, isOwnWriteEcho, isValidationEvent, createLinkUpstreamChangedHandler } =
         await import("@/lib/sync/ws-reconciler")
       const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
       if (cancelled || !project?.id) return
@@ -2203,6 +2203,13 @@ export function ProjectWorkspace() {
               // firing a redundant targeted GET (~5 of 8 per edit cycle).
               if (!ownWrite) {
                 revalidateCell(msg.cell)
+                // activeValidators (the validation pill) comes from the
+                // audit-stats projection, not /files/:fileId/cells — a remote
+                // validate/unvalidate must poke that read too, or the pill
+                // stays stale until the next full stats poll.
+                if (isValidationEvent(msg.kind)) {
+                  revalidateCellStats(msg.cell)
+                }
               }
               // Audio attachment events project into cell_audio (not cells);
               // poke the per-file audio read so the new clip surfaces. This
@@ -2305,7 +2312,7 @@ export function ProjectWorkspace() {
       setLiveReconciler(null)
       reconciler?.close()
     }
-  }, [project?.id, frontierSession?.jwt, getTokenForFile, revalidateCells, revalidateCell, currentUsername, refresh])
+  }, [project?.id, frontierSession?.jwt, getTokenForFile, revalidateCells, revalidateCell, revalidateCellStats, currentUsername, refresh])
 
   // FRO-288: workspace-level focus-lock with renewal.
   // useFocusLock is driven by focusedCellId (the reactive mirror of

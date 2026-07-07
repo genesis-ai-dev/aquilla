@@ -11,13 +11,16 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * Agent-mode-v2 journey: ask the agent to draft the open file, watch the
  * draft tool chip land inline in the run timeline, expand to the full-screen
  * workbench, and accept the staged drafts from the working set — the applied
- * text must reach the editor through the normal outbox path.
+ * text must reach the editor through the normal outbox path. Then UNDO the
+ * applied proposal from its receipt: compensating commits restore each cell's
+ * pre-draft value through the same outbox path (rollback is compensation,
+ * not deletion).
  *
  * The model is scripts/mock-openrouter.ts (booted by e2e-up and wired via
  * OPENROUTER_BASE_URL): "draft…" → the semantic draft tool → its internal
  * drafting call returns deterministic "[bozza] <source>" values.
  */
-test("agent drafts the open file; workbench accept-all lands in the editor", async ({ alice }) => {
+test("agent drafts the open file; workbench accept-all lands in the editor; undo restores", async ({ alice }) => {
   // Import + agent run + apply + sync round-trip busts the 30s default.
   test.setTimeout(120_000)
   const dash = new Dashboard(alice)
@@ -58,4 +61,18 @@ test("agent drafts the open file; workbench accept-all lands in the editor", asy
   await alice.getByRole("button", { name: "Close workbench" }).click()
   await ws.waitForEditor()
   await expect(ws.cellRow(0)).toContainText("[bozza]", { timeout: 15_000 })
+
+  // Regret it: back in the workbench, the receipt offers Undo. Compensating
+  // commits restore the pre-draft (empty) targets through the outbox; the
+  // receipt flips to "undone" and the editor no longer shows the draft.
+  await alice.getByRole("button", { name: "Open full-screen workbench" }).click()
+  const undo = alice.getByRole("button", { name: /Undo applied/ })
+  await expect(undo).toBeVisible({ timeout: 10_000 })
+  await undo.click()
+  await expect(alice.getByText(/\d+ undone/)).toBeVisible({ timeout: 15_000 })
+  await expect(undo).toBeHidden()
+
+  await alice.getByRole("button", { name: "Close workbench" }).click()
+  await ws.waitForEditor()
+  await expect(ws.cellRow(0)).not.toContainText("[bozza]", { timeout: 15_000 })
 })

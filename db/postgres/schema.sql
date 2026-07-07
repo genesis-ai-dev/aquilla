@@ -624,6 +624,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     cost_cents  DOUBLE PRECISION NOT NULL DEFAULT 0,
     steps       INTEGER NOT NULL DEFAULT 0,
     session_id  TEXT,                            -- 0050: owning agent_sessions row (nullable)
+    staged_count INTEGER NOT NULL DEFAULT 0,     -- 0051: target.cell.commit events staged by the run
     started_at  BIGINT NOT NULL,
     ended_at    BIGINT
 );

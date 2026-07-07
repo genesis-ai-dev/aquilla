@@ -8,7 +8,7 @@
  * dock keeps the full ProposalCard — there is no grid beside it there.
  */
 
-import { AlertTriangle, ArrowRight, PenLine } from "lucide-react"
+import { AlertTriangle, ArrowRight, PenLine, Undo2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { AgentProposal } from "@/lib/agent/protocol"
 
@@ -16,6 +16,8 @@ export interface ReceiptCounts {
   accepted: number
   edited: number
   rejected: number
+  /** Applied rows since compensated back to their pre-run value. */
+  undone: number
   /** Undecided rows still in the review queue. */
   pending: number
   /** Rule-lint hits across the undecided rows. */
@@ -27,6 +29,8 @@ export interface ProposalReceiptProps {
   counts: ReceiptCounts
   /** Focus the first undecided row in the working set. */
   onReview?: () => void
+  /** Compensate the applied rows back to their pre-run values (undo.ts). */
+  onUndo?: () => void
 }
 
 /** "MRK 1:1 – MRK 1:5" from the staged events' display refs. */
@@ -53,9 +57,10 @@ function Pill({ className, children }: { className?: string; children: React.Rea
   )
 }
 
-export function ProposalReceipt({ proposal, counts, onReview }: ProposalReceiptProps) {
+export function ProposalReceipt({ proposal, counts, onReview, onUndo }: ProposalReceiptProps) {
   const span = refSpan(proposal)
   const settled = counts.pending === 0
+  const undoable = counts.accepted + counts.edited > 0
 
   return (
     <div className="my-1.5 flex flex-col gap-1.5 rounded-lg border border-sky-900/60 bg-sky-950/30 px-3 py-2">
@@ -79,6 +84,11 @@ export function ProposalReceipt({ proposal, counts, onReview }: ProposalReceiptP
           </Pill>
         )}
         {counts.rejected > 0 && <Pill>{counts.rejected} rejected</Pill>}
+        {counts.undone > 0 && (
+          <Pill className="border-amber-700/50 text-amber-600 dark:text-amber-400">
+            {counts.undone} undone
+          </Pill>
+        )}
         {counts.pending > 0 && (
           <Pill className="border-sky-800/60 text-sky-600 dark:text-sky-400">
             {counts.pending} to review
@@ -90,20 +100,35 @@ export function ProposalReceipt({ proposal, counts, onReview }: ProposalReceiptP
             {counts.checks} check{counts.checks === 1 ? "" : "s"}
           </Pill>
         )}
-        {settled && counts.accepted + counts.edited + counts.rejected > 0 && (
+        {settled && counts.accepted + counts.edited + counts.rejected + counts.undone > 0 && (
           <Pill className="border-transparent">done</Pill>
         )}
       </div>
 
-      {!settled && onReview && (
-        <button
-          type="button"
-          onClick={onReview}
-          className="inline-flex w-fit items-center gap-1 text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
-        >
-          Review in working set
-          <ArrowRight className="h-3 w-3" />
-        </button>
+      {(!settled || (undoable && onUndo)) && (
+        <div className="flex items-center gap-3">
+          {!settled && onReview && (
+            <button
+              type="button"
+              onClick={onReview}
+              className="inline-flex w-fit items-center gap-1 text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
+            >
+              Review in working set
+              <ArrowRight className="h-3 w-3" />
+            </button>
+          )}
+          {undoable && onUndo && (
+            <button
+              type="button"
+              onClick={onUndo}
+              title="Restore each applied cell to its pre-draft text (a new, audited edit — nothing is deleted)"
+              className="inline-flex w-fit items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:underline"
+            >
+              <Undo2 className="h-3 w-3" />
+              Undo applied
+            </button>
+          )}
+        </div>
       )}
     </div>
   )

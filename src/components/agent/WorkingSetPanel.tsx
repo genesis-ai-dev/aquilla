@@ -28,6 +28,7 @@ const STATUS_STYLE: Record<string, string> = {
 function rowStripe(row: WorkingSetRow, editing: boolean): string {
   if (editing) return "border-l-sky-400 bg-accent/30"
   if (row.outcome === "accepted" || row.outcome === "edited") return "border-l-emerald-500"
+  if (row.outcome === "undone") return "border-l-amber-500 opacity-70"
   if (row.outcome === "rejected") return "border-l-transparent opacity-55"
   if (row.proposed !== undefined) return "border-l-sky-800"
   return "border-l-transparent"
@@ -274,6 +275,7 @@ const OUTCOME_LABEL: Record<string, string> = {
   accepted: "✓ accepted",
   edited: "✓ edited & accepted",
   rejected: "rejected",
+  undone: "↩ undone",
 }
 
 const WorkingSetRowView = memo(function WorkingSetRowView({
@@ -307,7 +309,9 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
   const stateClass = row.outcome
     ? row.outcome === "rejected"
       ? "text-muted-foreground"
-      : "text-emerald-600 dark:text-emerald-500"
+      : row.outcome === "undone"
+        ? "text-amber-600 dark:text-amber-400"
+        : "text-emerald-600 dark:text-emerald-500"
     : isPending
       ? "text-sky-600 dark:text-sky-400"
       : row.status

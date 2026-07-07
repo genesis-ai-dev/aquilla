@@ -33,7 +33,7 @@ import { parseAquiferOp } from "../lib/agent/aquifer-guard"
 import { aquiferSearch, aquiferReadPage, type AquiferCitation } from "../lib/aquifer/client"
 import { isBibleResourcesEnabled } from "../lib/aquifer/gate"
 import { buildSystemPrompt } from "../lib/agent/schema-card"
-import { insertAgentRun, finishAgentRun } from "../lib/agent/runs"
+import { insertAgentRun, finishAgentRun, listAgentRuns } from "../lib/agent/runs"
 import { makePostgres } from "../../../db/shim/postgres"
 
 const agent = new Hono<{ Bindings: Env; Variables: Variables }>()
@@ -422,6 +422,26 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
   })
 })
 
+// ── GET /runs — the per-project acceptance ledger (design §7 health metrics:
+//    "≥40% of staged writes applied"). staged_count lives on agent_runs; the
+//    applied/undone counts come from event-log provenance (agent_run_id /
+//    undo_of_agent_run_id), so this is a read-only rollup — no extra write path.
+agent.get("/runs", authMiddleware, async (c) => {
+  const projectId = c.req.query("projectId")
+  if (!projectId) {
+    return c.json({ error: "bad_request", message: "projectId is required" }, 400)
+  }
+  const user = c.get("user")
+  const role = await resolveProjectRole(c.env, user, projectId)
+  if (!role) {
+    return c.json({ error: "forbidden", message: "No access to this project" }, 403)
+  }
+  const limitRaw = Number(c.req.query("limit"))
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : 50
+  const runs = await listAgentRuns(c.env.AQUILLA_PG, projectId, limit)
+  return c.json({ runs })
+})
+
 interface LoopArgs {
   env: Env
   body: z.infer<typeof runRequestSchema>
@@ -526,6 +546,7 @@ async function runAgentLoop({ env, body, storedConvo, user, roleLevel, runId, or
   let completionTokens = 0
   let costCents = 0
   let steps = 0
+  let stagedCount = 0
   let status: "ok" | "capped" | "error" = "ok"
 
   send({ type: "run_start", runId, ...(body.sessionId ? { sessionId: body.sessionId } : {}) })
@@ -624,6 +645,11 @@ async function runAgentLoop({ env, body, storedConvo, user, roleLevel, runId, or
             completionTokens += u.completion_tokens ?? 0
             costCents += (u.cost ?? 0) * 100
           },
+          // Acceptance-rate denominator (0051): staged commits per run. The
+          // numerator lands in the event log when the user Applies.
+          countStaged: (n) => {
+            stagedCount += n
+          },
         })
         convo.push({ role: "tool", tool_call_id: call.id, content: result })
       }
@@ -639,7 +665,7 @@ async function runAgentLoop({ env, body, storedConvo, user, roleLevel, runId, or
   send({ type: "done", runId, status })
 
   try {
-    await finishAgentRun(env.AQUILLA_PG, { runId, status, promptTokens, completionTokens, costCents, steps })
+    await finishAgentRun(env.AQUILLA_PG, { runId, status, promptTokens, completionTokens, costCents, steps, stagedCount })
   } catch (err) {
     console.error("[agent] failed to finalise agent_runs row:", err)
   }
@@ -685,6 +711,8 @@ interface ToolCallEnv {
   }
   /** Folds a tool-internal model call's usage into the run totals. */
   addUsage: (usage: { prompt_tokens?: number; completion_tokens?: number; cost?: number }) => void
+  /** Folds staged target.cell.commit events into the run's staged_count. */
+  countStaged: (n: number) => void
 }
 
 /** Does this tool call consume the write/SQL iteration budget? */
@@ -718,6 +746,7 @@ async function runEmitTool(events: unknown[], t: ToolCallEnv): Promise<string> {
   const { proposal, modelVerdictBlock } = await stageEvents(t.env.AQUILLA_PG, events, t.stageCtx)
   if (proposal) {
     t.send({ type: "proposal", proposal })
+    t.countStaged(proposal.events.filter((ev) => ev.kind === "target.cell.commit").length)
   }
   t.send({
     type: "code_result",
@@ -830,6 +859,7 @@ async function runDraftTool(args: DraftArgs, t: ToolCallEnv): Promise<string> {
   )
   if (outcome.proposal) {
     t.send({ type: "proposal", proposal: outcome.proposal })
+    t.countStaged(outcome.proposal.events.filter((ev) => ev.kind === "target.cell.commit").length)
   }
   t.send({
     type: "code_result",
@@ -903,11 +933,17 @@ async function executeToolCall(call: ToolCall, t: ToolCallEnv): Promise<string> 
   }
 }
 
-/** v1 combined tool — one of sql | emit | docs | aquifer per call. */
+/** v1 combined tool — one of sql | emit | docs | aquifer per call.
+ *
+ *  DEPRECATED (2026-07-06): kept only for scripted mocks and stored v1
+ *  session transcripts. Remove the tool + this handler once (a) the mocks
+ *  call the semantic tools and (b) stored sessions predating v2 have aged
+ *  out — check the warn below in worker logs for residual callers first. */
 async function executeLegacyCall(
   args: { sql?: unknown; emit?: unknown; docs?: unknown; aquifer?: unknown },
   t: ToolCallEnv,
 ): Promise<string> {
+  console.warn("[agent] legacy execute tool called — see executeLegacyCall deprecation note")
   const fields = (["sql", "emit", "docs", "aquifer"] as const).filter((f) => args[f] !== undefined)
   if (fields.length !== 1) {
     const kind = fields[0] ?? "sql"

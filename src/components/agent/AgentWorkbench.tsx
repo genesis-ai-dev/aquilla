@@ -17,6 +17,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
 import type { AgentProposal } from "@/lib/agent/protocol"
 import { useAgentSession } from "@/lib/agent/session-store"
+import { buildUndoEvents } from "@/lib/agent/undo"
 import {
   deriveWorkingSet,
   pendingRows,
@@ -40,10 +41,11 @@ export interface AgentWorkbenchProps {
 }
 
 export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchProps) {
-  const { state, stop, reset } = useAgentSession(agent.projectId)
-  // Local decisions per proposal row — key: proposalId:cellId. Rows keep
-  // their outcome (accepted / edited / rejected) so the grid stays a record.
-  const [decided, setDecided] = useState<ReadonlyMap<string, RowDecision>>(new Map())
+  const { state, stop, reset, decide } = useAgentSession(agent.projectId)
+  // Decisions per proposal row (key: proposalId:cellId) live in the SESSION
+  // store, not here — closing/reopening the workbench must not forget what
+  // was applied (that would re-offer applied drafts and drop Undo).
+  const decided = state.decided
   const [applying, setApplying] = useState(false)
   const panelRef = useRef<WorkingSetPanelHandle>(null)
 
@@ -97,30 +99,63 @@ export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchP
       setApplying(true)
       try {
         const eventIds = await applyStagedEvents(events, applyContext)
-        setDecided((prev) => {
-          const next = new Map(prev)
-          for (const { row, value } of staged) {
-            next.set(proposalRowKey(row.proposalId!, row.cellId), {
+        decide(
+          staged.map(({ row, value }, i): [string, RowDecision] => [
+            proposalRowKey(row.proposalId!, row.cellId),
+            {
               outcome: value === row.proposed ? "accepted" : "edited",
               value,
-            })
-          }
-          return next
-        })
+              // The undo path's chain-head guard: undo only while this is
+              // still the cell's winning head.
+              appliedEventId: eventIds[i],
+            },
+          ]),
+        )
         await agent.onApplied?.(eventIds, staged.map(({ row }) => row.cellId))
       } finally {
         setApplying(false)
       }
     },
-    [applyContext, agent],
+    [applyContext, agent, decide],
   )
 
-  const rejectRow = useCallback((row: WorkingSetRow) => {
-    if (!row.proposalId) return
-    setDecided((prev) =>
-      new Map(prev).set(proposalRowKey(row.proposalId!, row.cellId), { outcome: "rejected" }),
-    )
-  }, [])
+  // ── Undo (compensation, not deletion): emit commits restoring each
+  //    accepted row's pre-run value through the SAME apply path. Rows whose
+  //    chain head moved on since the accept are skipped, not clobbered.
+  const undoProposal = useCallback(
+    async (proposal: AgentProposal) => {
+      const plan = buildUndoEvents(proposal, decided, (cellId) =>
+        agent.resolveCell?.(cellId)?.targetEventId,
+      )
+      if (plan.events.length === 0) return
+      setApplying(true)
+      try {
+        const eventIds = await applyStagedEvents(plan.events, applyContext)
+        decide(
+          plan.cellIds.map((cellId, i): [string, RowDecision] => [
+            proposalRowKey(proposal.proposalId, cellId),
+            {
+              outcome: "undone",
+              value: plan.restoredValues.get(cellId),
+              appliedEventId: eventIds[i],
+            },
+          ]),
+        )
+        await agent.onApplied?.(eventIds, plan.cellIds)
+      } finally {
+        setApplying(false)
+      }
+    },
+    [decided, applyContext, agent, decide],
+  )
+
+  const rejectRow = useCallback(
+    (row: WorkingSetRow) => {
+      if (!row.proposalId) return
+      decide([[proposalRowKey(row.proposalId, row.cellId), { outcome: "rejected" }]])
+    },
+    [decide],
+  )
 
   // ── Receipt rendering (chat shows counters, not a second diff) ──────────
   const renderProposalOverride = useCallback(
@@ -132,6 +167,7 @@ export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchP
       let accepted = 0
       let edited = 0
       let rejected = 0
+      let undone = 0
       let pendingCount = 0
       let checks = 0
       for (const ev of commits) {
@@ -147,18 +183,20 @@ export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchP
           }
         } else if (decision.outcome === "accepted") accepted++
         else if (decision.outcome === "edited") edited++
+        else if (decision.outcome === "undone") undone++
         else rejected++
       }
       return (
         <ProposalReceipt
           key={proposal.proposalId}
           proposal={proposal}
-          counts={{ accepted, edited, rejected, pending: pendingCount, checks }}
+          counts={{ accepted, edited, rejected, undone, pending: pendingCount, checks }}
           onReview={() => panelRef.current?.focusFirstPending()}
+          onUndo={applying ? undefined : () => undoProposal(proposal)}
         />
       )
     },
-    [decided, enabledRules, agent.resolveCell],
+    [decided, enabledRules, agent.resolveCell, applying, undoProposal],
   )
 
   return (
@@ -188,10 +226,7 @@ export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchP
             variant="ghost"
             size="sm"
             className="h-6 text-[11px] text-muted-foreground"
-            onClick={() => {
-              reset()
-              setDecided(new Map())
-            }}
+            onClick={reset}
             title="Drop this conversation and start a fresh session"
           >
             <RotateCcw data-icon="inline-start" />

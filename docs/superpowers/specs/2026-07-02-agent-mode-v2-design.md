@@ -5,9 +5,26 @@ supersedes the UX + tool surface of 2026-06-12-translation-agent-design.md;
 the staged-proposal safety model, role filtering, emit-stage lint, and credit
 rails all carry forward unchanged. Implementation notes vs. this design:
 `propose` kept the `emit` frame kind on the wire; the legacy `execute` tool
-remains as a back-compat shim (scripted mocks, stored v1 sessions); the dev
-stack and e2e harness auto-boot scripts/mock-openrouter.ts when no real
-OPENROUTER_API_KEY is configured.
+remains as a back-compat shim (scripted mocks, stored v1 sessions — deprecated
+2026-07-06, logs a warn on use); the dev stack and e2e harness auto-boot
+scripts/mock-openrouter.ts when no real OPENROUTER_API_KEY is configured.
+
+Added 2026-07-06 (carrying forward the v1 design's §5 rollback + §7 metrics):
+
+- **Undo applied drafts** — per-proposal "Undo applied" on the workbench
+  receipt. Compensation, not deletion: `src/lib/agent/undo.ts` builds
+  `target.cell.commit` events restoring each accepted row's `display.before`,
+  applied through the same outbox path; payload carries
+  `undo_of_agent_run_id` (never `agent_run_id`/`ai_suggestion`). A foreign-
+  head guard skips rows someone edited after the apply.
+- **Review decisions live on the session store** (`state.decided`), not in
+  the workbench — closing/reopening the workbench no longer re-offers
+  applied drafts as pending, and Undo survives the round-trip.
+- **Acceptance ledger** — `agent_runs.staged_count` (0051) counts staged
+  commits per run; `GET /api/v1/ai/agent/runs?projectId=` rolls up
+  staged / applied / undone per run from event-log provenance
+  (acceptance = applied ÷ staged; §7 kill metric "≥40% of staged writes
+  applied").
 
 ## 0. Why v1 underperforms — audit of what exists
 

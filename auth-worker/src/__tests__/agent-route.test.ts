@@ -465,3 +465,80 @@ describe("POST /api/v1/ai/agent/run — scripted full loop", () => {
     expect(run!.status).toBe("error")
   })
 })
+
+describe("GET /api/v1/ai/agent/runs — acceptance ledger", () => {
+  /** Insert a target.cell.commit event with the given provenance payload. */
+  let seq = 0
+  async function insertCommitEvent(id: string, payload: Record<string, unknown>) {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO events (id, schema_version, project_id, file_id, cell_id, kind, author, payload, client_ts, server_ts, parent_id, server_seq)
+       VALUES (?, 1, ?, ?, ?, 'target.cell.commit', 'alice', ?, 0, 0, NULL, ?)`,
+    )
+      .bind(id, PROJECT, FILE, CELL, JSON.stringify(payload), ++seq)
+      .run()
+  }
+
+  it("requires auth, membership, and a projectId", async () => {
+    await seedProjectWorld()
+    await seedUser(3, "stranger")
+
+    const unauth = await app.request(`/api/v1/ai/agent/runs?projectId=${PROJECT}`, {}, testEnv())
+    expect(unauth.status).toBe(401)
+
+    const noProject = await app.request(
+      "/api/v1/ai/agent/runs",
+      { headers: authHeader(await jwtFor("alice")) },
+      testEnv(),
+    )
+    expect(noProject.status).toBe(400)
+
+    const outsider = await app.request(
+      `/api/v1/ai/agent/runs?projectId=${PROJECT}`,
+      { headers: authHeader(await jwtFor("stranger")) },
+      testEnv(),
+    )
+    expect(outsider.status).toBe(403)
+  })
+
+  it("rolls up staged (ledger) vs applied/undone (event-log provenance) per run", async () => {
+    await seedProjectWorld()
+    const jwt = await jwtFor("alice")
+
+    // A scripted run that stages ONE commit → staged_count = 1 on the ledger.
+    const script = [
+      toolCall("tc1", {
+        emit: [
+          { kind: "target.cell.commit", fileId: FILE, cellId: CELL, payload: { value: "drafted" } },
+        ],
+      }),
+      { role: "assistant", content: "Staged 1 draft." },
+    ]
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => modelTurn(script.shift() as Record<string, unknown>))
+    const runRes = await postRun(jwt)
+    const frames = parseFrames(await runRes.text())
+    const runId = frames.find((f) => f.type === "run_start")!.runId as string
+    vi.restoreAllMocks()
+
+    // The user Applies (event carries agent_run_id), then regrets it (the
+    // undo carries undo_of_agent_run_id — it must NOT count as applied).
+    await insertCommitEvent("e-applied", { value: "drafted", ai_suggestion: true, agent_run_id: runId })
+    await insertCommitEvent("e-undone", { value: "", undo_of_agent_run_id: runId })
+    await insertCommitEvent("e-human", { value: "a plain human edit" })
+
+    const res = await app.request(
+      `/api/v1/ai/agent/runs?projectId=${PROJECT}`,
+      { headers: authHeader(jwt) },
+      testEnv(),
+    )
+    expect(res.status).toBe(200)
+    const { runs } = (await res.json()) as { runs: Record<string, unknown>[] }
+    const run = runs.find((r) => r.runId === runId)!
+    expect(run).toMatchObject({
+      username: "alice",
+      status: "ok",
+      stagedCount: 1,
+      appliedCount: 1,
+      undoneCount: 1,
+    })
+  })
+})

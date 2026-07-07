@@ -16,6 +16,7 @@ import { useCallback, useSyncExternalStore } from "react"
 import { runAgent as realRunAgent } from "./agent-client"
 import type { AgentRunRequest } from "./protocol"
 import { createRun, failRun, reduceRunFrame, type AgentRunUi } from "./run-state"
+import type { RowDecision } from "./working-set"
 
 export interface AgentSendOptions {
   /** What the model receives (prompt + chip legend). */
@@ -34,6 +35,13 @@ export interface AgentSessionState {
   isStreaming: boolean
   /** Prompts waiting for the current run to settle (display text, for UI). */
   queued: string[]
+  /**
+   * Per-proposal-row review decisions (key: proposalRowKey). Lives here, not
+   * in the workbench, so closing/reopening the workbench cannot forget what
+   * was already applied — forgetting would re-offer applied drafts as
+   * pending (double-apply) and lose the Undo affordance.
+   */
+  decided: ReadonlyMap<string, RowDecision>
 }
 
 type RunAgentFn = typeof realRunAgent
@@ -52,6 +60,7 @@ export class AgentSessionStore {
       runs: [],
       isStreaming: false,
       queued: [],
+      decided: new Map(),
     }
   }
 
@@ -91,7 +100,14 @@ export class AgentSessionStore {
   /** Drop the conversation and start a fresh server session. */
   reset = (): void => {
     this.stop()
-    this.set({ sessionId: crypto.randomUUID(), runs: [], isStreaming: false, queued: [] })
+    this.set({ sessionId: crypto.randomUUID(), runs: [], isStreaming: false, queued: [], decided: new Map() })
+  }
+
+  /** Record review decisions (accept/edit/reject/undo) for proposal rows. */
+  decide = (entries: Iterable<[string, RowDecision]>): void => {
+    const next = new Map(this.state.decided)
+    for (const [key, decision] of entries) next.set(key, decision)
+    this.set({ decided: next })
   }
 
   private async dispatch(options: AgentSendOptions): Promise<void> {
@@ -147,11 +163,16 @@ export function useAgentSession(projectId: string): {
   send: (options: AgentSendOptions) => void
   stop: () => void
   reset: () => void
+  decide: (entries: Iterable<[string, RowDecision]>) => void
 } {
   const store = agentSessionStore(projectId)
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState)
   const send = useCallback((options: AgentSendOptions) => store.send(options), [store])
   const stop = useCallback(() => store.stop(), [store])
   const reset = useCallback(() => store.reset(), [store])
-  return { state, send, stop, reset }
+  const decide = useCallback(
+    (entries: Iterable<[string, RowDecision]>) => store.decide(entries),
+    [store],
+  )
+  return { state, send, stop, reset, decide }
 }

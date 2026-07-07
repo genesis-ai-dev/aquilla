@@ -152,6 +152,14 @@ export interface OutboxEventPayloads {
      */
     agent_run_id?: string
     /**
+     * Compensating-undo provenance: set when this commit REVERSES an applied
+     * agent draft (restores the pre-run value). Carries the undone run's id so
+     * the ledger can count undos per run — deliberately NOT agent_run_id (an
+     * undo restores human text and must not inflate a run's applied count) and
+     * never paired with ai_suggestion. Emitted by src/lib/agent/undo.ts.
+     */
+    undo_of_agent_run_id?: string
+    /**
      * FRO-186 / harmonization: when present, tags this commit as a harmonize
      * sweep event (`cell.commit.harmonize` variant per AD-2). The server uses
      * this to trigger the AD-14 endorsement-revocation cascade and the

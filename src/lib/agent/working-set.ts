@@ -13,13 +13,20 @@
 import type { PassageRow, StagedEvent } from "./protocol"
 import type { AgentRunUi } from "./run-state"
 
-/** How a pending row was decided. "edited" = accepted with user changes. */
-export type RowOutcome = "accepted" | "edited" | "rejected"
+/**
+ * How a pending row was decided. "edited" = accepted with user changes;
+ * "undone" = accepted then compensated back to the pre-run value (undo.ts).
+ */
+export type RowOutcome = "accepted" | "edited" | "rejected" | "undone"
 
 export interface RowDecision {
   outcome: RowOutcome
-  /** The committed text (post-edit) for accepted/edited rows. */
+  /** The committed text (post-edit) for accepted/edited rows; the RESTORED
+   *  pre-run text for undone rows. */
   value?: string
+  /** The event id the accept minted — the undo path's chain-head guard:
+   *  a row is only undone while this is still the cell's winning head. */
+  appliedEventId?: string
 }
 
 export interface WorkingSetRow extends PassageRow {

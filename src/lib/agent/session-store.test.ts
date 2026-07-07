@@ -123,4 +123,23 @@ describe("AgentSessionStore", () => {
       errorMessage: "AI limit reached: Out of credits.",
     })
   })
+
+  it("review decisions live on the session (survive workbench remounts) and reset with it", () => {
+    const { impl } = deferredRunAgent()
+    const store = new AgentSessionStore(impl)
+
+    store.decide([["p1:c1", { outcome: "accepted", value: "text", appliedEventId: "e1" }]])
+    store.decide([["p1:c2", { outcome: "rejected" }]])
+    // A later decision on the same row wins (accept → undo).
+    store.decide([["p1:c1", { outcome: "undone", value: "", appliedEventId: "e9" }]])
+
+    const decided = store.getState().decided
+    expect(decided.get("p1:c1")).toMatchObject({ outcome: "undone", appliedEventId: "e9" })
+    expect(decided.get("p1:c2")).toMatchObject({ outcome: "rejected" })
+
+    // New session = clean slate: stale decisions must not leak onto the
+    // next conversation's proposals.
+    store.reset()
+    expect(store.getState().decided.size).toBe(0)
+  })
 })

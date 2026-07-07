@@ -142,11 +142,12 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
       if (!def) return null
       const spans = def.run(cell.original, cell.translated)
       if (!spans || spans.length === 0) return null
+      const message = typeof def.message === "function" ? def.message(spans) : def.message
       return {
         ruleId: rule.id,
         cellId: cell.id,
         fileId,
-        message: `"${rule.name}": ${def.message}`,
+        message: `"${rule.name}": ${message}`,
         spans,
       }
     }

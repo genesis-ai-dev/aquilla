@@ -88,6 +88,58 @@ function currentCells(): Map<string, CurrentCell> {
   return m
 }
 
+describe("computeDelta — adapter-file scoping (subset adapter must ignore other books)", () => {
+  it("ignores changed files the adapter does not hold (no 83k-creates hang)", async () => {
+    const PHM_PATH = "58-PHM.usfm"
+    const NEW_PHM_USFM = `\\id PHM
+\\c 1
+\\p
+\\v 1 Paul, a prisoner of Christ Jesus.
+\\v 2 Grace to you and peace.`
+    const MANIFEST_BOTH = `dublin_core:
+  type: 'bundle'
+  format: 'text/usfm'
+  identifier: 'ult'
+  subject: 'Aligned Bible'
+  language: { identifier: 'en', title: 'English', direction: 'ltr' }
+projects:
+  - identifier: 'tit'
+    path: './57-TIT.usfm'
+  - identifier: 'phm'
+    path: './58-PHM.usfm'
+`
+    // The release changed BOTH TIT (which the adapter holds) and PHM (which it
+    // does NOT). The adapter's currentCells are TIT-only.
+    const client = {
+      getCatalogEntry: vi.fn(),
+      searchCatalog: vi.fn(),
+      compareRefs: vi.fn(async () => ({ totalCommits: 1, changedFiles: [TIT_PATH, PHM_PATH] })),
+      getTree: vi.fn(),
+      fetchRaw: vi.fn(async (_o: string, _r: string, _ref: string, path: string) => {
+        if (path === "manifest.yaml") return MANIFEST_BOTH
+        if (path === TIT_PATH) return NEW_TIT_USFM
+        if (path === PHM_PATH) return NEW_PHM_USFM
+        return ""
+      }),
+    }
+    const delta = await computeDelta({
+      client: client as never,
+      cursor: { ...OLD_ENTRY, trackMode: "release", importedAt: "x" } as never,
+      oldEntry: OLD_ENTRY,
+      newEntry: NEW_ENTRY,
+      currentCells: currentCells(), // TIT cells only
+    })
+    // PHM cells (a book the adapter never imported) must NOT be pulled in.
+    const phmV1 = dcsCellId(`${REPO}|PHM 1:1`)
+    expect(delta.creates.some((c) => c.cell.cellId === phmV1)).toBe(false)
+    // Only TIT's genuinely-new verse is a create.
+    expect(delta.creates.map((c) => c.cell.cellId)).toEqual([V3])
+    // TIT commit/delete still work (adapter holds TIT).
+    expect(delta.commits.map((c) => c.cell.cellId)).toEqual([V1])
+    expect(delta.deletes).toEqual([V4_GONE])
+  })
+})
+
 describe("computeDelta — classification (spec §6, THE money logic)", () => {
   it("classifies edited→commit, added→create, unchanged→nothing, vanished→delete", async () => {
     const delta = await computeDelta({

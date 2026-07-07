@@ -91,16 +91,28 @@ export async function computeDelta(args: ComputeDeltaArgs): Promise<DeltaResult>
   }
   const parsedFiles = route.parse({ entry: newEntry, manifest, files: fileTexts })
 
-  // The set of files the parse (re)produced — deletes are scoped to these so a
-  // cell that vanished from a re-parsed file is a real removal, not just an
-  // untouched file elsewhere.
-  const parsedFileIds = new Set(parsedFiles.map((f) => f.fileId))
+  // Scope the delta to files THIS adapter actually holds. A release changes many
+  // files (a whole-repo release touches dozens of books); an adapter that only
+  // imported a subset (e.g. one book) must ignore the rest — otherwise every cell
+  // of every OTHER changed file is absent from currentCells and classifies as a
+  // create (measured 83k+ creates for a one-book adapter → "Import changes" hangs).
+  // A whole-repo adapter holds every file, so nothing is skipped for it.
+  // (A brand-new upstream file is NOT auto-added here — that needs file.create
+  // wiring; tracked as a follow-up. Fixing the hang is the priority.)
+  const adapterFileIds = new Set<string>()
+  for (const c of currentCells.values()) adapterFileIds.add(c.fileId)
+  const relevantFiles = parsedFiles.filter((f) => adapterFileIds.has(f.fileId))
+
+  // The set of (relevant) files the parse (re)produced — deletes are scoped to
+  // these so a cell that vanished from a re-parsed file is a real removal, not
+  // just an untouched file elsewhere.
+  const parsedFileIds = new Set(relevantFiles.map((f) => f.fileId))
   const parsedCellIds = new Set<string>()
 
   const creates: Array<{ cell: DcsCell; fileId: string }> = []
   const commits: Array<{ cell: DcsCell; parentEventId: string }> = []
 
-  for (const file of parsedFiles) {
+  for (const file of relevantFiles) {
     for (const cell of file.cells) {
       parsedCellIds.add(cell.cellId)
       const current = currentCells.get(cell.cellId)

@@ -197,3 +197,15 @@ new `dcsUpstream` key); server floor is MAINTAINER(600). Added `dcsUpstream?: Dc
   catalog fetch, the Select-in-Dialog interaction (happy-dom can't drive Base UI Select portals
   reliably — filter Selects are untested at the unit level, only the text inputs + row-pick are),
   and the end-to-end import-then-pin against live git.door43.org are for the browser-QA agent.
+
+## Live-proof findings — 2026-07-06 (see DCS-PROOF.md)
+
+- Adapter VERIFIED on live git.door43.org: en_tn TIT v87→v89 → exactly 1 changed note detected
+  (206 rows, 1 commit, 0 spurious); en_ult TIT v80→v89 → 1 commit + 2 deletes, cell-ids STABLE
+  across releases. Fetch/manifest/parse/delta all real.
+- FINDING 1 (follow-up, high priority for Bible UX): USFM route does NOT strip `\zaln`/`\w`
+  alignment markup — cell values carry alignment attributes. Pre-existing `usfm.ts` behavior (not a
+  DCS regression). Add alignment stripping to the USFM route/parser for clean verse text. TSV/OBS
+  routes are clean. en_tn is the recommended first-use + demo target.
+- FINDING 2: `compare` endpoint throttles (empty body under rapid requests). VERIFY delta.ts has
+  backoff + full-scan reconcile fallback (spec §6); add if missing.

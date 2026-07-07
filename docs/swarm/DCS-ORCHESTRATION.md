@@ -134,3 +134,14 @@ is the self-heal path the spec §6 already mandates — make sure `delta.ts`/the
   errors. Routes refactored into `src/lib/dcs/routes/{usfm,obs,tsv-notes,tsv-questions}.ts` +
   `tsv-common.ts`. E repointed one Slice-A test fixture (`import-dcs.test.ts` no-route case tn→tw)
   — legitimate since tn is now routable. tw/ta still deferred. Awaiting B + C.
+- 2026-07-06 · Slice C merged (`8e78dffaa`, TRACES union-resolved). Then Slice B merged
+  (`4782d5644`, TRACES union-resolved). Orchestrator fix `c64cff2b5`: mount DcsUpstreamPanel for
+  self-contained adapter projects (ProjectSettings gated it on hasSourceLink; adapters have a
+  dcsUpstream cursor + no sourceProjectId). ALL WAVE 2 MERGED.
+- 2026-07-06 · FULL GATE: tsc 0 errors; `vitest run` (whole suite) = **3627 passed**, DCS-relevant
+  134/134 green. The only failures (ProjectOverview.test.tsx) are PRE-EXISTING on base `ff466abfe`
+  (byte-identical file, fails 1/20 isolated on base too; "3 failed" in full run = base test
+  pollution) — NOT a DCS regression. Verified by diff --stat (empty) + isolated base-vs-integration
+  runs matching. Honest status: DCS work is regression-free; ProjectOverview flakiness is the
+  user's separate in-flight work.
+- 2026-07-06 · Wave 3 starting: live-DCS proof.

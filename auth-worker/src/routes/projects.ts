@@ -30,6 +30,7 @@ import {
   INVITE_MIN_ROLE,
   LINK_ROLE_CAP,
   ROLE,
+  type AuthUser,
   type ProjectInviteRow,
   type ProjectRow,
 } from "../types"
@@ -52,6 +53,7 @@ import {
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { lookupUserByUsername } from "../services/user-lookup"
 import { sendProjectInviteEmail } from "../services/email"
+import { notifySyncWorkerOfMemberRemoval } from "../services/sync-worker-notify"
 
 const projects = new Hono<AuthHonoEnv>()
 
@@ -251,7 +253,8 @@ projects.get("/", authMiddleware, async (c) => {
   //   ?12    : orgFilter (NULL or number) — IS NULL check (no-filter case)
   //   ?13    : orgFilter (NULL or number) — equality check (filter case)
   const rows = await c.env.AQUILLA_PG.prepare(
-    `SELECT p.id, p.name, p.org_id, p.archived_at, p.is_active,
+    `SELECT p.id, p.name, p.org_id, o.name AS org_name, p.archived_at, p.is_active,
+            p.source_project_id,
             GREATEST(
               COALESCE(pm.role_level, 0),
               COALESCE(gg.max_grant,  0),
@@ -274,6 +277,8 @@ projects.get("/", authMiddleware, async (c) => {
               ELSE 'creator'
             END AS role_source
        FROM projects p
+       LEFT JOIN organizations o
+         ON o.id = p.org_id
        LEFT JOIN project_members pm
          ON pm.project_id = p.id AND pm.user_id = ?
        LEFT JOIN org_members om
@@ -309,8 +314,10 @@ projects.get("/", authMiddleware, async (c) => {
       id: string
       name: string
       org_id: number | null
+      org_name: string | null
       archived_at: string | null
       is_active: boolean
+      source_project_id: string | null
       role_level: number
       role_source: "creator" | "override" | "org" | "group"
     }>()
@@ -340,8 +347,12 @@ projects.get("/", authMiddleware, async (c) => {
         id: row.id,
         name: row.name,
         orgId: row.org_id,
+        orgName: row.org_name,
         archivedAt: row.archived_at,
         isActive: row.is_active,
+        // FRO-478: see the single-project route's comment — this field was
+        // declared on CloudProjectSummary but never actually populated.
+        sourceProjectId: row.source_project_id,
         role,
         files: filesByProject.get(row.id) ?? [],
       }
@@ -362,6 +373,8 @@ projects.get("/:projectId", authMiddleware, async (c) => {
 
   const row = await c.env.AQUILLA_PG.prepare(
     `SELECT p.id, p.name, p.org_id, p.archived_at, p.archived_by, p.is_active,
+            p.source_project_id, p.source_link_mode, p.source_link_consumes,
+            p.source_link_gate, p.source_link_cursor,
             u.username AS archived_by_username
        FROM projects p
        LEFT JOIN users u ON u.id = p.archived_by
@@ -376,6 +389,11 @@ projects.get("/:projectId", authMiddleware, async (c) => {
       archived_by: number | null
       archived_by_username: string | null
       is_active: boolean
+      source_project_id: string | null
+      source_link_mode: string | null
+      source_link_consumes: string | null
+      source_link_gate: string | null
+      source_link_cursor: number | string | null
     }>()
 
   if (!row) return c.json({ error: "not found" }, 404)
@@ -392,6 +410,15 @@ projects.get("/:projectId", authMiddleware, async (c) => {
       ? { id: row.archived_by, username: row.archived_by_username }
       : null,
     isActive: row.is_active,
+    // FRO-478: surface the AD-9/FRO-476 link state so the client's
+    // SourceLinkSection actually renders (it gates on sourceProjectId, which
+    // this route previously never selected — the section was effectively
+    // unreachable in production despite the client plumbing existing).
+    sourceProjectId: row.source_project_id,
+    sourceLinkMode: row.source_link_mode,
+    sourceLinkConsumes: row.source_link_consumes,
+    sourceLinkGate: row.source_link_gate,
+    sourceLinkCursor: row.source_link_cursor != null ? Number(row.source_link_cursor) : null,
     role: { level: role.level, name: role.name, source: role.source },
     files,
   })
@@ -727,11 +754,42 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
     )
   }
 
+  // Presence identity for the DO socket match (its presence key is the
+  // username). Full row so resolveProjectRole below can re-resolve.
+  const targetUser = await c.env.AQUILLA_PG.prepare(
+    "SELECT * FROM users WHERE id = ?",
+  )
+    .bind(targetUserId)
+    .first<AuthUser>()
+
   await c.env.AQUILLA_PG.prepare(
     "DELETE FROM project_members WHERE project_id = ? AND user_id = ?",
   )
     .bind(projectId, targetUserId)
     .run()
+
+  // FRO-346: when NO grant path survives the delete (AD-12: org / group /
+  // creator paths are additive and unaffected by removing the direct row),
+  // eject the removed user's live WS sessions + denylist their still-valid
+  // sync tokens. Users who retain access via another path must NOT be
+  // ejected. Best-effort — removal must not fail on it.
+  const surviving = targetUser
+    ? await resolveProjectRole(c.env, targetUser, projectId)
+    : null
+  if (!surviving) {
+    const notifyPromise = notifySyncWorkerOfMemberRemoval(c.env, projectId, {
+      userId: targetUserId,
+      username: targetUser?.username,
+    })
+    // waitUntil only exists with a real ExecutionContext (prod); the test
+    // harness has none and the getter throws, so fall back to letting the
+    // best-effort promise settle on its own.
+    try {
+      c.executionCtx.waitUntil(notifyPromise)
+    } catch {
+      void notifyPromise
+    }
+  }
 
   return c.json({ removed: true })
 })
@@ -1045,6 +1103,17 @@ projects.post(
     )
       .bind(invite.project_id, user.id)
       .first<{ role_level: number }>()
+
+    // FRO-347: "idempotent-while-member" (option 2). A same-user re-click
+    // (invite.used_at already stamped to this user) used to unconditionally
+    // re-grant/re-insert project_members — including after the owner removed
+    // them, turning the old link into a permanent self-service re-entry pass.
+    // Re-redemption by the SAME user is only a no-op success while they are
+    // STILL a member; once membership has been removed, the link is dead for
+    // them too, same as anyone else.
+    if (invite.used_at && invite.used_by === user.id && !existing) {
+      return c.json({ error: "Invite already used", code: "used" }, 410)
+    }
 
     const finalRole = existing
       ? Math.max(existing.role_level, invite.role_level)

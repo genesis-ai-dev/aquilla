@@ -436,11 +436,16 @@ async function main(): Promise<void> {
   // 8. Hand off to Playwright. Forward extra CLI args after `--`.
   // Default to the `line` reporter for live one-line progress; user can
   // override via `npm run test:e2e -- --reporter=list` etc.
+  //
+  // The config path is overridable via E2E_CONFIG so the same boot pipeline
+  // can drive the recording harness (playwright.config.recordings.ts) without
+  // duplicating the 8-step backend bring-up. Defaults to the web e2e config.
+  const configPath = process.env.E2E_CONFIG ?? "e2e/config/playwright.config.web.ts"
   const playwrightArgs = [
     "playwright",
     "test",
     "--config",
-    "e2e/config/playwright.config.web.ts",
+    configPath,
   ]
   const extra = process.argv.slice(2)
   const dashDashIdx = extra.indexOf("--")

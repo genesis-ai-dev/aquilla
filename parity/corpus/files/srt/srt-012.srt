@@ -1,0 +1,58 @@
+1
+00:00:01,569 --> 00:00:06,591
+<i>Enter your 6-digit verification code to continue.
+Congratulations! You have unlocked the "Explorer" achievement 🎉.</i>
+
+2
+00:00:07,078 --> 00:00:10,338
+Session expired — please sign in again to continue where you left off.
+
+3
+00:00:10,976 --> 00:00:16,063
+Установите приложение и войдите в свою учетную запись.
+
+4
+00:00:16,476 --> 00:00:20,620
+Click "Save" to apply your changes, or press Cancel to discard them.
+
+5
+00:00:21,033 --> 00:00:22,987
+請在使用前仔細閱讀本說明書。
+Third-party integrations require an Enterprise plan subscription.
+
+6
+00:00:23,045 --> 00:00:27,570
+Warning: contents may be hot. Handle with care.
+Adverse reactions may include nausea, dizziness, and <severe> headaches.
+
+7
+00:00:28,775 --> 00:00:33,856
+Please review the attached invoice before the payment deadline.
+
+8
+00:00:34,426 --> 00:00:37,603
+Use the <b>bold</b> toggle to emphasize key phrases.
+
+9
+00:00:39,513 --> 00:00:43,768
+Congratulations! You have unlocked the "Explorer" achievement 🎉.
+
+10
+00:00:45,587 --> 00:00:49,874
+Third-party integrations require an Enterprise plan subscription.
+
+11
+00:00:50,837 --> 00:00:52,869
+Free shipping on orders over $50 — terms apply.
+
+12
+00:00:54,347 --> 00:00:59,441
+Enter your 6-digit verification code to continue.
+
+13
+00:01:00,348 --> 00:01:05,389
+Our team delivers world-class localization at scale — 24/7 support included.
+
+14
+00:01:06,124 --> 00:01:07,712
+A load-bearing wall shall not be modified without engineering approval.

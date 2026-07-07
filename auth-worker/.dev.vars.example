@@ -13,6 +13,17 @@ ACCESS_TOKEN_EXPIRE_MINUTES="43200"
 # sync-worker compromise cannot forge access tokens).
 SYNC_SECRET_KEY="test-sync-secret-key"
 
+# FRO-346: base URL auth-worker calls to notify sync-worker of admin events
+# (member removal -> live WS eject, project archive, file delete). Without
+# this (or if it's wrong), those notifications silently no-op — see
+# notifySyncWorkerOfMemberRemoval's early-return on a missing SYNC_WORKER_URL.
+# `pnpm dev` (scripts/dev-stack.ts) overrides this automatically to match its
+# own sync-worker port; only needed here if you run
+# `wrangler dev` in auth-worker/ directly. Default sync-worker port is 8789
+# (see scripts/dev-stack.ts SYNC_PORT) — do NOT use 8788, that's this
+# worker's own port.
+SYNC_WORKER_URL="http://127.0.0.1:8789"
+
 # GitLab admin token used for user provisioning + PAT minting during register/login.
 # Without these, /register returns 503; /token still works for existing users
 # but the GitLab token refresh is skipped.

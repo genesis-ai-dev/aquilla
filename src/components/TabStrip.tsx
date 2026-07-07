@@ -14,8 +14,8 @@ function tabClasses(active: boolean): string {
   return cn(
     TAB_BASE,
     active
-      ? "border-border/60 bg-card text-foreground shadow-sm"
-      : "border-transparent bg-card/60 text-muted-foreground hover:border-border/40 hover:bg-card hover:text-foreground",
+      ? "border-border bg-card text-foreground"
+      : "border-border/50 bg-card/60 text-muted-foreground hover:border-border hover:bg-card hover:text-foreground",
   )
 }
 
@@ -86,7 +86,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
     <div
       role="tablist"
       aria-label="Open files"
-      className="relative z-10 flex items-center gap-1 overflow-x-auto bg-muted px-1.5 py-1"
+      className="relative z-10 flex items-center gap-1 overflow-x-auto"
     >
       {visibleTabs.map(({ tab, name }) => {
         const active = tab.id === activeTabId

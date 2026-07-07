@@ -15,6 +15,7 @@ import { handleDiarizationRequest } from "./diarization"
 import { notifyProjectDo } from "./archive-broadcast"
 import { handleCorsPreflight, withCors } from "./cors"
 import { handleProjectArchiveRequest } from "./project-archive"
+import { handleMemberRemovedRequest, notifyProjectDoMemberRemoved } from "./member-removed"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
 import { handleCellHistoryReadRequest } from "./events/cell-history-read-route"
 import { handleCellsReadRequest } from "./events/cells-read-route"
@@ -42,6 +43,8 @@ import { handleRebuildProjectionRequest } from "./events/rebuild"
 import { handleRebuildFtsRequest } from "./events/rebuild-fts"
 import { handleSearchReadRequest, handleSearchPassagesRequest } from "./events/search-route"
 import { handleStaleSourceRequest } from "./events/stale-source-route"
+import { handleLinkSyncRequest } from "./events/link-sync-route"
+import { handleLinkCursorBatchesRequest } from "./events/link-cursor-batches-route"
 import { handleValidatorsReadRequest } from "./events/validators-read-route"
 import { handleBranchingSearchRequest } from "./events/branching-search-route"
 import { handleBranchingSearchPassagesRequest } from "./events/branching-search-passages-route"
@@ -194,6 +197,14 @@ export default {
 
     const projectArchiveResponse = await handleProjectArchiveRequest(request, env, notifyProjectDo)
     if (projectArchiveResponse) return projectArchiveResponse
+    // FRO-346: eject a removed member's live WS sessions + denylist their
+    // still-valid tokens on the per-project DO.
+    const memberRemovedResponse = await handleMemberRemovedRequest(
+      request,
+      env,
+      notifyProjectDoMemberRemoved,
+    )
+    if (memberRemovedResponse) return memberRemovedResponse
     const rebuildResponse = await handleRebuildProjectionRequest(request, env)
     if (rebuildResponse) return rebuildResponse
     const rebuildFtsResponse = await handleRebuildFtsRequest(request, env)
@@ -230,6 +241,10 @@ export default {
     if (cellHistoryResponse) return withCors(cellHistoryResponse, request)
     const staleSourceResponse = await handleStaleSourceRequest(request, env)
     if (staleSourceResponse) return withCors(staleSourceResponse, request)
+    const linkSyncResponse = await handleLinkSyncRequest(request, env)
+    if (linkSyncResponse) return withCors(linkSyncResponse, request)
+    const linkCursorBatchesResponse = await handleLinkCursorBatchesRequest(request, env)
+    if (linkCursorBatchesResponse) return withCors(linkCursorBatchesResponse, request)
     const commentsReadResponse = await handleCommentsReadRequest(request, env)
     if (commentsReadResponse) return withCors(commentsReadResponse, request)
     const btReadResponse = await handleCellBacktranslationsReadRequest(request, env)

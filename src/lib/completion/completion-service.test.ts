@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, collectValidatedPairs, buildRulesBlock, buildBriefBlock } from "./completion-service"
+import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, collectValidatedPairs, buildRulesBlock, buildBriefBlock, activeProjectIdFromPath } from "./completion-service"
 import type { CompletionSettings, TranslationRule } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -335,6 +335,41 @@ describe("complete", () => {
     expect(((init as RequestInit).headers as Record<string, string>).Authorization).toBeUndefined()
     const body = JSON.parse((init as RequestInit).body as string)
     expect(body.model).toBe("gemma")
+  })
+
+  // FRO-414 follow-up: frontier chat invoked from a project route carries the
+  // project id so the server bills the spend to that project's org.
+  describe("projectId attribution (FRO-414 follow-up)", () => {
+    afterEach(() => {
+      window.history.pushState({}, "", "/")
+    })
+
+    it("frontier: includes projectId from the current /project/:id route", async () => {
+      window.history.pushState({}, "", "/project/proj-uuid-1/file/file-uuid-2")
+      fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "ok" } }] }))
+      await complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg })
+      const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
+      expect(body.projectId).toBe("proj-uuid-1")
+    })
+
+    it("frontier: omits projectId off project routes (spend stays at the no-org fallback)", async () => {
+      window.history.pushState({}, "", "/preferences")
+      fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "ok" } }] }))
+      await complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg })
+      const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
+      expect(body).not.toHaveProperty("projectId")
+    })
+
+    it("custom: never sends projectId — third-party OpenAI-compatible endpoints may reject unknown fields", async () => {
+      window.history.pushState({}, "", "/project/proj-uuid-1")
+      fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "ok" } }] }))
+      await complete({
+        settings: { ...BASE, provider: "custom", endpoint: "http://localhost:8000", model: "gemma" },
+        session: null, messages: msg,
+      })
+      const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
+      expect(body).not.toHaveProperty("projectId")
+    })
   })
 
   it("custom: sends Bearer <apiKey> when configured (OpenRouter)", async () => {
@@ -990,5 +1025,26 @@ describe("buildParagraphPrompt", () => {
     expect(sys.content).toContain("Kala")
     expect(sys.content).not.toContain("{sourceLanguage}")
     expect(sys.content).not.toContain("{targetLanguage}")
+  })
+})
+
+describe("activeProjectIdFromPath", () => {
+  // WHY: this is the single attribution point for chat credit spend (FRO-414
+  // follow-up) — every completion caller runs on a project route, so the URL
+  // defines "the project in scope". A wrong match here silently bills the
+  // wrong org (or none), so the route shapes are pinned.
+  it("extracts the id from /project/:id and nested project routes", () => {
+    expect(activeProjectIdFromPath("/project/abc-123")).toBe("abc-123")
+    expect(activeProjectIdFromPath("/project/abc-123/file/f-9")).toBe("abc-123")
+    expect(activeProjectIdFromPath("/project/abc-123/rules")).toBe("abc-123")
+    expect(activeProjectIdFromPath("/projects/abc-123")).toBe("abc-123")
+  })
+
+  it("returns null off project surfaces so project-less chat stays at the no-org fallback", () => {
+    expect(activeProjectIdFromPath("/")).toBeNull()
+    expect(activeProjectIdFromPath("/preferences")).toBeNull()
+    expect(activeProjectIdFromPath("/settings/ai")).toBeNull()
+    // /projects/archived is a static list page, not a project id.
+    expect(activeProjectIdFromPath("/projects/archived")).toBeNull()
   })
 })

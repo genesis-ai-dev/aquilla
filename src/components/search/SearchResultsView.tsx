@@ -10,8 +10,9 @@
  */
 
 import { useMemo } from "react"
-import { X, FileText, ChevronRight } from "lucide-react"
+import { X, FileText, ChevronRight, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/ui/page"
 import { cn } from "@/lib/utils"
 import { MarkedSnippet } from "@/components/search/MarkedSnippet"
 import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
@@ -108,9 +109,11 @@ export function SearchResultsView({
       {/* Body */}
       <div className="flex-1 overflow-y-auto">
         {results.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            No results
-          </div>
+          <EmptyState
+            className="h-full border-0 bg-transparent"
+            icon={Search}
+            title="No results"
+          />
         ) : (
           <div className="py-2">
             {groups.map((group) => (

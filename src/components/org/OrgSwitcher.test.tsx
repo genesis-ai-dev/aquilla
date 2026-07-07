@@ -9,14 +9,23 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 }))
 const listMyOrgs = vi.fn()
 const createOrg = vi.fn()
-const renameOrg = vi.fn()
 vi.mock("@/lib/frontier/orgs", () => ({
   listMyOrgs: (...a: unknown[]) => listMyOrgs(...a),
   createOrg: (...a: unknown[]) => createOrg(...a),
-  renameOrg: (...a: unknown[]) => renameOrg(...a),
 }))
 
-beforeEach(() => { localStorage.clear(); listMyOrgs.mockReset(); createOrg.mockReset(); renameOrg.mockReset() })
+const fetchAccessibleProjects = vi.fn()
+vi.mock("@/lib/sync/cloud-projects", () => ({
+  fetchAccessibleProjects: (...a: unknown[]) => fetchAccessibleProjects(...a),
+}))
+
+beforeEach(() => {
+  localStorage.clear()
+  listMyOrgs.mockReset()
+  createOrg.mockReset()
+  fetchAccessibleProjects.mockReset()
+  fetchAccessibleProjects.mockResolvedValue([])
+})
 afterEach(() => vi.restoreAllMocks())
 
 describe("OrgSwitcher", () => {
@@ -33,11 +42,11 @@ describe("OrgSwitcher", () => {
     expect(screen.getByText("Come and See")).toBeInTheDocument()
     expect(screen.getByText(/maintainer/i)).toBeInTheDocument()
     // Selecting an org makes it the active scope and persists it.
-    await act(async () => { screen.getByText("Side Org").click() })
+    await act(async () => { screen.getByRole("menuitem", { name: /side org/i }).click() })
     await waitFor(() => expect(localStorage.getItem("org:active")).toBe("2"))
   })
 
-  it("create org: opens input, types name, clicks Create, calls createOrg", async () => {
+  it("create org: opens dialog, types name, submits, calls createOrg", async () => {
     listMyOrgs
       .mockResolvedValueOnce([{ id: 1, name: "Acme", role: { level: 700, name: "owner" } }])
       .mockResolvedValue([
@@ -52,41 +61,55 @@ describe("OrgSwitcher", () => {
     // Open the switcher
     await act(async () => { screen.getByRole("button", { name: /acme/i }).click() })
 
-    // Click "+ Create org"
-    await act(async () => { screen.getByRole("button", { name: /\+ create org/i }).click() })
+    // Click Create in the menu
+    const createItem = await screen.findByRole("menuitem", { name: /^create$/i })
+    await act(async () => { createItem.click() })
 
-    // Type a name
-    const input = screen.getByRole("textbox", { name: /new org name/i })
+    // Dialog opens with name field
+    const input = await screen.findByLabelText(/organization name/i)
     fireEvent.change(input, { target: { value: "New Org" } })
 
-    // Click Create
-    await act(async () => { screen.getByRole("button", { name: /^create$/i }).click() })
+    // Submit
+    await act(async () => { screen.getByRole("button", { name: /create organization/i }).click() })
 
     await waitFor(() => expect(createOrg).toHaveBeenCalledWith("jwt", "New Org"))
   })
 
-  it("rename org: owner sees Rename, changes name, Save calls renameOrg", async () => {
+  it("member-only user sees no guest section", async () => {
     listMyOrgs.mockResolvedValue([
       { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
     ])
-    renameOrg.mockResolvedValue(undefined)
+    // Accessible projects are all in orgs the caller is already a member of.
+    fetchAccessibleProjects.mockResolvedValue([
+      { id: "p1", name: "Proj 1", orgId: 1, role: { level: 100, name: "viewer", source: "org" } },
+    ])
 
     render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
 
-    // Open the switcher
     await act(async () => { screen.getByRole("button", { name: /acme/i }).click() })
 
-    // Click "Rename"
-    await act(async () => { screen.getByRole("button", { name: /^rename$/i }).click() })
+    expect(screen.queryByTestId("guest-orgs")).not.toBeInTheDocument()
+    expect(screen.queryByText("Guest")).not.toBeInTheDocument()
+  })
 
-    // Change the name (input is prefilled with "Acme")
-    const input = screen.getByRole("textbox", { name: /rename org/i })
-    fireEvent.change(input, { target: { value: "Acme Renamed" } })
+  it("guest entry visible with Guest tag below member orgs", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+    ])
+    // A project in an org (id 2) the caller is not a member of.
+    fetchAccessibleProjects.mockResolvedValue([
+      { id: "p1", name: "Proj 1", orgId: 1, role: { level: 100, name: "viewer", source: "org" } },
+      { id: "p2", name: "Proj 2", orgId: 2, orgName: "Guest Org", role: { level: 100, name: "viewer", source: "override" } },
+    ])
 
-    // Click Save
-    await act(async () => { screen.getByRole("button", { name: /^save$/i }).click() })
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
 
-    await waitFor(() => expect(renameOrg).toHaveBeenCalledWith("jwt", 1, "Acme Renamed"))
+    await act(async () => { screen.getByRole("button", { name: /acme/i }).click() })
+
+    await waitFor(() => expect(screen.getByTestId("guest-orgs")).toBeInTheDocument())
+    expect(screen.getByText("Guest Org")).toBeInTheDocument()
+    expect(screen.getByText("Guest")).toBeInTheDocument()
   })
 })

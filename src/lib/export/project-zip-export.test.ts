@@ -57,10 +57,16 @@ describe("exportFileCells", () => {
     expect(blob.type).toContain("text/plain")
   })
 
-  it("md: returns markdown blob with anchors", async () => {
+  // 2026-07-04 parity run (principal directive: exports must round-trip):
+  // exportFileCells("md") now uses the structure-preserving markdown exporter,
+  // which emits NO anchor comments — they re-imported as paragraph text and
+  // broke the round trip. Assertion updated accordingly (logged in
+  // ITERATION_LOG.md cycle 11); the legacy anchor exporter (exportMarkdown)
+  // still exists with its own untouched tests.
+  it("md: returns round-trip markdown blob without anchor comments", async () => {
     const blob = exportFileCells(CELLS, "md", "en", "fr")
     const text = await blobText(blob)
-    expect(text).toContain("<!-- GEN 1:1 -->")
+    expect(text).not.toContain("<!--")
     expect(text).toContain("Au commencement")
   })
 

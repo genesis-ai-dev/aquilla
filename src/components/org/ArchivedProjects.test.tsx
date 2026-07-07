@@ -51,6 +51,22 @@ describe("ArchivedProjects", () => {
     fetchArchivedProjects.mockResolvedValue([])
     renderArchived()
 
-    expect(await screen.findByText("No archived projects.")).toBeInTheDocument()
+    await waitFor(() => expect(fetchArchivedProjects).toHaveBeenCalledWith("jwt", 1))
+    expect(screen.getByText("No archived projects.")).toBeInTheDocument()
+  })
+
+  // FRO-366: guard against the list clipping instead of scrolling — see
+  // ProjectsList.tsx for the full explanation of the flex chain this depends on.
+  it("renders the list in a scrollable container (h-full + overflow-y-auto, no clipping)", async () => {
+    fetchArchivedProjects.mockResolvedValue([
+      { id: "old", name: "Old Project", role: { level: 700, name: "owner", source: "org" } },
+    ])
+    renderArchived()
+    await screen.findByText("Old Project")
+
+    const scrollContainer = screen.getByTestId("archived-projects-scroll")
+    expect(scrollContainer.className).toMatch(/\bh-full\b/)
+    expect(scrollContainer.className).toMatch(/\boverflow-y-auto\b/)
+    expect(scrollContainer.className).not.toMatch(/overflow-hidden/)
   })
 })

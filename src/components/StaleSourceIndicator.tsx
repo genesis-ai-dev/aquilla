@@ -7,15 +7,21 @@
 //      that resolves.
 //   2. Parent-managed — pass {cellId, staleCellIds}; the parent already
 //      has the membership set and just wants the badge styling. This is
-//      the preferred form for `EditorTable` row rendering once 2c-β
-//      lands (one fetch per file, used to decorate every row).
+//      the form `EditorTable` row rendering uses (one fetch per file,
+//      used to decorate every row).
 //
-// IMPORTANT (Phase 5 scope): per the deliverables, this component is
-// exported but NOT wired into `CellRow.tsx` / `EditorTable.tsx` yet.
-// The 2c-β editor rewrite owns those files; a follow-up after that
-// merges drops the badge into the cell-row status area.
+// FRO-477 (§6/§9.4): a SECOND, visually distinct tone for INHERITED
+// staleness — an ancestor further up the link chain changed (or the
+// immediate upstream's own translation is itself stale against its
+// source), even though this project's direct pin comparison sees nothing
+// new yet (the "dormant middle hop" case). Rendered violet/dotted,
+// matching the existing term:* rule badge idiom (purple dotted — see
+// violation-decoration-plugin.ts) rather than the amber solid direct-stale
+// triangle, so the two are never confused at a glance. When BOTH direct and
+// inherited apply to the same cell, direct (amber) takes rendering
+// priority — it is the more actionable, immediate signal.
 
-import { AlertTriangle } from "lucide-react"
+import { AlertTriangle, GitBranchPlus } from "lucide-react"
 import {
   Tooltip,
   TooltipContent,
@@ -25,8 +31,12 @@ import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 
 interface BaseProps {
   cellId: string
-  /** Optional override for the tooltip body. Defaults to the AD-9 wording. */
+  /** Optional override for the direct-stale tooltip body. Defaults to the
+   *  AD-9 wording. */
   tooltipText?: string
+  /** Optional override for the inherited-stale tooltip body (FRO-477).
+   *  Defaults to the chain wording. */
+  upstreamTooltipText?: string
   /** Tailwind size; default 12px (h-3 w-3) so it fits in a cell action rail. */
   iconClassName?: string
 }
@@ -35,6 +45,10 @@ interface ManagedProps extends BaseProps {
   /** Membership set produced by `useStaleSourceCells`. The component
    *  reads `.has(cellId)`; no internal fetch. */
   staleCellIds: ReadonlySet<string>
+  /** FRO-477: membership set of cells whose ANCESTRY is stale (inherited,
+   *  §6). Optional — omit to render only the direct-stale tone (existing
+   *  call sites keep working unchanged). */
+  upstreamStaleCellIds?: ReadonlySet<string>
   projectId?: never
   fileId?: never
   getToken?: never
@@ -42,6 +56,7 @@ interface ManagedProps extends BaseProps {
 
 interface StandaloneProps extends BaseProps {
   staleCellIds?: never
+  upstreamStaleCellIds?: never
   projectId: string
   fileId: string
   /** Sync-token fetcher; same shape as `useCells`. Without this, the
@@ -53,13 +68,17 @@ export type StaleSourceIndicatorProps = ManagedProps | StandaloneProps
 
 const DEFAULT_TOOLTIP =
   "The source has changed since this translation was last revised."
+const DEFAULT_UPSTREAM_TOOLTIP =
+  "Something further upstream in the translation chain has changed — this cell's ancestry is stale."
 
 export function StaleSourceIndicator(props: StaleSourceIndicatorProps) {
   if (isManaged(props)) {
     return (
       <StaleBadge
-        visible={props.staleCellIds.has(props.cellId)}
+        direct={props.staleCellIds.has(props.cellId)}
+        inherited={props.upstreamStaleCellIds?.has(props.cellId) ?? false}
         tooltipText={props.tooltipText}
+        upstreamTooltipText={props.upstreamTooltipText}
         iconClassName={props.iconClassName}
       />
     )
@@ -77,46 +96,76 @@ function isManaged(
 }
 
 function StandaloneStaleSource(props: StandaloneProps) {
-  const { staleCellIds } = useStaleSourceCells({
+  const { staleCellIds, upstreamStaleCellIds } = useStaleSourceCells({
     projectId: props.projectId,
     fileId: props.fileId,
     getToken: props.getToken,
   })
   return (
     <StaleBadge
-      visible={staleCellIds.has(props.cellId)}
+      direct={staleCellIds.has(props.cellId)}
+      inherited={upstreamStaleCellIds.has(props.cellId)}
       tooltipText={props.tooltipText}
+      upstreamTooltipText={props.upstreamTooltipText}
       iconClassName={props.iconClassName}
     />
   )
 }
 
 function StaleBadge({
-  visible,
+  direct,
+  inherited,
   tooltipText,
+  upstreamTooltipText,
   iconClassName,
 }: {
-  visible: boolean
+  direct: boolean
+  inherited: boolean
   tooltipText?: string
+  upstreamTooltipText?: string
   iconClassName?: string
 }) {
-  if (!visible) return null
+  if (!direct && !inherited) return null
+  // Direct (amber) takes priority when both apply — it's the more
+  // actionable signal (this project's own pin moved), and showing both
+  // icons would clutter the cell action rail for no added clarity.
+  if (direct) {
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span
+              role="img"
+              aria-label="Source changed since last revision"
+              className="inline-flex items-center text-amber-600 dark:text-amber-400"
+              data-testid="stale-source-indicator"
+            />
+          }
+        >
+          <AlertTriangle className={iconClassName ?? "h-3 w-3"} />
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          {tooltipText ?? DEFAULT_TOOLTIP}
+        </TooltipContent>
+      </Tooltip>
+    )
+  }
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <span
             role="img"
-            aria-label="Source changed since last revision"
-            className="inline-flex items-center text-amber-600 dark:text-amber-400"
-            data-testid="stale-source-indicator"
+            aria-label="Upstream ancestry changed"
+            className="inline-flex items-center rounded-sm border border-dotted border-violet-500 text-violet-600 dark:border-violet-400 dark:text-violet-400"
+            data-testid="upstream-stale-source-indicator"
           />
         }
       >
-        <AlertTriangle className={iconClassName ?? "h-3 w-3"} />
+        <GitBranchPlus className={iconClassName ?? "h-3 w-3"} />
       </TooltipTrigger>
       <TooltipContent side="top">
-        {tooltipText ?? DEFAULT_TOOLTIP}
+        {upstreamTooltipText ?? DEFAULT_UPSTREAM_TOOLTIP}
       </TooltipContent>
     </Tooltip>
   )

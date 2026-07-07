@@ -9,7 +9,8 @@ name: Delta sync (content + audio)
 # Idempotent end to end; safe to re-run.
 #
 # Required repo secrets (Settings → Secrets and variables → Actions):
-#   FRONTIER_USERNAME, FRONTIER_PASSWORD   GitLab creds (Frontier password grant)
+#   FRONTIER_USERNAME, FRONTIER_PASSWORD   GitLab creds (Frontier password grant), OR
+#   FRONTIER_TOKEN, GITLAB_URL             GitLab token escape hatch (skips Frontier login)
 #   SYNC_SECRET_KEY                        trusted ingest/upsert auth (prod sync-worker)
 #   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY R2 S3 token (read LFS bucket, write snapshots, state)
 #   DISCORD_WEBHOOK_URL                    channel webhook for the run report
@@ -65,11 +66,21 @@ jobs:
 
       # 1) CONTENT: orgs/teams (created in Neon) + projects + cells. The group
       #    sync runs inline, so new orgs are fully pulled in. No R2 needed here.
+      # Step-level timeouts (not just the job's): a JOB-level timeout kills
+      # `if: always()` steps too, so the state-persist step never ran and every
+      # nightly full sweep restarted from zero (run 28809824118: content took
+      # 5h45m, job died at 350m into audio, persist stuck "pending"). A STEP
+      # timeout only fails the step; migrate-all.ts saveState()s after every
+      # project, so persisting the partial .migrate-state.json lets successive
+      # runs converge instead of repeating the sweep.
       - name: Content delta
         id: content
+        timeout-minutes: 150
         env:
           FRONTIER_USERNAME: ${{ secrets.FRONTIER_USERNAME }}
           FRONTIER_PASSWORD: ${{ secrets.FRONTIER_PASSWORD }}
+          FRONTIER_TOKEN: ${{ secrets.FRONTIER_TOKEN }}
+          GITLAB_URL: ${{ secrets.GITLAB_URL }}
           SYNC_SECRET_KEY: ${{ secrets.SYNC_SECRET_KEY }}
         run: |
           set -o pipefail
@@ -80,9 +91,12 @@ jobs:
       - name: Audio delta
         id: audio
         if: always()
+        timeout-minutes: 150
         env:
           FRONTIER_USERNAME: ${{ secrets.FRONTIER_USERNAME }}
           FRONTIER_PASSWORD: ${{ secrets.FRONTIER_PASSWORD }}
+          FRONTIER_TOKEN: ${{ secrets.FRONTIER_TOKEN }}
+          GITLAB_URL: ${{ secrets.GITLAB_URL }}
           SYNC_SECRET_KEY: ${{ secrets.SYNC_SECRET_KEY }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

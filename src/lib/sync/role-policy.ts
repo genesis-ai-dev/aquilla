@@ -63,6 +63,11 @@ const REQUIRED_ROLE: Record<string, number> = {
   // Timeline editor (mirrors server).
   "cell.retime": ROLE.CONTRIBUTOR,
   "file.video.set": ROLE.CONTRIBUTOR,
+
+  // FRO-478: repin ("accept upstream change as-is") — same authority bar
+  // as validating (spec §12). Bulk repin is gated higher (project_lead 500)
+  // in the review-panel UI itself, not here.
+  "target.cell.repin": ROLE.REVIEWER,
 }
 
 /**

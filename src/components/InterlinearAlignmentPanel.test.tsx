@@ -11,9 +11,8 @@
  *   4. HelpCircle tooltip text is present on the section header.
  */
 
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
-import { TooltipDelegationBoundary } from "@/components/ui/tooltip"
 import { InterlinearAlignmentPanel } from "./InterlinearAlignmentPanel"
 import {
   buildAlignmentModel,
@@ -21,6 +20,20 @@ import {
   type AlignmentModel,
   type AlignmentSeed,
 } from "@/lib/completion/interlinear"
+
+// AppTooltip only exposes the delegated `data-tooltip` attribute inside a
+// TooltipDelegationBoundary; elsewhere it renders the real Base UI tooltip,
+// which mounts on hover/focus and isn't reliably driveable in happy-dom.
+// Render its content unconditionally so this test asserts the panel's own
+// copy, not Base UI's async open/close timing.
+vi.mock("@/components/ui/tooltip", () => ({
+  AppTooltip: ({ children, content }: { children: React.ReactNode; content: React.ReactNode }) => (
+    <>
+      {children}
+      <div data-testid="tooltip-content">{content}</div>
+    </>
+  ),
+}))
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -193,23 +206,21 @@ describe("InterlinearAlignmentPanel — section header tooltip (FRO-241)", () =>
   it("HelpCircle tooltip on insufficient-data state mentions confirm and reject actions", () => {
     const model = stubModelWithPairCount(0)
     render(
-      // The delegation boundary makes AppTooltip surface string content as a
-      // `data-tooltip` attribute (tooltip.tsx) — the plain Base UI tooltip only
-      // exists as a portal on hover, which this render-only test can't reach.
-      <TooltipDelegationBoundary>
-        <InterlinearAlignmentPanel
-          sourceText="In the beginning"
-          targetText="Am Anfang"
-          alignmentModel={model}
-          confirmedSeeds={noSeeds}
-          onSeedChange={noop}
-        />
-      </TooltipDelegationBoundary>,
+      <InterlinearAlignmentPanel
+        sourceText="In the beginning"
+        targetText="Am Anfang"
+        alignmentModel={model}
+        confirmedSeeds={noSeeds}
+        onSeedChange={noop}
+      />,
     )
+    // AppTooltip is mocked to render its content unconditionally (see mock above) —
+    // Base UI's real hover/focus tooltip isn't reliably driveable in happy-dom.
     // The text must mention both confirm and reject/invalidate to satisfy FRO-240.
-    const helpSpan = Array.from(document.querySelectorAll("[data-tooltip]")).find((el) =>
-      /confirm.*reject|reject.*confirm/i.test(el.getAttribute("data-tooltip") ?? ""),
+    const tooltipContents = screen.getAllByTestId("tooltip-content")
+    const helpTooltip = tooltipContents.find((el) =>
+      /confirm.*reject|reject.*confirm/i.test(el.textContent ?? ""),
     )
-    expect(helpSpan).toBeTruthy()
+    expect(helpTooltip).toBeTruthy()
   })
 })

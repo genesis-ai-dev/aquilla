@@ -83,6 +83,29 @@ export type EventKind =
   // Timeline editor: set/clear a file's core video URL (timeline preview master
   // clock), stored in files.meta JSON. Non-chain-mutating; file-level.
   | 'file.video.set'
+  // FRO-476: live source links — mirror engine. Server-emitted only (the
+  // mirror sync engine in link-sync.ts; never a client outbox kind). Mirror
+  // events replicate an ordering the UPSTREAM already arbitrated, so they
+  // carry parentId: null and are EXEMPT from CHAIN_MUTATING_KINDS / the
+  // chain-claims gate (see event-projection.ts) — applied instead behind a
+  // monotonic `payload.upstream.seq > cells.upstream_seq` guard in the
+  // projection SQL itself. See the linked-projects design spec §4.
+  | 'source.cell.mirror'
+  // Downstream `files` row for an upstream file created post-seed. Same
+  // server-only, non-chain-mutating status as source.cell.mirror.
+  | 'file.mirror'
+  // Audit-trail record of a non-empty mirror batch (an empty fold advances
+  // `projects.source_link_cursor` directly with no event). No cells
+  // projection — purely a history record for the review panel (FRO-478).
+  | 'link.cursor.advance'
+  // FRO-478: "accept upstream change as-is" — reviewer(300)+ asserts a
+  // translation still stands against the new source. Non-chain-mutating:
+  // the chain head does NOT move, so validations/endorsements survive
+  // (deliberate — spec §7). Guarded: the projection only applies when the
+  // target row's CURRENT event_id still equals `expectedTargetEventId`, so
+  // a translator's concurrent re-commit makes this a no-op instead of
+  // clobbering a fresher pin (the route reports skips for bulk repin).
+  | 'target.cell.repin'
 
 // ── Comment scope ─────────────────────────────────────────────────────────
 
@@ -386,6 +409,78 @@ export interface EventPayloads {
   'file.video.set': {
     coreMediaUrl: string | null
   }
+
+  // ── FRO-476: live source links — mirror engine (server-emitted) ────────
+  // Advances a downstream source cell to match the upstream. Full
+  // create-grade shape (structural fields for a cell with no local row yet)
+  // PLUS the fields source.cell.commit carries (value/valueHtml) — a mirror
+  // can hit either a brand-new cell (post-seed upstream create) or an
+  // existing one (upstream commit), so the projection is a full UPSERT.
+  'source.cell.mirror': {
+    value: string
+    valueHtml?: string
+    type?: string
+    canonicalRef?: string
+    anchorCellId?: string | null
+    startMs?: number
+    endMs?: number
+    sequenceIndex?: number
+    transcription?: string
+    cameraState?: string
+    medium?: string
+    metadata?: Record<string, unknown>
+    /** True = the upstream deleted this cell. Tombstone (stamp
+     *  cells.tombstoned_at), never delete the downstream row. */
+    deleted?: true
+    /** Provenance: which upstream event/state this mirror reflects. */
+    upstream: {
+      projectId: string
+      cellId: string
+      eventId: string
+      /** The upstream event's server_seq — the monotonic apply-guard key. */
+      seq: number
+      side: 'source' | 'target'
+      contentHash: string
+    }
+  }
+  // Downstream `files` row for an upstream file created post-seed.
+  'file.mirror': {
+    fileId: string
+    name: string
+    /** Passed through to files.meta (JSON) — same shape as file.create's
+     *  language/orderedBy fields, merged rather than replacing wholesale. */
+    meta?: Record<string, unknown>
+    upstream: {
+      projectId: string
+      eventId: string
+      seq: number
+    }
+  }
+  // Audit-trail record of one non-empty mirror sync batch. No cells
+  // projection; purely a history row for the review panel (FRO-478).
+  'link.cursor.advance': {
+    upstreamProjectId: string
+    fromSeq: number
+    toSeq: number
+    cellCount: number
+  }
+
+  // ── FRO-478: repin (accept upstream change as-is) ──────────────────────
+  // Reviewer-level "translation still correct against the new source."
+  // Updates ONLY cells.source_event_id on the target row — never value,
+  // event_id, validated, or endorsement_count. Guarded by
+  // expectedTargetEventId so a race with a translator's concurrent
+  // target.cell.commit resolves to a no-op (the fresher pin wins) rather
+  // than clobbering it. See event-projection.ts's 'target.cell.repin' case.
+  'target.cell.repin': {
+    /** The (now-current) source row's event_id to pin the target to. */
+    sourceEventId: string
+    /** The target row's event_id as observed by the reviewer when they
+     *  opened the review panel. The UPDATE's WHERE clause requires
+     *  cells.event_id to still equal this — if a translator re-committed
+     *  in the meantime, the head moved and this repin silently no-ops. */
+    expectedTargetEventId: string
+  }
 }
 
 export type PayloadFor<K extends EventKind> = EventPayloads[K]
@@ -435,4 +530,10 @@ export interface EventClaims {
   fileId?: string
   /** Numeric role level (100=viewer..700=owner). */
   roleLevel: number
+  /**
+   * FRO-346: role-resolution source stamped at mint time. `"platform"`
+   * exempts the token from the live membership re-check (ADMIN_EMAILS
+   * operators have no membership rows). Absent on older tokens.
+   */
+  src?: string
 }

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tmx SYSTEM "tmx14.dtd">
+<tmx version="1.4">
+<header creationtool="corpus-gen" creationtoolversion="1.0" segtype="sentence" o-tmf="none" adminlang="en-US" srclang="en-US" datatype="plaintext"/>
+<body>
+<tu tuid="tu-11-0"><prop type="x-domain">legal</prop><tuv xml:lang="en-US"><seg>Use the &lt;b&gt;bold&lt;/b&gt; toggle to emphasize key phrases.</seg></tuv><tuv xml:lang="de-DE"><seg>This warranty does not cover damage caused by misuse or unauthorized repair.</seg></tuv></tu>
+<tu tuid="tu-11-1"><tuv xml:lang="en-US"><seg><![CDATA[Refunds are processed within 5–10 business days of approval.]]></seg></tuv><tuv xml:lang="de-DE"><seg>Session expi<ph x="1">{0}</ph>red — please sign in again to continue where you left off.</seg></tuv></tu>
+<tu tuid="tu-11-2"><tuv xml:lang="en-US"><seg>Use the &lt;b&gt;bold&lt;/b&gt; toggle to emphasize key phrases.</seg></tuv><tuv xml:lang="de-DE"><seg>Les données <ph x="1">{0}</ph>personnelles sont traitées conformément au RGPD.</seg></tuv></tu>
+<tu tuid="tu-11-3"><tuv xml:lang="en-US"><seg>Congratulations! You have unlocked the &quot;Explorer&quot; achievement 🎉.</seg></tuv><tuv xml:lang="de-DE"><seg>Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).</seg></tuv></tu>
+<tu tuid="tu-11-4"><prop type="x-domain">legal</prop><tuv xml:lang="en-US"><seg>Use the &lt;b&gt;bold&lt;/b&gt; toggle to emphasize key phrases.</seg></tuv><tuv xml:lang="de-DE"><seg>Net weight: 454 g (16 oz). Packaged in a facility that handles nuts.</seg></tuv></tu>
+<tu tuid="tu-11-5"><tuv xml:lang="en-US"><seg>Warning: contents may be hot. Handle with care.</seg></tuv><tuv xml:lang="de-DE"><seg>Net weight: 454 g (16 oz). Packaged in a facility that handles nuts.</seg></tuv></tu>
+<tu tuid="tu-11-6"><prop type="x-domain">legal</prop><note>reviewed</note><tuv xml:lang="en-US"><seg>The undersigned parties agree to the terms &amp; conditions set forth herein.</seg></tuv><tuv xml:lang="de-DE"><seg>Установите приложение и войдите в свою учетную запись.</seg></tuv></tu>
+</body>
+</tmx>

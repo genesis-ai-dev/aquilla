@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="en-GB" target-language="es-ES" datatype="plaintext" original="doc0.txt">
+    <body>
+      <trans-unit id="u1">
+        <source>Enter your 6-digit verification code to continue.</source>
+        <target state="translated">Enter your 6-digit verification code to continue.</target>
+      </trans-unit>
+      <trans-unit id="u2">
+        <source>製品の仕様は予告なく変更されることがあります。</source>
+        <target state="final">製品の仕様は予告なく変更されることがあります。</target>
+        <note>ctx-2</note>
+      </trans-unit>
+      <trans-unit id="u3">
+        <source>By signing below, the lessee acknowledges receipt of the premises.</source>
+        <target state="new"></target>
+        <note>ctx-3</note>
+      </trans-unit>
+      <trans-unit id="u4" xml:space="preserve">
+        <source><g id="g4">Rinse thoroughly with lukewarm water for at least 15 minutes.</g></source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u5">
+        <source><bpt id="b5">&lt;b&gt;</bpt>Die maximale Zuladung beträgt 750 kg einschließlich Fahrer.<ept id="b5">&lt;/b&gt;</ept></source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u6" xml:space="preserve">
+        <source>The quarterly report shows a 12.5% increase in recurring revenue.</source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u7" xml:space="preserve">
+        <source><g id="g7">Free shipping on orders over $50 — terms apply.</g></source>
+        <target state="new"></target>
+        <note>ctx-7</note>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

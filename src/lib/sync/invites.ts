@@ -45,6 +45,50 @@ export type InvitePreviewResult<T> =
   | { ok: true; data: T }
   | { ok: false; reason: InvitePreviewFailReason }
 
+/**
+ * Reason codes for a failed invite ACCEPT (redeem) call — distinct from
+ * InvitePreviewFailReason so callers never conflate "the invite itself is
+ * dead" (used/time_expired/invalid) with "the request to redeem it failed
+ * for an unrelated reason" (unauthorized/network/server).
+ *
+ * - "used" / "time_expired" / "invalid" — the invite really is dead (410/404).
+ * - "wrong_email"  — 403: this invite was sent to a different address.
+ * - "unauthorized" — 401: the caller's session token was rejected. This is
+ *   NOT evidence the invite is invalid — surfacing it as "invite dead" is
+ *   the FRO-364 bug (a fresh signup's token intermittently 401ing read as a
+ *   permanently broken magic link). Callers should re-prompt auth instead.
+ * - "network" — fetch threw.
+ * - "server"  — any other non-2xx (500s, unexpected codes).
+ */
+export type AcceptFailReason =
+  | "used"
+  | "time_expired"
+  | "invalid"
+  | "wrong_email"
+  | "unauthorized"
+  | "network"
+  | "server"
+
+export type AcceptResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; reason: AcceptFailReason }
+
+/** Classify a non-2xx accept response into an AcceptFailReason. */
+async function classifyAcceptFailure(res: Response): Promise<AcceptFailReason> {
+  if (res.status === 401) return "unauthorized"
+  if (res.status === 403) return "wrong_email"
+  if (res.status === 404) return "invalid"
+  if (res.status === 410) {
+    try {
+      const body = (await res.json()) as { code?: string }
+      return body.code === "time_expired" ? "time_expired" : "used"
+    } catch {
+      return "used"
+    }
+  }
+  return "server"
+}
+
 export interface ServerInviteCreated {
   token: string
   projectId: string
@@ -168,14 +212,16 @@ export async function previewServerInvite(
  * POST /api/v2/projects/accept-invite — joiner side.
  *
  * On success the caller is added to project_members at the role the sharer
- * specified, unblocking /sync-token for this project. 404/410/500 returns null;
- * joiner can still view the project locally but sync-worker writes will 401.
+ * specified, unblocking /sync-token for this project. Returns a discriminated
+ * result on failure (see AcceptFailReason) so callers can distinguish "the
+ * invite is really dead" from "the request failed for an unrelated reason"
+ * (FRO-364: a 401 here is not evidence of a dead invite).
  */
 export async function acceptServerInvite(
   jwt: string,
   token: string,
   apiUrl: string = AUTH_API_URL
-): Promise<ServerInviteAccepted | null> {
+): Promise<AcceptResult<ServerInviteAccepted>> {
   try {
     const res = await fetch(`${apiUrl}/api/v2/projects/accept-invite`, {
       method: "POST",
@@ -186,13 +232,14 @@ export async function acceptServerInvite(
       body: JSON.stringify({ token }),
     })
     if (!res.ok) {
-      console.warn(`[invites] acceptServerInvite → HTTP ${res.status}`)
-      return null
+      const reason = await classifyAcceptFailure(res)
+      console.warn(`[invites] acceptServerInvite → HTTP ${res.status} (${reason})`)
+      return { ok: false, reason }
     }
-    return (await res.json()) as ServerInviteAccepted
+    return { ok: true, data: (await res.json()) as ServerInviteAccepted }
   } catch (err) {
     console.warn("[invites] acceptServerInvite failed:", err)
-    return null
+    return { ok: false, reason: "network" }
   }
 }
 
@@ -275,7 +322,18 @@ export interface MultiInvitePreview {
   token: string
   role: { level: number; name: string }
   expiresAt: string | null
-  projects: { projectId: string; projectName: string; archived: boolean }[]
+  /**
+   * `usedByCaller` (FRO-347): true when the signed-in caller is this row's
+   * original redeemer and is still a member — i.e. this preview is a
+   * "continue" for a link they already used, not a fresh invite. The server
+   * only returns already-used rows at all when this is true for at least one
+   * of them (otherwise the whole request 410s) — JoinPage doesn't need to
+   * branch on it today (the normal confirm-card + accept flow already
+   * produces the right friendly no-op redirect), but it's surfaced here so a
+   * future "Welcome back" variant of the confirm card can distinguish the
+   * two cases without another round-trip.
+   */
+  projects: { projectId: string; projectName: string; archived: boolean; usedByCaller?: boolean }[]
 }
 
 export interface MultiInviteAccepted {
@@ -294,10 +352,19 @@ export interface MultiInviteAccepted {
  */
 export async function previewMultiInvite(
   token: string,
-  apiUrl: string = AUTH_API_URL
+  apiUrl: string = AUTH_API_URL,
+  jwt?: string | null
 ): Promise<InvitePreviewResult<MultiInvitePreview>> {
   try {
-    const res = await fetch(`${apiUrl}/api/v2/invites/${encodeURIComponent(token)}/preview`)
+    // The Authorization header is what lets the server recognize the caller
+    // as the token's original redeemer and return 200 usedByCaller instead of
+    // 410 used (FRO-347) — without it, a still-member re-click dead-ends.
+    const res = await fetch(`${apiUrl}/api/v2/invites/${encodeURIComponent(token)}/preview`, {
+      headers: jwt ? { Authorization: `Bearer ${jwt}` } : undefined,
+      // A heuristically-cached anonymous 410 must never answer the authed
+      // refetch (FRO-347 QA finding) — bypass the HTTP cache entirely.
+      cache: "no-store",
+    })
     if (!res.ok) {
       let reason: InvitePreviewFailReason
       if (res.status === 410) {
@@ -321,12 +388,16 @@ export async function previewMultiInvite(
   }
 }
 
-/** POST /api/v2/invites/:token/accept — joiner side; materializes membership in every project. */
+/**
+ * POST /api/v2/invites/:token/accept — joiner side; materializes membership
+ * in every project. Returns a discriminated result on failure (see
+ * AcceptFailReason) — same rationale as acceptServerInvite (FRO-364).
+ */
 export async function acceptMultiInvite(
   jwt: string,
   token: string,
   apiUrl: string = AUTH_API_URL
-): Promise<MultiInviteAccepted | null> {
+): Promise<AcceptResult<MultiInviteAccepted>> {
   try {
     const res = await fetch(`${apiUrl}/api/v2/invites/${encodeURIComponent(token)}/accept`, {
       method: "POST",
@@ -336,13 +407,14 @@ export async function acceptMultiInvite(
       },
     })
     if (!res.ok) {
-      console.warn(`[invites] acceptMultiInvite → HTTP ${res.status}`)
-      return null
+      const reason = await classifyAcceptFailure(res)
+      console.warn(`[invites] acceptMultiInvite → HTTP ${res.status} (${reason})`)
+      return { ok: false, reason }
     }
-    return (await res.json()) as MultiInviteAccepted
+    return { ok: true, data: (await res.json()) as MultiInviteAccepted }
   } catch (err) {
     console.warn("[invites] acceptMultiInvite failed:", err)
-    return null
+    return { ok: false, reason: "network" }
   }
 }
 

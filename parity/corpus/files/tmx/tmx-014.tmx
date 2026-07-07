@@ -1,0 +1,18 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tmx SYSTEM "tmx14.dtd">
+<tmx version="1.4">
+<header creationtool="corpus-gen" creationtoolversion="1.0" segtype="sentence" o-tmf="none" adminlang="en-US" srclang="en-GB" datatype="plaintext"/>
+<body>
+<tu tuid="tu-13-0"><prop type="x-domain">legal</prop><tuv xml:lang="en-GB"><seg>請在使用前仔細閱讀本說明書。</seg></tuv><tuv xml:lang="es-ES"><seg>Third-party integrations require an Enterprise plan subscription.</seg></tuv></tu>
+<tu tuid="tu-13-1"><tuv xml:lang="en-GB"><seg>Battery life: up to 18 hours of continuous video playback.</seg></tuv><tuv xml:lang="es-ES"><seg>By signing b<ph x="1">{0}</ph>elow, the lessee acknowledges receipt of the premises.</seg></tuv></tu>
+<tu tuid="tu-13-2"><tuv xml:lang="en-GB"><seg>請在使用前仔細閱讀本說明書。</seg></tuv><tuv xml:lang="es-ES"><seg>Enter your 6-digit verification code to continue.</seg></tuv></tu>
+<tu tuid="tu-13-3"><tuv xml:lang="en-GB"><seg>A load-bearing wall shall not be modified without engineering approval.</seg></tuv><tuv xml:lang="es-ES"><seg>This section<ph x="1">{0}</ph> intentionally left blank.</seg></tuv></tu>
+<tu tuid="tu-13-4"><tuv xml:lang="en-GB"><seg>請在使用前仔細閱讀本說明書。</seg></tuv><tuv xml:lang="es-ES"><seg>製品の仕様は予告なく変更<ph x="1">{0}</ph>されることがあります。</seg></tuv></tu>
+<tu tuid="tu-13-5"><tuv xml:lang="en-GB"><seg>Backup completed successfully at 02:00 UTC; 1,284 files archived.</seg></tuv><tuv xml:lang="es-ES"><seg>Net weight: 454 g (16 oz). Packaged in a facility that handles nuts.</seg></tuv></tu>
+<tu tuid="tu-13-6"><note>reviewed</note><tuv xml:lang="en-GB"><seg>Warning: contents may be hot. Handle with care.</seg></tuv><tuv xml:lang="es-ES"><seg>Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).</seg></tuv></tu>
+<tu tuid="tu-13-7"><prop type="x-domain">legal</prop><tuv xml:lang="en-GB"><seg>Battery life: up to 18 hours of continuous video playback.</seg></tuv><tuv xml:lang="es-ES"><seg>Rinse thorou<ph x="1">{0}</ph>ghly with lukewarm water for at least 15 minutes.</seg></tuv></tu>
+<tu tuid="tu-13-8"><prop type="x-domain">legal</prop><tuv xml:lang="en-GB"><seg>Congratulations! You have unlocked the &quot;Explorer&quot; achievement 🎉.</seg></tuv><tuv xml:lang="es-ES"><seg>Uptime SLA of 99.95% measured monthly, excluding scheduled maintenance.</seg></tuv></tu>
+<tu tuid="tu-13-9"><prop type="x-domain">legal</prop><tuv xml:lang="en-GB"><seg><![CDATA[Warning: contents may be hot. Handle with care.]]></seg></tuv><tuv xml:lang="es-ES"><seg>A load-bearing wall shall not be modified without engineering approval.</seg></tuv></tu>
+<tu tuid="tu-13-10"><tuv xml:lang="en-GB"><seg>Congratulations! You have unlocked the &quot;Explorer&quot; achievement 🎉.</seg></tuv><tuv xml:lang="es-ES"><seg>Please review the attached invoice before the payment deadline.</seg></tuv></tu>
+</body>
+</tmx>

@@ -16,8 +16,9 @@
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
-import type { Env, Variables } from "../types"
+import type { Env, Variables, AuthUser } from "../types"
 import { authMiddleware } from "../middleware/auth"
+import { resolveProjectRole } from "../services/project-permissions"
 import { runAiGuard } from "../lib/ai-budget"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
 import { creditGuard, recordCredit } from "../lib/credits"
@@ -45,6 +46,11 @@ const chatCompletionRequestSchema = z.object({
   stream: z.boolean().optional().default(false),
   max_tokens: z.number().optional(),
   response_format: z.record(z.unknown()).optional(),
+  // FRO-414 follow-up: chat invoked from a project-editing context carries the
+  // project id so its credit spend counts against that project's org (same
+  // attribution as agent.ts). Optional — project-less chat stays at org 0.
+  // NOT forwarded to OpenRouter (see buildOpenRouterBody).
+  projectId: z.string().min(1).optional(),
 })
 
 type ChatRequest = z.infer<typeof chatCompletionRequestSchema>
@@ -65,6 +71,33 @@ function resolveModel(env: Env, requested: string, settings: PlatformSettings): 
     settings.defaultLlmModel || env.DEFAULT_LLM_MODEL || "anthropic/claude-sonnet-4.5"
   if (isDefaultRequest(requested)) return fallback
   return requested
+}
+
+/**
+ * Resolve the org whose credit ledger this chat spend belongs to (FRO-414
+ * follow-up). Membership-gated: the caller must actually have a role on the
+ * project — otherwise a client could bill its chat to an arbitrary org by
+ * passing someone else's projectId. Attribution is best-effort and never
+ * blocks chat: no projectId, no access, or any lookup failure → org 0
+ * (the historical no-org fallback).
+ */
+async function resolveChatOrgId(
+  env: Env,
+  user: AuthUser,
+  projectId: string | undefined,
+): Promise<number> {
+  if (!projectId) return 0
+  try {
+    const role = await resolveProjectRole(env, user, projectId)
+    if (!role) return 0
+    const projectRow = await env.AQUILLA_PG
+      .prepare("SELECT org_id FROM projects WHERE id = ?")
+      .bind(projectId)
+      .first<{ org_id: number | null }>()
+    return projectRow?.org_id ?? 0
+  } catch {
+    return 0
+  }
 }
 
 function buildOpenRouterBody(request: ChatRequest, model: string): string {
@@ -111,9 +144,12 @@ chat.post(
       return c.json(guard.body, guard.status)
     }
 
-    // Credit guard: chat is not tied to a project → orgId = 0 (no-org fallback).
-    // Log-only by default; enforce only when cfg.enforce is on.
-    const chatCreditCheck = await creditGuard(c.env.AQUILLA_PG, c.env, 0, "llm")
+    // Credit guard + attribution (FRO-414 follow-up): chat invoked from a
+    // project context bills that project's org; project-less chat falls back
+    // to org 0 as before. The guard uses the same org so chat respects the
+    // org's caps once an admin turns enforcement on (log-only by default).
+    const orgId = await resolveChatOrgId(c.env, user, request.projectId)
+    const chatCreditCheck = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
     if (!chatCreditCheck.ok) {
       return c.json(
         { error: "credit_cap_exceeded", reason: chatCreditCheck.reason, message: "LLM credit cap reached. Contact your org admin." },
@@ -162,7 +198,7 @@ chat.post(
         // object from a streaming response without buffering it (defeats the
         // point). Record a flat 1¢ fallback estimate so the ledger always has
         // a row — this is the cheap/low-priority rail.
-        await recordCredit(c.env.AQUILLA_PG, 0, user.id, "llm", 1, 1)
+        await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", 1, 1)
         const streamHeaders = new Headers({
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
@@ -186,7 +222,7 @@ chat.post(
         /* ignore — use the fallback */
       }
       // Record asynchronously (graceful-degrade) — never block the response.
-      await recordCredit(c.env.AQUILLA_PG, 0, user.id, "llm", costCents, 1)
+      await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", costCents, 1)
 
       if (ab) {
         c.header("X-AB-Request-Id", ab.requestId)

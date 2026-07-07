@@ -397,6 +397,12 @@ export interface ProjectRecord {
    * auth-worker's /link-source endpoint; cleared by /detach-source.
    */
   sourceProjectId?: string | null
+  /** FRO-476/478: link mode/consumes/gate/cursor — see CloudProjectSummary
+   *  for field semantics. Populated alongside sourceProjectId. */
+  sourceLinkMode?: "clone" | "live" | null
+  sourceLinkConsumes?: "source" | "target" | null
+  sourceLinkGate?: "head" | "validated" | null
+  sourceLinkCursor?: number | null
   /** Cached sync role from the most recent /sync-token response. Lets the
    * Dashboard show the owner-only "Move to Trash" action without a round-trip
    * per card. Stale values are tolerable — server re-validates on every

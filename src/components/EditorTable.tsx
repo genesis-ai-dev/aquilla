@@ -9,10 +9,11 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity, NotebookPen, Info, Pencil,
+  ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, Music,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { getCellPref, setCellPref } from "@/lib/store/audio-cell-prefs"
@@ -55,6 +56,7 @@ import {
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
@@ -70,7 +72,7 @@ import { cn } from "@/lib/utils"
 import { looksLikeUuid } from "@/lib/uuid"
 import { isPerfLogEnabled } from "@/lib/perf-log"
 import { partitionInfractions } from "@/lib/rules/waivers"
-import { ViolationPopover } from "./ViolationPopover"
+import { ViolationPopover, type ViolationAnchor } from "./ViolationPopover"
 import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
@@ -437,11 +439,15 @@ interface EditorTableProps {
   // onInfractionClick moved to EditorActionsContext (FRO perf cleanup) — pure
   // pass-through, never consumed above the row.
   isBacktranslationConfigured?: boolean
-  onBacktranslate?: (cell: CellData, polish?: boolean) => void
+  /** Generate the cell's back-translation with the configured LLM. */
+  onBacktranslate?: (cell: CellData) => void
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
   /** Called when user saves a BT edit. Parent emits `cell.backtranslation.set`. */
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
+  /** On-demand statistical gloss (corpus-derived, never persisted) for the BT
+   *  tab's collapsed reference section. */
+  getStatisticalBt?: (translatedText: string) => string
   cellOpenCommentCount?: Map<string, number>
   // onOpenComments/onOpenHistory moved to EditorActionsContext (FRO perf
   // cleanup) — pure pass-through, never consumed above the row.
@@ -468,6 +474,11 @@ interface EditorTableProps {
    *  StaleSourceIndicator badge next to its validation status. Parent fetches
    *  once per file via `useStaleSourceCells` so we don't issue N requests. */
   staleCellIds?: ReadonlySet<string>
+  /** FRO-477 (§6) — set of cell ids whose ANCESTRY is stale (inherited, a
+   *  further-upstream chain hop changed). Renders the violet/dotted second
+   *  tone on `StaleSourceIndicator`, layered onto the same prop path as
+   *  `staleCellIds` above. */
+  upstreamStaleCellIds?: ReadonlySet<string>
   /** Token fetcher for project-scoped sync reads. Required for the inline
    *  History tab to query the D1 event log on demand. */
   getTokenForFile?: (fileId: string) => Promise<string | null>
@@ -515,7 +526,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onCompleteSingle, onCompleteBatch, healthMap,
   infractions = new Map(), rules = [],
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
-  onSaveBacktranslation,
+  onSaveBacktranslation, getStatisticalBt,
   cellOpenCommentCount,
   activeCueIndex, onSeekToCue,
   lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
@@ -530,6 +541,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   cellsWithRemoteChange,
   onClaimCell, onReleaseCell, onAckRemoteChange,
   staleCellIds,
+  upstreamStaleCellIds,
   getTokenForFile,
   getAlignmentModel,
   onAlignmentSeedChange,
@@ -969,10 +981,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const isAlreadySelected = selectedIds.has(cellId)
     const anchorId = getSelectionAnchorId()
     const anchorIndex = displayCellsRef.current.findIndex((cell) => cell.id === anchorId)
-    const shouldRange =
-      !isAdditive &&
-      anchorIndex >= 0 &&
-      (e.shiftKey || (selectedIds.size > 0 && !isAlreadySelected))
+    // FRO-348: range-select must be an explicit Shift-click. Previously a
+    // plain click on any unselected cell silently extended the range from
+    // the old anchor whenever *something* was already selected — no
+    // modifier, no visual preview. Under concurrent editing the anchor's
+    // row could have shifted since it was set, so the silently-computed
+    // range would land 1-2 rows off, or not start on the clicked cell at
+    // all. A plain click must always mean "select exactly this cell."
+    const shouldRange = !isAdditive && anchorIndex >= 0 && e.shiftKey
     const startIndex = shouldRange ? anchorIndex : rowIndex
 
     selectionDragRef.current = {
@@ -1161,6 +1177,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onActivateEditor={handleActivateEditor}
           onDeactivateEditor={handleDeactivateEditor}
           isStaleSource={staleCellIds?.has(cell.id) ?? false}
+          isUpstreamStaleSource={upstreamStaleCellIds?.has(cell.id) ?? false}
           username={username}
           editable={canEdit}
           canValidate={canValidate}
@@ -1186,6 +1203,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           backtranslationErrors={backtranslationErrors}
           onBacktranslate={onBacktranslate}
           onSaveBacktranslation={onSaveBacktranslation}
+          getStatisticalBt={getStatisticalBt}
           cellOpenCommentCount={cellOpenCommentCount}
           activeCueIndex={activeCueIndex}
           onSeekToCue={onSeekToCue}
@@ -1250,6 +1268,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     footnoteViewMode,
     getTokenForFile,
     getAlignmentModel,
+    getStatisticalBt,
     getVoiceTakeCells,
     gridCols,
     handleDragEnter,
@@ -1293,6 +1312,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     sourceFontSize,
     sourceTextDirection,
     staleCellIds,
+    upstreamStaleCellIds,
     targetFontSize,
     targetTextDirection,
     username,
@@ -1310,7 +1330,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         )}
         <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
           {/* FRO-250: sticky chapter label — left gutter, does not shift Source */}
-          <div className="flex items-center overflow-visible">
+          <div className="flex w-full items-center justify-center overflow-visible">
             {currentSectionLabel && !looksLikeUuid(currentSectionLabel) && (
               <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
                 {currentSectionLabel}
@@ -1364,10 +1384,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             <TimelineAddMedia onAttachFile={onAttachMediaFile} onAttachUrl={onAttachMediaUrl} />
           </div>
         ) : (
-          <div className="flex-1 px-4 py-10 text-center text-sm text-muted-foreground">
-            {audioLens
-              ? "No media segments yet. Import an audio or video file, or record a take, to populate the media layer."
-              : "No text segments in this file."}
+          <div className="flex-1">
+            <EmptyState
+              className="h-full border-0 bg-transparent py-10"
+              icon={audioLens ? Music : FileText}
+              title={audioLens ? "No media segments yet" : "No text segments in this file"}
+              description={
+                audioLens
+                  ? "Import an audio or video file, or record a take, to populate the media layer."
+                  : undefined
+              }
+            />
           </div>
         )
       ) : (
@@ -1403,6 +1430,10 @@ interface MemoizedRowProps {
    *  Resolved once per file by the parent (membership look-up) so this prop
    *  is just a stable boolean — preserves the row's React.memo invariant. */
   isStaleSource: boolean
+  /** FRO-477 (§6): this cell's ANCESTRY is stale (a further-upstream chain
+   *  hop changed). Same "stable boolean, resolved by the parent" shape as
+   *  `isStaleSource` above. */
+  isUpstreamStaleSource: boolean
   onCellCommitted?: (cellId: string, committedEventId?: string) => void | Promise<void>
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
@@ -1423,8 +1454,9 @@ interface MemoizedRowProps {
   isBacktranslationConfigured?: boolean
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
-  onBacktranslate?: (cell: CellData, polish?: boolean) => void
+  onBacktranslate?: (cell: CellData) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
+  getStatisticalBt?: (translatedText: string) => string
   cellOpenCommentCount?: Map<string, number>
   activeCueIndex?: number
   onSeekToCue?: (cellId: string) => void
@@ -1507,7 +1539,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onDeactivateEditor,
     project, username, editable, canValidate, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle,
-    isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation,
+    isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
     onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
     sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
@@ -1515,6 +1547,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onAckRemoteChange,
     isStaleSource,
+    isUpstreamStaleSource,
     assigneeLabel,
     assigneeNote,
     checkLockHolder,
@@ -1601,6 +1634,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         editable={editable}
         canValidate={canValidate}
         isStaleSource={isStaleSource}
+        isUpstreamStaleSource={isUpstreamStaleSource}
         isCompletionConfigured={isCompletionConfigured}
         isCompletionAvailable={isCompletionAvailable}
         isLoading={isLoading}
@@ -1619,6 +1653,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         backtranslationError={backtranslationError}
         onBacktranslate={onBacktranslate}
         onSaveBacktranslation={onSaveBacktranslation}
+        getStatisticalBt={getStatisticalBt}
         openCommentCount={openCommentCount}
         isActiveCue={isActiveCue}
         onSeekToCue={onSeekToCue}
@@ -1685,6 +1720,10 @@ interface EditorRowProps {
    *  target commit. Renders a small warning badge next to the validation
    *  status. Computed once-per-file by the parent. */
   isStaleSource: boolean
+  /** FRO-477 (§6) — true when this cell's ANCESTRY is stale (a further-
+   *  upstream chain hop changed). Renders the violet/dotted second tone.
+   *  Same once-per-file computation shape as `isStaleSource`. */
+  isUpstreamStaleSource: boolean
   onCellCommitted?: (cellId: string, committedEventId?: string) => void
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
@@ -1713,8 +1752,9 @@ interface EditorRowProps {
   isBacktranslationConfigured?: boolean
   isBacktranslating?: boolean
   backtranslationError?: string
-  onBacktranslate?: (cell: CellData, polish?: boolean) => void
+  onBacktranslate?: (cell: CellData) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
+  getStatisticalBt?: (translatedText: string) => string
   /** FRO-207: Lazily returns the interlinear alignment model. */
   getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
   /** FRO-207: Called when user confirms/invalidates an alignment. */
@@ -2433,6 +2473,7 @@ function EditorRow({
   cellInfractions, waivedInfractions, ruleMap,
   onCompleteSingle,
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate, onSaveBacktranslation,
+  getStatisticalBt,
   openCommentCount,
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
@@ -2443,6 +2484,7 @@ function EditorRow({
   onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onAckRemoteChange,
   isStaleSource,
+  isUpstreamStaleSource,
   getTokenForFile,
   getAlignmentModel,
   onAlignmentSeedChange,
@@ -2466,7 +2508,7 @@ function EditorRow({
   const hasTranslatedText = Boolean(cell.translated?.trim())
   const showCompletionOverlay = isLoading && !hasTranslatedText
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
-  const [openRuleAnchor, setOpenRuleAnchor] = useState<HTMLElement | null>(null)
+  const [openRuleAnchor, setOpenRuleAnchor] = useState<ViolationAnchor | null>(null)
   const [examplesExpanded, setExamplesExpanded] = useState(false)
   // FRO-204: chip click state for TermLookupPopover on target editor chips.
   const [termChipState, setTermChipState] = useState<{ term: string; anchor: HTMLElement } | null>(null)
@@ -3266,8 +3308,15 @@ function EditorRow({
   // ── BT tab edit state ─────────────────────────────────────────────────────
   const [btEditing, setBtEditing] = useState(false)
   const [btEditValue, setBtEditValue] = useState("")
-  const [btPolishOn, setBtPolishOn] = useState(false)
   const [btSaving, setBtSaving] = useState(false)
+  // Collapsed-by-default statistical reference. The gloss is corpus-derived
+  // and local-only — computed lazily when the section is opened, never
+  // persisted as the cell's back-translation.
+  const [btStatsOpen, setBtStatsOpen] = useState(false)
+  const statisticalGloss = useMemo(() => {
+    if (!btStatsOpen || !cell.translated.trim()) return ""
+    return getStatisticalBt?.(cell.translated) ?? ""
+  }, [btStatsOpen, cell.translated, getStatisticalBt])
 
   // When editing starts, seed the input with the current BT text.
   const handleBtEditStart = useCallback(() => {
@@ -3282,12 +3331,14 @@ function EditorRow({
     }
     setBtSaving(true)
     try {
-      onSaveBacktranslation?.(cell, btEditValue.trim(), btPolishOn)
+      // A hand-edited BT is the human's wording, not the model's — persist
+      // it unpolished so corrected readings re-seed the statistical glosser.
+      onSaveBacktranslation?.(cell, btEditValue.trim(), false)
     } finally {
       setBtSaving(false)
       setBtEditing(false)
     }
-  }, [btEditValue, btPolishOn, cell, onSaveBacktranslation])
+  }, [btEditValue, cell, onSaveBacktranslation])
 
   const handleBtCancel = useCallback(() => {
     setBtEditing(false)
@@ -3350,13 +3401,16 @@ function EditorRow({
   }
 
   // Inline rule click → open expansion to issues tab and remember which rule
-  // (and which blot DOM node) is active so the ViolationPopover can anchor to
-  // the blot directly rather than to a stray span at the bottom of the row.
+  // is active so the ViolationPopover can anchor to the clicked blot.
+  // Expanding the row re-renders the editor and detaches the blot's DOM node,
+  // and a detached anchor makes the popover fall back to the viewport origin —
+  // so snapshot the rect and anchor to a virtual element instead.
   const openInlineRule = useCallback((ruleId: string, anchor: HTMLElement) => {
     setExpanded(true)
     setExpansionTab("issues")
     setOpenRuleId(ruleId)
-    setOpenRuleAnchor(anchor)
+    const rect = anchor.getBoundingClientRect()
+    setOpenRuleAnchor({ getBoundingClientRect: () => rect })
   }, [])
 
   const isMultiSelected = useIsSelected(cell.id)
@@ -3378,6 +3432,7 @@ function EditorRow({
   const renderValidationButton = (onClick?: () => void) => (
     <button
       type="button"
+      data-showcase="cell.health"
       // FRO-297: button role + aria-pressed so screen readers announce the
       // validated/unvalidated toggle state. aria-label provides full context.
       aria-pressed={isSelfValidated}
@@ -3505,7 +3560,7 @@ function EditorRow({
             is the single issue surface (severity tint + title); no
             stripe/dot/warning. Selection lives on the source/target divider so
             range selection follows the text. */}
-        <div className="flex h-full items-start justify-center gap-1 pt-5">
+        <div className="flex h-full w-full items-start justify-center gap-1 pt-5">
           {numberPill}
           {/* Validation circle — single bare icon until validated, with a
               health ring appearing around it once there's a substantive score. */}
@@ -3572,11 +3627,15 @@ function EditorRow({
               )}
             </AppTooltip>
           )}
-          {/* Stale-source indicator alongside validate button */}
-          {isStaleSource && hasContent && (
+          {/* Stale-source indicator alongside validate button. Both flags
+              are already resolved per-row booleans (see isStaleSource's doc
+              comment) — the singleton Set(s) just adapt them to the
+              indicator's managed-mode membership-set contract. */}
+          {(isStaleSource || isUpstreamStaleSource) && hasContent && (
             <StaleSourceIndicator
               cellId={cell.id}
-              staleCellIds={new Set([cell.id])}
+              staleCellIds={isStaleSource ? new Set([cell.id]) : new Set()}
+              upstreamStaleCellIds={isUpstreamStaleSource ? new Set([cell.id]) : new Set()}
             />
           )}
           {(isSynthBusy || isSynthError) && (
@@ -3586,9 +3645,11 @@ function EditorRow({
               this cell is assigned to. Tooltip = username + scope label. */}
           {assigneeLabel && (
             <AppTooltip content={assigneeNote ? `Assigned to ${assigneeLabel} (${assigneeNote})` : `Assigned to ${assigneeLabel}`}>
-              <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[8px] font-semibold uppercase text-indigo-700 ring-1 ring-indigo-300 dark:bg-indigo-900 dark:text-indigo-300 dark:ring-indigo-700">
-                {assigneeLabel.slice(0, 2)}
-              </span>
+              <InitialsAvatar
+                name={assigneeLabel}
+                size="xs"
+                fallbackClassName="bg-indigo-100 text-[8px] uppercase text-indigo-700 ring-1 ring-indigo-300 dark:bg-indigo-900 dark:text-indigo-300 dark:ring-indigo-700"
+              />
             </AppTooltip>
           )}
         </div>
@@ -3627,6 +3688,7 @@ function EditorRow({
           })()
         ) : (
           <div
+            data-showcase="editor.source"
             className={cn(
               "relative flex flex-col transition-opacity",
               isSynthBusy && "opacity-70",
@@ -3652,7 +3714,7 @@ function EditorRow({
                 onToolbarMouseUp={handleToolbarMouseUp}
               />
             )}
-            <div className="mb-1 flex h-4 items-center gap-1 text-xs text-muted-foreground" dir="ltr">
+            <div className="mb-1 flex h-4 items-center justify-center gap-1 text-center text-xs text-muted-foreground" dir="ltr">
               <span>{cell.context}</span>
               {showFormattingLossWarning && (
                 <AppTooltip content="Source has inline formatting that the target does not preserve. Formatting will be lost on export." className="max-w-xs">
@@ -3694,6 +3756,7 @@ function EditorRow({
             detail) lives in the expansion panel. pr-9 reserves space for the
             ever-present chevron at the right edge. */}
         <div
+          data-showcase="editor.target"
           className={cn(
             "relative flex flex-col pl-3 pr-9 transition-opacity",
             isSynthBusy && "opacity-70",
@@ -4248,57 +4311,43 @@ function EditorRow({
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs font-medium text-foreground">Back-translation</span>
-                      <AppTooltip content="A plain reading of your translation back in your reference language. Use it to check the meaning carried over.">
+                      <AppTooltip content="An AI reading of your translation back in your reference language. Use it to check the meaning carried over — the AI can misread, so treat it as a second opinion, not proof.">
                         <Info className="h-3 w-3 cursor-help text-muted-foreground/50 transition-colors hover:text-muted-foreground" />
                       </AppTooltip>
                     </div>
                     {/* Controls appear only when there's a reading to act on. */}
                     {cell.backtranslation && !btEditing && (
                       <div className="flex items-center gap-0.5">
-                        {/* Refine — replaces the old "Polish"/"statistical" jargon.
-                            On = AI-refined wording; off = plain word-for-word.
-                            Toggling regenerates so the text matches the mode. */}
+                        {/* Regenerate — re-runs the AI on the current translation.
+                            Contributor+ only (persisting a BT is a project write). */}
                         {editable && (
                           <AppTooltip content={
                             !isBacktranslationConfigured
-                              ? "Add an AI model in project settings to refine the wording"
-                              : btPolishOn
-                                ? "Refined with AI — turn off for a plain word-for-word reading"
-                                : "Refine the wording with AI for a more natural reading"
+                              ? "Sign in or add an AI model in project settings to generate back-translations"
+                              : "Regenerate with AI"
                           }>
-                            <Button
+                            <button
                               type="button"
-                              size="xs"
-                              variant={btPolishOn ? "secondary" : "ghost"}
                               disabled={!isBacktranslationConfigured || isBacktranslating}
-                              onClick={() => {
-                                const next = !btPolishOn
-                                setBtPolishOn(next)
-                                onBacktranslate?.(cell, next)
-                              }}
-                              className={
-                                btPolishOn
-                                  ? "bg-violet-500/12 text-violet-700 hover:bg-violet-500/20 dark:text-violet-300"
-                                  : undefined
-                              }
+                              onClick={() => onBacktranslate?.(cell)}
+                              aria-label="Regenerate the back-translation"
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                             >
-                              <Sparkles className={cn("h-3 w-3", isBacktranslating && btPolishOn && "animate-pulse")} />
-                              Refine
-                            </Button>
+                              <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
+                            </button>
                           </AppTooltip>
                         )}
                         {/* Edit — contributor+ only. A quiet icon, not a labelled pill. */}
                         {editable ? (
                           <AppTooltip content="Edit the back-translation">
-                            <Button
+                            <button
                               type="button"
-                              size="icon-xs"
-                              variant="ghost"
                               onClick={handleBtEditStart}
                               aria-label="Edit the back-translation"
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                             >
                               <Pencil className="h-3 w-3" />
-                            </Button>
+                            </button>
                           </AppTooltip>
                         ) : (
                           <AppTooltip content="Contributor+ required to edit back-translations">
@@ -4330,17 +4379,17 @@ function EditorRow({
                             <AlertTriangle className="h-3 w-3 shrink-0" />
                             Your translation changed since this was written
                           </span>
-                          <Button
-                            type="button"
-                            size="xs"
-                            variant="outline"
-                            onClick={() => onBacktranslate?.(cell, btPolishOn)}
-                            disabled={isBacktranslating || cell.translated.trim().length === 0}
-                            className="shrink-0 border-amber-500/30 bg-amber-500/15 text-amber-800 hover:bg-amber-500/25 dark:text-amber-200"
-                          >
-                            <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
-                            Refresh
-                          </Button>
+                          {editable && (
+                            <button
+                              type="button"
+                              onClick={() => onBacktranslate?.(cell)}
+                              disabled={!isBacktranslationConfigured || isBacktranslating || cell.translated.trim().length === 0}
+                              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 transition-colors hover:bg-amber-500/25 dark:text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
+                              Refresh
+                            </button>
+                          )}
                         </div>
                       )}
                       {btEditing ? (
@@ -4358,23 +4407,21 @@ function EditorRow({
                             className="w-full resize-none rounded-lg border border-border bg-background px-3.5 py-3 text-[15px] leading-relaxed text-foreground outline-none focus:ring-1 focus:ring-ring"
                           />
                           <div className="flex items-center justify-end gap-1.5">
-                            <Button
+                            <button
                               type="button"
-                              size="xs"
-                              variant="ghost"
                               onClick={handleBtCancel}
+                              className="rounded-full px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted"
                             >
                               Cancel
-                            </Button>
-                            <Button
+                            </button>
+                            <button
                               type="button"
-                              size="xs"
-                              variant="default"
                               onClick={handleBtSave}
                               disabled={btSaving || !btEditValue.trim()}
+                              className="rounded-full bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               {btSaving ? "Saving…" : "Save"}
-                            </Button>
+                            </button>
                           </div>
                         </div>
                       ) : (
@@ -4390,24 +4437,71 @@ function EditorRow({
                       )}
                     </>
                   ) : (
-                    /* No reading yet — friendly, with one clear primary. */
+                    /* No reading yet — friendly, with one clear primary.
+                       Generation is AI-only and on-demand: nothing runs
+                       automatically when the translation is committed. */
                     <div className="flex flex-col items-center gap-2.5 rounded-xl bg-muted/40 px-3 py-6 text-center">
                       <p className="max-w-[34ch] text-xs leading-relaxed text-muted-foreground">
                         See what your translation says when read back, so you can check the meaning carried over.
                       </p>
-                      <Button
+                      {editable ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => onBacktranslate?.(cell)}
+                            disabled={!isBacktranslationConfigured || isBacktranslating || cell.translated.trim().length === 0}
+                            className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {isBacktranslating ? (
+                              <><RefreshCw className="h-3 w-3 animate-spin" /> Reading it back…</>
+                            ) : (
+                              <><Sparkles className="h-3 w-3" /> Read it back with AI</>
+                            )}
+                          </button>
+                          {!isBacktranslationConfigured && (
+                            <p className="text-[11px] text-muted-foreground/70">
+                              Sign in or add an AI model in project settings to generate one.
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-[11px] text-muted-foreground/70">
+                          A contributor can generate one with AI.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {/* ── Statistical reference — collapsed by default. A rough
+                      corpus-derived gloss kept as a cross-check on the AI
+                      reading; local-only, never saved as the cell's BT. ──── */}
+                  {cell.translated.trim().length > 0 && getStatisticalBt && !btEditing && (
+                    <div className="rounded-lg border border-border/60">
+                      <button
                         type="button"
-                        size="sm"
-                        variant="default"
-                        onClick={() => onBacktranslate?.(cell, btPolishOn)}
-                        disabled={isBacktranslating || cell.translated.trim().length === 0}
+                        onClick={() => setBtStatsOpen((v) => !v)}
+                        aria-expanded={btStatsOpen}
+                        className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
                       >
-                        {isBacktranslating ? (
-                          <><RefreshCw className="h-3 w-3 animate-spin" /> Reading it back…</>
-                        ) : (
-                          <><Sparkles className="h-3 w-3" /> Read it back</>
-                        )}
-                      </Button>
+                        <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", btStatsOpen && "rotate-90")} />
+                        Statistical gloss
+                        <span className="font-normal text-muted-foreground/60">— word-for-word, from this project's own pairs</span>
+                      </button>
+                      {btStatsOpen && (
+                        <div className="flex flex-col gap-1.5 px-2.5 pb-2.5">
+                          {statisticalGloss.trim() ? (
+                            <p className="text-[13px] leading-relaxed text-foreground/80">{statisticalGloss}</p>
+                          ) : (
+                            <p className="text-[11px] italic text-muted-foreground">
+                              Not enough translated pairs in this project to build a gloss yet.
+                            </p>
+                          )}
+                          <p className="text-[10px] leading-relaxed text-muted-foreground/70">
+                            Built statistically from this project's translated pairs — no AI involved.
+                            It's only as good as the corpus so far: expect rough, literal, sometimes
+                            wrong word choices. Use it as a hint, not a reading.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
                   {/* ── FRO-207: Interlinear alignment panel ──────────────── */}

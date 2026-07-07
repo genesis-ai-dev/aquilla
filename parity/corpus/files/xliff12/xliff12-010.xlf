@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="fr-FR" target-language="en-US" datatype="plaintext" original="doc0.txt">
+    <body>
+      <trans-unit id="u1" xml:space="preserve">
+        <source>製品の仕様は予告なく<x id="x1"/>変更されることがあります。</source>
+        <target state="final">製品の仕様は予告なく<x id="x1"/>変更されることがあります。</target>
+      </trans-unit>
+      <trans-unit id="u2">
+        <source>A load-bea<x id="x2"/>ring wall shall not be modified without engineering approval.</source>
+        <target state="new"></target>
+        <note>ctx-2</note>
+      </trans-unit>
+      <trans-unit id="u3">
+        <source><bpt id="b3">&lt;b&gt;</bpt>Refunds are processed within 5–10 business days of approval.<ept id="b3">&lt;/b&gt;</ept></source>
+        <target state="new"></target>
+        <note>ctx-3</note>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

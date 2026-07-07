@@ -65,6 +65,14 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 binding = "HYPERDRIVE"
 id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 
+# CI's `wrangler deploy` (no --env) targets this top-level block for the
+# actually-live aquilla-identity worker (see ROUTE/ENV note above), so the
+# EMAIL binding must be duplicated here too, not just under [env.production] —
+# its absence here was silently making prod behave like the no-EMAIL dev
+# fallback (email sends were no-ops, and admin elevation leaked devCode).
+[[send_email]]
+name = "EMAIL"
+
 # Secrets (provisioned via `wrangler secret put`, never committed):
 #   SECRET_KEY      — frontier JWT signing key. MUST match prod
 #                     frontier-server so access tokens are interchangeable.
@@ -234,7 +242,7 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
 EMAIL_FROM = "noreply@support.aquilla.app"
 BASE_URL = "https://dev.aquilla.app"
-SYNC_WORKER_URL = "https://api.dev.aquilla.app/sync"
+SYNC_WORKER_URL = "https://api.staging.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "staging"
 ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com"
@@ -260,6 +268,10 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
 EMAIL_FROM = "noreply@local.test"
 BASE_URL = "http://127.0.0.1:5173"
-SYNC_WORKER_URL = "http://127.0.0.1:8788"
+# FRO-346: this used to be 8788 — auth-worker's OWN port, not sync-worker's
+# (8789; see scripts/dev-stack.ts IDENTITY_PORT/SYNC_PORT) — so member-removal
+# eject notifications silently no-op'd (notifySyncWorkerOfMemberRemoval early-
+# returns without SYNC_WORKER_URL... this just pointed it at the wrong worker).
+SYNC_WORKER_URL = "http://127.0.0.1:8789"
 ENVIRONMENT = "development"
 ADMIN_EMAILS = "alice@example.test"

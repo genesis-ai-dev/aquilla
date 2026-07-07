@@ -1,0 +1,62 @@
+1
+00:00:03,579 --> 00:00:04,811
+Please review the attached invoice before the payment deadline.
+
+2
+00:00:05,144 --> 00:00:06,874
+A load-bearing wall shall not be modified without engineering approval.
+Use the <b>bold</b> toggle to emphasize key phrases.
+
+3
+00:00:07,336 --> 00:00:09,806
+<i>Backup completed successfully at 02:00 UTC; 1,284 files archived.</i>
+
+4
+00:00:11,577 --> 00:00:13,876
+Enter your 6-digit verification code to continue.
+
+5
+00:00:15,675 --> 00:00:20,125
+Les données personnelles sont traitées conformément au RGPD.
+
+6
+00:00:21,259 --> 00:00:23,807
+<i>Free shipping on orders over $50 — terms apply.
+Warning: contents may be hot. Handle with care.</i>
+
+7
+00:00:25,386 --> 00:00:28,826
+請在使用前仔細閱讀本說明書。
+
+8
+00:00:29,518 --> 00:00:30,922
+Don't share your password with anyone, including support staff.
+A load-bearing wall shall not be modified without engineering approval.
+
+9
+00:00:31,259 --> 00:00:36,396
+A load-bearing wall shall not be modified without engineering approval.
+
+10
+00:00:37,456 --> 00:00:41,671
+The API returns HTTP 429 when the rate limit of 100 req/min is exceeded.
+
+11
+00:00:42,971 --> 00:00:44,978
+Der Vertrag tritt am ersten Tag des Folgemonats in Kraft.
+
+12
+00:00:46,015 --> 00:00:49,938
+<i>Adverse reactions may include nausea, dizziness, and <severe> headaches.</i>
+
+13
+00:00:50,419 --> 00:00:54,701
+Click "Save" to apply your changes, or press Cancel to discard them.
+
+14
+00:00:55,304 --> 00:00:56,753
+Third-party integrations require an Enterprise plan subscription.
+
+15
+00:00:58,588 --> 00:01:00,395
+Adverse reactions may include nausea, dizziness, and <severe> headaches.

@@ -125,7 +125,7 @@
 | Projects    | Project settings API key show/hide toggle             | `e2e/specs/projects/project-settings-api-key-toggle.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings termbase sharing section             | `e2e/specs/projects/project-settings-termbase-sharing.smoke.spec.ts` | ⏸ hidden |
 | Projects    | Multi-project invite submit from share panel          | `e2e/specs/projects/multi-project-invite-submit.smoke.spec.ts` |   ✅   |
-| Orgs        | Org rename from org switcher                          | `e2e/specs/orgs/org-switcher-rename.smoke.spec.ts` + `org-rename.smoke.spec.ts` | ✅ |
+| Orgs        | Org rename from settings page                         | `e2e/specs/orgs/org-rename.smoke.spec.ts` | ✅ |
 | Orgs        | Org settings page renders and shows rename            | `e2e/specs/orgs/org-settings.smoke.spec.ts` + `org-settings-rename.smoke.spec.ts` | ✅ |
 | Orgs        | Member access panel expand shows per-project access   | `e2e/specs/orgs/member-access-panel-expand.smoke.spec.ts`     |   ✅   |
 | Orgs        | Assigned to me page shows inbox                       | `e2e/specs/orgs/assigned-to-me-page.smoke.spec.ts` + `assigned.smoke.spec.ts` | ✅ |
@@ -219,7 +219,7 @@
 | Memory      | Add / edit / delete living memory entry               | `e2e/specs/projects/living-memory-add-entry.smoke.spec.ts` + `living-memory-edit-entry.smoke.spec.ts` + `living-memory-delete-entry.smoke.spec.ts` | ✅ |
 | Memory      | Living memory empty state                             | `e2e/specs/projects/living-memory-empty-state.smoke.spec.ts`  |   ✅   |
 | Memory      | Living memory standards section                       | `e2e/specs/projects/living-memory-standards-section.smoke.spec.ts` |   ✅   |
-| Voice       | Voice creation (NewVoiceModal: Gemini/Clone tabs · name · describe) | `e2e/specs/editor/voice-creation.smoke.spec.ts` | ✅ |
+| Voice       | Voice creation (NewVoiceModal: TTS/Clone tabs · name · 4-engine picker) | `e2e/specs/editor/voice-creation.smoke.spec.ts` | ✅ |
 | Voice       | Voice make default + save                             | `e2e/specs/orgs/voice-make-default.smoke.spec.ts` + `voice-save.smoke.spec.ts` | ✅ |
 | Voice       | Voice Gemini API key toggle                           | `e2e/specs/orgs/voice-gemini-api-key-toggle.smoke.spec.ts`    |   ✅   |
 | Voice       | Audio mode lens toggle in workspace                   | `e2e/specs/orgs/audio-mode.smoke.spec.ts`                     |   ✅   |
@@ -262,7 +262,7 @@
 | Debug       | Debug view accessible at /debug                       | `e2e/specs/editor/debug-view.smoke.spec.ts`                   |   ✅   |
 | Debug       | Admin console tabs (users/orgs/projects/teams/activity) | `e2e/specs/orgs/admin-console.smoke.spec.ts` + `admin-console-users-tab.smoke.spec.ts` + `admin-console-orgs-tab.smoke.spec.ts` + `admin-console-projects-tab.smoke.spec.ts` + `admin-console-teams-tab.smoke.spec.ts` + `admin-console-activity-tab.smoke.spec.ts` | ✅ |
 | Tauri       | Native dialogs / deeplink / updater / fs / keychain  | _gap — Plan 3_                                                |        |
-| Editor      | BT panel Polish toggle + Edit BT + Regenerate BT     | _gap — require pre-existing cell.backtranslation (LLM infra-blocked)_ |   |
+| Editor      | BT Edit + Regenerate on an existing back-translation | _gap — needs a pre-existing cell.backtranslation (generate covered by bt-edit-locked-for-reviewer; statistical gloss expander covered by cell-expansion-bt-tab)_ |   |
 | Editor      | TranslatedEditor focus-lock banner + Discard and reload | _gap — require two writers editing same cell simultaneously_ |   |
 | Editor      | StaleSourceIndicator badge (source changed since last revision) | _gap — not yet wired into CellRow/EditorTable (Phase 5 TODO in source)_ | |
 | Auth        | DevLoginRoute error state (auth-worker unavailable)  | _gap — test infrastructure component; not a user workflow_    |        |

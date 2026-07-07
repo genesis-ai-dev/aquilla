@@ -34,13 +34,14 @@ export class Dashboard {
     // org setup checklist. They all open the same create dialog, so scope to the
     // first (the header) to avoid a strict-mode violation.
     await this.page.getByRole("button", { name: /new project/i }).first().click()
-    // Exact match: the AD-9 "Advanced: project shape" radios carry long
-    // descriptions (e.g. the "Source-only" option mentions "target language"),
-    // so a substring getByLabel would resolve to multiple elements.
-    await this.page.getByLabel("Project name", { exact: true }).fill(name)
-    await this.page.getByLabel("Source language", { exact: true }).fill(source)
-    await this.page.getByLabel("Target language", { exact: true }).fill(target)
-    await this.page.getByRole("button", { name: "Create Project" }).click()
+    // Anchored, case-insensitive labels: the AD-9 "Advanced: project shape"
+    // radios carry long descriptions (e.g. the "Source-only" option mentions
+    // "target language"), so we anchor with ^...$ to avoid matching those,
+    // while /i tolerates label casing ("Project name" vs "Project Name").
+    await this.page.getByLabel(/^Project name$/i).fill(name)
+    await this.page.getByLabel(/^Source language$/i).fill(source)
+    await this.page.getByLabel(/^Target language$/i).fill(target)
+    await this.page.getByRole("button", { name: /^Create Project$/i }).click()
 
     // The project name renders in more than one place after creation (card +
     // heading), so scope to the first match to avoid strict-mode violations.

@@ -128,6 +128,11 @@ syncToken.post(
       projectId,
       fileId,
       role: resolved.level,
+      // FRO-346: the sync-worker's write-path membership re-check exempts
+      // `src === "platform"` tokens (ADMIN_EMAILS operators have no
+      // membership rows to re-check). Every other source is re-verified
+      // against the live grant tables on each POST /events flush.
+      src: resolved.source,
       aud: "sync",
       iat: now,
       exp: now + SYNC_TOKEN_TTL_SECONDS,

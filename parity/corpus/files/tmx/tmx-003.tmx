@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tmx SYSTEM "tmx14.dtd">
+<tmx version="1.4">
+<header creationtool="corpus-gen" creationtoolversion="1.0" segtype="sentence" o-tmf="none" adminlang="en-US" srclang="en-GB" datatype="plaintext"/>
+<body>
+<tu tuid="tu-2-0"><prop type="x-domain">legal</prop><tuv xml:lang="en-GB"><seg>Use the &lt;b&gt;bold&lt;/b&gt; toggle to emphasize key phrases.</seg></tuv><tuv xml:lang="es-ES"><seg>Error 404: the requested resource could not be found on this server.</seg></tuv></tu>
+<tu tuid="tu-2-1"><tuv xml:lang="en-GB"><seg>Ensure the device is powered off before removing the battery cover.</seg></tuv><tuv xml:lang="es-ES"><seg>Please review the attached invoice before the payment deadline.</seg></tuv></tu>
+<tu tuid="tu-2-2"><tuv xml:lang="en-GB"><seg>Error 404: the requested resource could not be found on this server.</seg></tuv><tuv xml:lang="es-ES"><seg>La configuración se guardará automáticamente cada 5 minutos.</seg></tuv></tu>
+<tu tuid="tu-2-3"><tuv xml:lang="en-GB"><seg><![CDATA[Ensure the device is powered off before removing the battery cover.]]></seg></tuv><tuv xml:lang="es-ES"><seg>Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).</seg></tuv></tu>
+<tu tuid="tu-2-4"><tuv xml:lang="en-GB"><seg>Uptime SLA of 99.95% measured monthly, excluding scheduled maintenance.</seg></tuv><tuv xml:lang="es-ES"><seg>Don't share <ph x="1">{0}</ph>your password with anyone, including support staff.</seg></tuv></tu>
+<tu tuid="tu-2-5"><tuv xml:lang="en-GB"><seg>The undersigned parties agree to the terms &amp; conditions set forth herein.</seg></tuv><tuv xml:lang="es-ES"><seg>Click &quot;Save&quot;<ph x="1">{0}</ph> to apply your changes, or press Cancel to discard them.</seg></tuv></tu>
+</body>
+</tmx>

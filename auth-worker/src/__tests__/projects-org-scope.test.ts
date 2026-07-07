@@ -19,6 +19,18 @@ describe("GET /api/v2/projects org scoping", () => {
     expect(p1?.orgId).toBe(1)
   })
 
+  // FRO-473: the org switcher needs the host org's display name (not just its
+  // id) to label guest orgs — the list endpoint now joins `organizations`.
+  it("includes orgName on each project", async () => {
+    await seedTwoOrgProjects()
+    const res = await app.request("/api/v2/projects", { headers: authHeader(await jwtFor("wendi")) }, env)
+    const body = (await res.json()) as { projects: Array<{ id: string; orgName: string | null }> }
+    const p1 = body.projects.find((p) => p.id === "p1")
+    const p3 = body.projects.find((p) => p.id === "p3")
+    expect(p1?.orgName).toBe("Come and See")
+    expect(p3?.orgName).toBe("Side Org")
+  })
+
   it("filters by ?orgId", async () => {
     await seedTwoOrgProjects()
     const res = await app.request("/api/v2/projects?orgId=1", { headers: authHeader(await jwtFor("wendi")) }, env)

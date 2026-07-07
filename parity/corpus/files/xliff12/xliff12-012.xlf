@@ -1,0 +1,68 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="en-US" target-language="zh-CN" datatype="plaintext" original="doc0.txt">
+    <body>
+      <trans-unit id="u1">
+        <source>A load-bearing wall shall not be modified without engineering approval.</source>
+        <target state="final">A load-bearing wall shall not be modified without engineering approval.</target>
+      </trans-unit>
+      <trans-unit id="u2">
+        <source><g id="g2">This warranty does not cover damage caused by misuse or unauthorized repair.</g></source>
+        <target state="translated"><g id="g2">This warranty does not cover damage caused by misuse or unauthorized repair.</g></target>
+      </trans-unit>
+      <trans-unit id="u3">
+        <source><g id="g3">Error 404: the requested resource could not be found on this server.</g></source>
+        <target state="new"></target>
+        <note>ctx-3</note>
+      </trans-unit>
+      <trans-unit id="u4">
+        <source>請在使用前仔細閱讀本說明書。</source>
+        <target state="translated">請在使用前仔細閱讀本說明書。</target>
+        <note>ctx-4</note>
+      </trans-unit>
+      <trans-unit id="u5">
+        <source>Refunds are processed within 5–10 business days of approval.</source>
+        <target state="translated">Refunds are processed within 5–10 business days of approval.</target>
+      </trans-unit>
+      <trans-unit id="u6">
+        <source>Congratulations! You have unlocked the &quot;Explorer&quot; achievement 🎉.</source>
+        <target state="final">Congratulations! You have unlocked the &quot;Explorer&quot; achievement 🎉.</target>
+      </trans-unit>
+      <trans-unit id="u7">
+        <source>Battery li<x id="x7"/>fe: up to 18 hours of continuous video playback.</source>
+        <target state="final">Battery li<x id="x7"/>fe: up to 18 hours of continuous video playback.</target>
+        <note>ctx-7</note>
+      </trans-unit>
+    </body>
+  </file>
+  <file source-language="en-US" target-language="zh-CN" datatype="plaintext" original="doc1.txt">
+    <body>
+      <trans-unit id="u8">
+        <source>Mesures de sécurité : portez des gants et des lunettes de protection.</source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u9">
+        <source>All prices include VAT at the applicable rate of 21%.</source>
+        <target state="final">All prices include VAT at the applicable rate of 21%.</target>
+      </trans-unit>
+      <trans-unit id="u10">
+        <source>Click &quot;Save&quot; to apply your changes, or press Cancel to discard them.</source>
+        <target state="translated">Click &quot;Save&quot; to apply your changes, or press Cancel to discard them.</target>
+        <note>ctx-10</note>
+      </trans-unit>
+      <trans-unit id="u11" xml:space="preserve">
+        <source>This warra<x id="x11"/>nty does not cover damage caused by misuse or unauthorized repair.</source>
+        <target state="translated">This warra<x id="x11"/>nty does not cover damage caused by misuse or unauthorized repair.</target>
+        <note>ctx-11</note>
+      </trans-unit>
+      <trans-unit id="u12">
+        <source><g id="g12">Battery life: up to 18 hours of continuous video playback.</g></source>
+        <target state="translated"><g id="g12">Battery life: up to 18 hours of continuous video playback.</g></target>
+      </trans-unit>
+      <trans-unit id="u13">
+        <source>Refunds are processed within 5–10 business days of approval.</source>
+        <target state="translated">Refunds are processed within 5–10 business days of approval.</target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

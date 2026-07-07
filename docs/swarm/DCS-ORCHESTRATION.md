@@ -174,3 +174,7 @@ flight. NOT promoted (branch only, awaiting user).
   project-scoped → same resource in 2 projects dedupes away. Dispatched claude/dcs-fix-ui to fix
   all 4 + regression tests. Delta ENGINE separately proven on real en_tn v87→v89 (1082 changed,
   stable ids). Also confirmed product gap: import UI pins latest-only (no release picker).
+- 2026-07-07 · fix-ui MERGED (`6e7c16d57`): all 4 live-QA defects fixed + regression tests
+  (bind fetch, ISO lang seed via new lang-seed.ts, getLatestRelease-based check-for-updates,
+  project-scoped dcsEventId(projectId,repo,sha,cellId)). Central gate: vitest 94/94 (13 files),
+  tsc 0. Dispatching final M2 browser proof on the FIXED code (defects 1+3 were what blocked M2).

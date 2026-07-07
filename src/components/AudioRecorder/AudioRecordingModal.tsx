@@ -24,6 +24,7 @@ import { DurationBar } from "./DurationBar"
 import { TakesStrip } from "./TakesStrip"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import { buildAudioId, uploadCellAudio, deleteCellAudio } from "@/lib/audio/upload"
+import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
@@ -184,6 +185,14 @@ export function AudioRecordingModal({
       const blob = recorder.state.blob
       const ext = recorder.state.ext
       const audioId = buildAudioId(activeCell.id)
+      // Warm the OPFS byte cache BEFORE upload (FRO-355), keyed exactly as
+      // transcribeCell/useCellAudio look bytes up (audioId+ext of the
+      // frontier-audio:// URL). Once the attach lands, the take transcribes
+      // and plays from local bytes — no network, no JWT — and the post-save
+      // auto-transcribe below gets a deterministic cache hit. (If the upload
+      // throws, save() aborts before the attach, so the orphaned cache entry
+      // is unreachable and simply ages out of the LRU.)
+      await audioCachePutBlob(audioId, ext, blob)
       const result = await uploadCellAudio({
         projectId: project.id,
         fileId: activeCell.fileId,

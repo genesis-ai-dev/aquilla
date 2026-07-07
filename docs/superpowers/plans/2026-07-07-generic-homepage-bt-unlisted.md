@@ -497,6 +497,7 @@ git commit -m "feat(homepage): genericize public homepage's interactive demo con
 
 **Files:**
 - Modify: `src/pages/Homepage/Homepage.tsx` (public copy only — `BibleTranslationLanding.tsx` from Task 1 is untouched)
+- Modify: `homepage.html` (static pre-mount hero fallback only — `bible-translation.html` from Task 2 is untouched)
 
 **Interfaces:**
 - Consumes: `MultimodalWorkspace` (genericized in Task 4), `LanguageBlitz`/`LanguageMarquee` (genericized in Task 3) — same import paths as before (`./MultimodalWorkspace`, `./LanguageBlitz`), unchanged.
@@ -697,7 +698,20 @@ Check `src/pages/Homepage/Homepage.login-link.test.tsx` — it mocks `useBrand` 
 Run: `pnpm test src/pages/Homepage/Homepage.login-link.test.tsx`
 Expected: both tests still PASS unchanged.
 
-- [ ] **Step 11: Build and manually verify in the dev preview**
+- [ ] **Step 11: Update `homepage.html`'s static pre-mount hero (crawler/no-JS fallback)**
+
+`homepage.html` (not `Homepage.tsx`) has its own static pre-hydration hero markup shown to crawlers, no-JS visitors, and briefly before React mounts — it currently duplicates the old Bible-oriented copy. Task 2 copied this file verbatim into `bible-translation.html` for the BT page (correct — that page should keep the Bible copy), but the original `homepage.html` also needs the generic rewrite. Replace its pre-mount `<p>` (currently "One workspace for Bible &amp; ministry translation — text, audio, and video under one roof, with real-time guidance and a memory that learns. Free for everyone."):
+
+```html
+        <p>
+          One workspace for text, audio, and video translation — under one roof, with
+          real-time guidance and a memory that learns. Free for everyone.
+        </p>
+```
+
+The `<h1>Translation, <em>lifted.</em></h1>` line and the `Create account`/`Sign in` actions stay unchanged.
+
+- [ ] **Step 12: Build and manually verify in the dev preview**
 
 Run: `pnpm build`
 Expected: succeeds.
@@ -708,7 +722,7 @@ Start the dev stack, navigate to `/homepage` and `/bible-translation`, and confi
 - View source on `/bible-translation` and confirm `<meta name="robots" content="noindex, nofollow">` is present.
 - Confirm no link anywhere in `/homepage`'s nav or footer points to `/bible-translation`.
 
-- [ ] **Step 12: Commit**
+- [ ] **Step 13: Commit**
 
 ```bash
 git add src/pages/Homepage/Homepage.tsx

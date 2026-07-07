@@ -178,3 +178,17 @@ flight. NOT promoted (branch only, awaiting user).
   (bind fetch, ISO lang seed via new lang-seed.ts, getLatestRelease-based check-for-updates,
   project-scoped dcsEventId(projectId,repo,sha,cellId)). Central gate: vitest 94/94 (13 files),
   tsc 0. Dispatching final M2 browser proof on the FIXED code (defects 1+3 were what blocked M2).
+
+## FINAL STATUS — 2026-07-07 (swarm converged)
+ALL slices + all review/QA fixes merged to swarm/dcs-integration (tip 3749260c4, 26 commits off
+ff466abfe, ~4341 LOC across 36 source files). FINAL GATE GREEN: tsc -p tsconfig.app.json = 0
+errors; DCS suite 124/124 (16 files); full suite regression-free (only pre-existing ProjectOverview
+flakiness on base). PROVEN LIVE vs git.door43.org: adapter engine (DCS-PROOF.md) + Milestone-1
+import UI + Milestone-2 full linked-projects delta→stale (DCS-UIQA.md, DCS-UIQA-M2.md, 16
+screenshots). Fixes applied: review blocker (create fileId), 4 live-QA defects (unbound fetch,
+ISO lang, latest-release check, project-scoped event ids), delta subset-adapter scoping (83k-create
+hang). Main checkout pristine; agent worktrees pruned; nothing pushed.
+FOLLOW-UPS (all flagged, non-blocking): USFM \zaln alignment stripping (Bible source UX);
+HEAD-tracking delta (finding-2); brand-new-file file.create (finding-3); release-picker in import
+UI (product gap); aligned-target import (Slice D, deferred); tw/ta markdown routes (deferred).
+AWAITING USER: promotion decision. NOT promoted to main, NOT pushed to dev/staging.

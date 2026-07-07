@@ -89,3 +89,6 @@ ds-bundle/
 .design-sync/learnings/
 .design-sync/node_modules
 .video-staging/
+
+# TypeScript incremental build state
+*.tsbuildinfo

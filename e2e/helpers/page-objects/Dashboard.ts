@@ -52,7 +52,14 @@ export class Dashboard {
   /** Click a project card by name and wait for the workspace shell to render.
    * Dismisses the per-project Setup Checklist drawer if it auto-opens. */
   async openProject(name: string): Promise<void> {
-    await this.page.getByText(name).first().click()
+    // Creating a project now lands directly on its Overview, where the name
+    // renders as the DISABLED current-page breadcrumb — clicking it hangs
+    // forever. Only click through the projects list when we're not already
+    // on the project's own page.
+    const currentCrumb = this.page.locator('[data-slot="breadcrumb-page"]', { hasText: name })
+    if (!(await currentCrumb.isVisible().catch(() => false))) {
+      await this.page.getByText(name).first().click()
+    }
     // A project card now lands on the project Overview (/projects/:id). Enter
     // the editor workspace (/project/:id) via its "Open project" action when
     // present (older UIs went straight to the editor).

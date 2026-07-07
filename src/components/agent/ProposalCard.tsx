@@ -35,12 +35,16 @@ import { canApply, isSupportedApplyKind } from "@/lib/agent/role-floors"
  * in place of the current translation. Prefers the live cell (so
  * source-dependent rules see the real source text); falls back to a minimal
  * synthetic cell when the projection hasn't loaded that cell.
+ *
+ * Exported for the workbench's working set, which lints the row's CURRENT
+ * text (the user may have edited the draft) — pass it as `afterOverride`.
  */
-function lintCellFor(
+export function lintCellFor(
   ev: StagedEvent,
   resolveCell: ((cellId: string) => CellData | undefined) | undefined,
+  afterOverride?: string,
 ): CellData {
-  const after = ev.display.after ?? ""
+  const after = afterOverride ?? ev.display.after ?? ""
   const live = ev.cellId ? resolveCell?.(ev.cellId) : undefined
   const base: CellData =
     live ??

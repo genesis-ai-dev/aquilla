@@ -238,13 +238,16 @@ describe("ProjectOverview file list show-more", () => {
     await waitFor(() => expect(screen.queryByText(/top 12 of 16/)).toBeInTheDocument())
 
     // Only 12 files should be visible initially
-    expect(screen.getAllByRole("listitem").length).toBe(12)
+    // Scoped to file rows (data-testid="file-row") — a plain listitem-role query
+    // also picks up unrelated <li>s rendered elsewhere in the shell (e.g. the
+    // org switcher's popover list), which aren't part of what this test covers.
+    expect(screen.getAllByTestId("file-row").length).toBe(12)
 
     // Clicking show-more reveals all 16 files
     const showMore = screen.getByRole("button", { name: /show all/i })
     fireEvent.click(showMore)
 
-    await waitFor(() => expect(screen.getAllByRole("listitem").length).toBe(totalFiles))
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(totalFiles))
     // Header should now say "(16)" not "top 12 of 16"
     expect(screen.queryByText(/top 12 of 16/)).not.toBeInTheDocument()
     expect(screen.getByText(/\(16\)/)).toBeInTheDocument()

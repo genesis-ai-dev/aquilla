@@ -559,7 +559,7 @@ export function ProjectOverview() {
                         const tPct = f.cellCount > 0 ? Math.round((f.filledCount / f.cellCount) * 100) : 0
                         const vPct = f.cellCount > 0 ? Math.round((f.approvedCount / f.cellCount) * 100) : 0
                         return (
-                          <li key={f.fileId} className="flex items-center gap-3 text-sm">
+                          <li key={f.fileId} data-testid="file-row" className="flex items-center gap-3 text-sm">
                             <AppTooltip content={f.name}>
                               <span className="w-36 shrink-0 truncate text-sm font-medium">{f.name}</span>
                             </AppTooltip>

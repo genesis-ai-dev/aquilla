@@ -149,3 +149,51 @@ Contract wired exactly as Slice A specified:
   linked targets stale can only be shown against the dev stack + live git.door43.org. Wave 3
   browser-QA owns that proof (import book@vOLD, link a language project, translate, Import changes
   → vNEW, observe stale flags + Upstream-changes review panel).
+
+---
+
+## Slice B (import UI) — traces & deferrals · 2026-07-06
+
+**Delivered:** `src/components/dcs/DcsCatalogBrowser.tsx` (catalog search + filters + pick) and a
+surgical ImportDialog edit adding a "Door43 (DCS)" source that runs `importDcsResource` into the
+CURRENT project then pins the release via `project_settings.dcsUpstream`. Wired at the render site
+in `ProjectWorkspace.tsx` (`patchDcsCursor` → `useProject().patchSettings({ dcsUpstream })`).
+
+**Token/projectId path:** identical to OBS/eBible — ImportDialog receives `projectId` +
+`getToken(fileId) => Promise<string|null>` as props (from ProjectWorkspace's
+`getTokenForFile` = `buildFileScopedTokenFetcher`) and threads them straight into
+`importDcsResource({ projectId, getToken })`.
+
+**Settings-patch client:** `useProjectSettings().patch` (exposed as `useProject().patchSettings`),
+which merges the partial over fresh server settings and PUTs the whole blob to
+`PATCH /api/v2/projects/:id/settings`. Server schema is `z.record(string, unknown)` (accepts the
+new `dcsUpstream` key); server floor is MAINTAINER(600). Added `dcsUpstream?: DcsCursor` to
+`ProjectWideSettings` (spec §8) — additive, no migration.
+
+**SWARM-TODOs / deferrals for Wave 3 (Slice C) + follow-ups:**
+- **No FileReference optimism after DCS import.** `importDcsResource` returns only
+  `{ files, cells, cursor }` (no per-file ids/names), and `src/lib/dcs/**` is read-only, so the
+  DcsPanel calls `onImported([], …)` and relies on the parent's `refresh()` + `revalidateCells()`
+  to pull the server projection. Consequence: the imported file is NOT auto-opened and does not
+  appear optimistically — it shows after the server round-trip. If Slice C wants auto-open, extend
+  `ImportDcsSummary` to return `{ fileId, name }[]` and map to FileReferences here.
+- **DCS option gated on `patchDcsCursor`.** When the host can't persist settings (unsynced
+  local-only project, or ImportDialog rendered without the prop — e.g. the existing tests), the
+  Door43 card is hidden. This is intentional (can't pin a release). Below-MAINTAINER users still
+  SEE the card (the prop is present) but the pin PATCH returns non-ok → the success screen shows
+  "Imported, but couldn't pin the release." The source cells still land.
+- **Only USFM imports today.** `resource-map.ROUTES` = `[usfmRoute]` on the integration branch, so
+  picking a non-Bible resource (OBS/TSV/markdown) throws "No import route for …" from
+  `importDcsResource`; the DcsPanel surfaces it as an error and returns to browse. The browser does
+  NOT hide unsupported subjects (the catalog search returns them) — Slice E enables the routes.
+- **Catalog `stage=latest`/`preprod` untested against prod.** The Stage filter offers
+  prod/preprod/latest; only `prod` is on the spec's happy path. Verify the DCS search honours these
+  stage values (and that `latest`=HEAD behaves) in Wave 3 live QA.
+- **Adapter-project dedupe (spec §15) NOT implemented.** Re-importing the same repo into the same
+  project just re-runs the idempotent import (server /import dedupes by deterministic event id) and
+  re-pins. No "you already imported en_ult" guard. Acceptable for v1; revisit with §10 cross-org
+  sharing.
+- **Live browser proof owed (Wave 3).** Everything verified headlessly (tsc + 28 vitest). The real
+  catalog fetch, the Select-in-Dialog interaction (happy-dom can't drive Base UI Select portals
+  reliably — filter Selects are untested at the unit level, only the text inputs + row-pick are),
+  and the end-to-end import-then-pin against live git.door43.org are for the browser-QA agent.

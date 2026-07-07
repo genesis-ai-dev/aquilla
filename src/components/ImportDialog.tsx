@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   Upload, Library, Globe, Table2, Languages, ArrowLeft, ArrowLeftRight, Tags, StickyNote, Database,
-  BookImage, BookA, Search,
+  BookImage, BookA, Search, Cloud,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -92,8 +92,12 @@ import {
 import { SpreadsheetImportPanel } from "@/components/import/SpreadsheetImportPanel"
 import { LabelImportPanel } from "@/components/import/LabelImportPanel"
 import { PairedImportPanel } from "@/components/import/PairedImportPanel"
+import { DcsCatalogBrowser } from "@/components/dcs/DcsCatalogBrowser"
+import { importDcsResource } from "@/lib/dcs/import-dcs"
+import { DcsClient } from "@/lib/dcs/catalog"
+import type { DcsCatalogEntry, DcsCursor } from "@/lib/dcs/types"
 
-type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "direction" | "result" | "collision" | "spreadsheet" | "labels" | "paired" | "sdbh"
+type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "direction" | "result" | "collision" | "spreadsheet" | "labels" | "paired" | "sdbh" | "dcs"
 
 interface ImportDialogProps {
   open: boolean
@@ -127,6 +131,14 @@ interface ImportDialogProps {
    * Fresh projects (empty array or absent) skip the detection step.
    */
   existingFiles?: { name: string }[]
+  /**
+   * DCS (Door43) import (spec §8/§9): persist the `dcsUpstream` cursor to the
+   * current project's settings after a successful import, pinning it to the
+   * chosen release. Wired from ProjectWorkspace to `useProject().patchSettings`.
+   * When absent, the Door43 source option is hidden (the import can't pin
+   * without a way to write settings). Returns true on a successful save.
+   */
+  patchDcsCursor?: (cursor: DcsCursor) => Promise<boolean>
 }
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */
@@ -147,6 +159,7 @@ export function ImportDialog({
   onCastUpdated,
   sourceCells,
   existingFiles,
+  patchDcsCursor,
 }: ImportDialogProps) {
   const [screen, setScreen] = useState<Screen>("landing")
   // Holds refs + inferred languages while waiting for the user to set direction.
@@ -396,6 +409,7 @@ export function ImportDialog({
                 {screen === "upload" ? "Upload Files"
                   : screen === "helloao" ? "Bible API (helloao.org)"
                   : screen === "obs" ? "Open Bible Stories"
+                  : screen === "dcs" ? "Door43 (DCS)"
                   : screen === "macula" ? "Macula Hebrew + Greek"
                   : screen === "tn" ? "Translation Notes (TSV)"
                   : screen === "spreadsheet" ? "Spreadsheet (CSV / XLSX)"
@@ -412,6 +426,7 @@ export function ImportDialog({
 
         {screen === "landing" && (
           <ImportLanding
+            allowDcs={patchDcsCursor !== undefined}
             onSelect={(s) => {
               posthog.capture(IMPORT_STARTED, { import_type: s, project_id: projectId })
               setScreen(s)
@@ -490,6 +505,18 @@ export function ImportDialog({
             getToken={getToken}
             onImported={async (ref, inferredLanguages) => {
               await handleChildImported([ref], inferredLanguages)
+            }}
+          />
+        )}
+
+        {screen === "dcs" && patchDcsCursor && (
+          <DcsPanel
+            projectId={projectId}
+            getToken={getToken}
+            defaultLang={sourceLanguage}
+            patchDcsCursor={patchDcsCursor}
+            onImported={async (refs, inferredLanguages) => {
+              await handleChildImported(refs, inferredLanguages)
             }}
           />
         )}
@@ -717,6 +744,8 @@ const SPECIALIZED_OPTIONS: ImportOption[] = [
     description: "unfoldingWord notes, shown beside the matching verse as you translate." },
   { id: "obs", title: "Open Bible Stories", hint: "door43", icon: BookImage, badge: "beta",
     description: "Narrative stories with reference images, from unfoldingWord/door43." },
+  { id: "dcs", title: "Door43 (DCS)", hint: "upstream", icon: Cloud, badge: "beta",
+    description: "Import any released Door43 resource as source and pin it to a release — pull upstream changes later." },
   { id: "sdbh", title: "SDBH Hebrew Lexicon", hint: "UBS MARBLE", icon: BookA, badge: "beta",
     description: "Semantic Dictionary of Biblical Hebrew — localize definitions and glosses by semantic domain, with lossless export back to the MARBLE XML." },
   { title: "Translation Memory", hint: "TMX", icon: Database, badge: "soon", disabled: true,
@@ -794,18 +823,26 @@ function ImportSection({ label, children }: { label: string; children: ReactNode
 
 interface ImportLandingProps {
   onSelect: (screen: Screen) => void
+  /** When false, the Door43 (DCS) option is hidden — its import needs a way to
+   *  write the project settings cursor (patchDcsCursor), unavailable e.g. for
+   *  unsynced local-only projects. */
+  allowDcs: boolean
 }
 
-function ImportLanding({ onSelect }: ImportLandingProps) {
+function ImportLanding({ onSelect, allowDcs }: ImportLandingProps) {
   // The specialized tier is a growing catalogue of domain-specific importers —
   // filterable so it stays scannable as entries accumulate.
   const [filter, setFilter] = useState("")
   const q = filter.trim().toLowerCase()
+  // Hide DCS when the host can't persist the release cursor.
+  const available = allowDcs
+    ? SPECIALIZED_OPTIONS
+    : SPECIALIZED_OPTIONS.filter((o) => o.id !== "dcs")
   const specialized = q
-    ? SPECIALIZED_OPTIONS.filter((o) =>
+    ? available.filter((o) =>
         [o.title, o.hint ?? "", o.description].some((t) => t.toLowerCase().includes(q)),
       )
-    : SPECIALIZED_OPTIONS
+    : available
   return (
     <div className="space-y-5 py-1">
       <p className="text-sm text-muted-foreground">Choose the format that matches your files.</p>
@@ -2558,6 +2595,143 @@ function ObsPanel({ projectId, username, sourceLanguage, targetLanguage, getToke
           {importing ? "Importing…" : "Download & Import"}
         </Button>
       </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Door43 (DCS) panel — the catalog browser + import-as-source flow (spec §9).
+// Browse released Door43 resources, pick one, import it into the CURRENT
+// project as source cells via the DCS adapter (importDcsResource → the same
+// bulkUploadSource front door the other importers use), then pin the project
+// to that release by writing the `dcsUpstream` cursor to project settings.
+// This turns the current project into a DCS-linked source/"adapter" project;
+// downstream language projects link to it via the existing linked-projects
+// create flow (NOT built here).
+// ---------------------------------------------------------------------------
+
+interface DcsPanelProps {
+  projectId: string
+  getToken: (fileId: string) => Promise<string | null>
+  defaultLang?: string
+  /** Persist the pinned-release cursor to the project settings. Returns true on save. */
+  patchDcsCursor: (cursor: DcsCursor) => Promise<boolean>
+  /** Signal the parent to refresh the project after a successful import. DCS
+   *  writes source cells server-side (bulkUploadSource → POST /import); we pass
+   *  empty refs and let the parent's refresh()/revalidateCells() pull the fresh
+   *  projection — importDcsResource returns counts, not per-file references. */
+  onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
+}
+
+type DcsPanelStage = "browse" | "importing" | "done"
+
+function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onImported }: DcsPanelProps) {
+  const [stage, setStage] = useState<DcsPanelStage>("browse")
+  const [selected, setSelected] = useState<DcsCatalogEntry | null>(null)
+  const [progress, setProgress] = useState<{ uploaded: number; total: number } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [summary, setSummary] = useState<{ files: number; cells: number; ref: string; pinned: boolean } | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  // Cancel any in-flight import when the panel unmounts (dialog closed).
+  useEffect(() => () => abortRef.current?.abort(), [])
+
+  const runImport = useCallback(async (entry: DcsCatalogEntry) => {
+    setSelected(entry)
+    setStage("importing")
+    setError(null)
+    setProgress(null)
+    abortRef.current = new AbortController()
+    try {
+      const result = await importDcsResource({
+        entry,
+        projectId,
+        client: new DcsClient(),
+        getToken,
+        trackMode: "release",
+        onProgress: (uploaded, total) => setProgress({ uploaded, total }),
+        signal: abortRef.current.signal,
+      })
+      // Pin the project to the imported release (spec §8). A failed patch is
+      // surfaced but does NOT undo the source cells that already landed.
+      let pinned = false
+      try {
+        pinned = await patchDcsCursor(result.cursor)
+      } catch (err) {
+        console.warn("[DcsPanel] failed to persist dcsUpstream cursor:", err)
+      }
+      setSummary({ files: result.files, cells: result.cells, ref: result.cursor.ref, pinned })
+      setStage("done")
+      // Refresh the project so the new source files/cells appear. DCS imports
+      // have no FileReferences to append optimistically; the server projection
+      // is authoritative and the parent's refresh pulls it in.
+      await onImported([], entry.language ? { sourceLanguage: entry.language } : undefined)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed")
+      setStage("browse")
+    } finally {
+      abortRef.current = null
+    }
+  }, [projectId, getToken, patchDcsCursor, onImported])
+
+  if (stage === "browse") {
+    return (
+      <div className="flex flex-col gap-2">
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <DcsCatalogBrowser
+          onPick={(entry) => void runImport(entry)}
+          {...(defaultLang ? { defaultLang } : {})}
+        />
+      </div>
+    )
+  }
+
+  if (stage === "importing") {
+    const pct = progress && progress.total > 0
+      ? Math.round((progress.uploaded / progress.total) * 100)
+      : 0
+    return (
+      <div className="mx-auto w-full max-w-sm py-8 text-center">
+        <p className="text-sm font-medium">
+          Importing {selected?.fullName ?? "resource"}
+          {selected?.ref ? ` @ ${selected.ref}` : ""}…
+        </p>
+        {progress && progress.total > 0 ? (
+          <>
+            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div className="h-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              {progress.uploaded.toLocaleString()} / {progress.total.toLocaleString()} files
+            </p>
+          </>
+        ) : (
+          <p className="mt-2 text-xs text-muted-foreground">Fetching &amp; parsing from Door43…</p>
+        )}
+      </div>
+    )
+  }
+
+  // stage === "done"
+  return (
+    <div className="mx-auto w-full max-w-sm py-8 text-center">
+      <p className="text-sm font-medium">Import complete</p>
+      {summary && (
+        <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+          <p>{selected?.fullName}</p>
+          <p>
+            {summary.files.toLocaleString()} file{summary.files === 1 ? "" : "s"} ·{" "}
+            {summary.cells.toLocaleString()} cell{summary.cells === 1 ? "" : "s"}
+          </p>
+          <p>
+            {summary.pinned
+              ? <>Pinned to release <span className="font-medium text-foreground/80">{summary.ref}</span></>
+              : <span className="text-amber-600 dark:text-amber-400">
+                  Imported, but couldn&apos;t pin the release — you may lack maintainer rights on this project.
+                </span>}
+          </p>
+        </div>
+      )}
     </div>
   )
 }

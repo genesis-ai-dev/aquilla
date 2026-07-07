@@ -94,3 +94,7 @@ serialized (only ONE agent touches a given existing file per wave — see below)
 ## Merge log (append-only)
 
 - 2026-07-06 · integration branch created; spec + `types.ts` + state files committed.
+- 2026-07-06 · Slice A merged (`88a458cd2`, ff). Central gate PASSED: vitest 46/46 (8 files),
+  tsc `-p tsconfig.app.json` 0 errors. Live-API assumptions re-verified vs git.door43.org:
+  `content_format`/`zipball_url` present, git-tree `{tree:[{path,type}]}`, raw `manifest.yaml`
+  at `/raw/tag/{ref}/manifest.yaml` → 200. Wave 2 dispatched (B import-UI, C delta-wiring, E routes).

@@ -65,7 +65,11 @@ describe("Preferences", () => {
   it("renders the Privacy form on its detail route, with a back link to the index", () => {
     renderAt("/preferences/privacy")
     expect(screen.getByText("Share usage data")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /Preferences/ })).toHaveAttribute("href", "/preferences")
+    // Both the breadcrumb and the back affordance link to the index — the
+    // journey needs at least one route back, and every match must point there.
+    const backLinks = screen.getAllByRole("link", { name: /Preferences/ })
+    expect(backLinks.length).toBeGreaterThan(0)
+    for (const link of backLinks) expect(link).toHaveAttribute("href", "/preferences")
   })
 
   it("renders the personal provider section on its detail route", () => {

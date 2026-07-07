@@ -13,6 +13,7 @@
 
 import { describe, it, expect } from "vitest"
 import { render, screen } from "@testing-library/react"
+import { TooltipDelegationBoundary } from "@/components/ui/tooltip"
 import { InterlinearAlignmentPanel } from "./InterlinearAlignmentPanel"
 import {
   buildAlignmentModel,
@@ -192,16 +193,19 @@ describe("InterlinearAlignmentPanel — section header tooltip (FRO-241)", () =>
   it("HelpCircle tooltip on insufficient-data state mentions confirm and reject actions", () => {
     const model = stubModelWithPairCount(0)
     render(
-      <InterlinearAlignmentPanel
-        sourceText="In the beginning"
-        targetText="Am Anfang"
-        alignmentModel={model}
-        confirmedSeeds={noSeeds}
-        onSeedChange={noop}
-      />,
+      // The delegation boundary makes AppTooltip surface string content as a
+      // `data-tooltip` attribute (tooltip.tsx) — the plain Base UI tooltip only
+      // exists as a portal on hover, which this render-only test can't reach.
+      <TooltipDelegationBoundary>
+        <InterlinearAlignmentPanel
+          sourceText="In the beginning"
+          targetText="Am Anfang"
+          alignmentModel={model}
+          confirmedSeeds={noSeeds}
+          onSeedChange={noop}
+        />
+      </TooltipDelegationBoundary>,
     )
-    // AppTooltip exposes its content via a `data-tooltip` attribute in test mode
-    // (tooltip.tsx) rather than a real `title` — the popup itself is portalled on hover.
     // The text must mention both confirm and reject/invalidate to satisfy FRO-240.
     const helpSpan = Array.from(document.querySelectorAll("[data-tooltip]")).find((el) =>
       /confirm.*reject|reject.*confirm/i.test(el.getAttribute("data-tooltip") ?? ""),

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, waitFor, fireEvent } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { ProjectOverview, deriveProjectStatus } from "./ProjectOverview"
@@ -225,14 +225,16 @@ describe("ProjectOverview file list show-more", () => {
     // Wait for async file fetch to populate the list
     await waitFor(() => expect(screen.queryByText(/top 12 of 16/)).toBeInTheDocument())
 
-    // Only 12 files should be visible initially
-    expect(screen.getAllByRole("listitem").length).toBe(12)
+    // Only 12 files should be visible initially (scoped to the Files list —
+    // the Team card renders its own listitems).
+    const filesList = () => within(screen.getByRole("list", { name: "Files" }))
+    expect(filesList().getAllByRole("listitem").length).toBe(12)
 
     // Clicking show-more reveals all 16 files
     const showMore = screen.getByRole("button", { name: /show all/i })
     fireEvent.click(showMore)
 
-    await waitFor(() => expect(screen.getAllByRole("listitem").length).toBe(totalFiles))
+    await waitFor(() => expect(filesList().getAllByRole("listitem").length).toBe(totalFiles))
     // Header should now say "(16)" not "top 12 of 16"
     expect(screen.queryByText(/top 12 of 16/)).not.toBeInTheDocument()
     expect(screen.getByText(/\(16\)/)).toBeInTheDocument()

@@ -17,8 +17,8 @@ export interface CellExpansionTab {
   label: string
   /** Tiny dot in the corner indicating the tab needs attention. */
   attentionDot?: "amber" | "emerald" | "red"
-  /** Tab body. */
-  content: React.ReactNode
+  /** Lazily renders the tab body. Only called for the active tab. */
+  renderContent: () => React.ReactNode
   disabled?: boolean
 }
 
@@ -41,6 +41,10 @@ export function CellExpansion({
   open, tab, onTabChange, tabs, onClose, className,
 }: Props) {
   const wrapperRef = useRef<HTMLDivElement | null>(null)
+  const activeTab = tabs.find((t) => t.value === tab && !t.disabled)
+    ?? tabs.find((t) => !t.disabled)
+    ?? null
+  const renderedTab = activeTab?.value ?? tab
 
   // Esc to close. Listen on the wrapper so we don't compete with global Esc
   // handlers when the panel isn't focused.
@@ -57,6 +61,11 @@ export function CellExpansion({
     el.addEventListener("keydown", handler)
     return () => el.removeEventListener("keydown", handler)
   }, [open, onClose])
+
+  useEffect(() => {
+    if (!open || !activeTab || activeTab.value === tab) return
+    onTabChange(activeTab.value)
+  }, [activeTab, onTabChange, open, tab])
 
   if (!open) return null
 
@@ -77,7 +86,7 @@ export function CellExpansion({
       // row-level handlers (e.g. selection toggling).
       onClick={(e) => e.stopPropagation()}
     >
-      <Tabs value={tab} onValueChange={onTabChange} className="flex flex-col">
+      <Tabs value={renderedTab} onValueChange={onTabChange} className="flex flex-col">
         <div className="flex items-center justify-between px-2 py-1.5">
           <TabsList>
             {tabs.map((t) => (
@@ -94,11 +103,13 @@ export function CellExpansion({
           </TabsList>
         </div>
 
-        {tabs.map((t) => (
-          <TabsContent key={t.value} value={t.value} className="px-3 py-3">
-            {t.content}
+        {activeTab && (
+          <TabsContent key={activeTab.value} value={activeTab.value} className="px-3 py-3">
+            <div data-cell-detail-tab={activeTab.value}>
+              {activeTab.renderContent()}
+            </div>
           </TabsContent>
-        ))}
+        )}
       </Tabs>
     </div>
   )

@@ -13,7 +13,13 @@ import {
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
-import { type CellStore, useCellIds, useCellStoreVersion, useCellView } from "@/hooks/useActiveCellStore"
+import {
+  type CellFootnoteDetails,
+  type CellStore,
+  useCellIds,
+  useCellStoreVersion,
+  useCellView,
+} from "@/hooks/useActiveCellStore"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { getCellPref, setCellPref } from "@/lib/store/audio-cell-prefs"
@@ -398,9 +404,19 @@ function ValidationHistoryTimeline({
 const EMPTY_EXAMPLES: ScoredPair[] = []
 const EMPTY_INFRACTIONS: RuleInfraction[] = []
 const EMPTY_HIGHLIGHTS: ReturnType<typeof buildHighlightsFromExamples> = []
+const EMPTY_EXTRACTED_FOOTNOTES: ExtractedFootnote[] = []
+const EMPTY_CELL_FOOTNOTE_DETAILS: CellFootnoteDetails = {
+  sourceFootnotes: EMPTY_EXTRACTED_FOOTNOTES,
+  targetFootnotes: EMPTY_EXTRACTED_FOOTNOTES,
+  sourceCount: 0,
+  targetCount: 0,
+  hasFootnotes: false,
+}
 const SELECTION_DRAG_THRESHOLD_PX = 3
 const SELECTION_EDGE_SCROLL_ZONE_PX = 56
 const SELECTION_EDGE_SCROLL_STEP_PX = 22
+
+export type BacktranslationActionSource = "read-back" | "refresh" | "regenerate"
 
 export interface EditorTableHandle {
   scrollToCellIndex: (index: number) => void
@@ -497,7 +513,7 @@ interface EditorTableProps {
   // pass-through, never consumed above the row.
   isBacktranslationConfigured?: boolean
   /** Generate the cell's back-translation with the configured LLM. */
-  onBacktranslate?: (cell: CellData) => void
+  onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
   backtranslationByCellId?: ReadonlyMap<string, string>
@@ -1119,16 +1135,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         const cell = cellId ? cellStore.getCellView(cellId) : null
         if (!cell) return null
         const offsets = cellStore.getFootnoteOffsets(cell.id)
-        const sourceFootnotes = extractUsfmFootnotes(cell.original ?? "")
-        const targetFootnotes = extractUsfmFootnotes(cell.translated ?? "")
-        if (sourceFootnotes.length === 0 && targetFootnotes.length === 0) return null
+        const footnotes = cellStore.getCellFootnotes(cell.id)
+        if (!footnotes.hasFootnotes) return null
         return {
           cellId: cell.id,
           cellLabel: cell.cellLabel || String(index + 1),
           cellRef: humanFootnoteCellRef(cell),
           rowIndex: index,
-          sourceFootnotes,
-          targetFootnotes,
+          sourceFootnotes: footnotes.sourceFootnotes,
+          targetFootnotes: footnotes.targetFootnotes,
           activeFootnoteIndex: hoveredFootnote?.cellId === cell.id ? hoveredFootnote.index : null,
           isDocx: (cell.fileId ?? "").endsWith(".docx"),
           numberOffset: offsets.target,
@@ -1160,6 +1175,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       .sort((a, b) => a - b)
     setViewableIndexes((current) => areNumberArraysEqual(current, next) ? current : next)
   }, [displayCellIds.length])
+
+  const getFootnoteDetails = useCallback(
+    (cellId: string) => cellStore.getCellFootnotes(cellId),
+    [cellStore],
+  )
 
   const renderListItem = useCallback(({ item: cellId, index }: LegendListRenderItemProps<string>) => {
     const audioEntry = audioByCellId.get(cellId)
@@ -1222,6 +1242,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onBacktranslate={onBacktranslate}
           onSaveBacktranslation={onSaveBacktranslation}
           getStatisticalBt={getStatisticalBt}
+          getFootnoteDetails={getFootnoteDetails}
           cellOpenCommentCount={cellOpenCommentCount}
           activeCueIndex={activeCueIndex}
           onSeekToCue={onSeekToCue}
@@ -1495,9 +1516,10 @@ interface MemoizedRowProps {
   isBacktranslationConfigured?: boolean
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
-  onBacktranslate?: (cell: CellData) => void
+  onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   getStatisticalBt?: (translatedText: string) => string
+  getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   cellOpenCommentCount?: Map<string, number>
   activeCueIndex?: number
   onSeekToCue?: (cellId: string) => void
@@ -1581,6 +1603,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     project, username, editable, canValidate, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
+    getFootnoteDetails,
     onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
     sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
@@ -1693,6 +1716,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onBacktranslate={onBacktranslate}
         onSaveBacktranslation={onSaveBacktranslation}
         getStatisticalBt={getStatisticalBt}
+        getFootnoteDetails={getFootnoteDetails}
         openCommentCount={openCommentCount}
         isActiveCue={isActiveCue}
         onSeekToCue={onSeekToCue}
@@ -1787,9 +1811,10 @@ interface EditorRowProps {
   isBacktranslationConfigured?: boolean
   isBacktranslating?: boolean
   backtranslationError?: string
-  onBacktranslate?: (cell: CellData) => void
+  onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   getStatisticalBt?: (translatedText: string) => string
+  getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   /** FRO-207: Lazily returns the interlinear alignment model. */
   getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
   /** FRO-207: Called when user confirms/invalidates an alignment. */
@@ -2478,6 +2503,7 @@ function EditorRow({
   onCompleteSingle,
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate, onSaveBacktranslation,
   getStatisticalBt,
+  getFootnoteDetails,
   openCommentCount,
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
@@ -2560,13 +2586,24 @@ function EditorRow({
     ref: "",
     text: "",
   })
-  const allFootnotes = useMemo(() => ({
-    sourceFootnotes: extractUsfmFootnotes(cell.original ?? ""),
-    targetFootnotes: extractUsfmFootnotes(cell.translated ?? ""),
-  }), [cell.original, cell.translated])
+  const [expanded, setExpanded] = useState(false)
+  const [expansionTab, setExpansionTab] = useState<string>("backtranslation")
+  const [btAlignmentOpen, setBtAlignmentOpen] = useState(false)
+  const hasSourceFootnoteMarker = (cell.original ?? "").includes("\\f")
+  const hasTargetFootnoteMarker = (cell.translated ?? "").includes("\\f")
+  const mayHaveFootnotes = hasSourceFootnoteMarker || hasTargetFootnoteMarker
+  const showFootnotesInExpansion = footnoteViewMode === "off" && mayHaveFootnotes
+  const shouldHydrateFootnotes =
+    showFootnotesInline ||
+    (expanded && expansionTab === "footnotes" && showFootnotesInExpansion)
+  const allFootnotes = useMemo(
+    () => shouldHydrateFootnotes ? getFootnoteDetails(cell.id) : EMPTY_CELL_FOOTNOTE_DETAILS,
+    [cell.id, cell.original, cell.translated, getFootnoteDetails, shouldHydrateFootnotes],
+  )
   const sourceDisplayFootnotes = useMemo(() => {
+    if (!shouldHydrateFootnotes || !hasSourceFootnoteMarker) return EMPTY_EXTRACTED_FOOTNOTES
     const segments = segmentUsfmForDisplay(cell.original ?? "")
-    if (!segments) return []
+    if (!segments) return EMPTY_EXTRACTED_FOOTNOTES
     return segments
       .filter((segment): segment is UsfmNoteSegment => segment.kind === "note")
       .map((note) => ({
@@ -2576,15 +2613,13 @@ function EditorRow({
         ref: note.ref,
         text: note.text,
       }))
-  }, [cell.original])
+  }, [cell.original, hasSourceFootnoteMarker, shouldHydrateFootnotes])
   const sourceDetailFootnotes = allFootnotes.sourceFootnotes.length > 0
     ? allFootnotes.sourceFootnotes
     : sourceDisplayFootnotes
-  const sourceFootnotes = showFootnotesInline ? allFootnotes.sourceFootnotes : []
-  const targetFootnotes = showFootnotesInline ? allFootnotes.targetFootnotes : []
+  const sourceFootnotes = showFootnotesInline ? allFootnotes.sourceFootnotes : EMPTY_EXTRACTED_FOOTNOTES
+  const targetFootnotes = showFootnotesInline ? allFootnotes.targetFootnotes : EMPTY_EXTRACTED_FOOTNOTES
   const hasInlineFootnotes = sourceFootnotes.length > 0 || targetFootnotes.length > 0
-  const hasAnyFootnotes = sourceDetailFootnotes.length > 0 || allFootnotes.targetFootnotes.length > 0
-  const showFootnotesInExpansion = footnoteViewMode === "off" && hasAnyFootnotes
   const isDocxFile = (cell.fileId ?? "").endsWith(".docx")
 
   useEffect(() => {
@@ -3228,13 +3263,11 @@ function EditorRow({
   const hoverLeaveTimerRef = useRef<number | null>(null)
 
   // ── Expansion state ───────────────────────────────────────────────────────
-  const [expanded, setExpanded] = useState(false)
-  const [expansionTab, setExpansionTab] = useState<string>("backtranslation")
   const alignmentModelForExpansion = useMemo(() => {
-    if (!expanded || expansionTab !== "backtranslation") return null
+    if (!btAlignmentOpen || !expanded || expansionTab !== "backtranslation") return null
     if (!cell.original.trim() || !cell.translated.trim()) return null
     return getAlignmentModel?.() ?? null
-  }, [cell.original, cell.translated, expanded, expansionTab, getAlignmentModel])
+  }, [btAlignmentOpen, cell.original, cell.translated, expanded, expansionTab, getAlignmentModel])
 
   // History tab: fetch the D1 event log on demand only when the History tab is
   // visible. `cell.history` from useCells is intentionally empty (EMPTY_HISTORY)
@@ -3305,6 +3338,10 @@ function EditorRow({
       setExpansionTab("backtranslation")
     }
   }, [expansionTab, showFootnotesInExpansion])
+
+  useEffect(() => {
+    if (!expanded || expansionTab !== "backtranslation") setBtAlignmentOpen(false)
+  }, [expanded, expansionTab])
 
   const railRevealed = isHovering || hasFocusWithin || isTapSelected || expanded
 
@@ -3521,6 +3558,7 @@ function EditorRow({
         // focus-visible:outline shows a subtle ring when navigating by
         // keyboard so the focused row is clear to sighted keyboard users.
         data-grid-row
+        data-cell-expanded={expanded ? "true" : undefined}
         tabIndex={0}
         aria-label={`${cellRef} cell`}
         className={cn(
@@ -4275,7 +4313,7 @@ function EditorRow({
               value: "health",
               icon: <Activity className="h-3 w-3" />,
               label: "Staleness",
-              content: (
+              renderContent: () => (
                 <div className="space-y-1.5 py-3 text-xs text-muted-foreground">
                   <p>
                     <span className="font-medium text-foreground">{cell.endorsementCount ?? 0}</span>
@@ -4295,7 +4333,7 @@ function EditorRow({
               icon: <FileText className="h-3 w-3" />,
               label: "Back-translation",
               attentionDot: isBtStale ? "amber" : undefined,
-              content: (
+              renderContent: () => (
                 <div className="flex flex-col gap-2.5">
                   {/* ── Header: a calm label + a quiet explainer. The controls
                       stay subdued so the reading below is the focus, not the
@@ -4321,7 +4359,7 @@ function EditorRow({
                             <button
                               type="button"
                               disabled={!isBacktranslationConfigured || isBacktranslating}
-                              onClick={() => onBacktranslate?.(cell)}
+                              onClick={() => onBacktranslate?.(cell, "regenerate")}
                               aria-label="Regenerate the back-translation"
                               className="inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                             >
@@ -4374,7 +4412,7 @@ function EditorRow({
                           {editable && (
                             <button
                               type="button"
-                              onClick={() => onBacktranslate?.(cell)}
+                              onClick={() => onBacktranslate?.(cell, "refresh")}
                               disabled={!isBacktranslationConfigured || isBacktranslating || cell.translated.trim().length === 0}
                               className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 transition-colors hover:bg-amber-500/25 dark:text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
                             >
@@ -4440,7 +4478,7 @@ function EditorRow({
                         <>
                           <button
                             type="button"
-                            onClick={() => onBacktranslate?.(cell)}
+                            onClick={() => onBacktranslate?.(cell, "read-back")}
                             disabled={!isBacktranslationConfigured || isBacktranslating || cell.translated.trim().length === 0}
                             className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                           >
@@ -4497,14 +4535,30 @@ function EditorRow({
                     </div>
                   )}
                   {/* ── FRO-207: Interlinear alignment panel ──────────────── */}
-                  {alignmentModelForExpansion && cell.original.trim() && cell.translated.trim() && (
-                    <InterlinearAlignmentPanel
-                      sourceText={cell.original}
-                      targetText={cell.translated}
-                      alignmentModel={alignmentModelForExpansion}
-                      confirmedSeeds={project.alignmentSeeds ?? []}
-                      onSeedChange={onAlignmentSeedChange ?? (() => undefined)}
-                    />
+                  {cell.original.trim() && cell.translated.trim() && getAlignmentModel && !btEditing && (
+                    <div className="rounded-lg border border-border/60">
+                      <button
+                        type="button"
+                        onClick={() => setBtAlignmentOpen((v) => !v)}
+                        aria-expanded={btAlignmentOpen}
+                        className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                      >
+                        <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", btAlignmentOpen && "rotate-90")} />
+                        Alignment
+                        <span className="font-normal text-muted-foreground/60">— word-level source/target view</span>
+                      </button>
+                      {btAlignmentOpen && alignmentModelForExpansion && (
+                        <div data-aquilla-alignment-panel className="px-2.5 pb-2.5">
+                          <InterlinearAlignmentPanel
+                            sourceText={cell.original}
+                            targetText={cell.translated}
+                            alignmentModel={alignmentModelForExpansion}
+                            confirmedSeeds={project.alignmentSeeds ?? []}
+                            onSeedChange={onAlignmentSeedChange ?? (() => undefined)}
+                          />
+                        </div>
+                      )}
+                    </div>
                   )}
                   {backtranslationError && (
                     <p className="text-xs text-destructive">{backtranslationError}</p>
@@ -4516,7 +4570,7 @@ function EditorRow({
               value: "footnotes",
               icon: <NotebookPen className="h-3 w-3" />,
               label: "Footnotes",
-              content: (
+              renderContent: () => (
                 <FootnoteInline
                   sourceFootnotes={sourceDetailFootnotes}
                   targetFootnotes={allFootnotes.targetFootnotes}
@@ -4546,7 +4600,7 @@ function EditorRow({
                 : (hasAudio || hasGeneratedVoice)
                   ? "emerald"
                   : undefined,
-              content: (
+              renderContent: () => (
                 <div
                   className={cn(
                     "flex flex-col gap-3 rounded-xl transition-colors",
@@ -4725,7 +4779,7 @@ function EditorRow({
                     : "amber"
                   : undefined,
               disabled: cellInfractions.length === 0 && waivedInfractions.length === 0,
-              content: (
+              renderContent: () => (
                 <div className="flex flex-col gap-1.5">
                   {cellInfractions.length === 0 && waivedInfractions.length === 0 ? (
                     <p className="py-3 text-center text-xs text-muted-foreground">
@@ -4794,7 +4848,7 @@ function EditorRow({
               value: "history",
               icon: <HistoryIcon className="h-3 w-3" />,
               label: "History",
-              content: (
+              renderContent: () => (
                 <div className="flex flex-col gap-2">
                   {isHistoryLoading ? (
                     <p className="py-3 text-center text-xs text-muted-foreground">

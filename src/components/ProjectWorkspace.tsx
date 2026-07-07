@@ -37,7 +37,7 @@ import type { WorkspaceSearchResult } from "@/hooks/useWorkspaceSearch"
 import { StatusBar } from "./StatusBar"
 import { SyncStatusIndicator } from "./SyncStatusIndicator"
 import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
-import { EditorTable, type AudioLensContext } from "./EditorTable"
+import { EditorTable, type AudioLensContext, type BacktranslationActionSource } from "./EditorTable"
 import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
@@ -1450,6 +1450,14 @@ export function ProjectWorkspace() {
   const [backtranslatingState, setBacktranslatingState] = useState<Set<string>>(new Set())
   const [backtranslationErrorsState, setBacktranslationErrorsState] = useState<Map<string, string>>(new Map())
 
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    ;(window as typeof window & { __aquillaBtGenerationInFlight?: number }).__aquillaBtGenerationInFlight = backtranslatingState.size
+    return () => {
+      delete (window as typeof window & { __aquillaBtGenerationInFlight?: number }).__aquillaBtGenerationInFlight
+    }
+  }, [backtranslatingState.size])
+
   // Hydrate persisted BTs on file/project load from the cell-backtranslations-read route.
   // Compares each BT's targetEventId against the cell's eventId to detect staleness.
   // Falls back gracefully to local generation on any error.
@@ -1566,6 +1574,9 @@ export function ProjectWorkspace() {
       cached.corpusCells === corpusCells &&
       cached.alignmentSeeds === alignmentSeeds
     ) {
+      if (typeof window !== "undefined") {
+        ;(window as typeof window & { __aquillaAlignmentModelBuilt?: boolean }).__aquillaAlignmentModelBuilt = true
+      }
       return cached.model
     }
 
@@ -1574,6 +1585,9 @@ export function ProjectWorkspace() {
       .map((c) => ({ source: c.original!, target: c.translated }))
     const m = buildAlignmentModel(pairs, alignmentSeeds ?? [])
     memMark(`alignmentModel.build(${pairs.length}p)`)
+    if (typeof window !== "undefined") {
+      ;(window as typeof window & { __aquillaAlignmentModelBuilt?: boolean }).__aquillaAlignmentModelBuilt = true
+    }
     alignmentModelCacheRef.current = {
       corpusCells,
       alignmentSeeds,
@@ -1581,6 +1595,11 @@ export function ProjectWorkspace() {
     }
     return m
   }, [corpusCells, project?.alignmentSeeds])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    ;(window as typeof window & { __aquillaAlignmentModelBuilt?: boolean }).__aquillaAlignmentModelBuilt = false
+  }, [activeFileId, project?.id])
 
   // Persist a confirmed/invalidated alignment as an additive seed via the same
   // project-settings sync path used for terminology.
@@ -1650,7 +1669,13 @@ export function ProjectWorkspace() {
    * glosser is a separate read-only reference surfaced on demand via
    * `getStatisticalBt` (never persisted).
    */
-  const runBacktranslation = useCallback(async (cell: CellData) => {
+  const runBacktranslation = useCallback(async (cell: CellData, actionSource?: BacktranslationActionSource) => {
+    if (!actionSource) {
+      const message = "[bt] generateBacktranslation requires an explicit user action source"
+      if (import.meta.env.DEV || import.meta.env.MODE === "test") throw new Error(message)
+      console.warn(message)
+      return
+    }
     if (!cell.translated?.trim() || !isBacktranslationConfigured) return
     const cellId = cell.id
     setBacktranslatingState((prev) => new Set(prev).add(cellId))

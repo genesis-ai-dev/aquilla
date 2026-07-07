@@ -6,7 +6,7 @@ import { streamFileCells, fetchCellsByIds, fetchCellsDelta } from "@/lib/sync/ce
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import { mergeCellsDelta, readCellsCache, writeCellsCache } from "@/lib/sync/cells-cache"
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
-import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
+import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { sortByLens } from "@/lib/timeline/derive"
 import type { OrderedBy } from "@/lib/parsers/types"
 
@@ -15,6 +15,14 @@ const EMPTY_CELL_IDS: readonly string[] = Object.freeze([])
 const EMPTY_SUMMARIES: readonly CellSummary[] = Object.freeze([])
 const EMPTY_TEXT_PAIRS: readonly CellTextPair[] = Object.freeze([])
 const EMPTY_NAVIGATION: readonly CellNavigationEntry[] = Object.freeze([])
+const EMPTY_FOOTNOTES: ExtractedFootnote[] = []
+const EMPTY_FOOTNOTE_DETAILS: CellFootnoteDetails = Object.freeze({
+  sourceFootnotes: EMPTY_FOOTNOTES,
+  targetFootnotes: EMPTY_FOOTNOTES,
+  sourceCount: 0,
+  targetCount: 0,
+  hasFootnotes: false,
+})
 
 export type CellViewModel = CellData
 
@@ -74,6 +82,51 @@ export interface CellNavigationEntry {
   total: number
 }
 
+export interface CellFootnoteDetails {
+  sourceFootnotes: ExtractedFootnote[]
+  targetFootnotes: ExtractedFootnote[]
+  sourceCount: number
+  targetCount: number
+  hasFootnotes: boolean
+}
+
+export interface CellDetailsSummary {
+  id: string
+  fileId: string
+  index: number
+  sourceText: string
+  targetText: string
+  sourceHtml?: string
+  targetHtml?: string
+  status: CellData["status"]
+  validationStatus: CellData["validationStatus"]
+  activeValidators: string[]
+  hasTargetText: boolean
+  endorsementCount?: number
+  sourceEventId?: string
+  targetEventId?: string
+  targetSourceEventId?: string | null
+  lastEditAt?: number
+  startTime?: number
+  endTime?: number
+  sequenceIndex?: number
+  medium?: CellData["medium"]
+  sourceFootnoteCount: number
+  targetFootnoteCount: number
+  hasSourceFootnotes: boolean
+  hasTargetFootnotes: boolean
+}
+
+export interface CellBacktranslationState {
+  cellId: string
+  targetText: string
+  targetEventId: string | null
+  hasTargetText: boolean
+  savedText: string
+  hasSaved: boolean
+  stale: boolean
+}
+
 interface RuntimeContext {
   projectId: string | null
   fileId: string | null
@@ -127,6 +180,11 @@ export class CellStore {
   private navIndex: CellNavigationEntry[] = []
   private sectionLabelById = new Map<string, string>()
   private footnoteOffsets = new Map<string, { source: number; target: number }>()
+  private footnoteCache = new Map<string, {
+    sourceText: string
+    targetText: string
+    details: CellFootnoteDetails
+  }>()
   private derivedCache: DerivedCache = { baseVersion: -1, summaries: [], textPairs: [] }
 
   setRuntime(next: RuntimeContext): void {
@@ -154,6 +212,7 @@ export class CellStore {
     this.cellVersionById = new Map()
     this.maxServerSeq = null
     this.writeSeq = 0
+    this.footnoteCache = new Map()
     this.rebuildDerivedIndexes()
     this.listVersion++
     this.fileVersion++
@@ -241,6 +300,30 @@ export class CellStore {
     return this.footnoteOffsets.get(cellId) ?? { source: 0, target: 0 }
   }
 
+  getCellFootnotes(cellId: string): CellFootnoteDetails {
+    const sourceText = this.sourceById.get(cellId)?.value ?? ""
+    const targetText = this.targetById.get(cellId)?.value ?? ""
+    if (!sourceText.includes("\\f") && !targetText.includes("\\f")) {
+      this.footnoteCache.delete(cellId)
+      return EMPTY_FOOTNOTE_DETAILS
+    }
+    const cached = this.footnoteCache.get(cellId)
+    if (cached && cached.sourceText === sourceText && cached.targetText === targetText) {
+      return cached.details
+    }
+    const sourceFootnotes = extractUsfmFootnotes(sourceText)
+    const targetFootnotes = extractUsfmFootnotes(targetText)
+    const details: CellFootnoteDetails = {
+      sourceFootnotes,
+      targetFootnotes,
+      sourceCount: sourceFootnotes.length,
+      targetCount: targetFootnotes.length,
+      hasFootnotes: sourceFootnotes.length > 0 || targetFootnotes.length > 0,
+    }
+    this.footnoteCache.set(cellId, { sourceText, targetText, details })
+    return details
+  }
+
   getCellView(cellId: string): CellViewModel | null {
     if (!this.indexById.has(cellId)) return null
     const source = this.sourceById.get(cellId)
@@ -256,6 +339,66 @@ export class CellStore {
     )
     this.applyContentOverlays(cell)
     return cell
+  }
+
+  getCellDetailsSummary(cellId: string): CellDetailsSummary | null {
+    const index = this.indexById.get(cellId)
+    if (index == null) return null
+    const source = this.sourceById.get(cellId)
+    const target = this.targetById.get(cellId)
+    if (!source && !target) return null
+    const sourceText = source?.value ?? ""
+    const targetText = target?.value ?? ""
+    const audit = this.ctx.auditStats.get(cellId)
+    const activeValidators = audit?.activeValidators ?? []
+    const validated = target?.validated ?? false
+    const status = deriveStatus(targetText, validated)
+    const footnotes = this.getCellFootnotes(cellId)
+    return {
+      id: cellId,
+      fileId: this.ctx.fileId ?? "",
+      index,
+      sourceText,
+      targetText,
+      ...(source?.valueHtml ? { sourceHtml: source.valueHtml } : {}),
+      ...(target?.valueHtml ? { targetHtml: target.valueHtml } : {}),
+      status,
+      validationStatus: deriveValidationStatus(status, activeValidators, this.ctx.username, this.ctx.requiredValidations),
+      activeValidators,
+      hasTargetText: targetText.trim().length > 0,
+      endorsementCount: target?.endorsementCount ?? source?.endorsementCount,
+      sourceEventId: source?.eventId,
+      targetEventId: target?.eventId,
+      targetSourceEventId: target?.sourceEventId,
+      lastEditAt: target?.lastEditAt ?? source?.lastEditAt,
+      startTime: target?.startMs ?? source?.startMs ?? undefined,
+      endTime: target?.endMs ?? source?.endMs ?? undefined,
+      sequenceIndex: target?.sequenceIndex ?? source?.sequenceIndex ?? undefined,
+      medium: (target?.medium ?? source?.medium ?? undefined) as CellData["medium"],
+      sourceFootnoteCount: footnotes.sourceCount,
+      targetFootnoteCount: footnotes.targetCount,
+      hasSourceFootnotes: footnotes.sourceCount > 0,
+      hasTargetFootnotes: footnotes.targetCount > 0,
+    }
+  }
+
+  getCellBacktranslationState(
+    cellId: string,
+    savedText = "",
+    savedTargetEventId?: string | null,
+  ): CellBacktranslationState | null {
+    const target = this.targetById.get(cellId)
+    const targetText = target?.value ?? ""
+    if (!this.indexById.has(cellId)) return null
+    return {
+      cellId,
+      targetText,
+      targetEventId: target?.eventId ?? null,
+      hasTargetText: targetText.trim().length > 0,
+      savedText,
+      hasSaved: savedText.trim().length > 0,
+      stale: Boolean(savedText.trim() && savedTargetEventId && target?.eventId && savedTargetEventId !== target.eventId),
+    }
   }
 
   getCellSummary(cellId: string): CellSummary | null {
@@ -377,6 +520,10 @@ export class CellStore {
     this.sourceById = sourceById
     this.targetById = targetById
     this.indexById = new Map(order.map((id, index) => [id, index]))
+    const liveIds = new Set(order)
+    for (const id of this.footnoteCache.keys()) {
+      if (!liveIds.has(id)) this.footnoteCache.delete(id)
+    }
     if (opts.maxServerSeq !== undefined) this.maxServerSeq = opts.maxServerSeq
     this.rebuildDerivedIndexes()
     this.bumpCells(changedIds)
@@ -559,6 +706,7 @@ export class CellStore {
       pendingEdits: this.pendingOverlay.size,
       optimisticEdits: this.optimisticEdits.size,
       navigationEntries: this.navIndex.length,
+      footnoteCacheEntries: this.footnoteCache.size,
       textMB: +(textBytes / 1048576).toFixed(2),
       htmlMB: +(htmlBytes / 1048576).toFixed(2),
       maxServerSeq: this.maxServerSeq,
@@ -995,14 +1143,27 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       const root = document.querySelector("[data-aquilla-editor-root]") ?? document
       const rowCount = root.querySelectorAll("[data-cell-id][data-index]").length
       const prosemirrorCount = root.querySelectorAll(".ProseMirror").length
+      const expandedCellCount = root.querySelectorAll('[data-cell-expanded="true"]').length
+      const mountedDetailTabs = Array.from(root.querySelectorAll<HTMLElement>("[data-cell-detail-tab]"))
+        .map((el) => el.dataset.cellDetailTab)
+        .filter(Boolean)
       const nodeCount = document.getElementsByTagName("*").length
       const rowRenderMap = (window as typeof window & { __perfRowRenders?: Map<string, number> }).__perfRowRenders
+      const diagnostics = window as typeof window & {
+        __aquillaAlignmentModelBuilt?: boolean
+        __aquillaBtGenerationInFlight?: number
+      }
       return store.getMemorySnapshot({
         usedJSHeapMB: memory?.usedJSHeapSize ? +(memory.usedJSHeapSize / 1048576).toFixed(1) : null,
         totalJSHeapMB: memory?.totalJSHeapSize ? +(memory.totalJSHeapSize / 1048576).toFixed(1) : null,
         domNodes: nodeCount,
         mountedRows: rowCount,
         prosemirrorEditors: prosemirrorCount,
+        expandedCellCount,
+        mountedDetailTab: mountedDetailTabs[0] ?? null,
+        mountedDetailTabs,
+        alignmentModelBuilt: Boolean(diagnostics.__aquillaAlignmentModelBuilt),
+        btGenerationInFlight: diagnostics.__aquillaBtGenerationInFlight ?? 0,
         rowRenderCounters: rowRenderMap?.size ?? null,
       })
     }
@@ -1041,6 +1202,20 @@ export function useCellStoreViews(store: CellStore): CellViewModel[] {
 function deriveStatus(translated: string, validated: boolean): CellData["status"] {
   if (!translated || !translated.trim()) return "empty"
   return validated ? "validated" : "unvalidated"
+}
+
+function deriveValidationStatus(
+  status: CellData["status"],
+  activeValidators: string[],
+  username: string,
+  requiredValidations: number,
+): CellData["validationStatus"] {
+  if (status === "empty") return "empty"
+  if (activeValidators.length === 0) return status === "validated" ? "full-others" : "none"
+  if (activeValidators.length >= requiredValidations) {
+    return activeValidators.includes(username) ? "full-self" : "full-others"
+  }
+  return activeValidators.includes(username) ? "self" : "others"
 }
 
 function sameStringArray(a: readonly string[], b: readonly string[]): boolean {

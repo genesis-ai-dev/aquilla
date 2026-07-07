@@ -3,6 +3,8 @@ import { getOrgCredits, type OrgCredits } from "@/lib/sync/credits"
 import { formatCredits, capUsagePct } from "@/lib/credits"
 import { ROLE } from "@/lib/frontier/roles"
 import { Section } from "@/components/ui/page"
+import { SegmentedCapBar, RailLegend } from "@/components/credits/credit-visuals"
+import { pctTextClass } from "@/components/credits/rails"
 
 /**
  * Credit cap usage panel for the org Overview (maintainer+ view).
@@ -54,59 +56,31 @@ export function CreditsPanel({
   if (!data) return null
 
   const { day, week, config } = data
-  const dayPct = capUsagePct(day.totalCredits, config.dailyCap)
-  const weekPct = capUsagePct(week.totalCredits, config.weeklyCap)
-  const agentDayPct = capUsagePct(day.agentCredits, config.agentDailyCap)
-  const agentWeekPct = capUsagePct(week.agentCredits, config.agentWeeklyCap)
 
   return (
     <Section
       title="Compute credits"
-      description="Daily and weekly cap usage across all rails (agent, chat, TTS)"
+      description="Usage against daily & weekly caps, broken out by rail"
       data-testid="credits-panel"
     >
-      <div className="space-y-4">
-        {/* Daily total — all rails */}
-        <CapBar
-          label="Today"
-          used={day.totalCredits}
-          cap={config.dailyCap}
-          pct={dayPct}
-          variant="default"
-        />
+      <div className="space-y-5">
+        {/* Overall caps — total fill = spend/cap, segmented by rail. */}
+        <CapWindow label="Today" total={day.totalCredits} cap={config.dailyCap} byRail={day.byRail} window="day" />
+        <CapWindow label="This week" total={week.totalCredits} cap={config.weeklyCap} byRail={week.byRail} window="week" />
 
-        {/* Weekly total — all rails */}
-        <CapBar
-          label="This week"
-          used={week.totalCredits}
-          cap={config.weeklyCap}
-          pct={weekPct}
-          variant="default"
-        />
-
-        {/* Agent sub-cap — the "Today"/"This week" totals above already
-            include this; it's broken out because agent is the dangerous
-            rail (highest markup, fastest to compound). It is NOT a
-            duplicate — it's a subset shown for visibility. */}
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/40">
-          <p className="mb-2 text-xs font-medium text-amber-800 dark:text-amber-300">
-            Agent spend (elevated rail — included in the totals above)
-          </p>
-          <div className="space-y-2">
-            <CapBar
-              label="Agent — today"
-              used={day.agentCredits}
-              cap={config.agentDailyCap}
-              pct={agentDayPct}
-              variant="agent"
-            />
-            <CapBar
-              label="Agent — this week"
-              used={week.agentCredits}
-              cap={config.agentWeeklyCap}
-              pct={agentWeekPct}
-              variant="agent"
-            />
+        {/* Agent sub-cap — the totals above already include this; it's broken
+            out because agent is the elevated rail (own cap, 5× markup, fastest
+            to compound). NOT a duplicate — a subset with its own limit. */}
+        <div className="rounded-xl border border-amber-200/70 bg-amber-50/50 px-3 py-2.5 dark:border-amber-900/50 dark:bg-amber-950/20">
+          <div className="mb-2 flex items-center gap-1.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+            <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300">
+              Agent spend (elevated rail — own cap, 5× markup)
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <AgentCapRow label="Today" used={day.agentCredits} cap={config.agentDailyCap} testId="agentcap-day" />
+            <AgentCapRow label="This week" used={week.agentCredits} cap={config.agentWeeklyCap} testId="agentcap-week" />
           </div>
         </div>
       </div>
@@ -114,45 +88,62 @@ export function CreditsPanel({
   )
 }
 
-function CapBar({
+/** One window (Today / This week): total vs cap + a rail-segmented bar + legend. */
+function CapWindow({
+  label,
+  total,
+  cap,
+  byRail,
+  window,
+}: {
+  label: string
+  total: number
+  cap: number
+  byRail: Record<string, number>
+  window: "day" | "week"
+}) {
+  const pct = capUsagePct(total, cap)
+  return (
+    <div>
+      <div className="mb-1.5 flex items-baseline justify-between gap-2">
+        <span className="text-xs font-medium">{label}</span>
+        <span className="text-xs tabular-nums" data-testid={`cap-${window}-total`}>
+          <span className="font-semibold">{formatCredits(total)}</span>
+          <span className="text-muted-foreground"> / {formatCredits(cap)}</span>
+          <span className={`ml-1.5 font-medium ${pctTextClass(pct)}`}>{pct}%</span>
+        </span>
+      </div>
+      <SegmentedCapBar byRail={byRail} cap={cap} />
+      <div className="mt-1.5">
+        <RailLegend byRail={byRail} chipTestId={(rail) => `rail-${window}-${rail}`} />
+      </div>
+    </div>
+  )
+}
+
+/** Compact agent sub-cap row: label · thin amber bar · used/cap · %. */
+function AgentCapRow({
   label,
   used,
   cap,
-  pct,
-  variant,
+  testId,
 }: {
   label: string
   used: number
   cap: number
-  pct: number
-  variant: "default" | "agent"
+  testId: string
 }) {
-  const barColor =
-    pct >= 90
-      ? "bg-destructive"
-      : pct >= 70
-        ? "bg-amber-500"
-        : variant === "agent"
-          ? "bg-amber-400"
-          : "bg-primary"
-
+  const pct = capUsagePct(used, cap)
   return (
-    <div>
-      <div className="mb-1 flex items-baseline justify-between">
-        <span className="text-xs text-muted-foreground">{label}</span>
-        <span className="text-xs tabular-nums font-semibold">
-          {formatCredits(used)}
-          <span className="font-normal text-muted-foreground"> / {formatCredits(cap)}</span>
-          <span className="ml-1 text-muted-foreground">({pct}%)</span>
-        </span>
+    <div className="flex items-center gap-2.5">
+      <span className="w-16 shrink-0 text-[11px] text-muted-foreground">{label}</span>
+      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-amber-100 dark:bg-amber-950/50">
+        <div className="h-full rounded-full bg-amber-500" style={{ width: `${pct}%` }} aria-hidden />
       </div>
-      <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-        <div
-          className={`h-full rounded-full ${barColor} transition-all`}
-          style={{ width: `${pct}%` }}
-          aria-label={`${pct}% of ${label} cap used`}
-        />
-      </div>
+      <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground" data-testid={testId}>
+        <span className="font-medium text-foreground">{formatCredits(used)}</span> / {formatCredits(cap)}
+        <span className="ml-1">· {pct}%</span>
+      </span>
     </div>
   )
 }

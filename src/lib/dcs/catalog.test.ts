@@ -284,3 +284,81 @@ describe("DcsClient error handling", () => {
     await expect(client.getCatalogEntry("uW", "nope", "v1")).rejects.toThrow(/404/)
   })
 })
+
+describe("DcsClient default fetch binding (DEFECT 1 — Illegal invocation guard)", () => {
+  it("with NO injected fetchImpl, calls through to the BOUND global fetch", async () => {
+    // In a real browser, storing the bare native `fetch` and later calling it as
+    // `this.fetchImpl(url)` throws "Illegal invocation" (fetch needs this===window).
+    // The client must default to `fetch.bind(globalThis)`. We prove the default
+    // path invokes global fetch — and, critically, that what the client stored is
+    // NOT the same unbound reference it would fail on. A spy on globalThis.fetch
+    // that asserts its own `this` catches a regression to the unbound form.
+    const realFetch = globalThis.fetch
+    const spy = vi.fn(async function (this: unknown) {
+      // A correctly-bound default calls with this === globalThis (or undefined
+      // under strict binding), NEVER with this === the DcsClient instance.
+      expect(this === undefined || this === globalThis).toBe(true)
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [] }),
+        text: async () => "",
+      } as Response
+    })
+    // Assign the spy as the global; the client's `fetch.bind(globalThis)` default
+    // must resolve to THIS spy (bound), not a stale/unbound reference.
+    globalThis.fetch = spy as unknown as typeof fetch
+    try {
+      const client = new DcsClient() // no fetchImpl → default path
+      const rows = await client.searchCatalog({ lang: "en" })
+      expect(spy).toHaveBeenCalledTimes(1)
+      expect(rows).toEqual([])
+    } finally {
+      globalThis.fetch = realFetch
+    }
+  })
+})
+
+describe("DcsClient.getLatestRelease (DEFECT 3 — resolve the newest prod release)", () => {
+  it("searches owner+repo+stage=prod and returns the entry with the newest released date", async () => {
+    const { fetchImpl, calls } = stubFetch(() => ({
+      json: {
+        data: [
+          {
+            name: "en_obs",
+            owner: "unfoldingWord",
+            full_name: "unfoldingWord/en_obs",
+            branch_or_tag_name: "v8",
+            commit_sha: "sha-v8",
+            released: "2024-01-01T00:00:00Z",
+          },
+          {
+            name: "en_obs",
+            owner: "unfoldingWord",
+            full_name: "unfoldingWord/en_obs",
+            branch_or_tag_name: "v9",
+            commit_sha: "sha-v9",
+            released: "2026-06-01T00:00:00Z",
+          },
+        ],
+      },
+    }))
+    const client = new DcsClient({ fetchImpl })
+    const latest = await client.getLatestRelease("unfoldingWord", "en_obs")
+
+    // Hit the search endpoint scoped to owner+repo+prod (NOT the pinned ref).
+    expect(calls[0]).toContain(`${DEFAULT_DCS_BASE}/catalog/search?`)
+    expect(calls[0]).toContain("owner=unfoldingWord")
+    expect(calls[0]).toContain("repo=en_obs")
+    expect(calls[0]).toContain("stage=prod")
+    // Newest release wins even when the API returns them out of order.
+    expect(latest?.ref).toBe("v9")
+    expect(latest?.commitSha).toBe("sha-v9")
+  })
+
+  it("returns null when the repo has no prod release", async () => {
+    const { fetchImpl } = stubFetch(() => ({ json: { data: [] } }))
+    const client = new DcsClient({ fetchImpl })
+    expect(await client.getLatestRelease("uW", "nope")).toBeNull()
+  })
+})

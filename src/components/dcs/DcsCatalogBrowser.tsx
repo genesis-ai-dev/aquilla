@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { DcsClient, type CatalogSearchParams } from "@/lib/dcs/catalog"
+import { toDcsLangSeed } from "@/lib/dcs/lang-seed"
 import type { DcsCatalogEntry } from "@/lib/dcs/types"
 
 // Sentinel for "any" in the Select — Base UI/Radix selects can't carry an empty
@@ -70,7 +71,9 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
   // A stable client instance across renders (real network unless injected).
   const clientRef = useRef<DcsClient>(client ?? new DcsClient())
 
-  const [lang, setLang] = useState(defaultLang ?? "en")
+  // Seed the language filter from a DCS-friendly ISO code — NEVER a display
+  // name (DCS matches `?lang=en`, not `?lang=English`). Empty seed → "en".
+  const [lang, setLang] = useState(() => toDcsLangSeed(defaultLang) || "en")
   const [owner, setOwner] = useState<string>("unfoldingWord")
   const [ownerText, setOwnerText] = useState("")
   const [subject, setSubject] = useState<string>(ANY)

@@ -130,3 +130,7 @@ is the self-heal path the spec §6 already mandates — make sure `delta.ts`/the
   tsc `-p tsconfig.app.json` 0 errors. Live-API assumptions re-verified vs git.door43.org:
   `content_format`/`zipball_url` present, git-tree `{tree:[{path,type}]}`, raw `manifest.yaml`
   at `/raw/tag/{ref}/manifest.yaml` → 200. Wave 2 dispatched (B import-UI, C delta-wiring, E routes).
+- 2026-07-06 · Slice E merged (`a2c6d221d`). Central gate PASSED: vitest 72/72 (11 files), tsc 0
+  errors. Routes refactored into `src/lib/dcs/routes/{usfm,obs,tsv-notes,tsv-questions}.ts` +
+  `tsv-common.ts`. E repointed one Slice-A test fixture (`import-dcs.test.ts` no-route case tn→tw)
+  — legitimate since tn is now routable. tw/ta still deferred. Awaiting B + C.

@@ -92,3 +92,60 @@ the mirror engine absorbs reflow, structural edits map to explicit `cell.delete`
 `usfm`; it falls through returning the route id verbatim for `obs`/`tsv-notes`/`tsv-questions`. If the
 server projection needs a specific `FileType` for these (e.g. `obs` → "obs", TSV → "tsv"), refine that
 map — it is a Slice-A-owned file, out of Slice E's scope.
+## Slice C (delta wiring + upstream panel) — done 2026-07-06, branch `claude/dcs-c-delta-wiring`
+
+Added `emitSourceCellCommit` (ADD-ONLY) to `src/lib/sync/events-emit.ts`, new
+`src/components/dcs/DcsUpstreamPanel.tsx` (+ `.test.tsx`), mounted the panel in
+`src/components/ProjectSettings/SourceLinkSection.tsx`. tsc `-p tsconfig.app.json` = 0 errors;
+`vitest run src/lib/sync/events-emit src/components/dcs` = 34/34 (4 files); eslint clean; no `any`.
+NOT pushed.
+
+Contract wired exactly as Slice A specified:
+- `applyDelta`'s injected `DeltaEmitters` bind to → `commit`: `emitSourceCellCommit({ parentId:
+  parentEventId, id: eventId, value, valueHtml })`; `delete`: `emitSourceCellDelete`; `create`:
+  `enqueueEvent({ kind: "source.cell.create", id: eventId, parentId: null, payload })` directly
+  (NOT `emitSourceCellCreate`, which has no `id` param — bypassing it keeps events-emit ADD-ONLY
+  while still stamping the deterministic `dcsEventId` so re-runs dedupe).
+- `emitSourceCellCommit` signature (symmetrical with `emitSourceCellDelete`, plus a `parentId` +
+  optional deterministic `id`):
+  `emitSourceCellCommit({ projectId, fileId, cellId, parentId: string|null, value, valueHtml?,
+  id?, author, clientTs? }) → Promise<string>` — emits `{ kind: "source.cell.commit", parentId,
+  payload: { value, valueHtml? } }` through `enqueueEvent`.
+- `currentCells` built by NEW internal `buildCurrentCells()` in the panel: `fetchProjectFiles` →
+  per file `fetchAllFileCells(side:"source")`, hashing each row's `value` with the shared
+  `@/lib/dcs/content-hash` djb2 → `Map<cellId,{ eventId: row.eventId, contentHash, fileId }>` =
+  the `CurrentCell` shape. Token minted via `buildFileScopedTokenFetcher` (project-scoped; any
+  fileId works for reads), same pattern as the FRO-478 Upstream-changes panel.
+- Cursor advanced with `buildCursor(newEntry, cursor.trackMode)` and persisted via
+  `useProjectSettings().patch({ dcsUpstream })`. `applyDelta` ctx = `{ repo: newEntry.fullName,
+  sha: newEntry.commitSha }` — matches `import-dcs.ts`'s `dcsEventId(fullName, commitSha, cellId)`.
+- Import gated at MAINTAINER (600) per spec §11 (importer is maintainer of the adapter project);
+  also clears the role-policy PROJECT_LEAD(500) floor on `source.cell.*`.
+
+**SWARM-TODOs / deferrals:**
+- MOUNT-GATING GAP (orchestrator owns `ProjectSettings.tsx`, which I may NOT edit): the panel is
+  mounted inside `SourceLinkSection`, which `ProjectSettings.tsx` only renders when
+  `hasSourceLink` (a non-null `sourceProjectId`, i.e. a DOWNSTREAM link). A SELF-CONTAINED DCS
+  adapter project (the common case — no `sourceProjectId`) never shows `SourceLinkSection`, so the
+  panel won't appear there. The panel itself is correctly self-gated (renders null without a
+  `dcsUpstream` cursor). FIX (one line, `ProjectSettings.tsx`): also mount the panel — or a
+  dedicated `section-dcs-upstream` — when `readCursor(settings)` is non-null, independent of
+  `hasSourceLink`. Left to the orchestrator since `ProjectSettings.tsx` + `project-settings.ts`
+  are outside Slice C's owned files. The dev-proof (Wave 3) should re-pin an adapter that IS a
+  downstream link (so the section shows) OR land the one-line gate first.
+- `ProjectWideSettings` (`src/lib/sync/project-settings.ts`) has NO `dcsUpstream` key — the panel
+  reads via `readCursor(settings as Record<string, unknown>)` and writes via
+  `patch({ [DCS_UPSTREAM_KEY]: cursor } as Record<string, unknown>)` (JSONB passthrough; no schema
+  migration per spec §8). Adding `dcsUpstream?: DcsCursor` to `ProjectWideSettings` additively
+  would drop both casts — a nice-to-have for another owner (that file is not Slice C's).
+- create-emitter fileId: a brand-new upstream cell has no existing projection row, so
+  `buildCurrentCells` can't map its fileId. The panel currently falls back to `cell.cellId` as the
+  fileId placeholder for creates. This is WRONG for multi-file books (the created cell lands under
+  a synthetic file id). Not exercised by the v88→v89 en_ult delta (all changed cells already
+  exist), but Slice E / a book-addition delta needs `DcsCell` to carry its parsed `fileId` (or the
+  delta to return creates grouped by file). Flagged for whoever extends the delta result shape.
+- LIVE INVALIDATION IS UNPROVEN HEADLESSLY: unit tests prove the wiring (applyDelta called with
+  real emitters, cursor persisted), but that moving a source head actually flags downstream
+  linked targets stale can only be shown against the dev stack + live git.door43.org. Wave 3
+  browser-QA owns that proof (import book@vOLD, link a language project, translate, Import changes
+  → vNEW, observe stale flags + Upstream-changes review panel).

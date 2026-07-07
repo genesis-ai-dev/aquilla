@@ -43,7 +43,10 @@ export interface ComputeDeltaArgs {
 }
 
 export interface DeltaResult {
-  creates: DcsCell[]
+  /** Newly-added upstream cells. Each carries the parsed file's fileId so the
+   *  create lands in the RIGHT file — a create is by definition absent from the
+   *  adapter's existing cells, so its fileId can't be recovered from them. */
+  creates: Array<{ cell: DcsCell; fileId: string }>
   commits: Array<{ cell: DcsCell; parentEventId: string }>
   deletes: string[]
 }
@@ -94,7 +97,7 @@ export async function computeDelta(args: ComputeDeltaArgs): Promise<DeltaResult>
   const parsedFileIds = new Set(parsedFiles.map((f) => f.fileId))
   const parsedCellIds = new Set<string>()
 
-  const creates: DcsCell[] = []
+  const creates: Array<{ cell: DcsCell; fileId: string }> = []
   const commits: Array<{ cell: DcsCell; parentEventId: string }> = []
 
   for (const file of parsedFiles) {
@@ -102,7 +105,7 @@ export async function computeDelta(args: ComputeDeltaArgs): Promise<DeltaResult>
       parsedCellIds.add(cell.cellId)
       const current = currentCells.get(cell.cellId)
       if (!current) {
-        creates.push(cell)
+        creates.push({ cell, fileId: file.fileId })
       } else if (current.contentHash !== cell.contentHash) {
         commits.push({ cell, parentEventId: current.eventId })
       }
@@ -135,6 +138,9 @@ export interface CreateArg {
   cellId: string
   eventId: string
   cell: DcsCell
+  /** The parsed file the new cell belongs to — the create must project into
+   *  this file, not a fallback derived from the cell id. */
+  fileId: string
 }
 export interface CommitArg {
   cellId: string
@@ -159,11 +165,12 @@ export async function applyDelta(
   emitters: DeltaEmitters,
   ctx: { repo: string; sha: string },
 ): Promise<void> {
-  for (const cell of delta.creates) {
+  for (const { cell, fileId } of delta.creates) {
     await emitters.create({
       cellId: cell.cellId,
       eventId: dcsEventId(ctx.repo, ctx.sha, cell.cellId),
       cell,
+      fileId,
     })
   }
   for (const { cell, parentEventId } of delta.commits) {

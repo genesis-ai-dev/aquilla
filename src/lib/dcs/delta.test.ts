@@ -99,8 +99,12 @@ describe("computeDelta — classification (spec §6, THE money logic)", () => {
     })
 
     // v3 is new.
-    expect(delta.creates.map((c) => c.cellId)).toEqual([V3])
-    expect(delta.creates[0].value).toContain("A new verse added")
+    expect(delta.creates.map((c) => c.cell.cellId)).toEqual([V3])
+    expect(delta.creates[0].cell.value).toContain("A new verse added")
+    // The create carries the parsed FILE's id (so it lands in the right file),
+    // never the cell id — guards the phantom-file orphaning bug.
+    expect(delta.creates[0].fileId).toBeTruthy()
+    expect(delta.creates[0].fileId).not.toBe(V3)
 
     // v1 changed → commit, chained on v1's current head event id.
     expect(delta.commits).toHaveLength(1)

@@ -70,7 +70,10 @@ vi.mock("@/lib/sync/events-emit", () => ({
 
 const cannedDelta: DeltaResult = {
   creates: [
-    { cellId: "TIT-1-3", value: "new verse 3", type: "verse", contentHash: "aaaa1111" },
+    {
+      cell: { cellId: "TIT-1-3", value: "new verse 3", type: "verse", contentHash: "aaaa1111" },
+      fileId: "file-57-TIT",
+    },
   ],
   commits: [
     {
@@ -84,8 +87,8 @@ const cannedDelta: DeltaResult = {
 const mockComputeDelta = vi.fn().mockResolvedValue(cannedDelta)
 const mockApplyDelta = vi.fn(
   async (delta: DeltaResult, emitters: DeltaEmitters, ctx: { repo: string; sha: string }) => {
-    for (const cell of delta.creates) {
-      await emitters.create({ cellId: cell.cellId, eventId: `ev-${cell.cellId}`, cell })
+    for (const { cell, fileId } of delta.creates) {
+      await emitters.create({ cellId: cell.cellId, eventId: `ev-${cell.cellId}`, cell, fileId })
     }
     for (const { cell, parentEventId } of delta.commits) {
       await emitters.commit({ cellId: cell.cellId, eventId: `ev-${cell.cellId}`, parentEventId, cell })
@@ -194,10 +197,15 @@ describe("DcsUpstreamPanel", () => {
     expect(mockEmitDelete.mock.calls[0][0]).toMatchObject({ cellId: "TIT-1-9" })
     // create goes through enqueueEvent with kind source.cell.create.
     expect(mockEnqueue).toHaveBeenCalledTimes(1)
+    // fileId MUST be the parsed file's id, not the cell id — a create is absent
+    // from currentCells, so the old `fileIdByCellId.get() ?? cell.cellId` fallback
+    // orphaned new cells into a phantom file. Guard that regression here.
     expect(mockEnqueue.mock.calls[0][0]).toMatchObject({
       kind: "source.cell.create",
       cellId: "TIT-1-3",
+      fileId: "file-57-TIT",
     })
+    expect(mockEnqueue.mock.calls[0][0].fileId).not.toBe("TIT-1-3")
 
     // applyDelta's ctx uses the new release's fullName + sha (deterministic ids).
     expect(mockApplyDelta.mock.calls[0][2]).toEqual({

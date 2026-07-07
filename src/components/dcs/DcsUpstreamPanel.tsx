@@ -169,11 +169,10 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
       const emitters: DeltaEmitters = {
         // Deterministic event id (from applyDelta) is threaded through as the
         // outbox event `id` so a re-run dedupes idempotently (server /import is
-        // idempotent on event id). New cells have no existing fileId in the
-        // projection — use the parsed DcsFile's fileId already stamped on the
-        // cell path via delta; here we fall back to the cell's own file mapping.
-        create: async ({ eventId, cell }) => {
-          const fileId = fileIdByCellId.get(cell.cellId) ?? cell.cellId
+        // idempotent on event id). A new cell has no existing projection row, so
+        // its fileId comes from the parsed DcsFile via the delta (CreateArg.fileId)
+        // — NOT from currentCells (which would miss and fall back to a phantom id).
+        create: async ({ eventId, cell, fileId }) => {
           const { eventId: id } = await enqueueEvent({
             kind: "source.cell.create",
             projectId,

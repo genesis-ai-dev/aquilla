@@ -132,7 +132,9 @@ export async function computeDelta(args: ComputeDeltaArgs): Promise<DeltaResult>
 // rather than importing the outbox emitters directly. The Slice C wiring binds
 // these to `source.cell.create` / `source.cell.commit` (chained on parentEventId)
 // / `source.cell.delete` from src/lib/sync/events-emit.ts. All event ids are the
-// deterministic `dcsEventId(repo|newSha|cellId)` so a re-run dedupes.
+// deterministic `dcsEventId(projectId|repo|newSha|cellId)` — scoped to the
+// destination project so the same resource delta'd into two projects never
+// collides on the events-table PK — so a re-run in the SAME project dedupes.
 
 export interface CreateArg {
   cellId: string
@@ -158,17 +160,19 @@ export interface DeltaEmitters {
   delete: (arg: DeleteArg) => Promise<string>
 }
 
-/** Apply a computed delta through the injected emitters. `repo`/`sha` derive the
- *  deterministic new-revision event ids for creates + commits. */
+/** Apply a computed delta through the injected emitters. `projectId`/`repo`/`sha`
+ *  derive the deterministic, project-scoped new-revision event ids for creates +
+ *  commits (project scope prevents the events-table PK from colliding when the
+ *  same resource is delta'd into more than one project). */
 export async function applyDelta(
   delta: DeltaResult,
   emitters: DeltaEmitters,
-  ctx: { repo: string; sha: string },
+  ctx: { projectId: string; repo: string; sha: string },
 ): Promise<void> {
   for (const { cell, fileId } of delta.creates) {
     await emitters.create({
       cellId: cell.cellId,
-      eventId: dcsEventId(ctx.repo, ctx.sha, cell.cellId),
+      eventId: dcsEventId(ctx.projectId, ctx.repo, ctx.sha, cell.cellId),
       cell,
       fileId,
     })
@@ -176,7 +180,7 @@ export async function applyDelta(
   for (const { cell, parentEventId } of delta.commits) {
     await emitters.commit({
       cellId: cell.cellId,
-      eventId: dcsEventId(ctx.repo, ctx.sha, cell.cellId),
+      eventId: dcsEventId(ctx.projectId, ctx.repo, ctx.sha, cell.cellId),
       parentEventId,
       cell,
     })

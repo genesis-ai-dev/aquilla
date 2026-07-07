@@ -50,13 +50,20 @@ function fileTypeForRoute(routeId: string): string {
 }
 
 /** Turn a parsed DcsFile's cells into anchor-chained BulkImportCells whose ids
- *  are the deterministic per-revision EVENT ids (mirrors buildBulkCells). */
-function toBulkCells(file: DcsFile, repo: string, sha: string): BulkImportCell[] {
+ *  are the deterministic per-revision, per-PROJECT EVENT ids (mirrors
+ *  buildBulkCells). projectId scopes the event id so importing the same resource
+ *  into two projects does not collide on the events-table PK. */
+function toBulkCells(
+  file: DcsFile,
+  projectId: string,
+  repo: string,
+  sha: string,
+): BulkImportCell[] {
   const cells: BulkImportCell[] = []
   let anchor: string | null = null
   for (const c of file.cells) {
     cells.push({
-      id: dcsEventId(repo, sha, c.cellId),
+      id: dcsEventId(projectId, repo, sha, c.cellId),
       cellId: c.cellId,
       anchorCellId: anchor,
       value: c.value,
@@ -114,7 +121,7 @@ export async function importDcsResource(args: ImportDcsArgs): Promise<ImportDcsS
   // 4. Emit one bulk upload per parsed file.
   let totalCells = 0
   for (const file of parsedFiles) {
-    const cells = toBulkCells(file, repo, entry.commitSha)
+    const cells = toBulkCells(file, args.projectId, repo, entry.commitSha)
     const meta: BulkImportFileMeta = {
       id: file.fileId,
       name: file.name,

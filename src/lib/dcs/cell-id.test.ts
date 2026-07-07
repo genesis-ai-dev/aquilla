@@ -34,19 +34,33 @@ describe("dcs cell-id (deterministic uuidv5, spec §5)", () => {
     expect(v87).toBe(v89)
   })
 
-  it("dcsEventId folds in the sha so re-runs of the SAME delta dedupe", () => {
+  it("dcsEventId folds in projectId + sha so re-runs of the SAME delta in the SAME project dedupe", () => {
     const cellId = dcsCellId("unfoldingWord/en_ult|TIT 1:1")
-    const a = dcsEventId("unfoldingWord/en_ult", "84c73ba0", cellId)
-    const b = dcsEventId("unfoldingWord/en_ult", "84c73ba0", cellId)
+    const a = dcsEventId("proj-1", "unfoldingWord/en_ult", "84c73ba0", cellId)
+    const b = dcsEventId("proj-1", "unfoldingWord/en_ult", "84c73ba0", cellId)
     expect(a).toBe(b)
-    expect(a).toBe(uuidv5(`unfoldingWord/en_ult|84c73ba0|${cellId}`, DCS_NS))
+    expect(a).toBe(uuidv5(`proj-1|unfoldingWord/en_ult|84c73ba0|${cellId}`, DCS_NS))
   })
 
   it("dcsEventId changes when the sha changes (a new delta → a new event id)", () => {
     const cellId = dcsCellId("unfoldingWord/en_ult|TIT 1:1")
-    expect(dcsEventId("unfoldingWord/en_ult", "sha_old", cellId)).not.toBe(
-      dcsEventId("unfoldingWord/en_ult", "sha_new", cellId),
+    expect(dcsEventId("proj-1", "unfoldingWord/en_ult", "sha_old", cellId)).not.toBe(
+      dcsEventId("proj-1", "unfoldingWord/en_ult", "sha_new", cellId),
     )
+  })
+
+  it("dcsEventId is PROJECT-SCOPED: same (repo,sha,cell) in two projects → DIFFERENT event ids", () => {
+    // The events-table PK is the event id. Without project scope, importing the
+    // same DCS resource into a second project produces identical event ids and
+    // the server's INSERT OR IGNORE silently drops the second import. Same
+    // project must still be deterministic (idempotent re-run); different project
+    // must differ.
+    const cellId = dcsCellId("unfoldingWord/en_ult|TIT 1:1")
+    const inProjA = dcsEventId("proj-A", "unfoldingWord/en_ult", "84c73ba0", cellId)
+    const inProjB = dcsEventId("proj-B", "unfoldingWord/en_ult", "84c73ba0", cellId)
+    expect(inProjA).not.toBe(inProjB)
+    // …but the SAME project is still deterministic across calls (idempotency).
+    expect(inProjA).toBe(dcsEventId("proj-A", "unfoldingWord/en_ult", "84c73ba0", cellId))
   })
 
   it("dcsFileId is deterministic per (repo, key)", () => {

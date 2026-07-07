@@ -19,6 +19,7 @@ import { render, screen, act, fireEvent, waitFor } from "@testing-library/react"
 import type { DcsCatalogEntry } from "@/lib/dcs/types"
 import type { CatalogSearchParams } from "@/lib/dcs/catalog"
 import { DcsCatalogBrowser } from "./DcsCatalogBrowser"
+import { toDcsLangSeed } from "@/lib/dcs/lang-seed"
 
 function entry(over: Partial<DcsCatalogEntry> = {}): DcsCatalogEntry {
   return {
@@ -104,6 +105,50 @@ describe("DcsCatalogBrowser", () => {
     // The most recent call carried the new language filter.
     const lastParams = mock.mock.calls[mock.mock.calls.length - 1][0] as CatalogSearchParams
     expect(lastParams.lang).toBe("es-419")
+  })
+
+  it("seeds the initial search with an ISO code, NEVER a display name (DEFECT 2)", async () => {
+    // The project stores its source language as a display name ("English"), but
+    // DCS matches on ISO codes ("en"). The app's own initial search must not
+    // fire `?lang=English` (→ 0 results); it must normalize the seed to a code.
+    let firstParams: CatalogSearchParams | undefined
+    const client = makeClient(async (p) => {
+      if (!firstParams) firstParams = p
+      return [entry()]
+    })
+
+    await act(async () => {
+      render(<DcsCatalogBrowser onPick={vi.fn()} client={client} defaultLang="English" />)
+    })
+    await screen.findByText("unfoldingWord/en_ult")
+
+    expect(firstParams?.lang).toBe("en")
+    // Never leak the raw display name into the query.
+    expect(firstParams?.lang).not.toBe("English")
+  })
+
+  it("passes an already-ISO seed (incl. region subtag) through unchanged", async () => {
+    let firstParams: CatalogSearchParams | undefined
+    const client = makeClient(async (p) => {
+      if (!firstParams) firstParams = p
+      return []
+    })
+    await act(async () => {
+      render(<DcsCatalogBrowser onPick={vi.fn()} client={client} defaultLang="es-419" />)
+    })
+    await waitFor(() => expect(firstParams).toBeDefined())
+    expect(firstParams?.lang).toBe("es-419")
+  })
+
+  it("toDcsLangSeed: names → 2-letter code, codes pass through, unknown word → empty", () => {
+    expect(toDcsLangSeed("English")).toBe("en")
+    expect(toDcsLangSeed("Spanish")).toBe("es")
+    expect(toDcsLangSeed("en")).toBe("en")
+    expect(toDcsLangSeed("es-419")).toBe("es-419")
+    expect(toDcsLangSeed("hbo")).toBe("hbo") // 3-letter code DCS uses verbatim
+    expect(toDcsLangSeed("Klingon")).toBe("") // unmappable word → empty, not a name
+    expect(toDcsLangSeed("")).toBe("")
+    expect(toDcsLangSeed(undefined)).toBe("")
   })
 
   it("surfaces a search error instead of silently showing an empty list", async () => {

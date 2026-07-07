@@ -123,9 +123,19 @@ const V89: DcsCatalogEntry = {
   language: "en",
 }
 
-function makeClient(latest: DcsCatalogEntry, changedFiles: string[]) {
+// `latest` is what getLatestRelease resolves (the newest prod release — this is
+// what "Check for updates" now compares against, per DEFECT 3). `oldEntry` is
+// what getCatalogEntry resolves for the cursor's pinned ref (used by handleImport
+// for the delta's old side). Defaulting oldEntry to `latest` keeps existing
+// tests behaving, but the up-to-date case passes a distinct pinned entry.
+function makeClient(
+  latest: DcsCatalogEntry,
+  changedFiles: string[],
+  oldEntry: DcsCatalogEntry = latest,
+) {
   return {
-    getCatalogEntry: vi.fn().mockResolvedValue(latest),
+    getLatestRelease: vi.fn().mockResolvedValue(latest),
+    getCatalogEntry: vi.fn().mockResolvedValue(oldEntry),
     compareRefs: vi.fn().mockResolvedValue({ totalCommits: 3, changedFiles }),
   } as unknown as import("@/lib/dcs/catalog").DcsClient
 }
@@ -149,7 +159,11 @@ describe("DcsUpstreamPanel", () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it("Check for updates renders 'vOLD → vNEW, N files changed'", async () => {
+  it("Check for updates resolves the LATEST prod release and shows an update when it's NEWER than the cursor (DEFECT 3)", async () => {
+    // The cursor is pinned at v88; the current prod release is v89 (a NEW tag,
+    // not a moved one). The old bug re-fetched the pinned ref's own entry and
+    // always reported "up to date". The panel must resolve the latest release
+    // (getLatestRelease) and surface the available update.
     const client = makeClient(V89, ["57-TIT.usfm", "58-PHM.usfm"])
     render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
 
@@ -158,9 +172,15 @@ describe("DcsUpstreamPanel", () => {
     await waitFor(() => {
       expect(screen.getByText(/v88\s*→\s*v89,\s*2\s*files changed/i)).toBeInTheDocument()
     })
+    // It resolved the latest release rather than re-fetching the pinned ref.
+    const c = client as unknown as { getLatestRelease: ReturnType<typeof vi.fn> }
+    expect(c.getLatestRelease).toHaveBeenCalledWith("unfoldingWord", "en_ult")
+    // NOT "up to date" — the whole DEFECT-3 point.
+    expect(screen.queryByText(/up to date/i)).not.toBeInTheDocument()
   })
 
-  it("shows up-to-date when the resolved release matches the cursor", async () => {
+  it("shows up-to-date when the LATEST prod release equals the cursor (DEFECT 3)", async () => {
+    // Latest prod release == the pinned cursor (same ref + sha) → truly current.
     const sameEntry = { ...V89, ref: "v88", commitSha: "old-sha" }
     const client = makeClient(sameEntry, [])
     render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
@@ -168,6 +188,7 @@ describe("DcsUpstreamPanel", () => {
     await waitFor(() => {
       expect(screen.getByText(/up to date/i)).toBeInTheDocument()
     })
+    expect(screen.queryByText(/files changed/i)).not.toBeInTheDocument()
   })
 
   it("Import changes runs applyDelta with real emitters and persists the advanced cursor", async () => {
@@ -207,8 +228,11 @@ describe("DcsUpstreamPanel", () => {
     })
     expect(mockEnqueue.mock.calls[0][0].fileId).not.toBe("TIT-1-3")
 
-    // applyDelta's ctx uses the new release's fullName + sha (deterministic ids).
+    // applyDelta's ctx uses the destination projectId + the new release's
+    // fullName + sha — projectId scopes the deterministic event ids so the same
+    // resource delta'd into two projects never collides on the events PK (DEFECT 4).
     expect(mockApplyDelta.mock.calls[0][2]).toEqual({
+      projectId: "adapter-1",
       repo: "unfoldingWord/en_ult",
       sha: "new-sha",
     })

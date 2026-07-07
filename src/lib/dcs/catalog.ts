@@ -111,7 +111,11 @@ export class DcsClient {
   private readonly sleep: (ms: number) => Promise<void>
 
   constructor(opts: DcsClientOptions = {}) {
-    this.fetchImpl = opts.fetchImpl ?? fetch
+    // Native `fetch` loses its `this` binding when stored as an instance field
+    // and later called as `this.fetchImpl(...)` — the browser then throws
+    // "Illegal invocation" (it requires `this === window`). Bind the default to
+    // globalThis so the real-browser path works; injected impls are used as-is.
+    this.fetchImpl = opts.fetchImpl ?? fetch.bind(globalThis)
     this.baseUrl = (opts.baseUrl ?? DEFAULT_DCS_BASE).replace(/\/$/, "")
     this.rawBaseUrl = (opts.rawBaseUrl ?? DEFAULT_DCS_RAW_BASE).replace(/\/$/, "")
     this.compareRetries = opts.compareRetries ?? 3
@@ -146,6 +150,24 @@ export class DcsClient {
       `${this.baseUrl}/catalog/search?${qs.toString()}`,
     )
     return (data.data ?? []).map(normalizeEntry)
+  }
+
+  /**
+   * Resolve the CURRENT prod release for a repo — the newest released entry,
+   * regardless of ref/tag NAME. This is what a freshness check must compare a
+   * pinned cursor against: re-fetching the pinned ref's own entry only ever
+   * catches a MOVED tag, never a NEW tag (v8 → v9, the normal release case).
+   *
+   * Uses /catalog/search (owner + repo + stage=prod), which returns released
+   * entries; we pick the one with the latest `released` timestamp (falling back
+   * to first). Returns null when the repo has no prod release.
+   */
+  async getLatestRelease(owner: string, repo: string): Promise<DcsCatalogEntry | null> {
+    const entries = await this.searchCatalog({ owner, repo, stage: "prod" })
+    if (entries.length === 0) return null
+    return entries.reduce((newest, e) =>
+      Date.parse(e.released) > Date.parse(newest.released) ? e : newest,
+    )
   }
 
   /** GET /catalog/entry/{owner}/{repo}/{ref} — one released resource, normalized. */

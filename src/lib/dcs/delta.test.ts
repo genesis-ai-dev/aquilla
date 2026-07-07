@@ -5,6 +5,7 @@ import { contentHash } from "./content-hash"
 import type { DcsCatalogEntry } from "./types"
 
 const REPO = "unfoldingWord/en_ult"
+const PROJECT_ID = "adapter-proj-1"
 
 const OLD_ENTRY: DcsCatalogEntry = {
   name: "en_ult",
@@ -70,17 +71,17 @@ function fakeClient() {
 function currentCells(): Map<string, CurrentCell> {
   const m = new Map<string, CurrentCell>()
   m.set(V1, {
-    eventId: dcsEventId(REPO, OLD_ENTRY.commitSha, V1),
+    eventId: dcsEventId(PROJECT_ID, REPO, OLD_ENTRY.commitSha, V1),
     contentHash: contentHash("Paul, a servant of God."), // OLD text — differs from NEW
     fileId: TIT_FILE_ID,
   })
   m.set(V2, {
-    eventId: dcsEventId(REPO, OLD_ENTRY.commitSha, V2),
+    eventId: dcsEventId(PROJECT_ID, REPO, OLD_ENTRY.commitSha, V2),
     contentHash: contentHash("In the hope of eternal life."), // unchanged
     fileId: TIT_FILE_ID,
   })
   m.set(V4_GONE, {
-    eventId: dcsEventId(REPO, OLD_ENTRY.commitSha, V4_GONE),
+    eventId: dcsEventId(PROJECT_ID, REPO, OLD_ENTRY.commitSha, V4_GONE),
     contentHash: contentHash("Old verse 4 that got removed."),
     fileId: TIT_FILE_ID,
   })
@@ -110,7 +111,7 @@ describe("computeDelta — classification (spec §6, THE money logic)", () => {
     expect(delta.commits).toHaveLength(1)
     expect(delta.commits[0].cell.cellId).toBe(V1)
     expect(delta.commits[0].cell.value).toContain("bondservant")
-    expect(delta.commits[0].parentEventId).toBe(dcsEventId(REPO, OLD_ENTRY.commitSha, V1))
+    expect(delta.commits[0].parentEventId).toBe(dcsEventId(PROJECT_ID, REPO, OLD_ENTRY.commitSha, V1))
 
     // v2 unchanged → NOT in commits (no-op suppression).
     expect(delta.commits.map((c) => c.cell.cellId)).not.toContain(V2)
@@ -133,7 +134,7 @@ describe("computeDelta — classification (spec §6, THE money logic)", () => {
       [
         V1,
         {
-          eventId: dcsEventId(REPO, OLD_ENTRY.commitSha, V1),
+          eventId: dcsEventId(PROJECT_ID, REPO, OLD_ENTRY.commitSha, V1),
           contentHash: contentHash("Paul, a servant of God."),
           fileId: TIT_FILE_ID,
         },
@@ -187,20 +188,24 @@ describe("applyDelta — routes to the injected emitters, idempotent event ids",
       commit: vi.fn(async () => "e-commit"),
       delete: vi.fn(async () => "e-delete"),
     }
-    await applyDelta(delta, emitters, { repo: REPO, sha: NEW_ENTRY.commitSha })
+    await applyDelta(delta, emitters, {
+      projectId: PROJECT_ID,
+      repo: REPO,
+      sha: NEW_ENTRY.commitSha,
+    })
 
-    // create for v3.
+    // create for v3 — event id is scoped to the destination project.
     expect(emitters.create).toHaveBeenCalledTimes(1)
     const createArg = (emitters.create as ReturnType<typeof vi.fn>).mock.calls[0][0]
     expect(createArg.cellId).toBe(V3)
-    expect(createArg.eventId).toBe(dcsEventId(REPO, NEW_ENTRY.commitSha, V3))
+    expect(createArg.eventId).toBe(dcsEventId(PROJECT_ID, REPO, NEW_ENTRY.commitSha, V3))
 
-    // commit for v1, chained on the old head.
+    // commit for v1, chained on the old head (also project-scoped).
     expect(emitters.commit).toHaveBeenCalledTimes(1)
     const commitArg = (emitters.commit as ReturnType<typeof vi.fn>).mock.calls[0][0]
     expect(commitArg.cellId).toBe(V1)
-    expect(commitArg.parentEventId).toBe(dcsEventId(REPO, OLD_ENTRY.commitSha, V1))
-    expect(commitArg.eventId).toBe(dcsEventId(REPO, NEW_ENTRY.commitSha, V1))
+    expect(commitArg.parentEventId).toBe(dcsEventId(PROJECT_ID, REPO, OLD_ENTRY.commitSha, V1))
+    expect(commitArg.eventId).toBe(dcsEventId(PROJECT_ID, REPO, NEW_ENTRY.commitSha, V1))
 
     // delete for v4.
     expect(emitters.delete).toHaveBeenCalledTimes(1)
@@ -224,8 +229,44 @@ describe("applyDelta — routes to the injected emitters, idempotent event ids",
       commit: vi.fn(async (a) => { bucket.push(a.eventId); return a.eventId }),
       delete: vi.fn(async (a) => { bucket.push(a.cellId); return "x" }),
     })
-    await applyDelta(delta, mk(seen1), { repo: REPO, sha: NEW_ENTRY.commitSha })
-    await applyDelta(delta, mk(seen2), { repo: REPO, sha: NEW_ENTRY.commitSha })
+    await applyDelta(delta, mk(seen1), {
+      projectId: PROJECT_ID,
+      repo: REPO,
+      sha: NEW_ENTRY.commitSha,
+    })
+    await applyDelta(delta, mk(seen2), {
+      projectId: PROJECT_ID,
+      repo: REPO,
+      sha: NEW_ENTRY.commitSha,
+    })
     expect(seen1).toEqual(seen2)
+  })
+
+  it("scopes event ids to the destination project: same delta into two projects → different event ids", async () => {
+    // FINDING 4 fix: without project scope, the same resource delta'd into two
+    // projects mints identical event ids, and the server's INSERT OR IGNORE
+    // silently drops the second project's import. The event id MUST carry the
+    // projectId so both projects land their own events.
+    const delta = await computeDelta({
+
+      client: fakeClient() as any,
+      cursor: { ...OLD_ENTRY } as never,
+      oldEntry: OLD_ENTRY,
+      newEntry: NEW_ENTRY,
+      currentCells: currentCells(),
+    })
+    const seenA: string[] = []
+    const seenB: string[] = []
+    const mk = (bucket: string[]): DeltaEmitters => ({
+      create: vi.fn(async (a) => { bucket.push(a.eventId); return a.eventId }),
+      commit: vi.fn(async (a) => { bucket.push(a.eventId); return a.eventId }),
+      delete: vi.fn(async (a) => { void a; return "x" }),
+    })
+    await applyDelta(delta, mk(seenA), { projectId: "proj-A", repo: REPO, sha: NEW_ENTRY.commitSha })
+    await applyDelta(delta, mk(seenB), { projectId: "proj-B", repo: REPO, sha: NEW_ENTRY.commitSha })
+    expect(seenA.length).toBeGreaterThan(0)
+    expect(seenA).toHaveLength(seenB.length)
+    // No event id is shared between the two projects.
+    for (const id of seenA) expect(seenB).not.toContain(id)
   })
 })

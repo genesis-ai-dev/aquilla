@@ -5,10 +5,11 @@
 // Flow:
 //   1. Read the pinned cursor via readCursor(settings). No cursor ⇒ render
 //      nothing (this project is not a DCS adapter).
-//   2. "Check for updates" → client.getCatalogEntry(owner, repo, ref) to
-//      resolve the current prod release, compare its commitSha/ref against the
-//      cursor; if newer, client.compareRefs(cursor.ref, newRef) reports the
-//      changed-file count. Shows "vOLD → vNEW, N files changed".
+//   2. "Check for updates" → client.getLatestRelease(owner, repo) resolves the
+//      current prod release (newest released entry, regardless of tag name),
+//      compares its commitSha/ref against the cursor; if newer,
+//      client.compareRefs(cursor.ref, newRef) reports the changed-file count.
+//      Shows "vOLD → vNEW, N files changed".
 //   3. "Import changes" → build the currentCells map from the adapter project's
 //      source cells (fetchProjectFiles + fetchAllFileCells(side:"source")),
 //      computeDelta(), applyDelta() bound to the typed source emitters
@@ -110,13 +111,15 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
     setCheck({ kind: "checking" })
     setImportState({ kind: "idle" })
     try {
-      // Resolve the current prod release. For a release-tracking cursor we ask
-      // for the pinned ref's entry family; the catalog returns the entry AT
-      // that ref, but a fresh prod release carries a newer commitSha even at a
-      // moved tag — so we resolve via the cursor's ref (release track) and let
-      // the SHA comparison catch a moved release. trackMode "head" pins to the
-      // branch head, which advances under the same ref.
-      const latest = await dcs.getCatalogEntry(cursor.owner, cursor.repo, cursor.ref)
+      // Resolve the CURRENT prod release for the repo — the newest released
+      // entry regardless of tag NAME. Re-fetching the pinned ref's own entry
+      // only catches a MOVED tag, never a NEW tag (v8 → v9, the normal release
+      // case), so it would always report "up to date". Fall back to the pinned
+      // ref's entry only if the latest-release lookup returns nothing (e.g. the
+      // repo has no prod release surfaced by search).
+      const latest =
+        (await dcs.getLatestRelease(cursor.owner, cursor.repo)) ??
+        (await dcs.getCatalogEntry(cursor.owner, cursor.repo, cursor.ref))
       if (!isNewer(cursor, latest)) {
         setCheck({ kind: "up-to-date", latest })
         return
@@ -214,6 +217,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
       }
 
       await applyDelta(delta, emitters, {
+        projectId,
         repo: newEntry.fullName,
         sha: newEntry.commitSha,
       })

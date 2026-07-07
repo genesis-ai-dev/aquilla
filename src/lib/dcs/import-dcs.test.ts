@@ -90,9 +90,11 @@ describe("importDcsResource — genesis transform (spec §3, §5)", () => {
     expect(c0.cellId).toBe(cell0Id)
     expect(c1.cellId).toBe(cell1Id)
 
-    // The BulkImportCell.id is the DETERMINISTIC EVENT id (repo|sha|cellId).
-    expect(c0.id).toBe(dcsEventId(ENTRY.fullName, ENTRY.commitSha, cell0Id))
-    expect(c1.id).toBe(dcsEventId(ENTRY.fullName, ENTRY.commitSha, cell1Id))
+    // The BulkImportCell.id is the DETERMINISTIC, PROJECT-SCOPED EVENT id
+    // (projectId|repo|sha|cellId) — project scope stops the same resource
+    // imported into two projects from colliding on the events-table PK.
+    expect(c0.id).toBe(dcsEventId("proj-1", ENTRY.fullName, ENTRY.commitSha, cell0Id))
+    expect(c1.id).toBe(dcsEventId("proj-1", ENTRY.fullName, ENTRY.commitSha, cell1Id))
 
     // Anchor chain: first cell anchors to null, each subsequent to the prior cellId.
     expect(c0.anchorCellId).toBeNull()
@@ -125,6 +127,28 @@ describe("importDcsResource — genesis transform (spec §3, §5)", () => {
     const idsA = emitA.mock.calls[0][0].cells.map((c) => c.id)
     const idsB = emitB.mock.calls[0][0].cells.map((c) => c.id)
     expect(idsA).toEqual(idsB)
+  })
+
+  it("importing the SAME resource into a DIFFERENT project derives DIFFERENT event ids (project scope)", async () => {
+    // FINDING 4 fix: event ids fold in projectId. Same resource@ref imported
+    // into two projects must NOT collide on the events-table PK (which would
+    // make the server's INSERT OR IGNORE silently drop the second import).
+    const emitP1 = vi.fn(async (_args: BulkUploadArgs) => {})
+    const emitP2 = vi.fn(async (_args: BulkUploadArgs) => {})
+    const base = { entry: ENTRY, getToken: async () => "tok" }
+
+    await importDcsResource({ ...base, projectId: "proj-1", client: fakeClient() as any, emit: emitP1 })
+    await importDcsResource({ ...base, projectId: "proj-2", client: fakeClient() as any, emit: emitP2 })
+
+    const idsP1 = emitP1.mock.calls[0][0].cells.map((c) => c.id)
+    const idsP2 = emitP2.mock.calls[0][0].cells.map((c) => c.id)
+    // Cell ids (content-addressed) stay identical across projects…
+    const cellIdsP1 = emitP1.mock.calls[0][0].cells.map((c) => c.cellId)
+    const cellIdsP2 = emitP2.mock.calls[0][0].cells.map((c) => c.cellId)
+    expect(cellIdsP1).toEqual(cellIdsP2)
+    // …but the EVENT ids differ, so both projects land their own import events.
+    expect(idsP1).toHaveLength(idsP2.length)
+    for (const id of idsP1) expect(idsP2).not.toContain(id)
   })
 
   it("passes the raw USFM through as rawSource for round-trip export", async () => {

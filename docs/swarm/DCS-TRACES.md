@@ -227,3 +227,48 @@ new `dcsUpstream` key); server floor is MAINTAINER(600). Added `dcsUpstream?: Dc
   EXISTING files (the common case); a brand-new file needs file.create wiring (thread the DcsFile
   name/bookCode + a file.create emit when a created cell's fileId isn't among existing files).
   Narrow case; flagged for the aligned-target / hardening pass.
+
+## UI-defect fixes — 2026-07-07, branch `claude/dcs-fix-ui`
+
+Fixed the four live-browser-QA defects from `docs/swarm/DCS-UIQA.md` (unit tests + mocks missed
+all four). tsc `-p tsconfig.app.json` = 0 errors, no `any` in source; `vitest run src/lib/dcs
+src/components/dcs` = 94 passed (13 files). Each fix carries a regression test. NOT pushed.
+
+- DEFECT 1 (BLOCKER) — FIXED: `DcsClient` stored an UNBOUND native `fetch`
+  (`opts.fetchImpl ?? fetch`) → every real-browser DCS call threw `TypeError: Illegal invocation`
+  (native fetch needs `this === window`). Fix: `opts.fetchImpl ?? fetch.bind(globalThis)`
+  (`catalog.ts` ctor). Injected `fetchImpl` path unchanged. Guard: new `catalog.test.ts` test
+  spies `globalThis.fetch` (asserting `this === globalThis|undefined`) and drives the NO-fetchImpl
+  default path — VERIFIED to FAIL against the unbound form and PASS with the bind. NOTE: the
+  actual `Illegal invocation` throw only reproduces in a real browser (happy-dom's fetch tolerates
+  a rebound `this`), so the test guards the *binding contract*, not the browser throw itself.
+- DEFECT 2 (major) — FIXED: `DcsCatalogBrowser` seeded the initial `lang` filter from the
+  project's source-language DISPLAY NAME ("English") → the app's own first search fired
+  `?lang=English` → 0 results (DCS matches ISO codes: `?lang=en`). Fix: new
+  `toDcsLangSeed()` (in `src/lib/dcs/lang-seed.ts` — kept out of the component so the file only
+  exports a component, react-refresh clean) normalizes the seed to a short ISO code via
+  `@/lib/language-normalize`
+  (reverse-mapping its 639-2/T 3-letter output back to the 2-letter GL code DCS uses); codes with
+  a region subtag (`es-419`) or already-short codes pass through verbatim; an unmappable word →
+  `""` (never leak a display name). `useState(() => toDcsLangSeed(defaultLang) || "en")`. Guard:
+  `DcsCatalogBrowser.test.tsx` asserts the initial `searchCatalog` param is `en` (from
+  `defaultLang="English"`), `es-419` passes through, and `toDcsLangSeed` unit cases.
+- DEFECT 3 (BLOCKER for delta flow) — FIXED: `DcsUpstreamPanel` "Check for updates" resolved the
+  entry AT the pinned ref (`getCatalogEntry(owner, repo, cursor.ref)`) → for a release-tracking
+  cursor at v8 it compared v8-vs-v8 → always "up to date", never seeing a NEW tag (v8→v9). Fix:
+  new `DcsClient.getLatestRelease(owner, repo)` (catalog search `stage=prod`, newest `released`);
+  the panel now resolves the latest prod release and only falls back to the pinned-ref entry if
+  that returns nothing. "Import changes" deltas `cursor.ref` → `latest.ref` (unchanged path, now
+  fed the real latest). Guards: `catalog.test.ts` `getLatestRelease` (newest-wins + null);
+  `DcsUpstreamPanel.test.tsx` — latest v89 vs cursor v88 shows the update (asserts
+  `getLatestRelease` called, NOT "up to date"), latest==cursor shows "up to date".
+- DEFECT 4 (major, design) — FIXED: `dcsEventId(repo, sha, cellId)` had NO project scope →
+  importing the same DCS resource into two projects minted IDENTICAL event ids; the server events
+  PK + `INSERT OR IGNORE` silently dropped the second project's import. Fix: signature is now
+  `dcsEventId(projectId, repo, sha, cellId) = uuidv5(`${projectId}|${repo}|${sha}|${cellId}`,
+  DCS_NS)`. Cell ids stay content-addressed (cells PK is already project-scoped). Callers updated:
+  `import-dcs.ts` `toBulkCells` (threads `args.projectId`), `delta.ts` `applyDelta` (ctx gains
+  `projectId`), `DcsUpstreamPanel.tsx` (passes `projectId` into the applyDelta ctx). Determinism
+  preserved per `(project, repo, sha, cell)` → same-project re-run still dedupes. Guards:
+  `cell-id.test.ts` (two projectIds → different ids, same projectId → same id), `delta.test.ts` +
+  `import-dcs.test.ts` (same resource into two projects → different EVENT ids, identical CELL ids).

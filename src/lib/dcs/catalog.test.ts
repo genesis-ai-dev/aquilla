@@ -134,6 +134,106 @@ describe("DcsClient.compareRefs — the Gitea union quirk (spec §6)", () => {
   })
 })
 
+describe("DcsClient.compareRefs — throttled/empty-body retry (rate-limit guard)", () => {
+  it("retries a malformed body (no numeric total_commits) then THROWS after exhausting retries", async () => {
+    // DCS under throttle returns HTTP 200 with an empty/malformed body: no
+    // total_commits, no commits. This is indistinguishable from a real
+    // no-change ONLY if we ignore total_commits — so it must NOT resolve to an
+    // empty delta, it must throw.
+    let calls = 0
+    const fetchImpl = vi.fn(async () => {
+      calls++
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({}), // throttled: no total_commits
+        text: async () => "",
+      } as Response
+    }) as unknown as typeof fetch
+
+    // retries=2 → initial attempt + 2 retries = 3 fetches total, then throw.
+    const client = new DcsClient({ fetchImpl, compareRetries: 2, retryBaseMs: 0 })
+    await expect(client.compareRefs("uW", "en_ult", "v88", "v89")).rejects.toThrow(
+      /no data after 2 retries|rate-limited/,
+    )
+    expect(calls).toBe(3)
+  })
+
+  it("recovers: a malformed body once, then a good body → returns the union after retry", async () => {
+    let calls = 0
+    const fetchImpl = vi.fn(async () => {
+      calls++
+      const body =
+        calls === 1
+          ? {} // throttled first
+          : {
+              total_commits: 2,
+              files: [], // top-level empty (Gitea quirk)
+              commits: [
+                { files: [{ filename: "57-TIT.usfm" }] },
+                { files: [{ filename: "manifest.yaml" }] },
+              ],
+            }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => body,
+        text: async () => "",
+      } as Response
+    }) as unknown as typeof fetch
+
+    const client = new DcsClient({ fetchImpl, compareRetries: 3, retryBaseMs: 0 })
+    const res = await client.compareRefs("uW", "en_ult", "v88", "v89")
+    expect(calls).toBe(2) // one throttle + one good
+    expect(res.totalCommits).toBe(2)
+    expect(res.changedFiles.sort()).toEqual(["57-TIT.usfm", "manifest.yaml"].sort())
+  })
+
+  it("does NOT retry a genuine no-change (numeric total_commits: 0) — returns empty immediately", async () => {
+    let calls = 0
+    const fetchImpl = vi.fn(async () => {
+      calls++
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ total_commits: 0, files: [], commits: [] }),
+        text: async () => "",
+      } as Response
+    }) as unknown as typeof fetch
+
+    const client = new DcsClient({ fetchImpl, compareRetries: 3, retryBaseMs: 0 })
+    const res = await client.compareRefs("uW", "en_ult", "v89", "v89")
+    expect(calls).toBe(1) // numeric 0 is a real answer, not a throttle
+    expect(res.totalCommits).toBe(0)
+    expect(res.changedFiles).toEqual([])
+  })
+
+  it("does not actually sleep between retries when a zero-delay sleep is injected", async () => {
+    let calls = 0
+    let slept = 0
+    const fetchImpl = vi.fn(async () => {
+      calls++
+      return {
+        ok: true,
+        status: 200,
+        json: async () => (calls < 3 ? {} : { total_commits: 0, commits: [] }),
+        text: async () => "",
+      } as Response
+    }) as unknown as typeof fetch
+
+    const client = new DcsClient({
+      fetchImpl,
+      compareRetries: 5,
+      retryBaseMs: 999_999, // would hang the suite if the real timer ran
+      sleep: async () => { slept++ },
+    })
+    const res = await client.compareRefs("uW", "en_ult", "v88", "v89")
+    expect(res.totalCommits).toBe(0)
+    expect(calls).toBe(3) // two throttles, then good
+    expect(slept).toBe(2) // slept once per retry, via the injected no-op timer
+  })
+})
+
 describe("DcsClient.getTree", () => {
   it("GETs the recursive tree and returns only blob paths", async () => {
     const { fetchImpl, calls } = stubFetch(() => ({

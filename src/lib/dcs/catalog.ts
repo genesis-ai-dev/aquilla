@@ -21,6 +21,15 @@ export interface DcsClientOptions {
   baseUrl?: string
   /** Override the raw-file host. Defaults to git.door43.org. */
   rawBaseUrl?: string
+  /**
+   * How many times `compareRefs` retries a throttled/malformed compare body
+   * (one with no numeric `total_commits`) before throwing. Default 3.
+   */
+  compareRetries?: number
+  /** Base backoff (ms) between compare retries; grows exponentially. Default 500. */
+  retryBaseMs?: number
+  /** Injected for tests so retries don't actually wait. Defaults to setTimeout. */
+  sleep?: (ms: number) => Promise<void>
 }
 
 /** Params accepted by /catalog/search. All optional; passed through verbatim
@@ -97,11 +106,17 @@ export class DcsClient {
   private readonly fetchImpl: typeof fetch
   private readonly baseUrl: string
   private readonly rawBaseUrl: string
+  private readonly compareRetries: number
+  private readonly retryBaseMs: number
+  private readonly sleep: (ms: number) => Promise<void>
 
   constructor(opts: DcsClientOptions = {}) {
     this.fetchImpl = opts.fetchImpl ?? fetch
     this.baseUrl = (opts.baseUrl ?? DEFAULT_DCS_BASE).replace(/\/$/, "")
     this.rawBaseUrl = (opts.rawBaseUrl ?? DEFAULT_DCS_RAW_BASE).replace(/\/$/, "")
+    this.compareRetries = opts.compareRetries ?? 3
+    this.retryBaseMs = opts.retryBaseMs ?? 500
+    this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)))
   }
 
   private async getJson<T>(url: string): Promise<T> {
@@ -147,6 +162,15 @@ export class DcsClient {
    * changedFiles is the UNIQUE UNION of `.commits[].files[].filename`. DCS's
    * Gitea leaves the response's top-level `.files` empty (spec §6), so reading
    * that would report zero changes — the per-commit union is the real set.
+   *
+   * Throttle guard: under rapid requests the compare endpoint returns HTTP 200
+   * with an EMPTY/malformed body (no numeric `total_commits`, no `commits`) and
+   * recovers after ~20s. A LEGITIMATE response ALWAYS carries a numeric
+   * `total_commits` — even `0` for a genuine no-change ref. So we treat a body
+   * whose `total_commits` is non-numeric as throttled and RETRY with backoff;
+   * after exhausting retries we THROW rather than returning an empty delta (a
+   * silent "nothing changed" would skip a real upstream update). A numeric
+   * `total_commits: 0` is a real no-change and is NOT retried.
    */
   async compareRefs(
     owner: string,
@@ -154,19 +178,33 @@ export class DcsClient {
     oldRef: string,
     newRef: string,
   ): Promise<DcsCompareResult> {
-    const raw = await this.getJson<RawCompare>(
-      `${this.baseUrl}/repos/${owner}/${repo}/compare/${oldRef}...${newRef}`,
-    )
-    const changed = new Set<string>()
-    for (const commit of raw.commits ?? []) {
-      for (const f of commit.files ?? []) {
-        if (f.filename) changed.add(f.filename)
+    const url = `${this.baseUrl}/repos/${owner}/${repo}/compare/${oldRef}...${newRef}`
+    for (let attempt = 0; attempt <= this.compareRetries; attempt++) {
+      const raw = await this.getJson<RawCompare>(url)
+      if (typeof raw.total_commits !== "number") {
+        // Throttled/malformed body — back off and retry (unless out of tries).
+        if (attempt < this.compareRetries) {
+          await this.sleep(this.retryBaseMs * 2 ** attempt)
+          continue
+        }
+        throw new Error(
+          `DCS compare returned no data after ${this.compareRetries} retries ` +
+            `(rate-limited?) for ${url} — try again shortly`,
+        )
+      }
+      const changed = new Set<string>()
+      for (const commit of raw.commits ?? []) {
+        for (const f of commit.files ?? []) {
+          if (f.filename) changed.add(f.filename)
+        }
+      }
+      return {
+        totalCommits: raw.total_commits,
+        changedFiles: [...changed],
       }
     }
-    return {
-      totalCommits: raw.total_commits ?? (raw.commits?.length ?? 0),
-      changedFiles: [...changed],
-    }
+    // Unreachable: the loop either returns a good body or throws above.
+    throw new Error(`DCS compare failed unexpectedly for ${url}`)
   }
 
   /**

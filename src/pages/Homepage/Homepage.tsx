@@ -383,7 +383,7 @@ export function Homepage() {
                 {/* Stats from the Come and See case study (codexeditor.app/case-studies/come-and-see). Verify current before launch. */}
                 <div className="aq-stat">
                   <div className="aq-stat-num aq-display aq-gold-text">125</div>
-                  <div className="aq-stat-label">languages for Season 1 of The Chosen — reaching the languages people pray in</div>
+                  <div className="aq-stat-label">languages for Season 1 of The Chosen — reaching the languages people actually speak</div>
                 </div>
                 <div className="aq-stat">
                   <div className="aq-stat-num aq-display aq-gold-text">2×</div>

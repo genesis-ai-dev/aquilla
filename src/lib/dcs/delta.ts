@@ -60,7 +60,10 @@ export async function computeDelta(args: ComputeDeltaArgs): Promise<DeltaResult>
   const repoName = newEntry.name
   const refKind: RefKind = newEntry.refType === "branch" ? "branch" : "tag"
 
-  // 1. Which files changed between the two refs.
+  // 1. Which files changed between the two refs. compareRefs now THROWS on a
+  //    throttled/empty compare body (no numeric total_commits) — we let it
+  //    propagate so the UI surfaces "try again" instead of silently importing
+  //    nothing. An empty changedFiles here means a GENUINE no-change.
   const compare = await client.compareRefs(owner, repoName, oldEntry.ref, newEntry.ref)
   if (compare.changedFiles.length === 0) {
     return { creates: [], commits: [], deletes: [] }

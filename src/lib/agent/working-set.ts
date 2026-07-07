@@ -48,14 +48,22 @@ export function proposalRowKey(proposalId: string, cellId: string): string {
 /**
  * Fold a session's runs (oldest → newest) into working-set rows. Later
  * sightings of a cell update its text/status; staged commits overlay a
- * `proposed` value until decided, after which the row carries the outcome
- * (and, for accepts, the committed text — a later server read still wins).
+ * `proposed` value until decided, after which the row carries the outcome.
+ *
+ * Decisions out-rank tool data: the user decides AFTER every item in the
+ * timeline existed, so an accepted/undone row's text is re-asserted in a
+ * final pass. Without it, a read the model ran after staging (but before
+ * the user accepted) still shows target="" and, sitting later in the
+ * timeline, blanks the freshly accepted text.
  */
 export function deriveWorkingSet(
   runs: AgentRunUi[],
   decided: ReadonlyMap<string, RowDecision> = new Map(),
 ): WorkingSetRow[] {
   const rows = new Map<string, WorkingSetRow>()
+  // Per cell: the decision on the LAST proposal that touched it (cleared if
+  // a newer undecided proposal re-stages the cell — its overlay must show).
+  const finalDecision = new Map<string, RowDecision>()
 
   const upsert = (cellId: string, patch: Partial<WorkingSetRow>): void => {
     const existing = rows.get(cellId)
@@ -78,8 +86,7 @@ export function deriveWorkingSet(
           if (ev.kind !== "target.cell.commit" || !ev.cellId) continue
           const decision = decided.get(proposalRowKey(item.proposal.proposalId, ev.cellId))
           if (decision) {
-            // Decided — drop the pending overlay but keep the outcome. For
-            // accepts, show the committed text until a fresh read replaces it.
+            // Decided — drop the pending overlay but keep the outcome.
             upsert(ev.cellId, {
               ...(ev.fileId ? { fileId: ev.fileId } : {}),
               ...(ev.display.canonicalRef ? { ref: ev.display.canonicalRef } : {}),
@@ -87,10 +94,8 @@ export function deriveWorkingSet(
               proposalId: undefined,
               stagedEvent: undefined,
               outcome: decision.outcome,
-              ...(decision.outcome !== "rejected" && decision.value !== undefined
-                ? { target: decision.value }
-                : {}),
             })
+            finalDecision.set(ev.cellId, decision)
             continue
           }
           upsert(ev.cellId, {
@@ -101,8 +106,16 @@ export function deriveWorkingSet(
             stagedEvent: ev,
             outcome: undefined,
           })
+          finalDecision.delete(ev.cellId)
         }
       }
+    }
+  }
+
+  // Final pass: the decided text wins over any tool-data sighting above.
+  for (const [cellId, decision] of finalDecision) {
+    if (decision.outcome !== "rejected" && decision.value !== undefined) {
+      upsert(cellId, { target: decision.value })
     }
   }
 

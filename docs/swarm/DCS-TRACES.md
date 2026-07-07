@@ -272,3 +272,15 @@ src/components/dcs` = 94 passed (13 files). Each fix carries a regression test. 
   preserved per `(project, repo, sha, cell)` → same-project re-run still dedupes. Guards:
   `cell-id.test.ts` (two projectIds → different ids, same projectId → same id), `delta.test.ts` +
   `import-dcs.test.ts` (same resource into two projects → different EVENT ids, identical CELL ids).
+
+## Live M2 proof + delta-scoping fix — 2026-07-07 (DCS-UIQA-M2.md)
+
+- MILESTONE 2 PROVEN LIVE: en_tn TIT adapter@v87 → 2 UI-linked downstreams (Spanish+French, 206
+  mirrored cells each) → translated cells → "Check for updates" showed v87→v89, 55 files → Import
+  changes → BOTH downstreams flagged the changed note STALE (amber "Source changed" + "Upstream
+  changes: 1 flagged" w/ old→new diff), server-asserted after reload, precise (unchanged cells not
+  flagged). Defects 1/3/4 confirmed fixed in a real browser.
+- NEW defect FOUND + FIXED: computeDelta scoped deletes/commits to adapter files but not creates →
+  a subset (single-book) adapter against a whole-repo release emitted a create per cell of every
+  other changed book (83,689 measured → Import-changes hang). Fixed: scope parsed files to the
+  adapter's own fileIds (currentCells). Regression test added.

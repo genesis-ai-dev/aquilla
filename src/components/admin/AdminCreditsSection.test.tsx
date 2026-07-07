@@ -146,38 +146,30 @@ describe("AdminCreditsSection — FRO-414 regression: each column binds to its o
     },
   }
 
-  it("renders four distinct spend values, each in its correctly-labeled column", async () => {
+  it("binds each of the four spend buckets to its own test id, no transposition", async () => {
     mockList.mockResolvedValue([ORG_DISTINCT])
     render(<AdminCreditsSection jwt="admin-jwt" />)
     await waitFor(() => expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument())
 
-    const row = screen.getByText("Distinct Org").closest("tr")
-    expect(row).not.toBeNull()
-    const cells = row!.querySelectorAll("td")
-    // Column order: Org, Day spend, Agent(day), Week spend, Agent(wk), …
-    expect(cells[1]).toHaveTextContent("11 cr")
-    expect(cells[1]).not.toHaveTextContent("33 cr")
-    expect(cells[1]).not.toHaveTextContent("99 cr")
-    expect(cells[1]).not.toHaveTextContent("77 cr")
+    // Window totals and agent sub-values each pinned to their own test id, so a
+    // transposition between total↔agent or day↔week fails loudly.
+    const dayTotal = screen.getByTestId("cap-day-3")
+    expect(dayTotal).toHaveTextContent("11 cr")
+    expect(dayTotal).not.toHaveTextContent("33 cr")
+    expect(dayTotal).not.toHaveTextContent("99 cr")
+    expect(dayTotal).not.toHaveTextContent("77 cr")
 
-    expect(cells[2]).toHaveTextContent("33 cr")
-    expect(cells[2]).not.toHaveTextContent("11 cr")
-    expect(cells[2]).not.toHaveTextContent("99 cr")
-    expect(cells[2]).not.toHaveTextContent("77 cr")
+    const weekTotal = screen.getByTestId("cap-week-3")
+    expect(weekTotal).toHaveTextContent("99 cr")
+    expect(weekTotal).not.toHaveTextContent("11 cr")
+    expect(weekTotal).not.toHaveTextContent("33 cr")
+    expect(weekTotal).not.toHaveTextContent("77 cr")
 
-    expect(cells[3]).toHaveTextContent("99 cr")
-    expect(cells[3]).not.toHaveTextContent("11 cr")
-    expect(cells[3]).not.toHaveTextContent("33 cr")
-    expect(cells[3]).not.toHaveTextContent("77 cr")
-
-    expect(cells[4]).toHaveTextContent("77 cr")
-    expect(cells[4]).not.toHaveTextContent("11 cr")
-    expect(cells[4]).not.toHaveTextContent("33 cr")
-    expect(cells[4]).not.toHaveTextContent("99 cr")
-
-    // Also assert via the dedicated agent test ids (belt-and-suspenders).
+    // Agent (day/week) via the dedicated agent-rail test ids.
     expect(screen.getByTestId("agent-day-3")).toHaveTextContent("33 cr")
+    expect(screen.getByTestId("agent-day-3")).not.toHaveTextContent("11 cr")
     expect(screen.getByTestId("agent-week-3")).toHaveTextContent("77 cr")
+    expect(screen.getByTestId("agent-week-3")).not.toHaveTextContent("99 cr")
   })
 })
 

@@ -23,7 +23,7 @@ import type {
 } from "@/lib/parsers/types"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { resolveVoice } from "@/lib/audio/voices"
-import { normalizeVoiceForProvider, resolveTtsProvider } from "@/lib/audio/tts-providers"
+import { normalizeVoiceForProvider, resolveTtsProvider, providerInfo } from "@/lib/audio/tts-providers"
 
 interface Props {
   cellId: string
@@ -280,6 +280,11 @@ export function CellTtsButton({
 
   // A3: when no audio exists the button will GENERATE (not play), so the label
   // must say so. "Hear translation" falsely implies existing audio is ready.
+  // FRO-360: name the ENGINE that will actually run, not just the voice —
+  // `provider` above is the same voice.provider ?? resolveTtsProvider(...)
+  // resolution generateAndAttachCellVoice/synthesizeForCell use, so the label
+  // can't drift from the real synthesis path.
+  const engineName = providerInfo(provider).shortTitle
   const tooltip = isError
     ? `TTS failed — ${status.message}`
     : isLoadingModel
@@ -290,7 +295,7 @@ export function CellTtsButton({
           ? "Pause"
           : playableAttachId
             ? `Play generated voice (${voice.name})`
-            : `Generate & play (${voice.name})`
+            : `Generate & play (${voice.name} — ${engineName})`
 
   const button = (
     <button

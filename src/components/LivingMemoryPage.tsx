@@ -136,7 +136,7 @@ function RecentExamplesEmpty() {
 
 function ValidatedCellCard({ cell }: { cell: LivingMemoryCell }) {
   return (
-    <Card className="overflow-hidden transition-shadow hover:shadow-sm">
+    <Card className="overflow-hidden transition-colors hover:bg-muted/50">
       <CardContent className="p-3 flex flex-col gap-1.5">
         {/* Reference label */}
         {cell.group && (

@@ -238,13 +238,16 @@ describe("ProjectOverview file list show-more", () => {
     await waitFor(() => expect(screen.queryByText(/top 12 of 16/)).toBeInTheDocument())
 
     // Only 12 files should be visible initially
-    expect(screen.getAllByRole("listitem").length).toBe(12)
+    // Scoped to file rows (data-testid="file-row") — a plain listitem-role query
+    // also picks up unrelated <li>s rendered elsewhere in the shell (e.g. the
+    // org switcher's popover list), which aren't part of what this test covers.
+    expect(screen.getAllByTestId("file-row").length).toBe(12)
 
     // Clicking show-more reveals all 16 files
     const showMore = screen.getByRole("button", { name: /show all/i })
     fireEvent.click(showMore)
 
-    await waitFor(() => expect(screen.getAllByRole("listitem").length).toBe(totalFiles))
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(totalFiles))
     // Header should now say "(16)" not "top 12 of 16"
     expect(screen.queryByText(/top 12 of 16/)).not.toBeInTheDocument()
     expect(screen.getByText(/\(16\)/)).toBeInTheDocument()
@@ -467,6 +470,29 @@ describe("ProjectOverview project-only invitee access (FRO-474)", () => {
     renderOverview()
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("/", { replace: true }))
+  })
+
+  // FRO-416: the overview rendering (no redirect) is necessary but not
+  // sufficient — a guest must be able to actually ENTER the workspace from
+  // here. "Open project" navigates unconditionally to `/project/:id`; this
+  // locks in that the button still fires for a project whose org the caller
+  // does not belong to (the exact "Shared with you" scenario), so a future
+  // regression that guards this button on org membership fails loudly here
+  // instead of only surfacing as a live "clicking does nothing" report.
+  it("clicking Open project navigates into the workspace even when the project's org is foreign to the caller", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, orgId: 99, files: [] }),
+      status: "ready",
+      refresh,
+    })
+    getPortfolio.mockResolvedValue([])
+
+    renderOverview()
+
+    const openButton = await screen.findByRole("button", { name: "Open project" })
+    fireEvent.click(openButton)
+
+    expect(navigate).toHaveBeenCalledWith("/project/p1")
   })
 })
 

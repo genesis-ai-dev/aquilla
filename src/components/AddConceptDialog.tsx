@@ -22,8 +22,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 
 interface AddConceptDialogProps {
   open: boolean
@@ -90,20 +90,22 @@ export function AddConceptDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="concept-term-input" className="text-xs font-medium">
-            Source term
-          </Label>
-          <Input
-            id="concept-term-input"
-            ref={inputRef}
-            value={term}
-            onChange={(e) => setTerm(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Source term…"
-            aria-label="Source term for new concept"
-          />
-        </div>
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="concept-term-input" className="text-xs font-medium">
+              Source term
+            </FieldLabel>
+            <Input
+              id="concept-term-input"
+              ref={inputRef}
+              value={term}
+              onChange={(e) => setTerm(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Source term…"
+              aria-label="Source term for new concept"
+            />
+          </Field>
+        </FieldGroup>
 
         <DialogFooter>
           <Button

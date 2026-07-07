@@ -9,9 +9,11 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight,
+  ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, Music,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
 import {
   type CellFootnoteDetails,
@@ -62,6 +64,7 @@ import {
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
@@ -548,6 +551,11 @@ interface EditorTableProps {
    *  StaleSourceIndicator badge next to its validation status. Parent fetches
    *  once per file via `useStaleSourceCells` so we don't issue N requests. */
   staleCellIds?: ReadonlySet<string>
+  /** FRO-477 (§6) — set of cell ids whose ANCESTRY is stale (inherited, a
+   *  further-upstream chain hop changed). Renders the violet/dotted second
+   *  tone on `StaleSourceIndicator`, layered onto the same prop path as
+   *  `staleCellIds` above. */
+  upstreamStaleCellIds?: ReadonlySet<string>
   /** Token fetcher for project-scoped sync reads. Required for the inline
    *  History tab to query the D1 event log on demand. */
   getTokenForFile?: (fileId: string) => Promise<string | null>
@@ -611,6 +619,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   cellsWithRemoteChange,
   onClaimCell, onReleaseCell, onAckRemoteChange,
   staleCellIds,
+  upstreamStaleCellIds,
   getTokenForFile,
   getAlignmentModel,
   onAlignmentSeedChange,
@@ -1017,10 +1026,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const ids = displayCellIdsRef.current
     const anchorId = getSelectionAnchorId()
     const anchorIndex = anchorId ? ids.indexOf(anchorId) : -1
-    const shouldRange =
-      !isAdditive &&
-      anchorIndex >= 0 &&
-      (e.shiftKey || (selectedIds.size > 0 && !isAlreadySelected))
+    // FRO-348: range-select must be an explicit Shift-click. Previously a
+    // plain click on any unselected cell silently extended the range from
+    // the old anchor whenever *something* was already selected — no
+    // modifier, no visual preview. Under concurrent editing the anchor's
+    // row could have shifted since it was set, so the silently-computed
+    // range would land 1-2 rows off, or not start on the clicked cell at
+    // all. A plain click must always mean "select exactly this cell."
+    const shouldRange = !isAdditive && anchorIndex >= 0 && e.shiftKey
     const startIndex = shouldRange ? anchorIndex : rowIndex
 
     selectionDragRef.current = {
@@ -1216,6 +1229,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onActivateEditor={handleActivateEditor}
           onDeactivateEditor={handleDeactivateEditor}
           isStaleSource={staleCellIds?.has(cell.id) ?? false}
+          isUpstreamStaleSource={upstreamStaleCellIds?.has(cell.id) ?? false}
           username={username}
           editable={canEdit}
           canValidate={canValidate}
@@ -1356,6 +1370,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     sourceFontSize,
     sourceTextDirection,
     staleCellIds,
+    upstreamStaleCellIds,
     targetFontSize,
     targetTextDirection,
     username,
@@ -1364,16 +1379,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   return (
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
       <div className="shrink-0 bg-background">
-        {/* FRO-250: sticky section/chapter indicator strip. Appears above the
-            column header when the file has section-tagged cells. Keeps the
-            reader oriented while scrolling through long Bible chapters. */}
-        {currentSectionLabel && !looksLikeUuid(currentSectionLabel) && (
-          <div className="flex items-center gap-1.5 border-b border-border/40 px-4 py-0.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-              {currentSectionLabel}
-            </span>
-          </div>
-        )}
         {/* FRO-273: role badge — shown for read-only roles (viewer/commenter/reviewer) */}
         {readOnlyLabel && (
           <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
@@ -1382,7 +1387,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </div>
         )}
         <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
-          <div />
+          {/* FRO-250: sticky chapter label — left gutter, does not shift Source */}
+          <div className="flex w-full items-center justify-center overflow-visible">
+            {currentSectionLabel && !looksLikeUuid(currentSectionLabel) && (
+              <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                {currentSectionLabel}
+              </span>
+            )}
+          </div>
           {/* In Audio mode the left column carries per-line voice controls, not
               source text, so label it "Controls" (no source-language badge). */}
           <div className="flex items-center gap-2">
@@ -1430,10 +1442,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             <TimelineAddMedia onAttachFile={onAttachMediaFile} onAttachUrl={onAttachMediaUrl} />
           </div>
         ) : (
-          <div className="flex-1 px-4 py-10 text-center text-sm text-muted-foreground">
-            {audioLens
-              ? "No media segments yet. Import an audio or video file, or record a take, to populate the media layer."
-              : "No text segments in this file."}
+          <div className="flex-1">
+            <EmptyState
+              className="h-full border-0 bg-transparent py-10"
+              icon={audioLens ? Music : FileText}
+              title={audioLens ? "No media segments yet" : "No text segments in this file"}
+              description={
+                audioLens
+                  ? "Import an audio or video file, or record a take, to populate the media layer."
+                  : undefined
+              }
+            />
           </div>
         )
       ) : (
@@ -1496,6 +1515,10 @@ interface MemoizedRowProps {
    *  Resolved once per file by the parent (membership look-up) so this prop
    *  is just a stable boolean — preserves the row's React.memo invariant. */
   isStaleSource: boolean
+  /** FRO-477 (§6): this cell's ANCESTRY is stale (a further-upstream chain
+   *  hop changed). Same "stable boolean, resolved by the parent" shape as
+   *  `isStaleSource` above. */
+  isUpstreamStaleSource: boolean
   onCellCommitted?: (cellId: string, committedEventId?: string) => void | Promise<void>
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
@@ -1611,6 +1634,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onAckRemoteChange,
     isStaleSource,
+    isUpstreamStaleSource,
     assigneeLabel,
     assigneeNote,
     checkLockHolder,
@@ -1697,6 +1721,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         editable={editable}
         canValidate={canValidate}
         isStaleSource={isStaleSource}
+        isUpstreamStaleSource={isUpstreamStaleSource}
         isCompletionConfigured={isCompletionConfigured}
         isCompletionAvailable={isCompletionAvailable}
         isLoading={isLoading}
@@ -1783,6 +1808,10 @@ interface EditorRowProps {
    *  target commit. Renders a small warning badge next to the validation
    *  status. Computed once-per-file by the parent. */
   isStaleSource: boolean
+  /** FRO-477 (§6) — true when this cell's ANCESTRY is stale (a further-
+   *  upstream chain hop changed). Renders the violet/dotted second tone.
+   *  Same once-per-file computation shape as `isStaleSource`. */
+  isUpstreamStaleSource: boolean
   onCellCommitted?: (cellId: string, committedEventId?: string) => void
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
@@ -2514,6 +2543,7 @@ function EditorRow({
   onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onAckRemoteChange,
   isStaleSource,
+  isUpstreamStaleSource,
   getTokenForFile,
   getAlignmentModel,
   onAlignmentSeedChange,
@@ -3472,6 +3502,7 @@ function EditorRow({
   const renderValidationButton = (onClick?: () => void) => (
     <button
       type="button"
+      data-showcase="cell.health"
       // FRO-297: button role + aria-pressed so screen readers announce the
       // validated/unvalidated toggle state. aria-label provides full context.
       aria-pressed={isSelfValidated}
@@ -3600,7 +3631,7 @@ function EditorRow({
             is the single issue surface (severity tint + title); no
             stripe/dot/warning. Selection lives on the source/target divider so
             range selection follows the text. */}
-        <div className="flex h-full items-start justify-center gap-1 pt-5">
+        <div className="flex h-full w-full items-start justify-center gap-1 pt-5">
           {numberPill}
           {/* Validation circle — single bare icon until validated, with a
               health ring appearing around it once there's a substantive score. */}
@@ -3620,7 +3651,7 @@ function EditorRow({
                 <PopoverContent
                   side="right"
                   align="start"
-                  className="w-72 rounded-xl p-2 shadow-lg"
+                  className="w-72 rounded-xl p-2"
                 >
                   <ul className="space-y-0.5">
                     <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -3667,11 +3698,15 @@ function EditorRow({
               )}
             </AppTooltip>
           )}
-          {/* Stale-source indicator alongside validate button */}
-          {isStaleSource && hasContent && (
+          {/* Stale-source indicator alongside validate button. Both flags
+              are already resolved per-row booleans (see isStaleSource's doc
+              comment) — the singleton Set(s) just adapt them to the
+              indicator's managed-mode membership-set contract. */}
+          {(isStaleSource || isUpstreamStaleSource) && hasContent && (
             <StaleSourceIndicator
               cellId={cell.id}
-              staleCellIds={new Set([cell.id])}
+              staleCellIds={isStaleSource ? new Set([cell.id]) : new Set()}
+              upstreamStaleCellIds={isUpstreamStaleSource ? new Set([cell.id]) : new Set()}
             />
           )}
           {(isSynthBusy || isSynthError) && (
@@ -3681,9 +3716,11 @@ function EditorRow({
               this cell is assigned to. Tooltip = username + scope label. */}
           {assigneeLabel && (
             <AppTooltip content={assigneeNote ? `Assigned to ${assigneeLabel} (${assigneeNote})` : `Assigned to ${assigneeLabel}`}>
-              <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[8px] font-semibold uppercase text-indigo-700 ring-1 ring-indigo-300 dark:bg-indigo-900 dark:text-indigo-300 dark:ring-indigo-700">
-                {assigneeLabel.slice(0, 2)}
-              </span>
+              <InitialsAvatar
+                name={assigneeLabel}
+                size="xs"
+                fallbackClassName="bg-indigo-100 text-[8px] uppercase text-indigo-700 ring-1 ring-indigo-300 dark:bg-indigo-900 dark:text-indigo-300 dark:ring-indigo-700"
+              />
             </AppTooltip>
           )}
         </div>
@@ -3722,6 +3759,7 @@ function EditorRow({
           })()
         ) : (
           <div
+            data-showcase="editor.source"
             className={cn(
               "relative flex flex-col transition-opacity",
               isSynthBusy && "opacity-70",
@@ -3747,7 +3785,7 @@ function EditorRow({
                 onToolbarMouseUp={handleToolbarMouseUp}
               />
             )}
-            <div className="mb-1 flex h-4 items-center gap-1 text-xs text-muted-foreground" dir="ltr">
+            <div className="mb-1 flex h-4 items-center justify-center gap-1 text-center text-xs text-muted-foreground" dir="ltr">
               <span>{cell.context}</span>
               {showFormattingLossWarning && (
                 <AppTooltip content="Source has inline formatting that the target does not preserve. Formatting will be lost on export." className="max-w-xs">
@@ -3789,6 +3827,7 @@ function EditorRow({
             detail) lives in the expansion panel. pr-9 reserves space for the
             ever-present chevron at the right edge. */}
         <div
+          data-showcase="editor.target"
           className={cn(
             "relative flex flex-col pl-3 pr-9 transition-opacity",
             isSynthBusy && "opacity-70",
@@ -4068,14 +4107,16 @@ function EditorRow({
                 className="mt-1 flex items-start justify-between gap-2 rounded-xl bg-destructive/10 px-2.5 py-1.5 text-[11px] text-destructive dark:bg-destructive/20"
               >
                 <span>{writeError}</span>
-                <button
+                <Button
                   type="button"
+                  size="icon-xs"
+                  variant="ghost"
                   aria-label="Dismiss"
                   onClick={() => setWriteError(null)}
-                  className="shrink-0 rounded-full px-1.5 py-0.5 text-destructive hover:bg-destructive/20"
+                  className="shrink-0 text-destructive hover:bg-destructive/20"
                 >
                   ✕
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -4659,20 +4700,22 @@ function EditorRow({
                         />
                       )}
                       <div className="flex flex-wrap gap-1.5">
-                        <button
+                        <Button
                           type="button"
+                          size="xs"
+                          variant="outline"
                           onClick={() => onOpenRecording?.(cell.id)}
                           disabled={!editable || !onOpenRecording}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-all disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Mic className="h-3 w-3" />
                           Re-record
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
+                          size="xs"
+                          variant="outline"
                           onClick={handleTranscribe}
                           disabled={!editable || isTranscribing}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-all disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Sparkles
                             className={cn(
@@ -4681,7 +4724,7 @@ function EditorRow({
                             )}
                           />
                           {isTranscribing ? "Transcribing…" : "Transcribe"}
-                        </button>
+                        </Button>
                         {cell.selectedAudioId && selectedAudio && (
                           <DenoiseButton
                             projectId={project.id}
@@ -4733,15 +4776,16 @@ function EditorRow({
                       )}
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="text-[11px] text-muted-foreground">AI generated voice. Drag a voice from the toolbar to regenerate, or:</span>
-                        <button
+                        <Button
                           type="button"
+                          size="xs"
+                          variant="outline"
                           onClick={() => onOpenRecording?.(cell.id)}
                           disabled={!editable || !onOpenRecording}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-all disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Mic className="h-3 w-3" />
                           Record over
-                        </button>
+                        </Button>
                       </div>
                     </>
                   ) : (
@@ -4753,15 +4797,16 @@ function EditorRow({
                         No audio yet. Record below, or drag a voice onto this cell from the toolbar above.
                       </p>
                       <div className="flex flex-wrap items-center justify-center gap-2">
-                        <button
+                        <Button
                           type="button"
+                          size="sm"
+                          variant="default"
                           onClick={() => onOpenRecording?.(cell.id)}
                           disabled={!editable || !onOpenRecording}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Mic className="h-3 w-3" />
                           Record
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   )}
@@ -4864,15 +4909,17 @@ function EditorRow({
                     </p>
                   ) : (
                     <>
-                      <button
+                      <Button
                         type="button"
+                        size="xs"
+                        variant="outline"
                         onClick={() => onOpenHistory?.(cell.id)}
                         disabled={!onOpenHistory}
-                        className="self-start inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-all disabled:cursor-not-allowed disabled:opacity-40"
+                        className="self-start"
                       >
                         <HistoryIcon className="h-3 w-3" />
                         Open full history
-                      </button>
+                      </Button>
                       <ul className="bg-muted divide-y divide-border/40 rounded-lg">
                         {[...fetchedHistory].slice(-5).reverse().map((entry, i) => {
                           const date = new Date(entry.timestamp).toLocaleString(undefined, {
@@ -4991,7 +5038,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
 
 interface GenerateOverwriteDialogProps {
   open: boolean

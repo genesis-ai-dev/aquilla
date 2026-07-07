@@ -8,7 +8,7 @@ import { CheckCircle2, Download, AlertCircle, ChevronDown, Wifi } from "lucide-r
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { FieldLabel } from "@/components/ui/field"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
 import { prefetchAiModels, useModelStatus } from "@/lib/audio/prefetch"
@@ -195,9 +195,9 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
               />
               {voiceChoice === "gemini" && (
                 <div className="ml-6 space-y-1 rounded-md bg-muted/30 p-2">
-                  <Label htmlFor="setup-gemini-tts-key" className="text-xs">
+                  <FieldLabel htmlFor="setup-gemini-tts-key" className="text-xs">
                     Gemini API key
-                  </Label>
+                  </FieldLabel>
                   <Input
                     id="setup-gemini-tts-key"
                     type="password"

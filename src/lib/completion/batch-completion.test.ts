@@ -6,6 +6,8 @@ import {
   resetBatchCompletionState,
   clearBatchCompletionProgress,
   incrementBatchCompletionDone,
+  incrementBatchCompletionFailed,
+  dismissBatchCompletionSummary,
   isBatchCompletionCancelled,
   getBatchCompletionSignal,
   cancelBatchCompletion,
@@ -57,6 +59,76 @@ describe("clearBatchCompletionProgress", () => {
     freshBatch(2)
     expect(getCompletionBatchProgress()).not.toBeNull()
     clearBatchCompletionProgress()
+    expect(getCompletionBatchProgress()).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// FRO-361: sub-batch failure summary must survive run completion
+// ---------------------------------------------------------------------------
+
+describe("incrementBatchCompletionFailed (FRO-361)", () => {
+  beforeEach(() => {
+    clearBatchCompletionProgress()
+    dismissBatchCompletionSummary()
+  })
+
+  it("increments the failed count", () => {
+    freshBatch(90)
+    incrementBatchCompletionFailed(undefined, 30)
+    expect(getCompletionBatchProgress()?.failed).toBe(30)
+  })
+
+  it("is a no-op when no batch is running", () => {
+    dismissBatchCompletionSummary()
+    expect(() => incrementBatchCompletionFailed()).not.toThrow()
+    expect(getCompletionBatchProgress()).toBeNull()
+  })
+
+  it("is a no-op for a superseded run id", () => {
+    const oldId = resetBatchCompletionState(5)
+    const newId = resetBatchCompletionState(5)
+    incrementBatchCompletionFailed(oldId, 1)
+    expect(getCompletionBatchProgress()?.failed).toBe(0)
+    incrementBatchCompletionFailed(newId, 1)
+    expect(getCompletionBatchProgress()?.failed).toBe(1)
+  })
+})
+
+describe("clearBatchCompletionProgress retains a failed-run summary (FRO-361)", () => {
+  beforeEach(() => {
+    dismissBatchCompletionSummary()
+  })
+
+  it("does NOT clear progress when the run ended with failures — surfaces the summary instead of going silent", () => {
+    const runId = resetBatchCompletionState(90)
+    incrementBatchCompletionDone(runId)
+    incrementBatchCompletionFailed(runId, 30)
+
+    clearBatchCompletionProgress(runId)
+
+    const progress = getCompletionBatchProgress()
+    expect(progress).not.toBeNull()
+    expect(progress?.failed).toBe(30)
+    expect(progress?.finished).toBe(true)
+  })
+
+  it("clears progress normally when the run had no failures", () => {
+    const runId = resetBatchCompletionState(10)
+    incrementBatchCompletionDone(runId)
+
+    clearBatchCompletionProgress(runId)
+
+    expect(getCompletionBatchProgress()).toBeNull()
+  })
+
+  it("dismissBatchCompletionSummary always clears, even with failures present", () => {
+    const runId = resetBatchCompletionState(10)
+    incrementBatchCompletionFailed(runId, 5)
+    clearBatchCompletionProgress(runId)
+    expect(getCompletionBatchProgress()).not.toBeNull()
+
+    dismissBatchCompletionSummary()
     expect(getCompletionBatchProgress()).toBeNull()
   })
 })

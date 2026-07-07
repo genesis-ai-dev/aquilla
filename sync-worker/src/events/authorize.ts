@@ -104,6 +104,7 @@ export async function authorize<K extends EventKind>(
       projectId: tokenClaims.projectId,
       fileId: PROJECT_SENTINEL_FILE_ID,
       roleLevel: tokenClaims.role,
+      ...(tokenClaims.src ? { src: tokenClaims.src } : {}),
     }
     return { ok: true, event: new AuthorizedEvent(claims, raw) }
   }
@@ -142,6 +143,7 @@ export async function authorize<K extends EventKind>(
     projectId: tokenClaims.projectId,
     fileId: tokenClaims.fileId,
     roleLevel: tokenClaims.role,
+    ...(tokenClaims.src ? { src: tokenClaims.src } : {}),
   }
 
   return { ok: true, event: new AuthorizedEvent(claims, raw) }

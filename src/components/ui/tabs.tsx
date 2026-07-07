@@ -1,149 +1,148 @@
-// Minimal headless tabs primitive. Used by the cell expansion panel; we don't
-// pull a full Radix-style tabs package because we only need a few behaviors:
-// controlled value, click-to-switch, ARIA roles, keyboard arrow navigation.
+import { Tabs as TabsPrimitive } from "@base-ui/react/tabs"
+import { cva, type VariantProps } from "class-variance-authority"
 
-import { createContext, useContext, useCallback, useId, useRef } from "react"
 import { cn } from "@/lib/utils"
 
-interface TabsCtx {
-  value: string
-  onValueChange: (next: string) => void
-  baseId: string
-}
-
-const Ctx = createContext<TabsCtx | null>(null)
-
-function useTabs() {
-  const ctx = useContext(Ctx)
-  if (!ctx) throw new Error("Tabs subcomponent must be inside <Tabs>")
-  return ctx
-}
-
-export function Tabs({
-  value, onValueChange, children, className,
-}: {
-  value: string
-  onValueChange: (next: string) => void
-  children: React.ReactNode
-  className?: string
-}) {
-  const baseId = useId()
+function Tabs({
+  className,
+  orientation = "horizontal",
+  ...props
+}: TabsPrimitive.Root.Props) {
   return (
-    <Ctx.Provider value={{ value, onValueChange, baseId }}>
-      <div className={className} data-tabs-root>{children}</div>
-    </Ctx.Provider>
-  )
-}
-
-export function TabsList({
-  children, className,
-}: { children: React.ReactNode; className?: string }) {
-  const listRef = useRef<HTMLDivElement | null>(null)
-
-  const onKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight" && e.key !== "Home" && e.key !== "End") return
-    const triggers = Array.from(
-      listRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]:not([disabled])') ?? [],
-    )
-    if (triggers.length === 0) return
-    const active = document.activeElement as HTMLElement | null
-    const idx = triggers.findIndex((t) => t === active)
-    let next = idx
-    if (e.key === "ArrowLeft") next = idx <= 0 ? triggers.length - 1 : idx - 1
-    if (e.key === "ArrowRight") next = idx >= triggers.length - 1 ? 0 : idx + 1
-    if (e.key === "Home") next = 0
-    if (e.key === "End") next = triggers.length - 1
-    e.preventDefault()
-    triggers[next]?.focus()
-    triggers[next]?.click()
-  }, [])
-
-  return (
-    <div
-      ref={listRef}
-      role="tablist"
-      onKeyDown={onKeyDown}
+    <TabsPrimitive.Root
+      data-slot="tabs"
+      data-orientation={orientation}
       className={cn(
-        "bg-muted inline-flex items-center gap-0.5 rounded-full p-0.5",
-        className,
+        "group/tabs flex gap-2 data-horizontal:flex-col",
+        className
       )}
-    >
-      {children}
-    </div>
+      {...props}
+    />
   )
 }
 
-export function TabsTrigger({
-  value, children, disabled, className, attentionDot,
-}: {
-  value: string
-  children: React.ReactNode
-  disabled?: boolean
-  className?: string
+const tabsListVariants = cva(
+  "group/tabs-list inline-flex w-fit items-center justify-center rounded-lg text-muted-foreground group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col data-[variant=line]:rounded-none",
+  {
+    variants: {
+      variant: {
+        default: "bg-muted",
+        line: "gap-1 bg-transparent",
+      },
+      size: {
+        default: "p-[3px] group-data-horizontal/tabs:h-8",
+        lg: "gap-1 rounded-xl border border-border bg-muted/40 p-1 group-data-horizontal/tabs:h-auto",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+      size: "default",
+    },
+  }
+)
+
+function TabsList({
+  className,
+  variant = "default",
+  size = "default",
+  ...props
+}: TabsPrimitive.List.Props & VariantProps<typeof tabsListVariants>) {
+  return (
+    <TabsPrimitive.List
+      data-slot="tabs-list"
+      data-variant={variant}
+      data-size={size}
+      className={cn(tabsListVariants({ variant, size }), className)}
+      {...props}
+    />
+  )
+}
+
+function TabsTrigger({
+  className,
+  attentionDot,
+  children,
+  ...props
+}: TabsPrimitive.Tab.Props & {
   /** Tiny dot in the corner indicating something inside this tab needs attention. */
   attentionDot?: "amber" | "emerald" | "red"
 }) {
-  const { value: current, onValueChange, baseId } = useTabs()
-  const active = current === value
-  const dotColor = attentionDot === "amber"
-    ? "bg-amber-500"
-    : attentionDot === "red"
-      ? "bg-red-500"
-      : attentionDot === "emerald"
-        ? "bg-emerald-500"
-        : null
+  const dotColor =
+    attentionDot === "amber"
+      ? "bg-amber-500"
+      : attentionDot === "red"
+        ? "bg-red-500"
+        : attentionDot === "emerald"
+          ? "bg-emerald-500"
+          : null
+
   return (
-    <button
-      type="button"
-      role="tab"
-      id={`${baseId}-trigger-${value}`}
-      aria-selected={active}
-      aria-controls={`${baseId}-panel-${value}`}
-      tabIndex={active ? 0 : -1}
-      disabled={disabled}
-      onClick={() => onValueChange(value)}
+    <TabsPrimitive.Tab
+      data-slot="tabs-trigger"
       className={cn(
-        "relative inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-medium tracking-tight transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-        "disabled:cursor-not-allowed disabled:opacity-40",
-        active
-          ? "bg-card text-foreground"
-          : "text-muted-foreground hover:text-foreground",
-        className,
+        "relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 text-sm font-medium whitespace-nowrap text-foreground/60 transition-all group-data-vertical/tabs:w-full group-data-vertical/tabs:justify-start hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 aria-disabled:pointer-events-none aria-disabled:opacity-50 dark:text-muted-foreground dark:hover:text-foreground group-data-[variant=default]/tabs-list:data-active:shadow-sm group-data-[variant=line]/tabs-list:data-active:shadow-none group-data-[size=lg]/tabs-list:h-auto group-data-[size=lg]/tabs-list:rounded-lg group-data-[size=lg]/tabs-list:px-3 group-data-[size=lg]/tabs-list:py-2 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:data-active:bg-transparent dark:group-data-[variant=line]/tabs-list:data-active:border-transparent dark:group-data-[variant=line]/tabs-list:data-active:bg-transparent",
+        "data-active:bg-background data-active:text-foreground dark:data-active:border-input dark:data-active:bg-input/30 dark:data-active:text-foreground",
+        "after:absolute after:bg-foreground after:opacity-0 after:transition-opacity group-data-horizontal/tabs:after:inset-x-0 group-data-horizontal/tabs:after:bottom-[-5px] group-data-horizontal/tabs:after:h-0.5 group-data-vertical/tabs:after:inset-y-0 group-data-vertical/tabs:after:-right-1 group-data-vertical/tabs:after:w-0.5 group-data-[variant=line]/tabs-list:data-active:after:opacity-100",
+        className
       )}
+      {...props}
     >
       {children}
       {dotColor && (
         <span
           aria-hidden
           className={cn(
-            "absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full ring-2 ring-background",
+            "absolute -right-0.5 -top-0.5 size-1.5 rounded-full ring-2 ring-background",
             dotColor,
           )}
         />
       )}
-    </button>
+    </TabsPrimitive.Tab>
   )
 }
 
-export function TabsContent({
-  value, children, className,
-}: {
-  value: string
-  children: React.ReactNode
-  className?: string
-}) {
-  const { value: current, baseId } = useTabs()
-  if (current !== value) return null
+function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props) {
   return (
-    <div
-      role="tabpanel"
-      id={`${baseId}-panel-${value}`}
-      aria-labelledby={`${baseId}-trigger-${value}`}
-      tabIndex={0}
-      className={cn("focus:outline-none", className)}
-    >
-      {children}
-    </div>
+    <TabsPrimitive.Panel
+      data-slot="tabs-content"
+      className={cn("flex-1 text-sm outline-none", className)}
+      {...props}
+    />
   )
 }
+
+/** Compact mutually-exclusive control — default Tabs styling, no panel content. */
+function SegmentTabs<T extends string>({
+  value,
+  onValueChange,
+  options,
+  "aria-label": ariaLabel,
+  className,
+  listClassName,
+}: {
+  value: T
+  onValueChange: (value: T) => void
+  options: { label: string; value: T; disabled?: boolean }[]
+  "aria-label"?: string
+  className?: string
+  listClassName?: string
+}) {
+  return (
+    <Tabs
+      value={value}
+      onValueChange={(next) => onValueChange(next as T)}
+      className={cn("gap-0", className)}
+    >
+      <TabsList aria-label={ariaLabel} className={listClassName}>
+        {options.map((opt) => (
+          <TabsTrigger key={opt.value} value={opt.value} disabled={opt.disabled}>
+            {opt.label}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
+  )
+}
+
+export { Tabs, TabsList, TabsTrigger, TabsContent, SegmentTabs, tabsListVariants }

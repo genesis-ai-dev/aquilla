@@ -149,3 +149,32 @@ Orchestration: docs/swarm/UXA-ORCHESTRATION.md. Open follow-ups:
 - 2026-07-01 · **FRO-460 focused re-QA FAILED ×2** — settingsHasFetched gate insufficient; multi-instance remount race (stale in-flight refresh flips hasFetched against transient/stale value → unrequested true PATCH overrides explicit OFF, server false→true v44/v46). Secondary (auto-enable-genuinely-unset) PASS. ROOT ISSUE: persist-on-load effect is race-prone by design → correct fix = DERIVE-ON-READ (explicit ?? isScripture at consumers + server aquifer gate), no write-on-load. 3 gate attempts failed. FRO-460 → Dispatched; escalating scope decision to user (descope to safe discoverability half vs derive-on-read redesign). FRO-455/457/458 verified & green, held on dirty main.
 - 2026-07-01 · **FRO-460 derive-on-read adversarial wf = PROMOTE** (correctness CONFIRMED sev-none; regression REFUTED sev-low). Trust invariant (explicit false wins) holds client+server; all consumers read derived value; server gate short-circuits explicit before the bounded+indexed files.kind query (idx_files_project_active, fails-closed); nothing writes on load. Regression lens inverted derivation → 6/8 tests failed (non-vacuous). 3 LOW/semantic follow-ups (non-blocking): (1) test assert exact false payload, (2) route-level explicit-false+scripture→404 test, (3) no affordance to reset to derived default. Independent live-QA running to close explicit-OFF empirically.
 - 2026-07-01 · **FRO-460 derive-on-read independent live-QA: 4/4 PASS**. Check1 (explicit OFF respected) PASS ×2 hard-reload+nav — server false, version frozen @51, ZERO unrequested writes (the invariant that failed 3× is now solid). Check2 scripture-default-on no-write (settings stayed v0). Check3 non-scripture off no-write. Check4 explicit-on 200. Trust invariant SOLID. NON-BLOCKING display race found: ProjectSettings switch transiently paints checked (~2-5s, rarely >5s) for server-false scripture project — seededRef baseline locks pre-hydration undefined → derived-true; never persists/writes. Dispatched finisher ae774a30 to fix display (gate baseline seed on hasFetched / read hydrated value); self-verifying live. Then re-gate + promote FRO-460.
+
+## §PD7 (2026-07-06) — Prototype Debugging Urgent/High batch (13 issues, promoted dev@0189d3971)
+
+Deferred/open tails, honestly traced:
+- **FRO-361 happy path unverified live**: dev stack's cell-completion route (auth-worker routes/chat.ts
+  completion path) has no `OPENROUTER_BASE_URL` override, so mock-openrouter can't serve it keyless —
+  only the failure-banner path was live-verified. DX gap: add the override like the Agent/chat route.
+- **FRO-360 "Omni voice" hover string**: not present anywhere in this tree — likely prod/main divergence;
+  labels now derive from the same provider resolution the synthesis call uses. Follow-up chip: NewVoiceModal
+  still offers only Gemini/Clone (orphaned 4-provider CharacterModal exists).
+- **FRO-366 original symptom never reproduced**: the intermittent "list won't scroll" couldn't be triggered
+  live (real wheel-scroll works); shipped overscroll-contain + structural regression tests as hardening.
+- **FRO-414 root attribution**: regular-chat spend is recorded under org 0 by design/accident
+  (auth-worker routes/chat.ts hardcodes orgId=0) — labels are now honest, but real per-org chat attribution
+  needs a product decision + creditGuard change (chip task_7bc10238).
+- **FRO-334 residual server gap**: AiInstructionsStep/AiModelsStep persist via IDB/localStorage-only paths
+  that never reach the maintainer-gated PATCH /settings — client gating closes the UI, but the write path
+  itself has no server floor to hit. Needs a follow-up (route the checklist saves through the gated PATCH).
+- **FRO-347 legacy route**: the single-project invite preview (`/invite-preview/:token` family) has the same
+  no-`used_by`-check bug the multi route had (fixer chip spawned).
+- **FRO-346 org-level removal**: org-member removal routes do NOT yet send the DO eject (project-member
+  routes only); org removal cascades access loss without the live kick.
+- **scripts/e2e-up.ts**: same `env:`-vs-`--var` wrangler bug dev-stack.ts had (vars never reach c.env) —
+  chip spawned.
+- **New issue filed from QA**: FRO-481 — viewer role can open/interact with the full Import dialog
+  (server rejects; affordance honesty gap).
+- **QA cadence lesson**: three rounds were needed for FRO-347 (server logic → client Authorization header →
+  browser HTTP-cache of the anonymous 410). "Server returns the right thing" ≠ "the UI shows it" —
+  the live-UI gate caught both inert halves; unit suites alone would have shipped them broken.

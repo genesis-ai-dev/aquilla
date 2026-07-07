@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
+import { MoreHorizontal } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Button } from "@/components/ui/button"
+import { ButtonGroup } from "@/components/ui/button-group"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useProject } from "@/hooks/useProject"
@@ -19,6 +22,16 @@ import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
 import { getProjectAssignments, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { Badge } from "@/components/ui/badge"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { DatePicker, dateToDeadlineString, deadlineStringToDate } from "@/components/ui/date-picker"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 
 /** Max per-file rows shown on the overview; the rest are counted as "+N more". */
 const FILE_ROW_CAP = 12
@@ -147,13 +160,15 @@ function OverflowMenu({ children }: { children: React.ReactNode }) {
 
   return (
     <div ref={ref} className="relative">
-      <button
+      <Button
+        type="button"
+        size="icon-sm"
+        variant="outline"
         aria-label="More actions"
         onClick={() => setOpen((v) => !v)}
-        className="rounded-md border px-2.5 py-1.5 text-sm font-medium hover:bg-accent/40"
       >
-        ⋯
-      </button>
+        <MoreHorizontal className="h-4 w-4" />
+      </Button>
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1 min-w-40 rounded-md border bg-popover shadow-md py-1">
           {children}
@@ -194,8 +209,8 @@ export function ProjectOverview() {
   const [error, setError] = useState<string | null>(null)
   const [audio, setAudio] = useState<PortfolioProject | null>(null)
   const [files, setFiles] = useState<FileSummary[]>([])
-  const [editingDeadline, setEditingDeadline] = useState(false)
-  const [deadlineInput, setDeadlineInput] = useState("")
+  const [deadlineDialogOpen, setDeadlineDialogOpen] = useState(false)
+  const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
   const [showAllFiles, setShowAllFiles] = useState(false)
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
 
@@ -226,7 +241,9 @@ export function ProjectOverview() {
   // to "ready" here when they hold a direct grant. Redirecting on org
   // mismatch alone (pre-FRO-474 behavior) sent guests right back to "/".
   useEffect(() => {
-    if (status === "not-found") {
+    // FRO-346: "forbidden" (access revoked) leaves the overview the same way
+    // a missing project does — back to the dashboard.
+    if (status === "not-found" || status === "forbidden") {
       navigate("/", { replace: true })
     }
   }, [status, navigate])
@@ -286,7 +303,7 @@ export function ProjectOverview() {
     try {
       await setProjectDeadline(jwt, id, value)
       await loadRow()
-      setEditingDeadline(false)
+      setDeadlineDialogOpen(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -369,7 +386,7 @@ export function ProjectOverview() {
           ) : (
             <div className="max-w-5xl space-y-4">
               {/* ── Header card ── */}
-              <div className="rounded-xl border bg-card shadow-sm p-6">
+              <div className="rounded-xl border bg-card p-6">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -394,21 +411,14 @@ export function ProjectOverview() {
                     )}
                     <p className="mt-0.5 text-sm text-muted-foreground">{project?.files.length ?? 0} files</p>
                   </div>
-                  <div className="flex shrink-0 gap-2 items-start">
-                    <button
-                      onClick={() => navigate(`/project/${id}`)}
-                      className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground"
-                    >
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Button size="sm" onClick={() => navigate(`/project/${id}`)}>
                       Open project
-                    </button>
+                    </Button>
                     {isOwner && isArchived && (
-                      <button
-                        onClick={handleRestore}
-                        disabled={busy}
-                        className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent/40 disabled:opacity-50"
-                      >
+                      <Button size="sm" variant="outline" onClick={handleRestore} disabled={busy}>
                         Restore
-                      </button>
+                      </Button>
                     )}
                     {/* Archive + Download + Lifecycle moved into overflow menu */}
                     {(canManage || isOwner || canToggleLifecycle) && !isArchived && (
@@ -448,7 +458,7 @@ export function ProjectOverview() {
 
               {/* ── Progress card ── */}
               {audio && audio.totalCells > 0 && (
-                <div className="rounded-xl border bg-card shadow-sm p-5">
+                <div className="rounded-xl border bg-card p-5">
                   <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Progress</h2>
 
                   {/* Big-number tiles lead the section */}
@@ -530,7 +540,7 @@ export function ProjectOverview() {
                 const shown = showAllFiles ? sorted : sorted.slice(0, FILE_ROW_CAP)
                 const hidden = sorted.length - shown.length
                 return (
-                  <div className="rounded-xl border bg-card shadow-sm p-5">
+                  <div className="rounded-xl border bg-card p-5">
                     <div className="mb-3 flex items-center justify-between">
                       <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         Files {!showAllFiles && hidden > 0 ? `(top ${FILE_ROW_CAP} of ${sorted.length})` : `(${sorted.length})`}
@@ -549,7 +559,7 @@ export function ProjectOverview() {
                         const tPct = f.cellCount > 0 ? Math.round((f.filledCount / f.cellCount) * 100) : 0
                         const vPct = f.cellCount > 0 ? Math.round((f.approvedCount / f.cellCount) * 100) : 0
                         return (
-                          <li key={f.fileId} className="flex items-center gap-3 text-sm">
+                          <li key={f.fileId} data-testid="file-row" className="flex items-center gap-3 text-sm">
                             <AppTooltip content={f.name}>
                               <span className="w-36 shrink-0 truncate text-sm font-medium">{f.name}</span>
                             </AppTooltip>
@@ -584,69 +594,91 @@ export function ProjectOverview() {
               })()}
 
               {/* ── Deadline card ── */}
-              <div className="rounded-xl border bg-card shadow-sm p-5">
+              <div className="rounded-xl border bg-card p-5">
                 <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Deadline</h2>
-                {editingDeadline ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      type="date"
-                      value={deadlineInput}
-                      onChange={(e) => setDeadlineInput(e.target.value)}
-                      disabled={busy}
-                      className="rounded-md border bg-background px-2 py-1 text-sm"
-                      aria-label="Project deadline"
-                    />
-                    <button
-                      onClick={() => saveDeadline(deadlineInput || null)}
-                      disabled={busy || !deadlineInput}
-                      className="rounded-md border px-2 py-1 text-xs font-medium hover:bg-accent/40 disabled:opacity-50"
-                    >
-                      Save
-                    </button>
-                    <button
-                      onClick={() => setEditingDeadline(false)}
-                      disabled={busy}
-                      className="rounded-md border px-2 py-1 text-xs font-medium hover:bg-accent/40 disabled:opacity-50"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex flex-wrap items-center gap-2 text-sm">
-                    {audio?.deadlineAt ? (
-                      <span className="flex items-center gap-2 font-medium">
-                        {audio.deadlineAt}
-                        <DeadlineChip status={dstatus} />
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">No deadline set</span>
-                    )}
-                    {canManage && (
-                      <>
-                        <button
-                          onClick={() => { setDeadlineInput(audio?.deadlineAt ?? ""); setEditingDeadline(true) }}
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  {audio?.deadlineAt ? (
+                    <span className="flex items-center gap-2 font-medium">
+                      {audio.deadlineAt}
+                      <DeadlineChip status={dstatus} />
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">No deadline set</span>
+                  )}
+                  {canManage && (
+                    <ButtonGroup>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => {
+                          setDeadlineDate(deadlineStringToDate(audio?.deadlineAt))
+                          setDeadlineDialogOpen(true)
+                        }}
+                      >
+                        {audio?.deadlineAt ? "Change" : "Set deadline"}
+                      </Button>
+                      {audio?.deadlineAt && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
                           disabled={busy}
-                          className="rounded-md border px-2 py-0.5 text-xs hover:bg-accent/40 disabled:opacity-50"
+                          onClick={() => saveDeadline(null)}
                         >
-                          {audio?.deadlineAt ? "Change" : "Set deadline"}
-                        </button>
-                        {audio?.deadlineAt && (
-                          <button
-                            onClick={() => saveDeadline(null)}
-                            disabled={busy}
-                            className="rounded-md border px-2 py-0.5 text-xs hover:bg-accent/40 disabled:opacity-50"
-                          >
-                            Clear
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                )}
+                          Clear
+                        </Button>
+                      )}
+                    </ButtonGroup>
+                  )}
+                </div>
               </div>
 
+              <Dialog open={deadlineDialogOpen} onOpenChange={setDeadlineDialogOpen}>
+                <DialogContent className="sm:max-w-sm">
+                  <DialogHeader>
+                    <DialogTitle>
+                      {audio?.deadlineAt ? "Change project deadline" : "Set project deadline"}
+                    </DialogTitle>
+                    <DialogDescription>
+                      The deadline is inclusive through the end of that day anywhere on Earth.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <FieldGroup>
+                    <Field>
+                      <FieldLabel htmlFor="project-deadline">Deadline date</FieldLabel>
+                      <DatePicker
+                        id="project-deadline"
+                        value={deadlineDate}
+                        onChange={setDeadlineDate}
+                        disabled={busy}
+                        placeholder="July 03, 2026"
+                      />
+                    </Field>
+                  </FieldGroup>
+                  <DialogFooter>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => setDeadlineDialogOpen(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      disabled={busy || !deadlineDate}
+                      onClick={() => saveDeadline(deadlineDate ? dateToDeadlineString(deadlineDate) : null)}
+                    >
+                      Save
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
               {/* ── Team / Assignments card ── */}
-              <div className="rounded-xl border bg-card shadow-sm p-5">
+              <div className="rounded-xl border bg-card p-5">
                 <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</h2>
                 {workload.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No open assignments in this project yet.</p>
@@ -691,7 +723,7 @@ export function ProjectOverview() {
                   surface as the in-project members page, so access can be
                   managed from the overview without opening the workspace. ── */}
               {canManage && !isArchived && (
-                <div className="rounded-xl border bg-card shadow-sm p-5" data-testid="overview-members-card">
+                <div className="rounded-xl border bg-card p-5" data-testid="overview-members-card">
                   <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Members</h2>
                   <MembersTab projectId={id} className="space-y-6" />
                 </div>

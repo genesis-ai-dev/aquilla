@@ -1,7 +1,7 @@
 import { useEffect } from "react"
 import { Button } from "@/components/ui/button"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 
 export function NameStep({
@@ -39,16 +39,18 @@ export function NameStep({
           This name appears on your edits and comments.
         </p>
       </div>
-      <div>
-        <Label htmlFor="display-name">Display name</Label>
-        <Input
-          id="display-name"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder="Anonymous translator"
-          autoFocus
-        />
-      </div>
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="display-name">Display name</FieldLabel>
+          <Input
+            id="display-name"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="Anonymous translator"
+            autoFocus
+          />
+        </Field>
+      </FieldGroup>
       <Button size="lg" onClick={handleContinue} className="w-full">
         Continue
       </Button>

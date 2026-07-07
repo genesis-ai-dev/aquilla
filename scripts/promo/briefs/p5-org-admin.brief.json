@@ -1,0 +1,21 @@
+{
+  "persona": "p5-org-admin",
+  "personaLabel": "The Program / Org Administrator",
+  "emotionalThroughline": "From the quiet weight of holding scattered projects together by hand to the lightness of running it all with calm, confident control.",
+  "mood": "build",
+  "durationSec": 18,
+  "fps": 30,
+  "scenes": [
+    {"t":0.0,"id":"cold-open","title":"Who's on chapter 9?","subtitle":"Three teams. Twelve files. One inbox you dread."},
+    {"t":3.0,"id":"reveal","title":"The tools changed.","subtitle":"You don't have to carry it the old way."},
+    {"t":6.5,"id":"showcase","title":"Every project, in view.","subtitle":"Live progress, no chasing required."},
+    {"t":11.0,"id":"proof","title":"It's already done.","subtitle":"Verified, synced, the moment it happens."},
+    {"t":14.5,"id":"cta","title":"Aquilla","subtitle":"Lead the work. Not the chaos."}
+  ],
+  "beats": [
+    {"t":0.4,"kind":"thump"},{"t":1.8,"kind":"thump"},{"t":3.0,"kind":"swell"},
+    {"t":4.4,"kind":"thump"},{"t":6.5,"kind":"swell"},{"t":8.2,"kind":"thump"},
+    {"t":9.8,"kind":"thump"},{"t":11.0,"kind":"swell"},{"t":12.8,"kind":"thump"},
+    {"t":14.5,"kind":"impact"}
+  ]
+}

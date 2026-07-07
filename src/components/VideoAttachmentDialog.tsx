@@ -3,7 +3,13 @@ import { Film, Upload, Link as LinkIcon, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
@@ -138,10 +144,10 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
                 <Trash2 className="h-3.5 w-3.5 text-destructive" />
               </Button>
             </div>
-            <div className="flex items-center gap-2">
-              <Label htmlFor="vstart" layout="inline" className="text-xs whitespace-nowrap">
+            <Field orientation="horizontal" className="items-center gap-2">
+              <FieldLabel htmlFor="vstart" className="text-xs whitespace-nowrap">
                 Start offset (s)
-              </Label>
+              </FieldLabel>
               <Input
                 id="vstart"
                 type="number"
@@ -167,11 +173,11 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
               >
                 Save offset
               </Button>
-            </div>
-            <p className="text-[11px] text-muted-foreground">
+            </Field>
+            <FieldDescription className="text-[11px]">
               Seconds to wait before cues align. If your video has an intro, set this
               to the duration of the intro so subtitles line up correctly.
-            </p>
+            </FieldDescription>
           </div>
         )}
 
@@ -199,33 +205,33 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
         </div>
 
         {tab === "url" ? (
-          <div className="space-y-3">
-            <div>
-              <Label htmlFor="vurl">Video URL</Label>
+          <FieldGroup className="space-y-3">
+            <Field>
+              <FieldLabel htmlFor="vurl">Video URL</FieldLabel>
               <Input
                 id="vurl"
                 value={urlInput}
                 onChange={(e) => setUrlInput(e.target.value)}
                 placeholder="https://example.com/video.mp4"
               />
-              <p className="mt-1 text-xs text-muted-foreground">
+              <FieldDescription>
                 Direct video URL (MP4, WebM, etc). URL syncs across collaborators.
-              </p>
-            </div>
-            <div>
-              <Label htmlFor="vname">Display name (optional)</Label>
+              </FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="vname">Display name (optional)</FieldLabel>
               <Input
                 id="vname"
                 value={fileNameInput}
                 onChange={(e) => setFileNameInput(e.target.value)}
                 placeholder="Episode 1"
               />
-            </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            </Field>
+            {error && <FieldError>{error}</FieldError>}
             <Button onClick={handleSaveUrl} disabled={!urlInput.trim()} className="w-full">
               Save URL
             </Button>
-          </div>
+          </FieldGroup>
         ) : (
           <div className="space-y-3">
             <div
@@ -269,7 +275,7 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
                 </>
               )}
             </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            {error && <FieldError>{error}</FieldError>}
           </div>
         )}
       </DialogContent>

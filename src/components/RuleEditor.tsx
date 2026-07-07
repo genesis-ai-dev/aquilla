@@ -14,7 +14,7 @@
 import { useState, useMemo, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { FieldLabel } from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
 import { X } from "lucide-react"
 import type { TranslationRule, RuleCheck, RuleAutofix } from "@/lib/parsers/types"
@@ -222,7 +222,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
   const sentence = humanSentence(side, mode)
 
   return (
-    <div className="rounded-lg border bg-card p-4 space-y-4 shadow-sm">
+    <div className="rounded-lg border bg-card p-4 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold text-foreground">
@@ -239,7 +239,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
       {/* Name + Description */}
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div>
-          <Label htmlFor="re-name" className="text-xs">Rule name</Label>
+          <FieldLabel htmlFor="re-name" className="text-xs">Rule name</FieldLabel>
           <Input
             id="re-name"
             value={name}
@@ -249,7 +249,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
           />
         </div>
         <div>
-          <Label htmlFor="re-desc" className="text-xs">Description (optional)</Label>
+          <FieldLabel htmlFor="re-desc" className="text-xs">Description (optional)</FieldLabel>
           <Input
             id="re-desc"
             value={description}
@@ -263,7 +263,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
       {/* Mode selectors */}
       <div className="flex flex-wrap gap-3">
         <div>
-          <Label className="text-xs">Mode</Label>
+          <FieldLabel className="text-xs">Mode</FieldLabel>
           <div className="mt-1 flex gap-1">
             {(["forbidden", "required", "match"] as Mode[]).map((m) => (
               <button
@@ -285,7 +285,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
         {/* Side only shows when not "match" (match implies both sides) */}
         {mode !== "match" && (
           <div>
-            <Label className="text-xs">Side</Label>
+            <FieldLabel className="text-xs">Side</FieldLabel>
             <div className="mt-1 flex gap-1">
               {(["source", "target"] as Side[]).map((s) => (
                 <button
@@ -306,7 +306,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
         )}
 
         <div>
-          <Label className="text-xs">Severity</Label>
+          <FieldLabel className="text-xs">Severity</FieldLabel>
           <div className="mt-1 flex gap-1">
             {(["minor", "major"] as const).map((sv) => (
               <button
@@ -342,9 +342,9 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
       {/* Source pattern (only for source-requires-target mode) */}
       {mode === "required" && (
         <div>
-          <Label htmlFor="re-src-pat" className="text-xs">
+          <FieldLabel htmlFor="re-src-pat" className="text-xs">
             Source pattern — when source contains this…
-          </Label>
+          </FieldLabel>
           <div className="mt-1 flex gap-2 items-center">
             <Input
               id="re-src-pat"
@@ -363,9 +363,9 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
       {/* Main pattern */}
       <div>
         <div className="flex items-center justify-between">
-          <Label htmlFor="re-pat" className="text-xs">
+          <FieldLabel htmlFor="re-pat" className="text-xs">
             {mode === "required" ? "…target must contain this pattern" : "Pattern"}
-          </Label>
+          </FieldLabel>
           <button
             type="button"
             onClick={() => setIsLiteral((v) => !v)}
@@ -435,7 +435,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
             </p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <div>
-                <Label className="text-[10px]">Find pattern</Label>
+                <FieldLabel className="text-[10px]">Find pattern</FieldLabel>
                 <Input
                   value={afPattern}
                   onChange={(e) => setAfPattern(e.target.value)}
@@ -444,7 +444,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
                 />
               </div>
               <div>
-                <Label className="text-[10px]">Replace with</Label>
+                <FieldLabel className="text-[10px]">Replace with</FieldLabel>
                 <Input
                   value={afReplacement}
                   onChange={(e) => setAfReplacement(e.target.value)}
@@ -453,7 +453,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
                 />
               </div>
               <div>
-                <Label className="text-[10px]">Flags</Label>
+                <FieldLabel className="text-[10px]">Flags</FieldLabel>
                 <Input
                   value={afFlags}
                   onChange={(e) => setAfFlags(e.target.value)}
@@ -464,7 +464,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
             </div>
             {/* Sample before/after */}
             <div>
-              <Label className="text-[10px]">Preview on sample text</Label>
+              <FieldLabel className="text-[10px]">Preview on sample text</FieldLabel>
               <Input
                 value={afSample}
                 onChange={(e) => setAfSample(e.target.value)}

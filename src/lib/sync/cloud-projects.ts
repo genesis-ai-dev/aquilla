@@ -42,6 +42,13 @@ export interface CloudProjectSummary {
    * endpoint may omit (older servers).
    */
   sourceProjectId?: string | null
+  /** FRO-476/478: link mode/consumes/gate/cursor. Only the single-project
+   *  endpoint returns these (the list endpoint returns sourceProjectId only —
+   *  the picker/settings-detail views are what need the full state). */
+  sourceLinkMode?: "clone" | "live" | null
+  sourceLinkConsumes?: "source" | "target" | null
+  sourceLinkGate?: "head" | "validated" | null
+  sourceLinkCursor?: number | null
   role: {
     level: number
     name: string
@@ -237,6 +244,11 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
   if (summary.sourceProjectId !== undefined) {
     record.sourceProjectId = summary.sourceProjectId
   }
+  // FRO-476/478: propagate link mode/consumes/gate/cursor when present.
+  if (summary.sourceLinkMode !== undefined) record.sourceLinkMode = summary.sourceLinkMode
+  if (summary.sourceLinkConsumes !== undefined) record.sourceLinkConsumes = summary.sourceLinkConsumes
+  if (summary.sourceLinkGate !== undefined) record.sourceLinkGate = summary.sourceLinkGate
+  if (summary.sourceLinkCursor !== undefined) record.sourceLinkCursor = summary.sourceLinkCursor
   return record
 }
 
@@ -316,7 +328,7 @@ export async function resolveCloudProject(
  */
 export type ResolveProjectResult =
   | { ok: true; project: ProjectStateResponse | CloudProjectSummary }
-  | { ok: false; reason: "not-found" | "unreachable" }
+  | { ok: false; reason: "not-found" | "forbidden" | "unreachable" }
 
 /**
  * Like {@link resolveCloudProject} but returns a discriminated result
@@ -347,7 +359,15 @@ export async function resolveCloudProjectResult(
         return { ok: false, reason: "unreachable" }
       }
       const found = listResult.projects.find((p) => p.id === projectId)
-      return found ? { ok: true, project: found } : { ok: false, reason: "not-found" }
+      if (found) return { ok: true, project: found }
+      // FRO-346: a 403 on the direct endpoint means the project exists but
+      // this account has no access (e.g. membership was revoked) — surface
+      // it distinctly so the workspace shows "you no longer have access"
+      // instead of the misleading "project not found".
+      return {
+        ok: false,
+        reason: directRes.status === 403 ? "forbidden" : "not-found",
+      }
     }
     // 5xx or other server error.
     return { ok: false, reason: "unreachable" }

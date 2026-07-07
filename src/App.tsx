@@ -16,6 +16,7 @@ import { PrivacyPolicy } from "@/pages/PrivacyPolicy"
 import { NotFound } from "@/pages/NotFound"
 import { DevLoginRoute } from "@/components/DevLoginRoute"
 import { DevLogoutRoute } from "@/components/DevLogoutRoute"
+import { MarketingLoginRoute } from "@/components/MarketingLoginRoute"
 import { Preferences } from "@/pages/Preferences"
 import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
 import { OrgProvider } from "@/context/OrgContext"
@@ -29,7 +30,6 @@ import { PrivateModeBanner } from "@/components/PrivateModeBanner"
 import { SessionExpiredBanner } from "@/components/SessionExpiredBanner"
 import { VersionBadge } from "@/components/VersionBadge"
 import { UpdateBanner } from "@/components/UpdateBanner"
-import { DelegatedTooltipLayer } from "@/components/ui/tooltip"
 import { hydratePrefetchStatus } from "@/lib/audio/prefetch"
 import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
 import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
@@ -124,13 +124,12 @@ export default function App() {
     // Single app-wide tooltip delay group: once one tooltip opens, adjacent
     // ones open instantly (Base UI grouping). `delay` only exists on the
     // Provider, so this is the one knob for hover timing across the app.
-    <TooltipProvider delay={300}>
+    <TooltipProvider delay={600}>
       <SyncingProvider>
         <PrivateModeBanner />
         {/* FRO-293: session-expiry banner — must be inside Router (uses useLocation) */}
         <SessionExpiredBanner />
         <SyncFreezeOverlay />
-        <DelegatedTooltipLayer />
         <OrgProvider>
           <OutboxProvider>
             {/* FRO-243: ProductTourProvider mounts once here; the tour portal
@@ -175,6 +174,8 @@ function AppRoutes() {
         {/* Dev-only auto-login/logout — see components/DevLoginRoute.tsx */}
         <Route path="/__dev/login" element={<DevLoginRoute />} />
         <Route path="/__dev/logout" element={<DevLogoutRoute />} />
+        {/* Curated marketing/demo auto-login — see components/MarketingLoginRoute.tsx */}
+        <Route path="/__marketing/login" element={<MarketingLoginRoute />} />
 
         {/* Lazy — org-level pages */}
         <Route path="/projects/archived" element={<ArchivedProjects />} />

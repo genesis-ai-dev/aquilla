@@ -1,5 +1,7 @@
 import { useState } from "react"
 import { Users } from "lucide-react"
+import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
 import { AppTooltip } from "@/components/ui/tooltip"
 import type { PeerState } from "@/hooks/useFileSync"
 
@@ -15,14 +17,6 @@ export function PeerPresence({ peers }: PeerPresenceProps) {
   const visible = peers.slice(0, 5)
   const overflow = peers.length - 5
 
-  function getInitials(username: string): string {
-    const trimmed = username.trim()
-    if (!trimmed) return "?"
-    const parts = trimmed.split(/\s+/)
-    if (parts.length === 1) return trimmed[0].toUpperCase()
-    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-  }
-
   return (
     <div className="relative">
       <AppTooltip content={`${peers.length} collaborator${peers.length !== 1 ? "s" : ""} online`}>
@@ -30,40 +24,34 @@ export function PeerPresence({ peers }: PeerPresenceProps) {
           className="flex items-center gap-0.5"
           onClick={() => setShowPopover(!showPopover)}
         >
-        <div className="flex -space-x-1.5">
-          {visible.map((peer) => (
-            <div
-              key={peer.peerId}
-              className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-background text-[10px] font-semibold text-white"
-              style={{ backgroundColor: peer.color }}
-            >
-              {getInitials(peer.username)}
-            </div>
-          ))}
-          {overflow > 0 && (
-            <div className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-background bg-muted text-[10px] font-semibold text-muted-foreground">
-              +{overflow}
-            </div>
-          )}
-        </div>
+          <AvatarGroup className="-space-x-1.5 *:data-[slot=avatar]:ring-background">
+            {visible.map((peer) => (
+              <InitialsAvatar
+                key={peer.peerId}
+                name={peer.username}
+                size="sm"
+                color={peer.color}
+              />
+            ))}
+            {overflow > 0 && (
+              <AvatarGroupCount className="size-6 text-[10px] font-semibold">
+                +{overflow}
+              </AvatarGroupCount>
+            )}
+          </AvatarGroup>
         </button>
       </AppTooltip>
 
       {showPopover && (
-        <div className="absolute right-0 bottom-full mb-2 z-40 w-56 rounded border bg-background p-2 shadow-md">
+        <div className="absolute right-0 bottom-full z-40 mb-2 w-56 rounded border bg-background p-2 shadow-md">
           <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
             <Users className="h-3 w-3" />
             Online ({peers.length})
           </div>
-          <ul className="space-y-1">
+          <ul className="flex flex-col gap-1">
             {peers.map((peer) => (
               <li key={peer.peerId} className="flex items-center gap-2 text-xs">
-                <div
-                  className="flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-semibold text-white"
-                  style={{ backgroundColor: peer.color }}
-                >
-                  {getInitials(peer.username)}
-                </div>
+                <InitialsAvatar name={peer.username} size="xs" color={peer.color} />
                 <span className="truncate">{peer.username}</span>
                 {peer.currentFileId && (
                   <span className="ml-auto text-[10px] text-muted-foreground">editing</span>

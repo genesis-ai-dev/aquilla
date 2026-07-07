@@ -13,6 +13,7 @@ import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
 import { useActiveCellStore, useCellStoreVersion, type CellStore, type CellSummary } from "@/hooks/useActiveCellStore"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
+import { triggerLinkSync } from "@/lib/sync/archive"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useCompletion, FALLBACK_COMPLETION_SETTINGS } from "@/hooks/useCompletion"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
@@ -131,7 +132,7 @@ import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
 import { CompletionBulkProgressBanner } from "./CompletionBulkProgressBanner"
-import { AppTooltip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { AppTooltip, Tooltip, TooltipContent, TooltipDelegationBoundary, TooltipTrigger } from "@/components/ui/tooltip"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
 import { AiSetupDialog } from "./AiSetupDialog"
 import {
@@ -225,6 +226,32 @@ export function shouldPatchSystemPrompt(
   return roleLevel >= ROLE.MAINTAINER
 }
 
+// ── QA-BUG-1: pure guard — exported for unit testing ─────────────────────────
+/**
+ * Returns true iff the zero-file self-heal should fire a `/link/sync`
+ * trigger for the current project. Only live-linked projects can be
+ * self-healed this way (clone links never sync again after creation — the
+ * QA-flagged gap there is closed at link time in the auth-worker route, not
+ * here). Guards against re-firing for a project that already has files (the
+ * common case, and the state right after a successful heal) and against
+ * re-firing for the SAME project id more than once per mount (the caller
+ * tracks `alreadyAttemptedProjectId` across renders via a ref).
+ */
+export function shouldSelfHealZeroFileLink(args: {
+  projectId: string | null | undefined
+  jwt: string | null | undefined
+  sourceLinkMode: "clone" | "live" | null | undefined
+  fileCount: number
+  alreadyAttemptedProjectId: string | null
+}): boolean {
+  const { projectId, jwt, sourceLinkMode, fileCount, alreadyAttemptedProjectId } = args
+  if (!projectId || !jwt) return false
+  if (sourceLinkMode !== "live") return false
+  if (fileCount > 0) return false
+  if (alreadyAttemptedProjectId === projectId) return false
+  return true
+}
+
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
@@ -235,7 +262,7 @@ export function ProjectWorkspace() {
       search: isAllOrgs ? "?org=all" : activeOrgId != null ? `?org=${activeOrgId}` : "",
     })
   }, [activeOrgId, isAllOrgs, navigate])
-  const { project: loadedProject, status, refresh, patchSettings } = useProject(projectId!)
+  const { project: loadedProject, status, refresh, patchSettings, roleLevel: serverRoleLevel } = useProject(projectId!)
   // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt)
   // live in IDB; merge them onto the server-fetched record on load and after
   // each local patch so rename suggestions don't loop on every open.
@@ -784,6 +811,32 @@ export function ProjectWorkspace() {
   const getActiveCells = useCallback(() => cellStore.getAllCellViews(), [cellStore])
   const getActiveCell = useCallback((cellId: string) => cellStore.getCellView(cellId), [cellStore])
 
+  // QA-BUG-1: zero-file self-heal for live-linked projects. The lazy-pull
+  // trigger in useStaleSourceCells only fires once a FILE is open — a
+  // freshly linked (or link-time-seed-failed) project has none, so there was
+  // no client path that could ever recover it. Fire /link/sync once per
+  // project load when the project is live-linked and its file list is
+  // empty; on success, `refresh()` pulls the now-populated file list. Clone
+  // links correctly no-op server-side (mirrorSync short-circuits for
+  // mode='clone') so this is safe to fire unconditionally for any live link.
+  const zeroFileHealAttemptedRef = useRef<string | null>(null)
+  useEffect(() => {
+    const pid = project?.id ?? null
+    const jwt = frontierSession?.jwt ?? null
+    if (!shouldSelfHealZeroFileLink({
+      projectId: pid,
+      jwt,
+      sourceLinkMode: project?.sourceLinkMode,
+      fileCount: projectFiles.length,
+      alreadyAttemptedProjectId: zeroFileHealAttemptedRef.current,
+    })) return
+    zeroFileHealAttemptedRef.current = pid
+    void (async () => {
+      const ok = await triggerLinkSync(jwt!, pid!)
+      if (ok) refresh()
+    })()
+  }, [project?.id, project?.sourceLinkMode, projectFiles.length, frontierSession?.jwt, refresh])
+
   // Track the last cell that received an optimistic target edit so
   // `handleCellCommitted` can fall back to a targeted revalidate when the
   // caller didn't pass a cellId. EditorTable calls applyOptimisticTargetEdit
@@ -825,12 +878,27 @@ export function ProjectWorkspace() {
   // editor table can decorate stale rows with the AlertTriangle badge.
   // One fetch per (projectId, fileId) — flattened to a boolean per row
   // inside EditorTable.
-  const { staleCellIds } = useStaleSourceCells({
+  // FRO-477 (§6) — upstreamStaleCellIds surfaces inherited (ancestor-chain)
+  // staleness alongside the existing direct staleCellIds; both flatten to
+  // per-row booleans inside EditorTable the same way.
+  const { staleCellIds, upstreamStaleCellIds, revalidate: revalidateStaleSource, syncNow: syncStaleSourceNow } = useStaleSourceCells({
     projectId: project?.id ?? null,
     fileId: activeFileId,
     getToken: getTokenForFile,
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
   })
+  // FRO-479: the WS connect effect's onMessage closure is created once, before
+  // staleness state settles — route link.upstream-changed frames through a ref
+  // so the handler always reaches the latest revalidate (which piggybacks the
+  // fire-and-forget POST /link/sync, single-flighted server-side).
+  const staleSourceRevalidateRef = useRef<() => void>(() => {})
+  staleSourceRevalidateRef.current = revalidateStaleSource
+  // QA-BUG-2: awaitable sync — the push handler awaits this THEN revalidates
+  // cells too, so the mirrored source TEXT updates live (not just the badge).
+  const syncStaleSourceNowRef = useRef<() => Promise<void>>(async () => {})
+  syncStaleSourceNowRef.current = syncStaleSourceNow
+  const revalidateCellsRef = useRef<() => void>(() => {})
+  revalidateCellsRef.current = revalidateCells
 
   // Audio lens: TTS settings (engine, voice library, cast) hydrated from IDB
   // and overlaid onto the project so generation uses the real engine/key/cast.
@@ -902,6 +970,11 @@ export function ProjectWorkspace() {
 
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const isSubtitleFile = activeFile?.type === "vtt" || activeFile?.type === "srt"
+
+  const workspaceBreadcrumb = useMemo(() => ({
+    surfaceLabel:
+      centerSurface === "editor" ? "Editor" : deriveNavTitle(location.pathname),
+  }), [centerSurface, location.pathname])
 
   const handleVisibleFootnotesChange = useCallback((entries: VisibleFootnoteEntry[]) => {
     const key = entries
@@ -1336,6 +1409,14 @@ export function ProjectWorkspace() {
 
   const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string) => {
     if (!project?.id) return
+    // FRO-365: defense-in-depth — the selection-island Translate button and
+    // the header "Run AI completions"/"Complete all" actions are already
+    // hidden below the contributor floor (SelectionBar.tsx, registry.ts), and
+    // the server 403s the resulting target.cell.commit regardless. This guard
+    // stops a below-floor caller from getting even a local optimistic echo
+    // (applyOptimisticTargetEdit) of a write the server will refuse, matching
+    // the same mirror-check used by handleEditorCommit/commitTrayFootnoteText.
+    if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
     // Optimistic local patch BEFORE the outbox enqueue. Mirrors what
     // handleEditorCommit in EditorTable does for hand-typed edits, and
     // collapses the race window where `cells.translated` would otherwise
@@ -2036,10 +2117,30 @@ export function ProjectWorkspace() {
     let cancelled = false
     let reconciler: import("@/lib/sync/ws-reconciler").WsReconciler | null = null
     void (async () => {
-      const { createWsReconciler, isOwnWriteEcho } = await import("@/lib/sync/ws-reconciler")
+      const { createWsReconciler, isOwnWriteEcho, createLinkUpstreamChangedHandler } =
+        await import("@/lib/sync/ws-reconciler")
       const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
       if (cancelled || !project?.id) return
       const pid = project.id
+      // FRO-479: link.upstream-changed frames → refetch staleness immediately
+      // (cheap GET, reflects the frame as soon as possible), and — debounced —
+      // AWAIT the mirror sync, then revalidate BOTH staleness and cells.
+      // QA-BUG-2: previously `triggerLinkSync` just re-ran the fire-and-forget
+      // stale-source fetch, which raced the mirror commit and never refreshed
+      // cells at all — the badge went live but the mirrored source TEXT only
+      // updated on a manual reload. Sequencing the revalidates AFTER the sync
+      // POST resolves (syncStaleSourceNow awaits it) fixes both: cells finally
+      // refetch post-commit, and staleness settles on the correct tone
+      // instead of the transient pre-sync "violet" (QA-BUG-3's other half).
+      const handleLinkUpstreamChanged = createLinkUpstreamChangedHandler({
+        currentProjectId: () => pid,
+        revalidateStaleSource: () => staleSourceRevalidateRef.current(),
+        triggerLinkSync: () => {
+          void syncStaleSourceNowRef.current().then(() => {
+            revalidateCellsRef.current()
+          })
+        },
+      })
       reconciler = createWsReconciler(
         {
           projectId: pid,
@@ -2115,6 +2216,12 @@ export function ProjectWorkspace() {
                   return next
                 })
               }
+            } else if (msg.t === "link.upstream-changed") {
+              // FRO-479: an upstream live-link project committed lane-relevant
+              // changes. Refetch staleness immediately; the handler debounces
+              // the mirror-sync trigger (push is a lossy accelerator — the
+              // lazy pull on file open remains the self-healing floor).
+              handleLinkUpstreamChanged(msg)
             } else if (msg.t === "presence") {
               // FRO-288: forward presence snapshots to the focus-lock hook so
               // it can update heldBy when another user holds our focused cell.
@@ -2167,6 +2274,15 @@ export function ProjectWorkspace() {
                 delete next.deletedBy
                 return next
               }).then(() => refresh())
+            } else if (msg.t === "member.removed") {
+              // FRO-346: this user's membership was revoked; the DO closes
+              // the socket right after this frame. Re-fetch the project —
+              // the server now 403s, which flips useProject to "forbidden",
+              // unmounts the editor (project → null tears this reconciler
+              // down via the effect cleanup) and shows the clean
+              // "you no longer have access" state.
+              if (msg.project !== pid || msg.userId !== currentUsername) return
+              refresh()
             }
           },
         },
@@ -3043,6 +3159,18 @@ export function ProjectWorkspace() {
       </div>
     )
   }
+  // FRO-346: revoked / never-granted access gets its own clean state — the
+  // project exists, so "not found" would be misleading (and after a member
+  // removal the removed user must land here on reload, not in the editor).
+  if (status === "forbidden") {
+    return (
+      <div className="p-8 text-muted-foreground" data-testid="project-no-access">
+        You no longer have access to this project. Ask a project maintainer to
+        re-invite you if this is unexpected.{" "}
+        <button className="underline" onClick={goToProjects}>Back to dashboard</button>.
+      </div>
+    )
+  }
   if (status === "not-found" || !project) {
     return (
       <div className="p-8 text-muted-foreground">
@@ -3219,14 +3347,15 @@ export function ProjectWorkspace() {
         logoAccessory={
           dockTab !== null ? (
             <AppTooltip content="Collapse sidebar" side="right">
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 aria-label="Collapse sidebar"
                 onClick={() => setDockTab(null)}
-                className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
               >
                 <PanelLeftClose className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             </AppTooltip>
           ) : null
         }
@@ -3393,9 +3522,9 @@ export function ProjectWorkspace() {
         header={
           <WorkspaceHeader
             project={project}
-            onBack={goToProjects}
             extraMenuItems={workspaceHeaderMenuItems}
             overviewHref={projectId ? `/projects/${projectId}` : undefined}
+            surfaceLabel={workspaceBreadcrumb.surfaceLabel}
           >
             {project && centerSurface === "rules" && (
               <>
@@ -3423,6 +3552,18 @@ export function ProjectWorkspace() {
                 </Button>
               </>
             )}
+
+            {project && centerSurface === "editor" && activeFileId ? (
+              <EditorModeToggle
+                lens={lens}
+                onChange={(l) => {
+                  setLens(l)
+                  // Surface the Voices tab when entering the Audio lens.
+                  if (l === "audio") setDockTab("voices")
+                }}
+                timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
+              />
+            ) : null}
 
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
 
@@ -3455,43 +3596,30 @@ export function ProjectWorkspace() {
             />
           </WorkspaceHeader>
         }
+        aboveCard={
+          <TabStrip
+            tabs={workspaceTabs.tabs}
+            // While a non-editor surface (Rules) is showing, no file tab is
+            // "active" even though selectedFileId still remembers the last
+            // file — the surface tab is the active one.
+            activeTabId={centerSurface === "editor" ? workspaceTabs.activeTabId : null}
+            files={projectFiles}
+            onActivate={workspaceTabs.activateTab}
+            onClose={handleCloseTab}
+            surfaceTab={
+              centerSurface === "rules" && projectId
+                ? {
+                    label: "Rules",
+                    // Navigating to the bare project route lets the
+                    // restore-location effect re-open the last active file.
+                    onClose: () => navigate(`/project/${projectId}`),
+                  }
+                : null
+            }
+          />
+        }
         beforeMain={
           <>
-            <TabStrip
-              tabs={workspaceTabs.tabs}
-              // While a non-editor surface (Rules) is showing, no file tab is
-              // "active" even though selectedFileId still remembers the last
-              // file — the surface tab is the active one.
-              activeTabId={centerSurface === "editor" ? workspaceTabs.activeTabId : null}
-              files={projectFiles}
-              onActivate={workspaceTabs.activateTab}
-              onClose={handleCloseTab}
-              surfaceTab={
-                centerSurface === "rules" && projectId
-                  ? {
-                      label: "Rules",
-                      // Navigating to the bare project route lets the
-                      // restore-location effect re-open the last active file.
-                      onClose: () => navigate(`/project/${projectId}`),
-                    }
-                  : null
-              }
-              trailing={
-                // Per-file view-mode control — lives with the content it
-                // affects, not in the global header (which holds actions).
-                project && centerSurface === "editor" && activeFileId ? (
-                  <EditorModeToggle
-                    lens={lens}
-                    onChange={(l) => {
-                      setLens(l)
-                      // Surface the Voices tab when entering the Audio lens.
-                      if (l === "audio") setDockTab("voices")
-                    }}
-                    timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
-                  />
-                ) : undefined
-              }
-            />
             {project && activeFileId && (
               <>
                 <SelectionBar
@@ -3746,6 +3874,11 @@ export function ProjectWorkspace() {
                 />
               ) : (
               <EditorActionsProvider value={editorActionsValue}>
+              {/* Dense grid: one tooltip-bearing control per cell across
+                  hundreds of cells — opt into the delegated tooltip layer here
+                  (see TooltipDelegationBoundary) instead of mounting a Base UI
+                  tooltip per control. */}
+              <TooltipDelegationBoundary>
               <EditorTable
             ref={editorRef} project={project} cellStore={cellStore}
             showFootnotesInline={footnoteViewMode === "inline"}
@@ -3794,9 +3927,11 @@ export function ProjectWorkspace() {
             onAckRemoteChange={handleAckRemoteChange}
             checkLockHolder={checkLockHolder}
             staleCellIds={staleCellIds}
+            upstreamStaleCellIds={upstreamStaleCellIds}
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
           />
+              </TooltipDelegationBoundary>
               </EditorActionsProvider>
               )}
             </div>
@@ -3927,6 +4062,7 @@ export function ProjectWorkspace() {
           open={checklistOpen}
           onOpenChange={handleChecklistOpenChange}
           project={project}
+          roleLevel={serverRoleLevel}
           state={checklistState}
           onProjectUpdated={handleProjectUpdated}
           onSharesChanged={refreshChecklistShares}

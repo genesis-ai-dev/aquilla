@@ -5,7 +5,7 @@ import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { Switch } from "@/components/ui/switch"
-import { Label } from "@/components/ui/label"
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Page, PageHeader, Section } from "@/components/ui/page"
@@ -17,7 +17,7 @@ import { useDockRailPosition } from "@/hooks/useDockRailPosition"
 import { PersonalProviderSection } from "@/components/settings/PersonalProviderSection"
 import { LocalModelsSection } from "@/components/ProjectSettings/LocalModelsSection"
 import { UsageSection } from "@/components/settings/UsageSection"
-import { cn } from "@/lib/utils"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { DockRailPosition } from "@/lib/dock-rail-position"
 import {
   getTranslatorProfile,
@@ -69,40 +69,26 @@ function WorkspaceSection() {
   const { position: railPosition, setPosition: setRailPosition } = useDockRailPosition()
   return (
     <Section title="Workspace" description="Layout choices for the project sidebar.">
-      <div className="space-y-3">
-        <div className="space-y-1">
-          <Label className="text-sm font-medium">Sidebar tab layout</Label>
-          <p className="text-xs text-muted-foreground">
-            Show Files, Chat, and Search as a vertical rail on the left or a horizontal bar
-            across the top of the sidebar.
-          </p>
-        </div>
-        <div
-          className="bg-muted inline-flex items-center gap-0.5 rounded-full p-1 text-xs"
-          role="group"
-          aria-label="Sidebar tab layout"
+      <Field>
+        <FieldLabel className="text-sm font-medium">Sidebar tab layout</FieldLabel>
+        <FieldDescription>
+          Show Files, Chat, and Search as a vertical rail on the left or a horizontal bar
+          across the top of the sidebar.
+        </FieldDescription>
+        <Tabs
+          value={railPosition}
+          onValueChange={(value) => setRailPosition(value as DockRailPosition)}
+          className="gap-0"
         >
-          {RAIL_OPTIONS.map(({ id, label }) => {
-            const active = railPosition === id
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setRailPosition(id)}
-                aria-pressed={active}
-                className={cn(
-                  "rounded-full px-3 py-1.5 transition-all",
-                  active
-                    ? "bg-card font-medium text-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
+          <TabsList aria-label="Sidebar tab layout">
+            {RAIL_OPTIONS.map(({ id, label }) => (
+              <TabsTrigger key={id} value={id}>
                 {label}
-              </button>
-            )
-          })}
-        </div>
-      </div>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      </Field>
     </Section>
   )
 }
@@ -150,9 +136,9 @@ function PrivacySection() {
     <Section title="Privacy" description="Control what's shared with us about how you use the app.">
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
-          <Label htmlFor="analytics-consent" className="text-sm font-medium">
+          <FieldLabel htmlFor="analytics-consent" className="text-sm font-medium">
             Share usage data
-          </Label>
+          </FieldLabel>
           <p className="text-xs text-muted-foreground">
             Events like project creation, exports, and AI translations. Never the contents of your
             translations or files.
@@ -188,25 +174,25 @@ function TranslatorProfileSection() {
       title="Translator profile"
       description="Tell the AI about yourself so its summaries and answers fit your context — and so it replies in your language. All fields are optional."
     >
-      <div className="grid gap-4 sm:grid-cols-2">
+      <FieldGroup className="grid gap-4 sm:grid-cols-2">
         {PROFILE_TEXT_FIELDS.map(({ key, label, placeholder }) => (
-          <div key={key} className="space-y-1">
-            <Label htmlFor={`profile-${key}`} className="text-sm font-medium">
+          <Field key={key}>
+            <FieldLabel htmlFor={`profile-${key}`} className="text-sm font-medium">
               {label}
-            </Label>
+            </FieldLabel>
             <Input
               id={`profile-${key}`}
               value={form[key] ?? ""}
               onChange={(e) => update(key, e.target.value)}
               placeholder={placeholder}
             />
-          </div>
+          </Field>
         ))}
-      </div>
-      <div className="mt-4 space-y-1">
-        <Label htmlFor="profile-otherInfo" className="text-sm font-medium">
+      </FieldGroup>
+      <Field className="mt-4">
+        <FieldLabel htmlFor="profile-otherInfo" className="text-sm font-medium">
           Other relevant information
-        </Label>
+        </FieldLabel>
         <Textarea
           id="profile-otherInfo"
           value={form.otherInfo ?? ""}
@@ -214,7 +200,7 @@ function TranslatorProfileSection() {
           placeholder="Anything else that should shape the summaries you get"
           rows={3}
         />
-      </div>
+      </Field>
       <p className="mt-3 text-xs text-muted-foreground">
         This profile is stored on this device and sent to the AI to tailor your summaries.
       </p>

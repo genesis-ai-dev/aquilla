@@ -10,10 +10,15 @@
 //   4. Stale-source markers are derived from cells.source_event_id vs
 //      source event_id pointer; after detach the local source IS the upstream
 //      snapshot, so the pointer matches and all markers clear naturally.
+//
+// FRO-478: extended to also display the link's mode/consumes/gate/cursor
+// state (read-only — creation/mode are set at link time, not editable here).
+// Detach itself is unchanged.
 
 import { useState } from "react"
 import { AlertTriangle, Link2Off } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import {
   Dialog,
@@ -31,6 +36,13 @@ export interface SourceLinkSectionProps {
   projectId: string
   /** Upstream source project id — only show when non-null. */
   sourceProjectId: string
+  /** FRO-476/478: link mode — 'clone' | 'live'. Null/undefined ⇒ legacy link
+   *  (pre-FRO-476) or unknown — rendered as "live" per the server's own
+   *  default-to-live-behavior fallback (COALESCE reasoning in stale-source-route.ts). */
+  sourceLinkMode?: "clone" | "live" | null
+  sourceLinkConsumes?: "source" | "target" | null
+  sourceLinkGate?: "head" | "validated" | null
+  sourceLinkCursor?: number | null
   /** Called after successful detach so the parent can refresh the project record. */
   onDetached: () => void
   /** The caller's resolved role level on this project. */
@@ -43,6 +55,10 @@ const MIN_ROLE_LEVEL = 500 // project_lead
 export function SourceLinkSection({
   projectId,
   sourceProjectId,
+  sourceLinkMode,
+  sourceLinkConsumes,
+  sourceLinkGate,
+  sourceLinkCursor,
   onDetached,
   roleLevel,
 }: SourceLinkSectionProps) {
@@ -105,6 +121,32 @@ export function SourceLinkSection({
               {sourceProjectId}
             </code>
           </div>
+          {/* FRO-478: mode/consumes/gate/cursor state, read-only — set at
+              link/creation time, not editable from here. */}
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <Badge variant={sourceLinkMode === "clone" ? "secondary" : "default"}>
+              {sourceLinkMode === "clone" ? "Clone" : "Live"}
+            </Badge>
+            {sourceLinkConsumes === "target" && (
+              <Badge variant="outline">consumes translations</Badge>
+            )}
+            {sourceLinkConsumes !== "target" && (
+              <Badge variant="outline">consumes source</Badge>
+            )}
+            {sourceLinkConsumes === "target" && sourceLinkGate && (
+              <Badge variant="outline">
+                gate: {sourceLinkGate === "validated" ? "validated only" : "every commit"}
+              </Badge>
+            )}
+            {sourceLinkMode !== "clone" && (
+              <Badge variant="outline">cursor: {sourceLinkCursor ?? 0}</Badge>
+            )}
+          </div>
+          {sourceLinkMode === "clone" && (
+            <p className="text-xs text-muted-foreground">
+              This is a one-time snapshot — upstream changes do not propagate here.
+            </p>
+          )}
           {canDetach ? (
             <div className="flex items-start gap-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm dark:border-amber-800 dark:bg-amber-950">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />

@@ -11,7 +11,7 @@ import { useState } from "react"
 import { Check } from "lucide-react"
 import { RevealableInput } from "@/components/ui/revealable-input"
 import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
+import { FieldLabel } from "@/components/ui/field"
 import { Section } from "@/components/ui/page"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 
@@ -89,9 +89,9 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
       <div className="space-y-4">
         {/* Gemini TTS */}
         <div className="space-y-2">
-          <Label htmlFor="org-gemini-tts-key" className="text-sm font-medium">
+          <FieldLabel htmlFor="org-gemini-tts-key" className="text-sm font-medium">
             Gemini TTS API key
-          </Label>
+          </FieldLabel>
           <RevealableInput
             id="org-gemini-tts-key"
             revealKind="key"

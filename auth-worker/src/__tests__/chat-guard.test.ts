@@ -20,11 +20,12 @@ import { pg } from "./helpers/pg-test-env"
 const ALLOWED_MODEL = "anthropic/claude-sonnet-4.5"
 const DISALLOWED_MODEL = "openai/gpt-4o-ultra-max"
 
-function chatBody(model: string) {
+function chatBody(model: string, extra: Record<string, unknown> = {}) {
   return JSON.stringify({
     model,
     messages: [{ role: "user", content: "Hello" }],
     stream: false,
+    ...extra,
   })
 }
 
@@ -227,5 +228,135 @@ describe("chat /api/v1/chat/completions — budget enforcement", () => {
     )
     // Must pass through (upstream mocked to 200), not 429.
     expect(res.status).toBe(200)
+  })
+})
+
+// ── FRO-414 follow-up: chat spend org attribution ────────────────────────────
+//
+// WHY: FRO-414's root cause was chat.ts hardcoding orgId=0 for every
+// recordCredit call, making chat spend invisible in every real org's credits
+// view (total degenerated to agent-only). The fix: a chat request invoked
+// from a project-editing context carries `projectId`, and the route resolves
+// the project's org (membership-gated) for both the credit guard and the
+// ledger write. Attribution must be best-effort — it can change WHERE spend
+// lands, but must never break chat itself.
+describe("chat /api/v1/chat/completions — org credit attribution (FRO-414 follow-up)", () => {
+  const PROJECT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+
+  /** wendi (user 1) is a maintainer on org 1's project; mallory (user 2) is a stranger. */
+  async function seedOrgProjectWorld() {
+    await seedUser(1, "wendi")
+    await seedUser(2, "mallory")
+    await pg.exec(`INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)`)
+    await pg.exec(`INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 600, 1)`)
+    await pg.exec(
+      `INSERT INTO projects (id, name, created_by, org_id) VALUES ('${PROJECT}', 'Test Project', 1, 1)`,
+    )
+    await pg.exec(
+      `INSERT INTO project_members (project_id, user_id, role_level) VALUES ('${PROJECT}', 1, 600)`,
+    )
+  }
+
+  async function llmLedger(): Promise<Array<{ org_id: number; user_id: number }>> {
+    const res = await env.AQUILLA_PG
+      .prepare(`SELECT org_id, user_id FROM org_credit_usage_daily WHERE rail = 'llm'`)
+      .all<{ org_id: number; user_id: number }>()
+    return res.results ?? []
+  }
+
+  const attributionEnv = () =>
+    withEnvOverrides({ OPENROUTER_API_KEY: "test-key" })
+
+  it("bills chat spend to the project's org when a member passes projectId", async () => {
+    await seedOrgProjectWorld()
+    const jwt = await jwtFor("wendi")
+    mockUpstreamSuccess()
+    const res = await app.request(
+      "/api/v1/chat/completions",
+      { method: "POST", headers: authHeader(jwt), body: chatBody(ALLOWED_MODEL, { projectId: PROJECT }) },
+      attributionEnv(),
+    )
+    expect(res.status).toBe(200)
+    // The llm row must land at org 1 — this is exactly what makes chat spend
+    // visible in the org's Today/This week totals (the FRO-414 symptom).
+    expect(await llmLedger()).toEqual([{ org_id: 1, user_id: 1 }])
+  })
+
+  it("falls back to org 0 when no projectId is present (legacy project-less chat)", async () => {
+    await seedOrgProjectWorld()
+    const jwt = await jwtFor("wendi")
+    mockUpstreamSuccess()
+    const res = await app.request(
+      "/api/v1/chat/completions",
+      { method: "POST", headers: authHeader(jwt), body: chatBody(ALLOWED_MODEL) },
+      attributionEnv(),
+    )
+    expect(res.status).toBe(200)
+    expect(await llmLedger()).toEqual([{ org_id: 0, user_id: 1 }])
+  })
+
+  it("falls back to org 0 when the caller has no access to the project — no cross-org billing injection", async () => {
+    await seedOrgProjectWorld()
+    const jwt = await jwtFor("mallory") // not a member of PROJECT or org 1
+    mockUpstreamSuccess()
+    const res = await app.request(
+      "/api/v1/chat/completions",
+      { method: "POST", headers: authHeader(jwt), body: chatBody(ALLOWED_MODEL, { projectId: PROJECT }) },
+      attributionEnv(),
+    )
+    // Chat itself must not break (attribution is best-effort, never a gate) —
+    // but mallory cannot burn org 1's caps by naming its project.
+    expect(res.status).toBe(200)
+    expect(await llmLedger()).toEqual([{ org_id: 0, user_id: 2 }])
+  })
+
+  it("falls back to org 0 for an unknown projectId (garbage in → legacy behavior out)", async () => {
+    await seedOrgProjectWorld()
+    const jwt = await jwtFor("wendi")
+    mockUpstreamSuccess()
+    const res = await app.request(
+      "/api/v1/chat/completions",
+      { method: "POST", headers: authHeader(jwt), body: chatBody(ALLOWED_MODEL, { projectId: "does-not-exist" }) },
+      attributionEnv(),
+    )
+    expect(res.status).toBe(200)
+    expect(await llmLedger()).toEqual([{ org_id: 0, user_id: 1 }])
+  })
+
+  it("enforces the org's caps for project-attributed chat when the org opts into enforce", async () => {
+    await seedOrgProjectWorld()
+    // Org 1 enforces a tiny daily cap and is already over it (100¢ × 4 = 400 credits ≥ 10).
+    await pg.exec(
+      `INSERT INTO org_settings (org_id, settings, version, updated_by)
+       VALUES (1, '{"credits":{"enforce":true,"dailyCap":10}}', 1, 1)`,
+    )
+    const today = new Date().toISOString().slice(0, 10)
+    await pg.exec(
+      `INSERT INTO org_credit_usage_daily (org_id, user_id, date_utc, rail, raw_cost_cents, units)
+       VALUES (1, 1, '${today}', 'llm', 100, 1)`,
+    )
+    const jwt = await jwtFor("wendi")
+    mockUpstreamSuccess()
+
+    // Project-attributed chat → blocked by org 1's cap.
+    const blocked = await app.request(
+      "/api/v1/chat/completions",
+      { method: "POST", headers: authHeader(jwt), body: chatBody(ALLOWED_MODEL, { projectId: PROJECT }) },
+      attributionEnv(),
+    )
+    expect(blocked.status).toBe(429)
+    const body = await blocked.json() as { error: string; reason: string }
+    expect(body.error).toBe("credit_cap_exceeded")
+    expect(body.reason).toBe("daily")
+
+    // Control: the same user's project-less chat guards against org 0
+    // (env-default caps, no spend) and passes — enforcement is scoped to the
+    // org that opted in, not to the user.
+    const passed = await app.request(
+      "/api/v1/chat/completions",
+      { method: "POST", headers: authHeader(jwt), body: chatBody(ALLOWED_MODEL) },
+      attributionEnv(),
+    )
+    expect(passed.status).toBe(200)
   })
 })

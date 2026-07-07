@@ -2,6 +2,16 @@ import { Plus, Sparkles, Download, CheckSquare, Bot, Upload, Mic, Wand2 } from "
 import type {
   WorkspaceAction, WorkspaceActionContext,
 } from "./types"
+import { canPerform } from "@/lib/sync/role-policy"
+
+// FRO-365: viewers (and any role below the action's server floor) must not
+// see these buttons at all — clicking them either persists a write server
+// can't refuse in time to avoid a confusing UX, or (pre-fix) looked like a
+// silent no-op. canPerform fails OPEN when the role is unknown (local/legacy
+// projects with no syncRole), so this never blocks non-cloud projects.
+function roleAllows(ctx: WorkspaceActionContext, kind: string): boolean {
+  return canPerform(kind, ctx.project.syncRole?.level ?? null)
+}
 
 // Cap on cells generated per "Run AI completions" click. Set to 50 so a
 // single scripture chapter (typically 25-50 verses) completes in one pass —
@@ -34,7 +44,7 @@ export const workspaceActions: WorkspaceAction[] = [
   },
   {
     id: "run-completions", label: "Run AI completions", icon: Sparkles, group: "primary",
-    isAvailable: (c) => c.activeFileId != null,
+    isAvailable: (c) => c.activeFileId != null && roleAllows(c, "target.cell.commit"),
     isDefault: (c) => {
       if (!c.activeFileId) return false
       const p = c.fileProgress.get(c.activeFileId)
@@ -57,6 +67,7 @@ export const workspaceActions: WorkspaceAction[] = [
     id: "complete-all", label: "Complete all", icon: Sparkles, group: "primary",
     isAvailable: (c) => {
       if (!c.activeFileId) return false
+      if (!roleAllows(c, "target.cell.commit")) return false
       const p = c.fileProgress.get(c.activeFileId)
       return !!p && p.total > 0 && p.translated < p.total
     },
@@ -77,7 +88,7 @@ export const workspaceActions: WorkspaceAction[] = [
   },
   {
     id: "batch-validate", label: "Batch validate…", icon: CheckSquare, group: "primary",
-    isAvailable: (c) => c.activeFileId != null,
+    isAvailable: (c) => c.activeFileId != null && roleAllows(c, "cell.validate"),
     isDefault: (c) => {
       if (!c.activeFileId) return false
       const p = c.fileProgress.get(c.activeFileId)

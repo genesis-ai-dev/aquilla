@@ -1,7 +1,12 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog"
@@ -117,84 +122,86 @@ export function RuleCreateDialog({ onAdd }: RuleCreateDialogProps) {
       <DialogContent className="max-w-lg">
         <DialogHeader><DialogTitle>Create Translation Rule</DialogTitle></DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-3">
-          <div>
-            <Label htmlFor="rname">Rule Name</Label>
-            <Input id="rname" value={name} onChange={(e) => setName(e.target.value)} placeholder="Preserve numbers" />
-          </div>
-          <div>
-            <Label htmlFor="rdesc">Description</Label>
-            <Input id="rdesc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Numbers in source must appear in target" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Severity</Label>
-              <Select
-                items={{ minor: "Minor", major: "Major" }}
-                value={severity}
-                onValueChange={(value) => setSeverity(value as "major" | "minor")}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="minor">Minor</SelectItem>
-                    <SelectItem value="major">Major</SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="rname">Rule Name</FieldLabel>
+              <Input id="rname" value={name} onChange={(e) => setName(e.target.value)} placeholder="Preserve numbers" />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="rdesc">Description</FieldLabel>
+              <Input id="rdesc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Numbers in source must appear in target" />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field>
+                <FieldLabel>Severity</FieldLabel>
+                <Select
+                  items={{ minor: "Minor", major: "Major" }}
+                  value={severity}
+                  onValueChange={(value) => setSeverity(value as "major" | "minor")}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="minor">Minor</SelectItem>
+                      <SelectItem value="major">Major</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field>
+                <FieldLabel>Rule Type</FieldLabel>
+                <Select
+                  items={{
+                    "source-target-match": "Source-target match",
+                    "source-requires-target": "Source requires target",
+                    "target-forbids": "Target forbids",
+                  }}
+                  value={checkType}
+                  onValueChange={(value) => setCheckType(value as Exclude<RuleCheck["type"], "builtin">)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="source-target-match">Source-target match</SelectItem>
+                      <SelectItem value="source-requires-target">Source requires target</SelectItem>
+                      <SelectItem value="target-forbids">Target forbids</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </Field>
             </div>
-            <div>
-              <Label>Rule Type</Label>
-              <Select
-                items={{
-                  "source-target-match": "Source-target match",
-                  "source-requires-target": "Source requires target",
-                  "target-forbids": "Target forbids",
-                }}
-                value={checkType}
-                onValueChange={(value) => setCheckType(value as Exclude<RuleCheck["type"], "builtin">)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="source-target-match">Source-target match</SelectItem>
-                    <SelectItem value="source-requires-target">Source requires target</SelectItem>
-                    <SelectItem value="target-forbids">Target forbids</SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
 
-          {checkType === "source-target-match" && (
-            <div>
-              <Label htmlFor="pat">Pattern (regex)</Label>
-              <Input id="pat" value={pattern} onChange={(e) => setPattern(e.target.value)} placeholder="\\d+" className="font-mono text-xs" />
-              <p className="mt-1 text-xs text-muted-foreground">Must appear in both source and target</p>
-            </div>
-          )}
-          {checkType === "target-forbids" && (
-            <div>
-              <Label htmlFor="tpat">Forbidden pattern (regex)</Label>
-              <Input id="tpat" value={targetPattern} onChange={(e) => setTargetPattern(e.target.value)} placeholder="\\b(the|a|an)\\b" className="font-mono text-xs" />
-              <p className="mt-1 text-xs text-muted-foreground">Target must not contain this</p>
-            </div>
-          )}
-          {checkType === "source-requires-target" && (
-            <>
-              <div>
-                <Label htmlFor="spat">Source pattern (regex)</Label>
-                <Input id="spat" value={sourcePattern} onChange={(e) => setSourcePattern(e.target.value)} placeholder="\\d+" className="font-mono text-xs" />
-              </div>
-              <div>
-                <Label htmlFor="tpat2">Required target pattern (regex)</Label>
-                <Input id="tpat2" value={targetPattern} onChange={(e) => setTargetPattern(e.target.value)} placeholder="\\d+" className="font-mono text-xs" />
-              </div>
-            </>
-          )}
+            {checkType === "source-target-match" && (
+              <Field>
+                <FieldLabel htmlFor="pat">Pattern (regex)</FieldLabel>
+                <Input id="pat" value={pattern} onChange={(e) => setPattern(e.target.value)} placeholder="\\d+" className="font-mono text-xs" />
+                <FieldDescription>Must appear in both source and target</FieldDescription>
+              </Field>
+            )}
+            {checkType === "target-forbids" && (
+              <Field>
+                <FieldLabel htmlFor="tpat">Forbidden pattern (regex)</FieldLabel>
+                <Input id="tpat" value={targetPattern} onChange={(e) => setTargetPattern(e.target.value)} placeholder="\\b(the|a|an)\\b" className="font-mono text-xs" />
+                <FieldDescription>Target must not contain this</FieldDescription>
+              </Field>
+            )}
+            {checkType === "source-requires-target" && (
+              <>
+                <Field>
+                  <FieldLabel htmlFor="spat">Source pattern (regex)</FieldLabel>
+                  <Input id="spat" value={sourcePattern} onChange={(e) => setSourcePattern(e.target.value)} placeholder="\\d+" className="font-mono text-xs" />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="tpat2">Required target pattern (regex)</FieldLabel>
+                  <Input id="tpat2" value={targetPattern} onChange={(e) => setTargetPattern(e.target.value)} placeholder="\\d+" className="font-mono text-xs" />
+                </Field>
+              </>
+            )}
+          </FieldGroup>
 
           {/* Test area */}
           <div className="rounded border bg-muted/30 p-3 space-y-2">

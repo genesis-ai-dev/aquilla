@@ -9,6 +9,7 @@
 
 import { Link } from "react-router-dom"
 import { FileQuestion } from "lucide-react"
+import { Button } from "@/components/ui/button"
 
 export function NotFound() {
   return (
@@ -22,11 +23,10 @@ export function NotFound() {
           The link you followed doesn't exist or may have moved.
         </p>
         <div className="mt-2">
-          <Link
-            to="/"
-            className="inline-flex items-center gap-1.5 rounded-full bg-card px-3 py-1.5 text-sm transition-all"
-          >
-            Go home
+          <Link to="/">
+            <Button size="sm" variant="outline">
+              Go home
+            </Button>
           </Link>
         </div>
       </div>

@@ -58,6 +58,11 @@ function getApplyButton() {
   return all.find((btn) => btn.hasAttribute("aria-busy"))!
 }
 
+/** CommandInput renders as a combobox (cmdk); happy-dom names it via placeholder. */
+function getFindInput() {
+  return screen.getByPlaceholderText(/find in project/i)
+}
+
 // ── Smoke ─────────────────────────────────────────────────────────────────────
 
 describe("ParallelPassagesPanel — smoke", () => {
@@ -82,7 +87,7 @@ describe("ParallelPassagesPanel — diff preview", () => {
     render(<ParallelPassagesPanel {...baseProps({ results })} />)
 
     // Type a find query that matches the translated text.
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
+    fireEvent.change(getFindInput(), {
       target: { value: "hello" },
     })
     // Type a replace value.
@@ -104,7 +109,7 @@ describe("ParallelPassagesPanel — diff preview", () => {
     ]
     render(<ParallelPassagesPanel {...baseProps({ results })} />)
 
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
+    fireEvent.change(getFindInput(), {
       target: { value: "foo" },
     })
     fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), {
@@ -120,7 +125,7 @@ describe("ParallelPassagesPanel — diff preview", () => {
     ]
     render(<ParallelPassagesPanel {...baseProps({ results })} />)
 
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
+    fireEvent.change(getFindInput(), {
       target: { value: "foo" },
     })
     fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), {
@@ -139,7 +144,7 @@ describe("ParallelPassagesPanel — diff preview", () => {
     ]
     render(<ParallelPassagesPanel {...baseProps({ results })} />)
 
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
+    fireEvent.change(getFindInput(), {
       target: { value: "hello" },
     })
     fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), {
@@ -154,7 +159,7 @@ describe("ParallelPassagesPanel — diff preview", () => {
     const results = [makeResult({ cellId: "c1", translated: "hello world" })]
     render(<ParallelPassagesPanel {...baseProps({ results })} />)
 
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
+    fireEvent.change(getFindInput(), {
       target: { value: "xyz" },
     })
     fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), {
@@ -176,7 +181,7 @@ describe("ParallelPassagesPanel — HTML-spanning skip count", () => {
     ]
     render(<ParallelPassagesPanel {...baseProps({ results })} />)
 
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
+    fireEvent.change(getFindInput(), {
       target: { value: "oo</b>b" },
     })
     fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), {
@@ -190,7 +195,7 @@ describe("ParallelPassagesPanel — HTML-spanning skip count", () => {
     const results = [makeResult({ cellId: "c1", translated: "hello world" })]
     render(<ParallelPassagesPanel {...baseProps({ results })} />)
 
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
+    fireEvent.change(getFindInput(), {
       target: { value: "hello" },
     })
     fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), {
@@ -204,32 +209,31 @@ describe("ParallelPassagesPanel — HTML-spanning skip count", () => {
 // ── Scope toggle ──────────────────────────────────────────────────────────────
 
 describe("ParallelPassagesPanel — scope toggle", () => {
-  it("renders the Project scope pill as active by default", () => {
+  it("renders the Project scope tab as active by default", () => {
     render(<ParallelPassagesPanel {...baseProps()} />)
-    // aria-pressed=true on the "Project" button in the scope group
-    const scopeGroup = screen.getByRole("group", { name: /search scope/i })
-    const projectBtn = within(scopeGroup).getByRole("button", { name: "Project" })
-    expect(projectBtn).toHaveAttribute("aria-pressed", "true")
+    const scopeTabs = screen.getByRole("tablist", { name: /search scope/i })
+    const projectTab = within(scopeTabs).getByRole("tab", { name: "Project" })
+    expect(projectTab).toHaveAttribute("aria-selected", "true")
   })
 
-  it("calls onScopeChange when a scope pill is clicked", () => {
+  it("calls onScopeChange when a scope tab is clicked", () => {
     const onScopeChange = vi.fn()
     render(
       <ParallelPassagesPanel
         {...baseProps({ onScopeChange, activeFileId: "file-1" })}
       />,
     )
-    const scopeGroup = screen.getByRole("group", { name: /search scope/i })
-    const fileBtn = within(scopeGroup).getByRole("button", { name: "File" })
-    fireEvent.click(fileBtn)
+    const scopeTabs = screen.getByRole("tablist", { name: /search scope/i })
+    const fileTab = within(scopeTabs).getByRole("tab", { name: "File" })
+    fireEvent.click(fileTab)
     expect(onScopeChange).toHaveBeenCalledWith("file")
   })
 
-  it("disables the File scope pill when there is no activeFileId", () => {
+  it("disables the File scope tab when there is no activeFileId", () => {
     render(<ParallelPassagesPanel {...baseProps({ activeFileId: undefined })} />)
-    const scopeGroup = screen.getByRole("group", { name: /search scope/i })
-    const fileBtn = within(scopeGroup).getByRole("button", { name: "File" })
-    expect(fileBtn).toBeDisabled()
+    const scopeTabs = screen.getByRole("tablist", { name: /search scope/i })
+    const fileTab = within(scopeTabs).getByRole("tab", { name: "File" })
+    expect(fileTab).toHaveAttribute("aria-disabled", "true")
   })
 })
 
@@ -256,7 +260,7 @@ describe("ParallelPassagesPanel — validation copy (FRO-286)", () => {
       <ParallelPassagesPanel {...baseProps({ results, onReplaceAll })} />,
     )
 
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
+    fireEvent.change(getFindInput(), {
       target: { value: "hello" },
     })
     fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), {
@@ -289,7 +293,7 @@ describe("ParallelPassagesPanel — Replace button state", () => {
     const results = [makeResult({ cellId: "c1", translated: "hello world" })]
     render(<ParallelPassagesPanel {...baseProps({ results, isReadOnly: true })} />)
 
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
+    fireEvent.change(getFindInput(), {
       target: { value: "hello" },
     })
     fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), {
@@ -306,7 +310,7 @@ describe("ParallelPassagesPanel — Replace button state", () => {
     ]
     render(<ParallelPassagesPanel {...baseProps({ results, onReplaceAll })} />)
 
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
+    fireEvent.change(getFindInput(), {
       target: { value: "world" },
     })
     fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), {

@@ -116,6 +116,63 @@ describe("AdminCreditsSection — agent spend is visually highlighted", () => {
   })
 })
 
+describe("AdminCreditsSection — FRO-414 regression: each column binds to its own distinct bucket", () => {
+  // WHY: FRO-414 was reported as Day-spend / Agent(day) / Week-spend / Agent(wk)
+  // showing duplicated values. Four distinct fixture numbers make a future
+  // transposition between these columns fail loudly rather than passing by
+  // coincidence (as it could if two of the four happened to share a value).
+  const ORG_DISTINCT: AdminOrgCredits = {
+    orgId: 3,
+    orgName: "Distinct Org",
+    day: {
+      totalCredits: 11, // Day spend
+      byRail: { llm: 0, agent: 33, tts: 0 },
+      agentCredits: 33, // Agent (day)
+    },
+    week: {
+      totalCredits: 99, // Week spend
+      byRail: { llm: 0, agent: 77, tts: 0 },
+      agentCredits: 77, // Agent (wk)
+    },
+    config: {
+      markup: 4,
+      agentMarkup: 5,
+      dailyCap: 1000,
+      weeklyCap: 5000,
+      agentDailyCap: 600,
+      agentWeeklyCap: 3000,
+      enforce: false,
+      showToOrg: false,
+    },
+  }
+
+  it("binds each of the four spend buckets to its own test id, no transposition", async () => {
+    mockList.mockResolvedValue([ORG_DISTINCT])
+    render(<AdminCreditsSection jwt="admin-jwt" />)
+    await waitFor(() => expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument())
+
+    // Window totals and agent sub-values each pinned to their own test id, so a
+    // transposition between total↔agent or day↔week fails loudly.
+    const dayTotal = screen.getByTestId("cap-day-3")
+    expect(dayTotal).toHaveTextContent("11 cr")
+    expect(dayTotal).not.toHaveTextContent("33 cr")
+    expect(dayTotal).not.toHaveTextContent("99 cr")
+    expect(dayTotal).not.toHaveTextContent("77 cr")
+
+    const weekTotal = screen.getByTestId("cap-week-3")
+    expect(weekTotal).toHaveTextContent("99 cr")
+    expect(weekTotal).not.toHaveTextContent("11 cr")
+    expect(weekTotal).not.toHaveTextContent("33 cr")
+    expect(weekTotal).not.toHaveTextContent("77 cr")
+
+    // Agent (day/week) via the dedicated agent-rail test ids.
+    expect(screen.getByTestId("agent-day-3")).toHaveTextContent("33 cr")
+    expect(screen.getByTestId("agent-day-3")).not.toHaveTextContent("11 cr")
+    expect(screen.getByTestId("agent-week-3")).toHaveTextContent("77 cr")
+    expect(screen.getByTestId("agent-week-3")).not.toHaveTextContent("99 cr")
+  })
+})
+
 describe("AdminCreditsSection — enforce toggle", () => {
   it("calls setOrgCreditConfig with { enforce: true } when toggled on", async () => {
     // WHY: enforce toggle transitions from log-only to hard-blocking. A broken

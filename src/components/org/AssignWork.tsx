@@ -1,6 +1,17 @@
 import { useState, useEffect } from "react"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
+import { Button } from "@/components/ui/button"
+import {
+  DatePicker,
+  dateToDeadlineString,
+} from "@/components/ui/date-picker"
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
 import {
   Select,
   SelectContent,
@@ -36,7 +47,7 @@ export function AssignWork({ projectId, files, orgId, jwt, author, onAssigned }:
   const [fileId, setFileId] = useState(files[0]?.id ?? "")
   const [chapter, setChapter] = useState("")
   const [chapters, setChapters] = useState<string[]>([])
-  const [deadline, setDeadline] = useState("")
+  const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
@@ -69,6 +80,7 @@ export function AssignWork({ projectId, files, orgId, jwt, author, onAssigned }:
     const scopeKind = chap ? "chapters" : "books"
     const scope = chap ? [{ fileId, chapter: chap }] : [{ fileId }]
     const scopeLabel = chap ? `${fileName} · ${chap}` : fileName
+    const deadline = deadlineDate ? dateToDeadlineString(deadlineDate) : ""
     setBusy(true)
     setError(null)
     setDone(null)
@@ -87,7 +99,7 @@ export function AssignWork({ projectId, files, orgId, jwt, author, onAssigned }:
       const name = members.find((m) => m.userId === Number(assigneeId))?.username ?? "member"
       setDone(`Assigned ${scopeLabel} to ${name}.`)
       setChapter("")
-      setDeadline("")
+      setDeadlineDate(undefined)
       onAssigned?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -98,102 +110,116 @@ export function AssignWork({ projectId, files, orgId, jwt, author, onAssigned }:
 
   if (!open) {
     return (
-      <button
-        onClick={() => setOpen(true)}
-        className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent/40"
-      >
+      <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
         Assign…
-      </button>
+      </Button>
     )
   }
 
   return (
     <div role="group" aria-label="Assign work" className="mt-3 w-full rounded-md border p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Select
-          items={[
-            { value: "", label: "Select member…" },
-            ...members.map((m) => ({ value: String(m.userId), label: m.username })),
-          ]}
-          value={assigneeId === "" ? "" : String(assigneeId)}
-          onValueChange={(v) => setAssigneeId(v == null || v === "" ? "" : Number(v))}
-          disabled={busy}
-        >
-          <SelectTrigger aria-label="Assignee">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              <SelectItem value="">Select member…</SelectItem>
-              {members.map((m) => (
-                <SelectItem key={m.userId} value={String(m.userId)}>{m.username}</SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-        <Select
-          items={files.map((f) => ({ value: f.id, label: f.name }))}
-          value={fileId}
-          onValueChange={(v) => setFileId(v ?? "")}
-          disabled={busy}
-        >
-          <SelectTrigger aria-label="Book">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              {files.map((f) => (
-                <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-        <Select
-          items={[
-            { value: "", label: "Whole book" },
-            ...chapters.map((ch) => ({ value: ch, label: ch })),
-          ]}
-          value={chapter}
-          onValueChange={(v) => setChapter(v ?? "")}
-          disabled={busy}
-        >
-          <SelectTrigger aria-label="Chapter">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              <SelectItem value="">Whole book</SelectItem>
-              {chapters.map((ch) => (
-                <SelectItem key={ch} value={ch}>{ch}</SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-        <input
-          type="date"
-          aria-label="Deadline (optional)"
-          value={deadline}
-          onChange={(e) => setDeadline(e.target.value)}
-          disabled={busy}
-          className="rounded-md border bg-background px-2 py-1 text-sm"
-        />
-        <button
-          onClick={submit}
-          disabled={busy || assigneeId === "" || !fileId}
-          className="rounded-md bg-primary px-3 py-1 text-sm font-medium text-primary-foreground disabled:opacity-50"
-        >
-          Assign
-        </button>
-        <button
-          onClick={() => { setOpen(false); setError(null); setDone(null) }}
-          disabled={busy}
-          className="rounded-md border px-3 py-1 text-sm font-medium hover:bg-accent/40 disabled:opacity-50"
-        >
-          Cancel
-        </button>
-      </div>
-      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
-      {done && <p className="mt-2 text-sm text-foreground">{done}</p>}
+      <FieldGroup className="gap-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field>
+            <FieldLabel htmlFor="assign-work-assignee">Assignee</FieldLabel>
+            <Select
+              items={[
+                { value: "", label: "Select member…" },
+                ...members.map((m) => ({ value: String(m.userId), label: m.username })),
+              ]}
+              value={assigneeId === "" ? "" : String(assigneeId)}
+              onValueChange={(v) => setAssigneeId(v == null || v === "" ? "" : Number(v))}
+              disabled={busy}
+            >
+              <SelectTrigger id="assign-work-assignee" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="">Select member…</SelectItem>
+                  {members.map((m) => (
+                    <SelectItem key={m.userId} value={String(m.userId)}>{m.username}</SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="assign-work-book">Book</FieldLabel>
+            <Select
+              items={files.map((f) => ({ value: f.id, label: f.name }))}
+              value={fileId}
+              onValueChange={(v) => setFileId(v ?? "")}
+              disabled={busy}
+            >
+              <SelectTrigger id="assign-work-book" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {files.map((f) => (
+                    <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="assign-work-chapter">Chapter</FieldLabel>
+            <Select
+              items={[
+                { value: "", label: "Whole book" },
+                ...chapters.map((ch) => ({ value: ch, label: ch })),
+              ]}
+              value={chapter}
+              onValueChange={(v) => setChapter(v ?? "")}
+              disabled={busy}
+            >
+              <SelectTrigger id="assign-work-chapter" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="">Whole book</SelectItem>
+                  {chapters.map((ch) => (
+                    <SelectItem key={ch} value={ch}>{ch}</SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="assign-work-deadline">Deadline (optional)</FieldLabel>
+            <DatePicker
+              id="assign-work-deadline"
+              value={deadlineDate}
+              onChange={setDeadlineDate}
+              disabled={busy}
+            />
+          </Field>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => void submit()}
+            disabled={busy || assigneeId === "" || !fileId}
+          >
+            Assign
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => { setOpen(false); setError(null); setDone(null) }}
+            disabled={busy}
+          >
+            Cancel
+          </Button>
+        </div>
+        {error && <FieldError>{error}</FieldError>}
+        {done && <p className="text-sm text-foreground">{done}</p>}
+      </FieldGroup>
     </div>
   )
 }

@@ -10,8 +10,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 /**
  * Text ↔ Audio lens toggle (EditorModeToggle).
  *
- * The header bar shows a segmented control with "Text" and "Audio" buttons.
- * Each button carries aria-pressed reflecting the active lens. Toggling is
+ * The tab strip shows a Tabs control with "Text" and "Audio" triggers.
+ * Each tab carries aria-selected reflecting the active lens. Toggling is
  * client-side only (no route change) so cells remain mounted.
  */
 test("text/audio mode toggle switches lens and preserves editor mount", async ({ alice }) => {
@@ -26,27 +26,26 @@ test("text/audio mode toggle switches lens and preserves editor mount", async ({
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // The toggle is a segmented control — two buttons with aria-pressed.
-  const textBtn = alice.getByRole("button", { name: /^Text$/i })
-  const audioBtn = alice.getByRole("button", { name: /^Audio$/i })
+  const textTab = alice.getByRole("tab", { name: /^Text$/i })
+  const audioTab = alice.getByRole("tab", { name: /^Audio$/i })
 
-  await expect(textBtn).toBeVisible({ timeout: 5_000 })
-  await expect(audioBtn).toBeVisible({ timeout: 5_000 })
+  await expect(textTab).toBeVisible({ timeout: 5_000 })
+  await expect(audioTab).toBeVisible({ timeout: 5_000 })
 
-  // 1. Initially in Text mode: Text pressed, Audio not pressed.
-  await expect(textBtn).toHaveAttribute("aria-pressed", "true")
-  await expect(audioBtn).toHaveAttribute("aria-pressed", "false")
+  // 1. Initially in Text mode: Text selected, Audio not selected.
+  await expect(textTab).toHaveAttribute("aria-selected", "true")
+  await expect(audioTab).toHaveAttribute("aria-selected", "false")
 
   // 2. Switch to Audio lens.
-  await audioBtn.click()
-  await expect(audioBtn).toHaveAttribute("aria-pressed", "true", { timeout: 3_000 })
-  await expect(textBtn).toHaveAttribute("aria-pressed", "false")
+  await audioTab.click()
+  await expect(audioTab).toHaveAttribute("aria-selected", "true", { timeout: 3_000 })
+  await expect(textTab).toHaveAttribute("aria-selected", "false")
 
   // The editor cells should still be mounted (lens toggle doesn't unmount the list).
   await expect(alice.locator("[data-cell-id]").first()).toBeVisible({ timeout: 5_000 })
 
   // 3. Switch back to Text lens.
-  await textBtn.click()
-  await expect(textBtn).toHaveAttribute("aria-pressed", "true", { timeout: 3_000 })
-  await expect(audioBtn).toHaveAttribute("aria-pressed", "false")
+  await textTab.click()
+  await expect(textTab).toHaveAttribute("aria-selected", "true", { timeout: 3_000 })
+  await expect(audioTab).toHaveAttribute("aria-selected", "false")
 })

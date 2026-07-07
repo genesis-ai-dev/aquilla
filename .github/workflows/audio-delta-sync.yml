@@ -66,8 +66,16 @@ jobs:
 
       # 1) CONTENT: orgs/teams (created in Neon) + projects + cells. The group
       #    sync runs inline, so new orgs are fully pulled in. No R2 needed here.
+      # Step-level timeouts (not just the job's): a JOB-level timeout kills
+      # `if: always()` steps too, so the state-persist step never ran and every
+      # nightly full sweep restarted from zero (run 28809824118: content took
+      # 5h45m, job died at 350m into audio, persist stuck "pending"). A STEP
+      # timeout only fails the step; migrate-all.ts saveState()s after every
+      # project, so persisting the partial .migrate-state.json lets successive
+      # runs converge instead of repeating the sweep.
       - name: Content delta
         id: content
+        timeout-minutes: 150
         env:
           FRONTIER_USERNAME: ${{ secrets.FRONTIER_USERNAME }}
           FRONTIER_PASSWORD: ${{ secrets.FRONTIER_PASSWORD }}
@@ -83,6 +91,7 @@ jobs:
       - name: Audio delta
         id: audio
         if: always()
+        timeout-minutes: 150
         env:
           FRONTIER_USERNAME: ${{ secrets.FRONTIER_USERNAME }}
           FRONTIER_PASSWORD: ${{ secrets.FRONTIER_PASSWORD }}

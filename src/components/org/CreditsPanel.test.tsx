@@ -56,7 +56,7 @@ const SAMPLE_DATA: OrgCredits = {
 }
 
 describe("CreditsPanel — renders for maintainer when data is present", () => {
-  it("shows daily and weekly cap bars for a maintainer", async () => {
+  it("shows daily and weekly windows + the agent sub-cap for a maintainer", async () => {
     // WHY: this is the happy path — a maintainer should see the panel.
     mockGetOrgCredits.mockResolvedValue(SAMPLE_DATA)
     render(<CreditsPanel jwt="mgr-jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
@@ -64,27 +64,109 @@ describe("CreditsPanel — renders for maintainer when data is present", () => {
     await waitFor(() => expect(screen.getByTestId("credits-panel")).toBeInTheDocument())
 
     expect(screen.getByText("Compute credits")).toBeInTheDocument()
-    expect(screen.getByText("Today")).toBeInTheDocument()
-    expect(screen.getByText("This week")).toBeInTheDocument()
-    // Agent section headline
-    expect(screen.getByText("Agent spend (elevated rail)")).toBeInTheDocument()
-    // Agent sub-bars
-    expect(screen.getByText("Agent today")).toBeInTheDocument()
-    expect(screen.getByText("Agent this week")).toBeInTheDocument()
+    // "Today"/"This week" label both the overall window and the agent sub-cap row.
+    expect(screen.getAllByText("Today").length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText("This week").length).toBeGreaterThanOrEqual(1)
+    // Overall + agent sub-cap totals are present via their stable test ids.
+    expect(screen.getByTestId("cap-day-total")).toBeInTheDocument()
+    expect(screen.getByTestId("cap-week-total")).toBeInTheDocument()
+    expect(screen.getByTestId("agentcap-day")).toBeInTheDocument()
+    expect(screen.getByTestId("agentcap-week")).toBeInTheDocument()
+    // Agent sub-cap section headline.
+    expect(screen.getByText(/Agent spend \(elevated rail/)).toBeInTheDocument()
     expect(mockGetOrgCredits).toHaveBeenCalledWith("mgr-jwt", 1)
   })
 
-  it("shows formatted credit values", async () => {
+  it("surfaces the per-rail breakdown (chat, agent, TTS) the API returns", async () => {
+    // WHY the follow-up UI work exists: chat spend was invisible before. The
+    // legend must show each rail's own value, scoped per window.
+    mockGetOrgCredits.mockResolvedValue(SAMPLE_DATA)
+    render(<CreditsPanel jwt="mgr-jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
+    await waitFor(() => expect(screen.getByTestId("credits-panel")).toBeInTheDocument())
+
+    // Day byRail: { llm: 200, agent: 150, tts: 50 }
+    expect(screen.getByTestId("rail-day-agent")).toHaveTextContent("150 cr")
+    expect(screen.getByTestId("rail-day-llm")).toHaveTextContent("Chat")
+    expect(screen.getByTestId("rail-day-llm")).toHaveTextContent("200 cr")
+    expect(screen.getByTestId("rail-day-tts")).toHaveTextContent("50 cr")
+    // Week byRail: { llm: 900, agent: 700, tts: 200 }
+    expect(screen.getByTestId("rail-week-llm")).toHaveTextContent("900 cr")
+  })
+
+  it("shows the formatted daily total", async () => {
     mockGetOrgCredits.mockResolvedValue(SAMPLE_DATA)
     render(<CreditsPanel jwt="mgr-jwt" orgId={1} orgRoleLevel={ROLE.OWNER} />)
     await waitFor(() => expect(screen.getByTestId("credits-panel")).toBeInTheDocument())
-    // Day cap: 400 cr / 1,000 cr
-    expect(screen.getByText("400 cr")).toBeInTheDocument()
+    // Day total 400 cr against its 1,000 cr cap.
+    expect(screen.getByTestId("cap-day-total")).toHaveTextContent("400 cr")
+    expect(screen.getByTestId("cap-day-total")).toHaveTextContent("1,000 cr")
   })
 
   // NOTE: the "Caps are display-only — enforcement is off" notice was intentionally
   // removed in e92aacc49. The enforce=false state now renders no extra notice, so the
   // former "shows enforcement-off notice" test was dropped rather than weakened.
+})
+
+describe("CreditsPanel — FRO-414 regression: each bar binds to its own distinct bucket", () => {
+  // WHY: FRO-414 was reported as "3 of 4 bars echo the same number" — a
+  // transposed field mapping would make two bars silently render the same
+  // value. Using four DISTINCT fixture numbers means any future swap of
+  // day/week or total/agent fields fails loudly instead of coincidentally
+  // passing (e.g. a swap between two bars that happen to share a value).
+  const DISTINCT_DATA: OrgCredits = {
+    config: {
+      markup: 4,
+      agentMarkup: 5,
+      dailyCap: 1000,
+      weeklyCap: 5000,
+      agentDailyCap: 600,
+      agentWeeklyCap: 3000,
+      enforce: true,
+      showToOrg: true,
+    },
+    day: {
+      totalCredits: 11, // "Today"
+      byRail: { llm: 0, agent: 33, tts: 0 },
+      agentCredits: 33, // "Agent — today"
+    },
+    week: {
+      totalCredits: 99, // "This week"
+      byRail: { llm: 0, agent: 77, tts: 0 },
+      agentCredits: 77, // "Agent — this week"
+    },
+    remaining: { daily: 989, weekly: 4901, agentDaily: 567, agentWeekly: 2923 },
+  }
+
+  it("binds each of the four buckets to its own test id, no transposition", async () => {
+    mockGetOrgCredits.mockResolvedValue(DISTINCT_DATA)
+    render(<CreditsPanel jwt="mgr-jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
+    await waitFor(() => expect(screen.getByTestId("credits-panel")).toBeInTheDocument())
+
+    // Each value pinned to its OWN element by test id — this is what catches a
+    // transposition that a plain getByText can't. Day total (11) ≠ agent (33);
+    // week total (99) ≠ agent (77); and none are swapped across windows.
+    const dayTotal = screen.getByTestId("cap-day-total")
+    expect(dayTotal).toHaveTextContent("11 cr")
+    expect(dayTotal).not.toHaveTextContent("33 cr")
+    expect(dayTotal).not.toHaveTextContent("99 cr")
+    expect(dayTotal).not.toHaveTextContent("77 cr")
+
+    const weekTotal = screen.getByTestId("cap-week-total")
+    expect(weekTotal).toHaveTextContent("99 cr")
+    expect(weekTotal).not.toHaveTextContent("11 cr")
+    expect(weekTotal).not.toHaveTextContent("33 cr")
+    expect(weekTotal).not.toHaveTextContent("77 cr")
+
+    // Agent appears twice by design (rail legend + its own sub-cap); both must
+    // carry the agent value for the matching window, never the total.
+    expect(screen.getByTestId("rail-day-agent")).toHaveTextContent("33 cr")
+    expect(screen.getByTestId("agentcap-day")).toHaveTextContent("33 cr")
+    expect(screen.getByTestId("rail-week-agent")).toHaveTextContent("77 cr")
+    expect(screen.getByTestId("agentcap-week")).toHaveTextContent("77 cr")
+
+    expect(screen.getByTestId("rail-day-agent")).not.toHaveTextContent("11 cr")
+    expect(screen.getByTestId("rail-week-agent")).not.toHaveTextContent("99 cr")
+  })
 })
 
 describe("CreditsPanel — translator-never-sees-it invariant", () => {

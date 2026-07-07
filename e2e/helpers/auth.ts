@@ -135,6 +135,53 @@ export async function injectSession(page: Page, session: PersistedSession): Prom
   await page.waitForLoadState("networkidle")
 }
 
+/** Inject multiple FrontierSessions with a chosen active account. */
+export async function injectSessions(
+  page: Page,
+  sessions: PersistedSession[],
+  activeUsername: string,
+): Promise<void> {
+  await page.evaluate(async ({ sessions, activeUsername }) => {
+    const DB = "frontier"
+    const STORE = "session"
+    const ENVELOPE_KEY = "envelope"
+
+    const open = indexedDB.open(DB, 1)
+    open.onupgradeneeded = () => {
+      if (!open.result.objectStoreNames.contains(STORE)) {
+        open.result.createObjectStore(STORE)
+      }
+    }
+    await new Promise<void>((resolve, reject) => {
+      open.onsuccess = () => resolve()
+      open.onerror = () => reject(open.error)
+    })
+    const db = open.result
+
+    const tx = db.transaction(STORE, "readwrite")
+    const store = tx.objectStore(STORE)
+    store.put(
+      {
+        active: activeUsername,
+        sessions: Object.fromEntries(sessions.map((s) => [s.username, s])),
+      },
+      ENVELOPE_KEY,
+    )
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+    db.close()
+
+    localStorage.setItem("codex:onboardingComplete", "true")
+    localStorage.setItem("codex:productTourDone", "1")
+    document.cookie = "aq_hint=1; Path=/; Max-Age=31536000; SameSite=Lax"
+  }, { sessions, activeUsername })
+
+  await page.reload()
+  await page.waitForLoadState("networkidle")
+}
+
 /** Convenience: load JSON from disk and inject into a page in one call. */
 export async function injectSessionFromDisk(
   page: Page,

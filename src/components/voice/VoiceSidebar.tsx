@@ -2,7 +2,7 @@
 // subtitles often has only ONE voice actor; "Cast" is how that single actor
 // becomes MANY distinct characters. This rail is now purely the calm cast
 // roster (VoiceLibraryPanel) — crafting/cloning a character happens inside the
-// roster's CharacterModal, so there's no separate clone dialog or "make a
+// roster's NewVoiceModal, so there's no separate clone dialog or "make a
 // character" button here anymore.
 //
 // The host still owns a "clone open + seed cell" signal (so the per-cell "+"
@@ -38,13 +38,13 @@ export function VoiceSidebar({
   project, projectId, tts, session, username,
   targetLanguage, fileId, cells, cloneOpen, onCloneOpenChange, cloneSeedCellId,
 }: VoiceSidebarProps) {
-  // `project` and `username` are part of the rail's contract (the studio is
-  // project-scoped) but the cast roster reads everything it needs off `tts`.
-  void project
+  // `username` is part of the rail's contract (the studio is project-scoped)
+  // but the cast roster reads everything else it needs off `tts`.
+  // FRO-365: `project.syncRole?.level` gates character CRUD in VoiceLibraryPanel.
   void username
 
   // Translate the host's open/close clone signal into a monotonically rising
-  // `seedSignal` the roster consumes to (re)open its CharacterModal seeded to a
+  // `seedSignal` the roster consumes to (re)open its NewVoiceModal seeded to a
   // take. On each rising edge of `cloneOpen` we bump the signal (a real state
   // update so the roster re-renders) and reset the host flag — the modal's own
   // lifecycle now lives in the roster, so the host flag is just an edge-trigger.
@@ -70,6 +70,7 @@ export function VoiceSidebar({
             cells={cells}
             seedCellId={cloneSeedCellId}
             seedSignal={seedSignal}
+            roleLevel={project.syncRole?.level ?? null}
           />
         </div>
       </div>

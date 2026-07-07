@@ -24,6 +24,7 @@ const STATIC_PAGES: Record<string, string> = {
   "/homepage": "/homepage.html",
   "/beta": "/beta.html",
   "/case-studies/come-and-see": "/case-study.html",
+  "/case-studies/biblica": "/case-study-biblica.html",
 }
 
 // Structural type avoids a @cloudflare/workers-types dependency in tests.

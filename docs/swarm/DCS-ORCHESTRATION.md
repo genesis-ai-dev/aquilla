@@ -91,6 +91,38 @@ serialized (only ONE agent touches a given existing file per wave — see below)
 - **Wave 3:** C (delta-invalidation wiring) + the browser-QA dev-proof agent.
 - **Gate + adversarial review + proof capture + summary.**
 
+## Wave 3 dev-proof plan (recon done 2026-07-06, live git.door43.org)
+
+Goal: import a resource at an OLD release, link 2 language projects, translate a couple cells,
+then "Import changes" to a NEWER release and watch those cells flag STALE in both downstreams +
+appear in the Upstream-changes review panel. Use REAL DCS data.
+
+**Preferred target — Translation Notes (clean prose delta):** `unfoldingWord/en_tn`, one short
+book file `tn_TIT.tsv` (or `tn_PHM.tsv`/`tn_JUD.tsv`). Notes are edited between releases as real
+text changes (no alignment noise). Requires Agent E's `tsv-notes` route merged+verified. Tags run
+…v86 v87 v88 v89. Proof agent must first CONFIRM the chosen release pair yields ≥1 changed Note
+row (fetch the file at both refs, diff) before building the demo on it.
+
+**Fallback target — USFM Bible (route guaranteed by Slice A):** `unfoldingWord/en_ult`, a short
+book (`57-TIT.usfm`/`58-PHM.usfm`/`66-JUD.usfm`). CAVEAT: en_ult is an *Aligned Bible* — much of
+what changes between releases is `\zaln`/`\w` word-alignment markup, NOT verse text. Two risks the
+proof agent MUST check: (a) does `src/lib/parsers/usfm.ts` strip alignment markup? If yes,
+alignment-only diffs will (correctly) hash-suppress → pick a pair with a REAL verse-text change
+(verified: v80 vs v89 differ for TIT/PHM/JUD; v70 is an 11-byte stub — too old). If the parser
+does NOT strip alignment, imported source values carry alignment junk (ugly but the invalidation
+still demonstrates). Verify ≥1 cell actually flags stale after the delta before relying on it.
+
+**CRITICAL API finding — the `compare` endpoint THROTTLES under rapid requests:** returns HTTP 200
+with an EMPTY body (`total_commits` null, no commits) when hit too fast; recovers after ~20s.
+Confirmed: v88→v89 = 1 commit/56 files, v80→v89 = 1077 commits/68 files once spaced. The delta
+engine + proof harness MUST: space requests, retry with backoff on an empty/short compare body,
+and fall back to FULL-SCAN reconcile (parse all files, hash-compare) if compare stays empty. This
+is the self-heal path the spec §6 already mandates — make sure `delta.ts`/the panel honor it.
+(SWARM-TODO for whoever owns delta robustness: add backoff + full-scan fallback if not present.)
+
+**Compare quirk reconfirmed live:** changed files = union of `.commits[].files[].filename`
+(top-level `.files` empty). Raw content + manifest fetch fine (CORS `*`).
+
 ## Merge log (append-only)
 
 - 2026-07-06 · integration branch created; spec + `types.ts` + state files committed.

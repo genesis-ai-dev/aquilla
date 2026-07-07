@@ -162,3 +162,15 @@ TSV routes), orchestrator mount-fix, fix-compare (throttle correctness). Full su
 NOT DONE / DEFERRED: Slice D (aligned-target) — scoped out for this run; tw/ta markdown routes —
 deferred (spec §12); USFM `\zaln` alignment stripping — follow-up; full browser UI proof — in
 flight. NOT promoted (branch only, awaiting user).
+- 2026-07-06 · Adversarial review BLOCKER (delta create fileId orphaning) FIXED + tests
+  (`b74b7e922`). Findings 2/3 (HEAD-tracking delta, new-file file.create) → follow-ups in TRACES.
+- 2026-07-06 · LIVE BROWSER QA (DCS-UIQA.md + 5 screenshots, committed `d5cdf45f9`): MILESTONE 1
+  PROVEN on the real dev stack — browsed 18 live DCS entries, imported en_obs (50 files/598 cells,
+  frame images, survives reload) via real /import, panel renders + Check-for-updates round-trips.
+  MILESTONE 2 (UI delta→stale) blocked by 4 real defects live QA found (unit tests missed all):
+  (1) catalog.ts unbound `fetch` → Illegal invocation in browser [BLOCKER]; (2) DcsCatalogBrowser
+  seeds lang with display-name not ISO → 0 initial results; (3) DcsUpstreamPanel check-for-updates
+  queries the PINNED ref → never sees new releases [BLOCKER for delta UI]; (4) dcsEventId not
+  project-scoped → same resource in 2 projects dedupes away. Dispatched claude/dcs-fix-ui to fix
+  all 4 + regression tests. Delta ENGINE separately proven on real en_tn v87→v89 (1082 changed,
+  stable ids). Also confirmed product gap: import UI pins latest-only (no release picker).

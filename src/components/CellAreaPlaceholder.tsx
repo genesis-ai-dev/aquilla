@@ -1,18 +1,10 @@
-import type { ComponentType } from "react"
 // while a file hydrates, empty states when nothing is selected or the file
 // has no cells yet. Mirrors the EditorTable's grid columns so there's no
 // layout shift when real rows arrive.
 
 import { FileText, FolderOpen, Sparkles, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
+import { EmptyState } from "@/components/ui/page"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { CellAreaState } from "@/lib/editor/cell-area-state"
 
@@ -103,6 +95,7 @@ function NoFileEmpty({
   if (!filesLoaded) {
     return (
       <EmptyState
+        className="h-full border-0 bg-transparent p-8"
         icon={FolderOpen}
         title="No file selected"
         description="Pick a file from the sidebar to start translating."
@@ -115,6 +108,7 @@ function NoFileEmpty({
   if (!hasFiles) {
     return (
       <EmptyState
+        className="h-full border-0 bg-transparent p-8"
         icon={Upload}
         title="No files yet"
         description="Import a file to get started."
@@ -131,6 +125,7 @@ function NoFileEmpty({
   }
   return (
     <EmptyState
+      className="h-full border-0 bg-transparent p-8"
       icon={FolderOpen}
       title="No file selected"
       description="Pick a file from the sidebar to start translating."
@@ -147,6 +142,7 @@ function ReadyEmpty({
 }) {
   return (
     <EmptyState
+      className="h-full border-0 bg-transparent p-8"
       icon={FileText}
       title={fileName ? `${fileName} is empty` : "This file has no cells yet"}
       description="Import content, or start typing in the first cell."
@@ -159,30 +155,5 @@ function ReadyEmpty({
         ) : undefined
       }
     />
-  )
-}
-
-function EmptyState({
-  icon: Icon,
-  title,
-  description,
-  action,
-}: {
-  icon: ComponentType<{ className?: string }>
-  title: string
-  description: string
-  action?: React.ReactNode
-}) {
-  return (
-    <Empty className="h-full border-0 p-8">
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <Icon />
-        </EmptyMedia>
-        <EmptyTitle>{title}</EmptyTitle>
-        <EmptyDescription>{description}</EmptyDescription>
-      </EmptyHeader>
-      {action ? <EmptyContent>{action}</EmptyContent> : null}
-    </Empty>
   )
 }

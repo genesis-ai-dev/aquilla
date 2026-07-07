@@ -35,7 +35,7 @@ import {
 } from "@/components/ui/input-group"
 import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
 import { cn } from "@/lib/utils"
-import { FolderPlus, Search, X } from "lucide-react"
+import { FolderPlus, Search, X, Building2 } from "lucide-react"
 
 const STALE_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000
 
@@ -659,13 +659,17 @@ export function OrgHome() {
                       </div>
 
                       {orgSummaries.length === 0 ? (
-                        <div className="px-4 py-10 text-center">
-                          <p className="text-sm text-muted-foreground">No organizations yet.</p>
-                        </div>
+                        <EmptyState
+                          className="border-0 bg-transparent py-10"
+                          icon={Building2}
+                          title="No organizations yet."
+                        />
                       ) : visibleOrgSummaries.length === 0 ? (
-                        <div className="px-4 py-10 text-center">
-                          <p className="text-sm text-muted-foreground">No matching organizations.</p>
-                        </div>
+                        <EmptyState
+                          className="border-0 bg-transparent py-10"
+                          icon={Search}
+                          title="No matching organizations."
+                        />
                       ) : (
                         <div className="divide-y">
                           {visibleOrgSummaries.map((summary) => (
@@ -778,15 +782,17 @@ export function OrgHome() {
                       </div>
 
                       {projects.length === 0 ? (
-                        <div className="px-4 py-10 text-center">
-                          <p className="text-sm text-muted-foreground">No projects yet.</p>
-                        </div>
+                        <EmptyState
+                          className="border-0 bg-transparent py-10"
+                          icon={FolderPlus}
+                          title="No projects yet."
+                        />
                       ) : visible.length === 0 ? (
-                        <div className="px-4 py-10 text-center">
-                          <p className="text-sm text-muted-foreground">
-                            {projectQuery ? "No matching projects." : currentProjectLens.empty}
-                          </p>
-                        </div>
+                        <EmptyState
+                          className="border-0 bg-transparent py-10"
+                          icon={Search}
+                          title={projectQuery ? "No matching projects." : currentProjectLens.empty}
+                        />
                       ) : (
                         <ProjectTable projects={visible} now={now} showOrg />
                       )}
@@ -917,7 +923,11 @@ export function OrgHome() {
                       }
                     />
                   ) : visible.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No matching projects.</p>
+                    <EmptyState
+                      className="border-0 bg-transparent py-6"
+                      icon={Search}
+                      title="No matching projects."
+                    />
                   ) : (
                     <div className="overflow-hidden rounded-2xl border bg-card">
                       <ProjectTable projects={visible} now={now} showOrg={false} />

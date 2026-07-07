@@ -7,8 +7,9 @@
  */
 import { useState, useMemo, useEffect } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, Pencil, ArrowUpCircle, Building2, Lock, Clock } from "lucide-react"
+import { AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, Pencil, ArrowUpCircle, Building2, Lock, Clock, ScrollText } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/ui/page"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -261,7 +262,12 @@ export function RulesSurface({
                 </div>
               )}
               {orgRules.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No org-level rules yet. Add one or promote a project rule.</p>
+                <EmptyState
+                  className="border-0 bg-transparent px-0 py-4"
+                  icon={Building2}
+                  title="No org-level rules yet"
+                  description="Add one or promote a project rule."
+                />
               ) : (
                 <ul className="flex flex-col gap-2">
                   {orgRules.map((rule) => (
@@ -383,13 +389,17 @@ export function RulesSurface({
           <CardHeader><CardTitle>Project Rules ({userRules.length})</CardTitle></CardHeader>
           <CardContent>
             {userRules.length === 0 ? (
-              <div className="flex flex-col gap-1 text-sm text-muted-foreground">
-                <p>No project rules yet.</p>
-                <p className="text-xs">
-                  Add a rule, import a style guide, or suggest rules from your edits using the buttons above.
-                  {canEditOrgRules && orgRules.length > 0 && " Org rules above also apply to this project."}
-                </p>
-              </div>
+              <EmptyState
+                className="border-0 bg-transparent px-0 py-4"
+                icon={ScrollText}
+                title="No project rules yet"
+                description={
+                  <>
+                    Add a rule, import a style guide, or suggest rules from your edits using the buttons above.
+                    {canEditOrgRules && orgRules.length > 0 && " Org rules above also apply to this project."}
+                  </>
+                }
+              />
             ) : (
               <ul className="flex flex-col gap-2">
                 {userRules.map((rule) => {

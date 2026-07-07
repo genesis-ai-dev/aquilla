@@ -7,8 +7,9 @@
  * that passes orgId + a selected member). Self-contained so it doesn't
  * collide with the FRO-170 org-vs-project legibility redesign.
  */
-import { X } from "lucide-react"
+import { X, FolderX } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import { EmptyState } from "@/components/ui/page"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useMemberAccess } from "@/hooks/useMemberAccess"
 import type { ProjectAccessBreakdown } from "@/lib/frontier/orgs"
@@ -68,11 +69,11 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
 
             {/* Project list */}
             {state.data.projects.length === 0 ? (
-              <div className="rounded-md border bg-muted/30 p-6 text-center">
-                <p className="text-sm text-muted-foreground">
-                  {username} has no access to any project in this org.
-                </p>
-              </div>
+              <EmptyState
+                className="border-0 bg-muted/30 py-8"
+                icon={FolderX}
+                title={`${username} has no access to any project in this org.`}
+              />
             ) : (
               <div className="space-y-2">
                 <p className="text-xs text-muted-foreground">

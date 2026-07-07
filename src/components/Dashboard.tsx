@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, Navigate } from "react-router-dom"
 import {
-  ChevronRight, Cloud, Settings as SettingsIcon, Trash2, Users,
+  ChevronRight, Cloud, Settings as SettingsIcon, Trash2, Users, FolderOpen, Filter,
 } from "lucide-react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import {
@@ -14,6 +14,7 @@ import { ProjectCard } from "./ProjectCard"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { Skeleton } from "@/components/ui/skeleton"
+import { EmptyState } from "@/components/ui/page"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { OverflowMenu } from "@/components/OverflowMenu"
@@ -298,13 +299,24 @@ export function Dashboard() {
           {loading && projects.length === 0 ? (
             <ProjectCardGridSkeleton count={3} />
           ) : filteredProjects.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {projects.length === 0
-                ? session
-                  ? "No local projects yet. Import one from Frontier below or create a new one."
-                  : "No projects yet. Create one or log in to import from Frontier."
-                : `No ${lifecycleFilter} projects.`}
-            </p>
+            <EmptyState
+              className="border-0 bg-transparent py-6"
+              icon={projects.length === 0 ? FolderOpen : Filter}
+              title={
+                projects.length === 0
+                  ? session
+                    ? "No local projects yet"
+                    : "No projects yet"
+                  : `No ${lifecycleFilter} projects.`
+              }
+              description={
+                projects.length === 0
+                  ? session
+                    ? "Import one from Frontier below or create a new one."
+                    : "Create one or log in to import from Frontier."
+                  : undefined
+              }
+            />
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredProjects.map((p) => (

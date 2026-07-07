@@ -1,5 +1,5 @@
 import { memo, useState } from "react"
-import { AlertTriangle, HelpCircle } from "lucide-react"
+import { AlertTriangle, HelpCircle, FolderOpen, Users } from "lucide-react"
 import { useProjectsMembersMatrix } from "@/hooks/useProjectsMembersMatrix"
 import { useOrg } from "@/hooks/useOrg"
 import { ROLE } from "@/lib/frontier/roles"
@@ -13,6 +13,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
+import { EmptyState } from "@/components/ui/page"
 import type { MatrixMember, MatrixCell } from "@/hooks/useProjectsMembersMatrix"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
@@ -72,13 +73,20 @@ export function MembersMatrixView() {
 
   if (!matrix || matrix.members.length === 0 || matrix.projects.length === 0) {
     return (
-      <div className="rounded-md border bg-muted/30 p-6 text-center">
-        <p className="text-sm text-muted-foreground">
-          {matrix?.projects.length === 0
-            ? "No projects yet. Once you create or sync a project, this view will populate."
-            : "No members beyond yourself. Invite someone from the Roster tab to start."}
-        </p>
-      </div>
+      <EmptyState
+        className="border-0 bg-muted/30 py-8"
+        icon={matrix?.projects.length === 0 ? FolderOpen : Users}
+        title={
+          matrix?.projects.length === 0
+            ? "No projects yet"
+            : "No members beyond yourself"
+        }
+        description={
+          matrix?.projects.length === 0
+            ? "Once you create or sync a project, this view will populate."
+            : "Invite someone from the Roster tab to start."
+        }
+      />
     )
   }
 

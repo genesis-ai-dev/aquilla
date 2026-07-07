@@ -9,10 +9,11 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight,
+  ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, Music,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { getCellPref, setCellPref } from "@/lib/store/audio-cell-prefs"
@@ -55,6 +56,7 @@ import {
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
@@ -1328,7 +1330,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         )}
         <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
           {/* FRO-250: sticky chapter label — left gutter, does not shift Source */}
-          <div className="flex items-center overflow-visible">
+          <div className="flex w-full items-center justify-center overflow-visible">
             {currentSectionLabel && !looksLikeUuid(currentSectionLabel) && (
               <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
                 {currentSectionLabel}
@@ -1382,10 +1384,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             <TimelineAddMedia onAttachFile={onAttachMediaFile} onAttachUrl={onAttachMediaUrl} />
           </div>
         ) : (
-          <div className="flex-1 px-4 py-10 text-center text-sm text-muted-foreground">
-            {audioLens
-              ? "No media segments yet. Import an audio or video file, or record a take, to populate the media layer."
-              : "No text segments in this file."}
+          <div className="flex-1">
+            <EmptyState
+              className="h-full border-0 bg-transparent py-10"
+              icon={audioLens ? Music : FileText}
+              title={audioLens ? "No media segments yet" : "No text segments in this file"}
+              description={
+                audioLens
+                  ? "Import an audio or video file, or record a take, to populate the media layer."
+                  : undefined
+              }
+            />
           </div>
         )
       ) : (
@@ -3551,7 +3560,7 @@ function EditorRow({
             is the single issue surface (severity tint + title); no
             stripe/dot/warning. Selection lives on the source/target divider so
             range selection follows the text. */}
-        <div className="flex h-full items-start justify-center gap-1 pt-5">
+        <div className="flex h-full w-full items-start justify-center gap-1 pt-5">
           {numberPill}
           {/* Validation circle — single bare icon until validated, with a
               health ring appearing around it once there's a substantive score. */}
@@ -3636,9 +3645,11 @@ function EditorRow({
               this cell is assigned to. Tooltip = username + scope label. */}
           {assigneeLabel && (
             <AppTooltip content={assigneeNote ? `Assigned to ${assigneeLabel} (${assigneeNote})` : `Assigned to ${assigneeLabel}`}>
-              <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[8px] font-semibold uppercase text-indigo-700 ring-1 ring-indigo-300 dark:bg-indigo-900 dark:text-indigo-300 dark:ring-indigo-700">
-                {assigneeLabel.slice(0, 2)}
-              </span>
+              <InitialsAvatar
+                name={assigneeLabel}
+                size="xs"
+                fallbackClassName="bg-indigo-100 text-[8px] uppercase text-indigo-700 ring-1 ring-indigo-300 dark:bg-indigo-900 dark:text-indigo-300 dark:ring-indigo-700"
+              />
             </AppTooltip>
           )}
         </div>
@@ -3703,7 +3714,7 @@ function EditorRow({
                 onToolbarMouseUp={handleToolbarMouseUp}
               />
             )}
-            <div className="mb-1 flex h-4 items-center gap-1 text-xs text-muted-foreground" dir="ltr">
+            <div className="mb-1 flex h-4 items-center justify-center gap-1 text-center text-xs text-muted-foreground" dir="ltr">
               <span>{cell.context}</span>
               {showFormattingLossWarning && (
                 <AppTooltip content="Source has inline formatting that the target does not preserve. Formatting will be lost on export." className="max-w-xs">

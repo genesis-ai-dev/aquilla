@@ -145,3 +145,8 @@ is the self-heal path the spec §6 already mandates — make sure `delta.ts`/the
   runs matching. Honest status: DCS work is regression-free; ProjectOverview flakiness is the
   user's separate in-flight work.
 - 2026-07-06 · Wave 3 starting: live-DCS proof.
+- 2026-07-06 · LIVE PROOF (adapter half) captured in DCS-PROOF.md: real en_tn + en_ult deltas,
+  stable ids, on git.door43.org. Wave 3 dispatched: (a) fix-compare (throttle correctness bug —
+  compareRefs must retry/throw not silently report no-changes), (b) adversarial review of the full
+  ff466abfe..HEAD diff, (c) browser-proof (dev-stack UI walkthrough, best-effort). NOT promoting;
+  leaving on swarm/dcs-integration for user's morning review.

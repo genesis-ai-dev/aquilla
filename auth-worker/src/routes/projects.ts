@@ -1021,7 +1021,7 @@ projects.post(
       invite.email.toLowerCase() !== user.email.toLowerCase()
     ) {
       return c.json(
-        { error: "This invite was sent to a different email address." },
+        { error: "This invite was sent to a different email address.", code: "email_mismatch" },
         403,
       )
     }

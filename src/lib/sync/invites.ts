@@ -45,6 +45,27 @@ export type InvitePreviewResult<T> =
   | { ok: true; data: T }
   | { ok: false; reason: InvitePreviewFailReason }
 
+/** Coded failure from the accept endpoints (FRO-443). The server has always
+ *  distinguished e.g. an email-bound mismatch (403) from a dead token (410),
+ *  but the helpers used to collapse every non-2xx into `null`, so JoinPage
+ *  could only ever say "link no longer valid". `null` still means the fetch
+ *  itself threw (network). */
+export type InviteAcceptFailCode = "email_mismatch" | "used" | "time_expired" | "unknown"
+export type InviteAcceptFailure = { ok: false; code: InviteAcceptFailCode }
+
+async function acceptFailureFromResponse(res: Response): Promise<InviteAcceptFailure> {
+  let code: InviteAcceptFailCode = "unknown"
+  try {
+    const body = (await res.json()) as { code?: string }
+    if (body.code === "email_mismatch" || body.code === "used" || body.code === "time_expired") {
+      code = body.code
+    }
+  } catch {
+    // non-JSON body — keep "unknown"
+  }
+  return { ok: false, code }
+}
+
 export interface ServerInviteCreated {
   token: string
   projectId: string
@@ -175,7 +196,7 @@ export async function acceptServerInvite(
   jwt: string,
   token: string,
   apiUrl: string = AUTH_API_URL
-): Promise<ServerInviteAccepted | null> {
+): Promise<ServerInviteAccepted | InviteAcceptFailure | null> {
   try {
     const res = await fetch(`${apiUrl}/api/v2/projects/accept-invite`, {
       method: "POST",
@@ -187,7 +208,7 @@ export async function acceptServerInvite(
     })
     if (!res.ok) {
       console.warn(`[invites] acceptServerInvite → HTTP ${res.status}`)
-      return null
+      return acceptFailureFromResponse(res)
     }
     return (await res.json()) as ServerInviteAccepted
   } catch (err) {
@@ -326,7 +347,7 @@ export async function acceptMultiInvite(
   jwt: string,
   token: string,
   apiUrl: string = AUTH_API_URL
-): Promise<MultiInviteAccepted | null> {
+): Promise<MultiInviteAccepted | InviteAcceptFailure | null> {
   try {
     const res = await fetch(`${apiUrl}/api/v2/invites/${encodeURIComponent(token)}/accept`, {
       method: "POST",
@@ -337,7 +358,7 @@ export async function acceptMultiInvite(
     })
     if (!res.ok) {
       console.warn(`[invites] acceptMultiInvite → HTTP ${res.status}`)
-      return null
+      return acceptFailureFromResponse(res)
     }
     return (await res.json()) as MultiInviteAccepted
   } catch (err) {

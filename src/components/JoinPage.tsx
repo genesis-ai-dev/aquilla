@@ -9,6 +9,7 @@ import {
   previewServerInvite,
   previewMultiInvite,
   acceptMultiInvite,
+  type InviteAcceptFailure,
   type InvitePreviewFailReason,
   type ServerInvitePreview,
   type MultiInvitePreview,
@@ -105,7 +106,7 @@ export function JoinPage() {
     // Prefer the multi-project accept — it also redeems a single-project token
     // (one row) — then fall back to the legacy single-project accept.
     const multi = await acceptMultiInvite(jwt, token)
-    if (multi && multi.accepted.length > 0) {
+    if (multi && !("ok" in multi) && multi.accepted.length > 0) {
       posthog.capture(INVITE_REDEEMED, {
         invite_kind: "multi",
         project_count: multi.accepted.length,
@@ -115,7 +116,7 @@ export function JoinPage() {
       return
     }
     const single = await acceptServerInvite(jwt, token)
-    if (single) {
+    if (single && !("ok" in single)) {
       posthog.capture(INVITE_REDEEMED, {
         invite_kind: "single",
         project_count: 1,
@@ -130,6 +131,23 @@ export function JoinPage() {
     // can re-auth and accept, instead of seeing a misleading dead-link error.
     if (isJwtExpired(jwt)) {
       setPhase("initial")
+      return
+    }
+    // FRO-443: an email-bound invite redeemed by the wrong account is NOT a
+    // dead link — telling the user to ask for a fresh one sends them in a
+    // circle (the new link carries the same binding). Name the real problem.
+    const failure = [multi, single].find(
+      (r): r is InviteAcceptFailure => !!r && "ok" in r && !r.ok
+    )
+    if (failure?.code === "email_mismatch") {
+      const boundEmail =
+        preview && "email" in preview.data ? preview.data.email : null
+      setPhase("error")
+      setError(
+        boundEmail
+          ? `This invite was sent to ${boundEmail} — sign in with that account to accept it.`
+          : "This invite was sent to a different email address — sign in with the account it was sent to."
+      )
       return
     }
     setPhase("error")

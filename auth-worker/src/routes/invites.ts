@@ -314,7 +314,7 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
   // All rows share the token's email; sample the first.
   if (first.email && first.email.toLowerCase() !== user.email.toLowerCase()) {
     return c.json(
-      { error: "This invite was sent to a different email address." },
+      { error: "This invite was sent to a different email address.", code: "email_mismatch" },
       403,
     )
   }

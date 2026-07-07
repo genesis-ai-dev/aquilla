@@ -206,3 +206,49 @@ describe("JoinPage preview error states (signed-out)", () => {
     expect(screen.queryByText("do-signup")).not.toBeInTheDocument()
   })
 })
+
+describe("JoinPage email-bound mismatch (FRO-443)", () => {
+  // A wrong-account redeem used to collapse into "link is no longer valid" —
+  // sending the user to ask for a fresh link that would fail identically.
+  it("names the bound email instead of claiming the link is dead", async () => {
+    sessionValue = { session: { jwt: fakeJwt(3600) }, loading: false }
+    vi.mocked(previewServerInvite).mockResolvedValueOnce({      ok: true,
+      data: { projectName: "John", role: { level: 400, name: "contributor" }, email: "bob@example.com" },
+    } as Awaited<ReturnType<typeof previewServerInvite>>)
+    vi.mocked(acceptMultiInvite).mockResolvedValueOnce({ ok: false, code: "email_mismatch" })
+    vi.mocked(acceptServerInvite).mockResolvedValueOnce({ ok: false, code: "email_mismatch" })
+
+    renderJoin()
+    fireEvent.click(await screen.findByRole("button", { name: /accept invitation/i }))
+
+    expect(
+      await screen.findByText(/This invite was sent to bob@example\.com/)
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/no longer valid/)).not.toBeInTheDocument()
+  })
+
+  it("falls back to generic mismatch copy when the preview has no email", async () => {
+    sessionValue = { session: { jwt: fakeJwt(3600) }, loading: false }
+    vi.mocked(acceptMultiInvite).mockResolvedValueOnce({ ok: false, code: "email_mismatch" })
+    vi.mocked(acceptServerInvite).mockResolvedValueOnce({ ok: false, code: "email_mismatch" })
+
+    renderJoin()
+    fireEvent.click(await screen.findByRole("button", { name: /accept invitation/i }))
+
+    expect(
+      await screen.findByText(/sent to a different email address/)
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/no longer valid/)).not.toBeInTheDocument()
+  })
+
+  it("still shows the dead-link copy for uncoded failures", async () => {
+    sessionValue = { session: { jwt: fakeJwt(3600) }, loading: false }
+    vi.mocked(acceptMultiInvite).mockResolvedValueOnce({ ok: false, code: "unknown" })
+    vi.mocked(acceptServerInvite).mockResolvedValueOnce({ ok: false, code: "unknown" })
+
+    renderJoin()
+    fireEvent.click(await screen.findByRole("button", { name: /accept invitation/i }))
+
+    expect(await screen.findByText(/no longer valid/)).toBeInTheDocument()
+  })
+})

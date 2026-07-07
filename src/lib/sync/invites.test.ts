@@ -201,16 +201,33 @@ describe("acceptServerInvite", () => {
     expect(JSON.parse(init!.body as string)).toEqual({ token: "token-123" })
   })
 
-  it("returns null on 410 (used or expired)", async () => {
+  // FRO-443: HTTP failures now return a coded failure (not null) so JoinPage
+  // can distinguish an email-bound mismatch from a genuinely dead link.
+  it("returns code:'unknown' on a 410 without a server code field", async () => {
     global.fetch = mockFetch(410, { error: "expired" }) as unknown as typeof fetch
     const result = await acceptServerInvite("jwt", "token", API)
-    expect(result).toBeNull()
+    expect(result).toEqual({ ok: false, code: "unknown" })
   })
 
-  it("returns null on 404 (unknown token)", async () => {
+  it("maps a coded 410 body to its code", async () => {
+    global.fetch = mockFetch(410, { error: "Invite already used", code: "used" }) as unknown as typeof fetch
+    const result = await acceptServerInvite("jwt", "token", API)
+    expect(result).toEqual({ ok: false, code: "used" })
+  })
+
+  it("returns code:'email_mismatch' on a bound-email 403 (FRO-443)", async () => {
+    global.fetch = mockFetch(403, {
+      error: "This invite was sent to a different email address.",
+      code: "email_mismatch",
+    }) as unknown as typeof fetch
+    const result = await acceptServerInvite("jwt", "token", API)
+    expect(result).toEqual({ ok: false, code: "email_mismatch" })
+  })
+
+  it("returns code:'unknown' on 404 (unknown token)", async () => {
     global.fetch = mockFetch(404, { error: "not found" }) as unknown as typeof fetch
     const result = await acceptServerInvite("jwt", "bogus", API)
-    expect(result).toBeNull()
+    expect(result).toEqual({ ok: false, code: "unknown" })
   })
 
   it("returns null on network error without throwing", async () => {

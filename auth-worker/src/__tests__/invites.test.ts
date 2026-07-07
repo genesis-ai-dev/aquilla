@@ -416,8 +416,32 @@ describe("accept-invite: email-bound enforcement (FRO-283)", () => {
       env,
     )
     expect(res.status).toBe(403)
-    const body = (await res.json()) as { error: string }
+    const body = (await res.json()) as { error: string; code?: string }
     expect(body.error).toMatch(/different email/)
+    // FRO-443: machine-readable code so JoinPage can render a specific
+    // email-mismatch message instead of the generic dead-link copy.
+    expect(body.code).toBe("email_mismatch")
+  })
+
+  it("multi-invite accept also returns code:'email_mismatch' on a bound-email mismatch (FRO-443)", async () => {
+    await seedUser(1, "alice")
+    await seedUser(2, "carol") // email: carol@example.com
+    await seedProject("p-multi-email-bad", 1)
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_invites (token, project_id, role_level, created_by, email, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+      .bind("tok-multi-email-bad", "p-multi-email-bad", 400, 1, "bob@example.com", new Date(Date.now() + 86400000).toISOString())
+      .run()
+
+    const res = await app.request(
+      "/api/v2/invites/tok-multi-email-bad/accept",
+      { method: "POST", headers: authHeader(await jwtFor("carol")) },
+      env,
+    )
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as { error: string; code?: string }
+    expect(body.error).toMatch(/different email/)
+    expect(body.code).toBe("email_mismatch")
   })
 
   it("allows anyone to redeem an open-link invite (null email)", async () => {

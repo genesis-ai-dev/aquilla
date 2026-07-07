@@ -146,6 +146,7 @@ export default defineConfig(({ mode }) => ({
         homepage: path.resolve(__dirname, "homepage.html"),
         beta: path.resolve(__dirname, "beta.html"),
         "case-study": path.resolve(__dirname, "case-study.html"),
+        "case-study-biblica": path.resolve(__dirname, "case-study-biblica.html"),
       },
       output: {
         // Keep source module names out of emitted chunk URLs. Brave/EasyList can
@@ -190,6 +191,11 @@ export default defineConfig(({ mode }) => ({
       "auth-worker/**",
       "sync-worker/**",
       "worker/**",
+      // Parity-run acceptance/roundtrip suites run via `pnpm parity:score` /
+      // `pnpm roundtrip:score` with parity/vitest.config.ts — rows there are
+      // red by design until implemented, so they must not fail the default
+      // suite.
+      "parity/**",
     ],
   },
 }))

@@ -1,7 +1,9 @@
 import { useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { Building2, Check, ChevronDown, Plus } from "lucide-react"
-import { useActiveOrg } from "@/context/OrgContext"
+import { useActiveOrg, type GuestOrg } from "@/context/OrgContext"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { fetchAccessibleProjects } from "@/lib/sync/cloud-projects"
 import { isOrgScopedRoute } from "./org-route-scope"
 import { OrgCreateDialog } from "./OrgCreateDialog"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
@@ -60,14 +62,18 @@ function OrgMark({
 }
 
 export function OrgSwitcher() {
-  const { orgs, activeOrg, activeOrgId, isAllOrgs, setActiveOrg, setAllOrgs, refresh } = useActiveOrg()
+  const { orgs, activeOrg, activeOrgId, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs, refresh } = useActiveOrg()
+  const { session } = useFrontierSession()
+  const jwt = session?.jwt ?? null
   const location = useLocation()
   const navigate = useNavigate()
 
   const [open, setOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
 
-  if (!activeOrg && !isAllOrgs) return null
+  // FRO-473: a project-only invitee has zero member orgs but may still have
+  // guest orgs to switch into — don't hide the whole switcher for them.
+  if (!activeOrg && !isAllOrgs && guestOrgs.length === 0) return null
 
   const showAllOrgs = orgs.length > 1
   const title = isAllOrgs ? "All organizations" : activeOrg?.name ?? "Workspace"
@@ -84,6 +90,22 @@ export function OrgSwitcher() {
     if (isOrgScopedRoute(location.pathname) || location.pathname === "/") {
       navigate({ pathname: "/", search: `?org=${orgId}` })
     }
+  }
+
+  // FRO-473: guest orgs are not activatable (no org membership, so
+  // setActiveOrg/org:active would misrepresent the user's role) — clicking
+  // one just navigates. Single accessible project in that org → straight to
+  // it; multiple → the all-orgs overview, which surfaces "Shared with you".
+  async function handleGuestOrg(org: GuestOrg) {
+    setOpen(false)
+    if (jwt) {
+      const projects = await fetchAccessibleProjects(jwt, org.id)
+      if (projects.length === 1) {
+        navigate(`/projects/${projects[0].id}`)
+        return
+      }
+    }
+    navigate({ pathname: "/", search: "?org=all" })
   }
 
   async function handleCreated(orgId: number) {
@@ -145,6 +167,26 @@ export function OrgSwitcher() {
               )
             })}
           </DropdownMenuGroup>
+          {guestOrgs.length > 0 && (
+            <>
+              <DropdownMenuSeparator className="mx-0 my-1" />
+              <DropdownMenuGroup data-testid="guest-orgs">
+                {guestOrgs.map((g) => (
+                  <DropdownMenuItem
+                    key={g.id}
+                    className={ORG_MENU_ITEM_CLASS}
+                    onClick={() => void handleGuestOrg(g)}
+                  >
+                    <OrgMark name={g.name ?? `Org #${g.id}`} />
+                    <span className="truncate">{g.name ?? `Org #${g.id}`}</span>
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">Guest</span>
+                    </span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
+            </>
+          )}
           <DropdownMenuSeparator className="mx-0 my-1" />
           <DropdownMenuItem className={ORG_MENU_ITEM_CLASS} onClick={openCreateDialog}>
             <OrgMark name="Create" create />

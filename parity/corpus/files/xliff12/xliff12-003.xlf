@@ -1,0 +1,34 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="es-ES" target-language="pt-BR" datatype="plaintext" original="doc0.txt">
+    <body>
+      <trans-unit id="u1">
+        <source><bpt id="b1">&lt;b&gt;</bpt>Der Vertrag tritt am ersten Tag des Folgemonats in Kraft.<ept id="b1">&lt;/b&gt;</ept></source>
+        <target state="final"><bpt id="b1">&lt;b&gt;</bpt>Der Vertrag tritt am ersten Tag des Folgemonats in Kraft.<ept id="b1">&lt;/b&gt;</ept></target>
+        <note>ctx-1</note>
+      </trans-unit>
+      <trans-unit id="u2" xml:space="preserve">
+        <source><g id="g2">This section intentionally left blank.</g></source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u3">
+        <source><bpt id="b3">&lt;b&gt;</bpt>Les données personnelles sont traitées conformément au RGPD.<ept id="b3">&lt;/b&gt;</ept></source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u4" xml:space="preserve">
+        <source>Third-party integrations require an Enterprise plan subscription.</source>
+        <target state="translated">Third-party integrations require an Enterprise plan subscription.</target>
+        <note>ctx-4</note>
+      </trans-unit>
+      <trans-unit id="u5" xml:space="preserve">
+        <source>Adverse re<x id="x5"/>actions may include nausea, dizziness, and &lt;severe&gt; headaches.</source>
+        <target state="final">Adverse re<x id="x5"/>actions may include nausea, dizziness, and &lt;severe&gt; headaches.</target>
+      </trans-unit>
+      <trans-unit id="u6">
+        <source>La configuración se guardará automáticamente cada 5 minutos.</source>
+        <target state="new"></target>
+        <note>ctx-6</note>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

@@ -9,20 +9,32 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 const listMyOrgs = vi.fn()
 vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: (...a: unknown[]) => listMyOrgs(...a) }))
 
+const fetchAccessibleProjects = vi.fn()
+vi.mock("@/lib/sync/cloud-projects", () => ({
+  fetchAccessibleProjects: (...a: unknown[]) => fetchAccessibleProjects(...a),
+}))
+
 function Probe() {
-  const { orgs, activeOrg, isAllOrgs, setActiveOrg, setAllOrgs } = useActiveOrg()
+  const { orgs, activeOrg, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs } = useActiveOrg()
   return (
     <div>
       <span data-testid="count">{orgs.length}</span>
       <span data-testid="active">{activeOrg?.id ?? "none"}</span>
       <span data-testid="all">{isAllOrgs ? "yes" : "no"}</span>
+      <span data-testid="guest-count">{guestOrgs.length}</span>
+      <span data-testid="guest-names">{guestOrgs.map((g) => g.name ?? `#${g.id}`).join(",")}</span>
       <button onClick={() => setActiveOrg(2)}>switch</button>
       <button onClick={() => setAllOrgs()}>all</button>
     </div>
   )
 }
 
-beforeEach(() => { localStorage.clear(); listMyOrgs.mockReset() })
+beforeEach(() => {
+  localStorage.clear()
+  listMyOrgs.mockReset()
+  fetchAccessibleProjects.mockReset()
+  fetchAccessibleProjects.mockResolvedValue([])
+})
 afterEach(() => vi.restoreAllMocks())
 
 describe("OrgProvider", () => {
@@ -62,5 +74,48 @@ describe("OrgProvider", () => {
     listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
     render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByTestId("active").textContent).toBe("1"))
+  })
+
+  describe("guestOrgs (FRO-473)", () => {
+    it("is empty when every accessible project's org is a member org", async () => {
+      listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
+      fetchAccessibleProjects.mockResolvedValue([
+        { id: "p1", name: "Proj 1", orgId: 1, role: { level: 100, name: "viewer", source: "org" } },
+      ])
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"))
+      await waitFor(() => expect(screen.getByTestId("guest-count").textContent).toBe("0"))
+    })
+
+    it("classifies accessible-project orgs the caller doesn't belong to as guest orgs", async () => {
+      listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
+      fetchAccessibleProjects.mockResolvedValue([
+        { id: "p1", name: "Proj 1", orgId: 1, role: { level: 100, name: "viewer", source: "org" } },
+        { id: "p2", name: "Proj 2", orgId: 2, orgName: "Guest Org", role: { level: 100, name: "viewer", source: "override" } },
+      ])
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(screen.getByTestId("guest-count").textContent).toBe("1"))
+      expect(screen.getByTestId("guest-names").textContent).toBe("Guest Org")
+    })
+
+    it("dedupes multiple accessible projects sharing the same guest org", async () => {
+      listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
+      fetchAccessibleProjects.mockResolvedValue([
+        { id: "p2", name: "Proj 2", orgId: 2, orgName: "Guest Org", role: { level: 100, name: "viewer", source: "override" } },
+        { id: "p3", name: "Proj 3", orgId: 2, orgName: "Guest Org", role: { level: 100, name: "viewer", source: "override" } },
+      ])
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(screen.getByTestId("guest-count").textContent).toBe("1"))
+    })
+
+    it("never adds a guest org id into the member orgs array", async () => {
+      listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
+      fetchAccessibleProjects.mockResolvedValue([
+        { id: "p2", name: "Proj 2", orgId: 2, orgName: "Guest Org", role: { level: 100, name: "viewer", source: "override" } },
+      ])
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(screen.getByTestId("guest-count").textContent).toBe("1"))
+      expect(screen.getByTestId("count").textContent).toBe("1")
+    })
   })
 })

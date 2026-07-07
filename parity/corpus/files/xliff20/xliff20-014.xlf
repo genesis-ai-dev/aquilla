@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" version="2.0" srcLang="en-US" trgLang="de-DE">
+  <file id="f1">
+    <unit id="u1">
+      <segment id="s0-0" state="final">
+        <source>Enter your 6-digit verification code to continue.</source>
+        <target>Enter your 6-digit verification code to continue.</target>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s0-1" state="initial">
+        <source>By signing below, the lessee acknowledges receipt of the premises.</source>
+      </segment>
+    </unit>
+    <unit id="u2">
+      <segment id="s1-0" state="initial">
+        <source>Congratulations! You have unlocked the &quot;Explorer&quot; achievement 🎉.</source>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s1-1" state="final">
+        <source>Mesures de sécurité : portez des gants et des lunettes de protection.</source>
+        <target>Mesures de sécurité : portez des gants et des lunettes de protection.</target>
+      </segment>
+    </unit>
+    <unit id="u3">
+      <segment id="s2-0" state="translated">
+        <source>Mesures <ph id="ph2-0"/>de sécurité : portez des gants et des lunettes de protection.</source>
+        <target>Mesures <ph id="ph2-0"/>de sécurité : portez des gants et des lunettes de protection.</target>
+      </segment>
+    </unit>
+  </file>
+</xliff>

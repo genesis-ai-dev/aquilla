@@ -132,6 +132,25 @@ export const FRONTIER_CHAT_URL = `${CHAT_BASE_OVERRIDE || CHAT_BASE_FALLBACK || 
 interface ChatMessage { role: "system" | "user" | "assistant"; content: string }
 
 /**
+ * The project id of the project currently being edited, derived from the SPA
+ * route (`/project/:id/...` or `/projects/:id`), or null when not on a
+ * project surface.
+ *
+ * FRO-414 follow-up: chat spend is billed to the org of the project in scope
+ * when the completion is invoked. Every completion caller (copilot drafts,
+ * backtranslation, brief generator, rule extract/suggest/autofix) runs on a
+ * project route, so the URL IS the project context — deriving it here means
+ * one attribution point instead of threading projectId through six services
+ * and their call sites. Static segments like /projects/archived are excluded.
+ */
+export function activeProjectIdFromPath(pathname: string): string | null {
+  const m = /^\/projects?\/([^/]+)/.exec(pathname)
+  if (!m) return null
+  const id = m[1]
+  return id === "archived" ? null : id
+}
+
+/**
  * Pre-migration CompletionSettings records don't have `provider` set.
  * Infer: empty endpoint → "frontier" (new default); populated → "custom"
  * (preserves existing self-hosted/local setups). Saved-through on next write.
@@ -516,6 +535,12 @@ export async function complete(options: CompleteOptions): Promise<string> {
   // still stream normally.
   const useStream = options.stream === true && provider !== "frontier"
 
+  // Frontier only: attribute this spend to the project being edited (see
+  // activeProjectIdFromPath). Custom OpenAI-compatible endpoints may reject
+  // unknown body fields, so the hint is never sent to them.
+  const projectId =
+    provider === "frontier" ? activeProjectIdFromPath(window.location.pathname) : null
+
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...headers },
@@ -525,6 +550,7 @@ export async function complete(options: CompleteOptions): Promise<string> {
       max_tokens: effectiveSettings.maxTokens,
       temperature: effectiveSettings.temperature,
       stream: useStream,
+      ...(projectId && { projectId }),
     }),
     signal: options.signal,
   })

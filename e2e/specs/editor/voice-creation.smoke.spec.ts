@@ -11,15 +11,16 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * Voice creation — unified "New voice" modal.
  *
  * Audio mode (lens === "audio") renders VoiceSidebar with VoiceLibraryPanel.
- * The panel has a single "New voice" button that opens NewVoiceModal (Gemini /
- * Clone tabs) with h2 "New voice" and input[aria-label="Voice name"].
+ * The panel has a single "New voice" button that opens NewVoiceModal (TTS /
+ * Clone tabs) with h2 "New voice", input[aria-label="Voice name"], and the
+ * 4-engine picker (OmniVoice / Gemini / Kokoro / MMS) on the TTS tab.
  *
  * Flow:
  *   1. Import file, open editor.
  *   2. Click the Audio toggle button (EditorModeToggle) to enter audio mode.
  *   3. VoiceSidebar renders with the Voices panel.
  *   4. Click "New voice" → NewVoiceModal opens.
- *   5. Verify "New voice" heading and Voice name input.
+ *   5. Verify "New voice" heading, Voice name input, and the engine picker.
  *   6. Dismiss via Escape.
  */
 test("new voice dialog opens in audio mode with New voice heading", async ({ alice }) => {
@@ -53,6 +54,12 @@ test("new voice dialog opens in audio mode with New voice heading", async ({ ali
 
   // Voice name input
   await expect(dialog.locator('input[aria-label="Voice name"]')).toBeVisible()
+
+  // Engine picker offers all four TTS engines (regression: creation used to
+  // hardcode Gemini, stranding Kokoro/MMS/OmniVoice projects).
+  for (const engine of [/OmniVoice/, /Gemini/, /Kokoro/, /MMS/]) {
+    await expect(dialog.getByRole("button", { name: engine })).toBeVisible()
+  }
 
   // Dismiss.
   await alice.keyboard.press("Escape")

@@ -90,6 +90,22 @@ describe("useProject status distinction", () => {
     expect(result.current.project).toBeNull()
   })
 
+  it("returns status='forbidden' when resolveCloudProjectResult returns reason='forbidden' (FRO-346)", async () => {
+    // WHY: a removed member reloading the workspace URL must land on a clean
+    // "you no longer have access" state — distinct from "not-found" (the
+    // project exists) and never a live editor rendered from stale caches.
+    setResolveMock({ ok: false, reason: "forbidden" })
+
+    const { result } = renderHook(() => useProject("p-revoked"))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(result.current.status).toBe("forbidden")
+    expect(result.current.isError).toBe(true) // forbidden counts as error for legacy consumers
+    expect(result.current.isUnreachable).toBe(false)
+    expect(result.current.project).toBeNull()
+  })
+
   it("returns status='ready' and populates project when resolve succeeds", async () => {
     setResolveMock({
       ok: true,

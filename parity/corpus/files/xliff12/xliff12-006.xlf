@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="en-US" target-language="zh-CN" datatype="plaintext" original="doc0.txt">
+    <body>
+      <trans-unit id="u1">
+        <source>Use the &lt;b&gt;bold&lt;/b&gt; toggle to emphasize key phrases.</source>
+        <target state="translated">Use the &lt;b&gt;bold&lt;/b&gt; toggle to emphasize key phrases.</target>
+        <note>ctx-1</note>
+      </trans-unit>
+      <trans-unit id="u2">
+        <source><g id="g2">Les données personnelles sont traitées conformément au RGPD.</g></source>
+        <target state="final"><g id="g2">Les données personnelles sont traitées conformément au RGPD.</g></target>
+      </trans-unit>
+      <trans-unit id="u3">
+        <source>Error 404: the requested resource could not be found on this server.</source>
+        <target state="final">Error 404: the requested resource could not be found on this server.</target>
+      </trans-unit>
+      <trans-unit id="u4" xml:space="preserve">
+        <source><g id="g4">Ensure the device is powered off before removing the battery cover.</g></source>
+        <target state="translated"><g id="g4">Ensure the device is powered off before removing the battery cover.</g></target>
+      </trans-unit>
+    </body>
+  </file>
+  <file source-language="en-US" target-language="zh-CN" datatype="plaintext" original="doc1.txt">
+    <body>
+      <trans-unit id="u5">
+        <source>The quarterly report shows a 12.5% increase in recurring revenue.</source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u6">
+        <source>Free shipping on orders over $50 — terms apply.</source>
+        <target state="final">Free shipping on orders over $50 — terms apply.</target>
+      </trans-unit>
+      <trans-unit id="u7">
+        <source><g id="g7">Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).</g></source>
+        <target state="final"><g id="g7">Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).</g></target>
+      </trans-unit>
+      <trans-unit id="u8">
+        <source>The quarte<x id="x8"/>rly report shows a 12.5% increase in recurring revenue.</source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u9">
+        <source>Adverse reactions may include nausea, dizziness, and &lt;severe&gt; headaches.</source>
+        <target state="final">Adverse reactions may include nausea, dizziness, and &lt;severe&gt; headaches.</target>
+        <note>ctx-9</note>
+      </trans-unit>
+      <trans-unit id="u10">
+        <source><bpt id="b10">&lt;b&gt;</bpt>Adverse reactions may include nausea, dizziness, and &lt;severe&gt; headaches.<ept id="b10">&lt;/b&gt;</ept></source>
+        <target state="translated"><bpt id="b10">&lt;b&gt;</bpt>Adverse reactions may include nausea, dizziness, and &lt;severe&gt; headaches.<ept id="b10">&lt;/b&gt;</ept></target>
+      </trans-unit>
+      <trans-unit id="u11">
+        <source><bpt id="b11">&lt;b&gt;</bpt>Error 404: the requested resource could not be found on this server.<ept id="b11">&lt;/b&gt;</ept></source>
+        <target state="translated"><bpt id="b11">&lt;b&gt;</bpt>Error 404: the requested resource could not be found on this server.<ept id="b11">&lt;/b&gt;</ept></target>
+        <note>ctx-11</note>
+      </trans-unit>
+      <trans-unit id="u12">
+        <source>Net weight<x id="x12"/>: 454 g (16 oz). Packaged in a facility that handles nuts.</source>
+        <target state="translated">Net weight<x id="x12"/>: 454 g (16 oz). Packaged in a facility that handles nuts.</target>
+      </trans-unit>
+      <trans-unit id="u13">
+        <source><g id="g13">This warranty does not cover damage caused by misuse or unauthorized repair.</g></source>
+        <target state="final"><g id="g13">This warranty does not cover damage caused by misuse or unauthorized repair.</g></target>
+      </trans-unit>
+      <trans-unit id="u14">
+        <source><g id="g14">Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).</g></source>
+        <target state="translated"><g id="g14">Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).</g></target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

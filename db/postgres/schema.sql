@@ -123,7 +123,15 @@ CREATE TABLE projects (
     -- Active/inactive lifecycle flag (migration 0033). FALSE = frozen/dormant;
     -- deliberate reactivation required to edit. DISTINCT from archived_at
     -- (Trash): inactive projects remain visible in the list but block edits.
-    is_active BOOLEAN NOT NULL DEFAULT TRUE
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    -- FRO-476: link metadata (migration 0050). mode distinguishes a one-time
+    -- snapshot ('clone', detach-snapshot applied at birth) from a subscribed
+    -- link ('live', mirror sync keeps it current). NULL = legacy/self-contained.
+    source_link_mode     TEXT,
+    source_link_consumes TEXT,   -- 'source' | 'target' (null = 'source')
+    source_link_gate     TEXT,   -- 'head' | 'validated' (target-consumption only)
+    -- Max upstream server_seq (lane-relevant) this project has mirrored.
+    source_link_cursor   BIGINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE project_members (
@@ -361,6 +369,14 @@ CREATE TABLE cells (
     -- future keys (gif/video/audio attachments, etc.) need no schema change.
     metadata          JSONB,
     source_location   TEXT,
+    -- FRO-476: mirror provenance (migration 0050). Set on a downstream's
+    -- source-side row by source.cell.mirror — the upstream event id/seq this
+    -- row currently reflects (monotonic apply-guard key, see link-sync.ts) and,
+    -- if the upstream deleted the cell, when this row was tombstoned (never
+    -- actually deleted — see the linked-projects design spec §5).
+    upstream_event_id TEXT,
+    upstream_seq      BIGINT,
+    tombstoned_at     BIGINT,
     -- Replaces SQLite FTS5. Maintained automatically; no triggers needed.
     value_tsv         tsvector GENERATED ALWAYS AS (to_tsvector('simple', value)) STORED,
     PRIMARY KEY (project_id, file_id, cell_id, side)
@@ -531,6 +547,8 @@ CREATE INDEX idx_cells_last_edit ON cells(project_id, file_id, side, last_edit_a
 CREATE INDEX idx_cells_pair_lookup ON cells(project_id, cell_id, side);
 CREATE INDEX idx_cells_source_basis ON cells(source_event_id);
 CREATE INDEX idx_cells_validated ON cells(project_id, file_id, side, validated);
+-- FRO-476: mirror provenance lookup (only mirrored rows carry this).
+CREATE INDEX idx_cells_upstream_event ON cells(upstream_event_id) WHERE upstream_event_id IS NOT NULL;
 -- FTS replacement: GIN over the generated tsvector.
 CREATE INDEX idx_cells_value_tsv ON cells USING GIN (value_tsv);
 CREATE INDEX idx_checkpoints_file ON checkpoints(file_id, created_at);

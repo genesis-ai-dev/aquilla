@@ -52,7 +52,10 @@ export function AssignedToMe() {
       header={<OrgBreadcrumb section="Assigned to me" />}
       statusBar={null}
       main={
-        <div className="h-full overflow-y-auto space-y-4 p-6">
+        // FRO-366: see ProjectsList.tsx for why `h-full overflow-y-auto` is the
+        // correct (and only) scroll surface inside AppShell's main slot;
+        // `overscroll-contain` prevents wheel/trackpad chaining to an ancestor.
+        <div className="h-full overflow-y-auto overscroll-contain space-y-4 p-6" data-testid="assigned-to-me-scroll">
           <h1 className="text-lg font-semibold">Assigned to me</h1>
           {activeOrgId == null ? (
             <EmptyState

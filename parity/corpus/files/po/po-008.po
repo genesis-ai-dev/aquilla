@@ -1,0 +1,23 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: corpus 7\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "This section intentionally left blank."
+msgid_plural "This section intentionally left blank. (plural)"
+msgstr[0] ""
+msgstr[1] ""
+
+#. developer note 1
+#: src/app.ts:11
+msgid "A load-bearing wall shall not be modified without engineering approval."
+msgstr "The quarterly report shows a 12.5% increase in recurring revenue."
+
+msgid "This warranty does not cover damage caused by misuse or unauthorized repair."
+msgstr "Uptime SLA of 99.95% measured monthly, excluding scheduled maintenance."
+
+#. developer note 3
+#: src/app.ts:13
+msgid "Error 404: the requested resource could not be found on this server."
+msgstr "All prices include VAT at the applicable rate of 21%."

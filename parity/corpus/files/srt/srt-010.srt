@@ -1,0 +1,15 @@
+1
+00:00:01,112 --> 00:00:03,614
+Ensure the device is powered off before removing the battery cover.
+
+2
+00:00:04,070 --> 00:00:07,594
+This section intentionally left blank.
+
+3
+00:00:09,200 --> 00:00:11,642
+Enter your 6-digit verification code to continue.
+
+4
+00:00:12,279 --> 00:00:15,954
+Please review the attached invoice before the payment deadline.

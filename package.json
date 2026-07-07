@@ -19,6 +19,11 @@
     "build:honeycomb": "BRAND=honeycomb tsc -b && BRAND=honeycomb vite build && tsx scripts/check-brand-build.ts honeycomb",
     "build:context": "BRAND=context tsc -b && BRAND=context vite build && tsx scripts/check-brand-build.ts context",
     "lint": "eslint .",
+    "parity:score": "tsx parity/instruments/parity-score.ts",
+    "roundtrip:score": "tsx parity/instruments/roundtrip-score.ts",
+    "parity:time": "tsx parity/instruments/time.ts",
+    "parity:spend": "tsx parity/instruments/spend.ts",
+    "parity:corpus": "tsx parity/corpus/generate.ts",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -27,6 +32,12 @@
     "test:e2e:shard": "tsx scripts/e2e-shard.ts",
     "test:e2e:ui": "tsx scripts/e2e-up.ts -- --ui",
     "test:e2e:debug": "tsx scripts/e2e-up.ts -- --debug",
+    "record": "E2E_CONFIG=e2e/config/playwright.config.recordings.ts tsx scripts/e2e-up.ts --",
+    "record:assemble": "tsx scripts/assemble-showcase.ts",
+    "promo:capture": "E2E_CONFIG=e2e/config/playwright.config.recordings.ts tsx scripts/e2e-up.ts -- -g \"Promo capture\"",
+    "promo:render": "tsx scripts/promo/render.ts",
+    "promo": "tsx scripts/promo/build.ts",
+    "promo:all": "npm run promo:capture && npm run promo",
     "//test:e2e:tauri": "Plan 3 — config file does not yet exist; this script will fail until Tauri smoke is implemented.",
     "test:e2e:tauri": "playwright test --config e2e/config/playwright.config.tauri.ts",
     "mms:r2:publish": "node scripts/mms-r2-publish.mjs",
@@ -137,6 +148,7 @@
     "vite": "^8.0.4",
     "vite-plugin-node-polyfills": "^0.26.0",
     "vitest": "^4.1.4",
-    "wrangler": "^4.99.0"
+    "wrangler": "^4.99.0",
+    "yaml": "^2.9.0"
   }
 }

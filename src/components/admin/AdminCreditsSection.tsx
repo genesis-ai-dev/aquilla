@@ -6,6 +6,8 @@ import {
   type CreditConfigPatch,
 } from "@/lib/sync/credits"
 import { formatCredits, capUsagePct } from "@/lib/credits"
+import { SegmentedCapBar, RailLegend } from "@/components/credits/credit-visuals"
+import { pctTextClass } from "@/components/credits/rails"
 
 /**
  * Platform-admin "Compute / Credits" section for the AdminConsole.
@@ -68,27 +70,27 @@ export function AdminCreditsSection({ jwt }: { jwt: string }) {
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-muted-foreground">
-        Credit = 1¢ customer-facing price. Agent rail uses elevated markup (5×).
-        Caps are advisory when enforce is off (log + display only).
-      </p>
-      <div className="overflow-x-auto rounded-lg border">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <span>Credit = 1¢ customer price · agent rail 5× markup, others 4×.</span>
+        <span className="inline-flex items-center gap-3">
+          <RailKey label="Agent" dot="bg-amber-500" />
+          <RailKey label="Chat" dot="bg-sky-500" />
+          <RailKey label="TTS" dot="bg-violet-500" />
+        </span>
+      </div>
+      <div className="overflow-x-auto rounded-xl border">
         <table className="w-full text-sm" data-testid="admin-credits-table">
           <thead>
-            <tr className="bg-muted/40 text-left text-xs text-muted-foreground">
+            <tr className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
               <th className="px-3 py-2 font-medium">Org</th>
-              <th className="px-3 py-2 font-medium">Day spend</th>
-              <th className="px-3 py-2 font-medium text-amber-700 dark:text-amber-400">
-                Agent (day)
+              <th className="px-3 py-2 font-medium" title="Total spend today across all rails (agent + chat + TTS).">
+                Today
               </th>
-              <th className="px-3 py-2 font-medium">Week spend</th>
-              <th className="px-3 py-2 font-medium text-amber-700 dark:text-amber-400">
-                Agent (wk)
+              <th className="px-3 py-2 font-medium" title="Total spend this week across all rails.">
+                This week
               </th>
-              <th className="px-3 py-2 font-medium">Daily cap</th>
-              <th className="px-3 py-2 font-medium">Weekly cap</th>
-              <th className="px-3 py-2 font-medium">Enforce</th>
-              <th className="px-3 py-2 font-medium">Show org</th>
+              <th className="px-3 py-2 font-medium">Caps</th>
+              <th className="px-3 py-2 font-medium">Controls</th>
             </tr>
           </thead>
           <tbody>
@@ -102,6 +104,15 @@ export function AdminCreditsSection({ jwt }: { jwt: string }) {
   )
 }
 
+function RailKey({ label, dot }: { label: string; dot: string }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+      {label}
+    </span>
+  )
+}
+
 function AdminCreditsRow({
   row,
   onPatch,
@@ -109,106 +120,102 @@ function AdminCreditsRow({
   row: AdminOrgCredits
   onPatch: (orgId: number, patch: CreditConfigPatch) => Promise<void>
 }) {
-  const dayPct = capUsagePct(row.day.totalCredits, row.config.dailyCap)
-  const weekPct = capUsagePct(row.week.totalCredits, row.config.weeklyCap)
-  const agentDayPct = capUsagePct(row.day.agentCredits, row.config.agentDailyCap)
-  const agentWeekPct = capUsagePct(row.week.agentCredits, row.config.agentWeeklyCap)
-
   return (
     <tr className="border-t align-top">
       {/* Org name */}
-      <td className="px-3 py-2 font-medium">{row.orgName ?? `#${row.orgId}`}</td>
-
-      {/* Daily total spend + bar */}
-      <td className="px-3 py-2">
-        <SpendCell credits={row.day.totalCredits} pct={dayPct} />
+      <td className="px-3 py-3 font-medium">
+        <div className="min-w-[120px]">{row.orgName ?? `#${row.orgId}`}</div>
+        <div className="text-[10px] text-muted-foreground tabular-nums">#{row.orgId}</div>
       </td>
 
-      {/* Agent day spend — highlighted as the dangerous rail */}
-      <td className="px-3 py-2 bg-amber-50/60 dark:bg-amber-950/30" data-testid={`agent-day-${row.orgId}`}>
-        <SpendCell credits={row.day.agentCredits} pct={agentDayPct} variant="agent" />
-      </td>
-
-      {/* Weekly total spend + bar */}
-      <td className="px-3 py-2">
-        <SpendCell credits={row.week.totalCredits} pct={weekPct} />
-      </td>
-
-      {/* Agent week spend — highlighted */}
-      <td className="px-3 py-2 bg-amber-50/60 dark:bg-amber-950/30" data-testid={`agent-week-${row.orgId}`}>
-        <SpendCell credits={row.week.agentCredits} pct={agentWeekPct} variant="agent" />
-      </td>
-
-      {/* Editable daily cap */}
-      <td className="px-3 py-2">
-        <CapInput
-          value={row.config.dailyCap}
-          onCommit={(v) => onPatch(row.orgId, { dailyCap: v })}
-          label="daily cap"
+      {/* Today — total vs cap + segmented rail bar + legend */}
+      <td className="px-3 py-3">
+        <SpendWindow
+          total={row.day.totalCredits}
+          cap={row.config.dailyCap}
+          byRail={row.day.byRail}
+          agentTestId={`agent-day-${row.orgId}`}
+          totalTestId={`cap-day-${row.orgId}`}
         />
       </td>
 
-      {/* Editable weekly cap */}
-      <td className="px-3 py-2">
-        <CapInput
-          value={row.config.weeklyCap}
-          onCommit={(v) => onPatch(row.orgId, { weeklyCap: v })}
-          label="weekly cap"
+      {/* This week */}
+      <td className="px-3 py-3">
+        <SpendWindow
+          total={row.week.totalCredits}
+          cap={row.config.weeklyCap}
+          byRail={row.week.byRail}
+          agentTestId={`agent-week-${row.orgId}`}
+          totalTestId={`cap-week-${row.orgId}`}
         />
       </td>
 
-      {/* Enforce toggle */}
-      <td className="px-3 py-2">
-        <Toggle
-          checked={row.config.enforce}
-          onChange={(v) => onPatch(row.orgId, { enforce: v })}
-          label="enforce caps"
-          testId={`enforce-toggle-${row.orgId}`}
-        />
+      {/* Editable caps (daily / weekly) */}
+      <td className="px-3 py-3">
+        <div className="space-y-1.5">
+          <CapInput
+            value={row.config.dailyCap}
+            onCommit={(v) => onPatch(row.orgId, { dailyCap: v })}
+            label="daily cap"
+            prefix="Day"
+          />
+          <CapInput
+            value={row.config.weeklyCap}
+            onCommit={(v) => onPatch(row.orgId, { weeklyCap: v })}
+            label="weekly cap"
+            prefix="Wk"
+          />
+        </div>
       </td>
 
-      {/* showToOrg toggle */}
-      <td className="px-3 py-2">
-        <Toggle
-          checked={row.config.showToOrg}
-          onChange={(v) => onPatch(row.orgId, { showToOrg: v })}
-          label="show to org maintainers"
-          testId={`show-org-toggle-${row.orgId}`}
-        />
+      {/* Controls (enforce / show to org) */}
+      <td className="px-3 py-3">
+        <div className="space-y-1.5">
+          <Toggle
+            checked={row.config.enforce}
+            onChange={(v) => onPatch(row.orgId, { enforce: v })}
+            label="enforce caps"
+            caption="Enforce"
+            testId={`enforce-toggle-${row.orgId}`}
+          />
+          <Toggle
+            checked={row.config.showToOrg}
+            onChange={(v) => onPatch(row.orgId, { showToOrg: v })}
+            label="show to org maintainers"
+            caption="Show org"
+            testId={`show-org-toggle-${row.orgId}`}
+          />
+        </div>
       </td>
     </tr>
   )
 }
 
-function SpendCell({
-  credits,
-  pct,
-  variant = "default",
+/** One spend window in the admin table: total/cap + % + segmented rail bar +
+ *  legend. The agent chip carries `agentTestId` so the FRO-414 anti-transposition
+ *  tests can pin the agent value distinctly from the total. */
+function SpendWindow({
+  total,
+  cap,
+  byRail,
+  agentTestId,
+  totalTestId,
 }: {
-  credits: number
-  pct: number
-  variant?: "default" | "agent"
+  total: number
+  cap: number
+  byRail: Record<string, number>
+  agentTestId: string
+  totalTestId: string
 }) {
-  const barColor =
-    pct >= 90
-      ? "bg-destructive"
-      : pct >= 70
-        ? "bg-amber-500"
-        : variant === "agent"
-          ? "bg-amber-400"
-          : "bg-primary"
-
+  const pct = capUsagePct(total, cap)
   return (
-    <div className="min-w-[80px]">
-      <p className="text-xs tabular-nums font-medium">{formatCredits(credits)}</p>
-      <div className="mt-0.5 h-1 w-full rounded-full bg-muted overflow-hidden">
-        <div
-          className={`h-full rounded-full ${barColor}`}
-          style={{ width: `${pct}%` }}
-          aria-label={`${pct}%`}
-        />
+    <div className="min-w-[150px] space-y-1.5">
+      <div className="flex items-baseline justify-between gap-2 text-xs tabular-nums" data-testid={totalTestId}>
+        <span className="font-semibold">{formatCredits(total)}</span>
+        <span className={`font-medium ${pctTextClass(pct)}`}>{pct}%</span>
       </div>
-      <p className="mt-0.5 text-[10px] text-muted-foreground tabular-nums">{pct}%</p>
+      <SegmentedCapBar byRail={byRail} cap={cap} className="h-1.5" />
+      <RailLegend byRail={byRail} chipTestId={(rail) => (rail === "agent" ? agentTestId : undefined)} />
     </div>
   )
 }
@@ -217,10 +224,13 @@ function CapInput({
   value,
   onCommit,
   label,
+  prefix,
 }: {
   value: number
   onCommit: (v: number) => void
   label: string
+  /** Short caption shown before the input (e.g. "Day", "Wk"). */
+  prefix?: string
 }) {
   const [local, setLocal] = useState(String(value))
 
@@ -228,18 +238,23 @@ function CapInput({
   useEffect(() => { setLocal(String(value)) }, [value])
 
   return (
-    <input
-      type="number"
-      aria-label={label}
-      value={local}
-      onChange={(e) => setLocal(e.target.value)}
-      onBlur={() => {
-        const n = Number(local)
-        if (!Number.isNaN(n) && n >= 0 && n !== value) onCommit(n)
-      }}
-      className="w-20 rounded border bg-background px-2 py-0.5 text-xs tabular-nums focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-      min={0}
-    />
+    <label className="flex items-center gap-1.5">
+      {prefix ? (
+        <span className="w-6 shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">{prefix}</span>
+      ) : null}
+      <input
+        type="number"
+        aria-label={label}
+        value={local}
+        onChange={(e) => setLocal(e.target.value)}
+        onBlur={() => {
+          const n = Number(local)
+          if (!Number.isNaN(n) && n >= 0 && n !== value) onCommit(n)
+        }}
+        className="w-20 rounded-md border bg-background px-2 py-0.5 text-xs tabular-nums focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        min={0}
+      />
+    </label>
   )
 }
 
@@ -247,30 +262,36 @@ function Toggle({
   checked,
   onChange,
   label,
+  caption,
   testId,
 }: {
   checked: boolean
   onChange: (v: boolean) => void
   label: string
+  /** Inline caption shown next to the switch (e.g. "Enforce"). */
+  caption?: string
   testId: string
 }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      data-testid={testId}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-        checked ? "bg-primary" : "bg-muted"
-      }`}
-    >
-      <span
-        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
-          checked ? "translate-x-4" : "translate-x-0.5"
+    <div className="flex items-center gap-1.5">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        data-testid={testId}
+        onClick={() => onChange(!checked)}
+        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+          checked ? "bg-primary" : "bg-muted"
         }`}
-      />
-    </button>
+      >
+        <span
+          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+            checked ? "translate-x-4" : "translate-x-0.5"
+          }`}
+        />
+      </button>
+      {caption ? <span className="text-[11px] text-muted-foreground">{caption}</span> : null}
+    </div>
   )
 }

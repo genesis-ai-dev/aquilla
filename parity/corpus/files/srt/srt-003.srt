@@ -1,0 +1,23 @@
+1
+00:00:04,841 --> 00:00:09,143
+This warranty does not cover damage caused by misuse or unauthorized repair.
+
+2
+00:00:10,840 --> 00:00:12,450
+Use the <b>bold</b> toggle to emphasize key phrases.
+
+3
+00:00:14,172 --> 00:00:15,960
+By signing below, the lessee acknowledges receipt of the premises.
+
+4
+00:00:16,692 --> 00:00:17,989
+<i>製品の仕様は予告なく変更されることがあります。</i>
+
+5
+00:00:19,139 --> 00:00:22,572
+Rinse thoroughly with lukewarm water for at least 15 minutes.
+
+6
+00:00:23,897 --> 00:00:28,318
+Adverse reactions may include nausea, dizziness, and <severe> headaches.

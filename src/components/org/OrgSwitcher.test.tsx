@@ -14,7 +14,18 @@ vi.mock("@/lib/frontier/orgs", () => ({
   createOrg: (...a: unknown[]) => createOrg(...a),
 }))
 
-beforeEach(() => { localStorage.clear(); listMyOrgs.mockReset(); createOrg.mockReset() })
+const fetchAccessibleProjects = vi.fn()
+vi.mock("@/lib/sync/cloud-projects", () => ({
+  fetchAccessibleProjects: (...a: unknown[]) => fetchAccessibleProjects(...a),
+}))
+
+beforeEach(() => {
+  localStorage.clear()
+  listMyOrgs.mockReset()
+  createOrg.mockReset()
+  fetchAccessibleProjects.mockReset()
+  fetchAccessibleProjects.mockResolvedValue([])
+})
 afterEach(() => vi.restoreAllMocks())
 
 describe("OrgSwitcher", () => {
@@ -62,5 +73,43 @@ describe("OrgSwitcher", () => {
     await act(async () => { screen.getByRole("button", { name: /create organization/i }).click() })
 
     await waitFor(() => expect(createOrg).toHaveBeenCalledWith("jwt", "New Org"))
+  })
+
+  it("member-only user sees no guest section", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+    ])
+    // Accessible projects are all in orgs the caller is already a member of.
+    fetchAccessibleProjects.mockResolvedValue([
+      { id: "p1", name: "Proj 1", orgId: 1, role: { level: 100, name: "viewer", source: "org" } },
+    ])
+
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
+
+    await act(async () => { screen.getByRole("button", { name: /acme/i }).click() })
+
+    expect(screen.queryByTestId("guest-orgs")).not.toBeInTheDocument()
+    expect(screen.queryByText("Guest")).not.toBeInTheDocument()
+  })
+
+  it("guest entry visible with Guest tag below member orgs", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+    ])
+    // A project in an org (id 2) the caller is not a member of.
+    fetchAccessibleProjects.mockResolvedValue([
+      { id: "p1", name: "Proj 1", orgId: 1, role: { level: 100, name: "viewer", source: "org" } },
+      { id: "p2", name: "Proj 2", orgId: 2, orgName: "Guest Org", role: { level: 100, name: "viewer", source: "override" } },
+    ])
+
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
+
+    await act(async () => { screen.getByRole("button", { name: /acme/i }).click() })
+
+    await waitFor(() => expect(screen.getByTestId("guest-orgs")).toBeInTheDocument())
+    expect(screen.getByText("Guest Org")).toBeInTheDocument()
+    expect(screen.getByText("Guest")).toBeInTheDocument()
   })
 })

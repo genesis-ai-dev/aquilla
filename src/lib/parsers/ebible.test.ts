@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
-import { parseEBibleCorpus, fetchTranslationsList, __setVrefsForTest, __setTranslationsCacheForTest } from "./ebible"
+import {
+  parseEBibleCorpus,
+  fetchTranslationsList,
+  fetchTranslationText,
+  __setVrefsForTest,
+  __setTranslationsCacheForTest,
+} from "./ebible"
 
 describe("parseEBibleCorpus", () => {
   beforeEach(() => {
@@ -246,5 +252,190 @@ describe("fetchTranslationsList – downloadable filter", () => {
 
     const result = await fetchTranslationsList()
     expect(result[0].downloadable).toBe(true)
+  })
+})
+
+describe("fetchTranslationText — retry/backoff on the download driver (FRO-325)", () => {
+  // FRO-325: Berean Standard Bible download is slow then 401s before completion,
+  // with the progress bar just stopping and no actionable error. The download goes
+  // straight to raw.githubusercontent.com — no sync token / session JWT is involved —
+  // so a 401 here is an upstream rate-limit/abuse heuristic, not our auth expiring.
+  // These tests mock fetch to simulate that failure shape and assert the driver
+  // retries with backoff, resumes progress, and surfaces a specific error only
+  // after retries are exhausted — never a silent stall.
+
+  function bodyFromChunks(chunks: string[], failAfter?: number): ReadableStream<Uint8Array> {
+    const encoder = new TextEncoder()
+    let i = 0
+    return new ReadableStream({
+      pull(controller) {
+        if (failAfter !== undefined && i === failAfter) {
+          controller.error(new TypeError("network error"))
+          return
+        }
+        if (i >= chunks.length) {
+          controller.close()
+          return
+        }
+        controller.enqueue(encoder.encode(chunks[i]))
+        i++
+      },
+    })
+  }
+
+  function okResponse(chunks: string[], opts: { failAfter?: number; contentLength?: number } = {}) {
+    const body = bodyFromChunks(chunks, opts.failAfter)
+    const headers = new Map<string, string>()
+    if (opts.contentLength !== undefined) headers.set("Content-Length", String(opts.contentLength))
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      body,
+      headers: { get: (k: string) => headers.get(k) ?? null },
+      text: async () => chunks.join(""),
+    }
+  }
+
+  function errResponse(status: number, statusText = "") {
+    return {
+      ok: false,
+      status,
+      statusText,
+      body: null,
+      headers: { get: () => null },
+      text: async () => "",
+    }
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  })
+
+  it("downloads successfully on the first attempt, reporting progress per chunk", async () => {
+    const chunks = ["In the beginning ", "God created ", "the heavens."]
+    vi.stubGlobal("fetch", vi.fn(async () => okResponse(chunks, { contentLength: 40 })))
+
+    const progressCalls: Array<{ received: number; total: number }> = []
+    const text = await fetchTranslationText("eng-eng-kjv", (received, total) => {
+      progressCalls.push({ received, total })
+    })
+
+    expect(text).toBe(chunks.join(""))
+    expect(progressCalls.length).toBeGreaterThan(0)
+    expect(progressCalls[progressCalls.length - 1].total).toBe(40)
+  })
+
+  it("retries a mid-stream 401 (upstream rate-limit, not our auth) and succeeds on a later attempt", async () => {
+    const fetchMock = vi.fn()
+    fetchMock.mockResolvedValueOnce(errResponse(401))
+    fetchMock.mockResolvedValueOnce(errResponse(401))
+    fetchMock.mockResolvedValueOnce(okResponse(["full corpus text"], { contentLength: 17 }))
+    vi.stubGlobal("fetch", fetchMock)
+    vi.useFakeTimers()
+
+    const promise = fetchTranslationText("eng-eng-kjv")
+    // Drain the backoff sleeps (500ms, 1000ms) so the retries proceed.
+    await vi.advanceTimersByTimeAsync(500)
+    await vi.advanceTimersByTimeAsync(1000)
+
+    const text = await promise
+    expect(text).toBe("full corpus text")
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it("recovers from a connection drop mid-stream (reader.read() throws) by retrying from scratch", async () => {
+    const fetchMock = vi.fn()
+    // First attempt: stream starts ok then errors after 1 chunk (connection reset).
+    fetchMock.mockResolvedValueOnce(okResponse(["partial chunk "], { failAfter: 1, contentLength: 100 }))
+    // Second attempt succeeds fully.
+    fetchMock.mockResolvedValueOnce(okResponse(["recovered full text"], { contentLength: 19 }))
+    vi.stubGlobal("fetch", fetchMock)
+    vi.useFakeTimers()
+
+    const progressCalls: number[] = []
+    const promise = fetchTranslationText("eng-eng-kjv", (received) => progressCalls.push(received))
+    await vi.advanceTimersByTimeAsync(500)
+
+    const text = await promise
+    expect(text).toBe("recovered full text")
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    // Progress was reported during the failed attempt too (received > 0) before recovery.
+    expect(progressCalls.some((r) => r > 0)).toBe(true)
+  })
+
+  it("surfaces a specific, actionable error after exhausting retries on a persistent 401", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => errResponse(401)))
+    vi.useFakeTimers()
+
+    const promise = fetchTranslationText("eng-eng-kjv")
+    promise.catch(() => {}) // avoid unhandled rejection warning while timers drain
+    await vi.advanceTimersByTimeAsync(500)
+    await vi.advanceTimersByTimeAsync(1000)
+    await vi.advanceTimersByTimeAsync(2000)
+
+    await expect(promise).rejects.toThrow(/401/)
+    await expect(promise).rejects.toThrow(/retried/i)
+  })
+
+  it("does not retry a 404 (terminal — translation genuinely absent) and fails immediately with one attempt", async () => {
+    const fetchMock = vi.fn(async () => errResponse(404))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await expect(fetchTranslationText("xyz-nonexistent")).rejects.toThrow(/404/)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("aborts immediately without retrying when the signal is already aborted", async () => {
+    const fetchMock = vi.fn(async () => errResponse(401))
+    vi.stubGlobal("fetch", fetchMock)
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(fetchTranslationText("eng-eng-kjv", undefined, controller.signal)).rejects.toThrow(/cancelled/i)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("applies the same retry/backoff path to the Berean Standard Bible id and to a second, smaller title (FRO-325 acceptance)", async () => {
+    // The download driver has no per-translation special-casing — the retry/backoff
+    // fix applies uniformly by id/URL-slug. This asserts both a Berean-shaped id
+    // ('eng-engBSB') and a different, smaller title id ('eng-eng-web') resolve to
+    // the expected corpus URL and succeed via the same path (including recovering
+    // from a transient 401 first), satisfying the acceptance criterion that at
+    // least one other eBible title also works — not just Berean specifically.
+    const fetchMock = vi.fn()
+    fetchMock.mockResolvedValueOnce(errResponse(401)) // Berean: transient upstream hiccup
+    fetchMock.mockResolvedValueOnce(okResponse(["berean corpus text"], { contentLength: 19 }))
+    fetchMock.mockResolvedValueOnce(okResponse(["web corpus text"], { contentLength: 16 })) // second title: succeeds first try
+    vi.stubGlobal("fetch", fetchMock)
+    vi.useFakeTimers()
+
+    const bereanPromise = fetchTranslationText("eng-engBSB")
+    await vi.advanceTimersByTimeAsync(500)
+    const bereanText = await bereanPromise
+    expect(bereanText).toBe("berean corpus text")
+
+    const webText = await fetchTranslationText("eng-eng-web")
+    expect(webText).toBe("web corpus text")
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock.mock.calls[0][0]).toBe(`${"https://raw.githubusercontent.com/BibleNLP/ebible/main"}/corpus/eng-engBSB.txt`)
+    expect(fetchMock.mock.calls[2][0]).toBe(`${"https://raw.githubusercontent.com/BibleNLP/ebible/main"}/corpus/eng-eng_web.txt`)
+  })
+
+  it("gives a slow-but-successful 5xx retry a specific message distinct from a generic failure", async () => {
+    const fetchMock = vi.fn()
+    fetchMock.mockResolvedValueOnce(errResponse(503, "Service Unavailable"))
+    fetchMock.mockResolvedValueOnce(okResponse(["ok text"], { contentLength: 7 }))
+    vi.stubGlobal("fetch", fetchMock)
+    vi.useFakeTimers()
+
+    const promise = fetchTranslationText("eng-eng-kjv")
+    await vi.advanceTimersByTimeAsync(500)
+
+    const text = await promise
+    expect(text).toBe("ok text")
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })

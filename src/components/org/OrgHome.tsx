@@ -262,6 +262,49 @@ function ProjectTable({
   )
 }
 
+/**
+ * FRO-335 / FRO-475: projects reachable only via a project-level grant (an
+ * invite accept or bulk-add) into an org the caller isn't a member of.
+ * Shared across both the active-org and all-orgs views so a zero-org guest
+ * never lands on an empty dashboard. `orgLabel` annotates each row with the
+ * host org — FRO-473: the accessible-projects endpoint now joins `orgName`,
+ * so the label falls back to "Org #N" only on older servers/absent data.
+ */
+function SharedWithYouSection({
+  projects,
+  orgLabel,
+}: {
+  projects: CloudProjectSummary[]
+  orgLabel?: (project: CloudProjectSummary) => string | null
+}) {
+  if (projects.length === 0) return null
+  return (
+    <section data-testid="shared-with-you" className="space-y-2">
+      <h2 className="text-sm font-medium text-muted-foreground">Shared with you</h2>
+      <div className="rounded-2xl border divide-y">
+        {projects.map((p) => {
+          const label = orgLabel?.(p) ?? null
+          return (
+            <Link
+              key={p.id}
+              to={`/projects/${p.id}`}
+              className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
+            >
+              <p className="flex-1 min-w-0 truncate font-medium">{p.name}</p>
+              {label && (
+                <span className="shrink-0 truncate rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  {label}
+                </span>
+              )}
+              <span className="shrink-0 text-xs text-muted-foreground">{p.role.name}</span>
+            </Link>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 export function OrgHome() {
   const { activeOrg, activeOrgId, isAllOrgs, orgs, isLoading: orgLoading, setActiveOrg } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
@@ -430,7 +473,17 @@ export function OrgHome() {
   const overdueCount = projects.filter((p) => deadlineStatus(p, now) === "overdue").length
   const avgAudioPct =
     projects.length > 0 ? projects.reduce((sum, p) => sum + audioPct(p), 0) / projects.length : 0
-  const sharedProjects = partitionSharedProjects(accessibleProjects, orgs, activeOrgId).sharedWithMe
+  // FRO-475: in all-orgs mode there's no single activeOrgId to compare
+  // against — classify by org membership alone so a project reached purely
+  // via a project-level grant (zero orgs, or a grant in an org the caller
+  // doesn't belong to) still surfaces instead of vanishing into an empty
+  // dashboard.
+  const sharedProjects = partitionSharedProjects(
+    accessibleProjects,
+    orgs,
+    activeOrgId,
+    isAllOrgs ? "all-orgs" : "active-org",
+  ).sharedWithMe
 
   const orgSummaries: OrgPortfolioSummary[] = orgs
     .map((org) => {
@@ -745,6 +798,16 @@ export function OrgHome() {
                       )}
                     </section>
                   </div>
+
+                  {/* FRO-475: projects reachable only via a project-level grant
+                      (no org membership at all, or a grant in an org the caller
+                      isn't a member of) are invisible to getPortfolios() — which
+                      only knows about the caller's org memberships. Without this,
+                      a zero-org guest sees a fully empty all-orgs dashboard. */}
+                  <SharedWithYouSection
+                    projects={sharedProjects}
+                    orgLabel={(p) => p.orgName ?? (p.orgId != null ? `Org #${p.orgId}` : null)}
+                  />
                 </>
               ) : (
                 <>
@@ -874,23 +937,7 @@ export function OrgHome() {
                   {/* FRO-335: cross-org projects (invite-link / bulk-add grants).
                       Listed separately — they're not part of this org's portfolio,
                       but hiding them made them unreachable from every nav surface. */}
-                  {sharedProjects.length > 0 && (
-                    <section data-testid="shared-with-you" className="space-y-2">
-                      <h2 className="text-sm font-medium text-muted-foreground">Shared with you</h2>
-                      <div className="rounded-2xl border divide-y">
-                        {sharedProjects.map((p) => (
-                          <Link
-                            key={p.id}
-                            to={`/projects/${p.id}`}
-                            className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
-                          >
-                            <p className="flex-1 min-w-0 truncate font-medium">{p.name}</p>
-                            <span className="shrink-0 text-xs text-muted-foreground">{p.role.name}</span>
-                          </Link>
-                        ))}
-                      </div>
-                    </section>
-                  )}
+                  <SharedWithYouSection projects={sharedProjects} />
                 </>
               )}
 

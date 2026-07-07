@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" version="2.0" srcLang="en-US" trgLang="ja-JP">
+  <file id="f1">
+    <unit id="u1">
+      <segment id="s0-0" state="final">
+        <source><pc id="pc0-0">製品の仕様は予告なく変更されることがあります。</pc></source>
+        <target><pc id="pc0-0">製品の仕様は予告なく変更されることがあります。</pc></target>
+      </segment>
+    </unit>
+    <unit id="u2">
+      <segment id="s1-0" state="translated">
+        <source><pc id="pc1-0">請在使用前仔細閱讀本說明書。</pc></source>
+        <target><pc id="pc1-0">請在使用前仔細閱讀本說明書。</pc></target>
+      </segment>
+    </unit>
+    <unit id="u3">
+      <segment id="s2-0" state="final">
+        <source><pc id="pc2-0">Adverse reactions may include nausea, dizziness, and &lt;severe&gt; headaches.</pc></source>
+        <target><pc id="pc2-0">Adverse reactions may include nausea, dizziness, and &lt;severe&gt; headaches.</pc></target>
+      </segment>
+    </unit>
+    <unit id="u4">
+      <segment id="s3-0" state="initial">
+        <source>Session <ph id="ph3-0"/>expired — please sign in again to continue where you left off.</source>
+      </segment>
+    </unit>
+  </file>
+</xliff>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tmx SYSTEM "tmx14.dtd">
+<tmx version="1.4">
+<header creationtool="corpus-gen" creationtoolversion="1.0" segtype="sentence" o-tmf="none" adminlang="en-US" srclang="en-US" datatype="plaintext"/>
+<body>
+<tu tuid="tu-8011-0"><tuv xml:lang="en-US"><seg>Les données personnelles sont traitées conformément au RGPD.</seg></tuv><tuv xml:lang="ja-JP"><seg>Ensure the device is powered off before removing the battery cover.</seg></tuv></tu>
+<tu tuid="tu-8011-1"><note>reviewed</note><tuv xml:lang="en-US"><seg>Backup completed successfully at 02:00 UTC; 1,284 files archived.</seg></tuv><tuv xml:lang="ja-JP"><seg>Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).</seg></tuv></tu>
+<tu tuid="tu-8011-2"><prop type="x-domain">legal</prop><tuv xml:lang="en-US"><seg>Error 404: the requested resource could not be found on this server.</seg></tuv><tuv xml:lang="ja-JP"><seg>Take 2 table<ph x="1">{0}</ph>ts daily with food; do not exceed 6 tablets in 24 hours.</seg></tuv></tu>
+<tu tuid="tu-8011-3"><note>reviewed</note><tuv xml:lang="en-US"><seg>Battery life: up to 18 hours of continuous video playback.</seg></tuv><tuv xml:lang="ja-JP"><seg>製品の仕様は予告なく変更されることがあります。</seg></tuv></tu>
+</body>
+</tmx>

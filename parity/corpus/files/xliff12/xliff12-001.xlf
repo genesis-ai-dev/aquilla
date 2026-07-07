@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="en-US" target-language="de-DE" datatype="plaintext" original="doc0.txt">
+    <body>
+      <trans-unit id="u1">
+        <source>This warranty does not cover damage caused by misuse or unauthorized repair.</source>
+        <target state="translated">This warranty does not cover damage caused by misuse or unauthorized repair.</target>
+      </trans-unit>
+      <trans-unit id="u2">
+        <source>Uptime SLA<x id="x2"/> of 99.95% measured monthly, excluding scheduled maintenance.</source>
+        <target state="translated">Uptime SLA<x id="x2"/> of 99.95% measured monthly, excluding scheduled maintenance.</target>
+      </trans-unit>
+      <trans-unit id="u3">
+        <source>Установите приложение и войдите в свою учетную запись.</source>
+        <target state="final">Установите приложение и войдите в свою учетную запись.</target>
+        <note>ctx-3</note>
+      </trans-unit>
+      <trans-unit id="u4">
+        <source><g id="g4">Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).</g></source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u5" xml:space="preserve">
+        <source>A load-bearing wall shall not be modified without engineering approval.</source>
+        <target state="final">A load-bearing wall shall not be modified without engineering approval.</target>
+      </trans-unit>
+      <trans-unit id="u6">
+        <source>This secti<x id="x6"/>on intentionally left blank.</source>
+        <target state="final">This secti<x id="x6"/>on intentionally left blank.</target>
+        <note>ctx-6</note>
+      </trans-unit>
+      <trans-unit id="u7" xml:space="preserve">
+        <source><g id="g7">Die maximale Zuladung beträgt 750 kg einschließlich Fahrer.</g></source>
+        <target state="new"></target>
+        <note>ctx-7</note>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

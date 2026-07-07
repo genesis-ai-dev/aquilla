@@ -1,0 +1,31 @@
+{
+  "app": {
+    "title": "Uptime SLA of 99.95% measured monthly, excluding scheduled maintenance.",
+    "subtitle": "A load-bearing wall shall not be modified without engineering approval."
+  },
+  "buttons": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Our team delivers world-class localization at scale — 24/7 support included."
+  },
+  "messages": [
+    "製品の仕様は予告なく変更されることがあります。",
+    "請在使用前仔細閱讀本說明書。",
+    "Enter your 6-digit verification code to continue.",
+    "Backup completed successfully at 02:00 UTC; 1,284 files archived."
+  ],
+  "meta": {
+    "version": 3,
+    "active": true,
+    "ratio": 0.5,
+    "nothing": null
+  },
+  "weird \"key\" with quotes": "Take 2 tablets daily with food; do not exceed 6 tablets in 24 hours.",
+  "nested": {
+    "deep": {
+      "deeper": {
+        "value": "A load-bearing wall shall not be modified without engineering approval."
+      }
+    }
+  }
+}

@@ -45,7 +45,14 @@ vi.mock("@/lib/frontier/portfolio", () => ({
   recordedMinutes: (p: { recordedMs: number }) => Math.round(p.recordedMs / 60000),
   deadlineStatus: () => _deadlineStatusResult,
 }))
-vi.mock("@/lib/sync/cloud-projects", () => ({ setProjectDeadline: vi.fn() }))
+vi.mock("@/lib/sync/cloud-projects", () => ({
+  setProjectDeadline: vi.fn(),
+  // OrgSidebar (rendered by ProjectOverview's AppShell) calls
+  // useProjectsForNavigation -> fetchAccessibleProjects for the "Shared with
+  // you" nav section (FRO-474). Default to empty so it never interferes with
+  // pre-existing tests; individual FRO-474 tests override via mockResolvedValue.
+  fetchAccessibleProjects: vi.fn(async () => []),
+}))
 const downloadProjectBundle = vi.fn()
 vi.mock("@/lib/sync/export-bundle", () => ({
   downloadProjectBundle: (...a: unknown[]) => downloadProjectBundle(...a),
@@ -93,9 +100,14 @@ function renderOverview() {
   )
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   localStorage.clear()
   _deadlineStatusResult = null
+  // Some FRO-474 tests override this to simulate a user with no orgs;
+  // vi.clearAllMocks() clears call history but not mockResolvedValue
+  // implementations, so restore the default (single org, auto-selected) here.
+  const { listMyOrgs } = await import("@/lib/frontier/orgs")
+  vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
 })
 afterEach(() => vi.clearAllMocks())
 
@@ -226,13 +238,16 @@ describe("ProjectOverview file list show-more", () => {
     await waitFor(() => expect(screen.queryByText(/top 12 of 16/)).toBeInTheDocument())
 
     // Only 12 files should be visible initially
-    expect(screen.getAllByRole("listitem").length).toBe(12)
+    // Scoped to file rows (data-testid="file-row") — a plain listitem-role query
+    // also picks up unrelated <li>s rendered elsewhere in the shell (e.g. the
+    // org switcher's popover list), which aren't part of what this test covers.
+    expect(screen.getAllByTestId("file-row").length).toBe(12)
 
     // Clicking show-more reveals all 16 files
     const showMore = screen.getByRole("button", { name: /show all/i })
     fireEvent.click(showMore)
 
-    await waitFor(() => expect(screen.getAllByRole("listitem").length).toBe(totalFiles))
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(totalFiles))
     // Header should now say "(16)" not "top 12 of 16"
     expect(screen.queryByText(/top 12 of 16/)).not.toBeInTheDocument()
     expect(screen.getByText(/\(16\)/)).toBeInTheDocument()
@@ -381,6 +396,103 @@ describe("ProjectOverview audio progress (FRO-160)", () => {
     await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
     // Audio should be hidden
     expect(screen.queryByText("Audio")).not.toBeInTheDocument()
+  })
+})
+
+// ── FRO-474: project-only invitee navigation ────────────────────────────────
+
+describe("ProjectOverview project-only invitee access (FRO-474)", () => {
+  // WHY: a user with a direct project_members grant but no org membership
+  // (activeOrgId == null, or an org that doesn't include this project) was
+  // being redirected straight back to "/" — they could never open their own
+  // shared project. useProject is server-verified per-project access, so the
+  // overview must render whenever status === "ready", and only redirect on a
+  // genuine "not-found" (no access).
+
+  it("renders the overview (no redirect) when activeOrgId is null and the user has a direct project grant", async () => {
+    // No orgs at all → OrgProvider resolves activeOrgId to null.
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockResolvedValue([])
+
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, orgId: 99, files: [] }),
+      status: "ready",
+      refresh,
+    })
+    getPortfolio.mockResolvedValue([])
+
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it("renders the overview (no redirect) when the project's orgId does not match activeOrgId", async () => {
+    // OrgProvider auto-selects the single org (id 1) from listMyOrgs (default mock).
+    // The project belongs to org 99 — a mismatch that pre-FRO-474 triggered a redirect.
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, orgId: 99, files: [] }),
+      status: "ready",
+      refresh,
+    })
+    getPortfolio.mockResolvedValue([])
+
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the project's own orgId to load portfolio stats when activeOrgId is null", async () => {
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockResolvedValue([])
+
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, orgId: 99, files: [] }),
+      status: "ready",
+      refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100, filledCells: 50, validatedCells: 20,
+      aiDraftedCells: 0, audioCells: 0, recordedMs: 0, lastEditAt: null, deadlineAt: null,
+    }])
+
+    renderOverview()
+
+    // Portfolio was queried using the project's own orgId (99), not activeOrgId (null).
+    await waitFor(() => expect(getPortfolio).toHaveBeenCalledWith("jwt", 99))
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it("still redirects to / when the user genuinely has no access (status = not-found)", async () => {
+    useProject.mockReturnValue({ project: null, status: "not-found", refresh })
+
+    renderOverview()
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/", { replace: true }))
+  })
+
+  // FRO-416: the overview rendering (no redirect) is necessary but not
+  // sufficient — a guest must be able to actually ENTER the workspace from
+  // here. "Open project" navigates unconditionally to `/project/:id`; this
+  // locks in that the button still fires for a project whose org the caller
+  // does not belong to (the exact "Shared with you" scenario), so a future
+  // regression that guards this button on org membership fails loudly here
+  // instead of only surfacing as a live "clicking does nothing" report.
+  it("clicking Open project navigates into the workspace even when the project's org is foreign to the caller", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, orgId: 99, files: [] }),
+      status: "ready",
+      refresh,
+    })
+    getPortfolio.mockResolvedValue([])
+
+    renderOverview()
+
+    const openButton = await screen.findByRole("button", { name: "Open project" })
+    fireEvent.click(openButton)
+
+    expect(navigate).toHaveBeenCalledWith("/project/p1")
   })
 })
 

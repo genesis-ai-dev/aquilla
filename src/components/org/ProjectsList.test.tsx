@@ -1,8 +1,14 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { ProjectsList } from "./ProjectsList"
+
+const navigate = vi.fn()
+vi.mock("react-router-dom", async (importActual) => {
+  const actual = await importActual<typeof import("react-router-dom")>()
+  return { ...actual, useNavigate: () => navigate }
+})
 
 // Default: signed-in. Type-cast to allow null session in signed-out tests.
 type FakeSession = { jwt: string; username: string; createdAt: string } | null
@@ -20,6 +26,7 @@ vi.mock("@/lib/sync/cloud-projects", () => ({
 beforeEach(() => {
   localStorage.clear()
   fetchAccessibleProjectsResultMock.mockReset()
+  navigate.mockClear()
   mockUseFrontierSession.mockReturnValue({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false } as { session: FakeSession; loading: boolean })
 })
 afterEach(() => vi.restoreAllMocks())
@@ -59,6 +66,29 @@ describe("ProjectsList", () => {
     expect(shared).not.toHaveTextContent("John")
   })
 
+  // FRO-416: clicking a "Shared with you" row must actually navigate — this
+  // was the literal repro ("clicking reloads the page / doesn't navigate").
+  // The row's onOpen and the own-project row's onOpen both call the same
+  // navigate(`/projects/${id}`); assert the shared row fires it too so a
+  // future divergence (e.g. gating the shared row's onClick on org
+  // membership) fails here instead of only in a live click-through.
+  it("clicking a Shared with you row navigates to its project overview", async () => {
+    fetchAccessibleProjectsResultMock.mockResolvedValue({
+      ok: true,
+      projects: [
+        { id: "p1", name: "John", orgId: 7, role: { level: 700, name: "owner", source: "creator" }, files: [] },
+        { id: "p503", name: "Joined Via Invite", orgId: 503, role: { level: 400, name: "contributor", source: "override" }, files: [] },
+      ],
+    })
+    render(<MemoryRouter><OrgProvider><ProjectsList /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("Joined Via Invite")).toBeInTheDocument())
+
+    const shared = screen.getByTestId("shared-with-you")
+    fireEvent.click(within(shared).getByText("Joined Via Invite"))
+
+    expect(navigate).toHaveBeenCalledWith("/projects/p503")
+  })
+
   // FRO-293: no infinite spinner when no session / org
   it("resolves to a sign-in prompt (not an infinite spinner) when there is no session", async () => {
     // Why: /projects must never stay in a perpetual Loading… state when the
@@ -82,6 +112,27 @@ describe("ProjectsList", () => {
 
     const link = await screen.findByRole("link", { name: /sign in/i })
     expect(link.getAttribute("href")).toMatch(/\/login\?next=.*projects/)
+  })
+
+  // FRO-366: the projects list must scroll natively (h-full + overflow-y-auto
+  // inside AppShell's height-constrained main slot) rather than clip. jsdom
+  // can't compute real layout, so this asserts the structural contract
+  // instead of pixel scroll behavior — see AppShell.tsx / this file for the
+  // flex chain that makes `h-full overflow-y-auto` the correct scroll surface.
+  it("renders the list in a scrollable container (h-full + overflow-y-auto, no fixed/clipped height)", async () => {
+    fetchAccessibleProjectsResultMock.mockResolvedValue({
+      ok: true,
+      projects: [{ id: "p1", name: "John", orgId: 7, role: { level: 700, name: "owner", source: "creator" }, files: [] }],
+    })
+    render(<MemoryRouter><OrgProvider><ProjectsList /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("John")).toBeInTheDocument())
+
+    const scrollContainer = screen.getByTestId("projects-list-scroll")
+    expect(scrollContainer.className).toMatch(/\bh-full\b/)
+    expect(scrollContainer.className).toMatch(/\boverflow-y-auto\b/)
+    // Must not clip via overflow-hidden (the ScrollArea/flex footgun this
+    // guards against — see FRO-164).
+    expect(scrollContainer.className).not.toMatch(/overflow-hidden/)
   })
 })
 

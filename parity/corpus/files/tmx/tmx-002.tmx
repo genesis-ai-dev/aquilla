@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tmx SYSTEM "tmx14.dtd">
+<tmx version="1.4">
+<header creationtool="corpus-gen" creationtoolversion="1.0" segtype="sentence" o-tmf="none" adminlang="en-US" srclang="en-US" datatype="plaintext"/>
+<body>
+<tu tuid="tu-1-0"><tuv xml:lang="en-US"><seg><![CDATA[Refunds are processed within 5–10 business days of approval.]]></seg></tuv><tuv xml:lang="ja-JP"><seg>Mesures de sécurité : portez des gants et des lunettes de protection.</seg></tuv></tu>
+<tu tuid="tu-1-1"><tuv xml:lang="en-US"><seg><![CDATA[This section intentionally left blank.]]></seg></tuv><tuv xml:lang="ja-JP"><seg>Mesures de s<ph x="1">{0}</ph>écurité : portez des gants et des lunettes de protection.</seg></tuv></tu>
+<tu tuid="tu-1-2"><prop type="x-domain">legal</prop><tuv xml:lang="en-US"><seg>This section intentionally left blank.</seg></tuv><tuv xml:lang="ja-JP"><seg>Battery life<ph x="1">{0}</ph>: up to 18 hours of continuous video playback.</seg></tuv></tu>
+<tu tuid="tu-1-3"><prop type="x-domain">legal</prop><tuv xml:lang="en-US"><seg>Third-party integrations require an Enterprise plan subscription.</seg></tuv><tuv xml:lang="ja-JP"><seg>請在使用前仔細閱讀本說明書。</seg></tuv></tu>
+<tu tuid="tu-1-4"><tuv xml:lang="en-US"><seg>This section intentionally left blank.</seg></tuv><tuv xml:lang="ja-JP"><seg>Les données personnelles sont traitées conformément au RGPD.</seg></tuv></tu>
+<tu tuid="tu-1-5"><tuv xml:lang="en-US"><seg>El usuario acepta las condiciones al hacer clic en “Continuar”.</seg></tuv><tuv xml:lang="ja-JP"><seg>Third-party integrations require an Enterprise plan subscription.</seg></tuv></tu>
+</body>
+</tmx>

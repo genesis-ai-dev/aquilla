@@ -209,3 +209,21 @@ new `dcsUpstream` key); server floor is MAINTAINER(600). Added `dcsUpstream?: Dc
   routes are clean. en_tn is the recommended first-use + demo target.
 - FINDING 2: `compare` endpoint throttles (empty body under rapid requests). VERIFY delta.ts has
   backoff + full-scan reconcile fallback (spec §6); add if missing.
+
+## Adversarial review findings — 2026-07-06
+
+- FINDING 1 (BLOCKER) — FIXED: delta CREATE assigned a phantom fileId (cell id) → new upstream
+  cells orphaned into a non-existent file, invisible in adapter + downstreams; test suite masked
+  it (no fileId assertion on the create call). Fix: thread parsed `file.fileId` through
+  `DeltaResult.creates` → `CreateArg` → the create emitter; commit/delete were already correct
+  (fileId from currentCells). Tests now assert the create fileId. Commit on integration.
+- FINDING 2 (minor, follow-up): trackMode:"head" cursors can't detect a delta —
+  `compareRefs(cursor.ref, latest.ref)` becomes compare(main...main) → empty. Dead config today
+  (every cursor is created with trackMode:"release"), but the "tracking HEAD" badge advertises a
+  mode that wouldn't work if wired. Fix later: for HEAD, compare stored commitSha...branch HEAD
+  (or commits-since-SHA), or drop the HEAD option until wired.
+- FINDING 3 (minor, follow-up): a wholly-NEW upstream FILE (a book added mid-resource) still emits
+  no `file.create`, so its cells would lack a files row. Finding-1's fix handles new cells in
+  EXISTING files (the common case); a brand-new file needs file.create wiring (thread the DcsFile
+  name/bookCode + a file.create emit when a created cell's fileId isn't among existing files).
+  Narrow case; flagged for the aligned-target / hardening pass.

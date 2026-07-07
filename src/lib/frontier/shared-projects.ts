@@ -27,11 +27,27 @@ export function partitionSharedProjects(
   activeOrgId: number | null,
   scope: ProjectPartitionScope = "active-org",
 ): PartitionedProjects {
+  const myOrgIds = new Set(myOrgs.map((o) => o.id))
+
   if (scope === "all-orgs") {
-    return { inActiveOrg: projects, sharedWithMe: [] }
+    // FRO-475: the all-orgs aggregate is built from getPortfolios(), which
+    // only knows about orgs the caller is a MEMBER of. A project reached
+    // purely via a project-level invite (no org membership at all) never
+    // appears there — so here "shared with me" = accessible projects whose
+    // org I do not belong to (including org-less projects), same rule as
+    // the active-org scope, just without an activeOrgId to compare against.
+    const inActiveOrg: CloudProjectSummary[] = []
+    const sharedWithMe: CloudProjectSummary[] = []
+    for (const p of projects) {
+      if (p.orgId != null && myOrgIds.has(p.orgId)) {
+        inActiveOrg.push(p)
+      } else {
+        sharedWithMe.push(p)
+      }
+    }
+    return { inActiveOrg, sharedWithMe }
   }
 
-  const myOrgIds = new Set(myOrgs.map((o) => o.id))
   const inActiveOrg: CloudProjectSummary[] = []
   const sharedWithMe: CloudProjectSummary[] = []
   for (const p of projects) {

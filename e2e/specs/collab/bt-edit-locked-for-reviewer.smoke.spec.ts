@@ -16,11 +16,17 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * role is below Contributor, the "Edit" affordance is a disabled span
  * labelled "Contributor+ required to edit back-translations".
  *
+ * BT generation is LLM-only and Contributor+ (persisting the BT is a project
+ * write), so the reviewer can't generate one themselves. Alice generates it
+ * against the mock LLM (per-device provider override, same pattern as the AI
+ * completion smoke); the `cell.backtranslation.set` event persists via the
+ * outbox, and bob's workspace hydrates it from the backtranslations read route.
+ *
  * This spec:
  *   1. Alice creates a project, imports sample.md, edits cell 0.
- *   2. Bob is added as a Reviewer.
- *   3. Bob opens cell details → BT tab.
- *   4. Verifies the locked "Edit" span is present.
+ *   2. Alice points her device override at the mock LLM and generates a BT.
+ *   3. Bob is added as a Reviewer and opens the same cell → BT tab.
+ *   4. Verifies the locked "Edit" span is present (and no generate button).
  */
 test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice, bob }) => {
   const aliceSession = await ensureAuthState("alice")
@@ -33,12 +39,46 @@ test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice,
   await dash.createProject({ name, source: "en", target: "fr" })
   await dash.openProject(name)
 
+  // Point alice's per-device LLM override at the mock server so "Read it back
+  // with AI" hits a real (mock) endpoint. complete() applies this override on
+  // top of project settings.
+  const llmBase = process.env.VITE_LLM_BASE_URL ?? ""
+  expect(llmBase).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
+  await alice.evaluate(({ endpoint }) => {
+    localStorage.setItem("codex:userProviderOverride", JSON.stringify({
+      endpoint,
+      model: "mock-model",
+      apiKey: "",
+    }))
+  }, { endpoint: `${llmBase}/v1` })
+  await alice.reload()
+  await alice.waitForLoadState("networkidle")
+
   const ws = new Workspace(alice)
   await ws.importFile(SAMPLE_MD)
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
   // Edit cell 0 so there's a translation (BT requires translated text).
   await ws.editCell(0, "Translation for BT locked test")
+
+  // Alice generates the back-translation from the BT tab.
+  const aliceRow = ws.cellRow(0)
+  await aliceRow.scrollIntoViewIfNeeded()
+  await aliceRow.hover()
+  const aliceExpandBtn = aliceRow.getByRole("button", { name: /Open cell details/i })
+  await expect(aliceExpandBtn).toBeVisible({ timeout: 8_000 })
+  await aliceExpandBtn.click()
+  const aliceBtTab = alice.getByRole("button", { name: /back-translation/i })
+    .or(alice.getByRole("tab", { name: /back-translation/i }))
+  await expect(aliceBtTab.first()).toBeVisible({ timeout: 5_000 })
+  await aliceBtTab.first().click()
+  const aliceBtPanel = alice.getByRole("tabpanel", { name: /back-translation/i })
+  const generateBtn = aliceBtPanel.getByRole("button", { name: /read it back|reading it back/i })
+  await expect(generateBtn).toBeVisible({ timeout: 8_000 })
+  await generateBtn.click()
+  // Mock LLM's default response — proves generation completed. The
+  // `cell.backtranslation.set` event drains via the outbox flusher (~5s).
+  await expect(aliceBtPanel).toContainText("Traducción de prueba", { timeout: 15_000 })
 
   // Extract project ID so bob can navigate to it.
   const projectId = alice.url().split("/project/")[1]?.split("/")[0]
@@ -55,34 +95,40 @@ test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice,
   await bobWs.openFileBySubstring("sample")
   await bobWs.waitForEditor()
 
-  // Open cell details for row 0.
-  const row = bobWs.cellRow(0)
-  await row.scrollIntoViewIfNeeded()
-  await row.hover()
-
-  const expandBtn = row.getByRole("button", { name: /Open cell details/i })
-  await expect(expandBtn).toBeVisible({ timeout: 8_000 })
-  await expandBtn.click()
-
-  // Switch to the Back-translation tab (formerly labelled "BT").
-  const btTab = bob.getByRole("button", { name: /back-translation/i })
-    .or(bob.getByRole("tab", { name: /back-translation/i }))
-  await expect(btTab.first()).toBeVisible({ timeout: 5_000 })
-  await btTab.first().click()
-
-  // The Edit affordance (enabled button OR locked span) only renders once the
-  // cell HAS a back-translation (EditorTable.tsx: `cell.backtranslation` gate).
-  // Alice's auto-BT on first edit may not persist server-side, so generate one
-  // as bob — the statistical glosser is client-side and the "Read it back"
-  // button is role-independent; only *editing* the BT is Contributor+.
-  const btPanel = bob.getByRole("tabpanel", { name: /back-translation/i })
-  const generateBtn = btPanel.getByRole("button", { name: /read it back|reading it back/i })
-  const lockedEdit = btPanel.getByLabel("Contributor+ required to edit back-translations")
-  await expect(generateBtn.or(lockedEdit).first()).toBeVisible({ timeout: 8_000 })
-  if (await generateBtn.isVisible().catch(() => false)) {
-    await generateBtn.click()
+  const openBtTabAsBob = async () => {
+    const row = bobWs.cellRow(0)
+    await row.scrollIntoViewIfNeeded()
+    await row.hover()
+    const expandBtn = row.getByRole("button", { name: /Open cell details/i })
+    await expect(expandBtn).toBeVisible({ timeout: 8_000 })
+    await expandBtn.click()
+    const btTab = bob.getByRole("button", { name: /back-translation/i })
+      .or(bob.getByRole("tab", { name: /back-translation/i }))
+    await expect(btTab.first()).toBeVisible({ timeout: 5_000 })
+    await btTab.first().click()
   }
+  await openBtTabAsBob()
 
-  // The locked Edit span should appear — Reviewer cannot edit BT.
-  await expect(lockedEdit).toBeVisible({ timeout: 8_000 })
+  // The Edit affordance renders once the cell HAS a back-translation. For a
+  // Reviewer it's the locked span. Alice's `cell.backtranslation.set` drains
+  // via the 5s outbox interval and bob's workspace hydrates BTs once on file
+  // load — so bob's first fetch can legitimately race the write. Poll by
+  // reloading bob's page (re-running the hydration fetch) rather than
+  // weakening the cross-user assertion.
+  const btPanel = bob.getByRole("tabpanel", { name: /back-translation/i })
+  const lockedEdit = btPanel.getByLabel("Contributor+ required to edit back-translations")
+  await expect(async () => {
+    const visible = await lockedEdit.isVisible().catch(() => false)
+    if (!visible) {
+      await bob.reload()
+      await bob.waitForLoadState("networkidle")
+      await bobWs.waitForEditor()
+      await openBtTabAsBob()
+      await expect(lockedEdit).toBeVisible({ timeout: 2_000 })
+    }
+  }).toPass({ timeout: 30_000 })
+
+  // Reviewer must NOT see the generate affordance — generation persists a BT,
+  // which is a Contributor+ write.
+  await expect(btPanel.getByRole("button", { name: /read it back/i })).toHaveCount(0)
 })

@@ -82,4 +82,19 @@ describe("AssignedToMe", () => {
     )
     expect(screen.queryByText("You have no open assignments.")).not.toBeInTheDocument()
   })
+
+  // FRO-366: guard against the list clipping instead of scrolling — see
+  // ProjectsList.tsx for the full explanation of the flex chain this depends on.
+  it("renders the list in a scrollable container (h-full + overflow-y-auto, no clipping)", async () => {
+    mockGetMy.mockResolvedValue([
+      { assignmentId: "a1", projectId: "pa", projectName: "John", scopeKind: "books", scopeLabel: "John", deadline: null, note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
+    ])
+    renderInbox()
+    await waitFor(() => expect(screen.getAllByText("John").length).toBeGreaterThan(0))
+
+    const scrollContainer = screen.getByTestId("assigned-to-me-scroll")
+    expect(scrollContainer.className).toMatch(/\bh-full\b/)
+    expect(scrollContainer.className).toMatch(/\boverflow-y-auto\b/)
+    expect(scrollContainer.className).not.toMatch(/overflow-hidden/)
+  })
 })

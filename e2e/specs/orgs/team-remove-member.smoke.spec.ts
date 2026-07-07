@@ -36,12 +36,10 @@ test("team remove member button removes the member from the team", async ({ alic
   const saveBtn = alice.getByRole("button", { name: /Save|Create|Confirm/i }).first()
   await saveBtn.click()
 
-  // Navigate to the team detail.
-  const teamLink = alice.getByRole("link", { name: teamName })
-    .or(alice.getByText(teamName).first())
-  await expect(teamLink).toBeVisible({ timeout: 10_000 })
-  await teamLink.click()
-  await alice.waitForURL(/\/teams\/\d+/, { timeout: 5_000 })
+  // Creating a team auto-navigates to its detail page (/teams/:id) — no click
+  // needed. (A team-name locator would resolve to the breadcrumb "current page"
+  // span, which is aria-disabled, so clicking it hangs until the test times out.)
+  await alice.waitForURL(/\/teams\/\d+/, { timeout: 10_000 })
 
   // Add bob to the team.
   const addMemberBtn = alice.getByRole("button", { name: /Add member/i })

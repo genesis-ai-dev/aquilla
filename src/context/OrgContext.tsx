@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react"
 import { useLocation } from "react-router-dom"
 import { listMyOrgs, type OrgSummary } from "@/lib/frontier/orgs"
+import { fetchAccessibleProjects } from "@/lib/sync/cloud-projects"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
@@ -8,11 +9,20 @@ import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 const STORAGE_KEY = "org:active"
 const ALL_ORGS_VALUE = "all"
 
+/** FRO-473: an org the caller can reach only via a project-level grant —
+ *  not an org membership. Surfaced in the org switcher tagged "Guest". */
+export interface GuestOrg {
+  id: number
+  name: string | null
+}
+
 interface OrgContextValue {
   orgs: OrgSummary[]
   activeOrgId: number | null
   activeOrg: OrgSummary | null
   isAllOrgs: boolean
+  /** Orgs reached only through a direct project grant (no org membership). */
+  guestOrgs: GuestOrg[]
   setActiveOrg: (id: number) => void
   setAllOrgs: () => void
   isLoading: boolean
@@ -37,6 +47,8 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   })
   const [isLoading, setLoading] = useState<boolean>(!!jwt)
   const [error, setError] = useState<string | null>(null)
+  const [guestOrgs, setGuestOrgs] = useState<GuestOrg[]>([])
+  const guestAliveRef = useRef(true)
 
   const refresh = useCallback(async (): Promise<OrgSummary[]> => {
     if (!jwt) { setOrgs([]); return [] }
@@ -63,6 +75,29 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   }, [jwt])
 
   useEffect(() => { void refresh() }, [refresh])
+
+  // FRO-473: derive guest orgs (accessible-project orgs the caller isn't a
+  // member of) so the org switcher can surface them tagged "Guest". Race-
+  // guarded like the other org-scoped effects in this file/hooks.
+  const refreshGuestOrgs = useCallback(async (): Promise<void> => {
+    if (!jwt) { if (guestAliveRef.current) setGuestOrgs([]); return }
+    const projects = await fetchAccessibleProjects(jwt)
+    if (!guestAliveRef.current) return
+    const memberOrgIds = new Set(orgs.map((o) => o.id))
+    const seen = new Map<number, GuestOrg>()
+    for (const p of projects) {
+      if (p.orgId == null || memberOrgIds.has(p.orgId)) continue
+      if (!seen.has(p.orgId)) seen.set(p.orgId, { id: p.orgId, name: p.orgName ?? null })
+    }
+    setGuestOrgs(Array.from(seen.values()))
+  }, [jwt, orgs])
+
+  useEffect(() => {
+    guestAliveRef.current = true
+    return () => { guestAliveRef.current = false }
+  }, [])
+
+  useEffect(() => { void refreshGuestOrgs() }, [refreshGuestOrgs])
 
   useEffect(() => {
     if (location.pathname !== "/") return
@@ -93,7 +128,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const activeOrg = orgs.find((o) => o.id === activeOrgId) ?? null
 
   return (
-    <OrgContext.Provider value={{ orgs, activeOrgId, activeOrg, isAllOrgs, setActiveOrg, setAllOrgs, isLoading, error, refresh }}>
+    <OrgContext.Provider value={{ orgs, activeOrgId, activeOrg, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs, isLoading, error, refresh }}>
       {children}
     </OrgContext.Provider>
   )

@@ -6,15 +6,19 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  Command,
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { SegmentTabs } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import type { WorkspaceSearchResult, SearchOptions } from "@/lib/search/workspace-index"
 import { computeReplaceDiffs, type CellReplaceDiff } from "@/lib/search/replace-action"
@@ -120,54 +124,9 @@ function Snippet({ html }: { html: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Scope / mode pill toggles
+// Scope / mode tab toggles
 // ---------------------------------------------------------------------------
-function PillToggle<T extends string>({
-  value,
-  options,
-  onChange,
-  disabled,
-  label,
-}: {
-  value: T
-  options: { label: string; value: T; disabled?: boolean }[]
-  onChange: (v: T) => void
-  disabled?: boolean
-  label: string
-}) {
-  return (
-    <div
-      className="inline-flex items-center gap-0.5 rounded-full bg-muted/50 p-0.5"
-      role="group"
-      aria-label={label}
-    >
-      {options.map((opt) => (
-        <AppTooltip key={opt.value} content={opt.disabled ? "Coming soon" : ""}>
-          <span className="inline-flex">
-            <button
-              type="button"
-              disabled={disabled || opt.disabled}
-              onClick={() => onChange(opt.value)}
-              aria-pressed={value === opt.value}
-              className={cn(
-                "inline-flex h-6 items-center rounded-full px-2.5 text-[11px] font-medium tracking-tight transition-colors",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-                "disabled:cursor-not-allowed disabled:opacity-40",
-                value === opt.value
-                  ? "bg-background text-foreground shadow-sm ring-1 ring-foreground/8"
-                  : "text-muted-foreground hover:text-foreground hover:bg-background/50",
-              )}
-            >
-              {opt.label}
-            </button>
-          </span>
-        </AppTooltip>
-      ))}
-    </div>
-  )
-}
 
-// ---------------------------------------------------------------------------
 // Inline diff preview row: shows before (strikethrough red) and after (green).
 // ---------------------------------------------------------------------------
 function DiffPreviewRow({
@@ -214,31 +173,13 @@ function DiffPreviewRow({
 }
 
 // ---------------------------------------------------------------------------
-// Result row (search mode)
+// Result row content (search mode — rendered inside CommandItem)
 // ---------------------------------------------------------------------------
-function ResultRow({
-  result,
-  query,
-  onSelect,
-}: {
-  result: WorkspaceSearchResult
-  query: string
-  onSelect: (result: WorkspaceSearchResult, query: string) => void
-}) {
+function SearchResultContent({ result }: { result: WorkspaceSearchResult }) {
   const columnLabel = result.original ? "source" : "target"
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(result, query)}
-      aria-label={`${result.fileName || result.fileId} — ${columnLabel}`}
-      className={cn(
-        "w-full text-left rounded-xl px-3 py-2.5 text-sm transition-colors",
-        "hover:bg-accent/60 hover:text-accent-foreground",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-        "active:bg-accent",
-      )}
-    >
-      <div className="flex items-center justify-between gap-2 mb-1">
+    <>
+      <div className="flex w-full items-center justify-between gap-2 mb-1">
         <span className="truncate text-xs font-medium text-muted-foreground leading-none">
           {result.fileName || result.fileId}
         </span>
@@ -249,15 +190,15 @@ function ResultRow({
           {columnLabel}
         </span>
       </div>
-      <div className="text-sm leading-snug">
+      <div className="w-full text-sm leading-snug">
         <Snippet html={result.snippet || (result.original || result.translated)} />
       </div>
       {result.paired != null && result.paired !== "" && (
-        <div className="mt-1.5 pl-2.5 border-l-2 border-muted text-xs text-muted-foreground leading-snug">
+        <div className="mt-1.5 w-full pl-2.5 border-l-2 border-muted text-xs text-muted-foreground leading-snug">
           {result.paired}
         </div>
       )}
-    </button>
+    </>
   )
 }
 
@@ -481,7 +422,6 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
   const [query, setQuery] = useState("")
   const [side, setSide] = useState<ParallelPanelSide>("both")
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const inputRef = useRef<HTMLInputElement | null>(null)
 
   // When replace mode is opened, auto-switch side to "target".
   useEffect(() => {
@@ -490,12 +430,8 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
     }
   }, [mode])
 
-  // Focus the input when the dialog opens.
   useEffect(() => {
-    if (open) {
-      const t = setTimeout(() => inputRef.current?.focus(), 50)
-      return () => clearTimeout(t)
-    } else {
+    if (!open) {
       setQuery("")
       clearResults?.()
     }
@@ -522,8 +458,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
     [activeFileId, clearResults, onSearch, onSearchPassages],
   )
 
-  const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const v = e.target.value
+  const handleQueryChange = (v: string) => {
     setQuery(v)
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
@@ -556,12 +491,15 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
     }
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       if (debounceRef.current) clearTimeout(debounceRef.current)
       triggerSearch(query, scope, mode, side)
     }
   }
+
+  const dialogTitle =
+    mode === "passages" ? "Parallel passages" : mode === "replace" ? "Search and Replace" : "Search"
 
   const scopeLabel =
     scope === "file"
@@ -581,24 +519,26 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
       : `Search ${scope === "file" ? scopeLabel.toLowerCase() : "project"}…`
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex flex-col gap-0 p-0 sm:max-w-2xl max-h-[85vh] overflow-hidden">
-        {/* Visually-hidden title for screen readers */}
-        <DialogHeader className="sr-only">
-          <DialogTitle>
-            {mode === "passages" ? "Parallel passages" : mode === "replace" ? "Search and Replace" : "Search"} —{" "}
-            {scope === "file" ? scopeLabel : "entire project"}
-          </DialogTitle>
-        </DialogHeader>
-
-        {/* Controls row — pr-10 reserves clearance for the absolute-positioned X close button (size-7 at right-2) */}
+    <CommandDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={`${dialogTitle} — ${scope === "file" ? scopeLabel : "entire project"}`}
+      description={inputPlaceholder}
+      showCloseButton
+      className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
+    >
+      <Command
+        shouldFilter={false}
+        className="flex max-h-[85vh] flex-col gap-0 rounded-none bg-transparent p-0"
+      >
+        {/* Controls row — pr-10 reserves clearance for the absolute-positioned X close button */}
         <div
-          className="flex flex-wrap items-center gap-3 pl-4 pr-10 pt-4 pb-3 shrink-0"
+          className="flex shrink-0 flex-wrap items-center gap-3 pb-3 pl-4 pr-10 pt-4"
           aria-label="Panel controls"
         >
-          <PillToggle<ParallelPanelScope>
+          <SegmentTabs<ParallelPanelScope>
             value={scope}
-            label="Search scope"
+            aria-label="Search scope"
             options={[
               { label: "Project", value: "project" },
               {
@@ -607,41 +547,38 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
                 disabled: !activeFileId,
               },
             ]}
-            onChange={handleScopeChange}
+            onValueChange={handleScopeChange}
           />
-          <PillToggle<ParallelPanelMode>
+          <SegmentTabs<ParallelPanelMode>
             value={mode}
-            label="Search mode"
+            aria-label="Search mode"
             options={[
               { label: "Search", value: "search" },
               { label: "Passages", value: "passages" },
               { label: "Replace", value: "replace" },
             ]}
-            onChange={handleModeChange}
+            onValueChange={handleModeChange}
           />
           {mode !== "replace" && (
-            <PillToggle<ParallelPanelSide>
+            <SegmentTabs<ParallelPanelSide>
               value={side}
-              label="Content side"
+              aria-label="Content side"
               options={[
                 { label: "Both", value: "both" },
                 { label: "Source", value: "source" },
                 { label: "Target", value: "target" },
               ]}
-              onChange={handleSideChange}
+              onValueChange={handleSideChange}
             />
           )}
         </div>
 
-        {/* Search input (find) */}
-        <div className="px-4 pb-3 shrink-0 flex flex-col gap-2">
-          <Input
-            ref={inputRef}
+        <div className="flex shrink-0 flex-col gap-2 px-4 pb-3">
+          <CommandInput
             placeholder={inputPlaceholder}
             value={query}
-            onChange={handleQueryChange}
-            onKeyDown={handleKeyDown}
-            className="h-9 text-sm"
+            onValueChange={handleQueryChange}
+            onKeyDown={handleSearchKeyDown}
             aria-label={inputPlaceholder}
             aria-busy={loading}
           />
@@ -651,10 +588,9 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
             </p>
           )}
 
-          {/* Replace section — shown when mode === "replace" */}
           {mode === "replace" && (
-            <div className="rounded-xl border border-border bg-muted/20 px-3 py-3 flex flex-col gap-3">
-              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            <div className="flex flex-col gap-3 rounded-xl border border-border bg-muted/20 px-3 py-3">
+              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Replace (target cells only)
               </div>
               <ReplaceSection
@@ -667,52 +603,58 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
           )}
         </div>
 
-        {/* Results */}
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-border">
-          <div className="px-2 py-2 space-y-0.5">
-            {loading && <ResultsLoadingSkeleton />}
+        <CommandList className="max-h-none min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-border px-2 py-2">
+          {loading && <ResultsLoadingSkeleton />}
 
-            {!loading && isIdle && (
-              <p className="px-3 py-8 text-center text-sm text-muted-foreground select-none" aria-live="polite">
-                {mode === "passages"
-                  ? "Type to find parallel passages — results show source and target side by side."
-                  : mode === "replace"
-                  ? "Type a search term above to find target cells for replacement."
-                  : `Type to search across ${scope === "file" ? "the open file" : "the project"}.`}
-              </p>
-            )}
+          {!loading && isIdle && (
+            <CommandEmpty aria-live="polite">
+              {mode === "passages"
+                ? "Type to find parallel passages — results show source and target side by side."
+                : mode === "replace"
+                ? "Type a search term above to find target cells for replacement."
+                : `Type to search across ${scope === "file" ? "the open file" : "the project"}.`}
+            </CommandEmpty>
+          )}
 
-            {!loading && isEmpty && (
-              <p className="px-3 py-8 text-center text-sm text-muted-foreground select-none" aria-live="polite">
-                No results for{" "}
-                <span className="font-medium text-foreground">&ldquo;{query}&rdquo;</span>.
-              </p>
-            )}
+          {!loading && isEmpty && (
+            <CommandEmpty aria-live="polite">
+              No results for{" "}
+              <span className="font-medium text-foreground">&ldquo;{query}&rdquo;</span>.
+            </CommandEmpty>
+          )}
 
-            {!loading &&
-              results.map((r) => (
-                <ResultRow
-                  key={`${r.fileId}:${r.cellId}:${r.original ? "src" : "tgt"}`}
-                  result={r}
-                  query={query}
-                  onSelect={(result, q) => onSelect?.(result, q)}
-                />
-              ))}
-          </div>
-        </div>
+          {!loading && results.length > 0 && (
+            <CommandGroup>
+              {results.map((r) => {
+                const columnLabel = r.original ? "source" : "target"
+                const itemKey = `${r.fileId}:${r.cellId}:${r.original ? "src" : "tgt"}`
+                return (
+                  <CommandItem
+                    key={itemKey}
+                    value={itemKey}
+                    aria-label={`${r.fileName || r.fileId} — ${columnLabel}`}
+                    className="flex flex-col items-start rounded-xl px-3 py-2.5"
+                    onSelect={() => onSelect?.(r, query)}
+                  >
+                    <SearchResultContent result={r} />
+                  </CommandItem>
+                )
+              })}
+            </CommandGroup>
+          )}
+        </CommandList>
 
-        {/* Footer — only when there are results */}
         {!loading && results.length > 0 && (
-          <div className="px-4 py-2.5 shrink-0 border-t border-border flex items-center justify-between bg-muted/20">
-            <span className="text-xs text-muted-foreground tabular-nums">
+          <div className="flex shrink-0 items-center justify-between border-t border-border bg-muted/20 px-4 py-2.5">
+            <span className="text-xs tabular-nums text-muted-foreground">
               {results.length.toLocaleString()} result{results.length !== 1 ? "s" : ""}
             </span>
-            <span className="text-xs text-muted-foreground truncate max-w-[60%] text-right">
+            <span className="max-w-[60%] truncate text-right text-xs text-muted-foreground">
               {mode === "passages" ? "Parallel passages" : scopeLabel}
             </span>
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+      </Command>
+    </CommandDialog>
   )
 }

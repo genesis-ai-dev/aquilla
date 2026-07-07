@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" version="2.0" srcLang="en-US" trgLang="fr-FR">
+  <file id="f1">
+    <unit id="u1">
+      <segment id="s0-0" state="final">
+        <source>The quarterly report shows a 12.5% increase in recurring revenue.</source>
+        <target>The quarterly report shows a 12.5% increase in recurring revenue.</target>
+      </segment>
+    </unit>
+    <unit id="u2">
+      <segment id="s1-0" state="initial">
+        <source><pc id="pc1-0">Warning: contents may be hot. Handle with care.</pc></source>
+      </segment>
+    </unit>
+    <unit id="u3">
+      <segment id="s2-0" state="initial">
+        <source>Rinse thoroughly with lukewarm water for at least 15 minutes.</source>
+      </segment>
+    </unit>
+  </file>
+</xliff>

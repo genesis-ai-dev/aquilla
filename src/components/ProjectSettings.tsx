@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { ArrowLeft, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDriveDownload } from "lucide-react"
+import { ArrowLeft, Check, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDriveDownload } from "lucide-react"
 import { Menu } from "@base-ui/react/menu"
 import { Button } from "@/components/ui/button"
+import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
+import { Slider } from "@/components/ui/slider"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
   Select,
@@ -48,6 +50,8 @@ import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
+import { UpstreamChangesPanel } from "./linked/UpstreamChangesPanel"
+import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useOrg } from "@/hooks/useOrg"
 import { ApiKeyField } from "./ApiKeyField"
 import { SettingsNav, useScrollSpy, type SettingsSection } from "./ProjectSettings/SettingsNav"
@@ -232,6 +236,13 @@ export function ProjectSettings() {
     getJwt,
     enabled: isCloudProject && !!id,
   })
+
+  // FRO-478: file-scoped sync-token minter for the Upstream-changes panel
+  // (mirrors ProjectWorkspace's getTokenForFile — per-file JWTs, cached).
+  const getTokenForUpstreamPanel = useMemo(
+    () => buildFileScopedTokenFetcher(getJwt, id ?? "", {}),
+    [getJwt, id],
+  )
 
   // Server enforces MAINTAINER (600) for settings writes — show the correct
   // floor in the read-only tooltip so users know what role they need.
@@ -453,6 +464,15 @@ export function ProjectSettings() {
   const [discardOpen, setDiscardOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  // FRO-408: success message reflects the actual delta saved (a brief
+  // enumeration of which fields changed), not a generic "Saved". Auto-dismisses
+  // like the sibling `conflictBy` notice above. The modal/page itself stays
+  // open on save — only an explicit "Save and close" leaves it.
+  const [savedMessage, setSavedMessage] = useState<string | null>(null)
+  const savedMessageTimerRef = useRef<number | null>(null)
+  useEffect(() => () => {
+    if (savedMessageTimerRef.current != null) window.clearTimeout(savedMessageTimerRef.current)
+  }, [])
 
   // Pending in-app navigation target. Set when the user clicks something that
   // would leave the page while dirty; cleared when they confirm discard (we
@@ -504,26 +524,31 @@ export function ProjectSettings() {
     if (!id || !baseline) return false
     setSaving(true)
     setSaveError(null)
+    setSavedMessage(null)
+    // FRO-408: track which fields actually changed so the success message can
+    // reflect the real delta saved, instead of a generic "Saved" that implies
+    // everything on the page was written.
+    const changedFieldLabels: string[] = []
     try {
       const completionUpdates: Partial<CompletionSettings> = {}
-      if (provider !== baseline.provider) completionUpdates.provider = provider
-      if (endpoint.trim() !== baseline.endpoint) completionUpdates.endpoint = endpoint.trim()
-      if (apiKey !== baseline.apiKey) completionUpdates.apiKey = apiKey || undefined
-      if (model !== baseline.model) completionUpdates.model = model
-      if (maxTokens !== baseline.maxTokens) completionUpdates.maxTokens = maxTokens
-      if (temperature !== baseline.temperature) completionUpdates.temperature = temperature
-      if (llmHealthPenalty !== baseline.llmHealthPenalty) completionUpdates.llmHealthPenalty = llmHealthPenalty
-      if (topK !== baseline.top_k) completionUpdates.top_k = topK
-      if (contextSize !== baseline.contextSize) completionUpdates.contextSize = contextSize
-      if (useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples) completionUpdates.useOnlyValidatedExamples = useOnlyValidatedExamples
-      if (fewShotExampleFormat !== baseline.fewShotExampleFormat) completionUpdates.fewShotExampleFormat = fewShotExampleFormat
-      if (mainChatLanguage !== baseline.main_chat_language) completionUpdates.main_chat_language = mainChatLanguage || undefined
+      if (provider !== baseline.provider) { completionUpdates.provider = provider; changedFieldLabels.push("AI provider") }
+      if (endpoint.trim() !== baseline.endpoint) { completionUpdates.endpoint = endpoint.trim(); changedFieldLabels.push("endpoint") }
+      if (apiKey !== baseline.apiKey) { completionUpdates.apiKey = apiKey || undefined; changedFieldLabels.push("API key") }
+      if (model !== baseline.model) { completionUpdates.model = model; changedFieldLabels.push("model") }
+      if (maxTokens !== baseline.maxTokens) { completionUpdates.maxTokens = maxTokens; changedFieldLabels.push("max tokens") }
+      if (temperature !== baseline.temperature) { completionUpdates.temperature = temperature; changedFieldLabels.push("temperature") }
+      if (llmHealthPenalty !== baseline.llmHealthPenalty) { completionUpdates.llmHealthPenalty = llmHealthPenalty; changedFieldLabels.push("health penalty") }
+      if (topK !== baseline.top_k) { completionUpdates.top_k = topK; changedFieldLabels.push("examples retrieved") }
+      if (contextSize !== baseline.contextSize) { completionUpdates.contextSize = contextSize; changedFieldLabels.push("context window") }
+      if (useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples) { completionUpdates.useOnlyValidatedExamples = useOnlyValidatedExamples; changedFieldLabels.push("validated examples only") }
+      if (fewShotExampleFormat !== baseline.fewShotExampleFormat) { completionUpdates.fewShotExampleFormat = fewShotExampleFormat; changedFieldLabels.push("reference example format") }
+      if (mainChatLanguage !== baseline.main_chat_language) { completionUpdates.main_chat_language = mainChatLanguage || undefined; changedFieldLabels.push("assisted language") }
 
       const localUpdates: Partial<ProjectRecord> = {}
-      if (name !== baseline.name) localUpdates.name = name
-      if (username !== baseline.username) localUpdates.username = username
-      if (!decayEqual(decaySettings, baseline.decaySettings)) localUpdates.decaySettings = decaySettings
-      if (audioMediaStrategy !== baseline.audioMediaStrategy) localUpdates.audioMediaStrategy = audioMediaStrategy
+      if (name !== baseline.name) { localUpdates.name = name; changedFieldLabels.push("project name") }
+      if (username !== baseline.username) { localUpdates.username = username; changedFieldLabels.push("username") }
+      if (!decayEqual(decaySettings, baseline.decaySettings)) { localUpdates.decaySettings = decaySettings; changedFieldLabels.push("decay settings") }
+      if (audioMediaStrategy !== baseline.audioMediaStrategy) { localUpdates.audioMediaStrategy = audioMediaStrategy; changedFieldLabels.push("audio media strategy") }
       // geminiApiKey handled below after `latest` is fetched, so voices/castAssignments are preserved.
       if (
         autoSyncEnabled !== baseline.autoSyncEnabled ||
@@ -532,9 +557,11 @@ export function ProjectSettings() {
         localUpdates.syncSettings = {
           autoSync: { enabled: autoSyncEnabled, intervalMinutes: Math.max(1, autoSyncInterval) },
         }
+        changedFieldLabels.push("auto-sync")
       }
 
       const geminiKeyChanged = geminiApiKey !== baseline.geminiApiKey
+      if (geminiKeyChanged) changedFieldLabels.push("voice API key")
       const hasLocalWork =
         Object.keys(localUpdates).length > 0 || Object.keys(completionUpdates).length > 0 || geminiKeyChanged
       if (hasLocalWork) {
@@ -551,22 +578,25 @@ export function ProjectSettings() {
       }
 
       const sharedUpdates: ProjectWideSettings = {}
-      if (sourceLanguage !== baseline.sourceLanguage) sharedUpdates.sourceLanguage = sourceLanguage
-      if (targetLanguage !== baseline.targetLanguage) sharedUpdates.targetLanguage = targetLanguage
-      if (systemPrompt !== baseline.systemPrompt) sharedUpdates.systemPrompt = systemPrompt
-      if (validationCount !== baseline.validationCount) sharedUpdates.validationCount = validationCount
+      if (sourceLanguage !== baseline.sourceLanguage) { sharedUpdates.sourceLanguage = sourceLanguage; changedFieldLabels.push("source language") }
+      if (targetLanguage !== baseline.targetLanguage) { sharedUpdates.targetLanguage = targetLanguage; changedFieldLabels.push("target language") }
+      if (systemPrompt !== baseline.systemPrompt) { sharedUpdates.systemPrompt = systemPrompt; changedFieldLabels.push("AI instructions") }
+      if (validationCount !== baseline.validationCount) { sharedUpdates.validationCount = validationCount; changedFieldLabels.push("validation count") }
       if (validationCountAudio !== baseline.validationCountAudio) {
         sharedUpdates.validationCountAudio = validationCountAudio
+        changedFieldLabels.push("audio validation count")
       }
-      if (validationRoleFloor !== baseline.validationRoleFloor) sharedUpdates.validationRoleFloor = validationRoleFloor
+      if (validationRoleFloor !== baseline.validationRoleFloor) { sharedUpdates.validationRoleFloor = validationRoleFloor; changedFieldLabels.push("validation role floor") }
       if (JSON.stringify(validationNamedUsers) !== JSON.stringify(baseline.validationNamedUsers)) {
         sharedUpdates.validationNamedUsers = validationNamedUsers
+        changedFieldLabels.push("named validators")
       }
-      if (allowSelfValidation !== baseline.allowSelfValidation) sharedUpdates.allowSelfValidation = allowSelfValidation
-      if (harmonizeMinRole !== baseline.harmonize_min_role) sharedUpdates.harmonize_min_role = harmonizeMinRole
-      if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled
+      if (allowSelfValidation !== baseline.allowSelfValidation) { sharedUpdates.allowSelfValidation = allowSelfValidation; changedFieldLabels.push("self-validation") }
+      if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
+      if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push("Bible resources") }
       if (precedingTargetCells !== baseline.precedingTargetCells) {
         sharedUpdates.draftContext = { precedingTargetCells }
+        changedFieldLabels.push("draft context")
       }
 
       if (Object.keys(sharedUpdates).length > 0) {
@@ -631,6 +661,20 @@ export function ProjectSettings() {
       // Refresh `useProject` in the background so other components see the
       // updated IDB record. We don't await it — the form is already correct.
       refresh()
+
+      // FRO-408 acceptance criterion: the success message reflects the actual
+      // delta saved (a brief enumeration of which fields changed), and the
+      // page/modal stays open afterward — callers decide separately whether
+      // to also navigate away (see handleSaveAndClose).
+      const message =
+        changedFieldLabels.length === 0
+          ? "No changes to save."
+          : changedFieldLabels.length <= 3
+            ? `Saved: ${changedFieldLabels.join(", ")}.`
+            : `Saved ${changedFieldLabels.length} changes: ${changedFieldLabels.slice(0, 3).join(", ")}, +${changedFieldLabels.length - 3} more.`
+      setSavedMessage(message)
+      if (savedMessageTimerRef.current != null) window.clearTimeout(savedMessageTimerRef.current)
+      savedMessageTimerRef.current = window.setTimeout(() => setSavedMessage(null), 4000)
       return true
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err))
@@ -673,8 +717,13 @@ export function ProjectSettings() {
   const hasGitOrigin = project?.origin?.kind === "git"
   const hasSourceLink = typeof project?.sourceProjectId === "string" && !!project.sourceProjectId
 
+  // FRO-478: only meaningful for a LIVE link (a clone never drifts from its
+  // upstream — see the mirror-sync short-circuit in stale-source-route.ts).
+  const hasLiveSourceLink = hasSourceLink && project?.sourceLinkMode !== "clone"
+
   const ALL_SECTIONS: SettingsSection[] = [
     { id: "section-source-link", label: "Source link", keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
+    { id: "section-upstream-changes", label: "Upstream changes", keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
     { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language"] },
     { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
@@ -713,36 +762,39 @@ export function ProjectSettings() {
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-30 flex items-center gap-3 border-b bg-background/95 px-4 py-2 backdrop-blur supports-backdrop-filter:bg-background/80">
         {isDirty ? (
-          <div className="flex items-stretch">
+          <ButtonGroup>
             <Button
               size="sm"
-              onClick={handleSaveAndClose}
+              onClick={handleSave}
               disabled={saving}
-              className="rounded-r-none"
             >
               {saving ? (
-                <Spinner className="mr-1" />
+                <Spinner data-icon="inline-start" />
               ) : (
-                <Save className="mr-1 h-4 w-4" />
+                <Save data-icon="inline-start" />
               )}
               Save changes
             </Button>
+            <ButtonGroupSeparator />
             <Menu.Root>
               <Menu.Trigger
                 render={
                   <Button
                     size="sm"
                     disabled={saving}
-                    className="rounded-l-none border-l border-primary-foreground/20 px-2"
+                    className="px-2"
                     aria-label="More save options"
                   >
-                    <ChevronDown className="h-4 w-4" />
+                    <ChevronDown />
                   </Button>
                 }
               />
               <Menu.Portal>
                 <Menu.Positioner sideOffset={4} align="start" className="z-40">
                   <Menu.Popup className="min-w-56 rounded-xl border bg-popover p-1 text-popover-foreground shadow-soft-lg">
+                    <Menu.Item onClick={handleSaveAndClose} className={ITEM_CLASS}>
+                      Save and close
+                    </Menu.Item>
                     <Menu.Item onClick={() => setDiscardOpen(true)} className={ITEM_CLASS}>
                       Close without saving
                     </Menu.Item>
@@ -750,7 +802,7 @@ export function ProjectSettings() {
                 </Menu.Positioner>
               </Menu.Portal>
             </Menu.Root>
-          </div>
+          </ButtonGroup>
         ) : (
           <Button variant="ghost" size="sm" onClick={() => requestNavigate(`/project/${id}`)}>
             <ArrowLeft className="mr-1 h-4 w-4" /> Back to Editor
@@ -759,6 +811,14 @@ export function ProjectSettings() {
         <h2 className="font-semibold">Project Settings</h2>
         <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
           {isDirty && !saving && <span>Unsaved changes</span>}
+          {!isDirty && savedMessage && (
+            <span
+              role="status"
+              className="flex items-center gap-1 text-green-600 dark:text-green-400"
+            >
+              <Check className="size-3.5" /> {savedMessage}
+            </span>
+          )}
           {saveError && <span className="text-destructive">{saveError}</span>}
         </div>
       </header>
@@ -807,8 +867,21 @@ export function ProjectSettings() {
           <SourceLinkSection
             projectId={id!}
             sourceProjectId={project.sourceProjectId}
+            sourceLinkMode={project.sourceLinkMode}
+            sourceLinkConsumes={project.sourceLinkConsumes}
+            sourceLinkGate={project.sourceLinkGate}
+            sourceLinkCursor={project.sourceLinkCursor}
             onDetached={refresh}
             roleLevel={project?.syncRole?.level ?? null}
+          />
+        )}
+        {hasLiveSourceLink && visibleSections.some((s) => s.id === "section-upstream-changes") && (
+          <UpstreamChangesPanel
+            projectId={id!}
+            files={project?.files ?? []}
+            getToken={getTokenForUpstreamPanel}
+            roleLevel={project?.syncRole?.level ?? null}
+            username={session?.username ?? "local"}
           />
         )}
         {visibleSections.some((s) => s.id === "section-project-info") && (
@@ -816,7 +889,7 @@ export function ProjectSettings() {
             <CardHeader><CardTitle>Project Info</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               <div>
-                <Label htmlFor="pname">Project Name</Label>
+                <FieldLabel htmlFor="pname">Project Name</FieldLabel>
                 <Input id="pname" value={name} onChange={(e) => setName(e.target.value)} />
               </div>
               {sharedUpdatedBy && sharedUpdatedAt && sharedVersion != null && sharedVersion > 0 && (
@@ -827,13 +900,13 @@ export function ProjectSettings() {
               )}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="sl">Source Language</Label>
+                  <FieldLabel htmlFor="sl">Source Language</FieldLabel>
                   <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
                     <Input id="sl" value={sourceLanguage} onChange={(e) => setSourceLanguage(e.target.value)} disabled={!canEditShared} />
                   </DisabledFieldTooltip>
                 </div>
                 <div>
-                  <Label htmlFor="tl">Target Language</Label>
+                  <FieldLabel htmlFor="tl">Target Language</FieldLabel>
                   <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
                     <Input id="tl" value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value)} disabled={!canEditShared} />
                   </DisabledFieldTooltip>
@@ -852,9 +925,9 @@ export function ProjectSettings() {
               <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-0.5">
-                    <Label htmlFor="bible-resources-enabled" className="text-sm">
+                    <FieldLabel htmlFor="bible-resources-enabled" className="text-sm">
                       Enable Bible resources
-                    </Label>
+                    </FieldLabel>
                     <p className="text-xs text-muted-foreground">
                       Scholarly reference data from bibletranslation.org in Search and the agent.
                     </p>
@@ -892,7 +965,7 @@ export function ProjectSettings() {
           <Card id="section-user">
             <CardHeader><CardTitle>User</CardTitle></CardHeader>
             <CardContent>
-              <Label htmlFor="un">Username</Label>
+              <FieldLabel htmlFor="un">Username</FieldLabel>
               <Input id="un" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="local" />
               <p className="mt-1 text-xs text-muted-foreground">Used as author name in translation history.</p>
             </CardContent>
@@ -927,7 +1000,7 @@ export function ProjectSettings() {
 
               <div className="grid grid-cols-1 gap-4 pt-2 sm:grid-cols-2">
                 <div className="space-y-1">
-                  <Label htmlFor="top-k">Examples retrieved (top_k)</Label>
+                  <FieldLabel htmlFor="top-k">Examples retrieved (top_k)</FieldLabel>
                   <Input
                     id="top-k"
                     type="number"
@@ -942,7 +1015,7 @@ export function ProjectSettings() {
                 </div>
 
                 <div className="space-y-1">
-                  <Label htmlFor="context-size">Context window</Label>
+                  <FieldLabel htmlFor="context-size">Context window</FieldLabel>
                   <Select
                     items={{
                       small: "Small — tight window",
@@ -969,7 +1042,7 @@ export function ProjectSettings() {
                 </div>
 
                 <div className="space-y-1">
-                  <Label htmlFor="main-chat-language">Assistant language</Label>
+                  <FieldLabel htmlFor="main-chat-language">Assistant language</FieldLabel>
                   <Input
                     id="main-chat-language"
                     value={mainChatLanguage}
@@ -989,7 +1062,7 @@ export function ProjectSettings() {
                     onCheckedChange={(checked) => setUseOnlyValidatedExamples(checked)}
                   />
                   <div>
-                    <Label htmlFor="validated-only">Validated examples only</Label>
+                    <FieldLabel htmlFor="validated-only">Validated examples only</FieldLabel>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       When on, only human-validated cells are used as reference examples — unvalidated results are excluded.
                     </p>
@@ -997,7 +1070,7 @@ export function ProjectSettings() {
                 </div>
 
                 <div className="space-y-1">
-                  <Label htmlFor="few-shot-example-format">Reference example format</Label>
+                  <FieldLabel htmlFor="few-shot-example-format">Reference example format</FieldLabel>
                   <Select
                     items={{
                       "source-and-target": "Source + target (default)",
@@ -1032,7 +1105,7 @@ export function ProjectSettings() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="space-y-1">
-                <Label htmlFor="preceding-target-cells">Preceding committed-target cells</Label>
+                <FieldLabel htmlFor="preceding-target-cells">Preceding committed-target cells</FieldLabel>
                 <Input
                   id="preceding-target-cells"
                   type="number"
@@ -1068,7 +1141,7 @@ export function ProjectSettings() {
             </summary>
             <div className="space-y-4 border-t px-6 py-4">
               <div className="space-y-2">
-                <Label>Provider</Label>
+                <FieldLabel>Provider</FieldLabel>
                 <RadioGroup
                   name="provider"
                   value={provider}
@@ -1095,7 +1168,7 @@ export function ProjectSettings() {
               {provider === "custom" && (
                 <>
                   <div>
-                    <Label htmlFor="preset">Provider preset</Label>
+                    <FieldLabel htmlFor="preset">Provider preset</FieldLabel>
                     <Select
                       items={CUSTOM_PRESETS.map((p) => ({ value: p.id, label: p.label }))}
                       value={presetId}
@@ -1114,7 +1187,7 @@ export function ProjectSettings() {
                     </Select>
                   </div>
                   <div>
-                    <Label htmlFor="ep">Endpoint URL</Label>
+                    <FieldLabel htmlFor="ep">Endpoint URL</FieldLabel>
                     <div className="flex gap-2">
                       <Input
                         id="ep"
@@ -1155,7 +1228,7 @@ export function ProjectSettings() {
                   </p>
                   {models.length > 0 && (
                     <div>
-                      <Label htmlFor="mdl">Model</Label>
+                      <FieldLabel htmlFor="mdl">Model</FieldLabel>
                       <Select value={model} onValueChange={(value) => setModel(value ?? "")}>
                         <SelectTrigger id="mdl" className="w-full">
                           <SelectValue />
@@ -1170,7 +1243,7 @@ export function ProjectSettings() {
                   )}
                   {models.length === 0 && (
                     <div>
-                      <Label htmlFor="mdl-manual">Model (if not listed)</Label>
+                      <FieldLabel htmlFor="mdl-manual">Model (if not listed)</FieldLabel>
                       <Input
                         id="mdl-manual"
                         value={model}
@@ -1187,7 +1260,7 @@ export function ProjectSettings() {
 
               {provider === "frontier" && (
                 <div>
-                  <Label htmlFor="mdl-frontier">Model override (optional)</Label>
+                  <FieldLabel htmlFor="mdl-frontier">Model override (optional)</FieldLabel>
                   <Input
                     id="mdl-frontier"
                     value={model}
@@ -1202,22 +1275,34 @@ export function ProjectSettings() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="mt">Max Tokens</Label>
+                  <FieldLabel htmlFor="mt">Max Tokens</FieldLabel>
                   <Input id="mt" type="number" value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value))} />
                 </div>
-                <div>
-                  <Label>Temperature ({temperature})</Label>
-                  <input type="range" min="0" max="1" step="0.05" value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} className="mt-2 w-full" />
-                </div>
+                <Field>
+                  <FieldLabel>Temperature ({temperature})</FieldLabel>
+                  <Slider
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={[temperature]}
+                    onValueChange={(next) => setTemperature(Array.isArray(next) ? next[0] : next)}
+                  />
+                </Field>
               </div>
 
-              <div>
-                <Label>LLM Health Penalty ({Math.round(llmHealthPenalty * 100)}%)</Label>
-                <input type="range" min="0" max="0.5" step="0.05" value={llmHealthPenalty} onChange={(e) => setLlmHealthPenalty(Number(e.target.value))} className="mt-2 w-full" />
-                <p className="mt-1 text-xs text-muted-foreground">
+              <Field>
+                <FieldLabel>LLM Health Penalty ({Math.round(llmHealthPenalty * 100)}%)</FieldLabel>
+                <Slider
+                  min={0}
+                  max={0.5}
+                  step={0.05}
+                  value={[llmHealthPenalty]}
+                  onValueChange={(next) => setLlmHealthPenalty(Array.isArray(next) ? next[0] : next)}
+                />
+                <FieldDescription>
                   LLM translations are penalized by this amount in health calculations. 0% = full trust, 50% = heavy penalty. Default: 10%.
-                </p>
-              </div>
+                </FieldDescription>
+              </Field>
             </div>
           </details>
         )}
@@ -1320,7 +1405,7 @@ export function ProjectSettings() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="harmonize-min-role">Minimum role to run a harmonization sweep</Label>
+                <FieldLabel htmlFor="harmonize-min-role">Minimum role to run a harmonization sweep</FieldLabel>
                 <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
                   <Select
                     items={{
@@ -1373,7 +1458,7 @@ export function ProjectSettings() {
                   checked={autoSyncEnabled}
                   onCheckedChange={(checked) => setAutoSyncEnabled(checked)}
                 />
-                <Label htmlFor="auto-sync" className="text-sm">Auto-sync every</Label>
+                <FieldLabel htmlFor="auto-sync" className="text-sm">Auto-sync every</FieldLabel>
                 <Input
                   type="number"
                   min={1}

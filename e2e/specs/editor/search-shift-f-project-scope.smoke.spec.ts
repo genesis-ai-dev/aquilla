@@ -15,7 +15,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *     → setParallelScope("project"), setParallelOpen(true)
  *
  * When opened via Ctrl+Shift+F, the scope should be set to "project"
- * (the "Project" pill in ParallelPassagesPanel should have aria-pressed="true").
+ * (the "Project" tab in ParallelPassagesPanel should have aria-selected="true").
  *
  * This spec: open workspace → Ctrl+Shift+F → verify the search panel
  * opens with the "Project" scope pill pressed.
@@ -36,14 +36,14 @@ test("Ctrl+Shift+F opens search panel with project scope selected", async ({ ali
   await alice.keyboard.press("Control+Shift+f")
 
   // The search panel should open.
-  const searchInput = alice.locator('[aria-label="Search project"]')
-    .or(alice.locator('input[placeholder*="Search"]').first())
+  const panel = alice.getByRole("dialog")
+  const searchInput = panel.locator('[aria-label="Search project"]')
+    .or(panel.locator('input[placeholder*="Search"]').first())
   await expect(searchInput).toBeVisible({ timeout: 8_000 })
 
-  // The "Project" scope pill should be active (aria-pressed="true").
-  const projectPill = alice.locator('[aria-pressed="true"]').filter({ hasText: /^Project$/i })
-    .or(alice.locator('button[aria-pressed="true"]:has-text("Project")'))
-  await expect(projectPill.first()).toBeVisible({ timeout: 3_000 })
+  // The "Project" scope tab should be active (aria-selected="true").
+  const projectTab = panel.getByRole("tab", { name: /^Project$/i })
+  await expect(projectTab).toHaveAttribute("aria-selected", "true", { timeout: 3_000 })
 
   // Press Escape to dismiss.
   await alice.keyboard.press("Escape")

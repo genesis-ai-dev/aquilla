@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" version="2.0" srcLang="en-US" trgLang="fr-FR">
+  <file id="f1">
+    <unit id="u1">
+      <segment id="s0-0" state="initial">
+        <source>Die maximale Zuladung beträgt 750 kg einschließlich Fahrer.</source>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s0-1" state="translated">
+        <source>請在使用前仔細閱讀本說明書。</source>
+        <target>請在使用前仔細閱讀本說明書。</target>
+      </segment>
+    </unit>
+    <unit id="u2">
+      <segment id="s1-0" state="translated">
+        <source>Free shipping on orders over $50 — terms apply.</source>
+        <target>Free shipping on orders over $50 — terms apply.</target>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s1-1" state="initial">
+        <source><pc id="pc1-1">Añada 250 ml de agua y mezcle hasta obtener una masa homogénea.</pc></source>
+      </segment>
+    </unit>
+    <unit id="u3">
+      <segment id="s2-0" state="translated">
+        <source>Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).</source>
+        <target>Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).</target>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s2-1" state="translated">
+        <source>Don't share your password with anyone, including support staff.</source>
+        <target>Don't share your password with anyone, including support staff.</target>
+      </segment>
+    </unit>
+    <unit id="u4">
+      <segment id="s3-0" state="final">
+        <source>A load-bearing wall shall not be modified without engineering approval.</source>
+        <target>A load-bearing wall shall not be modified without engineering approval.</target>
+      </segment>
+    </unit>
+    <unit id="u5">
+      <segment id="s4-0" state="initial">
+        <source>Warning: contents may be hot. Handle with care.</source>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s4-1" state="initial">
+        <source>Our team<ph id="ph4-1"/> delivers world-class localization at scale — 24/7 support included.</source>
+      </segment>
+    </unit>
+    <unit id="u6">
+      <segment id="s5-0" state="initial">
+        <source>Don't share your password with anyone, including support staff.</source>
+      </segment>
+    </unit>
+    <unit id="u7">
+      <segment id="s6-0" state="initial">
+        <source>By signing below, the lessee acknowledges receipt of the premises.</source>
+      </segment>
+    </unit>
+    <unit id="u8">
+      <segment id="s7-0" state="initial">
+        <source>Rinse thoroughly with lukewarm water for at least 15 minutes.</source>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s7-1" state="translated">
+        <source>Añada 25<ph id="ph7-1"/>0 ml de agua y mezcle hasta obtener una masa homogénea.</source>
+        <target>Añada 25<ph id="ph7-1"/>0 ml de agua y mezcle hasta obtener una masa homogénea.</target>
+      </segment>
+    </unit>
+  </file>
+</xliff>

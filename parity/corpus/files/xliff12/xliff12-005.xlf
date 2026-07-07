@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="en-GB" target-language="es-ES" datatype="plaintext" original="doc0.txt">
+    <body>
+      <trans-unit id="u1">
+        <source>Adverse reactions may include nausea, dizziness, and &lt;severe&gt; headaches.</source>
+        <target state="translated">Adverse reactions may include nausea, dizziness, and &lt;severe&gt; headaches.</target>
+        <note>ctx-1</note>
+      </trans-unit>
+      <trans-unit id="u2" xml:space="preserve">
+        <source><bpt id="b2">&lt;b&gt;</bpt>Our team delivers world-class localization at scale — 24/7 support included.<ept id="b2">&lt;/b&gt;</ept></source>
+        <target state="new"></target>
+        <note>ctx-2</note>
+      </trans-unit>
+      <trans-unit id="u3" xml:space="preserve">
+        <source><g id="g3">All prices include VAT at the applicable rate of 21%.</g></source>
+        <target state="final"><g id="g3">All prices include VAT at the applicable rate of 21%.</g></target>
+      </trans-unit>
+      <trans-unit id="u4" xml:space="preserve">
+        <source>The undersigned parties agree to the terms &amp; conditions set forth herein.</source>
+        <target state="final">The undersigned parties agree to the terms &amp; conditions set forth herein.</target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

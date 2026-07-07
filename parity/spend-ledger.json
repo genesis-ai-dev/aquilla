@@ -1,0 +1,55 @@
+{
+  "note": "I4 \u2014 token/spend accounting. One entry appended per cycle. Token counts are self-reported estimates from the agent loop (the harness does not expose exact counters to the run); the trend, not the absolute value, feeds the stall rule. No external paid resources may be used without human approval; none used so far.",
+  "externalPaidResourcesApproved": [],
+  "entries": [
+    {
+      "cycle": 0,
+      "label": "phase0-research",
+      "startedAtUtc": "2026-07-04T15:12:09Z",
+      "estTokensThisCycle": 250000,
+      "notes": "4 parallel research/recon subagents (Matecat docs x3, codebase map x1) + scaffolding."
+    },
+    {
+      "cycle": 1,
+      "label": "text-family-roundtrip",
+      "estTokensThisCycle": 90000,
+      "notes": "structured txt/md/srt/vtt exporters + CRLF fix"
+    },
+    {
+      "cycle": 2,
+      "label": "xliff-block",
+      "estTokensThisCycle": 110000,
+      "notes": "skeleton capture, 1.2/2.0 exporters, schema validation"
+    },
+    {
+      "cycle": 3,
+      "label": "tmx-docx-original",
+      "estTokensThisCycle": 100000,
+      "notes": "code-aware extraction, TMX variants"
+    },
+    {
+      "cycle": 4,
+      "label": "analysis+qa",
+      "estTokensThisCycle": 80000,
+      "notes": "wordcount/buckets/payable + qa checks"
+    },
+    {
+      "cycle": 6,
+      "label": "batch-pipeline",
+      "estTokensThisCycle": 90000,
+      "notes": "BatchService + stub + contract tests"
+    },
+    {
+      "cycle": 7,
+      "label": "tm-governance",
+      "estTokensThisCycle": 85000,
+      "notes": "global-tm index + entitlements + canary suite"
+    },
+    {
+      "cycle": 8,
+      "label": "p1-format-sweep",
+      "estTokensThisCycle": 320000,
+      "notes": "5 parallel subagents (html/json/po/props+sbv/pptx) + workflow/glossary libs"
+    }
+  ]
+}

@@ -1,7 +1,13 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { createOrg, createOrgInvite } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -81,32 +87,34 @@ export function OrgStep({
         </p>
       </div>
       <form onSubmit={handleCreate} className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="org-name">Organization name</Label>
-          <Input
-            id="org-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Acme Bible Translation"
-            autoFocus
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="org-emails">Invite teammates (optional)</Label>
-          <Input
-            id="org-emails"
-            value={emails}
-            onChange={(e) => setEmails(e.target.value)}
-            placeholder="alex@example.com, sam@example.com"
-          />
-          <p className="text-xs text-muted-foreground">
-            Comma- or space-separated emails. They'll get a link to join.
-          </p>
-        </div>
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="org-name">Organization name</FieldLabel>
+            <Input
+              id="org-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Acme Bible Translation"
+              autoFocus
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="org-emails">Invite teammates (optional)</FieldLabel>
+            <Input
+              id="org-emails"
+              value={emails}
+              onChange={(e) => setEmails(e.target.value)}
+              placeholder="alex@example.com, sam@example.com"
+            />
+            <FieldDescription>
+              Comma- or space-separated emails. They'll get a link to join.
+            </FieldDescription>
+          </Field>
+        </FieldGroup>
         {error ? (
-          <p className="text-sm text-destructive" role="alert">
+          <FieldError role="alert">
             {error}
-          </p>
+          </FieldError>
         ) : null}
         <Button type="submit" size="lg" className="w-full" disabled={busy || !name.trim()}>
           {busy ? "Creating…" : "Create organization"}

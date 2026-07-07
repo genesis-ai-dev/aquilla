@@ -18,7 +18,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { FieldLabel } from "@/components/ui/field"
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
@@ -515,9 +515,9 @@ function RevokeAllDialog({
           </div>
 
           <div className="space-y-1">
-            <Label htmlFor="revoke-confirm" className="text-xs">
+            <FieldLabel htmlFor="revoke-confirm" className="text-xs">
               Type <strong>{confirmationRequired}</strong> to confirm
-            </Label>
+            </FieldLabel>
             <Input
               id="revoke-confirm"
               value={confirmation}
@@ -658,7 +658,7 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
       <div className="rounded border p-4 space-y-4">
         {/* Role */}
         <div className="space-y-1">
-          <Label className="text-xs">Role</Label>
+          <FieldLabel className="text-xs">Role</FieldLabel>
           <Select
             items={LINK_ROLE_OPTIONS.map((opt) => ({
               value: String(opt.level),
@@ -690,10 +690,10 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
 
         {/* Optional email */}
         <div className="space-y-1">
-          <Label htmlFor="pm-invite-email" className="text-xs">
+          <FieldLabel htmlFor="pm-invite-email" className="text-xs">
             Recipient email{" "}
             <span className="font-normal text-muted-foreground">(optional)</span>
-          </Label>
+          </FieldLabel>
           <Input
             id="pm-invite-email"
             type="email"
@@ -720,7 +720,7 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
 
         {/* Expiry */}
         <div className="space-y-1">
-          <Label className="text-xs">Link expires</Label>
+          <FieldLabel className="text-xs">Link expires</FieldLabel>
           <Select
             items={EXPIRY_OPTIONS.map((opt) => ({
               value: String(opt.value),

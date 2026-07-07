@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="en-US" target-language="fr-FR" datatype="plaintext" original="doc0.txt">
+    <body>
+      <trans-unit id="u1">
+        <source>This section intentionally left blank.</source>
+        <target state="final">This section intentionally left blank.</target>
+      </trans-unit>
+      <trans-unit id="u2">
+        <source>Please review the attached invoice before the payment deadline.</source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u3">
+        <source><g id="g3">製品の仕様は予告なく変更されることがあります。</g></source>
+        <target state="final"><g id="g3">製品の仕様は予告なく変更されることがあります。</g></target>
+        <note>ctx-3</note>
+      </trans-unit>
+      <trans-unit id="u4">
+        <source>Session expired — please sign in again to continue where you left off.</source>
+        <target state="translated">Session expired — please sign in again to continue where you left off.</target>
+      </trans-unit>
+      <trans-unit id="u5">
+        <source>All prices include VAT at the applicable rate of 21%.</source>
+        <target state="new"></target>
+        <note>ctx-5</note>
+      </trans-unit>
+      <trans-unit id="u6">
+        <source>Adverse reactions may include nausea, dizziness, and &lt;severe&gt; headaches.</source>
+        <target state="translated">Adverse reactions may include nausea, dizziness, and &lt;severe&gt; headaches.</target>
+        <note>ctx-6</note>
+      </trans-unit>
+      <trans-unit id="u7" xml:space="preserve">
+        <source>Rinse thoroughly with lukewarm water for at least 15 minutes.</source>
+        <target state="translated">Rinse thoroughly with lukewarm water for at least 15 minutes.</target>
+      </trans-unit>
+      <trans-unit id="u8">
+        <source><g id="g8">Our team delivers world-class localization at scale — 24/7 support included.</g></source>
+        <target state="final"><g id="g8">Our team delivers world-class localization at scale — 24/7 support included.</g></target>
+      </trans-unit>
+      <trans-unit id="u9">
+        <source>This section intentionally left blank.</source>
+        <target state="final">This section intentionally left blank.</target>
+      </trans-unit>
+      <trans-unit id="u10">
+        <source>A load-bearing wall shall not be modified without engineering approval.</source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u11">
+        <source><bpt id="b11">&lt;b&gt;</bpt>Les données personnelles sont traitées conformément au RGPD.<ept id="b11">&lt;/b&gt;</ept></source>
+        <target state="new"></target>
+      </trans-unit>
+      <trans-unit id="u12">
+        <source>Don't share your password with anyone, including support staff.</source>
+        <target state="final">Don't share your password with anyone, including support staff.</target>
+        <note>ctx-12</note>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

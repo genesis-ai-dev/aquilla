@@ -101,13 +101,12 @@ export function TimelineCard({
       onClick={() => onSelect(cell.id)}
       onPointerDown={(e) => beginDrag("move", e)}
       className={cn(
-        "group absolute top-2.5 flex h-[46px] touch-none select-none flex-col justify-center gap-0.5 overflow-hidden rounded-lg border px-2.5 shadow-sm transition-shadow",
-        editable ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
+        "group absolute top-2.5 flex h-[46px] touch-none select-none flex-col justify-center gap-0.5 overflow-hidden rounded-lg border px-2.5 transition-colors",
         isDialogue
           ? "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-900 dark:bg-sky-950/50 dark:text-sky-200"
           : "border-border bg-card text-foreground",
         selected && "z-10 ring-2 ring-sky-500 ring-offset-1 ring-offset-background",
-        !selected && "hover:z-10 hover:shadow-md",
+        !selected && "hover:z-10 hover:bg-muted/30",
       )}
       style={{ left: `${left}px`, width: `${width}px` }}
     >

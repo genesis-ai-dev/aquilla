@@ -14,7 +14,12 @@ export function extractMarkdownStrings(content: string): TranslatableString[] {
     addEntry(text, "Paragraph", "text")
   }
 
-  function addEntry(rawText: string, context: string, type: CellType) {
+  function addEntry(
+    rawText: string,
+    context: string,
+    type: CellType,
+    metadata?: Record<string, unknown>,
+  ) {
     const plain = stripMarkdownInline(rawText)
     const html = markdownInlineToHtml(rawText)
     const segments = splitIntoSegments(plain)
@@ -29,6 +34,7 @@ export function extractMarkdownStrings(content: string): TranslatableString[] {
         context,
         group: seg.group,
         type,
+        ...(metadata ? { metadata } : {}),
         // D2: first sub-cell of each paragraph block carries paragraphStart; continuations do not.
         ...(i === 0 ? { paragraphStart: true } : {}),
       })
@@ -53,14 +59,18 @@ export function extractMarkdownStrings(content: string): TranslatableString[] {
     const ulMatch = trimmed.match(/^[-*+]\s+(.+)/)
     if (ulMatch) {
       flushParagraph()
-      addEntry(ulMatch[1], "List item", "list")
+      addEntry(ulMatch[1], "List item", "list", { md: { listKind: "unordered" } })
       continue
     }
 
-    const olMatch = trimmed.match(/^\d+\.\s+(.+)/)
+    const olMatch = trimmed.match(/^(\d+)\.\s+(.+)/)
     if (olMatch) {
       flushParagraph()
-      addEntry(olMatch[1], "List item", "list")
+      // Record list kind + the author's number so ordered lists round-trip as
+      // ordered (block-style fidelity) instead of degrading to "- " bullets.
+      addEntry(olMatch[2], "List item", "list", {
+        md: { listKind: "ordered", index: Number(olMatch[1]) },
+      })
       continue
     }
 

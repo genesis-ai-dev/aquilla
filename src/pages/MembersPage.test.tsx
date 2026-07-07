@@ -73,6 +73,12 @@ vi.mock("@/hooks/useAccessibleProjects", () => ({
     isLoading: false,
     refresh: vi.fn(async () => {}),
   })),
+  // FRO-474: OrgSidebar's "Shared with you" nav section uses this hook.
+  useProjectsForNavigation: vi.fn(() => ({
+    projects: [],
+    isLoading: false,
+    refresh: vi.fn(async () => {}),
+  })),
 }))
 
 beforeEach(() => localStorage.clear())

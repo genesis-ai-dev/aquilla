@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import { Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
+import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
@@ -163,10 +163,10 @@ export function MultiProjectInviteDialog({
         </DialogHeader>
 
         <div className="min-w-0 space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="invite-recipient" className="text-xs">
+          <Field>
+            <FieldLabel htmlFor="invite-recipient" className="text-xs">
               Recipient
-            </Label>
+            </FieldLabel>
             <UsernameTypeahead
               value={recipient}
               onChange={setRecipient}
@@ -175,14 +175,14 @@ export function MultiProjectInviteDialog({
               showModeToggle={true}
             />
             {recipient.mode === "email" && (
-              <p className="text-[10px] text-muted-foreground">
+              <FieldDescription className="text-[10px]">
                 Select projects below, then use each project&apos;s Share panel to send the invite link.
-              </p>
+              </FieldDescription>
             )}
-          </div>
+          </Field>
 
-          <div>
-            <Label className="text-xs">Projects</Label>
+          <Field>
+            <FieldLabel className="text-xs">Projects</FieldLabel>
             {projects.length === 0 ? (
               <p className="text-xs text-muted-foreground py-2">
                 No projects available — create one first or check back when sync completes.
@@ -290,7 +290,7 @@ export function MultiProjectInviteDialog({
                 )}
               </p>
             )}
-          </div>
+          </Field>
 
           {/* FRO-322: email-mode guide — direct operator to per-project Share panels */}
           {canShowEmailGuide && (
@@ -322,7 +322,7 @@ export function MultiProjectInviteDialog({
           )}
 
           {topError && (
-            <p className="text-xs text-destructive">{topError}</p>
+            <FieldError className="text-xs">{topError}</FieldError>
           )}
 
           <div className="flex justify-end gap-2 pt-2 border-t">

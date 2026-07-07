@@ -518,13 +518,9 @@ async function main(): Promise<void> {
     port: IDENTITY_PORT,
     label: "identity",
     env: {
-      // identity calls the sync worker for archive notifications etc.
-      // Point that at the local sync (not the prod workers.dev URL from
-      // wrangler.toml [vars]).
-      SYNC_WORKER_URL: `http://127.0.0.1:${SYNC_PORT}`,
-      // Loud env tag so logs make it obvious this is the local dev stack.
-      ENVIRONMENT: "development",
-      // Local Hyperdrive emulation → the local Postgres ensured above.
+      // Local Hyperdrive emulation → the local Postgres ensured above. This
+      // one IS a wrangler-native process-env var (not a c.env binding), so
+      // `env:` (not `--var`) is correct here.
       WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: PG_URL,
     },
     // `--var` is the only reliable way to land a value in `c.env` for
@@ -536,10 +532,26 @@ async function main(): Promise<void> {
     // list only carries the real company emails. The email step-up gate is
     // already bypassed under WRANGLER_LOCAL=1 (middleware/platform-admin.ts).
     // Mirrors e2e-up.ts, which allowlists alice@example.test the same way.
+    // FRO-346: SYNC_WORKER_URL + ENVIRONMENT used to be passed via `env:`
+    // (process env) like WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE
+    // above — but unlike that Hyperdrive var, these two ARE read from
+    // `c.env` by application code (types.ts SYNC_WORKER_URL, ENVIRONMENT),
+    // so process env silently never reached them, same class of bug as
+    // WRANGLER_LOCAL/ADMIN_EMAILS below. Moved to `--var` so identity calling
+    // the local sync-worker for archive/member-removal notifications
+    // actually works instead of silently no-op'ing (SYNC_WORKER_URL unset →
+    // notifySyncWorkerOfMemberRemoval early-returns).
     extraArgs: [
       "--persist-to", PERSIST_DIR,
       "--var", "WRANGLER_LOCAL:1",
       "--var", "ADMIN_EMAILS:dev@local.test",
+      // identity calls the sync worker server-side (archive/member-removal
+      // notifications, live-link seed sync). Must be --var — process env
+      // never reaches c.env, so the prod URL from wrangler.toml [vars] would
+      // win and local calls would silently hit prod (found independently by
+      // both the linked-projects and PD7 live QA passes).
+      "--var", `SYNC_WORKER_URL:http://127.0.0.1:${SYNC_PORT}`,
+      "--var", "ENVIRONMENT:development",
     ],
     logFile: openLogFile(path.join(LOG_DIR, "identity.log")),
     streamToParent: VERBOSE,

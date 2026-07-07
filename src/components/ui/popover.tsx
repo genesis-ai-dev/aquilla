@@ -1,3 +1,4 @@
+import * as React from "react"
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 
 import { cn } from "@/lib/utils"
@@ -12,37 +13,34 @@ function PopoverTrigger({ render, ...props }: PopoverPrimitive.Trigger.Props) {
 
 function PopoverContent({
   className,
+  align = "center",
+  alignOffset = 0,
   side = "bottom",
-  align = "start",
+  sideOffset = 4,
   anchor,
-  sideOffset,
   ...props
-}: PopoverPrimitive.Popup.Props & {
-  side?: "top" | "bottom" | "left" | "right"
-  align?: "start" | "center" | "end"
-  anchor?: PopoverPrimitive.Positioner.Props["anchor"]
-  sideOffset?: PopoverPrimitive.Positioner.Props["sideOffset"]
-}) {
+}: PopoverPrimitive.Popup.Props &
+  Pick<
+    PopoverPrimitive.Positioner.Props,
+    "align" | "alignOffset" | "side" | "sideOffset" | "anchor"
+  >) {
   return (
     <PopoverPrimitive.Portal>
       {/* z-50 has to live on the Positioner — see TooltipContent for the
           rationale. The Popup's z-index would otherwise be sealed inside
-          the Positioner's transform-induced stacking context. Matches
-          Dialog and Select (both z-50): a popover portal mounts after an
-          already-open dialog's, so equal z-index resolves by document
-          order and the popover stacks correctly above a parent dialog. */}
+          the Positioner's transform-induced stacking context. */}
       <PopoverPrimitive.Positioner
-        side={side}
         align={align}
-        anchor={anchor}
+        alignOffset={alignOffset}
+        side={side}
         sideOffset={sideOffset}
-        className="z-50"
+        anchor={anchor}
+        className="isolate z-50"
       >
         <PopoverPrimitive.Popup
           data-slot="popover-content"
           className={cn(
-            "rounded-2xl bg-popover text-popover-foreground shadow-soft-lg outline-none",
-            "data-closed:pointer-events-none data-closed:opacity-0",
+            "z-50 flex w-72 origin-(--transform-origin) flex-col gap-2.5 rounded-lg bg-popover p-2.5 text-sm text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-hidden duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
             className
           )}
           {...props}
@@ -52,4 +50,44 @@ function PopoverContent({
   )
 }
 
-export { Popover, PopoverContent, PopoverTrigger }
+function PopoverHeader({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="popover-header"
+      className={cn("flex flex-col gap-0.5 text-sm", className)}
+      {...props}
+    />
+  )
+}
+
+function PopoverTitle({ className, ...props }: PopoverPrimitive.Title.Props) {
+  return (
+    <PopoverPrimitive.Title
+      data-slot="popover-title"
+      className={cn("font-medium", className)}
+      {...props}
+    />
+  )
+}
+
+function PopoverDescription({
+  className,
+  ...props
+}: PopoverPrimitive.Description.Props) {
+  return (
+    <PopoverPrimitive.Description
+      data-slot="popover-description"
+      className={cn("text-muted-foreground", className)}
+      {...props}
+    />
+  )
+}
+
+export {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+}

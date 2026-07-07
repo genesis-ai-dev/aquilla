@@ -12,12 +12,13 @@
 import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
 import type { ExportFormat } from "@/components/ExportDialog"
-import { exportPlainText } from "./exporters/plaintext"
-import { exportMarkdown } from "./exporters/markdown"
+import { exportPlainTextStructured } from "./exporters/plaintext"
+import { exportMarkdownStructured } from "./exporters/markdown"
 import { exportTsv } from "./exporters/tsv"
 import { exportCsv } from "./exporters/csv"
-import { exportXliff } from "./exporters/xliff"
-import { exportTmx } from "./exporters/tmx"
+import { exportXliff12Structured } from "./exporters/xliff12-structured"
+import { exportTmxStructured } from "./exporters/tmx-structured"
+import { exportSrt } from "./exporters/srt"
 
 /** Formats handled by the project-zip path (excludes server-side USFM,
  *  audio-by-character which has its own orchestrator, vtt which needs
@@ -40,6 +41,7 @@ const FORMAT_EXT: Record<TextExportFormat, string> = {
   csv: ".csv",
   xlf: ".xlf",
   tmx: ".tmx",
+  srt: ".srt",
 }
 
 /**
@@ -52,12 +54,13 @@ export function exportFileCells(
   targetLanguage: string,
 ): Blob {
   switch (format) {
-    case "txt": return exportPlainText(cells)
-    case "md":  return exportMarkdown(cells)
+    case "txt": return exportPlainTextStructured(cells)
+    case "md":  return exportMarkdownStructured(cells)
     case "tsv": return exportTsv(cells)
     case "csv": return exportCsv(cells)
-    case "xlf": return exportXliff(cells, sourceLanguage, targetLanguage)
-    case "tmx": return exportTmx(cells, sourceLanguage, targetLanguage)
+    case "xlf": return exportXliff12Structured(cells, sourceLanguage, targetLanguage)
+    case "tmx": return exportTmxStructured(cells, sourceLanguage, targetLanguage)
+    case "srt": return exportSrt(cells)
     default: {
       // TypeScript exhaustiveness guard — should never happen at runtime.
       const _never: never = format

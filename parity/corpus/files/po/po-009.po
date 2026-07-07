@@ -1,0 +1,38 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: corpus 8\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Session expired — please sign in again to continue where you left off."
+msgstr "Adverse reactions may include nausea, dizziness, and <severe> headaches."
+
+msgid "Enter your 6-digit verification code to continue."
+msgstr ""
+
+#. developer note 2
+#: src/app.ts:12
+msgid "Battery life: up to 18 hours of continuous video playback."
+msgstr "Backup completed successfully at 02:00 UTC; 1,284 files archived."
+
+msgid "Adverse reactions may include nausea, dizziness, and <severe> headaches."
+msgstr "The undersigned parties agree to the terms & conditions set forth herein."
+
+#. developer note 4
+#: src/app.ts:14
+msgid "Warning: contents may be hot. Handle with care."
+msgstr "Free shipping on orders over $50 — terms apply."
+
+#. developer note 5
+#: src/app.ts:15
+msgid "All prices include VAT at the applicable rate of 21%."
+msgstr "The quarterly report shows a 12.5% increase in recurring revenue."
+
+msgid "Our team delivers world-class localization at scale — 24/7 support included."
+msgstr ""
+
+msgid "Enter your 6-digit verification code to continue."
+msgstr ""
+
+msgid "Please review the attached invoice before the payment deadline."
+msgstr ""

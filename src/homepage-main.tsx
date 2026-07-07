@@ -9,7 +9,6 @@ import { brand } from "./branding/current-brand"
 import { applyTheme } from "./branding/apply-theme"
 import { BrandProvider } from "./branding/BrandProvider"
 import { Homepage } from "./pages/Homepage/Homepage"
-import { DelegatedTooltipLayer } from "./components/ui/tooltip"
 
 applyTheme(brand)
 document.title = brand.app.htmlTitle
@@ -18,7 +17,6 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrandProvider>
       <Homepage />
-      <DelegatedTooltipLayer />
     </BrandProvider>
   </StrictMode>,
 )

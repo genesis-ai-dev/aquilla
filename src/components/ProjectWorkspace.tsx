@@ -13,8 +13,9 @@ import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
 import { useCells } from "@/hooks/useCells"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
+import { triggerLinkSync } from "@/lib/sync/archive"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
-import { useCompletion } from "@/hooks/useCompletion"
+import { useCompletion, FALLBACK_COMPLETION_SETTINGS } from "@/hooks/useCompletion"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { fetchBranchingSearch } from "@/lib/sync/branching-search-read"
 import { fetchBranchingSearchPassages } from "@/lib/sync/branching-search-passages-read"
@@ -131,7 +132,7 @@ import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
 import { CompletionBulkProgressBanner } from "./CompletionBulkProgressBanner"
-import { AppTooltip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { AppTooltip, Tooltip, TooltipContent, TooltipDelegationBoundary, TooltipTrigger } from "@/components/ui/tooltip"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
 import { AiSetupDialog } from "./AiSetupDialog"
 import {
@@ -144,7 +145,7 @@ import type { Concept } from "@/lib/terminology/types"
 import { buildGlosser, type BtSeed, type Glosser } from "@/lib/completion/bt-glosser"
 import { memMark } from "@/lib/perf-log"
 import { buildAlignmentModel, type AlignmentModel } from "@/lib/completion/interlinear"
-import { buildStatisticalBt, resolveBtTargetEventId } from "@/lib/completion/bt-auto"
+import { resolveBtTargetEventId } from "@/lib/completion/bt-auto"
 // FRO-192: assignment work-pickup UI
 import { AssignModal } from "./AssignModal"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
@@ -224,6 +225,32 @@ export function shouldPatchSystemPrompt(
   return roleLevel >= ROLE.MAINTAINER
 }
 
+// ── QA-BUG-1: pure guard — exported for unit testing ─────────────────────────
+/**
+ * Returns true iff the zero-file self-heal should fire a `/link/sync`
+ * trigger for the current project. Only live-linked projects can be
+ * self-healed this way (clone links never sync again after creation — the
+ * QA-flagged gap there is closed at link time in the auth-worker route, not
+ * here). Guards against re-firing for a project that already has files (the
+ * common case, and the state right after a successful heal) and against
+ * re-firing for the SAME project id more than once per mount (the caller
+ * tracks `alreadyAttemptedProjectId` across renders via a ref).
+ */
+export function shouldSelfHealZeroFileLink(args: {
+  projectId: string | null | undefined
+  jwt: string | null | undefined
+  sourceLinkMode: "clone" | "live" | null | undefined
+  fileCount: number
+  alreadyAttemptedProjectId: string | null
+}): boolean {
+  const { projectId, jwt, sourceLinkMode, fileCount, alreadyAttemptedProjectId } = args
+  if (!projectId || !jwt) return false
+  if (sourceLinkMode !== "live") return false
+  if (fileCount > 0) return false
+  if (alreadyAttemptedProjectId === projectId) return false
+  return true
+}
+
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
@@ -234,7 +261,7 @@ export function ProjectWorkspace() {
       search: isAllOrgs ? "?org=all" : activeOrgId != null ? `?org=${activeOrgId}` : "",
     })
   }, [activeOrgId, isAllOrgs, navigate])
-  const { project: loadedProject, status, refresh, patchSettings } = useProject(projectId!)
+  const { project: loadedProject, status, refresh, patchSettings, roleLevel: serverRoleLevel } = useProject(projectId!)
   // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt)
   // live in IDB; merge them onto the server-fetched record on load and after
   // each local patch so rename suggestions don't loop on every open.
@@ -777,23 +804,44 @@ export function ProjectWorkspace() {
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
   })
 
-  // ── Auto-BT on target commit ─────────────────────────────────────────────
-  // Track the last cell that received an optimistic target edit so we can
-  // recompute its statistical BT when `handleCellCommitted` fires (after the
-  // outbox flush). EditorTable calls applyOptimisticTargetEdit immediately
-  // before emitting the commit event, so this ref is always up-to-date by
-  // the time onCellCommitted fires.
-  const lastOptimisticEditRef = useRef<{ cellId: string; translatedText: string } | null>(null)
+  // QA-BUG-1: zero-file self-heal for live-linked projects. The lazy-pull
+  // trigger in useStaleSourceCells only fires once a FILE is open — a
+  // freshly linked (or link-time-seed-failed) project has none, so there was
+  // no client path that could ever recover it. Fire /link/sync once per
+  // project load when the project is live-linked and its file list is
+  // empty; on success, `refresh()` pulls the now-populated file list. Clone
+  // links correctly no-op server-side (mirrorSync short-circuits for
+  // mode='clone') so this is safe to fire unconditionally for any live link.
+  const zeroFileHealAttemptedRef = useRef<string | null>(null)
+  useEffect(() => {
+    const pid = project?.id ?? null
+    const jwt = frontierSession?.jwt ?? null
+    if (!shouldSelfHealZeroFileLink({
+      projectId: pid,
+      jwt,
+      sourceLinkMode: project?.sourceLinkMode,
+      fileCount: projectFiles.length,
+      alreadyAttemptedProjectId: zeroFileHealAttemptedRef.current,
+    })) return
+    zeroFileHealAttemptedRef.current = pid
+    void (async () => {
+      const ok = await triggerLinkSync(jwt!, pid!)
+      if (ok) refresh()
+    })()
+  }, [project?.id, project?.sourceLinkMode, projectFiles.length, frontierSession?.jwt, refresh])
+
+  // Track the last cell that received an optimistic target edit so
+  // `handleCellCommitted` can fall back to a targeted revalidate when the
+  // caller didn't pass a cellId. EditorTable calls applyOptimisticTargetEdit
+  // immediately before emitting the commit event, so this ref is always
+  // up-to-date by the time onCellCommitted fires.
+  const lastOptimisticEditRef = useRef<{ cellId: string } | null>(null)
 
   // RACE-3/QW-2: per-cell pending event id for the AI completion commit path.
   // Mirrors the per-row pendingTargetEventIdRef in EditorRow. Keyed by cellId
   // so concurrent completions on different cells don't cross-contaminate.
   const pendingCompletionEventIdRef = useRef<Map<string, string>>(new Map())
 
-  // Stable refs so that callbacks declared BEFORE glosser/persistBt (in React
-  // hook order) can still call the latest version without stale-closure issues.
-  // Updated unconditionally each render — refs never cause re-renders.
-  const getGlosserRef = useRef<(() => Glosser) | null>(null)
   const glosserCacheRef = useRef<{
     corpusCells: CellData[]
     backtranslationCache: Map<string, string>
@@ -805,9 +853,6 @@ export function ProjectWorkspace() {
     alignmentSeeds: ProjectRecord["alignmentSeeds"] | undefined
     model: AlignmentModel
   } | null>(null)
-  const persistBtRef = useRef<((cell: CellData, btText: string, polished: boolean, committedEventId?: string) => void) | null>(null)
-  // cellsRef is already declared later in the file (line ~689) — we reuse it.
-  const setBacktranslationCacheRef = useRef<React.Dispatch<React.SetStateAction<Map<string, string>>> | null>(null)
 
   // Wrap applyOptimisticTargetEdit to capture which cell was last edited.
   // We pass this wrapped version to EditorTable so we intercept without
@@ -815,7 +860,7 @@ export function ProjectWorkspace() {
   const applyOptimisticTargetEditWithCapture = useCallback(
     (cellId: string, patch: { value: string; valueHtml?: string }) => {
       if (patch.value) {
-        lastOptimisticEditRef.current = { cellId, translatedText: patch.value }
+        lastOptimisticEditRef.current = { cellId }
       }
       applyOptimisticTargetEdit(cellId, patch)
     },
@@ -826,12 +871,27 @@ export function ProjectWorkspace() {
   // editor table can decorate stale rows with the AlertTriangle badge.
   // One fetch per (projectId, fileId) — flattened to a boolean per row
   // inside EditorTable.
-  const { staleCellIds } = useStaleSourceCells({
+  // FRO-477 (§6) — upstreamStaleCellIds surfaces inherited (ancestor-chain)
+  // staleness alongside the existing direct staleCellIds; both flatten to
+  // per-row booleans inside EditorTable the same way.
+  const { staleCellIds, upstreamStaleCellIds, revalidate: revalidateStaleSource, syncNow: syncStaleSourceNow } = useStaleSourceCells({
     projectId: project?.id ?? null,
     fileId: activeFileId,
     getToken: getTokenForFile,
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
   })
+  // FRO-479: the WS connect effect's onMessage closure is created once, before
+  // staleness state settles — route link.upstream-changed frames through a ref
+  // so the handler always reaches the latest revalidate (which piggybacks the
+  // fire-and-forget POST /link/sync, single-flighted server-side).
+  const staleSourceRevalidateRef = useRef<() => void>(() => {})
+  staleSourceRevalidateRef.current = revalidateStaleSource
+  // QA-BUG-2: awaitable sync — the push handler awaits this THEN revalidates
+  // cells too, so the mirrored source TEXT updates live (not just the badge).
+  const syncStaleSourceNowRef = useRef<() => Promise<void>>(async () => {})
+  syncStaleSourceNowRef.current = syncStaleSourceNow
+  const revalidateCellsRef = useRef<() => void>(() => {})
+  revalidateCellsRef.current = revalidateCells
 
   // Audio lens: TTS settings (engine, voice library, cast) hydrated from IDB
   // and overlaid onto the project so generation uses the real engine/key/cast.
@@ -903,6 +963,11 @@ export function ProjectWorkspace() {
 
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const isSubtitleFile = activeFile?.type === "vtt" || activeFile?.type === "srt"
+
+  const workspaceBreadcrumb = useMemo(() => ({
+    surfaceLabel:
+      centerSurface === "editor" ? "Editor" : deriveNavTitle(location.pathname),
+  }), [centerSurface, location.pathname])
 
   const handleVisibleFootnotesChange = useCallback((entries: VisibleFootnoteEntry[]) => {
     const key = entries
@@ -1357,6 +1422,14 @@ export function ProjectWorkspace() {
 
   const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string) => {
     if (!project?.id) return
+    // FRO-365: defense-in-depth — the selection-island Translate button and
+    // the header "Run AI completions"/"Complete all" actions are already
+    // hidden below the contributor floor (SelectionBar.tsx, registry.ts), and
+    // the server 403s the resulting target.cell.commit regardless. This guard
+    // stops a below-floor caller from getting even a local optimistic echo
+    // (applyOptimisticTargetEdit) of a write the server will refuse, matching
+    // the same mirror-check used by handleEditorCommit/commitTrayFootnoteText.
+    if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
     // Optimistic local patch BEFORE the outbox enqueue. Mirrors what
     // handleEditorCommit in EditorTable does for hand-typed edits, and
     // collapses the race window where `cells.translated` would otherwise
@@ -1397,21 +1470,6 @@ export function ProjectWorkspace() {
     // confirms; the WS event.applied also pokes the same cell (coalesced).
     revalidateCellStats(cell.id)
     revalidateCell(cell.id)
-
-    // ── Auto statistical BT after AI completion commit (FRO-203) ───────────
-    // Runs synchronously — no network, no extra loading state. LLM polish
-    // remains opt-in via runBacktranslation (the Generate button path).
-    // Uses stable refs so this callback doesn't need glosser/persistBt in
-    // its dep array (they are declared later in hook order).
-    const getGlosser = getGlosserRef.current
-    if (text.trim() && getGlosser && persistBtRef.current && setBacktranslationCacheRef.current) {
-      const btText = buildStatisticalBt(getGlosser(), text)
-      if (btText) {
-        setBacktranslationCacheRef.current((prev) => new Map(prev).set(cell.id, btText))
-        // Pin to the just-committed event id (the projection still lags here).
-        persistBtRef.current(cell, btText, false, eventId)
-      }
-    }
   }, [project?.id, applyOptimisticTargetEdit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
   /**
@@ -1468,12 +1526,14 @@ export function ProjectWorkspace() {
     [getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell],
   )
 
-  // ── Back-translation: statistical primary path + optional LLM polish ────────
+  // ── Back-translation: LLM generation on demand ─────────────────────────────
   //
-  // Generation strategy (per spec):
-  //  1. Statistical Markov glosser over all translated (source↔target) pairs.
-  //     Runs synchronously — no network, always succeeds.
-  //  2. Optional LLM polish step when `polished: true` — calls generateBacktranslation.
+  // Generation strategy:
+  //  1. The BT of record is LLM-generated, and ONLY when the user asks for it
+  //     (the Generate/Refresh buttons in the BT tab). Nothing auto-runs on commit.
+  //  2. The statistical Markov glosser survives as a read-only, on-demand
+  //     reference (collapsed section in the BT tab) — computed locally, never
+  //     persisted.
   //
   // Persistence:
   //  - On generate: emit `cell.backtranslation.set` via outbox (non-chain-mutating).
@@ -1531,7 +1591,10 @@ export function ProjectWorkspace() {
     return () => { cancelled = true }
   }, [project?.id, activeFileId, getTokenForFile])
 
-  const isBacktranslationConfigured = Boolean(project?.completionSettings && isConfigured)
+  // Same gate as the AI-completion sparkle: a signed-in Frontier session or a
+  // custom endpoint+model (project settings or per-device override) counts as
+  // configured — BT generation no longer requires project-level customization.
+  const isBacktranslationConfigured = isConfigured
 
   // Build the glosser lazily from translated pairs. This used to run on every
   // workspace open after corpusCells settled, allocating a large temporary
@@ -1633,12 +1696,10 @@ export function ProjectWorkspace() {
     cell: CellData,
     btText: string,
     polished: boolean,
-    committedEventId?: string,
   ) => {
-    // The BT must pin to the commit it describes. Right after a target commit
-    // the cell projection still reports the PRE-commit head, so prefer the
-    // just-committed event id when the caller has it (auto-BT-on-commit path).
-    const pinnedTargetEventId = resolveBtTargetEventId(committedEventId, cell.targetEventId)
+    // The BT pins to the commit it describes. Generation is manual-only, so
+    // there is never an in-flight commit here — the projected head is current.
+    const pinnedTargetEventId = resolveBtTargetEventId(undefined, cell.targetEventId)
 
     // 1. In-memory cache
     setBacktranslationCache((prev) => new Map(prev).set(cell.id, btText))
@@ -1676,77 +1737,61 @@ export function ProjectWorkspace() {
     })
   }, [project?.id, currentUsername, setBtWriteError])
 
-  // ── Keep stable refs in sync every render (FRO-203) ────────────────────
-  // These allow commitCompletedCell / handleCellCommitted (declared earlier or
-  // later in hook order) to always call the latest glosser builder + persistBt without
-  // circular dependency issues in useCallback deps arrays.
-  getGlosserRef.current = getGlosser
-  persistBtRef.current = persistBt
-  // cellsRef.current is kept in sync by the useEffect at ~line 690 — no update needed here.
-  setBacktranslationCacheRef.current = setBacktranslationCache
-
   /**
-   * Re-runs statistical BT on demand + optional AI polish. Called by the BT
-   * tab's Generate/Regenerate buttons and the Polish toggle. Statistical BT is
-   * always computed first; the AI step only runs when the caller requests
-   * `polish` AND an AI model is configured (`isBacktranslationConfigured`).
-   *
-   * The Polish toggle passes its on/off state as `polish`, so turning it on
-   * regenerates with AI and turning it off regenerates statistical-only —
-   * keeping the displayed text in sync with the polished/statistical label.
-   *
-   * Auto-BT (on every target commit) uses `buildStatisticalBt` directly and
-   * does NOT call this function — that path lives in handleCellCommitted and
-   * commitCompletedCell (FRO-203).
+   * Generate the cell's back-translation with the configured LLM. Called by
+   * the BT tab's Generate/Refresh buttons — this is the ONLY generation path
+   * that persists a BT; nothing runs automatically on commit. The statistical
+   * glosser is a separate read-only reference surfaced on demand via
+   * `getStatisticalBt` (never persisted).
    */
-  const runBacktranslation = useCallback(async (cell: CellData, polish = false) => {
-    if (!cell.translated?.trim()) return
+  const runBacktranslation = useCallback(async (cell: CellData) => {
+    if (!cell.translated?.trim() || !isBacktranslationConfigured) return
     const cellId = cell.id
     setBacktranslatingState((prev) => new Set(prev).add(cellId))
     setBacktranslationErrorsState((prev) => { const n = new Map(prev); n.delete(cellId); return n })
     try {
-      // Step 1: statistical gloss (always runs)
-      let btText = getGlosser().gloss(cell.translated)
-      if (!btText.trim()) {
-        btText = cell.translated // last-resort literal fallback
-      }
-
-      // Step 2: AI polish — only when the caller asked for it (Polish toggle on)
-      // and a model is configured. The polished result replaces the statistical
-      // gloss and renders above the substring-alignment panel.
-      let polished = false
-      if (polish && isBacktranslationConfigured && project?.completionSettings) {
-        try {
-          btText = await generateBacktranslation({
-            settings: project.completionSettings,
-            session: frontierSession,
-            sourceLanguage: project.sourceLanguage || "English",
-            targetLanguage: project.targetLanguage || "Unknown",
-            targetText: cell.translated,
-            examples: [],
-            // btseed-glue: seed terminology so the literal BT surfaces the
-            // controlled-vocabulary source headwords for the renderings the
-            // translator chose. The service derives the relevant hints from
-            // the cell's source text; behavior is unchanged when nothing matches.
-            concepts: project.terminology ?? [],
-            sourceText: cell.original,
-          })
-          polished = true
-        } catch (polishErr) {
-          // Polish failed — keep statistical result, surface a non-fatal warning
-          console.warn("[bt] LLM polish failed, using statistical result:", polishErr)
-        }
-      }
-
-      setBacktranslationCache((prev) => new Map(prev).set(cellId, btText))
-      persistBt(cell, btText, polished)
+      const btText = await generateBacktranslation({
+        // Same precedence as the AI-completion path: project settings when
+        // customized, Frontier defaults otherwise. complete() layers the
+        // per-device provider override on top.
+        settings: project?.completionSettings ?? FALLBACK_COMPLETION_SETTINGS,
+        session: frontierSession,
+        sourceLanguage: project?.sourceLanguage || "English",
+        targetLanguage: project?.targetLanguage || "Unknown",
+        targetText: cell.translated,
+        examples: [],
+        // btseed-glue: seed terminology so the literal BT surfaces the
+        // controlled-vocabulary source headwords for the renderings the
+        // translator chose. The service derives the relevant hints from
+        // the cell's source text; behavior is unchanged when nothing matches.
+        concepts: project?.terminology ?? [],
+        sourceText: cell.original,
+      })
+      if (!btText.trim()) throw new Error("The model returned an empty back-translation.")
+      persistBt(cell, btText, true)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setBacktranslationErrorsState((prev) => new Map(prev).set(cellId, msg))
     } finally {
       setBacktranslatingState((prev) => { const n = new Set(prev); n.delete(cellId); return n })
     }
-  }, [getGlosser, isBacktranslationConfigured, project?.completionSettings, project?.sourceLanguage, project?.targetLanguage, project?.terminology, frontierSession, persistBt])
+  }, [isBacktranslationConfigured, project?.completionSettings, project?.sourceLanguage, project?.targetLanguage, project?.terminology, frontierSession, persistBt])
+
+  /**
+   * On-demand statistical gloss for the BT tab's collapsed "statistical
+   * reference" section. Computed from the project's own translation pairs,
+   * never persisted — it's a rough corpus-derived hint, not the BT of record.
+   */
+  const getStatisticalBt = useCallback((translatedText: string): string => {
+    if (!translatedText.trim()) return ""
+    const gloss = getGlosser().gloss(translatedText).trim()
+    // A gloss that only echoes the translation back is the glosser's
+    // no-corpus fallback (unknown tokens pass through) — return "" so the
+    // BT tab can say "not enough pairs yet" instead of presenting the
+    // translation as its own reading.
+    const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()
+    return norm(gloss) === norm(translatedText) ? "" : gloss
+  }, [getGlosser])
 
   // Add-from-selection: create a DRAFT concept from a source-side selection in
   // the editor and persist it via the same project-settings sync path the
@@ -2086,10 +2131,30 @@ export function ProjectWorkspace() {
     let cancelled = false
     let reconciler: import("@/lib/sync/ws-reconciler").WsReconciler | null = null
     void (async () => {
-      const { createWsReconciler, isOwnWriteEcho } = await import("@/lib/sync/ws-reconciler")
+      const { createWsReconciler, isOwnWriteEcho, createLinkUpstreamChangedHandler } =
+        await import("@/lib/sync/ws-reconciler")
       const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
       if (cancelled || !project?.id) return
       const pid = project.id
+      // FRO-479: link.upstream-changed frames → refetch staleness immediately
+      // (cheap GET, reflects the frame as soon as possible), and — debounced —
+      // AWAIT the mirror sync, then revalidate BOTH staleness and cells.
+      // QA-BUG-2: previously `triggerLinkSync` just re-ran the fire-and-forget
+      // stale-source fetch, which raced the mirror commit and never refreshed
+      // cells at all — the badge went live but the mirrored source TEXT only
+      // updated on a manual reload. Sequencing the revalidates AFTER the sync
+      // POST resolves (syncStaleSourceNow awaits it) fixes both: cells finally
+      // refetch post-commit, and staleness settles on the correct tone
+      // instead of the transient pre-sync "violet" (QA-BUG-3's other half).
+      const handleLinkUpstreamChanged = createLinkUpstreamChangedHandler({
+        currentProjectId: () => pid,
+        revalidateStaleSource: () => staleSourceRevalidateRef.current(),
+        triggerLinkSync: () => {
+          void syncStaleSourceNowRef.current().then(() => {
+            revalidateCellsRef.current()
+          })
+        },
+      })
       reconciler = createWsReconciler(
         {
           projectId: pid,
@@ -2165,6 +2230,12 @@ export function ProjectWorkspace() {
                   return next
                 })
               }
+            } else if (msg.t === "link.upstream-changed") {
+              // FRO-479: an upstream live-link project committed lane-relevant
+              // changes. Refetch staleness immediately; the handler debounces
+              // the mirror-sync trigger (push is a lossy accelerator — the
+              // lazy pull on file open remains the self-healing floor).
+              handleLinkUpstreamChanged(msg)
             } else if (msg.t === "presence") {
               // FRO-288: forward presence snapshots to the focus-lock hook so
               // it can update heldBy when another user holds our focused cell.
@@ -2217,6 +2288,15 @@ export function ProjectWorkspace() {
                 delete next.deletedBy
                 return next
               }).then(() => refresh())
+            } else if (msg.t === "member.removed") {
+              // FRO-346: this user's membership was revoked; the DO closes
+              // the socket right after this frame. Re-fetch the project —
+              // the server now 403s, which flips useProject to "forbidden",
+              // unmounts the editor (project → null tears this reconciler
+              // down via the effect cleanup) and shows the clean
+              // "you no longer have access" state.
+              if (msg.project !== pid || msg.userId !== currentUsername) return
+              refresh()
             }
           },
         },
@@ -2930,9 +3010,9 @@ export function ProjectWorkspace() {
     navigate,
   }), [activeFileId, completeBatch, cells, project, frontierSession, currentUsername, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell])
 
-  const handleCellCommitted = useCallback(async (cellId?: string, committedEventId?: string) => {
+  const handleCellCommitted = useCallback(async (cellId?: string, _committedEventId?: string) => {
     // Capture before async work — another edit could arrive during the flush.
-    const pendingBt = lastOptimisticEditRef.current
+    const pendingEdit = lastOptimisticEditRef.current
     lastOptimisticEditRef.current = null
 
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
@@ -2941,32 +3021,13 @@ export function ProjectWorkspace() {
     // only that row's stats and cell data instead of re-fetching the whole
     // file. Fall back to a full revalidate if the caller didn't pass a
     // cellId (older call sites).
-    const changed = cellId ?? pendingBt?.cellId
+    const changed = cellId ?? pendingEdit?.cellId
     if (changed) {
       revalidateCellStats(changed)
       revalidateCell(changed)
     } else {
       revalidateAuditStats()
       revalidateCells()
-    }
-
-    // ── Auto statistical BT on target commit (FRO-203) ─────────────────────
-    // Run synchronously after the flush so the BT reflects the committed text.
-    // LLM polish is NOT triggered here — it remains opt-in via runBacktranslation.
-    // Uses stable refs so this callback doesn't need getGlosser/cells/persistBt
-    // in its dep array (they are declared earlier or later in hook order).
-    const getGlosser = getGlosserRef.current
-    if (pendingBt?.translatedText && getGlosser && setBacktranslationCacheRef.current) {
-      const { cellId, translatedText } = pendingBt
-      const btText = buildStatisticalBt(getGlosser(), translatedText)
-      if (btText) {
-        const cell = cellsRef.current.find((c) => c.id === cellId)
-        setBacktranslationCacheRef.current((prev) => new Map(prev).set(cellId, btText))
-        if (cell && persistBtRef.current) {
-          // Pin to the just-committed event id (the projection still lags here).
-          persistBtRef.current(cell, btText, false, committedEventId)
-        }
-      }
     }
   }, [getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCellStats, revalidateCell, revalidateCells])
 
@@ -3087,6 +3148,18 @@ export function ProjectWorkspace() {
             Retry
           </button>
         </div>
+      </div>
+    )
+  }
+  // FRO-346: revoked / never-granted access gets its own clean state — the
+  // project exists, so "not found" would be misleading (and after a member
+  // removal the removed user must land here on reload, not in the editor).
+  if (status === "forbidden") {
+    return (
+      <div className="p-8 text-muted-foreground" data-testid="project-no-access">
+        You no longer have access to this project. Ask a project maintainer to
+        re-invite you if this is unexpected.{" "}
+        <button className="underline" onClick={goToProjects}>Back to dashboard</button>.
       </div>
     )
   }
@@ -3266,14 +3339,15 @@ export function ProjectWorkspace() {
         logoAccessory={
           dockTab !== null ? (
             <AppTooltip content="Collapse sidebar" side="right">
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 aria-label="Collapse sidebar"
                 onClick={() => setDockTab(null)}
-                className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
               >
                 <PanelLeftClose className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             </AppTooltip>
           ) : null
         }
@@ -3440,9 +3514,9 @@ export function ProjectWorkspace() {
         header={
           <WorkspaceHeader
             project={project}
-            onBack={goToProjects}
             extraMenuItems={workspaceHeaderMenuItems}
             overviewHref={projectId ? `/projects/${projectId}` : undefined}
+            surfaceLabel={workspaceBreadcrumb.surfaceLabel}
           >
             {project && centerSurface === "rules" && (
               <>
@@ -3470,6 +3544,18 @@ export function ProjectWorkspace() {
                 </Button>
               </>
             )}
+
+            {project && centerSurface === "editor" && activeFileId ? (
+              <EditorModeToggle
+                lens={lens}
+                onChange={(l) => {
+                  setLens(l)
+                  // Surface the Voices tab when entering the Audio lens.
+                  if (l === "audio") setDockTab("voices")
+                }}
+                timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
+              />
+            ) : null}
 
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
 
@@ -3502,43 +3588,30 @@ export function ProjectWorkspace() {
             />
           </WorkspaceHeader>
         }
+        aboveCard={
+          <TabStrip
+            tabs={workspaceTabs.tabs}
+            // While a non-editor surface (Rules) is showing, no file tab is
+            // "active" even though selectedFileId still remembers the last
+            // file — the surface tab is the active one.
+            activeTabId={centerSurface === "editor" ? workspaceTabs.activeTabId : null}
+            files={projectFiles}
+            onActivate={workspaceTabs.activateTab}
+            onClose={handleCloseTab}
+            surfaceTab={
+              centerSurface === "rules" && projectId
+                ? {
+                    label: "Rules",
+                    // Navigating to the bare project route lets the
+                    // restore-location effect re-open the last active file.
+                    onClose: () => navigate(`/project/${projectId}`),
+                  }
+                : null
+            }
+          />
+        }
         beforeMain={
           <>
-            <TabStrip
-              tabs={workspaceTabs.tabs}
-              // While a non-editor surface (Rules) is showing, no file tab is
-              // "active" even though selectedFileId still remembers the last
-              // file — the surface tab is the active one.
-              activeTabId={centerSurface === "editor" ? workspaceTabs.activeTabId : null}
-              files={projectFiles}
-              onActivate={workspaceTabs.activateTab}
-              onClose={handleCloseTab}
-              surfaceTab={
-                centerSurface === "rules" && projectId
-                  ? {
-                      label: "Rules",
-                      // Navigating to the bare project route lets the
-                      // restore-location effect re-open the last active file.
-                      onClose: () => navigate(`/project/${projectId}`),
-                    }
-                  : null
-              }
-              trailing={
-                // Per-file view-mode control — lives with the content it
-                // affects, not in the global header (which holds actions).
-                project && centerSurface === "editor" && activeFileId ? (
-                  <EditorModeToggle
-                    lens={lens}
-                    onChange={(l) => {
-                      setLens(l)
-                      // Surface the Voices tab when entering the Audio lens.
-                      if (l === "audio") setDockTab("voices")
-                    }}
-                    timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
-                  />
-                ) : undefined
-              }
-            />
             {project && activeFileId && (
               <>
                 <SelectionBar
@@ -3793,6 +3866,11 @@ export function ProjectWorkspace() {
                 />
               ) : (
               <EditorActionsProvider value={editorActionsValue}>
+              {/* Dense grid: one tooltip-bearing control per cell across
+                  hundreds of cells — opt into the delegated tooltip layer here
+                  (see TooltipDelegationBoundary) instead of mounting a Base UI
+                  tooltip per control. */}
+              <TooltipDelegationBoundary>
               <EditorTable
             ref={editorRef} project={project} cells={cellsWithBacktranslation}
             showFootnotesInline={footnoteViewMode === "inline"}
@@ -3812,6 +3890,7 @@ export function ProjectWorkspace() {
             cellOpenCommentCount={cellOpenCommentCount}
             getTokenForFile={getTokenForFile}
             getAlignmentModel={getAlignmentModel}
+            getStatisticalBt={getStatisticalBt}
             onAlignmentSeedChange={handleAlignmentSeedChange}
             activeCueIndex={activeCueIndex >= 0 ? activeCueIndex : undefined}
             onSeekToCue={isSubtitleFile ? handleCueSeek : undefined}
@@ -3839,9 +3918,11 @@ export function ProjectWorkspace() {
             onAckRemoteChange={handleAckRemoteChange}
             checkLockHolder={checkLockHolder}
             staleCellIds={staleCellIds}
+            upstreamStaleCellIds={upstreamStaleCellIds}
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
           />
+              </TooltipDelegationBoundary>
               </EditorActionsProvider>
               )}
             </div>
@@ -3973,6 +4054,7 @@ export function ProjectWorkspace() {
           open={checklistOpen}
           onOpenChange={handleChecklistOpenChange}
           project={project}
+          roleLevel={serverRoleLevel}
           state={checklistState}
           onProjectUpdated={handleProjectUpdated}
           onSharesChanged={refreshChecklistShares}

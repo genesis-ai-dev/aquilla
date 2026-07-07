@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { FieldLabel } from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
 import {
   Select,
@@ -94,7 +94,7 @@ export function ValidationSettingsSection({
       <CardContent className="space-y-4">
         {/* ── Count thresholds ── */}
         <div className="space-y-2">
-          <Label htmlFor="validation-count">Required validators (text)</Label>
+          <FieldLabel htmlFor="validation-count">Required validators (text)</FieldLabel>
           <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
             <Input
               id="validation-count"
@@ -112,7 +112,7 @@ export function ValidationSettingsSection({
           </p>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="validation-count-audio">Required validators (audio)</Label>
+          <FieldLabel htmlFor="validation-count-audio">Required validators (audio)</FieldLabel>
           <DisabledFieldTooltip
             disabled={disabled || !hasAnyAudioData}
             tooltip={disabled ? (disabledTooltip ?? null) : null}
@@ -137,7 +137,7 @@ export function ValidationSettingsSection({
 
         {/* ── Role floor ── */}
         <div className="space-y-2">
-          <Label htmlFor="validation-role-floor">Minimum validator role</Label>
+          <FieldLabel htmlFor="validation-role-floor">Minimum validator role</FieldLabel>
           <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
             <Select
               items={ROLE_OPTIONS}
@@ -180,7 +180,7 @@ export function ValidationSettingsSection({
             />
           </DisabledFieldTooltip>
           <div className="space-y-0.5">
-            <Label htmlFor="allow-self-validation">Allow self-validation</Label>
+            <FieldLabel htmlFor="allow-self-validation">Allow self-validation</FieldLabel>
             <p className="text-xs text-muted-foreground">
               When off, a contributor's vote on their own commit is ignored.
               {/* SWARM-TODO(server-enforcement): enforce in sync-worker cell.validate branch */}
@@ -190,7 +190,7 @@ export function ValidationSettingsSection({
 
         {/* ── Named-user allowlist ── */}
         <div className="space-y-2">
-          <Label htmlFor="validation-named-users">Named validators (optional)</Label>
+          <FieldLabel htmlFor="validation-named-users">Named validators (optional)</FieldLabel>
           <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
             <Input
               id="validation-named-users"

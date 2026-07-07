@@ -18,7 +18,9 @@
  */
 
 import { useMemo, useState } from "react"
+import { AlertTriangle, Cloud, Sparkles } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { EmptyState } from "@/components/ui/page"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
 import type { PostEditMetrics, WeekBucket, UserBucket } from "@/lib/metrics/post-edit-metrics"
@@ -140,17 +142,36 @@ function UserTable({ users, activeUser, onSelectUser }: {
 
 // ── Empty / loading states ────────────────────────────────────────────────────
 
-function EmptyState({ reason }: { reason: "no-data" | "error" | "no-cloud" }) {
-  const messages: Record<typeof reason, string> = {
-    "no-data":
-      "No post-edit pairs found yet. Pairs are recorded when an AI-drafted segment is later edited by a human. Use the AI completion feature (Sparkles) to generate drafts, then edit them — data will appear here.",
-    error:
-      "Failed to load metrics. Check your connection and try refreshing.",
-    "no-cloud":
-      "Metrics require a cloud-synced project. Sync this project to see AI post-edit statistics.",
+function MetricsEmptyState({ reason }: { reason: "no-data" | "error" | "no-cloud" }) {
+  const config: Record<
+    typeof reason,
+    { icon: typeof Sparkles; title: string; description: string }
+  > = {
+    "no-data": {
+      icon: Sparkles,
+      title: "No post-edit pairs yet",
+      description:
+        "Pairs are recorded when an AI-drafted segment is later edited by a human. Use the AI completion feature (Sparkles) to generate drafts, then edit them — data will appear here.",
+    },
+    error: {
+      icon: AlertTriangle,
+      title: "Failed to load metrics",
+      description: "Check your connection and try refreshing.",
+    },
+    "no-cloud": {
+      icon: Cloud,
+      title: "Cloud sync required",
+      description: "Metrics require a cloud-synced project. Sync this project to see AI post-edit statistics.",
+    },
   }
+  const { icon, title, description } = config[reason]
   return (
-    <p className="mt-3 text-sm text-muted-foreground">{messages[reason]}</p>
+    <EmptyState
+      className="mt-3 border-0 bg-transparent px-0 py-4"
+      icon={icon}
+      title={title}
+      description={description}
+    />
   )
 }
 
@@ -240,12 +261,12 @@ export function PostEditMetricsSection({
             </div>
           )}
 
-          {!isLoading && !isCloudProject && <EmptyState reason="no-cloud" />}
+          {!isLoading && !isCloudProject && <MetricsEmptyState reason="no-cloud" />}
 
-          {!isLoading && isCloudProject && isError && <EmptyState reason="error" />}
+          {!isLoading && isCloudProject && isError && <MetricsEmptyState reason="error" />}
 
           {!isLoading && isCloudProject && !isError && metrics?.totalCount === 0 && (
-            <EmptyState reason="no-data" />
+            <MetricsEmptyState reason="no-data" />
           )}
 
           {!isLoading && isCloudProject && !isError && metrics && metrics.totalCount > 0 && (

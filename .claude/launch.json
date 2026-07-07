@@ -38,6 +38,20 @@
         "--vite-port=15173"
       ],
       "port": 15173
+    },
+    {
+      "name": "stack-qa-fro414",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "DEV_STACK_IDENTITY_PORT=18888",
+        "DEV_STACK_SYNC_PORT=18889",
+        "npm",
+        "run",
+        "dev",
+        "--",
+        "--vite-port=15273"
+      ],
+      "port": 15273
     }
   ]
 }

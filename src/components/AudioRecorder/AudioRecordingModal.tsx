@@ -365,24 +365,28 @@ export function AudioRecordingModal({
           </div>
           <div className="flex items-center gap-1">
             <AppTooltip content={beepEnabled ? "Mute countdown beep" : "Enable countdown beep"}>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 onClick={() => setBeepEnabled((v) => !v)}
                 aria-label={beepEnabled ? "Mute countdown beep" : "Enable countdown beep"}
-                className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+                className="text-muted-foreground/60"
               >
                 {beepEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-              </button>
+              </Button>
             </AppTooltip>
             <AppTooltip content="Close (Esc)">
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 onClick={onClose}
                 aria-label="Close"
-                className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+                className="text-muted-foreground/60"
               >
                 <X className="h-4 w-4" />
-              </button>
+              </Button>
             </AppTooltip>
           </div>
         </div>

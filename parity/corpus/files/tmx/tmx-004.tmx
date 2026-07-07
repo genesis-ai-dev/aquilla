@@ -1,0 +1,12 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tmx SYSTEM "tmx14.dtd">
+<tmx version="1.4">
+<header creationtool="corpus-gen" creationtoolversion="1.0" segtype="sentence" o-tmf="none" adminlang="en-US" srclang="en-GB" datatype="plaintext"/>
+<body>
+<tu tuid="tu-3-0"><tuv xml:lang="en-GB"><seg>All prices include VAT at the applicable rate of 21%.</seg></tuv><tuv xml:lang="es-ES"><seg>Der Vertrag <ph x="1">{0}</ph>tritt am ersten Tag des Folgemonats in Kraft.</seg></tuv></tu>
+<tu tuid="tu-3-1"><prop type="x-domain">legal</prop><note>reviewed</note><tuv xml:lang="en-GB"><seg>製品の仕様は予告なく変更されることがあります。</seg></tuv><tuv xml:lang="es-ES"><seg>Take 2 tablets daily with food; do not exceed 6 tablets in 24 hours.</seg></tuv></tu>
+<tu tuid="tu-3-2"><prop type="x-domain">legal</prop><tuv xml:lang="en-GB"><seg>Añada 250 ml de agua y mezcle hasta obtener una masa homogénea.</seg></tuv><tuv xml:lang="es-ES"><seg>Error 404: the requested resource could not be found on this server.</seg></tuv></tu>
+<tu tuid="tu-3-3"><tuv xml:lang="en-GB"><seg>請在使用前仔細閱讀本說明書。</seg></tuv><tuv xml:lang="es-ES"><seg>La configura<ph x="1">{0}</ph>ción se guardará automáticamente cada 5 minutos.</seg></tuv></tu>
+<tu tuid="tu-3-4"><prop type="x-domain">legal</prop><tuv xml:lang="en-GB"><seg><![CDATA[Warning: contents may be hot. Handle with care.]]></seg></tuv><tuv xml:lang="es-ES"><seg>Der Vertrag tritt am ersten Tag des Folgemonats in Kraft.</seg></tuv></tu>
+</body>
+</tmx>

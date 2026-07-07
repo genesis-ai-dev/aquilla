@@ -30,18 +30,21 @@ import {
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { SegmentTabs } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { downloadBlob } from "@/lib/export/export-service"
+import { collectInlineStyleWarnings, type ExportFidelityWarning } from "@/lib/export/fidelity"
 import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar } from "@/lib/sync/source-export"
-import { exportPlainText } from "@/lib/export/exporters/plaintext"
-import { exportMarkdown } from "@/lib/export/exporters/markdown"
+import { exportPlainTextStructured } from "@/lib/export/exporters/plaintext"
+import { exportMarkdownStructured } from "@/lib/export/exporters/markdown"
 import { exportTsv } from "@/lib/export/exporters/tsv"
 import { exportCsv } from "@/lib/export/exporters/csv"
-import { exportXliff } from "@/lib/export/exporters/xliff"
-import { exportTmx } from "@/lib/export/exporters/tmx"
+import { exportXliff12Structured } from "@/lib/export/exporters/xliff12-structured"
+import { exportTmxStructured } from "@/lib/export/exporters/tmx-structured"
 import { exportVtt } from "@/lib/export/exporters/vtt"
+import { exportSrt } from "@/lib/export/exporters/srt"
 import { exportPlainTextDump } from "@/lib/export/exporters/plain-text-dump"
 import { buildProjectZip } from "@/lib/export/project-zip-export"
 import type { TextExportFormat } from "@/lib/export/project-zip-export"
@@ -52,7 +55,7 @@ import { useProjectCells } from "@/hooks/useProjectCells"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "audio-by-character" | "docx" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
+export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "docx" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
 
 interface FormatOption {
@@ -93,14 +96,14 @@ const FORMAT_OPTIONS: FormatOption[] = [
     id: "txt",
     label: "Plain text",
     ext: ".txt",
-    description: "Translated segments, one per line.",
+    description: "Round-trip plain text: paragraph structure preserved; untranslated paragraphs keep source.",
     lossy: true,
   },
   {
     id: "md",
     label: "Markdown",
     ext: ".md",
-    description: "Translated segments with canonical ref anchors.",
+    description: "Round-trip markdown: headings, ordered/unordered lists and quotes reconstructed; untranslated blocks keep source.",
     lossy: true,
   },
   {
@@ -121,14 +124,21 @@ const FORMAT_OPTIONS: FormatOption[] = [
     id: "xlf",
     label: "XLIFF 1.2",
     ext: ".xlf",
-    description: "Generic bilingual XLIFF for CAT tool import.",
-    lossy: true,
+    description: "Bilingual XLIFF for CAT tools — schema-valid, segment states mapped, imported inline tags preserved for unedited segments.",
+    lossy: false,
   },
   {
     id: "tmx",
     label: "TMX 1.4b",
     ext: ".tmx",
-    description: "Translation memory exchange — segments with source + target.",
+    description: "Translation memory exchange — DTD-valid, imported inline tags preserved for unedited pairs.",
+    lossy: true,
+  },
+  {
+    id: "srt",
+    label: "SRT (subtitles)",
+    ext: ".srt",
+    description: "SubRip subtitles: numbered cues with millisecond timecodes; translated text per cue, source kept for untranslated cues.",
     lossy: true,
   },
   {
@@ -282,6 +292,9 @@ export function ExportDialog({
     | { kind: "ok"; msg: string }
     | { kind: "ok-lossy"; msg: string; lossyVerseCount: number }
   >({ kind: "idle" })
+  // Inline-style fidelity report for the last export (parity run: users must
+  // see when formatting could not be carried into edited translations).
+  const [fidelityWarnings, setFidelityWarnings] = useState<ExportFidelityWarning[]>([])
 
   const selectedFormat = FORMAT_OPTIONS.find((f) => f.id === format)!
   const isLossy = selectedFormat.lossy
@@ -361,6 +374,7 @@ export function ExportDialog({
   async function handleExport() {
     if (!activeFileId) return
     setStatus({ kind: "busy", msg: "Exporting…" })
+    setFidelityWarnings([])
     try {
       if (format === "usfm") {
         if (effectiveScope === "project") {
@@ -406,6 +420,14 @@ export function ExportDialog({
         const note = result.injected === 0
           ? " (no translations to inject — download original structure)"
           : ` (${result.injected} paragraph${result.injected === 1 ? "" : "s"} translated)`
+        setFidelityWarnings([
+          ...result.warnings.map((w) => ({
+            kind: "inline-style-simplified" as const,
+            segment: w.segment,
+            detail: w.detail,
+          })),
+          ...collectInlineStyleWarnings(cells),
+        ])
         setStatus({ kind: "ok", msg: `Downloaded ${baseName}.docx${note}` })
       } else if (format === "audio-by-character") {
         setStatus({ kind: "busy", msg: "Decoding audio…" })
@@ -487,6 +509,7 @@ export function ExportDialog({
         const safeName = buildExportStem(true) // FRO-437: project scope uses project name + suffixes
         const ext = selectedFormat.ext
         downloadBlob(zipBlob, `${safeName}${ext}.zip`)
+        setFidelityWarnings(projectFileCells.flatMap((f) => collectInlineStyleWarnings(f.cells)))
         const truncNote = isTruncated ? " (first 40 files only)" : ""
         setStatus({ kind: "ok", msg: `Downloaded ${projectFileCells.length} files${truncNote}` })
       } else {
@@ -498,10 +521,10 @@ export function ExportDialog({
         const ext = selectedFormat.ext
         switch (format) {
           case "txt":
-            blob = exportPlainText(filteredCells)
+            blob = exportPlainTextStructured(filteredCells)
             break
           case "md":
-            blob = exportMarkdown(filteredCells)
+            blob = exportMarkdownStructured(filteredCells)
             break
           case "tsv":
             blob = exportTsv(filteredCells)
@@ -510,13 +533,16 @@ export function ExportDialog({
             blob = exportCsv(filteredCells)
             break
           case "xlf":
-            blob = exportXliff(filteredCells, sourceLanguage, targetLanguage)
+            blob = exportXliff12Structured(filteredCells, sourceLanguage, targetLanguage)
             break
           case "tmx":
-            blob = exportTmx(filteredCells, sourceLanguage, targetLanguage)
+            blob = exportTmxStructured(filteredCells, sourceLanguage, targetLanguage)
             break
           case "vtt":
             blob = exportVtt(filteredCells, ttsSettings)
+            break
+          case "srt":
+            blob = exportSrt(filteredCells)
             break
           case "plain-text-dump":
             blob = exportPlainTextDump(filteredCells, {
@@ -533,6 +559,7 @@ export function ExportDialog({
             throw new Error(`Unknown format: ${format}`)
         }
         downloadBlob(blob, `${baseName}${ext}`)
+        setFidelityWarnings(collectInlineStyleWarnings(filteredCells))
         setStatus({ kind: "ok", msg: `Downloaded ${baseName}${ext}` })
       }
     } catch (e) {
@@ -541,7 +568,10 @@ export function ExportDialog({
   }
 
   function handleOpenChange(next: boolean) {
-    if (!next) setStatus({ kind: "idle" })
+    if (!next) {
+      setStatus({ kind: "idle" })
+      setFidelityWarnings([])
+    }
     onOpenChange(next)
   }
 
@@ -615,37 +645,16 @@ export function ExportDialog({
           <legend className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
             Scope
           </legend>
-          <RadioGroup
+          <SegmentTabs<ExportScope>
             value={effectiveScope}
-            onValueChange={(value) => setScope(value as ExportScope)}
-            className="inline-flex w-auto items-center gap-0.5 rounded-full bg-muted/40 p-0.5 self-start"
             aria-label="Export scope"
-          >
-            {(["file", "project"] as const).map((s) => {
-              const isProjectDisabled = s === "project" && isFileOnlyFormat
-              return (
-                <label
-                  key={s}
-                  className={
-                    "inline-flex h-6 items-center rounded-full px-3 text-[11px] font-medium tracking-tight transition-colors " +
-                    (isProjectDisabled
-                      ? "cursor-not-allowed opacity-40 text-muted-foreground"
-                      : "cursor-pointer ") +
-                    (effectiveScope === s && !isProjectDisabled
-                      ? "bg-background text-foreground shadow-sm ring-1 ring-foreground/5"
-                      : (!isProjectDisabled ? "text-muted-foreground hover:text-foreground" : ""))
-                  }
-                >
-                  <RadioGroupItem
-                    value={s}
-                    disabled={isProjectDisabled}
-                    className="sr-only"
-                  />
-                  {s === "file" ? "Current file" : "Whole project"}
-                </label>
-              )
-            })}
-          </RadioGroup>
+            className="self-start"
+            options={[
+              { label: "Current file", value: "file", disabled: isProjectOnlyFormat },
+              { label: "Whole project", value: "project", disabled: isFileOnlyFormat },
+            ]}
+            onValueChange={setScope}
+          />
           {isFileOnlyFormat && (
             <p className="text-[10px] text-muted-foreground mt-0.5">
               Project scope not supported for this format.
@@ -935,6 +944,29 @@ export function ExportDialog({
                 </span>
               )}
             </span>
+          </div>
+        )}
+
+        {/* Inline-style fidelity report: formatting the export could not keep. */}
+        {fidelityWarnings.length > 0 && (status.kind === "ok" || status.kind === "ok-lossy") && (
+          <div
+            role="note"
+            className="flex flex-col gap-1 rounded-xl bg-amber-50 px-3 py-2.5 text-xs text-amber-700 dark:bg-amber-950/30 dark:text-amber-400"
+          >
+            <span className="flex items-center gap-1 font-medium">
+              <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
+              {fidelityWarnings.length === 1
+                ? "1 segment lost inline formatting in this export"
+                : `${fidelityWarnings.length} segments lost inline formatting in this export`}
+            </span>
+            <ul className="ml-4 list-disc space-y-0.5">
+              {fidelityWarnings.slice(0, 6).map((w, i) => (
+                <li key={i}>
+                  <span className="font-medium">{w.segment}</span>: {w.detail}
+                </li>
+              ))}
+              {fidelityWarnings.length > 6 && <li>…and {fidelityWarnings.length - 6} more</li>}
+            </ul>
           </div>
         )}
         </DialogBody>

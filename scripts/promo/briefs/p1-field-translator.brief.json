@@ -1,0 +1,21 @@
+{
+  "persona": "p1-field-translator",
+  "personaLabel": "The Field Translator",
+  "emotionalThroughline": "From the quiet dread of fragile work in a hard place to the calm trust of words that simply stay held.",
+  "mood": "intimate",
+  "durationSec": 18,
+  "fps": 30,
+  "scenes": [
+    {"t":0.0,"id":"cold-open","title":"One bar of signal.","subtitle":"And a verse you can't afford to lose."},
+    {"t":3.0,"id":"reveal","title":"Then it just stays.","subtitle":"Close it. Come back. Still here."},
+    {"t":6.5,"id":"showcase","title":"Two tongues, one page.","subtitle":"Your words, beside the source."},
+    {"t":11.0,"id":"proof","title":"Held.","subtitle":"Offline. Off-grid. On every device."},
+    {"t":14.5,"id":"cta","title":"Aquilla","subtitle":"Your words, always kept."}
+  ],
+  "beats": [
+    {"t":0.4,"kind":"thump"},{"t":1.8,"kind":"thump"},{"t":3.0,"kind":"swell"},
+    {"t":4.4,"kind":"thump"},{"t":6.5,"kind":"swell"},{"t":8.2,"kind":"thump"},
+    {"t":9.8,"kind":"thump"},{"t":11.0,"kind":"swell"},{"t":13.0,"kind":"thump"},
+    {"t":14.5,"kind":"impact"}
+  ]
+}

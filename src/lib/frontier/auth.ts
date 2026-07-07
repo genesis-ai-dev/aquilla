@@ -96,6 +96,29 @@ export async function devLogin(): Promise<FrontierSession | null> {
   return finalizeSession(data.username, data);
 }
 
+/**
+ * Marketing/demo auto-login. Unlike devLogin this is NOT gated on
+ * import.meta.env.DEV — the curated demo is meant to run in production-like
+ * builds (the recording harness uses `vite build`, and a public demo build is
+ * production). The real gate is server-side: /__marketing__/login 404s unless
+ * the auth-worker has it enabled (WRANGLER_LOCAL / demo mode), so a normal
+ * prod build simply gets null here and the route shows "demo unavailable".
+ */
+export async function marketingLogin(): Promise<FrontierSession | null> {
+  let res: Response;
+  try {
+    res = await fetch(`${AUTH_BASE}/__marketing__/login`, { method: "POST" });
+  } catch {
+    return null;
+  }
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new FrontierAuthError(`Marketing login failed (${res.status})`, res.status);
+  }
+  const data = (await res.json()) as AuthResponse & { username: string };
+  return finalizeSession(data.username, data);
+}
+
 export async function requestPasswordReset(email: string): Promise<void> {
   const res = await fetch(`${AUTH_BASE}/api/v2/auth/password-reset/request`, {
     method: "POST",

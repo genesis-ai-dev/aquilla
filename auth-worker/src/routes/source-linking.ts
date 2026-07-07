@@ -29,14 +29,23 @@ import {
   listDownstreamProjects,
   loadProjectWithSource,
   snapshotSourceCells,
+  triggerLinkSeedSync,
 } from "../services/source-linking"
 
 const sourceLinking = new Hono<AuthHonoEnv>()
 
 const LINK_MIN_ROLE = ROLE.PROJECT_LEAD // 500
 
+// FRO-476: mode/consumes/gate are optional so existing callers (pre-FRO-476
+// clients) keep working — defaulting to 'clone' preserves today's behavior
+// (no mirror sync runs) rather than silently opting an old client into live
+// mirroring. `consumes`/`gate` default per the design spec §2 ('source' /
+// 'validated').
 const linkSourceSchema = z.object({
   sourceProjectId: z.string().min(1).max(256),
+  mode: z.enum(["clone", "live"]).optional(),
+  consumes: z.enum(["source", "target"]).optional(),
+  gate: z.enum(["head", "validated"]).optional(),
 })
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -50,7 +59,12 @@ sourceLinking.post(
   async (c) => {
     const user = c.get("user")
     const projectId = c.req.param("projectId") as string
-    const { sourceProjectId } = c.req.valid("json")
+    const {
+      sourceProjectId,
+      mode = "clone",
+      consumes = "source",
+      gate = "validated",
+    } = c.req.valid("json")
 
     if (sourceProjectId === projectId) {
       return c.json({ error: "a project cannot link to itself" }, 400)
@@ -88,13 +102,21 @@ sourceLinking.post(
     }
 
     try {
+      // FRO-476: persist link metadata alongside source_project_id. Cursor
+      // resets to 0 on (re)link so a fresh live link always seeds from
+      // scratch via the mirror sync (§5 — "seeding IS the first mirror
+      // sync"), regardless of any prior link's cursor position.
       await c.env.AQUILLA_PG.prepare(
         `UPDATE projects
-            SET source_project_id = ?,
-                updated_at        = CURRENT_TIMESTAMP
+            SET source_project_id    = ?,
+                source_link_mode     = ?,
+                source_link_consumes = ?,
+                source_link_gate     = ?,
+                source_link_cursor   = 0,
+                updated_at           = CURRENT_TIMESTAMP
           WHERE id = ?`,
       )
-        .bind(sourceProjectId, projectId)
+        .bind(sourceProjectId, mode, consumes, gate, projectId)
         .run()
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -109,10 +131,41 @@ sourceLinking.post(
       sourceProjectId,
     })
 
+    // FRO-476/QA-BUG-1: seeding must happen at link time — a linked project
+    // born with 0 files/cells has no way to self-heal (live's lazy-pull is
+    // keyed to an open FILE; clone never syncs again after this call).
+    //
+    // - mode='live': trigger the first mirror sync now (§5 — "seeding IS the
+    //   first mirror sync"). Awaited so the response only returns once
+    //   seeding has actually run (or definitively failed) — the client no
+    //   longer has to guess whether content will "just appear".
+    // - mode='clone': run the one-time snapshot synchronously — this IS
+    //   clone semantics (§2: "snapshot at birth"), not a side effect of
+    //   detach. There is no later resync for clones, so this is the only
+    //   chance to seed.
+    let seeded = false
+    if (mode === "live") {
+      seeded = await triggerLinkSeedSync(c.env, projectId)
+    } else {
+      const snapshotted = await snapshotSourceCells(c.env, {
+        upstreamProjectId: sourceProjectId,
+        targetProjectId: projectId,
+        authorUsername: user.username,
+      })
+      seeded = snapshotted > 0
+    }
+
     return c.json({
       projectId,
       sourceProjectId,
+      mode,
+      consumes,
+      gate,
       previousSourceProjectId: project.source_project_id,
+      // FRO-476/QA-BUG-1: best-effort signal — false means the client
+      // should not assume content is present yet (e.g. the sync-worker
+      // call failed) and may fall back to its own self-heal trigger.
+      seeded,
     })
   },
 )
@@ -149,10 +202,17 @@ sourceLinking.post("/:projectId/detach-source", authMiddleware, async (c) => {
   const upstreamId = project.source_project_id
 
   try {
+    // FRO-476: clear link metadata too — detach makes the project fully
+    // self-contained (mode/consumes/gate no longer apply; cursor resets so
+    // a future re-link starts clean).
     await c.env.AQUILLA_PG.prepare(
       `UPDATE projects
-          SET source_project_id = NULL,
-              updated_at        = CURRENT_TIMESTAMP
+          SET source_project_id    = NULL,
+              source_link_mode     = NULL,
+              source_link_consumes = NULL,
+              source_link_gate     = NULL,
+              source_link_cursor   = 0,
+              updated_at           = CURRENT_TIMESTAMP
         WHERE id = ?`,
     )
       .bind(projectId)

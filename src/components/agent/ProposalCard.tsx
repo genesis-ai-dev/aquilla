@@ -260,7 +260,7 @@ export function ProposalCard({
   }
 
   return (
-    <div className="space-y-2 rounded-lg border bg-card px-2.5 py-2 shadow-sm">
+    <div className="space-y-2 rounded-lg border bg-card px-2.5 py-2">
       <div className="flex items-center gap-1.5">
         <span className="min-w-0 flex-1 truncate text-xs font-medium">{proposal.summary}</span>
         <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">

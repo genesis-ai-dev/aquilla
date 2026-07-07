@@ -66,9 +66,12 @@ admin.get("/me", async (c) => {
 
 /**
  * POST /api/v2/admin/elevation/request — email a fresh 6-digit code to the
- * operator's account email. Rate-limited to 5/hour/user. When no EMAIL binding
- * is configured (local/e2e), the code is returned in the body so the dev flow
- * is testable; production always has EMAIL, so the code never leaks there.
+ * operator's account email. Rate-limited to 5/hour/user. In non-production
+ * environments with no EMAIL binding (local/e2e), the code is returned in the
+ * body so the dev flow is testable. Gated on ENVIRONMENT, not just binding
+ * presence, so a misconfigured/missing EMAIL binding in prod fails closed
+ * (no email sent, no code leaked) instead of silently falling back to the dev
+ * behavior.
  */
 admin.post("/elevation/request", async (c) => {
   const user = c.get("user")
@@ -97,7 +100,7 @@ admin.post("/elevation/request", async (c) => {
 
   const sent = await sendAdminElevationCodeEmail(c.env, user.email, code, ttlMin)
   const body: { ok: true; sent: boolean; devCode?: string } = { ok: true, sent }
-  if (!c.env.EMAIL) body.devCode = code // dev only — prod always has EMAIL
+  if (c.env.ENVIRONMENT !== "production" && !c.env.EMAIL) body.devCode = code // dev only — never in prod, even if EMAIL is misconfigured
   return c.json(body)
 })
 

@@ -55,6 +55,11 @@ export function FileRow(props: FileRowProps) {
 
   return (
     <div
+      // Showcase label: addressable, readable target for video scripts/cursor
+      // (see docs/distribution/SHOWCASE-LABELS.md). The whole row is the click
+      // target that opens the file — what "click the sidebar file" should hit.
+      data-showcase="sidebar.file"
+      data-showcase-name={file.name}
       className={cn(
         "group relative flex h-7 items-center gap-1 rounded-lg px-2 text-[13px] cursor-pointer transition-colors",
         active ? "bg-accent text-foreground" : "hover:bg-accent",

@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { clearSelection, MAX_SELECTED, useSelectedIds } from "@/lib/audio/selection"
 import { emitCellValidate, emitCellUnvalidate } from "@/lib/sync/events-emit"
+import { canPerform } from "@/lib/sync/role-policy"
 
 interface Props {
   project: ProjectRecord
@@ -193,6 +194,16 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
     }
   }, [selectedCells, username, unvalidatableCount, isBusy, project.id])
 
+  // FRO-365: viewers (and any role below the lowest gated action here —
+  // REVIEWER 300, the validate floor) get no selection affordance at all.
+  // canPerform fails OPEN when the role is unknown (local/legacy projects
+  // with no syncRole), so this only suppresses the bar for a KNOWN
+  // sub-reviewer role — never blocks legacy non-cloud projects.
+  const roleLevel = project.syncRole?.level ?? null
+  if (roleLevel != null && !canPerform("cell.validate", roleLevel) && !canPerform("target.cell.commit", roleLevel)) {
+    return null
+  }
+
   if (selectedCells.length === 0) return null
 
   return (
@@ -201,7 +212,7 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
       <div
         role="status"
         aria-live="polite"
-        className="pointer-events-none fixed bottom-16 left-1/2 z-40 -translate-x-1/2 rounded-lg bg-card px-4 py-2 text-xs font-medium shadow-lg"
+        className="pointer-events-none fixed bottom-16 left-1/2 z-40 -translate-x-1/2 rounded-lg border bg-card px-4 py-2 text-xs font-medium ring-1 ring-foreground/10"
       >
         {toastMsg}
       </div>
@@ -209,7 +220,7 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
     <div
       className={cn(
         "pointer-events-auto fixed left-1/2 z-30 flex -translate-x-1/2 items-center gap-2",
-        "bottom-4 rounded-full bg-card px-4 py-2 text-xs shadow-lg",
+        "bottom-4 rounded-full border bg-card px-4 py-2 text-xs ring-1 ring-foreground/10",
       )}
       role="toolbar"
       aria-label="Selection actions"

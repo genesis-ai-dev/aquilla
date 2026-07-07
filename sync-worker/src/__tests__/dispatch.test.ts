@@ -45,6 +45,17 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'cast.assign': { castName: 'Narrator' },
     'cell.retime': { startMs: 0, endMs: 1000 },
     'file.video.set': { coreMediaUrl: 'https://cdn/v.mp4' },
+    'source.cell.mirror': {
+      value: 'x',
+      upstream: { projectId: 'proj-up', cellId: 'cell-1', eventId: 'evt-up-1', seq: 1, side: 'source', contentHash: 'abc' },
+    },
+    'file.mirror': {
+      fileId: 'file-x',
+      name: 'Genesis',
+      upstream: { projectId: 'proj-up', eventId: 'evt-up-1', seq: 1 },
+    },
+    'link.cursor.advance': { upstreamProjectId: 'proj-up', fromSeq: 0, toSeq: 1, cellCount: 1 },
+    'target.cell.repin': { sourceEventId: 'evt-src-1', expectedTargetEventId: 'evt-tgt-1' },
   }
 
   const raw = {

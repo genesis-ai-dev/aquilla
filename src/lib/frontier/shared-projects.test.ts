@@ -56,3 +56,43 @@ describe("partitionSharedProjects", () => {
     }
   })
 })
+
+// FRO-475: the all-orgs aggregate overview builds its project list from
+// getPortfolios(orgs the caller is a MEMBER of) — a project reached purely
+// via a project-level grant (zero org memberships, or a grant in an org the
+// caller doesn't belong to) never appears there. The "all-orgs" scope must
+// classify by org membership alone, with no activeOrgId to compare against.
+describe("partitionSharedProjects (all-orgs scope)", () => {
+  it("a zero-org user's project grants are entirely 'shared with me'", () => {
+    const { inActiveOrg, sharedWithMe } = partitionSharedProjects(
+      [proj("guest-project-a", 503), proj("guest-project-b", null)],
+      [],
+      null,
+      "all-orgs",
+    )
+    expect(inActiveOrg).toEqual([])
+    expect(sharedWithMe.map((p) => p.id)).toEqual(["guest-project-a", "guest-project-b"])
+  })
+
+  it("a mixed member+guest user splits by org membership, not activeOrgId", () => {
+    const { inActiveOrg, sharedWithMe } = partitionSharedProjects(
+      [proj("mine-7", 7), proj("mine-9", 9), proj("guest", 503), proj("no-org", null)],
+      MY_ORGS,
+      null,
+      "all-orgs",
+    )
+    expect(inActiveOrg.map((p) => p.id).sort()).toEqual(["mine-7", "mine-9"])
+    expect(sharedWithMe.map((p) => p.id).sort()).toEqual(["guest", "no-org"])
+  })
+
+  it("a pure member user (no foreign grants) has an empty shared list", () => {
+    const { inActiveOrg, sharedWithMe } = partitionSharedProjects(
+      [proj("mine-7", 7), proj("mine-9", 9)],
+      MY_ORGS,
+      null,
+      "all-orgs",
+    )
+    expect(inActiveOrg.map((p) => p.id).sort()).toEqual(["mine-7", "mine-9"])
+    expect(sharedWithMe).toEqual([])
+  })
+})

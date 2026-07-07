@@ -1,0 +1,818 @@
+[
+  {
+    "file": "xliff12/xliff12-001.xlf",
+    "format": "xliff12"
+  },
+  {
+    "file": "xliff12/xliff12-002.xlf",
+    "format": "xliff12"
+  },
+  {
+    "file": "xliff12/xliff12-003.xlf",
+    "format": "xliff12"
+  },
+  {
+    "file": "xliff12/xliff12-004.xlf",
+    "format": "xliff12"
+  },
+  {
+    "file": "xliff12/xliff12-005.xlf",
+    "format": "xliff12"
+  },
+  {
+    "file": "xliff12/xliff12-006.xlf",
+    "format": "xliff12"
+  },
+  {
+    "file": "xliff12/xliff12-007.xlf",
+    "format": "xliff12"
+  },
+  {
+    "file": "xliff12/xliff12-008.xlf",
+    "format": "xliff12"
+  },
+  {
+    "file": "xliff12/xliff12-009.xlf",
+    "format": "xliff12"
+  },
+  {
+    "file": "xliff12/xliff12-010.xlf",
+    "format": "xliff12"
+  },
+  {
+    "file": "xliff12/xliff12-011.xlf",
+    "format": "xliff12"
+  },
+  {
+    "file": "xliff12/xliff12-012.xlf",
+    "format": "xliff12"
+  },
+  {
+    "file": "xliff12/xliff12-013.xlf",
+    "format": "xliff12"
+  },
+  {
+    "file": "xliff12/xliff12-014.xlf",
+    "format": "xliff12"
+  },
+  {
+    "file": "xliff12/xliff12-015.xlf",
+    "format": "xliff12"
+  },
+  {
+    "file": "xliff12/xliff12-016.xlf",
+    "format": "xliff12"
+  },
+  {
+    "file": "xliff12/xliff12-017.xlf",
+    "format": "xliff12"
+  },
+  {
+    "file": "xliff12/xliff12-018.xlf",
+    "format": "xliff12"
+  },
+  {
+    "file": "xliff12/xliff12-019.xlf",
+    "format": "xliff12"
+  },
+  {
+    "file": "xliff12/xliff12-020.xlf",
+    "format": "xliff12"
+  },
+  {
+    "file": "xliff20/xliff20-001.xlf",
+    "format": "xliff20"
+  },
+  {
+    "file": "xliff20/xliff20-002.xlf",
+    "format": "xliff20"
+  },
+  {
+    "file": "xliff20/xliff20-003.xlf",
+    "format": "xliff20"
+  },
+  {
+    "file": "xliff20/xliff20-004.xlf",
+    "format": "xliff20"
+  },
+  {
+    "file": "xliff20/xliff20-005.xlf",
+    "format": "xliff20"
+  },
+  {
+    "file": "xliff20/xliff20-006.xlf",
+    "format": "xliff20"
+  },
+  {
+    "file": "xliff20/xliff20-007.xlf",
+    "format": "xliff20"
+  },
+  {
+    "file": "xliff20/xliff20-008.xlf",
+    "format": "xliff20"
+  },
+  {
+    "file": "xliff20/xliff20-009.xlf",
+    "format": "xliff20"
+  },
+  {
+    "file": "xliff20/xliff20-010.xlf",
+    "format": "xliff20"
+  },
+  {
+    "file": "xliff20/xliff20-011.xlf",
+    "format": "xliff20"
+  },
+  {
+    "file": "xliff20/xliff20-012.xlf",
+    "format": "xliff20"
+  },
+  {
+    "file": "xliff20/xliff20-013.xlf",
+    "format": "xliff20"
+  },
+  {
+    "file": "xliff20/xliff20-014.xlf",
+    "format": "xliff20"
+  },
+  {
+    "file": "xliff20/xliff20-015.xlf",
+    "format": "xliff20"
+  },
+  {
+    "file": "xliff20/xliff20-016.xlf",
+    "format": "xliff20"
+  },
+  {
+    "file": "tmx/tmx-001.tmx",
+    "format": "tmx"
+  },
+  {
+    "file": "tmx/tmx-002.tmx",
+    "format": "tmx"
+  },
+  {
+    "file": "tmx/tmx-003.tmx",
+    "format": "tmx"
+  },
+  {
+    "file": "tmx/tmx-004.tmx",
+    "format": "tmx"
+  },
+  {
+    "file": "tmx/tmx-005.tmx",
+    "format": "tmx"
+  },
+  {
+    "file": "tmx/tmx-006.tmx",
+    "format": "tmx"
+  },
+  {
+    "file": "tmx/tmx-007.tmx",
+    "format": "tmx"
+  },
+  {
+    "file": "tmx/tmx-008.tmx",
+    "format": "tmx"
+  },
+  {
+    "file": "tmx/tmx-009.tmx",
+    "format": "tmx"
+  },
+  {
+    "file": "tmx/tmx-010.tmx",
+    "format": "tmx"
+  },
+  {
+    "file": "tmx/tmx-011.tmx",
+    "format": "tmx"
+  },
+  {
+    "file": "tmx/tmx-012.tmx",
+    "format": "tmx"
+  },
+  {
+    "file": "tmx/tmx-013.tmx",
+    "format": "tmx"
+  },
+  {
+    "file": "tmx/tmx-014.tmx",
+    "format": "tmx"
+  },
+  {
+    "file": "tmx/tmx-015.tmx",
+    "format": "tmx"
+  },
+  {
+    "file": "tmx/tmx-016.tmx",
+    "format": "tmx"
+  },
+  {
+    "file": "txt/txt-001.txt",
+    "format": "txt"
+  },
+  {
+    "file": "txt/txt-002.txt",
+    "format": "txt"
+  },
+  {
+    "file": "txt/txt-003.txt",
+    "format": "txt"
+  },
+  {
+    "file": "txt/txt-004.txt",
+    "format": "txt"
+  },
+  {
+    "file": "txt/txt-005.txt",
+    "format": "txt"
+  },
+  {
+    "file": "txt/txt-006.txt",
+    "format": "txt"
+  },
+  {
+    "file": "txt/txt-007.txt",
+    "format": "txt"
+  },
+  {
+    "file": "txt/txt-008.txt",
+    "format": "txt"
+  },
+  {
+    "file": "txt/txt-009.txt",
+    "format": "txt"
+  },
+  {
+    "file": "txt/txt-010.txt",
+    "format": "txt"
+  },
+  {
+    "file": "txt/txt-011.txt",
+    "format": "txt"
+  },
+  {
+    "file": "txt/txt-012.txt",
+    "format": "txt"
+  },
+  {
+    "file": "csv/csv-001.csv",
+    "format": "csv"
+  },
+  {
+    "file": "csv/csv-002.csv",
+    "format": "csv"
+  },
+  {
+    "file": "csv/csv-003.csv",
+    "format": "csv"
+  },
+  {
+    "file": "csv/csv-004.csv",
+    "format": "csv"
+  },
+  {
+    "file": "csv/csv-005.csv",
+    "format": "csv"
+  },
+  {
+    "file": "csv/csv-006.csv",
+    "format": "csv"
+  },
+  {
+    "file": "csv/csv-007.csv",
+    "format": "csv"
+  },
+  {
+    "file": "csv/csv-008.csv",
+    "format": "csv"
+  },
+  {
+    "file": "csv/csv-009.csv",
+    "format": "csv"
+  },
+  {
+    "file": "csv/csv-010.csv",
+    "format": "csv"
+  },
+  {
+    "file": "csv/csv-011.csv",
+    "format": "csv"
+  },
+  {
+    "file": "csv/csv-012.csv",
+    "format": "csv"
+  },
+  {
+    "file": "tsv/tsv-001.tsv",
+    "format": "tsv"
+  },
+  {
+    "file": "tsv/tsv-002.tsv",
+    "format": "tsv"
+  },
+  {
+    "file": "tsv/tsv-003.tsv",
+    "format": "tsv"
+  },
+  {
+    "file": "tsv/tsv-004.tsv",
+    "format": "tsv"
+  },
+  {
+    "file": "tsv/tsv-005.tsv",
+    "format": "tsv"
+  },
+  {
+    "file": "tsv/tsv-006.tsv",
+    "format": "tsv"
+  },
+  {
+    "file": "tsv/tsv-007.tsv",
+    "format": "tsv"
+  },
+  {
+    "file": "tsv/tsv-008.tsv",
+    "format": "tsv"
+  },
+  {
+    "file": "tsv/tsv-009.tsv",
+    "format": "tsv"
+  },
+  {
+    "file": "tsv/tsv-010.tsv",
+    "format": "tsv"
+  },
+  {
+    "file": "srt/srt-001.srt",
+    "format": "srt"
+  },
+  {
+    "file": "srt/srt-002.srt",
+    "format": "srt"
+  },
+  {
+    "file": "srt/srt-003.srt",
+    "format": "srt"
+  },
+  {
+    "file": "srt/srt-004.srt",
+    "format": "srt"
+  },
+  {
+    "file": "srt/srt-005.srt",
+    "format": "srt"
+  },
+  {
+    "file": "srt/srt-006.srt",
+    "format": "srt"
+  },
+  {
+    "file": "srt/srt-007.srt",
+    "format": "srt"
+  },
+  {
+    "file": "srt/srt-008.srt",
+    "format": "srt"
+  },
+  {
+    "file": "srt/srt-009.srt",
+    "format": "srt"
+  },
+  {
+    "file": "srt/srt-010.srt",
+    "format": "srt"
+  },
+  {
+    "file": "srt/srt-011.srt",
+    "format": "srt"
+  },
+  {
+    "file": "srt/srt-012.srt",
+    "format": "srt"
+  },
+  {
+    "file": "vtt/vtt-001.vtt",
+    "format": "vtt"
+  },
+  {
+    "file": "vtt/vtt-002.vtt",
+    "format": "vtt"
+  },
+  {
+    "file": "vtt/vtt-003.vtt",
+    "format": "vtt"
+  },
+  {
+    "file": "vtt/vtt-004.vtt",
+    "format": "vtt"
+  },
+  {
+    "file": "vtt/vtt-005.vtt",
+    "format": "vtt"
+  },
+  {
+    "file": "vtt/vtt-006.vtt",
+    "format": "vtt"
+  },
+  {
+    "file": "vtt/vtt-007.vtt",
+    "format": "vtt"
+  },
+  {
+    "file": "vtt/vtt-008.vtt",
+    "format": "vtt"
+  },
+  {
+    "file": "vtt/vtt-009.vtt",
+    "format": "vtt"
+  },
+  {
+    "file": "vtt/vtt-010.vtt",
+    "format": "vtt"
+  },
+  {
+    "file": "vtt/vtt-011.vtt",
+    "format": "vtt"
+  },
+  {
+    "file": "vtt/vtt-012.vtt",
+    "format": "vtt"
+  },
+  {
+    "file": "sbv/sbv-001.sbv",
+    "format": "sbv"
+  },
+  {
+    "file": "sbv/sbv-002.sbv",
+    "format": "sbv"
+  },
+  {
+    "file": "sbv/sbv-003.sbv",
+    "format": "sbv"
+  },
+  {
+    "file": "sbv/sbv-004.sbv",
+    "format": "sbv"
+  },
+  {
+    "file": "sbv/sbv-005.sbv",
+    "format": "sbv"
+  },
+  {
+    "file": "sbv/sbv-006.sbv",
+    "format": "sbv"
+  },
+  {
+    "file": "sbv/sbv-007.sbv",
+    "format": "sbv"
+  },
+  {
+    "file": "sbv/sbv-008.sbv",
+    "format": "sbv"
+  },
+  {
+    "file": "md/md-001.md",
+    "format": "md"
+  },
+  {
+    "file": "md/md-002.md",
+    "format": "md"
+  },
+  {
+    "file": "md/md-003.md",
+    "format": "md"
+  },
+  {
+    "file": "md/md-004.md",
+    "format": "md"
+  },
+  {
+    "file": "md/md-005.md",
+    "format": "md"
+  },
+  {
+    "file": "md/md-006.md",
+    "format": "md"
+  },
+  {
+    "file": "md/md-007.md",
+    "format": "md"
+  },
+  {
+    "file": "md/md-008.md",
+    "format": "md"
+  },
+  {
+    "file": "md/md-009.md",
+    "format": "md"
+  },
+  {
+    "file": "md/md-010.md",
+    "format": "md"
+  },
+  {
+    "file": "md/md-011.md",
+    "format": "md"
+  },
+  {
+    "file": "md/md-012.md",
+    "format": "md"
+  },
+  {
+    "file": "html/html-001.html",
+    "format": "html"
+  },
+  {
+    "file": "html/html-002.html",
+    "format": "html"
+  },
+  {
+    "file": "html/html-003.html",
+    "format": "html"
+  },
+  {
+    "file": "html/html-004.html",
+    "format": "html"
+  },
+  {
+    "file": "html/html-005.html",
+    "format": "html"
+  },
+  {
+    "file": "html/html-006.html",
+    "format": "html"
+  },
+  {
+    "file": "html/html-007.html",
+    "format": "html"
+  },
+  {
+    "file": "html/html-008.html",
+    "format": "html"
+  },
+  {
+    "file": "html/html-009.html",
+    "format": "html"
+  },
+  {
+    "file": "html/html-010.html",
+    "format": "html"
+  },
+  {
+    "file": "html/html-011.html",
+    "format": "html"
+  },
+  {
+    "file": "html/html-012.html",
+    "format": "html"
+  },
+  {
+    "file": "json/json-001.json",
+    "format": "json"
+  },
+  {
+    "file": "json/json-002.json",
+    "format": "json"
+  },
+  {
+    "file": "json/json-003.json",
+    "format": "json"
+  },
+  {
+    "file": "json/json-004.json",
+    "format": "json"
+  },
+  {
+    "file": "json/json-005.json",
+    "format": "json"
+  },
+  {
+    "file": "json/json-006.json",
+    "format": "json"
+  },
+  {
+    "file": "json/json-007.json",
+    "format": "json"
+  },
+  {
+    "file": "json/json-008.json",
+    "format": "json"
+  },
+  {
+    "file": "json/json-009.json",
+    "format": "json"
+  },
+  {
+    "file": "json/json-010.json",
+    "format": "json"
+  },
+  {
+    "file": "json/json-011.json",
+    "format": "json"
+  },
+  {
+    "file": "json/json-012.json",
+    "format": "json"
+  },
+  {
+    "file": "po/po-001.po",
+    "format": "po"
+  },
+  {
+    "file": "po/po-002.po",
+    "format": "po"
+  },
+  {
+    "file": "po/po-003.po",
+    "format": "po"
+  },
+  {
+    "file": "po/po-004.po",
+    "format": "po"
+  },
+  {
+    "file": "po/po-005.po",
+    "format": "po"
+  },
+  {
+    "file": "po/po-006.po",
+    "format": "po"
+  },
+  {
+    "file": "po/po-007.po",
+    "format": "po"
+  },
+  {
+    "file": "po/po-008.po",
+    "format": "po"
+  },
+  {
+    "file": "po/po-009.po",
+    "format": "po"
+  },
+  {
+    "file": "po/po-010.po",
+    "format": "po"
+  },
+  {
+    "file": "properties/properties-001.properties",
+    "format": "properties"
+  },
+  {
+    "file": "properties/properties-002.properties",
+    "format": "properties"
+  },
+  {
+    "file": "properties/properties-003.properties",
+    "format": "properties"
+  },
+  {
+    "file": "properties/properties-004.properties",
+    "format": "properties"
+  },
+  {
+    "file": "properties/properties-005.properties",
+    "format": "properties"
+  },
+  {
+    "file": "properties/properties-006.properties",
+    "format": "properties"
+  },
+  {
+    "file": "properties/properties-007.properties",
+    "format": "properties"
+  },
+  {
+    "file": "properties/properties-008.properties",
+    "format": "properties"
+  },
+  {
+    "file": "docx/docx-001.docx",
+    "format": "docx"
+  },
+  {
+    "file": "docx/docx-002.docx",
+    "format": "docx"
+  },
+  {
+    "file": "docx/docx-003.docx",
+    "format": "docx"
+  },
+  {
+    "file": "docx/docx-004.docx",
+    "format": "docx"
+  },
+  {
+    "file": "docx/docx-005.docx",
+    "format": "docx"
+  },
+  {
+    "file": "docx/docx-006.docx",
+    "format": "docx"
+  },
+  {
+    "file": "docx/docx-007.docx",
+    "format": "docx"
+  },
+  {
+    "file": "docx/docx-008.docx",
+    "format": "docx"
+  },
+  {
+    "file": "docx/docx-009.docx",
+    "format": "docx"
+  },
+  {
+    "file": "docx/docx-010.docx",
+    "format": "docx"
+  },
+  {
+    "file": "docx/docx-011.docx",
+    "format": "docx"
+  },
+  {
+    "file": "docx/docx-012.docx",
+    "format": "docx"
+  },
+  {
+    "file": "docx/docx-013.docx",
+    "format": "docx"
+  },
+  {
+    "file": "docx/docx-014.docx",
+    "format": "docx"
+  },
+  {
+    "file": "pptx/pptx-001.pptx",
+    "format": "pptx"
+  },
+  {
+    "file": "pptx/pptx-002.pptx",
+    "format": "pptx"
+  },
+  {
+    "file": "pptx/pptx-003.pptx",
+    "format": "pptx"
+  },
+  {
+    "file": "pptx/pptx-004.pptx",
+    "format": "pptx"
+  },
+  {
+    "file": "pptx/pptx-005.pptx",
+    "format": "pptx"
+  },
+  {
+    "file": "pptx/pptx-006.pptx",
+    "format": "pptx"
+  },
+  {
+    "file": "pptx/pptx-007.pptx",
+    "format": "pptx"
+  },
+  {
+    "file": "pptx/pptx-008.pptx",
+    "format": "pptx"
+  },
+  {
+    "file": "pptx/pptx-009.pptx",
+    "format": "pptx"
+  },
+  {
+    "file": "pptx/pptx-010.pptx",
+    "format": "pptx"
+  },
+  {
+    "file": "xlsx/xlsx-001.xlsx",
+    "format": "xlsx"
+  },
+  {
+    "file": "xlsx/xlsx-002.xlsx",
+    "format": "xlsx"
+  },
+  {
+    "file": "xlsx/xlsx-003.xlsx",
+    "format": "xlsx"
+  },
+  {
+    "file": "xlsx/xlsx-004.xlsx",
+    "format": "xlsx"
+  },
+  {
+    "file": "xlsx/xlsx-005.xlsx",
+    "format": "xlsx"
+  },
+  {
+    "file": "xlsx/xlsx-006.xlsx",
+    "format": "xlsx"
+  },
+  {
+    "file": "xlsx/xlsx-007.xlsx",
+    "format": "xlsx"
+  },
+  {
+    "file": "xlsx/xlsx-008.xlsx",
+    "format": "xlsx"
+  }
+]

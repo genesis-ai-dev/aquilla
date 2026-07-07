@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from "react"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { FieldLabel } from "@/components/ui/field"
 import { Section } from "@/components/ui/page"
 import {
   clearUserProviderOverride,
@@ -60,32 +65,28 @@ export function PersonalProviderSection() {
   }
 
   return (
-    <Section contentClassName={open ? undefined : "pb-0"}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-start gap-2 text-left"
-        aria-expanded={open}
-      >
-        {open ? (
-          <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-        )}
-        <div className="min-w-0 space-y-1">
-          <h2 className="font-heading text-base leading-snug font-medium text-foreground">
-            AI provider (advanced)
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            {hasOverride
-              ? "Active — your projects use this endpoint on this device."
-              : "Optional. Most users should leave this off and use Frontier."}
-          </p>
-        </div>
-      </button>
+    <Section contentClassName="p-0">
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger className="flex w-full items-start gap-3 px-5 py-5 text-left hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset">
+          {open ? (
+            <ChevronDown className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          )}
+          <div className="min-w-0 flex flex-col gap-1">
+            <h2 className="font-heading text-base leading-snug font-medium text-foreground">
+              AI provider (advanced)
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              {hasOverride
+                ? "Active — your projects use this endpoint on this device."
+                : "Optional. Most users should leave this off and use Frontier."}
+            </p>
+          </div>
+        </CollapsibleTrigger>
 
-      {open && (
-        <div className="mt-4 space-y-4">
+        <CollapsibleContent>
+          <div className="flex flex-col gap-4 border-t px-5 pb-5 pt-4">
           <p className="text-xs text-muted-foreground">
             Use your own OpenAI-compatible endpoint instead of Frontier for AI
             translations. Stored only in this browser, never synced. Overrides
@@ -93,7 +94,7 @@ export function PersonalProviderSection() {
           </p>
 
           <div className="space-y-2">
-            <Label htmlFor="prov-endpoint">Endpoint URL</Label>
+            <FieldLabel htmlFor="prov-endpoint">Endpoint URL</FieldLabel>
             <Input
               id="prov-endpoint"
               value={endpoint}
@@ -108,9 +109,9 @@ export function PersonalProviderSection() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="prov-model">
+            <FieldLabel htmlFor="prov-model">
               Model <span className="text-muted-foreground/70">(optional)</span>
-            </Label>
+            </FieldLabel>
             <Input
               id="prov-model"
               value={model}
@@ -121,9 +122,9 @@ export function PersonalProviderSection() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="prov-key">
+            <FieldLabel htmlFor="prov-key">
               API key <span className="text-muted-foreground/70">(optional)</span>
-            </Label>
+            </FieldLabel>
             <Input
               id="prov-key"
               type="password"
@@ -155,8 +156,9 @@ export function PersonalProviderSection() {
               </Button>
             )}
           </div>
-        </div>
-      )}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
     </Section>
   )
 }

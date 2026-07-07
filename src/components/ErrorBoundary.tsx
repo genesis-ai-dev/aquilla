@@ -15,6 +15,7 @@
 
 import { Component, type ErrorInfo, type ReactNode } from "react"
 import { AlertTriangle } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import posthog from "@/lib/posthog"
 import { cn } from "@/lib/utils"
 
@@ -141,13 +142,9 @@ function ErrorFallback({
             : "An unexpected error occurred. Your work is saved locally — reload to continue."}
         </p>
         <div className="mt-2">
-          <button
-            type="button"
-            onClick={onReload}
-            className="inline-flex items-center gap-1.5 rounded-full bg-card px-3 py-1.5 text-sm transition-all"
-          >
+          <Button type="button" size="sm" variant="outline" onClick={onReload}>
             Reload
-          </button>
+          </Button>
         </div>
       </div>
     </div>

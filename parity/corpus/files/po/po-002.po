@@ -1,0 +1,25 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: corpus 8002\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Free shipping on orders over $50 — terms apply."
+msgstr ""
+
+msgid "Third-party integrations require an Enterprise plan subscription."
+msgstr ""
+
+#. developer note 2
+#: src/app.ts:12
+msgid "This warranty does not cover damage caused by misuse or unauthorized repair."
+msgstr ""
+
+msgid "Warning: contents may be hot. Handle with care."
+msgstr "Warning: contents may be hot. Handle with care."
+
+msgid "Error 404: the requested resource could not be found on this server."
+msgstr ""
+
+msgid "Mesures de sécurité : portez des gants et des lunettes de protection."
+msgstr ""

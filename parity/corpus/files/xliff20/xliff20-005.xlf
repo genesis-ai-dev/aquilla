@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" version="2.0" srcLang="de-DE" trgLang="it-IT">
+  <file id="f1">
+    <unit id="u1">
+      <segment id="s0-0" state="translated">
+        <source>Les données personnelles sont traitées conformément au RGPD.</source>
+        <target>Les données personnelles sont traitées conformément au RGPD.</target>
+      </segment>
+    </unit>
+    <unit id="u2">
+      <segment id="s1-0" state="translated">
+        <source>Die maximale Zuladung beträgt 750 kg einschließlich Fahrer.</source>
+        <target>Die maximale Zuladung beträgt 750 kg einschließlich Fahrer.</target>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s1-1" state="final">
+        <source>The API returns HTTP 429 when the rate limit of 100 req/min is exceeded.</source>
+        <target>The API returns HTTP 429 when the rate limit of 100 req/min is exceeded.</target>
+      </segment>
+    </unit>
+    <unit id="u3">
+      <segment id="s2-0" state="initial">
+        <source>The quarterly report shows a 12.5% increase in recurring revenue.</source>
+      </segment>
+    </unit>
+    <unit id="u4">
+      <segment id="s3-0" state="initial">
+        <source><pc id="pc3-0">Free shipping on orders over $50 — terms apply.</pc></source>
+      </segment>
+    </unit>
+    <unit id="u5">
+      <segment id="s4-0" state="initial">
+        <source>Añada 250 ml de agua y mezcle hasta obtener una masa homogénea.</source>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s4-1" state="final">
+        <source><pc id="pc4-1">製品の仕様は予告なく変更されることがあります。</pc></source>
+        <target><pc id="pc4-1">製品の仕様は予告なく変更されることがあります。</pc></target>
+      </segment>
+    </unit>
+    <unit id="u6">
+      <segment id="s5-0" state="final">
+        <source>Warning: contents may be hot. Handle with care.</source>
+        <target>Warning: contents may be hot. Handle with care.</target>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s5-1" state="translated">
+        <source>Session expired — please sign in again to continue where you left off.</source>
+        <target>Session expired — please sign in again to continue where you left off.</target>
+      </segment>
+    </unit>
+    <unit id="u7">
+      <segment id="s6-0" state="final">
+        <source>Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).</source>
+        <target>Storage temperature: −20 °C to +60 °C (−4 °F to +140 °F).</target>
+      </segment>
+    </unit>
+    <unit id="u8">
+      <segment id="s7-0" state="initial">
+        <source>Warning: contents may be hot. Handle with care.</source>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s7-1" state="initial">
+        <source><pc id="pc7-1">Enter your 6-digit verification code to continue.</pc></source>
+      </segment>
+    </unit>
+    <unit id="u9">
+      <segment id="s8-0" state="final">
+        <source>Enter your 6-digit verification code to continue.</source>
+        <target>Enter your 6-digit verification code to continue.</target>
+      </segment>
+    </unit>
+    <unit id="u10">
+      <segment id="s9-0" state="initial">
+        <source><pc id="pc9-0">Rinse thoroughly with lukewarm water for at least 15 minutes.</pc></source>
+      </segment>
+      <ignorable><source> </source></ignorable>
+      <segment id="s9-1" state="translated">
+        <source>Refunds are processed within 5–10 business days of approval.</source>
+        <target>Refunds are processed within 5–10 business days of approval.</target>
+      </segment>
+    </unit>
+  </file>
+</xliff>

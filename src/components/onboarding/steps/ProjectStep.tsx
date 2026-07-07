@@ -1,8 +1,13 @@
 import { useState } from "react"
 import { v4 as uuid } from "uuid"
 import { Button } from "@/components/ui/button"
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { createProject as createLocalProject } from "@/lib/store/project-index"
 import { createRemoteProject } from "@/lib/frontier/members"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -110,38 +115,40 @@ export function ProjectStep({
         </p>
       </div>
       <form onSubmit={handleCreate} className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="proj-name">Project name</Label>
-          <Input
-            id="proj-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="My Translation Project"
-            autoFocus
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="src-lang">Source language</Label>
-          <Input
-            id="src-lang"
-            value={sourceLanguage}
-            onChange={(e) => setSourceLanguage(e.target.value)}
-            placeholder="English"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="tgt-lang">Target language</Label>
-          <Input
-            id="tgt-lang"
-            value={targetLanguage}
-            onChange={(e) => setTargetLanguage(e.target.value)}
-            placeholder="French"
-          />
-        </div>
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="proj-name">Project name</FieldLabel>
+            <Input
+              id="proj-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="My Translation Project"
+              autoFocus
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="src-lang">Source language</FieldLabel>
+            <Input
+              id="src-lang"
+              value={sourceLanguage}
+              onChange={(e) => setSourceLanguage(e.target.value)}
+              placeholder="English"
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="tgt-lang">Target language</FieldLabel>
+            <Input
+              id="tgt-lang"
+              value={targetLanguage}
+              onChange={(e) => setTargetLanguage(e.target.value)}
+              placeholder="French"
+            />
+          </Field>
+        </FieldGroup>
         {error ? (
-          <p className="text-sm text-destructive" role="alert">
+          <FieldError role="alert">
             {error}
-          </p>
+          </FieldError>
         ) : null}
         <Button
           type="submit"

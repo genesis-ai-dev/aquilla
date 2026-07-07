@@ -1,13 +1,38 @@
+"use client"
+
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
-import { cloneElement, useCallback, useEffect, useRef, useState } from "react"
+import { cloneElement, createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
 import type { CSSProperties, ReactElement, ReactNode } from "react"
 
 import { cn } from "@/lib/utils"
 
 type TooltipSide = "top" | "bottom" | "left" | "right"
 
-const DEFAULT_TOOLTIP_DELAY = 300
+const DEFAULT_TOOLTIP_DELAY = 600
 const DELEGATED_TOOLTIP_OFFSET = 8
+
+// Delegation is a performance escape hatch, not the default. It trades the
+// full Base UI tooltip (a portal + positioner + effects per instance) for a
+// single document-level listener layer that renders one node on demand — worth
+// it only in trees that mount many tooltips at once (e.g. the editor grid,
+// which is one tooltip-bearing control per cell across hundreds of cells).
+// Everywhere else, AppTooltip renders the normal Base UI tooltip so behaviour
+// and styling stay uniform. Opt a subtree in by wrapping it in
+// <TooltipDelegationBoundary>.
+const TooltipDelegationContext = createContext(false)
+
+// Turns on delegation for its subtree AND mounts the single shared renderer,
+// so the document-level listeners exist only while a hot region is on screen.
+// Use around one region at a time (the editor grid) — nesting/parallel
+// boundaries would each mount their own layer.
+function TooltipDelegationBoundary({ children }: { children: ReactNode }) {
+  return (
+    <TooltipDelegationContext.Provider value={true}>
+      {children}
+      <DelegatedTooltipLayer />
+    </TooltipDelegationContext.Provider>
+  )
+}
 
 function TooltipProvider({
   delay = 0,
@@ -55,13 +80,12 @@ function TooltipContent({
         <TooltipPrimitive.Popup
           data-slot="tooltip-content"
           className={cn(
-            "z-50 inline-flex w-fit max-w-xs origin-(--transform-origin) items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-xs text-background has-data-[slot=kbd]:pr-1.5 data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 **:data-[slot=kbd]:relative **:data-[slot=kbd]:isolate **:data-[slot=kbd]:z-50 **:data-[slot=kbd]:rounded-sm data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+            "z-50 inline-flex w-fit max-w-xs origin-(--transform-origin) items-center gap-1.5 rounded-md border border-border bg-popover px-3 py-1.5 text-xs text-popover-foreground shadow-md has-data-[slot=kbd]:pr-1.5 **:data-[slot=kbd]:relative **:data-[slot=kbd]:isolate **:data-[slot=kbd]:z-50 **:data-[slot=kbd]:rounded-sm data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-[0.97] data-open:animate-in data-open:fade-in-0 data-open:zoom-in-[0.97] data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-[0.97]",
             className
           )}
           {...props}
         >
           {children}
-          <TooltipPrimitive.Arrow className="z-50 size-2.5 translate-y-[calc(-50%-2px)] rotate-45 rounded-[2px] bg-foreground fill-foreground data-[side=bottom]:top-1 data-[side=inline-end]:top-1/2! data-[side=inline-end]:-left-1 data-[side=inline-end]:-translate-y-1/2 data-[side=inline-start]:top-1/2! data-[side=inline-start]:-right-1 data-[side=inline-start]:-translate-y-1/2 data-[side=left]:top-1/2! data-[side=left]:-right-1 data-[side=left]:-translate-y-1/2 data-[side=right]:top-1/2! data-[side=right]:-left-1 data-[side=right]:-translate-y-1/2 data-[side=top]:-bottom-2.5" />
         </TooltipPrimitive.Popup>
       </TooltipPrimitive.Positioner>
     </TooltipPrimitive.Portal>
@@ -222,7 +246,7 @@ function DelegatedTooltipLayer() {
       data-side={tooltip.side}
       role="tooltip"
       className={cn(
-        "pointer-events-none fixed z-[60] rounded-xl bg-popover px-3 py-1.5 text-xs text-popover-foreground shadow-soft outline-none",
+        "pointer-events-none fixed z-60 max-w-xs rounded-md border border-border bg-popover px-3 py-1.5 text-xs text-popover-foreground shadow-md outline-none",
         tooltip.className,
       )}
       style={tooltip.style}
@@ -250,9 +274,10 @@ function AppTooltip({
   disabled?: boolean
   className?: string
 }) {
+  const delegate = useContext(TooltipDelegationContext)
   if (disabled || !content) return children
   const delegatedTooltipAttr = typeof content === "string" ? content : undefined
-  if (delegatedTooltipAttr && typeof children.type === "string") {
+  if (delegate && delegatedTooltipAttr && typeof children.type === "string") {
     return cloneElement(children, {
       "data-slot": "tooltip-trigger",
       "data-tooltip": delegatedTooltipAttr,
@@ -277,4 +302,4 @@ function AppTooltip({
   )
 }
 
-export { AppTooltip, DelegatedTooltipLayer, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger }
+export { AppTooltip, DelegatedTooltipLayer, TooltipDelegationBoundary, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger }

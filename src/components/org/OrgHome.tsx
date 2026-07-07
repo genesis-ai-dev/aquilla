@@ -26,9 +26,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
-import { FolderPlus, X } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { FolderPlus, Search, X, Building2 } from "lucide-react"
 
 const STALE_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000
 
@@ -255,6 +262,49 @@ function ProjectTable({
   )
 }
 
+/**
+ * FRO-335 / FRO-475: projects reachable only via a project-level grant (an
+ * invite accept or bulk-add) into an org the caller isn't a member of.
+ * Shared across both the active-org and all-orgs views so a zero-org guest
+ * never lands on an empty dashboard. `orgLabel` annotates each row with the
+ * host org — FRO-473: the accessible-projects endpoint now joins `orgName`,
+ * so the label falls back to "Org #N" only on older servers/absent data.
+ */
+function SharedWithYouSection({
+  projects,
+  orgLabel,
+}: {
+  projects: CloudProjectSummary[]
+  orgLabel?: (project: CloudProjectSummary) => string | null
+}) {
+  if (projects.length === 0) return null
+  return (
+    <section data-testid="shared-with-you" className="space-y-2">
+      <h2 className="text-sm font-medium text-muted-foreground">Shared with you</h2>
+      <div className="rounded-2xl border divide-y">
+        {projects.map((p) => {
+          const label = orgLabel?.(p) ?? null
+          return (
+            <Link
+              key={p.id}
+              to={`/projects/${p.id}`}
+              className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
+            >
+              <p className="flex-1 min-w-0 truncate font-medium">{p.name}</p>
+              {label && (
+                <span className="shrink-0 truncate rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  {label}
+                </span>
+              )}
+              <span className="shrink-0 text-xs text-muted-foreground">{p.role.name}</span>
+            </Link>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 export function OrgHome() {
   const { activeOrg, activeOrgId, isAllOrgs, orgs, isLoading: orgLoading, setActiveOrg } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
@@ -396,7 +446,7 @@ export function OrgHome() {
             </p>
             <Link
               to={`/login?next=${encodeURIComponent("/")}`}
-              className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              className={cn(buttonVariants())}
             >
               Sign in
             </Link>
@@ -423,7 +473,17 @@ export function OrgHome() {
   const overdueCount = projects.filter((p) => deadlineStatus(p, now) === "overdue").length
   const avgAudioPct =
     projects.length > 0 ? projects.reduce((sum, p) => sum + audioPct(p), 0) / projects.length : 0
-  const sharedProjects = partitionSharedProjects(accessibleProjects, orgs, activeOrgId).sharedWithMe
+  // FRO-475: in all-orgs mode there's no single activeOrgId to compare
+  // against — classify by org membership alone so a project reached purely
+  // via a project-level grant (zero orgs, or a grant in an org the caller
+  // doesn't belong to) still surfaces instead of vanishing into an empty
+  // dashboard.
+  const sharedProjects = partitionSharedProjects(
+    accessibleProjects,
+    orgs,
+    activeOrgId,
+    isAllOrgs ? "all-orgs" : "active-org",
+  ).sharedWithMe
 
   const orgSummaries: OrgPortfolioSummary[] = orgs
     .map((org) => {
@@ -464,8 +524,6 @@ export function OrgHome() {
     navigate(`/projects/${project.id}`)
   }
 
-  const projectSearchClassName =
-    "h-9 w-full rounded-md border border-border bg-background px-3 pr-9 text-sm focus-visible:border-muted-foreground/40 focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-sm"
   const projectControlGroupClassName =
     "flex min-w-fit shrink-0 items-center gap-2 whitespace-nowrap"
 
@@ -539,7 +597,7 @@ export function OrgHome() {
                         </div>
                         <Link
                           to={`/join/${inv.token}`}
-                          className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                          className={cn(buttonVariants({ size: "sm" }), "shrink-0")}
                         >
                           Review &amp; accept
                         </Link>
@@ -585,25 +643,33 @@ export function OrgHome() {
                           </p>
                         </div>
                         {orgSummaries.length > 0 && (
-                          <input
-                            type="search"
-                            value={orgQuery}
-                            onChange={(e) => setOrgQuery(e.target.value)}
-                            placeholder="Filter organizations…"
-                            aria-label="Filter organizations by name"
-                            className="h-9 w-full rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:w-56"
-                          />
+                          <InputGroup className="h-9 w-full sm:w-56">
+                            <InputGroupAddon>
+                              <Search />
+                            </InputGroupAddon>
+                            <InputGroupInput
+                              type="search"
+                              value={orgQuery}
+                              onChange={(e) => setOrgQuery(e.target.value)}
+                              placeholder="Filter organizations…"
+                              aria-label="Filter organizations by name"
+                            />
+                          </InputGroup>
                         )}
                       </div>
 
                       {orgSummaries.length === 0 ? (
-                        <div className="px-4 py-10 text-center">
-                          <p className="text-sm text-muted-foreground">No organizations yet.</p>
-                        </div>
+                        <EmptyState
+                          className="border-0 bg-transparent py-10"
+                          icon={Building2}
+                          title="No organizations yet."
+                        />
                       ) : visibleOrgSummaries.length === 0 ? (
-                        <div className="px-4 py-10 text-center">
-                          <p className="text-sm text-muted-foreground">No matching organizations.</p>
-                        </div>
+                        <EmptyState
+                          className="border-0 bg-transparent py-10"
+                          icon={Search}
+                          title="No matching organizations."
+                        />
                       ) : (
                         <div className="divide-y">
                           {visibleOrgSummaries.map((summary) => (
@@ -641,8 +707,11 @@ export function OrgHome() {
                           </div>
                         </div>
                         <div className="flex w-full flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden">
-                          <div className="relative min-w-[12rem] flex-[1_1_13rem] max-w-52">
-                            <input
+                          <InputGroup className="h-9 min-w-[12rem] flex-[1_1_13rem] max-w-52">
+                            <InputGroupAddon>
+                              <Search />
+                            </InputGroupAddon>
+                            <InputGroupInput
                               type="text"
                               value={projectQuery}
                               onChange={(e) => setProjectQuery(e.target.value)}
@@ -654,38 +723,36 @@ export function OrgHome() {
                               autoCorrect="off"
                               autoCapitalize="none"
                               spellCheck={false}
-                              className={projectSearchClassName}
                             />
                             {projectQuery && (
-                              <button
-                                type="button"
-                                aria-label="Clear project filter"
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => setProjectQuery("")}
-                                className="absolute right-2 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
-                              >
-                                <X className="size-3.5" aria-hidden />
-                              </button>
+                              <InputGroupAddon align="inline-end">
+                                <InputGroupButton
+                                  type="button"
+                                  size="icon-xs"
+                                  aria-label="Clear project filter"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => setProjectQuery("")}
+                                >
+                                  <X />
+                                </InputGroupButton>
+                              </InputGroupAddon>
                             )}
-                          </div>
+                          </InputGroup>
                           <div className={projectControlGroupClassName}>
                             <div className="flex items-center gap-2" aria-label="Project status filter">
                               <span className="text-xs font-medium text-muted-foreground">Status</span>
                               <div className="flex items-center gap-1">
                                 {STATUS_FILTERS.map((f) => (
-                                  <button
+                                  <Button
                                     key={f.value}
                                     type="button"
+                                    size="xs"
+                                    variant={statusFilter === f.value ? "default" : "secondary"}
                                     onClick={() => setStatusFilter(f.value)}
                                     aria-pressed={statusFilter === f.value}
-                                    className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
-                                      statusFilter === f.value
-                                        ? "bg-primary text-primary-foreground"
-                                        : "bg-muted text-muted-foreground hover:bg-muted/70"
-                                    }`}
                                   >
                                     {f.label}
-                                  </button>
+                                  </Button>
                                 ))}
                               </div>
                             </div>
@@ -715,20 +782,32 @@ export function OrgHome() {
                       </div>
 
                       {projects.length === 0 ? (
-                        <div className="px-4 py-10 text-center">
-                          <p className="text-sm text-muted-foreground">No projects yet.</p>
-                        </div>
+                        <EmptyState
+                          className="border-0 bg-transparent py-10"
+                          icon={FolderPlus}
+                          title="No projects yet."
+                        />
                       ) : visible.length === 0 ? (
-                        <div className="px-4 py-10 text-center">
-                          <p className="text-sm text-muted-foreground">
-                            {projectQuery ? "No matching projects." : currentProjectLens.empty}
-                          </p>
-                        </div>
+                        <EmptyState
+                          className="border-0 bg-transparent py-10"
+                          icon={Search}
+                          title={projectQuery ? "No matching projects." : currentProjectLens.empty}
+                        />
                       ) : (
                         <ProjectTable projects={visible} now={now} showOrg />
                       )}
                     </section>
                   </div>
+
+                  {/* FRO-475: projects reachable only via a project-level grant
+                      (no org membership at all, or a grant in an org the caller
+                      isn't a member of) are invisible to getPortfolios() — which
+                      only knows about the caller's org memberships. Without this,
+                      a zero-org guest sees a fully empty all-orgs dashboard. */}
+                  <SharedWithYouSection
+                    projects={sharedProjects}
+                    orgLabel={(p) => p.orgName ?? (p.orgId != null ? `Org #${p.orgId}` : null)}
+                  />
                 </>
               ) : (
                 <>
@@ -752,8 +831,11 @@ export function OrgHome() {
                   {/* Filter bar */}
                   {projects.length > 0 && (
                     <div className="flex w-full flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden">
-                      <div className="relative min-w-[12rem] flex-[1_1_13rem] max-w-52">
-                        <input
+                      <InputGroup className="h-9 min-w-[12rem] flex-[1_1_13rem] max-w-52">
+                        <InputGroupAddon>
+                          <Search />
+                        </InputGroupAddon>
+                        <InputGroupInput
                           type="text"
                           value={projectQuery}
                           onChange={(e) => setProjectQuery(e.target.value)}
@@ -765,38 +847,36 @@ export function OrgHome() {
                           autoCorrect="off"
                           autoCapitalize="none"
                           spellCheck={false}
-                          className={projectSearchClassName}
                         />
                         {projectQuery && (
-                          <button
-                            type="button"
-                            aria-label="Clear project filter"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => setProjectQuery("")}
-                            className="absolute right-2 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
-                          >
-                            <X className="size-3.5" aria-hidden />
-                          </button>
+                          <InputGroupAddon align="inline-end">
+                            <InputGroupButton
+                              type="button"
+                              size="icon-xs"
+                              aria-label="Clear project filter"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => setProjectQuery("")}
+                            >
+                              <X />
+                            </InputGroupButton>
+                          </InputGroupAddon>
                         )}
-                      </div>
+                      </InputGroup>
                       <div className={projectControlGroupClassName}>
                         <div className="flex items-center gap-2" aria-label="Project status filter">
                           <span className="text-xs font-medium text-muted-foreground">Status</span>
                           <div className="flex items-center gap-1">
                             {STATUS_FILTERS.map((f) => (
-                              <button
+                              <Button
                                 key={f.value}
                                 type="button"
+                                size="xs"
+                                variant={statusFilter === f.value ? "default" : "secondary"}
                                 onClick={() => setStatusFilter(f.value)}
                                 aria-pressed={statusFilter === f.value}
-                                className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
-                                  statusFilter === f.value
-                                    ? "bg-primary text-primary-foreground"
-                                    : "bg-muted text-muted-foreground hover:bg-muted/70"
-                                }`}
                               >
                                 {f.label}
-                              </button>
+                              </Button>
                             ))}
                           </div>
                         </div>
@@ -843,7 +923,11 @@ export function OrgHome() {
                       }
                     />
                   ) : visible.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No matching projects.</p>
+                    <EmptyState
+                      className="border-0 bg-transparent py-6"
+                      icon={Search}
+                      title="No matching projects."
+                    />
                   ) : (
                     <div className="overflow-hidden rounded-2xl border bg-card">
                       <ProjectTable projects={visible} now={now} showOrg={false} />
@@ -853,23 +937,7 @@ export function OrgHome() {
                   {/* FRO-335: cross-org projects (invite-link / bulk-add grants).
                       Listed separately — they're not part of this org's portfolio,
                       but hiding them made them unreachable from every nav surface. */}
-                  {sharedProjects.length > 0 && (
-                    <section data-testid="shared-with-you" className="space-y-2">
-                      <h2 className="text-sm font-medium text-muted-foreground">Shared with you</h2>
-                      <div className="rounded-2xl border divide-y">
-                        {sharedProjects.map((p) => (
-                          <Link
-                            key={p.id}
-                            to={`/projects/${p.id}`}
-                            className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
-                          >
-                            <p className="flex-1 min-w-0 truncate font-medium">{p.name}</p>
-                            <span className="shrink-0 text-xs text-muted-foreground">{p.role.name}</span>
-                          </Link>
-                        ))}
-                      </div>
-                    </section>
-                  )}
+                  <SharedWithYouSection projects={sharedProjects} />
                 </>
               )}
 

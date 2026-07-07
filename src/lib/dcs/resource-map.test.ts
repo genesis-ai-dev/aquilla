@@ -46,9 +46,21 @@ describe("routeFor (spec §4 dispatch)", () => {
     expect(route?.id).toBe("usfm")
   })
 
-  it("returns null for a resource no v1 route matches (e.g. TSV notes — Slice E)", () => {
+  it("routes TSV Translation Notes to the tsv-notes route (Slice E)", () => {
     const entry = { ...ULT_ENTRY, contentFormat: "tsv", subject: "TSV Translation Notes" }
-    const manifest = { ...ULT_MANIFEST, rcType: "help", format: "text/tsv" }
+    const manifest = { ...ULT_MANIFEST, rcType: "help", format: "text/tsv", identifier: "tn" }
+    expect(routeFor(entry, manifest)?.id).toBe("tsv-notes")
+  })
+
+  it("routes Open Bible Stories to the obs route (Slice E)", () => {
+    const entry = { ...ULT_ENTRY, contentFormat: "markdown", subject: "Open Bible Stories" }
+    const manifest = { ...ULT_MANIFEST, rcType: "book", format: "text/markdown", identifier: "obs" }
+    expect(routeFor(entry, manifest)?.id).toBe("obs")
+  })
+
+  it("returns null for a resource no route matches (e.g. Translation Words markdown — Slice E tail)", () => {
+    const entry = { ...ULT_ENTRY, contentFormat: "markdown", subject: "Translation Words" }
+    const manifest = { ...ULT_MANIFEST, rcType: "dict", format: "text/markdown", identifier: "tw" }
     expect(routeFor(entry, manifest)).toBeNull()
   })
 

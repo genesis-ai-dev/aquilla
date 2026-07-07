@@ -138,21 +138,24 @@ describe("importDcsResource — genesis transform (spec §3, §5)", () => {
   })
 
   it("throws a clear error when no route matches the resource", async () => {
+    // Slice E routed TSV notes/questions + OBS, so the "no route" case is now a
+    // still-unrouted markdown resource — Translation Words (the deferred tw/ta
+    // tail, spec §12). Keep this pointed at a genuinely unrouted resource.
     const noRouteManifest = `dublin_core:
-  type: 'help'
-  format: 'text/tsv'
-  identifier: 'tn'
-  subject: 'TSV Translation Notes'
+  type: 'dict'
+  format: 'text/markdown'
+  identifier: 'tw'
+  subject: 'Translation Words'
   language: { identifier: 'en', title: 'English', direction: 'ltr' }
 `
     const client = fakeClient({
       fetchRaw: vi.fn(async () => noRouteManifest),
-      getTree: vi.fn(async () => ["en_tn_TIT.tsv"]),
+      getTree: vi.fn(async () => ["bible/kt/god.md"]),
     })
     const emit = vi.fn(async (_args: BulkUploadArgs) => {})
     await expect(
-       
-      importDcsResource({ entry: { ...ENTRY, contentFormat: "tsv" }, projectId: "p", client: client as any, emit, getToken: async () => "t" }),
+
+      importDcsResource({ entry: { ...ENTRY, contentFormat: "markdown", subject: "Translation Words" }, projectId: "p", client: client as any, emit, getToken: async () => "t" }),
     ).rejects.toThrow(/no.*route/i)
   })
 })

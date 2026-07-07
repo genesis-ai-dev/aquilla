@@ -31,6 +31,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { FRONTIER_API_URL } from "@/lib/sync/sync-token"
+import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
 
 export interface SourceLinkSectionProps {
   projectId: string
@@ -102,6 +103,10 @@ export function SourceLinkSection({
 
   return (
     <>
+      {/* DCS (Door43) freshness/delta — only renders when this project carries a
+          `dcsUpstream` cursor (i.e. it is a Door43 adapter project). Self-gated
+          inside the panel: readCursor() ⇒ null renders nothing. */}
+      <DcsUpstreamPanel projectId={projectId} roleLevel={roleLevel} />
       <Card id="section-source-link">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">

@@ -8,7 +8,7 @@
 //   - Invite-link tab shows the form and renders the invite URL after creation
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectMembersPage } from "./ProjectMembersPage"
 
@@ -253,5 +253,42 @@ describe("ProjectMembersPage", () => {
     await waitFor(() => {
       expect(mockAdd).toHaveBeenCalledWith("dave", 400)
     })
+  })
+})
+
+describe("Remove needs confirmation + no numeric role leaks (FRO-368)", () => {
+  it("Remove opens a confirm dialog instead of removing instantly", async () => {
+    renderPage()
+    // alice + carol have override grants → Remove buttons render
+    const removeButtons = screen.getAllByRole("button", { name: /^remove$/i })
+    fireEvent.click(removeButtons[0])
+    expect(mockRemove).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(screen.getByText("Remove member")).toBeInTheDocument()
+    })
+    // Dialog copy names the role label, never the numeric level
+    expect(screen.getByText(/direct Maintainer access/)).toBeInTheDocument()
+    expect(screen.queryByText(/level \d+/i)).not.toBeInTheDocument()
+  })
+
+  it("confirming the dialog calls remove for the right member", async () => {
+    renderPage()
+    fireEvent.click(screen.getAllByRole("button", { name: /^remove$/i })[0])
+    const dialog = await screen.findByRole("dialog")
+    // House ConfirmActionDialog: tick the understanding checkbox, then confirm.
+    // Click the label text (not the control): happy-dom double-toggles a
+    // label-wrapped checkbox clicked directly. Scope to the dialog so the
+    // rows' own "Remove" buttons aren't matched.
+    fireEvent.click(within(dialog).getByText(/I understand this action/i))
+    fireEvent.click(within(dialog).getByRole("button", { name: /^remove$/i }))
+    await waitFor(() => expect(mockRemove).toHaveBeenCalledWith(1))
+  })
+
+  it("revoke-all grant paths show role labels, not numeric levels", async () => {
+    renderPage()
+    fireEvent.click(screen.getAllByRole("button", { name: /^revoke all$/i })[0])
+    await waitFor(() => screen.getByText("Revoke all access"))
+    expect(screen.queryByText(/\(level \d+\)/i)).not.toBeInTheDocument()
+    expect(screen.getByText("→ Maintainer")).toBeInTheDocument()
   })
 })

@@ -93,6 +93,13 @@ export function roleName(level: number): string {
   }
 }
 
+/** Human display form of a role level: 500 → "Project lead". Use this (never
+ *  the numeric level or raw snake_case name) anywhere copy faces users. */
+export function humanRoleName(level: number): string {
+  const name = roleName(level).replace(/_/g, " ")
+  return name.charAt(0).toUpperCase() + name.slice(1)
+}
+
 /** One-line description shown in role pickers. */
 export function roleDescription(level: number): string {
   switch (level) {

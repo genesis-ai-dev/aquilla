@@ -22,6 +22,7 @@
 // of session state.
 const STATIC_PAGES: Record<string, string> = {
   "/homepage": "/homepage.html",
+  "/bible-translation": "/bible-translation.html",
   "/beta": "/beta.html",
   "/case-studies/come-and-see": "/case-study.html",
   "/case-studies/biblica": "/case-study-biblica.html",

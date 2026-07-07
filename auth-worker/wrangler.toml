@@ -65,6 +65,14 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 binding = "HYPERDRIVE"
 id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 
+# CI's `wrangler deploy` (no --env) targets this top-level block for the
+# actually-live aquilla-identity worker (see ROUTE/ENV note above), so the
+# EMAIL binding must be duplicated here too, not just under [env.production] —
+# its absence here was silently making prod behave like the no-EMAIL dev
+# fallback (email sends were no-ops, and admin elevation leaked devCode).
+[[send_email]]
+name = "EMAIL"
+
 # Secrets (provisioned via `wrangler secret put`, never committed):
 #   SECRET_KEY      — frontier JWT signing key. MUST match prod
 #                     frontier-server so access tokens are interchangeable.

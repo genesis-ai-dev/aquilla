@@ -150,3 +150,15 @@ is the self-heal path the spec §6 already mandates — make sure `delta.ts`/the
   compareRefs must retry/throw not silently report no-changes), (b) adversarial review of the full
   ff466abfe..HEAD diff, (c) browser-proof (dev-stack UI walkthrough, best-effort). NOT promoting;
   leaving on swarm/dcs-integration for user's morning review.
+- 2026-07-06 · fix-compare merged (`e2033ed19` → integration). compareRefs now retries throttled
+  bodies (numeric total_commits = legit vs absent = throttled) and THROWS after N retries instead
+  of silently reporting no-changes. Central gate: vitest 76/76 (src/lib/dcs), tsc 0. Remaining Wave
+  3: adversarial review + browser proof.
+
+## STATUS (2026-07-06, mid-Wave-3)
+DONE: Slice A (foundation), Slice B (import UI), Slice C (delta panel + emitters), Slice E (OBS +
+TSV routes), orchestrator mount-fix, fix-compare (throttle correctness). Full suite regression-free
+(3627 pass; ProjectOverview failures pre-exist on base). Live adapter proof captured (DCS-PROOF.md).
+NOT DONE / DEFERRED: Slice D (aligned-target) — scoped out for this run; tw/ta markdown routes —
+deferred (spec §12); USFM `\zaln` alignment stripping — follow-up; full browser UI proof — in
+flight. NOT promoted (branch only, awaiting user).

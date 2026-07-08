@@ -20,6 +20,14 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
  * not — the row just lingered forever). Removing only soft-closes the
  * assignment row; it never touches assignment_cells or the underlying cells,
  * so validated work stays intact.
+ *
+ * SWARM-TODO(AQU-494): live-verify in the browser — org home → Overview →
+ * Team workload. Assign work, drive it to 100% (cellsDone == cellsTotal; it
+ * still shows as an open row, that's expected), click the row's Remove (X) —
+ * the row should disappear immediately and stay gone on reload. Each row
+ * should show <username> next to a project-name badge before the scope
+ * label so a manager with assignments across multiple projects can tell
+ * them apart.
  */
 export function WorkloadRollup({ jwt, orgId }: { jwt: string; orgId: number }) {
   const [rows, setRows] = useState<OrgWorkloadAssignment[] | null>(null)

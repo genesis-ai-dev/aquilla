@@ -15,6 +15,7 @@ import { createPortal } from "react-dom"
 import { X, ChevronRight, ChevronLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { markProductTourDone, shouldAutoStartTour } from "@/hooks/useProductTour"
+import { ROLE, type RoleLevel } from "@/lib/frontier/roles"
 
 // ---------------------------------------------------------------------------
 // Step definitions
@@ -27,6 +28,13 @@ export interface TourStep {
   body: string
   /** Preferred placement relative to the anchor element. */
   placement?: "top" | "bottom" | "left" | "right"
+  /**
+   * AQU-512: minimum org role required to see this step. Undefined = shown
+   * to everyone (translator-relevant steps stay ungated). Compared against
+   * the caller's org role (`activeOrg.role.level` — this is an org-level
+   * tour, so the org role is the right axis, not the per-project role).
+   */
+  minRole?: RoleLevel
 }
 
 export const TOUR_STEPS: TourStep[] = [
@@ -59,6 +67,9 @@ export const TOUR_STEPS: TourStep[] = [
     title: "Settings & members",
     body: "Manage your organization settings, invite members, and configure access here.",
     placement: "right",
+    // AQU-512: PM-only step — a translator (contributor) has nothing to do
+    // on this screen (no manage-members/settings permission at that level).
+    minRole: ROLE.PROJECT_LEAD,
   },
   {
     anchor: "account-switcher",
@@ -67,6 +78,28 @@ export const TOUR_STEPS: TourStep[] = [
     placement: "top",
   },
 ]
+
+// ---------------------------------------------------------------------------
+// Role filtering (AQU-512)
+// ---------------------------------------------------------------------------
+
+/**
+ * Keeps only the steps the caller's org role is allowed to see. Steps with
+ * no `minRole` are always kept.
+ *
+ * `roleLevel == null` (role not yet resolved — e.g. org list still loading)
+ * fails **open**, mirroring the existing role-gate convention in this
+ * codebase (`RoleGatedStep`, `RulesPage`'s `userRoleLevel == null` branch):
+ * an unresolved role is treated as unrestricted rather than as the lowest
+ * role. This is a coach-mark tour, not a security boundary, so the failure
+ * mode that matters is "step permanently missing because resolveSteps ran
+ * once before the org role loaded" — not "translator sees one extra step
+ * during a race." Failing closed would risk exactly that: `resolveSteps`
+ * only re-runs on open/resize, not when `activeOrg` finishes loading.
+ */
+export function filterStepsByRole(steps: TourStep[], roleLevel: number | null): TourStep[] {
+  return steps.filter((s) => s.minRole == null || roleLevel == null || roleLevel >= s.minRole)
+}
 
 // ---------------------------------------------------------------------------
 // Geometry helpers
@@ -360,9 +393,17 @@ interface ProductTourProps {
   /** Controlled open state. Caller manages this. */
   open: boolean
   onClose: () => void
+  /**
+   * AQU-512: caller's org role level (e.g. `activeOrg.role.level` from
+   * OrgContext — plain `number` there, same as RoleGatedStep/RulesPage's
+   * `roleLevel` props), used to filter out PM-only steps for lower-
+   * permission viewers. `null`/omitted = role unresolved, filterStepsByRole
+   * fails open.
+   */
+  roleLevel?: number | null
 }
 
-export function ProductTour({ open, onClose }: ProductTourProps) {
+export function ProductTour({ open, onClose, roleLevel = null }: ProductTourProps) {
   const [stepIndex, setStepIndex] = useState(0)
   const [vw, setVw] = useState(() => window.innerWidth)
   const [vh, setVh] = useState(() => window.innerHeight)
@@ -371,14 +412,17 @@ export function ProductTour({ open, onClose }: ProductTourProps) {
   // Resolved visible steps (steps whose anchors exist in the DOM, or splash steps).
   const [visibleSteps, setVisibleSteps] = useState<TourStep[]>([])
 
-  // Resolve visible steps whenever open changes or the window resizes.
+  // Resolve visible steps whenever open changes, the window resizes, or the
+  // caller's role changes. Role gate first, then the existing DOM-anchor
+  // check (a step can be dropped either because the caller lacks the role
+  // or because the anchor isn't rendered on this route).
   const resolveSteps = useCallback(() => {
-    const resolved = TOUR_STEPS.filter((s) => {
+    const resolved = filterStepsByRole(TOUR_STEPS, roleLevel).filter((s) => {
       if (s.anchor === null) return true // splash step always included
       return document.querySelector(`[data-tour="${s.anchor}"]`) !== null
     })
     setVisibleSteps(resolved)
-  }, [])
+  }, [roleLevel])
 
   // Resize observer keeps spotlight in sync with layout changes.
   useEffect(() => {

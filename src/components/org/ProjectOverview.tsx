@@ -21,6 +21,7 @@ import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, reco
 import { fetchProjectFiles, fetchAllFileCells, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
 import { buildCanonicalRollup, type BookRollup, type ChapterRollup } from "@/lib/progress/canonical-rollup"
+import { sortFiles, filterFilesByName, FILE_SORT_MODES, type FileSortMode } from "@/lib/progress/file-sort"
 import { getProjectAssignments, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
 import { ROLE } from "@/lib/frontier/roles"
@@ -41,6 +42,15 @@ import {
 import { DatePicker, dateToDeadlineString, deadlineStringToDate } from "@/components/ui/date-picker"
 import { cn } from "@/lib/utils"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 /** Max per-file rows shown on the overview; the rest are counted as "+N more". */
 const FILE_ROW_CAP = 12
@@ -341,6 +351,13 @@ export function ProjectOverview() {
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
   const [showAllFiles, setShowAllFiles] = useState(false)
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
+
+  // AQU-499: sort/filter controls for the per-file breakdown list. Default
+  // sort is last-updated (most-recently-progressed first) per acceptance
+  // criteria — a PM opening the overview should see recent activity without
+  // configuring anything.
+  const [fileSortMode, setFileSortMode] = useState<FileSortMode>("last-updated")
+  const [fileNameFilter, setFileNameFilter] = useState("")
 
   // AQU-493: chapter/verse rollup, lazily fetched per file on first expand.
   // `undefined` = not yet fetched, `null` = fetched but no canonical refs
@@ -746,12 +763,17 @@ export function ProjectOverview() {
 
               {/* ── Per-file rows (always fully visible per user decision) ── */}
               {files.length > 0 && (() => {
-                const sorted = [...files].sort((a, b) => b.cellCount - a.cellCount)
+                // AQU-499: filter by name, then sort by the selected mode.
+                // Expansion state (rollups/expandedFileId) is keyed by
+                // fileId, not row index, so re-sorting/filtering never
+                // disturbs an already-expanded row's chapter/verse rollup.
+                const filtered = filterFilesByName(files, fileNameFilter)
+                const sorted = sortFiles(filtered, fileSortMode)
                 const shown = showAllFiles ? sorted : sorted.slice(0, FILE_ROW_CAP)
                 const hidden = sorted.length - shown.length
                 return (
                   <div className="rounded-xl border bg-card p-5">
-                    <div className="mb-3 flex items-center justify-between">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                       <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         Files {!showAllFiles && hidden > 0 ? `(top ${FILE_ROW_CAP} of ${sorted.length})` : `(${sorted.length})`}
                       </h2>
@@ -764,6 +786,35 @@ export function ProjectOverview() {
                         </span>
                       </span>
                     </div>
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                      <Input
+                        type="text"
+                        placeholder="Filter files by name…"
+                        aria-label="Filter files by name"
+                        value={fileNameFilter}
+                        onChange={(e) => setFileNameFilter(e.target.value)}
+                        className="max-w-56"
+                      />
+                      <Select
+                        items={FILE_SORT_MODES}
+                        value={fileSortMode}
+                        onValueChange={(v) => setFileSortMode((v as FileSortMode) ?? "last-updated")}
+                      >
+                        <SelectTrigger aria-label="Sort files by" className="w-44">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            {FILE_SORT_MODES.map((m) => (
+                              <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {sorted.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No files match “{fileNameFilter}”.</p>
+                    ) : (
                     <ul className="space-y-2" aria-label="Files">
                       {shown.map((f) => {
                         const tPct = f.cellCount > 0 ? Math.round((f.filledCount / f.cellCount) * 100) : 0
@@ -798,6 +849,7 @@ export function ProjectOverview() {
                         )
                       })}
                     </ul>
+                    )}
                     {!showAllFiles && hidden > 0 && (
                       <button
                         className="mt-3 text-xs text-muted-foreground hover:text-foreground underline"

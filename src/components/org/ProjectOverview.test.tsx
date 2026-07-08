@@ -155,6 +155,20 @@ function fileSummary(i: number): import("@/lib/sync/cells-read").FileSummary {
   return { fileId: `f${i}`, projectId: "p1", name: `File${i}.usfm`, fileType: "usfm", sourceLanguage: null, targetLanguage: null, cellCount: 10, filledCount: 5, approvedCount: 2, wordCount: 100, lastEditAt: null }
 }
 
+// Drive the shadcn (Base UI) Select the same way AssignWork.test.tsx does:
+// open the trigger, hover-highlight the option, commit with Enter fired on
+// the option itself (the click path doesn't reliably commit under happy-dom).
+async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
+  const trigger = screen.getByRole("combobox", { name: triggerName })
+  fireEvent.click(trigger)
+  const option = await screen.findByRole("option", { name: optionName })
+  const label = option.textContent ?? ""
+  fireEvent.pointerMove(option)
+  fireEvent.mouseMove(option)
+  fireEvent.keyDown(option, { key: "Enter" })
+  await waitFor(() => expect(trigger.textContent).toContain(label))
+}
+
 // ── Status chip derivation ─────────────────────────────────────────────────
 
 describe("deriveProjectStatus", () => {
@@ -804,6 +818,126 @@ describe("ProjectOverview chapter/verse rollup (AQU-493)", () => {
     fireEvent.click(within(row).getByRole("button", { name: /^expand/i })) // re-expand
     await screen.findByTestId("book-row")
 
+    expect(fetchAllFileCells).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ── AQU-499: file list sort/filter ──────────────────────────────────────────
+
+describe("ProjectOverview file list sort/filter (AQU-499)", () => {
+  // WHY: Randall's dashboard walkthrough — the file list was sorted by total
+  // cells with no visible control, which "is not very helpful" for tracking
+  // what recently changed. These tests lock in the visible sort control
+  // (last-updated default, canonical, alphabetical), the name filter, and
+  // that AQU-493's per-row expand state survives a re-sort (it's keyed by
+  // fileId, not row position).
+
+  beforeEach(() => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+  })
+
+  function fileWith(fileId: string, name: string, lastEditAt: number | null): import("@/lib/sync/cells-read").FileSummary {
+    return { fileId, projectId: "p1", name, fileType: "usfm", sourceLanguage: null, targetLanguage: null, cellCount: 10, filledCount: 5, approvedCount: 2, wordCount: 100, lastEditAt }
+  }
+
+  function rowNames(): (string | null | undefined)[] {
+    return screen.getAllByTestId("file-row").map((row) => row.querySelector(".font-medium")?.textContent)
+  }
+
+  function useFiles(files: import("@/lib/sync/cells-read").FileSummary[]) {
+    fetchProjectFiles.mockResolvedValue(files)
+    useProject.mockReturnValue({
+      project: projectRecord({
+        level: 400,
+        files: files.map((f) => ({ id: f.fileId, name: f.name, type: "usfm", createdAt: "x", cellCount: f.cellCount })),
+      }),
+      status: "ready",
+      refresh,
+    })
+  }
+
+  it("defaults to last-updated: most-recently-progressed file first, unedited files last", async () => {
+    useFiles([
+      fileWith("f1", "Old.usfm", 100),
+      fileWith("f2", "Newest.usfm", 300),
+      fileWith("f3", "NeverEdited.usfm", null),
+      fileWith("f4", "Mid.usfm", 200),
+    ])
+
+    renderOverview()
+
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(4))
+    expect(rowNames()).toEqual(["Newest.usfm", "Mid.usfm", "Old.usfm", "NeverEdited.usfm"])
+  })
+
+  it("switching to canonical order puts Genesis before Exodus regardless of last-updated", async () => {
+    useFiles([
+      fileWith("f1", "EXO.usfm", 999), // most recently edited, but canonical must still win
+      fileWith("f2", "GEN.usfm", 1),
+    ])
+
+    renderOverview()
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(2))
+    expect(rowNames()).toEqual(["EXO.usfm", "GEN.usfm"]) // last-updated default sanity check
+
+    await pickSelectOption(/sort files by/i, /^canonical order$/i)
+
+    expect(rowNames()).toEqual(["GEN.usfm", "EXO.usfm"])
+  })
+
+  it("switching to alphabetical orders rows by name", async () => {
+    useFiles([fileWith("f1", "Zeta.usfm", null), fileWith("f2", "Alpha.usfm", null)])
+
+    renderOverview()
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(2))
+
+    await pickSelectOption(/sort files by/i, /^alphabetical$/i)
+
+    expect(rowNames()).toEqual(["Alpha.usfm", "Zeta.usfm"])
+  })
+
+  it("typing in the name filter narrows the visible rows", async () => {
+    useFiles([
+      fileWith("f1", "GEN.usfm", null),
+      fileWith("f2", "EXO.usfm", null),
+      fileWith("f3", "Notes.txt", null),
+    ])
+
+    renderOverview()
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(3))
+
+    fireEvent.change(screen.getByLabelText(/filter files by name/i), { target: { value: "gen" } })
+
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(1))
+    expect(rowNames()).toEqual(["GEN.usfm"])
+  })
+
+  it("keeps AQU-493's expanded chapter/verse rollup on the same file after re-sorting moves its row", async () => {
+    useFiles([fileWith("f1", "EXO.usfm", 50), fileWith("f2", "GEN.usfm", 100)])
+    fetchAllFileCells.mockResolvedValue([
+      { cellId: "c1", side: "source", canonicalRef: "GEN 1:1", value: "src", valueHtml: null, type: null, anchorCellId: null, eventId: "e", sourceEventId: null, lastEditor: null, lastEditAt: 0, validated: false, wordCount: 0 },
+      { cellId: "c1", side: "target", canonicalRef: "GEN 1:1", value: "tgt", valueHtml: null, type: null, anchorCellId: null, eventId: "e", sourceEventId: null, lastEditor: null, lastEditAt: 0, validated: true, wordCount: 0 },
+    ] as import("@/lib/sync/cells-read-types").CellRow[])
+
+    renderOverview()
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(2))
+
+    // Default (last-updated) order: GEN.usfm (100) first, EXO.usfm (50) second.
+    expect(rowNames()).toEqual(["GEN.usfm", "EXO.usfm"])
+    const genRow = screen.getAllByTestId("file-row")[0]
+    fireEvent.click(within(genRow).getByRole("button", { name: /^expand GEN\.usfm$/i }))
+    await screen.findByTestId("book-row")
+
+    // Flip to alphabetical (EXO.usfm < GEN.usfm) so GEN actually moves to a
+    // different row position — proving expansion tracks fileId, not index.
+    await pickSelectOption(/sort files by/i, /^alphabetical$/i)
+    expect(rowNames()).toEqual(["EXO.usfm", "GEN.usfm"])
+
+    const newGenRow = screen.getAllByTestId("file-row")[1]
+    expect(within(newGenRow).getByRole("button", { name: /^collapse GEN\.usfm$/i })).toBeInTheDocument()
+    expect(within(newGenRow).getByTestId("book-row")).toBeInTheDocument()
+    // Re-sorting must never re-trigger the lazy per-file cell fetch for an
+    // already-expanded file.
     expect(fetchAllFileCells).toHaveBeenCalledTimes(1)
   })
 })

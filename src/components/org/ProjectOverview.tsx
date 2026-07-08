@@ -448,12 +448,27 @@ export function ProjectOverview() {
   }, [status, navigate])
 
   // Load per-project assignment roster for the Team card (maintainer+)
-  useEffect(() => {
+  // AQU-495: extracted into a callback so a fresh assignment (onAssigned) can
+  // revalidate the workload list live, not only on mount — the walkthrough bug
+  // was "No open assignments in this project yet." lingering until manual reload.
+  const loadWorkload = useCallback(async () => {
     if (!jwt || !id) return
-    getProjectAssignments(jwt, id)
-      .then(setWorkload)
-      .catch(() => setWorkload([]))
+    try {
+      setWorkload(await getProjectAssignments(jwt, id))
+    } catch {
+      setWorkload([])
+    }
   }, [jwt, id])
+
+  useEffect(() => {
+    void loadWorkload()
+  }, [loadWorkload])
+
+  // AQU-495: after a successful assign, refresh BOTH the portfolio row and the
+  // open-assignments workload list so the Team card updates without a reload.
+  const handleAssigned = useCallback(async () => {
+    await Promise.all([loadRow(), loadWorkload()])
+  }, [loadRow, loadWorkload])
 
   // Per-file rollups
   const firstFileId = project?.files[0]?.id ?? null
@@ -1240,7 +1255,7 @@ export function ProjectOverview() {
                         orgId={activeOrgId}
                         jwt={jwt ?? ""}
                         author={session?.username ?? ""}
-                        onAssigned={loadRow}
+                        onAssigned={handleAssigned}
                       />
                     </div>
                   )}

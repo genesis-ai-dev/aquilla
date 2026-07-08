@@ -41,6 +41,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { FolderPlus, Search, X, Building2 } from "lucide-react"
 
@@ -178,14 +179,33 @@ function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, 
 // Shared column template for the project table so the header row and the data
 // rows always line up. Name flexes; the metric + date columns are fixed-width.
 // Kept compact so the Name column survives inside the narrow all-orgs panel.
-const PROJECT_TABLE_COLS = "grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_4rem_5.5rem_6rem]"
+// Audio column is 5rem (not 4rem) to fit the "Has Audio" header (AQU-489/490
+// terminology parity) without wrapping.
+const PROJECT_TABLE_COLS = "grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_5rem_5.5rem_6rem]"
 
 /**
  * The org/portfolio project list as a compact table — one row per project with
- * aligned Translated / Validated / Audio / Updated columns — instead of a stack
- * of full-width progress-bar cards. Rows stay `<Link>`s so cmd-click still opens
- * a project in a new tab. Wrapped in `overflow-x-auto` so the fixed columns can
- * scroll rather than squash on a narrow viewport.
+ * aligned Translated / Validated / Has Audio / Updated columns — instead of a
+ * stack of full-width progress-bar cards. Rows stay `<Link>`s so cmd-click
+ * still opens a project in a new tab. Wrapped in `overflow-x-auto` so the
+ * fixed columns can scroll rather than squash on a narrow viewport.
+ *
+ * AQU-489: column headers ARE the visible label for each number (no hover
+ * required to identify what a figure means); the header tooltips below are
+ * retained as EXTRA detail only. "Has Audio" (not bare "Audio") mirrors the
+ * ProjectOverview.tsx relabel from AQU-490 — this table has no per-medium
+ * validation figure to show (server doesn't track one; see AQU-490's
+ * in-code note there), so unlike ProjectOverview there is no separate
+ * "Audio Validated" column here — just the coverage figure, honestly named.
+ *
+ * SWARM-TODO(AQU-489): verify live — open the org home / all-organizations
+ * projects table and confirm each column header ("Translated", "Validated",
+ * "Has Audio") reads as a permanent visible label with NO hover required;
+ * hovering a header may show extra detail (a one-line tooltip) but the
+ * meaning must already be legible from the header text alone. Then open a
+ * single project's overview (ProjectOverview.tsx Progress card) and confirm
+ * the same three terms — plus "Audio Validated" — are used identically
+ * (not "Audio" bare, not "Approved" instead of "Validated").
  */
 function ProjectTable({
   projects,
@@ -200,14 +220,20 @@ function ProjectTable({
 }) {
   return (
     <div className="overflow-x-auto">
-      <div className="min-w-[38rem]">
+      <div className="min-w-[39rem]">
         <div
           className={`grid ${PROJECT_TABLE_COLS} gap-x-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground`}
         >
           <span>Name</span>
-          <span className="whitespace-nowrap text-right">Translated</span>
-          <span className="whitespace-nowrap text-right">Validated</span>
-          <span className="whitespace-nowrap text-right">Audio</span>
+          <AppTooltip content="Percentage of cells with target-language content filled in.">
+            <span className="whitespace-nowrap text-right">Translated</span>
+          </AppTooltip>
+          <AppTooltip content="Percentage of cells marked validated by a reviewer.">
+            <span className="whitespace-nowrap text-right">Validated</span>
+          </AppTooltip>
+          <AppTooltip content="Percentage of cells that have at least one audio recording attached. This is coverage, not validation — audio-specific validation isn't tracked yet (see AQU-490).">
+            <span className="whitespace-nowrap text-right">Has Audio</span>
+          </AppTooltip>
           <span className="whitespace-nowrap text-right">Role</span>
           <span className="whitespace-nowrap text-right">Updated</span>
         </div>

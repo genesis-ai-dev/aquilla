@@ -192,8 +192,11 @@ describe("OrgHome", () => {
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
     // Rollup average is still surfaced…
     expect(screen.getByText("Avg audio")).toBeInTheDocument()
-    // …and the project list is a table with a dedicated Audio column…
-    expect(screen.getByText("Audio")).toBeInTheDocument()
+    // …and the project list is a table with a dedicated Has Audio column
+    // (AQU-489: visible header label, no hover required; "Has Audio" mirrors
+    // the ProjectOverview.tsx relabel from AQU-490 for cross-surface
+    // consistency)…
+    expect(screen.getByText("Has Audio")).toBeInTheDocument()
     // …so each project row shows its own audio coverage (both are 50% audio).
     // Scope to the row so the bare "50%" cell isn't confused with a rollup tile.
     const legacyRow = screen.getByText("Legacy Translation").closest("a")
@@ -202,6 +205,23 @@ describe("OrgHome", () => {
     expect(freshRow).not.toBeNull()
     expect(within(legacyRow!).getByText("50%")).toBeInTheDocument()
     expect(within(freshRow!).getByText("50%")).toBeInTheDocument()
+  })
+
+  // AQU-489: a PM must be able to name what each progress-table number means
+  // without hovering — the column header is the (always-rendered) visible
+  // label; a title/hover explanation is optional extra detail, never the
+  // only source of meaning. Assert the three metric headers render as plain
+  // text nodes (not e.g. only inside a `title` attribute that needs a hover
+  // to surface).
+  it("labels every progress-table column visibly, without requiring hover (AQU-489)", async () => {
+    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
+    for (const header of ["Translated", "Validated", "Has Audio"]) {
+      const el = screen.getByText(header)
+      expect(el).toBeInTheDocument()
+      // Visible text content, not a title-only attribute — no hover needed.
+      expect(el.textContent).toBe(header)
+    }
   })
 
   it("renders the stalled project before the fresh project (attention rank order)", async () => {

@@ -12,6 +12,16 @@ import { cn } from "@/lib/utils"
 // cue. The trigger keeps the same DOM shape (button > span) whether or not
 // it's truncated, so toggling `truncated` never remounts the measured node
 // and drops its ResizeObserver.
+//
+// SWARM-TODO(AQU-491): live-UI verify — open a project with long file/episode
+// names -> Overview -> file-breakdown table (or Team card). Confirm a
+// truncated name shows a visible dotted-underline cue and can be expanded via
+// click (not hover) into a small popover with the full name; row layout
+// (progress bar, Filled/Approved/Total/Words numbers) stays intact
+// before/during/after expansion. OrgHome.tsx's project-name truncations are
+// intentionally NOT wired to this component yet (they sit inside a whole-row
+// <Link>, where nesting an interactive trigger is invalid HTML and would
+// fight row navigation) — spot-check that they remain hover-only, unchanged.
 export function ExpandableName({ name, className }: { name: string; className?: string }) {
   const spanRef = useRef<HTMLSpanElement>(null)
   const [truncated, setTruncated] = useState(false)

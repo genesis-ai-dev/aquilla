@@ -222,7 +222,7 @@ mode = "smart"
 
 # Staging runs on Neon (Postgres) to mirror prod. index.ts builds AQUILLA_PG
 # from the Postgres shim over Hyperdrive → the Neon `staging` branch (project
-# sweet-paper-88472094, branch br-old-credit-aja5brf7).
+# sweet-paper-88472094, branch `staging`).
 #
 # ONE-TIME PROVISIONING (FRO-146) — create the staging Hyperdrive config, then
 # paste its id below (replace the placeholder):
@@ -241,7 +241,7 @@ name = "EMAIL"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
 EMAIL_FROM = "noreply@support.aquilla.app"
-BASE_URL = "https://dev.aquilla.app"
+BASE_URL = "https://staging.aquilla.app"
 SYNC_WORKER_URL = "https://api.staging.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "staging"

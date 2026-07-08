@@ -42,6 +42,13 @@ export interface AgentSessionState {
    * pending (double-apply) and lose the Undo affordance.
    */
   decided: ReadonlyMap<string, RowDecision>
+  /**
+   * Card-interaction notes queued for the model (agent-complete design §5):
+   * e.g. "the user navigated the MRK 4 passage view to MRK 5". Drained into
+   * the next send's WIRE message only — the visible bubble stays what the
+   * user typed. Coalesced by key so only the latest note per card survives.
+   */
+  activity: ReadonlyArray<{ key: string; note: string }>
 }
 
 type RunAgentFn = typeof realRunAgent
@@ -61,6 +68,7 @@ export class AgentSessionStore {
       isStreaming: false,
       queued: [],
       decided: new Map(),
+      activity: [],
     }
   }
 
@@ -100,7 +108,17 @@ export class AgentSessionStore {
   /** Drop the conversation and start a fresh server session. */
   reset = (): void => {
     this.stop()
-    this.set({ sessionId: crypto.randomUUID(), runs: [], isStreaming: false, queued: [], decided: new Map() })
+    this.set({ sessionId: crypto.randomUUID(), runs: [], isStreaming: false, queued: [], decided: new Map(), activity: [] })
+  }
+
+  /**
+   * Queue a card-interaction note for the model's next turn. Same `key`
+   * replaces (a card's latest navigation supersedes its earlier ones);
+   * distinct keys accumulate in interaction order.
+   */
+  noteActivity = (key: string, note: string): void => {
+    const kept = this.state.activity.filter((a) => a.key !== key)
+    this.set({ activity: [...kept, { key, note }] })
   }
 
   /** Record review decisions (accept/edit/reject/undo) for proposal rows. */
@@ -111,7 +129,19 @@ export class AgentSessionStore {
   }
 
   private async dispatch(options: AgentSendOptions): Promise<void> {
-    const run = createRun(options.display, options.wire)
+    // Drain queued card-interaction notes into the WIRE message only — the
+    // bubble (display) stays what the user typed. Drained here (not in send)
+    // so notes queued while a run streams ride the next dispatched turn.
+    const activity = this.state.activity
+    const wire =
+      activity.length === 0
+        ? options.wire
+        : `${options.wire}\n\n[user activity since your last reply]\n${activity
+            .map((a) => `- ${a.note}`)
+            .join("\n")}`
+    if (activity.length > 0) this.set({ activity: [] })
+
+    const run = createRun(options.display, wire)
     const controller = new AbortController()
     this.abortController = controller
     this.set({ runs: [...this.state.runs, run], isStreaming: true })
@@ -123,7 +153,7 @@ export class AgentSessionStore {
           sessionId: this.state.sessionId,
           // Session-native: the server holds prior turns (incl. tool results);
           // the wire carries ONLY the new user message.
-          messages: [{ role: "user", content: options.wire }],
+          messages: [{ role: "user", content: wire }],
         },
         jwt: options.jwt,
         signal: controller.signal,
@@ -164,6 +194,7 @@ export function useAgentSession(projectId: string): {
   stop: () => void
   reset: () => void
   decide: (entries: Iterable<[string, RowDecision]>) => void
+  noteActivity: (key: string, note: string) => void
 } {
   const store = agentSessionStore(projectId)
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState)
@@ -174,5 +205,9 @@ export function useAgentSession(projectId: string): {
     (entries: Iterable<[string, RowDecision]>) => store.decide(entries),
     [store],
   )
-  return { state, send, stop, reset, decide }
+  const noteActivity = useCallback(
+    (key: string, note: string) => store.noteActivity(key, note),
+    [store],
+  )
+  return { state, send, stop, reset, decide, noteActivity }
 }

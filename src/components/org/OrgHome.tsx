@@ -171,7 +171,7 @@ function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, 
 // Shared column template for the project table so the header row and the data
 // rows always line up. Name flexes; the metric + date columns are fixed-width.
 // Kept compact so the Name column survives inside the narrow all-orgs panel.
-const PROJECT_TABLE_COLS = "grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_4rem_6rem]"
+const PROJECT_TABLE_COLS = "grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_4rem_5.5rem_6rem]"
 
 /**
  * The org/portfolio project list as a compact table — one row per project with
@@ -184,14 +184,16 @@ function ProjectTable({
   projects,
   now,
   showOrg,
+  roleByProjectId,
 }: {
   projects: PortfolioProjectRow[]
   now: number
   showOrg: boolean
+  roleByProjectId?: Map<string, CloudProjectSummary["role"]>
 }) {
   return (
     <div className="overflow-x-auto">
-      <div className="min-w-[32rem]">
+      <div className="min-w-[38rem]">
         <div
           className={`grid ${PROJECT_TABLE_COLS} gap-x-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground`}
         >
@@ -199,6 +201,7 @@ function ProjectTable({
           <span className="whitespace-nowrap text-right">Translated</span>
           <span className="whitespace-nowrap text-right">Validated</span>
           <span className="whitespace-nowrap text-right">Audio</span>
+          <span className="whitespace-nowrap text-right">Role</span>
           <span className="whitespace-nowrap text-right">Updated</span>
         </div>
         <div className="divide-y">
@@ -206,6 +209,7 @@ function ProjectTable({
             const tpct = Math.round(translatedPct(p) * 100)
             const pct = Math.round(validatedPct(p) * 100)
             const apct = Math.round(audioPct(p) * 100)
+            const role = roleByProjectId?.get(p.id)
             const status = activityStatus(p, now)
             const dstatus = deadlineStatus(p, now)
             return (
@@ -241,6 +245,9 @@ function ProjectTable({
                 </span>
                 <span className="text-right tabular-nums text-muted-foreground" aria-label={`${apct}% audio`}>
                   {apct}%
+                </span>
+                <span className="truncate text-right text-xs text-muted-foreground">
+                  {role?.name.replace(/_/g, " ") ?? "—"}
                 </span>
                 <span
                   className={`truncate text-right text-xs ${
@@ -484,6 +491,7 @@ export function OrgHome() {
     activeOrgId,
     isAllOrgs ? "all-orgs" : "active-org",
   ).sharedWithMe
+  const roleByProjectId = new Map(accessibleProjects.map((project) => [project.id, project.role]))
 
   const orgSummaries: OrgPortfolioSummary[] = orgs
     .map((org) => {
@@ -794,7 +802,7 @@ export function OrgHome() {
                           title={projectQuery ? "No matching projects." : currentProjectLens.empty}
                         />
                       ) : (
-                        <ProjectTable projects={visible} now={now} showOrg />
+                        <ProjectTable projects={visible} now={now} showOrg roleByProjectId={roleByProjectId} />
                       )}
                     </section>
                   </div>
@@ -930,7 +938,7 @@ export function OrgHome() {
                     />
                   ) : (
                     <div className="overflow-hidden rounded-2xl border bg-card">
-                      <ProjectTable projects={visible} now={now} showOrg={false} />
+                      <ProjectTable projects={visible} now={now} showOrg={false} roleByProjectId={roleByProjectId} />
                     </div>
                   )}
 

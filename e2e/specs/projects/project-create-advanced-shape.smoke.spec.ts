@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
  * ProjectCreateDialog — "Advanced: project shape" details section.
@@ -18,16 +19,9 @@ import { test, expect } from "../../helpers/multi-user"
  * → verify it is checked → select "Self-contained" → verify it is checked.
  */
 test("project create dialog advanced shape section toggles radio buttons", async ({ alice }) => {
-  await alice.goto("/projects")
-  await alice.waitForLoadState("networkidle")
-
-  // Click "+ New Project" to open the create dialog.
-  const newProjectBtn = alice.getByRole("button", { name: /\+ New Project/i })
-  await expect(newProjectBtn).toBeVisible({ timeout: 10_000 })
-  await newProjectBtn.click()
-
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
+  const dash = new Dashboard(alice)
+  await dash.goto()
+  const dialog = await dash.openCreateProjectDialog()
 
   // Click the "Advanced: project shape" summary to expand the details.
   const advancedSummary = dialog.locator("summary").filter({ hasText: /Advanced.*project shape/i })

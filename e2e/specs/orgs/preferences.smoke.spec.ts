@@ -19,11 +19,11 @@ test("preferences page renders Privacy section", async ({ alice }) => {
     timeout: 10_000,
   })
 
-  await expect(alice.locator("h2").filter({ hasText: /Workspace/i }).first()).toBeVisible({
+  await expect(alice.getByRole("link", { name: /Workspace/i })).toBeVisible({
     timeout: 5_000,
   })
 
-  await expect(alice.locator("h2").filter({ hasText: /Privacy/i }).first()).toBeVisible({
+  await expect(alice.getByRole("link", { name: /Privacy/i })).toBeVisible({
     timeout: 5_000,
   })
 })

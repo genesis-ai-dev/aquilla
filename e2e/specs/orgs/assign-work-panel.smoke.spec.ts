@@ -55,11 +55,11 @@ test("assign-work panel opens and shows Assignee and Book selects", async ({ ali
   await expect(panel).toBeVisible({ timeout: 5_000 })
 
   // Assignee select is visible.
-  const assigneeSelect = panel.locator('[aria-label="Assignee"]')
+  const assigneeSelect = panel.getByRole("combobox", { name: "Assignee" })
   await expect(assigneeSelect).toBeVisible({ timeout: 3_000 })
 
   // Book select is visible.
-  const bookSelect = panel.locator('[aria-label="Book"]')
+  const bookSelect = panel.getByRole("combobox", { name: "Book" })
   await expect(bookSelect).toBeVisible({ timeout: 3_000 })
 
   // Cancel closes the panel.

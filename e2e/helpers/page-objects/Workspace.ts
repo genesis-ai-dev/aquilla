@@ -66,9 +66,12 @@ export class Workspace {
     const moreActionsBtn = banner.getByRole("button", { name: /More actions/i })
     if (await moreActionsBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {
       await moreActionsBtn.click()
-      const importBtn = this.page.getByRole("button", { name: /^Import$/i }).filter({ visible: true }).last()
-      await expect(importBtn).toBeVisible({ timeout: 5_000 })
-      await importBtn.click()
+      const importItem = this.page
+        .getByRole("menuitem", { name: /^Import$/i })
+        .filter({ visible: true })
+        .last()
+      await expect(importItem).toBeVisible({ timeout: 5_000 })
+      await importItem.click()
       return
     }
 
@@ -207,7 +210,7 @@ export class Workspace {
     const moreActionsBtn = banner.getByRole("button", { name: /More actions/i })
     await expect(moreActionsBtn).toBeVisible({ timeout: 10_000 })
     await moreActionsBtn.click()
-    await this.page.getByRole("button", { name: /^Export$/i }).click()
+    await this.page.getByRole("menuitem", { name: /^Export$/i }).click()
   }
 
   /** FRO-331: next unfinished lives in the header overflow menu. */

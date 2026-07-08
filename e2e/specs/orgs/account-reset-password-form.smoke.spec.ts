@@ -23,7 +23,7 @@ test("forgot password form enables send button on valid email input", async ({ a
   await expect(accountBtn).toBeVisible({ timeout: 10_000 })
   await accountBtn.click()
 
-  const addAccountBtn = alice.getByRole("button", { name: /Add another account/i })
+  const addAccountBtn = alice.getByRole("menuitem", { name: /Add another account/i })
   await expect(addAccountBtn).toBeVisible({ timeout: 3_000 })
   await addAccountBtn.click()
 

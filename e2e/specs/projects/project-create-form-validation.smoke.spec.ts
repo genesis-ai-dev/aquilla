@@ -18,16 +18,10 @@ test("project create dialog Create button requires name and source language", as
   const dash = new Dashboard(alice)
   await dash.goto()
 
-  // Open the "+ New Project" dialog.
-  const newProjectBtn = alice.getByRole("button", { name: /\+ New Project/i })
-  await expect(newProjectBtn).toBeVisible({ timeout: 10_000 })
-  await newProjectBtn.click()
-
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
+  const dialog = await dash.openCreateProjectDialog()
 
   // "Create Project" button is initially disabled (empty name + source).
-  const createBtn = alice.getByRole("button", { name: /^Create Project$/i })
+  const createBtn = dialog.getByRole("button", { name: /^Create Project$/i })
   await expect(createBtn).toBeDisabled({ timeout: 3_000 })
 
   // Fill project name only — still disabled (source is empty by default).

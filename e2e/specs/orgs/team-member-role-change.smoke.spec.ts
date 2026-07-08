@@ -35,12 +35,8 @@ test("team member role select changes member role", async ({ alice }) => {
   await nameInput.fill(teamName)
   await alice.getByRole("button", { name: /Save|Create|Confirm/i }).first().click()
 
-  // Navigate to team detail.
-  const teamLink = alice.getByRole("link", { name: teamName })
-    .or(alice.getByText(teamName).first())
-  await expect(teamLink).toBeVisible({ timeout: 10_000 })
-  await teamLink.click()
-  await alice.waitForLoadState("networkidle")
+  await alice.waitForURL(/\/teams\/\d+/, { timeout: 10_000 })
+  await expect(alice.getByRole("heading", { name: teamName })).toBeVisible({ timeout: 5_000 })
 
   // Add bob as a member via the "Member to add" select.
   const addMemberBtn = alice.getByRole("button", { name: /Add member/i })

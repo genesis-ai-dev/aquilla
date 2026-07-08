@@ -24,7 +24,7 @@ test("account switcher add-account dialog Forgot password switches to reset mode
   await accountBtn.click()
 
   // Click "Add another account…"
-  const addAccountBtn = alice.getByRole("button", { name: /Add another account/i })
+  const addAccountBtn = alice.getByRole("menuitem", { name: /Add another account/i })
   await expect(addAccountBtn).toBeVisible({ timeout: 3_000 })
   await addAccountBtn.click()
 

@@ -7,14 +7,10 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * ProjectSettings.tsx:
  *  - Input id="pname" bound to the project name field.
  *  - "Save changes" button only appears when isDirty (baseline !== current).
- *  - handleSaveAndClose() calls handleSave() then navigate(`/project/${id}`).
+ *  - "Save changes" saves in place.
  *
- * This spec verifies the save flow: change field → "Save changes" button
- * appears → click saves without error → page navigates to /project/:id.
- *
- * NOTE: Project name is IDB-local (useProject is a thin server-read client).
- * The name does NOT persist server-side, so we only verify the save succeeded
- * (no error, correct navigation) — not round-trip value persistence.
+ * This spec verifies the in-place save flow: change field → "Save changes"
+ * button appears → click saves without error → the settings form remains open.
  */
 test("project settings name change saves and reflects in workspace", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -47,13 +43,9 @@ test("project settings name change saves and reflects in workspace", async ({ al
   const saveBtn = alice.getByRole("button", { name: /Save changes/i })
   await expect(saveBtn).toBeVisible({ timeout: 5_000 })
 
-  // 3. Click Save — handleSaveAndClose saves then navigates to /project/:id.
+  // 3. Click Save — this persists in place.
   await saveBtn.click()
-  await alice.waitForURL(new RegExp(`/project/${projectId}$`), { timeout: 10_000 })
-  await alice.waitForLoadState("networkidle")
-
-  // 4. After save the page navigates to /project/:id.
-  //    Verify we landed on the workspace (sidebar file filter is visible).
-  await alice.waitForURL(new RegExp(`/project/${projectId}$`), { timeout: 10_000 })
-  await expect(alice.locator('[aria-label="Filter files"]')).toBeVisible({ timeout: 5_000 })
+  await expect(alice).toHaveURL(new RegExp(`/project/${projectId}/settings$`), { timeout: 10_000 })
+  await expect(nameInput).toHaveValue(newName, { timeout: 5_000 })
+  await expect(alice.getByText(/Saved: project name/i)).toBeVisible({ timeout: 10_000 })
 })

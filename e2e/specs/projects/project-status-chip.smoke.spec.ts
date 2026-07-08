@@ -35,7 +35,7 @@ test("status chip shows Overdue when deadline is in the past", async ({ alice })
   await setDeadlineBtn.click()
 
   // Date input appears.
-  const dateInput = alice.locator('[aria-label="Project deadline"]')
+  const dateInput = alice.getByLabel(/Deadline date/i)
   await expect(dateInput).toBeVisible({ timeout: 3_000 })
 
   // Set a past date to trigger "Overdue".
@@ -65,7 +65,7 @@ test("status chip shows Due soon when deadline is within 7 days", async ({ alice
   await expect(setDeadlineBtn).toBeVisible({ timeout: 10_000 })
   await setDeadlineBtn.click()
 
-  const dateInput = alice.locator('[aria-label="Project deadline"]')
+  const dateInput = alice.getByLabel(/Deadline date/i)
   await expect(dateInput).toBeVisible({ timeout: 3_000 })
 
   // Set a date 3 days in the future to trigger "Due soon".

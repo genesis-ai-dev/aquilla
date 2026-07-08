@@ -47,6 +47,17 @@ export async function getMyOrg(jwt: string): Promise<MyOrg> {
   return (await r.json()) as MyOrg
 }
 
+/** POST /api/v2/orgs — create a named org owned by the caller. */
+export async function createOrg(jwt: string, name: string): Promise<MyOrg> {
+  const r = await fetch(`${FRONTIER_BASE}/api/v2/orgs`, {
+    method: "POST",
+    headers: authHeaders(jwt),
+    body: JSON.stringify({ name }),
+  })
+  if (!r.ok) throw new Error(`createOrg failed: HTTP ${r.status} — ${await r.text()}`)
+  return (await r.json()) as MyOrg
+}
+
 /** POST /api/v2/orgs/:orgId/members — add a user to an org by username.
  * Caller must be owner/maintainer of the org. Used in tests where alice
  * adds bob to Acme. */

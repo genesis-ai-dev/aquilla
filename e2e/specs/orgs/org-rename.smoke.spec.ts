@@ -1,26 +1,25 @@
 import { test, expect } from "../../helpers/multi-user"
 
 /**
- * Organization rename — Settings page (/settings).
+ * Organization rename — Settings Identity detail page (/settings/identity).
  *
  * The Identity section has a "Rename" button (owner only) that reveals:
  *   - input#org-name with the current name
  *   - Save button (calls renameOrg API)
  *   - Cancel button
  *
- * After saving the new name persists in the page heading.
+ * After saving the new name persists in the Identity section.
  *
  * NOTE: This test mutates the org name. The dev stack resets between test
  * runs so this is safe.
  */
 test("org rename saves new name in settings page", async ({ alice }) => {
-  await alice.goto("/settings")
+  await alice.goto("/settings/identity")
   await alice.waitForLoadState("networkidle")
 
-  // h1 "Organization settings"
-  await expect(
-    alice.locator("h1").filter({ hasText: /Organization settings/i })
-  ).toBeVisible({ timeout: 10_000 })
+  await expect(alice.getByRole("heading", { name: /^Identity$/i, level: 2 })).toBeVisible({
+    timeout: 10_000,
+  })
 
   // "Rename" button reveals the edit form.
   const renameBtn = alice.getByRole("button", { name: /^Rename$/i })

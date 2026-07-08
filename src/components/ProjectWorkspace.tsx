@@ -255,7 +255,7 @@ export function shouldSelfHealZeroFileLink(args: {
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
-  const { activeOrg, activeOrgId, isAllOrgs } = useActiveOrg()
+  const { orgs, activeOrg, activeOrgId, isAllOrgs, refresh: refreshOrgs } = useActiveOrg()
   const goToProjects = useCallback(() => {
     navigate({
       pathname: "/",
@@ -301,6 +301,7 @@ export function ProjectWorkspace() {
   }, [routeFileId])
   const [optimisticFiles, setOptimisticFiles] = useState<FileReference[]>([])
   const optimisticFileIdsRef = useRef<Set<string>>(new Set())
+  const orgRefreshAttemptedForProjectRef = useRef<number | null>(null)
   // Optimistic file-label renames (fileId → new name), applied locally before
   // the file.rename event round-trips so the new label shows instantly.
   const [optimisticRenames, setOptimisticRenames] = useState<Map<string, string>>(new Map())
@@ -362,6 +363,23 @@ export function ProjectWorkspace() {
     if (projectFiles === hydratedProject.files) return hydratedProject
     return { ...hydratedProject, files: projectFiles }
   }, [hydratedProject, projectFiles])
+
+  useEffect(() => {
+    if (project?.orgId == null) return
+    if (orgs.some((org) => org.id === project.orgId)) {
+      orgRefreshAttemptedForProjectRef.current = null
+      return
+    }
+    if (orgRefreshAttemptedForProjectRef.current === project.orgId) return
+    orgRefreshAttemptedForProjectRef.current = project.orgId
+    void refreshOrgs()
+  }, [orgs, project?.orgId, refreshOrgs])
+
+  const projectOrg = useMemo(() => {
+    if (project?.orgId == null) return activeOrg
+    if (activeOrg?.id === project.orgId) return activeOrg
+    return orgs.find((org) => org.id === project.orgId) ?? null
+  }, [activeOrg, orgs, project?.orgId])
 
   useEffect(() => {
     if (!hydratedProject || optimisticFiles.length === 0) return
@@ -1200,8 +1218,8 @@ export function ProjectWorkspace() {
     canExport: canExportByOrgPolicy,
     hasFetched: orgSettingsFetched,
   } = useOrgSettings(
-    activeOrg?.id,
-    activeOrg?.role?.level,
+    project?.orgId ?? activeOrg?.id,
+    projectOrg?.role?.level ?? null,
     // FRO-253 WARN fix: compare the project-resolved role (AD-12 max-wins), not
     // the raw org role. A user with org VIEWER + direct project MAINTAINER grant
     // must pass a floor of MAINTAINER. syncRole.level is the max-wins result

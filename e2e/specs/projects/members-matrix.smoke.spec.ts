@@ -22,7 +22,7 @@ test("members page renders roster with expandable project access", async ({ alic
   await expect(alice.getByRole("button", { name: /Matrix/i })).not.toBeVisible()
 
   // Expandable project-access section is present.
-  await expect(alice.getByText(/expand a member to see per-project roles/i)).toBeVisible({
+  await expect(alice.getByText(/expand a member.*per-project roles/i)).toBeVisible({
     timeout: 5_000,
   })
 })

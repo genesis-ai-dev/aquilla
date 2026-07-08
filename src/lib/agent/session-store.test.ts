@@ -142,4 +142,43 @@ describe("AgentSessionStore", () => {
     store.reset()
     expect(store.getState().decided.size).toBe(0)
   })
+
+  it("activity notes coalesce by key and ride the next send's wire only", async () => {
+    const { impl, calls, finish } = deferredRunAgent()
+    const store = new AgentSessionStore(impl)
+
+    // Two notes for the same card — the later view supersedes; a second
+    // card's note accumulates alongside.
+    store.noteActivity("passage:a", "the user is looking at MRK 4 (target side)")
+    store.noteActivity("passage:a", "the user is looking at MRK 5 (target side)")
+    store.noteActivity("passage:b", "the user is looking at GEN 1 (source + target)")
+    expect(store.getState().activity).toHaveLength(2)
+
+    store.send(sendOptions("continue please"))
+    await flush()
+    const wire = calls[0].request.messages[0].content
+    expect(wire).toContain("continue please")
+    expect(wire).toContain("[user activity since your last reply]")
+    expect(wire).not.toContain("MRK 4") // coalesced away
+    expect(wire).toContain("MRK 5")
+    expect(wire).toContain("GEN 1")
+    // Drained — and the visible bubble stays what the user typed.
+    expect(store.getState().activity).toHaveLength(0)
+    expect(store.getState().runs[0].prompt).toBe("continue please")
+    finish(0)
+    await flush()
+
+    // Nothing queued → the next wire carries no activity block.
+    store.send(sendOptions("and again"))
+    await flush()
+    expect(calls[1].request.messages[0].content).not.toContain("[user activity")
+  })
+
+  it("activity notes clear on reset", () => {
+    const { impl } = deferredRunAgent()
+    const store = new AgentSessionStore(impl)
+    store.noteActivity("passage:a", "stale note")
+    store.reset()
+    expect(store.getState().activity).toHaveLength(0)
+  })
 })

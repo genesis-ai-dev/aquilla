@@ -214,8 +214,13 @@ export function MembersTab({
 
       {/* Members list */}
       <div>
+        {/* AQU-488: explicit scope label. A first-time PM opening this
+            section cold must be able to tell at a glance whether it's
+            listing this project's people or the whole org — this list is
+            always project-scoped (the effective roster for THIS project,
+            per-row labeled with how each person got access below). */}
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-medium">Current members</h2>
+          <h2 className="text-sm font-medium">Members of this project</h2>
           <Button
             variant="ghost"
             size="sm"
@@ -226,6 +231,12 @@ export function MembersTab({
             Refresh
           </Button>
         </div>
+        {members.length > 0 && (
+          <p className="mb-2 text-xs text-muted-foreground">
+            Everyone who currently has access to this project. Each row shows how
+            they got it — direct invite, org membership, or team.
+          </p>
+        )}
 
         {isLoading && members.length === 0 ? (
           <p className="text-sm text-muted-foreground">Loading members…</p>
@@ -789,11 +800,22 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
 // Helpers
 // ──────────────────────────────────────────────────────────────────────────
 
+// AQU-488: human-readable access-path labels. auth-worker's resolveProjectRole
+// (AD-12) returns one of these four `source` values per member — see
+// ProjectMemberRole in src/lib/frontier/members.ts. Labeling every row (not
+// just org-sourced ones) is what makes project-specific vs. org-wide
+// membership visually distinct, per the AQU-488 acceptance criteria.
+const SOURCE_LABELS: Record<string, string> = {
+  override: "direct invite",
+  group: "via team",
+  org: "via org",
+  creator: "project creator",
+}
+
 function SourceBadge({ source }: { source: string }) {
-  if (source === "override") return null
   return (
     <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-      via {source}
+      {SOURCE_LABELS[source] ?? source}
     </span>
   )
 }

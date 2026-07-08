@@ -609,6 +609,9 @@ export function ProjectWorkspace() {
       setDockTab(null)
     } else if (centerSurface !== "agent" && prev === "agent") {
       setDockTab((cur) => cur ?? dockTabBeforeAgentRef.current)
+    } else if (centerSurface === "agent" && dockTab === "agent") {
+      // Restore/route paths can re-land the agent tab mid-takeover; collapse.
+      setDockTab(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- dockTab read on transition only
   }, [centerSurface])
@@ -3376,6 +3379,10 @@ export function ProjectWorkspace() {
             storageKey={projectId}
             activeTab={dockTab}
             onActiveTabChange={(t) => {
+              // While the workbench IS the agent surface, the dock's Agent tab
+              // has nothing to show but a pointer back to it — a wide panel of
+              // dead chrome beside the takeover. Make that state unreachable.
+              if (t === "agent" && centerSurface === "agent") return
               setDockTab(t)
               // Opening the Voices tab puts the editor into the Audio lens so
               // the per-line voice controls show alongside the panel.

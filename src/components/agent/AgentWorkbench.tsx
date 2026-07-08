@@ -247,26 +247,36 @@ export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchP
         </span>
       </div>
 
-      {/* Chat rail + review grid: the conversation narrates from the side;
-          the working set (the artifact) gets the space. */}
+      {/* Chat is the SPINE (agent-complete §2): until the session surfaces an
+          artifact, the conversation is the whole surface — a centered column,
+          not a narrow rail beside an empty grid. The working set is a STAGE
+          summoned when rows exist, and the chat becomes its side narrator. */}
       <div className="flex min-h-0 flex-1">
-        <div className="flex w-[380px] min-w-[320px] flex-none flex-col border-r">
-          <AgentDockView {...agent} renderProposalOverride={renderProposalOverride} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <WorkingSetPanel
-            ref={panelRef}
-            rows={rows}
-            busy={applying}
-            lintRow={lintRow}
-            onAccept={(row, value) => acceptRows([{ row, value }])}
-            onAcceptAll={(valueFor) =>
-              acceptRows(pending.map((row) => ({ row, value: valueFor(row) })))
-            }
-            onReject={rejectRow}
-            onJumpToCell={onJumpToCell}
-          />
-        </div>
+        {rows.length > 0 ? (
+          <>
+            <div className="flex w-[380px] min-w-[320px] flex-none flex-col border-r">
+              <AgentDockView {...agent} renderProposalOverride={renderProposalOverride} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <WorkingSetPanel
+                ref={panelRef}
+                rows={rows}
+                busy={applying}
+                lintRow={lintRow}
+                onAccept={(row, value) => acceptRows([{ row, value }])}
+                onAcceptAll={(valueFor) =>
+                  acceptRows(pending.map((row) => ({ row, value: valueFor(row) })))
+                }
+                onReject={rejectRow}
+                onJumpToCell={onJumpToCell}
+              />
+            </div>
+          </>
+        ) : (
+          <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col">
+            <AgentDockView {...agent} renderProposalOverride={renderProposalOverride} />
+          </div>
+        )}
       </div>
     </div>
   )

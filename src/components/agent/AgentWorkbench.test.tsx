@@ -140,6 +140,21 @@ beforeEach(() => {
   agentSessionStore(PROJECT).reset()
 })
 
+describe("AgentWorkbench layout (chat spine vs stage)", () => {
+  it("an empty session is a single centered chat column — no empty grid", () => {
+    render(<AgentWorkbench {...workbenchProps()} />)
+    // No working-set stage until there's an artifact to review.
+    expect(screen.queryByLabelText("Working set")).toBeNull()
+    expect(screen.queryByText(/cells the agent reads and drafts appear here/)).toBeNull()
+  })
+
+  it("summons the working-set stage once the run surfaces rows", async () => {
+    await primeSessionWithDraftRun()
+    render(<AgentWorkbench {...workbenchProps()} />)
+    expect(screen.getByLabelText("Working set")).toBeInTheDocument()
+  })
+})
+
 describe("AgentWorkbench review loop", () => {
   it("accept-all keeps the committed text visible in the grid (regression: rows went blank)", async () => {
     await primeSessionWithDraftRun()

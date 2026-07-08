@@ -81,6 +81,11 @@ jobs:
           NEON_PG_DB: ${{ secrets.NEON_PG_DB }}
           NEON_PG_ROLE: ${{ secrets.NEON_PG_ROLE }}
           NEON_PG_PASSWORD: ${{ secrets.NEON_PG_PASSWORD }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: sweet-paper-88472094
+          NEON_PRODUCTION_BRANCH: production
+          NEON_STAGING_BRANCH: staging
+          NEON_DEV_BRANCH: dev
           NEON_STAGING_PG_HOST: ${{ secrets.NEON_STAGING_PG_HOST }}
           NEON_STAGING_PG_DB: ${{ secrets.NEON_STAGING_PG_DB }}
           NEON_STAGING_PG_ROLE: ${{ secrets.NEON_STAGING_PG_ROLE }}

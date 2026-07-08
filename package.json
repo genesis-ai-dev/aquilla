@@ -79,7 +79,9 @@
     "neon:apply:staging": "tsx scripts/neon-target.ts staging apply",
     "neon:status:dev": "tsx scripts/neon-target.ts dev status",
     "neon:apply:dev": "tsx scripts/neon-target.ts dev apply",
-    "neon:refresh-dev": "tsx scripts/refresh-dev-neon.ts"
+    "neon:refresh:dev": "tsx scripts/refresh-neon-branch.ts dev",
+    "neon:refresh:staging": "tsx scripts/refresh-neon-branch.ts staging",
+    "neon:refresh-dev": "pnpm neon:refresh:dev"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.0",

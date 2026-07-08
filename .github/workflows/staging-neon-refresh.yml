@@ -1,16 +1,16 @@
-name: Refresh Dev Neon Branch
+name: Refresh Staging Neon Branch
 
 on:
   workflow_dispatch:
   schedule:
-    # GitHub cron is UTC. These two schedules cover 4:07 a.m. Eastern during
-    # daylight and standard time; the first step gates execution to the 4 a.m.
-    # America/New_York hour so the non-matching run exits without changes.
-    - cron: "7 8 * * *"
-    - cron: "7 9 * * *"
+    # GitHub cron is UTC. These two Sunday schedules cover 4:07 a.m. Eastern
+    # during daylight and standard time; the first step gates execution to the
+    # matching America/New_York offset so the non-matching run exits cleanly.
+    - cron: "7 8 * * 0"
+    - cron: "7 9 * * 0"
 
 concurrency:
-  group: dev-neon-refresh
+  group: staging-neon-refresh
   cancel-in-progress: false
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Gate scheduled run to 4 a.m. Eastern
+      - name: Gate scheduled run to Sunday 4 a.m. Eastern
         id: eastern_gate
         run: |
           if [ "${{ github.event_name }}" != "schedule" ]; then
@@ -27,12 +27,10 @@ jobs:
             exit 0
           fi
 
-          # GitHub cron is UTC and can start late. Gate by the cron expression
-          # plus today's Eastern offset instead of the runtime clock hour.
           eastern_offset="$(TZ=America/New_York date +%z)"
           schedule="${{ github.event.schedule }}"
-          if { [ "$schedule" = "7 8 * * *" ] && [ "$eastern_offset" = "-0400" ]; } || \
-             { [ "$schedule" = "7 9 * * *" ] && [ "$eastern_offset" = "-0500" ]; }; then
+          if { [ "$schedule" = "7 8 * * 0" ] && [ "$eastern_offset" = "-0400" ]; } || \
+             { [ "$schedule" = "7 9 * * 0" ] && [ "$eastern_offset" = "-0500" ]; }; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
@@ -58,28 +56,28 @@ jobs:
         if: steps.eastern_gate.outputs.should_run == 'true'
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-          DEV_API_PROJECT_READ_URL: ${{ secrets.DEV_API_PROJECT_READ_URL }}
-          DEV_API_PROJECT_READ_TOKEN: ${{ secrets.DEV_API_PROJECT_READ_TOKEN }}
+          STAGING_API_PROJECT_READ_URL: ${{ secrets.STAGING_API_PROJECT_READ_URL }}
+          STAGING_API_PROJECT_READ_TOKEN: ${{ secrets.STAGING_API_PROJECT_READ_TOKEN }}
         run: |
           if [ -z "$NEON_API_KEY" ]; then
-            echo "::error::NEON_API_KEY is required to restore the dev Neon branch from production."
+            echo "::error::NEON_API_KEY is required to restore the staging Neon branch from production."
             exit 1
           fi
-          if [ -n "$DEV_API_PROJECT_READ_URL" ] && [ -z "$DEV_API_PROJECT_READ_TOKEN" ]; then
-            echo "::error::DEV_API_PROJECT_READ_TOKEN is required when DEV_API_PROJECT_READ_URL is set."
+          if [ -n "$STAGING_API_PROJECT_READ_URL" ] && [ -z "$STAGING_API_PROJECT_READ_TOKEN" ]; then
+            echo "::error::STAGING_API_PROJECT_READ_TOKEN is required when STAGING_API_PROJECT_READ_URL is set."
             exit 1
           fi
 
-      - name: Restore dev branch from production and apply dev migrations
+      - name: Restore staging branch from production and apply staging migrations
         if: steps.eastern_gate.outputs.should_run == 'true'
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           NEON_PROJECT_ID: sweet-paper-88472094
-          NEON_DEV_BRANCH: dev
+          NEON_STAGING_BRANCH: staging
           NEON_PRODUCTION_BRANCH: production
-          NEON_DEV_DATABASE: neondb
-          NEON_DEV_ROLE: neondb_owner
-          DEV_API_HEALTH_URL: https://api.dev.aquilla.app/identity/api/v2/health
-          DEV_API_PROJECT_READ_URL: ${{ secrets.DEV_API_PROJECT_READ_URL }}
-          DEV_API_PROJECT_READ_TOKEN: ${{ secrets.DEV_API_PROJECT_READ_TOKEN }}
-        run: pnpm neon:refresh:dev
+          NEON_STAGING_DATABASE: neondb
+          NEON_STAGING_ROLE: neondb_owner
+          STAGING_API_HEALTH_URL: https://api.staging.aquilla.app/identity/api/v2/health
+          STAGING_API_PROJECT_READ_URL: ${{ secrets.STAGING_API_PROJECT_READ_URL }}
+          STAGING_API_PROJECT_READ_TOKEN: ${{ secrets.STAGING_API_PROJECT_READ_TOKEN }}
+        run: pnpm neon:refresh:staging

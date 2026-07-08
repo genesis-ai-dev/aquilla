@@ -315,6 +315,32 @@ describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
     expect(screen.getByText("Audio Validated")).toBeInTheDocument()
     expect(screen.getByText("N/A")).toBeInTheDocument()
   })
+
+  // AQU-489: a PM who has never seen the dashboard must be able to name what
+  // each progress number means without hovering. Every tile/bar label below
+  // is rendered as plain visible text (not just a `title`/tooltip attribute)
+  // — hover (AppTooltip) adds extra detail on top, it is never the only
+  // source of meaning. Terminology ("Has Audio" / "Audio Validated") must
+  // match OrgHome.tsx's project table (see OrgHome.test.tsx AQU-489 test).
+  it("labels every progress number visibly, without requiring hover (AQU-489)", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100, filledCells: 80, validatedCells: 50,
+      aiDraftedCells: 0,
+      audioCells: 60,
+      recordedMs: 90000, lastEditAt: null, deadlineAt: null,
+    }])
+    renderOverview()
+
+    for (const label of ["Translated", "Validated", "Has Audio", "Audio Validated"]) {
+      await waitFor(() => expect(screen.getAllByText(label).length).toBeGreaterThan(0))
+    }
+  })
 })
 
 // ── File list show-more ────────────────────────────────────────────────────

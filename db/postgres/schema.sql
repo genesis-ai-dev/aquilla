@@ -641,10 +641,28 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     completion_tokens BIGINT NOT NULL DEFAULT 0,
     cost_cents  DOUBLE PRECISION NOT NULL DEFAULT 0,
     steps       INTEGER NOT NULL DEFAULT 0,
+    session_id  TEXT,                            -- 0050: owning agent_sessions row (nullable)
+    staged_count INTEGER NOT NULL DEFAULT 0,     -- 0051: target.cell.commit events staged by the run
     started_at  BIGINT NOT NULL,
     ended_at    BIGINT
 );
 CREATE INDEX IF NOT EXISTS idx_agent_runs_project ON agent_runs (project_id, started_at DESC);
+
+-- Agent sessions (0050_agent_sessions.sql): server-persisted conversations for
+-- the translation agent. convo = JSON array of stored messages (user/assistant/
+-- tool — the system prompt is rebuilt per run). Session ids are client-generated
+-- UUIDs; ownership is (project_id, user_id), enforced on load.
+CREATE TABLE IF NOT EXISTS agent_sessions (
+    session_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    user_id    BIGINT NOT NULL,
+    title      TEXT NOT NULL DEFAULT '',
+    convo      TEXT NOT NULL DEFAULT '[]',
+    created_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_project_user
+    ON agent_sessions (project_id, user_id, updated_at DESC);
 
 -- Model A/B testing (0048_model_ab_events.sql). One row per default-model chat
 -- request while a platform experiment (platform_settings.abTest) is enabled;

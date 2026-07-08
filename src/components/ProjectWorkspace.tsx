@@ -86,6 +86,7 @@ import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOve
 import { useComments } from "@/hooks/useComments"
 import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, Mic2, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose } from "lucide-react"
 import { AgentDockPanel } from "./AgentDockPanel"
+import { AgentWorkbench } from "./agent/AgentWorkbench"
 import type { ContextChip } from "@/lib/agent/context-chip"
 import { SearchDockPanel } from "./SearchDockPanel"
 import { SearchResultsView } from "./search/SearchResultsView"
@@ -495,7 +496,8 @@ export function ProjectWorkspace() {
       location.pathname.endsWith("/comments") ||
       location.pathname.endsWith("/memory") ||
       location.pathname.endsWith("/terminology") ||
-      location.pathname.endsWith("/members")
+      location.pathname.endsWith("/members") ||
+      location.pathname.endsWith("/agent")
     ) return
 
     // A file is already in the URL: leave it unless the project genuinely
@@ -563,12 +565,13 @@ export function ProjectWorkspace() {
   // shell (sidebar + top bar + bottom status bar) never unmounts.
   // FRO-194 added "rules"; FRO-254 adds "comments", "memory", "terminology";
   // FRO-180 adds "members".
-  const centerSurface: "editor" | "rules" | "comments" | "memory" | "terminology" | "members" =
+  const centerSurface: "editor" | "rules" | "comments" | "memory" | "terminology" | "members" | "agent" =
     location.pathname.endsWith("/rules") ? "rules" :
     location.pathname.endsWith("/comments") ? "comments" :
     location.pathname.endsWith("/memory") ? "memory" :
     location.pathname.endsWith("/terminology") ? "terminology" :
     location.pathname.endsWith("/members") ? "members" :
+    location.pathname.endsWith("/agent") ? "agent" :
     "editor"
 
   const [editingRuleId, setEditingRuleId] = useState<string | "new" | null>(null)
@@ -592,6 +595,23 @@ export function ProjectWorkspace() {
   const [shareOpen, setShareOpen] = useState(false)
   // FRO-308: left dock active tab (null = collapsed rail only)
   const [dockTab, setDockTab] = useState<DockTab | null>("files")
+  // Agent workbench (agent-mode-v2 §4) is a takeover surface: collapse the
+  // dock to the rail on entry (a second agent chat beside the workbench is
+  // confusing) and restore the user's tab on exit. Manual reopen still wins —
+  // this only fires on surface transitions.
+  const dockTabBeforeAgentRef = useRef<DockTab | null>("files")
+  const prevSurfaceRef = useRef(centerSurface)
+  useEffect(() => {
+    const prev = prevSurfaceRef.current
+    prevSurfaceRef.current = centerSurface
+    if (centerSurface === "agent" && prev !== "agent") {
+      dockTabBeforeAgentRef.current = dockTab
+      setDockTab(null)
+    } else if (centerSurface !== "agent" && prev === "agent") {
+      setDockTab((cur) => cur ?? dockTabBeforeAgentRef.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dockTab read on transition only
+  }, [centerSurface])
   // A source selection the user sent to the agent via "Ask AI". Opens the
   // Agent dock and is inserted into the composer as a context chip.
   const [pendingChip, setPendingChip] = useState<ContextChip | null>(null)
@@ -3477,6 +3497,8 @@ export function ProjectWorkspace() {
                 bibleSummary={bibleSummary}
                 pendingChip={pendingChip}
                 onPendingChipConsumed={() => setPendingChip(null)}
+                onExpand={() => navigate(`/project/${projectId}/agent`)}
+                expanded={centerSurface === "agent"}
               />
             }
             searchPanel={
@@ -3589,6 +3611,8 @@ export function ProjectWorkspace() {
           </WorkspaceHeader>
         }
         aboveCard={
+          // Agent workbench is a takeover surface — file tabs stay with the editor.
+          centerSurface === "agent" ? null :
           <TabStrip
             tabs={workspaceTabs.tabs}
             // While a non-editor surface (Rules) is showing, no file tab is
@@ -3612,7 +3636,10 @@ export function ProjectWorkspace() {
         }
         beforeMain={
           <>
-            {project && activeFileId && (
+{/* Agent workbench is a takeover surface: the selection bar belongs
+                to the editor and only adds competing chrome above the workbench.
+                Banners below still render. */}
+            {project && activeFileId && centerSurface !== "agent" && (
               <>
                 <SelectionBar
                   project={project}
@@ -3668,7 +3695,7 @@ export function ProjectWorkspace() {
             <div className="px-3 py-1 empty:hidden">
               <CompletionBulkProgressBanner />
             </div>
-            {isSubtitleFile && videoSrc && (
+            {isSubtitleFile && videoSrc && centerSurface !== "agent" && (
               <ResizableVideoPanel>
                 {(height) => (
                   <VideoPlayer
@@ -3836,6 +3863,30 @@ export function ProjectWorkspace() {
               <ProjectMembersPageContent />
             </Suspense>
           </div>
+        ) : centerSurface === "agent" ? (
+          // Agent workbench (agent-mode-v2 §4): full-screen agent surface —
+          // same shared session as the dock tab, plus the working-set panel.
+          <AgentWorkbench
+            agent={{
+              projectId: project.id,
+              jwt,
+              author: currentUsername,
+              roleLevel: currentRoleLevel,
+              context: {
+                fileId: activeFileId ?? undefined,
+                cellId: focusedCellId ?? undefined,
+              },
+              fileName: activeFile?.name,
+              currentCell: null,
+              rules,
+              resolveCell: resolveCellById,
+              onApplied: handleAgentApplied,
+            }}
+            onClose={() => navigate(`/project/${projectId}`)}
+            onJumpToCell={(fileId, cellId) =>
+              navigate(`/project/${projectId}/file/${fileId}?cellId=${encodeURIComponent(cellId)}`)
+            }
+          />
         ) : cellAreaState.kind === "ready" ? (
           // FRO-309: relative wrapper so the search-expanded overlay can cover the editor
           <div className="relative flex h-full w-full flex-col">
@@ -4014,7 +4065,7 @@ export function ProjectWorkspace() {
         }
         statusBar={
           <>
-            {lens === "audio" && project && (
+            {lens === "audio" && project && centerSurface !== "agent" && (
               <VoicePlaybackBar
                 cells={cells}
                 projectId={project.id}
@@ -4038,13 +4089,18 @@ export function ProjectWorkspace() {
                 </div>
               }
             />
-            <StatusBar
-              cells={cells}
-              projectHealth={projectHealth}
-              healthMap={healthMap}
-              staleSourceCount={staleCellIds.size}
-              onJumpToCell={jumpToCellId}
-            />
+            {/* File translation stats belong to the editor; the workbench has
+                its own working-set summary. Sync/outbox status above stays —
+                agent Apply flushes through the same outbox. */}
+            {centerSurface !== "agent" && (
+              <StatusBar
+                cells={cells}
+                projectHealth={projectHealth}
+                healthMap={healthMap}
+                staleSourceCount={staleCellIds.size}
+                onJumpToCell={jumpToCellId}
+              />
+            )}
           </>
         }
       />

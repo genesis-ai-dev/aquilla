@@ -554,7 +554,7 @@ export function ProjectOverview() {
                         </span>
                       </span>
                     </div>
-                    <ul className="space-y-2">
+                    <ul className="space-y-2" aria-label="Files">
                       {shown.map((f) => {
                         const tPct = f.cellCount > 0 ? Math.round((f.filledCount / f.cellCount) * 100) : 0
                         const vPct = f.cellCount > 0 ? Math.round((f.approvedCount / f.cellCount) * 100) : 0

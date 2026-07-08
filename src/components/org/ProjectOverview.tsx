@@ -21,6 +21,13 @@ import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, reco
 import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
 import { getProjectAssignments, type AssigneeWorkload } from "@/lib/sync/assignments"
+import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
+import { ROLE } from "@/lib/frontier/roles"
+import {
+  SectionVisibilityBadge,
+  SectionVisibilityGate,
+  sectionTintClass,
+} from "./SectionVisibilityBadge"
 import { Badge } from "@/components/ui/badge"
 import {
   Dialog,
@@ -31,6 +38,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { DatePicker, dateToDeadlineString, deadlineStringToDate } from "@/components/ui/date-picker"
+import { cn } from "@/lib/utils"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 
 /** Max per-file rows shown on the overview; the rest are counted as "+N more". */
@@ -221,6 +229,18 @@ export function ProjectOverview() {
   // org — `useProject` already gatekept access, so any orgId it returns is
   // one this user can legitimately query the portfolio for.
   const portfolioOrgId = activeOrgId ?? project?.orgId ?? null
+
+  // AQU-486: per-section visibility chrome. The roster + team-progress floors
+  // come from AQU-485's org settings; `projectRoleLevel` (not orgRoleLevel)
+  // is what gates viewing here per useOrgSettings' AD-12 max-wins contract —
+  // a project-only invitee's project.syncRole can exceed their (absent) org
+  // role. Editing the floor is still an org-role (owner-only) action, so
+  // canEditVisibility below intentionally reads the org role, not the
+  // project role.
+  const projectRoleLevel = project?.syncRole?.level ?? null
+  const orgSettings = useOrgSettings(portfolioOrgId, projectRoleLevel, projectRoleLevel)
+  const canEditVisibility = canEditRosterProgressFloor(projectRoleLevel)
+
   const loadRow = useCallback(async () => {
     if (!jwt || portfolioOrgId == null) return
     try {
@@ -457,9 +477,16 @@ export function ProjectOverview() {
               </div>
 
               {/* ── Progress card ── */}
+              {/* AQU-486: progress has no configurable floor today — everyone
+                  with project access can see it. The badge is read-only
+                  (informational), matching that reality rather than implying
+                  a toggle that doesn't exist server-side. */}
               {audio && audio.totalCells > 0 && (
                 <div className="rounded-xl border bg-card p-5">
-                  <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Progress</h2>
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Progress</h2>
+                    <SectionVisibilityBadge minRole={ROLE.VIEWER} />
+                  </div>
 
                   {/* Big-number tiles lead the section */}
                   <div className="flex flex-wrap gap-3 mb-4">
@@ -678,55 +705,95 @@ export function ProjectOverview() {
               </Dialog>
 
               {/* ── Team / Assignments card ── */}
-              <div className="rounded-xl border bg-card p-5">
-                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</h2>
-                {workload.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No open assignments in this project yet.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {workload.map((w) => {
-                      const donePct = w.cellsTotal > 0 ? Math.round((w.cellsDone / w.cellsTotal) * 100) : 0
-                      return (
-                        <li key={w.userId} className="flex items-center gap-3 text-sm">
-                          <AppTooltip content={w.username ?? String(w.userId)}>
-                            <span className="w-32 shrink-0 font-medium truncate">
-                              {w.username ?? `User ${w.userId}`}
-                            </span>
-                          </AppTooltip>
-                          <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                            <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
-                          </span>
-                          <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                            {w.openAssignments} open · {donePct}%
-                          </span>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                )}
-
-                {canAssign && !isArchived && activeOrgId != null && (project?.files.length ?? 0) > 0 && (
-                  <div className="mt-3 pt-3 border-t">
-                    <AssignWork
-                      projectId={id}
-                      files={project?.files ?? []}
-                      orgId={activeOrgId}
-                      jwt={jwt ?? ""}
-                      author={session?.username ?? ""}
-                      onAssigned={loadRow}
+              {/* AQU-486: per-assignee progress is gated by the AQU-485
+                  memberProgressViewMinRole floor (same "who sees each
+                  person's productivity" policy WorkloadRollup/UsageRollup use
+                  on the org overview) — a lower-role account must not see
+                  this card exist at all, not an empty/placeholder version. */}
+              <SectionVisibilityGate
+                minRole={orgSettings.memberProgressViewMinRole}
+                viewerRoleLevel={projectRoleLevel}
+                ready={orgSettings.hasFetched}
+              >
+                <div className={cn("relative rounded-xl border bg-card p-5", sectionTintClass(orgSettings.memberProgressViewMinRole))}>
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</h2>
+                    <SectionVisibilityBadge
+                      minRole={orgSettings.memberProgressViewMinRole}
+                      canEdit={canEditVisibility}
+                      onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
+                      description="Who can see each teammate's assignment progress on this project."
                     />
                   </div>
-                )}
-              </div>
+                  {workload.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No open assignments in this project yet.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {workload.map((w) => {
+                        const donePct = w.cellsTotal > 0 ? Math.round((w.cellsDone / w.cellsTotal) * 100) : 0
+                        return (
+                          <li key={w.userId} className="flex items-center gap-3 text-sm">
+                            <AppTooltip content={w.username ?? String(w.userId)}>
+                              <span className="w-32 shrink-0 font-medium truncate">
+                                {w.username ?? `User ${w.userId}`}
+                              </span>
+                            </AppTooltip>
+                            <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                              <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
+                            </span>
+                            <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                              {w.openAssignments} open · {donePct}%
+                            </span>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+
+                  {canAssign && !isArchived && activeOrgId != null && (project?.files.length ?? 0) > 0 && (
+                    <div className="mt-3 pt-3 border-t">
+                      <AssignWork
+                        projectId={id}
+                        files={project?.files ?? []}
+                        orgId={activeOrgId}
+                        jwt={jwt ?? ""}
+                        author={session?.username ?? ""}
+                        onAssigned={loadRow}
+                      />
+                    </div>
+                  )}
+                </div>
+              </SectionVisibilityGate>
 
               {/* ── Members card (FRO-335) — same add / change-role / revoke
                   surface as the in-project members page, so access can be
-                  managed from the overview without opening the workspace. ── */}
+                  managed from the overview without opening the workspace. ──
+                  AQU-486: gated by AQU-485's rosterViewMinRole — the same
+                  policy MembersTab itself enforces server-side (see its
+                  "Roster hidden" state), applied here one layer up so a
+                  below-floor caller never sees the card shell at all. */}
               {canManage && !isArchived && (
-                <div className="rounded-xl border bg-card p-5" data-testid="overview-members-card">
-                  <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Members</h2>
-                  <MembersTab projectId={id} className="space-y-6" />
-                </div>
+                <SectionVisibilityGate
+                  minRole={orgSettings.rosterViewMinRole}
+                  viewerRoleLevel={projectRoleLevel}
+                  ready={orgSettings.hasFetched}
+                >
+                  <div
+                    className={cn("relative rounded-xl border bg-card p-5", sectionTintClass(orgSettings.rosterViewMinRole))}
+                    data-testid="overview-members-card"
+                  >
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Members</h2>
+                      <SectionVisibilityBadge
+                        minRole={orgSettings.rosterViewMinRole}
+                        canEdit={canEditVisibility}
+                        onChangeMinRole={async (next) => { await orgSettings.patch({ rosterViewMinRole: next }) }}
+                        description="Who can see the member roster on this project."
+                      />
+                    </div>
+                    <MembersTab projectId={id} className="space-y-6" />
+                  </div>
+                </SectionVisibilityGate>
               )}
             </div>
           )}

@@ -68,15 +68,56 @@ vi.mock("@/lib/sync/invites", () => ({
   listMyPendingInvites: () => listMyPendingInvitesMock(),
 }))
 
-beforeEach(() => {
+// AQU-486: useOrgSettings backs Team workload / Team usage visibility
+// (memberProgressViewMinRole). Mocked hermetically (same pattern as
+// Settings.test.tsx / ProjectOverview.test.tsx) instead of hitting real fetch.
+type OrgSettingsMock = ReturnType<typeof import("@/hooks/useOrgSettings").useOrgSettings>
+const defaultOrgSettingsMock = (): OrgSettingsMock => ({
+  settings: {},
+  orgRules: [],
+  promotionRequests: [],
+  canRequestPromotion: false,
+  version: 1,
+  hasFetched: true,
+  canEdit: true,
+  canEditOrgKeys: true,
+  orgProviderKeys: {},
+  canExport: true,
+  exportMinRole: null,
+  canViewRoster: true,
+  rosterViewMinRole: 600,
+  canViewMemberProgress: true,
+  memberProgressViewMinRole: 600,
+  refresh: vi.fn(async () => null),
+  patch: vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })),
+  requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
+})
+const useOrgSettingsMock = vi.fn<() => OrgSettingsMock>(defaultOrgSettingsMock)
+const canEditRosterProgressFloorMock = vi.fn((level: number | null | undefined) => (level ?? 0) >= 700)
+vi.mock("@/hooks/useOrgSettings", () => ({
+  useOrgSettings: () => useOrgSettingsMock(),
+  canEditRosterProgressFloor: (level: number | null | undefined) => canEditRosterProgressFloorMock(level),
+}))
+
+beforeEach(async () => {
   localStorage.clear()
   mockUseFrontierSession.mockReturnValue({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false })
+  // AQU-486: reset the org list back to the default (owner) — the
+  // below-floor visibility test overrides this to a contributor-level org,
+  // and restoreAllMocks does not undo a persistent mockResolvedValue.
+  const { listMyOrgs } = await import("@/lib/frontier/orgs")
+  vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
   // Reset to the default (no invites); the pending-invites test overrides this.
   // restoreAllMocks does not reset vi.fn implementations, so without this a
   // mockResolvedValue set in one test would leak into the next.
   listMyPendingInvitesMock.mockResolvedValue([])
   // Same leak-guard for the accessible-projects feed (shared-section test).
   fetchAccessibleProjectsMock.mockResolvedValue([])
+  // AQU-486: reset the org-settings mock to its default (everything visible,
+  // maintainer floor) — restoreAllMocks does not undo a persistent
+  // mockReturnValue set by an earlier test.
+  useOrgSettingsMock.mockReturnValue(defaultOrgSettingsMock())
+  canEditRosterProgressFloorMock.mockImplementation((level: number | null | undefined) => (level ?? 0) >= 700)
 })
 afterEach(() => vi.restoreAllMocks())
 
@@ -240,6 +281,70 @@ describe("OrgHome", () => {
     expect(link.getAttribute("href")).toBe("/projects/p503")
     // Own-org project must not leak into the shared section.
     expect(within(shared).queryByText("Legacy Translation")).not.toBeInTheDocument()
+  })
+})
+
+// ── AQU-486: per-section visibility chrome ──────────────────────────────────
+
+describe("OrgHome per-section visibility (AQU-486)", () => {
+  // WHY: Team workload / Team usage are per-member productivity views gated
+  // by the AQU-485 memberProgressViewMinRole floor. A below-floor caller must
+  // see nothing (no empty section leaking that workload/usage tracking
+  // exists); a permitted caller sees the section with a badge naming who can
+  // see it, and — if they can edit — an inline control to change the floor.
+
+  it("hides the Team workload section entirely for a caller below the memberProgressViewMinRole floor", async () => {
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: 600, // Maintainer floor
+    })
+    // Contributor-level org role — below the Maintainer floor.
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 400, name: "contributor" } }])
+
+    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
+
+    expect(screen.queryByTestId("section-team-workload")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("section-team-usage")).not.toBeInTheDocument()
+  })
+
+  it("shows the Team workload section with a visibility badge for a caller meeting the floor", async () => {
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: 600,
+    })
+    // Default org role in this suite is 700 (owner) — meets the floor.
+    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
+
+    const section = await screen.findByTestId("section-team-workload")
+    expect(within(section).getByTestId("section-visibility-badge")).toHaveTextContent(/maintainers & owners/i)
+  })
+
+  it("a maintainer can change the Team workload floor via the inline advanced toggle", async () => {
+    const patch = vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } }))
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: 600,
+      patch,
+    })
+    canEditRosterProgressFloorMock.mockReturnValue(true)
+
+    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
+
+    const section = await screen.findByTestId("section-team-workload")
+    fireEvent.click(within(section).getByTestId("section-visibility-badge"))
+
+    const trigger = await screen.findByRole("combobox", { name: /who can see this section/i })
+    fireEvent.click(trigger)
+    const option = await screen.findByRole("option", { name: /everyone with access/i })
+    fireEvent.pointerMove(option)
+    fireEvent.mouseMove(option)
+    fireEvent.keyDown(option, { key: "Enter" })
+
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: 100 }))
   })
 })
 

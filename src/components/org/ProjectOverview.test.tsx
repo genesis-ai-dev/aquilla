@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, waitFor, fireEvent } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { ProjectOverview, deriveProjectStatus } from "./ProjectOverview"
@@ -74,6 +74,38 @@ vi.mock("@/lib/sync/assignments", () => ({
   getMyAssignments: vi.fn(async () => []),
 }))
 
+// AQU-486: useOrgSettings backs the per-section visibility floors
+// (rosterViewMinRole / memberProgressViewMinRole). Mocked hermetically here
+// (same pattern as Settings.test.tsx) rather than letting it hit real fetch —
+// individual describe blocks override the return value per test.
+type OrgSettingsMock = ReturnType<typeof import("@/hooks/useOrgSettings").useOrgSettings>
+const defaultOrgSettingsMock = (): OrgSettingsMock => ({
+  settings: {},
+  orgRules: [],
+  promotionRequests: [],
+  canRequestPromotion: false,
+  version: 1,
+  hasFetched: true,
+  canEdit: true,
+  canEditOrgKeys: true,
+  orgProviderKeys: {},
+  canExport: true,
+  exportMinRole: null,
+  canViewRoster: true,
+  rosterViewMinRole: 600,
+  canViewMemberProgress: true,
+  memberProgressViewMinRole: 600,
+  refresh: vi.fn(async () => null),
+  patch: vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })),
+  requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
+})
+const useOrgSettingsMock = vi.fn<() => OrgSettingsMock>(defaultOrgSettingsMock)
+const canEditRosterProgressFloorMock = vi.fn((level: number | null | undefined) => (level ?? 0) >= 700)
+vi.mock("@/hooks/useOrgSettings", () => ({
+  useOrgSettings: () => useOrgSettingsMock(),
+  canEditRosterProgressFloor: (level: number | null | undefined) => canEditRosterProgressFloorMock(level),
+}))
+
 function projectRecord(over: Partial<ProjectRecord> & { level: number; deletedAt?: string }): ProjectRecord {
   const { level, deletedAt, ...rest } = over
   return {
@@ -108,6 +140,11 @@ beforeEach(async () => {
   // implementations, so restore the default (single org, auto-selected) here.
   const { listMyOrgs } = await import("@/lib/frontier/orgs")
   vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
+  // AQU-486: reset the org-settings mock to its default (everything visible,
+  // maintainer floor) — vi.clearAllMocks() does not undo a persistent
+  // mockReturnValue set by an earlier test.
+  useOrgSettingsMock.mockReturnValue(defaultOrgSettingsMock())
+  canEditRosterProgressFloorMock.mockImplementation((level: number | null | undefined) => (level ?? 0) >= 700)
 })
 afterEach(() => vi.clearAllMocks())
 
@@ -547,5 +584,85 @@ describe("ProjectOverview AI-drafted segment (FRO-292)", () => {
     await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
     // "AI Drafted" must NOT appear when count is 0 (forward-only honest rendering)
     expect(screen.queryByText("AI Drafted")).not.toBeInTheDocument()
+  })
+})
+
+// ── AQU-486: per-section visibility chrome ──────────────────────────────────
+
+describe("ProjectOverview per-section visibility (AQU-486)", () => {
+  // WHY: the Members card must be a hard gate on the AQU-485 rosterViewMinRole
+  // floor — a below-floor caller must not see the card at all (no empty
+  // placeholder leaking that a roster exists), while a permitted caller sees
+  // it, with a badge naming who can see it and (if they can edit) an inline
+  // control to change the floor without leaving the page.
+
+  it("hides the Members card entirely when the org has raised the roster floor above the caller's role", async () => {
+    // WHY: canManage (project role >= 600) alone used to be the only gate on
+    // this card. AQU-486 adds a second, independent gate — the org's
+    // rosterViewMinRole floor — and the floor must win: a maintainer-level
+    // caller (canManage=true) whose role still falls short of an
+    // owner-raised floor must see nothing, not an empty card.
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: 700, // org raised the floor to Owner-only
+      canViewRoster: false,
+    })
+    useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByTestId("overview-members-card")).not.toBeInTheDocument()
+  })
+
+  it("shows the Members card with a visibility badge for a caller meeting the roster floor", async () => {
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: 600,
+      canViewRoster: true,
+    })
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-members-card")
+    expect(within(card).getByTestId("section-visibility-badge")).toHaveTextContent(/maintainers & owners/i)
+  })
+
+  it("a maintainer can change the roster floor via the inline advanced toggle", async () => {
+    const patch = vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } }))
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: 600,
+      canViewRoster: true,
+      patch,
+    })
+    canEditRosterProgressFloorMock.mockReturnValue(true)
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-members-card")
+    fireEvent.click(within(card).getByTestId("section-visibility-badge"))
+
+    const trigger = await screen.findByRole("combobox", { name: /who can see this section/i })
+    fireEvent.click(trigger)
+    const option = await screen.findByRole("option", { name: /everyone with access/i })
+    fireEvent.pointerMove(option)
+    fireEvent.mouseMove(option)
+    fireEvent.keyDown(option, { key: "Enter" })
+
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ rosterViewMinRole: 100 }))
+  })
+
+  it("does not show the advanced toggle chevron for a caller who cannot edit the floor", async () => {
+    canEditRosterProgressFloorMock.mockReturnValue(false)
+    useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-members-card")
+    // Scoped to the badge itself, not the whole card — MembersTab's own
+    // "Add member" role picker renders an unrelated combobox in this card
+    // regardless of the visibility badge's edit state.
+    const badge = within(card).getByTestId("section-visibility-badge")
+    expect(within(badge).queryByRole("combobox")).not.toBeInTheDocument()
+    expect(badge.querySelector("svg.lucide-chevron-down")).not.toBeInTheDocument()
   })
 })

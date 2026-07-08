@@ -192,6 +192,12 @@ describe("validation", () => {
     expect((assignBtn as HTMLButtonElement).disabled).toBe(true)
   })
 
+  // AQU-495 regression: onAssigned is the sole hook the open-assignments /
+  // assigned-to-me lists rely on to revalidate after a create — a caller
+  // that doesn't wire this up (or wires it to an unrelated refresh, as
+  // ProjectOverview.tsx's Team card currently does — see SWARM-TODO(AQU-495)
+  // in src/lib/sync/assignments.ts) reproduces the "no open assignments
+  // until manual refresh" bug from the walkthrough.
   it("calls onAssigned and closes after successful creation", async () => {
     const onAssigned = vi.fn()
     const onOpenChange = vi.fn()

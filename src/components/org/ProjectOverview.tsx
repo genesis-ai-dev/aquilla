@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom"
 import { MoreHorizontal, ChevronRight, Copy, Check, Download } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { ExpandableName } from "@/components/ui/expandable-name"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { OrgSidebar } from "./OrgSidebar"
@@ -994,8 +995,14 @@ export function ProjectOverview() {
                                 >
                                   <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isExpanded && "rotate-90")} />
                                 </button>
+                                {/* AQU-491: full name was hover-only (tooltip); ExpandableName
+                                    adds a click-to-reveal Popover so a truncated file name is
+                                    discoverable without hovering. Tooltip kept for parity/hover
+                                    users; both read from the same fixed w-32 column. */}
                                 <AppTooltip content={f.name}>
-                                  <span className="w-32 shrink-0 truncate text-sm font-medium">{f.name}</span>
+                                  <span className="w-32 shrink-0 text-sm font-medium">
+                                    <ExpandableName name={f.name} />
+                                  </span>
                                 </AppTooltip>
                                 <FileProgressBars tPct={tPct} vPct={vPct} />
                                 <AppTooltip content="Cells filled / cells approved / total cells · word count">
@@ -1149,9 +1156,10 @@ export function ProjectOverview() {
                         const donePct = w.cellsTotal > 0 ? Math.round((w.cellsDone / w.cellsTotal) * 100) : 0
                         return (
                           <li key={w.userId} className="flex items-center gap-3 text-sm">
+                            {/* AQU-491: click-to-reveal affordance, see file-name cell above. */}
                             <AppTooltip content={w.username ?? String(w.userId)}>
-                              <span className="w-32 shrink-0 font-medium truncate">
-                                {w.username ?? `User ${w.userId}`}
+                              <span className="w-32 shrink-0 font-medium">
+                                <ExpandableName name={w.username ?? `User ${w.userId}`} />
                               </span>
                             </AppTooltip>
                             <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">

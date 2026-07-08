@@ -4,8 +4,8 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 /**
  * AdminConsole — Activity tab.
  *
- * AdminConsole.tsx has tabs: Overview, Users, Projects, Teams, Activity.
- * The Activity tab renders a Table with head ["When", "User", "Type", "Description"].
+ * AdminConsole.tsx has tabs: Overview, Tenants, People, Projects, Activity, Platform.
+ * The Activity tab renders a timeline headed "Activity".
  *
  * This spec: navigate to /admin → click "Activity" tab → verify the "When"
  * column header is visible.
@@ -23,10 +23,9 @@ test("admin console Activity tab renders When column header", async ({ alice }) 
   })
 
   // Click the Activity tab.
-  const activityTab = alice.getByRole("button", { name: /^Activity$/i })
+  const activityTab = alice.getByRole("tab", { name: /^Activity$/i })
   await expect(activityTab).toBeVisible({ timeout: 5_000 })
   await activityTab.click()
 
-  // The Activity table shows "When" as the first column header.
-  await expect(alice.getByText(/^When$/)).toBeVisible({ timeout: 5_000 })
+  await expect(alice.getByText(/Cross-tenant events, most recent first/i)).toBeVisible({ timeout: 5_000 })
 })

@@ -43,8 +43,8 @@ test("search panel opens, accepts a query, and shows no-results for unmatched te
   const panel = alice.getByRole("dialog")
   await expect(panel).toBeVisible({ timeout: 5_000 })
 
-  // 2. The only textbox in the dialog is the search input.
-  const input = panel.getByRole("textbox").first()
+  // 2. The command input exposes a combobox role.
+  const input = panel.getByRole("combobox").first()
   await expect(input).toBeVisible({ timeout: 5_000 })
 
   // Type a query that definitely won't match any cell content.

@@ -3,9 +3,9 @@ import { test, expect } from "../../helpers/multi-user"
 /**
  * Admin console (/admin) — tabs and overview stats.
  *
- * AdminConsole.tsx renders tabs: Overview, Orgs, Teams, Users, Projects, Activity.
- * The Overview tab shows stat cards for Orgs, Teams, Users, Active projects, etc.
- * Switching to the Orgs tab renders a table with columns Org/Owner/Members/Projects.
+ * AdminConsole.tsx renders tabs: Overview, Tenants, People, Projects, Activity, Platform.
+ * The Overview tab shows stat cards for organizations, teams, users, active projects, etc.
+ * Switching to the Tenants tab renders a table with Organization/Owner/Members/Projects/Teams.
  *
  * Alice is a superadmin in the test environment (seeded by test fixtures).
  * This spec: navigates to /admin → Overview tab shows stat headings →
@@ -20,11 +20,9 @@ test("admin console loads overview and Orgs tab", async ({ alice }) => {
     alice.getByText(/Orgs|Users|Active projects/i).first()
   ).toBeVisible({ timeout: 10_000 })
 
-  // Switch to Orgs tab.
-  const orgsTab = alice.getByRole("button", { name: /^Orgs$/i })
-  await expect(orgsTab).toBeVisible({ timeout: 5_000 })
-  await orgsTab.click()
+  const tenantsTab = alice.getByRole("tab", { name: /^Tenants$/i })
+  await expect(tenantsTab).toBeVisible({ timeout: 5_000 })
+  await tenantsTab.click()
 
-  // Orgs table header appears.
-  await expect(alice.getByText(/^Org$/i).first()).toBeVisible({ timeout: 5_000 })
+  await expect(alice.getByRole("columnheader", { name: /^Organization$/i }).first()).toBeVisible({ timeout: 5_000 })
 })

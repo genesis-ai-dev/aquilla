@@ -17,6 +17,8 @@ import { test, expect } from "../../helpers/multi-user"
  * ProjectStep (verify inputs).
  */
 test("onboarding ProjectStep inputs enable Create Project button", async ({ alice }) => {
+  await alice.goto("/")
+  await alice.evaluate(() => localStorage.removeItem("codex:onboardingComplete"))
   await alice.goto("/onboarding")
   await alice.waitForLoadState("networkidle")
 
@@ -41,7 +43,7 @@ test("onboarding ProjectStep inputs enable Create Project button", async ({ alic
 
     // Generic forward button.
     const forwardBtn = alice.getByRole("button", {
-      name: /Get started|Continue|Next|Skip|Already have|Sign in/i,
+      name: /Get started|Continue|Next|Skip|Already have|Sign in|Just me/i,
     }).first()
     if (await forwardBtn.isVisible({ timeout: 1_500 }).catch(() => false)) {
       await forwardBtn.click()

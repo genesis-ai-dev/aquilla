@@ -35,11 +35,9 @@ test("CharacterModal Make narrator sets the voice as narrator/default", async ({
   await ws.waitForEditor()
 
   // Switch to Audio mode.
-  const audioBtn = alice
-    .locator('button[aria-pressed="false"]')
-    .filter({ hasText: /Audio/i })
-  await expect(audioBtn.first()).toBeVisible({ timeout: 5_000 })
-  await audioBtn.first().click()
+  const audioTab = alice.getByRole("tab", { name: /Audio|Media/i }).first()
+  await expect(audioTab).toBeVisible({ timeout: 5_000 })
+  await audioTab.click()
 
   // Create a new voice.
   const newVoiceBtn = alice.getByRole("button", { name: /New voice/i })

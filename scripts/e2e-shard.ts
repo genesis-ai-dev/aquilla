@@ -18,7 +18,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(__dirname, "..")
 
 // Args: [N] then optional [-- <forwarded playwright args>].
-const argv = process.argv.slice(2)
+// `pnpm run test:e2e:shard -- 3 -- smoke.spec` includes a leading separator
+// before our own args; accept it because it is an easy muscle-memory mistake.
+const rawArgv = process.argv.slice(2)
+const argv = rawArgv[0] === "--" && /^\d+$/.test(rawArgv[1] ?? "") ? rawArgv.slice(1) : rawArgv
 const dashDash = argv.indexOf("--")
 const ownArgs = dashDash >= 0 ? argv.slice(0, dashDash) : argv
 const forwarded = dashDash >= 0 ? argv.slice(dashDash + 1) : []

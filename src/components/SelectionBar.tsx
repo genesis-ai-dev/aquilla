@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { Languages, Sparkles, Wand2, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
+import { type CellStore, useCellStoreVersion } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { Button } from "@/components/ui/button"
@@ -24,7 +25,7 @@ import { canPerform } from "@/lib/sync/role-policy"
 
 interface Props {
   project: ProjectRecord
-  cells: CellData[]
+  cellStore: CellStore
   session: FrontierSession | null
   username: string
   completeSingle?: (cell: CellData) => Promise<void> | void
@@ -53,8 +54,9 @@ type Running =
   | { kind: "validate" }
   | { kind: "voice" }
 
-export function SelectionBar({ project, cells, username, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true }: Props) {
+export function SelectionBar({ project, cellStore, username, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true }: Props) {
   const selected = useSelectedIds()
+  const cellStoreVersion = useCellStoreVersion(cellStore)
   const [running, setRunning] = useState<Running>({ kind: "idle" })
   const [toastMsg, setToastMsg] = useState<string | null>(null)
 
@@ -81,9 +83,8 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
   }, [])
 
   const selectedCells = useMemo(() => {
-    const wanted = selected
-    return cells.filter((c) => wanted.has(c.id)).slice(0, MAX_SELECTED)
-  }, [cells, selected])
+    return cellStore.getCellsByIds(selected).slice(0, MAX_SELECTED)
+  }, [cellStore, cellStoreVersion, selected])
 
   const missingCount = useMemo(
     () => selectedCells.filter((c) => !c.translated.trim() && c.original?.trim()).length,

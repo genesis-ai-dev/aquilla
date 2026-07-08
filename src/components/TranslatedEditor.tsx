@@ -579,6 +579,18 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     editor?.setEditable(!isReadOnly)
   }, [editor, isReadOnly])
 
+  const [, forceEditorStateUpdate] = useState(0)
+  useEffect(() => {
+    if (!editor) return
+    const refresh = () => forceEditorStateUpdate((n) => (n + 1) % 1_000_000)
+    editor.on("transaction", refresh)
+    editor.on("selectionUpdate", refresh)
+    return () => {
+      editor.off("transaction", refresh)
+      editor.off("selectionUpdate", refresh)
+    }
+  }, [editor])
+
   const handleEditorKeyDownCapture = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Tab") return
     const target = event.target as HTMLElement | null

@@ -1,4 +1,4 @@
-import { type Page, expect } from "@playwright/test"
+import { type Page, type Locator, expect } from "@playwright/test"
 
 export interface CreateProjectOpts {
   name?: string
@@ -29,19 +29,15 @@ export class Dashboard {
     const source = opts.source ?? "en"
     const target = opts.target ?? "fr"
 
-    // A freshly-reset org renders three "+ New Project" buttons on /projects:
-    // the page header, the empty-state "Create your first project" CTA, and the
-    // org setup checklist. They all open the same create dialog, so scope to the
-    // first (the header) to avoid a strict-mode violation.
-    await this.page.getByRole("button", { name: /new project/i }).first().click()
+    const dialog = await this.openCreateProjectDialog()
     // Anchored, case-insensitive labels: the AD-9 "Advanced: project shape"
     // radios carry long descriptions (e.g. the "Source-only" option mentions
     // "target language"), so we anchor with ^...$ to avoid matching those,
     // while /i tolerates label casing ("Project name" vs "Project Name").
-    await this.page.getByLabel(/^Project name$/i).fill(name)
-    await this.page.getByLabel(/^Source language$/i).fill(source)
-    await this.page.getByLabel(/^Target language$/i).fill(target)
-    await this.page.getByRole("button", { name: /^Create Project$/i }).click()
+    await dialog.getByLabel(/^Project name$/i).fill(name)
+    await dialog.getByLabel(/^Source language$/i).fill(source)
+    await dialog.getByLabel(/^Target language$/i).fill(target)
+    await dialog.getByRole("button", { name: /^Create Project$/i }).click()
 
     // The project name renders in more than one place after creation (card +
     // heading), so scope to the first match to avoid strict-mode violations.
@@ -49,14 +45,27 @@ export class Dashboard {
     return name
   }
 
+  async openCreateProjectDialog(): Promise<Locator> {
+    // A freshly-reset org renders three "+ New Project" buttons on /projects:
+    // the page header, the empty-state "Create your first project" CTA, and the
+    // org setup checklist. They all open the same create dialog, so scope to the
+    // first (the header) to avoid a strict-mode violation.
+    await this.page.getByRole("button", { name: /new project/i }).first().click()
+    const dialog = this.page.getByRole("dialog")
+    await expect(dialog).toBeVisible({ timeout: 5_000 })
+    return dialog
+  }
+
   /** Click a project card by name and wait for the workspace shell to render.
    * Dismisses the per-project Setup Checklist drawer if it auto-opens. */
   async openProject(name: string): Promise<void> {
-    await this.page.getByText(name).first().click()
     // A project card now lands on the project Overview (/projects/:id). Enter
     // the editor workspace (/project/:id) via its "Open project" action when
     // present (older UIs went straight to the editor).
     const openInEditor = this.page.getByRole("button", { name: /^Open project$/i })
+    if (!(await openInEditor.isVisible({ timeout: 1_000 }).catch(() => false))) {
+      await this.page.getByRole("link", { name, exact: true }).click()
+    }
     if (await openInEditor.isVisible({ timeout: 8_000 }).catch(() => false)) {
       await openInEditor.click()
     }

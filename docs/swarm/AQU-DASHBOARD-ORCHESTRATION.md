@@ -75,3 +75,28 @@ Run mode: **WS-Perms first, then checkpoint** (user decision 2026-07-08).
 - Sorting: `OrgHome.tsx::sortProjectsByLens`, `ProjectsList.tsx`, `portfolio.ts` (→ 499). NOTE: current sort is ProjectLens (recent/least-translated/etc.), NOT "total cells" as the issue assumed — agent to reconcile.
 
 **Wave revision:** WS-Perms = P1: AQU-485 solo (touches settings+perm-services+roster). P2 (after 485 merges): AQU-487, 501, 486 in parallel (487=perm-services/members, 501=ProjectSettings.tsx, 486=OrgHome/ProjectOverview — mutually disjoint). ProjectOverview/OrgHome are a hard-serialize hotspot for later waves.
+
+---
+
+## FINAL STATUS — 2026-07-08 (WS-Perms SHIPPED to local dev; rest PAUSED by user)
+
+**DONE + promoted to local `dev` (unpushed), fast-forward tip `1c5500a78`:**
+| Issue | Commit | Verified | Live-UI QA |
+|-------|--------|----------|------------|
+| AQU-485 roster/member-progress visibility perms | `74db04be4` | SPA tsc0 + vitest; aw tsc0 + 606 tests (+258-line enforcement test) | DEFERRED (by user) |
+| AQU-487 remove default-perm footgun | `dc2a49ab5` | root tsc0; aw tsc0 + 606; FE 15/15 | DEFERRED |
+| AQU-486 per-section visibility indicators | `e8db2cffc` | tsc0; vitest 54/54 | DEFERRED — **design-led, eyeball recommended** |
+| AQU-501 project-settings sub-menu IA | `b51747704` | tsc0; vitest 19/19 | DEFERRED — **updated ~20 e2e specs NOT run** |
+
+Consolidated integration re-gate (merged): SPA tsc0 · SPA vitest 120/120 (11 WS-Perms files) · auth-worker tsc0 + 606/606. All 4 → Linear **Fixed**. AQU-425 To-Do → Done.
+
+**Caveats to close later:** live-UI QA never run (unit gates only); 486 is HITL/design; 501's rewritten e2e smoke specs unrun (pre-push hook or a manual `pnpm test:e2e:smoke` will exercise them); nothing pushed to origin.
+
+**PAUSED — remain ready `Todo`, resume with `/swarm` (this doc drives it):**
+- WS-Progress-table (serialize, same component): AQU-493 → 499 → 500 → 490 → 492
+- WS-Dashboard-labels: AQU-488, 491, 489
+- WS-Assignments (serialize): AQU-494 → 495 → 496 → 497
+- WS-Member (after 485 — already merged): AQU-498 (consume the `SWARM-TODO(AQU-498)` hook + `memberProgressViewMinRole`)
+- NOTE for 499: current sort is ProjectLens, not "total cells" — reconcile the issue's premise.
+
+**Backlog (not in swarm scope):** AQU-502..505 (needs-info), AQU-506 (Monday), AQU-507 (PM-sort).

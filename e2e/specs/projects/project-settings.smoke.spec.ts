@@ -25,7 +25,7 @@ test("project settings name change saves and reflects in workspace", async ({ al
   expect(projectId).toBeTruthy()
 
   // Navigate directly to the settings page.
-  await alice.goto(`/project/${projectId}/settings`)
+  await alice.goto(`/project/${projectId}/settings?section=general`)
   await alice.waitForLoadState("networkidle")
 
   // 1. Find the Project Name input (Label htmlFor="pname", Input id="pname").
@@ -45,7 +45,9 @@ test("project settings name change saves and reflects in workspace", async ({ al
 
   // 3. Click Save — this persists in place.
   await saveBtn.click()
-  await expect(alice).toHaveURL(new RegExp(`/project/${projectId}/settings$`), { timeout: 10_000 })
+  // AQU-501: the General pane is expressed via `?section=general`, so match
+  // the path prefix rather than anchoring on end-of-string.
+  await expect(alice).toHaveURL(new RegExp(`/project/${projectId}/settings(\\?|$)`), { timeout: 10_000 })
   await expect(nameInput).toHaveValue(newName, { timeout: 5_000 })
   await expect(alice.getByText(/Saved: project name/i)).toBeVisible({ timeout: 10_000 })
 })

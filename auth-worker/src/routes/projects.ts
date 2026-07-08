@@ -46,8 +46,10 @@ import {
 import { getFileChapters, getMyAssignments, getProjectAssignmentRoster } from "../services/assignments"
 import {
   bumpOrgActivity,
+  canViewRoster,
   getEffectiveOrgRole,
   getOrCreateUserOrg,
+  getRosterViewMinRole,
   listEffectiveProjectMembers,
 } from "../services/org-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
@@ -594,6 +596,14 @@ projects.get("/:projectId/files/:fileId/chapters", authMiddleware, async (c) => 
   return c.json({ chapters })
 })
 
+/**
+ * AQU-485: additionally gated by the project's org rosterViewMinRole
+ * (default MAINTAINER=600) when the project belongs to an org. Projects with
+ * no org (org_id null — personal projects) have no org policy to check
+ * against and are never gated here. A caller below the floor gets a distinct
+ * 403 rather than the member list — the response must not leak the roster
+ * or its size.
+ */
 projects.get("/:projectId/members", authMiddleware, async (c) => {
   const user = c.get("user")
   const projectId = c.req.param("projectId") as string
@@ -606,6 +616,13 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
     .bind(projectId)
     .first<{ created_by: number; org_id: number | null }>()
   if (!project) return c.json({ error: "project not found" }, 404)
+
+  if (project.org_id != null) {
+    const rosterMinRole = await getRosterViewMinRole(c.env, project.org_id)
+    if (!canViewRoster(role.level, rosterMinRole)) {
+      return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
+    }
+  }
 
   const members = await listEffectiveProjectMembers(
     c.env,

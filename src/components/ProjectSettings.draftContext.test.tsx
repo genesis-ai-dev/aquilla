@@ -107,9 +107,11 @@ vi.mock("@/lib/metrics/use-post-edit-metrics", () => ({
 
 // ─── Render helper ───────────────────────────────────────────────────────────
 
+// AQU-501: Draft Context lives in the "AI & completion" sub-menu pane —
+// deep-link straight there via `?section=`.
 function renderSettings() {
   return render(
-    <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings`]}>
+    <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings?section=ai`]}>
       <Routes>
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
       </Routes>

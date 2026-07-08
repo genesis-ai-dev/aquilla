@@ -111,9 +111,12 @@ vi.mock("@/lib/metrics/use-post-edit-metrics", () => ({
   }),
 }))
 
+// AQU-501: Bible resources lives in the "General" sub-menu pane — deep-link
+// straight to it via the `?section=` search param so these tests don't have
+// to click through the settings index first.
 function renderSettings() {
   return render(
-    <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings`]}>
+    <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings?section=general`]}>
       <Routes>
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
       </Routes>
@@ -192,7 +195,7 @@ describe("ProjectSettings — Bible resources (FRO-460 derive-on-read)", () => {
 
     const rerenderSettings = () =>
       rerender(
-        <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings`]}>
+        <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings?section=general`]}>
           <Routes>
             <Route path="/project/:id/settings" element={<ProjectSettings />} />
           </Routes>

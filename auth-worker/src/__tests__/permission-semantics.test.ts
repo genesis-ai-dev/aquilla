@@ -560,7 +560,12 @@ describe("Role × Scope edit gates", () => {
       expect(res.status).toBe(403)
     })
 
-    it("org viewer (100) can list org members", async () => {
+    // AQU-485: the default rosterViewMinRole floor is MAINTAINER (600) — safe
+    // for sensitive teams out of the box. This SUPERSEDES the pre-AQU-485
+    // behavior (viewer could always list org members); the roster-visibility
+    // permission tests in roster-progress-visibility.test.ts cover the full
+    // matrix (default, configured floor, independence from member-progress).
+    it("org viewer (100) is denied the roster under the AQU-485 default floor (maintainer)", async () => {
       await seedBaseOrg()
       await env.AQUILLA_PG.prepare(
         "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 100, 1)",
@@ -568,6 +573,16 @@ describe("Role × Scope edit gates", () => {
       const res = await app.request(
         "/api/v2/orgs/1/members",
         { headers: authHeader(await jwtFor("viewer_member")) },
+        env,
+      )
+      expect(res.status).toBe(403)
+    })
+
+    it("org owner (700) still lists org members under the AQU-485 default floor", async () => {
+      await seedBaseOrg()
+      const res = await app.request(
+        "/api/v2/orgs/1/members",
+        { headers: authHeader(await jwtFor("owner")) },
         env,
       )
       expect(res.status).toBe(200)

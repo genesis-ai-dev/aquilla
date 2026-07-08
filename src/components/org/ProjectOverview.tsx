@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { MoreHorizontal } from "lucide-react"
+import { MoreHorizontal, ChevronRight, Copy, Check, Download } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
@@ -18,9 +18,20 @@ import { downloadProjectBundle } from "@/lib/sync/export-bundle"
 import { AssignWork } from "./AssignWork"
 import { MembersTab } from "@/components/ProjectMembersPage"
 import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
-import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
+import { fetchProjectFiles, fetchAllFileCells, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
+import { buildCanonicalRollup, type BookRollup, type ChapterRollup } from "@/lib/progress/canonical-rollup"
+import { sortFiles, filterFilesByName, FILE_SORT_MODES, type FileSortMode } from "@/lib/progress/file-sort"
+import { progressRowsToCsv, progressCsvFilename } from "@/lib/progress/progress-csv"
+import { downloadBlob } from "@/lib/export/export-service"
 import { getProjectAssignments, type AssigneeWorkload } from "@/lib/sync/assignments"
+import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
+import { ROLE } from "@/lib/frontier/roles"
+import {
+  SectionVisibilityBadge,
+  SectionVisibilityGate,
+  sectionTintClass,
+} from "./SectionVisibilityBadge"
 import { Badge } from "@/components/ui/badge"
 import {
   Dialog,
@@ -31,7 +42,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { DatePicker, dateToDeadlineString, deadlineStringToDate } from "@/components/ui/date-picker"
+import { cn } from "@/lib/utils"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 /** Max per-file rows shown on the overview; the rest are counted as "+N more". */
 const FILE_ROW_CAP = 12
@@ -90,10 +111,19 @@ function DeadlineChip({ status }: { status: "overdue" | "soon" | "ok" | null }) 
 
 // ── Stat tiles (big %) ────────────────────────────────────────────────────────
 
-function StatTile({ label, pct, colorClass, tooltip }: { label: string; pct: number; colorClass: string; tooltip?: string }) {
+function StatTile({ label, pct, colorClass, tooltip, display }: {
+  label: string
+  pct: number
+  colorClass: string
+  tooltip?: string
+  /** AQU-490: override the rendered value (e.g. "N/A") when there is no real
+   *  metric to show a percentage for. `pct` is still required by callers but
+   *  ignored visually when `display` is set. */
+  display?: string
+}) {
   const tile = (
     <div className="flex flex-col items-center rounded-lg bg-muted/40 px-5 py-3 text-center">
-      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{Math.round(pct * 100)}%</p>
+      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{display ?? `${Math.round(pct * 100)}%`}</p>
       <p className="mt-0.5 text-[11px] text-muted-foreground">{label}</p>
     </div>
   )
@@ -140,6 +170,125 @@ function FileProgressBars({ tPct, vPct }: { tPct: number; vPct: number }) {
         <span className="block h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${vPct}%` }} />
       </span>
     </span>
+  )
+}
+
+// ── Chapter/verse rollup (AQU-493) ───────────────────────────────────────────
+
+/** Small inline "N%" bar reused for the book/chapter rows of the rollup tree. */
+function MiniRollupBar({ filledPct, approvedPct }: { filledPct: number; approvedPct: number }) {
+  return (
+    <span className="flex w-24 shrink-0 flex-col gap-[3px]">
+      <span className="block h-1 rounded-full bg-muted overflow-hidden">
+        <span className="block h-full rounded-full bg-amber-500" style={{ width: `${filledPct}%` }} />
+      </span>
+      <span className="block h-1 rounded-full bg-muted overflow-hidden">
+        <span className="block h-full rounded-full bg-emerald-500" style={{ width: `${approvedPct}%` }} />
+      </span>
+    </span>
+  )
+}
+
+function ChapterRow({ chapter }: { chapter: ChapterRollup }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <li>
+      <button
+        type="button"
+        data-testid="chapter-row"
+        className="flex w-full items-center gap-2 py-0.5 text-left text-xs hover:text-foreground"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+        <span className="w-10 shrink-0 text-muted-foreground">Ch {chapter.chapterLabel}</span>
+        <MiniRollupBar filledPct={chapter.filledPct} approvedPct={chapter.approvedPct} />
+        <span className="text-[10px] tabular-nums text-muted-foreground">
+          {chapter.filledCount}/{chapter.approvedCount}/{chapter.cellCount}
+        </span>
+      </button>
+      {open && (
+        <ul className="ml-5 mt-0.5 mb-1 grid grid-cols-[repeat(auto-fill,minmax(2.5rem,1fr))] gap-1" aria-label={`${chapter.chapter} verses`}>
+          {chapter.verses.map((v) => (
+            <li
+              key={v.ref}
+              data-testid="verse-cell"
+              title={v.ref}
+              className={cn(
+                "rounded px-1.5 py-0.5 text-center text-[10px] tabular-nums",
+                v.approved ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                  : v.filled ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                  : "bg-muted text-muted-foreground",
+              )}
+            >
+              {v.verseLabel}
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  )
+}
+
+function BookRow({ book }: { book: BookRollup }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <li>
+      <button
+        type="button"
+        data-testid="book-row"
+        className="flex w-full items-center gap-2 py-0.5 text-left text-xs font-medium hover:text-foreground"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+        <span className="w-10 shrink-0">{book.book}</span>
+        <MiniRollupBar filledPct={book.filledPct} approvedPct={book.approvedPct} />
+        <span className="text-[10px] tabular-nums text-muted-foreground">
+          {book.filledCount}/{book.approvedCount}/{book.cellCount}
+        </span>
+      </button>
+      {open && (
+        <ul className="ml-5 mt-0.5" aria-label={`${book.book} chapters`}>
+          {book.chapters.map((c) => (
+            <ChapterRow key={c.chapter} chapter={c} />
+          ))}
+        </ul>
+      )}
+    </li>
+  )
+}
+
+/**
+ * Nested book › chapter › verse progress rollup shown under a file row once
+ * expanded. `books === null` means the file's cells carry no parseable
+ * canonical reference (AQU-493 detection is generic — see
+ * lib/progress/canonical-rollup.ts) — render an explanatory note instead of
+ * an empty tree, per the acceptance criteria.
+ *
+ * SWARM-TODO(AQU-493): verify live — open a Scripture project overview,
+ * click a file row's chevron to expand it, confirm chapter rows appear and
+ * their filled/approved counts sum to the file row's totals, then drill
+ * into a chapter to see the per-verse grid.
+ */
+function FileCanonicalRollup({ books, loading }: { books: BookRollup[] | null | undefined; loading: boolean }) {
+  if (loading) {
+    return <p className="ml-7 mt-1 text-xs text-muted-foreground">Loading chapter/verse breakdown…</p>
+  }
+  if (books === null) {
+    return (
+      <p className="ml-7 mt-1 text-xs text-muted-foreground">
+        No chapter/verse structure detected for this file.
+      </p>
+    )
+  }
+  if (books === undefined || books.length === 0) return null
+  return (
+    <ul className="ml-7 mt-1 border-l pl-3" data-testid="canonical-rollup-books" aria-label="Chapter/verse breakdown">
+      {books.map((b) => (
+        <BookRow key={b.book} book={b} />
+      ))}
+    </ul>
   )
 }
 
@@ -214,6 +363,25 @@ export function ProjectOverview() {
   const [showAllFiles, setShowAllFiles] = useState(false)
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
 
+  // AQU-499: sort/filter controls for the per-file breakdown list. Default
+  // sort is last-updated (most-recently-progressed first) per acceptance
+  // criteria — a PM opening the overview should see recent activity without
+  // configuring anything.
+  const [fileSortMode, setFileSortMode] = useState<FileSortMode>("last-updated")
+  const [fileNameFilter, setFileNameFilter] = useState("")
+
+  // AQU-500: transient "copied" feedback for the CSV-export control, mirroring
+  // the copy-affordance pattern used elsewhere (e.g. ChatMarkdown's code-block
+  // copy button).
+  const [csvCopied, setCsvCopied] = useState(false)
+
+  // AQU-493: chapter/verse rollup, lazily fetched per file on first expand.
+  // `undefined` = not yet fetched, `null` = fetched but no canonical refs
+  // found (flat-view fallback), `BookRollup[]` = ready to render.
+  const [expandedFileId, setExpandedFileId] = useState<string | null>(null)
+  const [rollups, setRollups] = useState<Record<string, BookRollup[] | null>>({})
+  const [rollupLoading, setRollupLoading] = useState<Record<string, boolean>>({})
+
   // FRO-474: project-only invitees (direct project_members grant, no org
   // membership) have `activeOrgId == null` or an org that doesn't include this
   // project's org. The portfolio endpoint is org-scoped, so fall back to the
@@ -221,6 +389,18 @@ export function ProjectOverview() {
   // org — `useProject` already gatekept access, so any orgId it returns is
   // one this user can legitimately query the portfolio for.
   const portfolioOrgId = activeOrgId ?? project?.orgId ?? null
+
+  // AQU-486: per-section visibility chrome. The roster + team-progress floors
+  // come from AQU-485's org settings; `projectRoleLevel` (not orgRoleLevel)
+  // is what gates viewing here per useOrgSettings' AD-12 max-wins contract —
+  // a project-only invitee's project.syncRole can exceed their (absent) org
+  // role. Editing the floor is still an org-role (owner-only) action, so
+  // canEditVisibility below intentionally reads the org role, not the
+  // project role.
+  const projectRoleLevel = project?.syncRole?.level ?? null
+  const orgSettings = useOrgSettings(portfolioOrgId, projectRoleLevel, projectRoleLevel)
+  const canEditVisibility = canEditRosterProgressFloor(projectRoleLevel)
+
   const loadRow = useCallback(async () => {
     if (!jwt || portfolioOrgId == null) return
     try {
@@ -267,6 +447,30 @@ export function ProjectOverview() {
       .catch(() => { if (!cancelled) setFiles([]) })
     return () => { cancelled = true }
   }, [jwt, id, firstFileId, project?.name])
+
+  // AQU-493: expand/collapse a file row's chapter/verse rollup. Fetches the
+  // file's full cell set (paired source+target) once per file, on demand —
+  // the aggregate `/files` rollup used above has no per-cell reference data,
+  // so this is a separate lazy fetch scoped to whichever file is expanded.
+  const toggleFileRollup = useCallback(async (file: FileSummary) => {
+    if (expandedFileId === file.fileId) {
+      setExpandedFileId(null)
+      return
+    }
+    setExpandedFileId(file.fileId)
+    if (file.fileId in rollups || !jwt) return
+    setRollupLoading((s) => ({ ...s, [file.fileId]: true }))
+    try {
+      const tok = await fetchSyncToken(jwt, id, file.fileId, { projectName: project?.name })
+      const rows = await fetchAllFileCells(id, file.fileId, tok.token)
+      setRollups((r) => ({ ...r, [file.fileId]: buildCanonicalRollup(rows) }))
+    } catch (e) {
+      console.warn("[ProjectOverview] chapter/verse rollup fetch failed:", e)
+      setRollups((r) => ({ ...r, [file.fileId]: null }))
+    } finally {
+      setRollupLoading((s) => ({ ...s, [file.fileId]: false }))
+    }
+  }, [expandedFileId, rollups, jwt, id, project?.name])
 
   const isOwner = (project?.syncRole?.level ?? 0) >= 700
   const canManage = (project?.syncRole?.level ?? 0) >= 600
@@ -489,9 +693,27 @@ export function ProjectOverview() {
               </div>
 
               {/* ── Progress card ── */}
+              {/* AQU-486: progress has no configurable floor today — everyone
+                  with project access can see it. The badge is read-only
+                  (informational), matching that reality rather than implying
+                  a toggle that doesn't exist server-side. */}
+              {/*
+               * SWARM-TODO(AQU-490): verify live — open an oral/dubbed project
+               * overview with partial audio validation and confirm the Progress
+               * card shows "Has Audio" (coverage, relabeled from "Audio") and a
+               * separate "Audio Validated" tile reading "N/A" with a tooltip
+               * explaining validation isn't tracked per-medium yet; then open a
+               * text-only project and confirm neither audio tile renders (no
+               * misleading figure). Blocked on new server work — see the
+               * in-card comment above the "Audio Validated" tile for exactly
+               * what's missing.
+               */}
               {audio && audio.totalCells > 0 && (
                 <div className="rounded-xl border bg-card p-5">
-                  <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Progress</h2>
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Progress</h2>
+                    <SectionVisibilityBadge minRole={ROLE.VIEWER} />
+                  </div>
 
                   {/* Big-number tiles lead the section */}
                   <div className="flex flex-wrap gap-3 mb-4">
@@ -510,9 +732,45 @@ export function ProjectOverview() {
                       </>
                     )}
                     {showAudio && (
-                      <StatTile label="Audio" pct={audioPct(audio)} colorClass="text-sky-600" />
+                      <>
+                        <StatTile
+                          label="Has Audio"
+                          pct={audioPct(audio)}
+                          colorClass="text-sky-600"
+                          tooltip="Percentage of cells that have at least one audio recording attached. This is coverage, not validation — see 'Audio Validated' for review status."
+                        />
+                        {/*
+                         * AQU-490 (was TODO(FRO-168)): a distinct audio-VALIDATION metric
+                         * is not reachable today. Investigated 2026-07-08:
+                         *   - `cells.validated` (db/postgres/schema.sql) is ONE boolean per
+                         *     cell, shared by text and audio review — there is no per-medium
+                         *     validated flag.
+                         *   - `cell_audio` (the per-take audio table) has no
+                         *     validated/approved column at all.
+                         *   - The `cell.validate` event payload
+                         *     (sync-worker/src/events/types.ts) is `{ editEventId }` only —
+                         *     no medium/kind field distinguishing "validated the text" from
+                         *     "validated the audio".
+                         *   - `readValidationCountAudio` (src/lib/progress/read-validation-count.ts)
+                         *     is a live, unrelated setting: the *required number of
+                         *     validators* for audio-bearing projects, not a count of
+                         *     validated audio cells. AQU-298's "possibly dead" flag was
+                         *     about a different symbol; this one is alive but doesn't help.
+                         * Needs new server work: either a `cell_audio.approved` column (or
+                         * equivalent) populated by a medium-aware validate event, or a
+                         * `validated_audio_cells` rollup column on `files`/portfolio SQL
+                         * analogous to `approved_count`. Until then this is an honest
+                         * placeholder, not a fabricated metric.
+                         */}
+                        <StatTile
+                          label="Audio Validated"
+                          pct={0}
+                          display="N/A"
+                          colorClass="text-muted-foreground"
+                          tooltip="Not tracked yet — the server does not record whether a validation applies to text or audio content (see AQU-490)."
+                        />
+                      </>
                     )}
-                    {/* TODO(FRO-168): audio VALIDATION metric — need audioCells with approved-audio count from server */}
                   </div>
 
                   {/* Detail bars below tiles */}
@@ -547,7 +805,7 @@ export function ProjectOverview() {
                     {showAudio && (
                       <>
                         <StatBar
-                          label="Audio"
+                          label="Has Audio"
                           value={audio.audioCells}
                           total={audio.totalCells}
                           fillClass="bg-sky-500"
@@ -568,12 +826,41 @@ export function ProjectOverview() {
 
               {/* ── Per-file rows (always fully visible per user decision) ── */}
               {files.length > 0 && (() => {
-                const sorted = [...files].sort((a, b) => b.cellCount - a.cellCount)
+                // AQU-499: filter by name, then sort by the selected mode.
+                // Expansion state (rollups/expandedFileId) is keyed by
+                // fileId, not row index, so re-sorting/filtering never
+                // disturbs an already-expanded row's chapter/verse rollup.
+                const filtered = filterFilesByName(files, fileNameFilter)
+                const sorted = sortFiles(filtered, fileSortMode)
                 const shown = showAllFiles ? sorted : sorted.slice(0, FILE_ROW_CAP)
                 const hidden = sorted.length - shown.length
+
+                // AQU-500: export the full sorted+filtered list (honoring
+                // AQU-499's current sort/filter), not just the `shown` slice
+                // — the FILE_ROW_CAP is a display truncation for readability,
+                // not a data filter, so a PM exporting "what I see" should
+                // get every row matching their filter/sort, not just the
+                // first FILE_ROW_CAP rows.
+                async function handleCopyCsv() {
+                  const csv = progressRowsToCsv(sorted)
+                  try {
+                    await navigator.clipboard.writeText(csv)
+                    setCsvCopied(true)
+                    setTimeout(() => setCsvCopied(false), 1500)
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : "Couldn't copy to clipboard.")
+                  }
+                }
+
+                function handleDownloadCsv() {
+                  const csv = progressRowsToCsv(sorted)
+                  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+                  downloadBlob(blob, progressCsvFilename(project?.name ?? "project"))
+                }
+
                 return (
                   <div className="rounded-xl border bg-card p-5">
-                    <div className="mb-3 flex items-center justify-between">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                       <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         Files {!showAllFiles && hidden > 0 ? `(top ${FILE_ROW_CAP} of ${sorted.length})` : `(${sorted.length})`}
                       </h2>
@@ -586,25 +873,149 @@ export function ProjectOverview() {
                         </span>
                       </span>
                     </div>
-                    <ul className="space-y-2" aria-label="Files">
-                      {shown.map((f) => {
-                        const tPct = f.cellCount > 0 ? Math.round((f.filledCount / f.cellCount) * 100) : 0
-                        const vPct = f.cellCount > 0 ? Math.round((f.approvedCount / f.cellCount) * 100) : 0
-                        return (
-                          <li key={f.fileId} data-testid="file-row" className="flex items-center gap-3 text-sm">
-                            <AppTooltip content={f.name}>
-                              <span className="w-36 shrink-0 truncate text-sm font-medium">{f.name}</span>
-                            </AppTooltip>
-                            <FileProgressBars tPct={tPct} vPct={vPct} />
-                            <AppTooltip content="filled / approved / total cells · word count">
-                              <span className="w-36 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                                {f.filledCount}/{f.approvedCount}/{f.cellCount} · {f.wordCount}w
-                              </span>
-                            </AppTooltip>
-                          </li>
-                        )
-                      })}
-                    </ul>
+                    {/*
+                      SWARM-TODO(AQU-500): verify live — as a role WITH the org's
+                      export permission, open a Scripture project overview,
+                      change the file sort/filter (AQU-499), then click "Copy
+                      CSV" and paste into a spreadsheet: confirm the rows/columns
+                      match on-screen (file, filled, approved, total, words) in
+                      the same order as the table, and that a file name with a
+                      comma/quote lands in one cell correctly. Click "Download
+                      CSV" and confirm the .csv opens with the same rows. Then,
+                      as a role WITHOUT the org's export permission (org
+                      settings → exportMinRole set above that role), confirm
+                      neither Copy CSV nor Download CSV control renders.
+                    */}
+                    {orgSettings.canExport && sorted.length > 0 && (
+                      <div className="mb-3 flex items-center gap-2">
+                        <AppTooltip content="Copy the file list below as CSV">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void handleCopyCsv()}
+                            data-testid="export-csv-copy"
+                          >
+                            {csvCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                            {csvCopied ? "Copied" : "Copy CSV"}
+                          </Button>
+                        </AppTooltip>
+                        <AppTooltip content="Download the file list below as a .csv file">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={handleDownloadCsv}
+                            data-testid="export-csv-download"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            Download CSV
+                          </Button>
+                        </AppTooltip>
+                      </div>
+                    )}
+                    {/*
+                      SWARM-TODO(AQU-499): verify live — open a Scripture
+                      project overview, change the "Sort files by" dropdown
+                      to "Canonical order" and confirm Genesis-before-Exodus
+                      (and OT-before-NT) row order; switch to "Alphabetical"
+                      and confirm plain name order; type into the filter box
+                      and confirm rows narrow to matching file names; expand
+                      a file's chapter/verse rollup (AQU-493), change sort,
+                      and confirm the same file's rollup is still expanded
+                      after its row moves.
+                    */}
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                      <Input
+                        type="text"
+                        placeholder="Filter files by name…"
+                        aria-label="Filter files by name"
+                        value={fileNameFilter}
+                        onChange={(e) => setFileNameFilter(e.target.value)}
+                        className="max-w-56"
+                      />
+                      <Select
+                        items={FILE_SORT_MODES}
+                        value={fileSortMode}
+                        onValueChange={(v) => setFileSortMode((v as FileSortMode) ?? "last-updated")}
+                      >
+                        <SelectTrigger aria-label="Sort files by" className="w-44">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            {FILE_SORT_MODES.map((m) => (
+                              <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {sorted.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No files match “{fileNameFilter}”.</p>
+                    ) : (
+                    <>
+                      {/*
+                        AQU-492: two-level layout — a header row labels each
+                        numeric column once, so per-row values (below) never
+                        need to be re-explained. Header and row cell widths
+                        must stay in lockstep (same width + gap classes) for
+                        the columns to line up; the tooltip on each row is
+                        kept as a redundant, not load-bearing, explainer.
+                      */}
+                      <div
+                        className="mb-1.5 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                        data-testid="file-breakdown-header"
+                      >
+                        <span className="w-5 shrink-0" />
+                        <span className="w-32 shrink-0">File</span>
+                        <span className="flex-1">Progress</span>
+                        <span className="flex shrink-0 items-center gap-4">
+                          <span className="w-10 text-right">Filled</span>
+                          <span className="w-14 text-right">Approved</span>
+                          <span className="w-10 text-right">Total</span>
+                          <span className="w-12 text-right">Words</span>
+                        </span>
+                      </div>
+                      <ul className="space-y-2" aria-label="Files">
+                        {shown.map((f) => {
+                          const tPct = f.cellCount > 0 ? Math.round((f.filledCount / f.cellCount) * 100) : 0
+                          const vPct = f.cellCount > 0 ? Math.round((f.approvedCount / f.cellCount) * 100) : 0
+                          const isExpanded = expandedFileId === f.fileId
+                          return (
+                            <li key={f.fileId} data-testid="file-row">
+                              <div className="flex items-center gap-3 text-sm">
+                                <button
+                                  type="button"
+                                  aria-label={isExpanded ? `Collapse ${f.name}` : `Expand ${f.name}`}
+                                  aria-expanded={isExpanded}
+                                  onClick={() => void toggleFileRollup(f)}
+                                  className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+                                >
+                                  <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isExpanded && "rotate-90")} />
+                                </button>
+                                <AppTooltip content={f.name}>
+                                  <span className="w-32 shrink-0 truncate text-sm font-medium">{f.name}</span>
+                                </AppTooltip>
+                                <FileProgressBars tPct={tPct} vPct={vPct} />
+                                <AppTooltip content="Cells filled / cells approved / total cells · word count">
+                                  <span className="flex shrink-0 items-center gap-4 text-xs tabular-nums text-muted-foreground">
+                                    <span className="w-10 text-right">{f.filledCount}</span>
+                                    <span className="w-14 text-right">{f.approvedCount}</span>
+                                    <span className="w-10 text-right">{f.cellCount}</span>
+                                    <span className="w-12 text-right">{f.wordCount}</span>
+                                  </span>
+                                </AppTooltip>
+                              </div>
+                              {isExpanded && (
+                                <FileCanonicalRollup books={rollups[f.fileId]} loading={rollupLoading[f.fileId] ?? false} />
+                              )}
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    </>
+                    )}
                     {!showAllFiles && hidden > 0 && (
                       <button
                         className="mt-3 text-xs text-muted-foreground hover:text-foreground underline"
@@ -710,55 +1121,95 @@ export function ProjectOverview() {
               </Dialog>
 
               {/* ── Team / Assignments card ── */}
-              <div className="rounded-xl border bg-card p-5">
-                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</h2>
-                {workload.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No open assignments in this project yet.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {workload.map((w) => {
-                      const donePct = w.cellsTotal > 0 ? Math.round((w.cellsDone / w.cellsTotal) * 100) : 0
-                      return (
-                        <li key={w.userId} className="flex items-center gap-3 text-sm">
-                          <AppTooltip content={w.username ?? String(w.userId)}>
-                            <span className="w-32 shrink-0 font-medium truncate">
-                              {w.username ?? `User ${w.userId}`}
-                            </span>
-                          </AppTooltip>
-                          <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                            <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
-                          </span>
-                          <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                            {w.openAssignments} open · {donePct}%
-                          </span>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                )}
-
-                {canAssign && !isArchived && activeOrgId != null && (project?.files.length ?? 0) > 0 && (
-                  <div className="mt-3 pt-3 border-t">
-                    <AssignWork
-                      projectId={id}
-                      files={project?.files ?? []}
-                      orgId={activeOrgId}
-                      jwt={jwt ?? ""}
-                      author={session?.username ?? ""}
-                      onAssigned={loadRow}
+              {/* AQU-486: per-assignee progress is gated by the AQU-485
+                  memberProgressViewMinRole floor (same "who sees each
+                  person's productivity" policy WorkloadRollup/UsageRollup use
+                  on the org overview) — a lower-role account must not see
+                  this card exist at all, not an empty/placeholder version. */}
+              <SectionVisibilityGate
+                minRole={orgSettings.memberProgressViewMinRole}
+                viewerRoleLevel={projectRoleLevel}
+                ready={orgSettings.hasFetched}
+              >
+                <div className={cn("relative rounded-xl border bg-card p-5", sectionTintClass(orgSettings.memberProgressViewMinRole))}>
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</h2>
+                    <SectionVisibilityBadge
+                      minRole={orgSettings.memberProgressViewMinRole}
+                      canEdit={canEditVisibility}
+                      onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
+                      description="Who can see each teammate's assignment progress on this project."
                     />
                   </div>
-                )}
-              </div>
+                  {workload.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No open assignments in this project yet.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {workload.map((w) => {
+                        const donePct = w.cellsTotal > 0 ? Math.round((w.cellsDone / w.cellsTotal) * 100) : 0
+                        return (
+                          <li key={w.userId} className="flex items-center gap-3 text-sm">
+                            <AppTooltip content={w.username ?? String(w.userId)}>
+                              <span className="w-32 shrink-0 font-medium truncate">
+                                {w.username ?? `User ${w.userId}`}
+                              </span>
+                            </AppTooltip>
+                            <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                              <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
+                            </span>
+                            <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                              {w.openAssignments} open · {donePct}%
+                            </span>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+
+                  {canAssign && !isArchived && activeOrgId != null && (project?.files.length ?? 0) > 0 && (
+                    <div className="mt-3 pt-3 border-t">
+                      <AssignWork
+                        projectId={id}
+                        files={project?.files ?? []}
+                        orgId={activeOrgId}
+                        jwt={jwt ?? ""}
+                        author={session?.username ?? ""}
+                        onAssigned={loadRow}
+                      />
+                    </div>
+                  )}
+                </div>
+              </SectionVisibilityGate>
 
               {/* ── Members card (FRO-335) — same add / change-role / revoke
                   surface as the in-project members page, so access can be
-                  managed from the overview without opening the workspace. ── */}
+                  managed from the overview without opening the workspace. ──
+                  AQU-486: gated by AQU-485's rosterViewMinRole — the same
+                  policy MembersTab itself enforces server-side (see its
+                  "Roster hidden" state), applied here one layer up so a
+                  below-floor caller never sees the card shell at all. */}
               {canManage && !isArchived && (
-                <div className="rounded-xl border bg-card p-5" data-testid="overview-members-card">
-                  <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Members</h2>
-                  <MembersTab projectId={id} className="space-y-6" />
-                </div>
+                <SectionVisibilityGate
+                  minRole={orgSettings.rosterViewMinRole}
+                  viewerRoleLevel={projectRoleLevel}
+                  ready={orgSettings.hasFetched}
+                >
+                  <div
+                    className={cn("relative rounded-xl border bg-card p-5", sectionTintClass(orgSettings.rosterViewMinRole))}
+                    data-testid="overview-members-card"
+                  >
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Members</h2>
+                      <SectionVisibilityBadge
+                        minRole={orgSettings.rosterViewMinRole}
+                        canEdit={canEditVisibility}
+                        onChangeMinRole={async (next) => { await orgSettings.patch({ rosterViewMinRole: next }) }}
+                        description="Who can see the member roster on this project."
+                      />
+                    </div>
+                    <MembersTab projectId={id} className="space-y-6" />
+                  </div>
+                </SectionVisibilityGate>
               )}
             </div>
           )}

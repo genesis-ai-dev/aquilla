@@ -24,3 +24,13 @@ export type WriteSettingsOutcome =
       latest: import("./project-settings").ProjectSettingsResponse
     }
   | { kind: "error"; status: number; message: string }
+
+/**
+ * AQU-485: re-export of the org-level roster/member-progress visibility
+ * settings shape (canonically defined in `org-settings.ts`, mirroring
+ * exportMinRole). Re-exported here — not because they're project-settings —
+ * but so callers already importing settings types from this module (per the
+ * "one consistent naming scheme" goal above) have a single place to find
+ * every settings-blob-typed key, org or project scoped.
+ */
+export type { OrgWideSettings } from "./org-settings"

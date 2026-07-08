@@ -14,7 +14,8 @@ import {
   shouldAutoStartTour,
 } from "@/hooks/useProductTour"
 // Import step list directly for data-level assertions (no render harness needed).
-import { TOUR_STEPS } from "./ProductTour"
+import { TOUR_STEPS, filterStepsByRole, type TourStep } from "./ProductTour"
+import { ROLE } from "@/lib/frontier/roles"
 
 const TOUR_DONE_KEY = "codex:productTourDone"
 const ONBOARDING_DONE_KEY = "codex:onboardingComplete"
@@ -123,5 +124,54 @@ describe("TOUR_STEPS — FRO-262 copy and anchor correctness", () => {
 
   it("FRO-262: splash step (anchor=null) still comes first", () => {
     expect(TOUR_STEPS[0].anchor).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-512: role-tailored steps — a translator (contributor) shouldn't be
+// walked through PM-only surfaces (org settings/members) they can't act on;
+// a PM (project_lead+) should see them.
+// ---------------------------------------------------------------------------
+
+describe("filterStepsByRole (AQU-512)", () => {
+  it("AQU-512: nav-settings step in TOUR_STEPS is gated at PROJECT_LEAD", () => {
+    const step = TOUR_STEPS.find((s) => s.anchor === "nav-settings")
+    expect(step).toBeDefined()
+    expect(step!.minRole).toBe(ROLE.PROJECT_LEAD)
+  })
+
+  it("AQU-512: a CONTRIBUTOR (translator, 400) does not get the PM-gated step", () => {
+    const visible = filterStepsByRole(TOUR_STEPS, ROLE.CONTRIBUTOR)
+    expect(visible.find((s) => s.anchor === "nav-settings")).toBeUndefined()
+    // ...but still gets the ungated, translator-relevant steps.
+    expect(visible.find((s) => s.anchor === "nav-overview")).toBeDefined()
+    expect(visible.find((s) => s.anchor === "nav-assigned")).toBeDefined()
+  })
+
+  it("AQU-512: a PROJECT_LEAD (PM, 500) does get the PM-gated step", () => {
+    const visible = filterStepsByRole(TOUR_STEPS, ROLE.PROJECT_LEAD)
+    expect(visible.find((s) => s.anchor === "nav-settings")).toBeDefined()
+  })
+
+  it("AQU-512: a MAINTAINER (600, also a PM-tier role) gets the PM-gated step", () => {
+    const visible = filterStepsByRole(TOUR_STEPS, ROLE.MAINTAINER)
+    expect(visible.find((s) => s.anchor === "nav-settings")).toBeDefined()
+  })
+
+  it("AQU-512: unresolved role (null) fails open — matches RoleGatedStep/RulesPage convention", () => {
+    const visible = filterStepsByRole(TOUR_STEPS, null)
+    expect(visible.find((s) => s.anchor === "nav-settings")).toBeDefined()
+  })
+
+  it("AQU-512: a step with no minRole is shown regardless of role level", () => {
+    const steps: TourStep[] = [{ anchor: "x", title: "t", body: "b" }]
+    expect(filterStepsByRole(steps, ROLE.VIEWER)).toHaveLength(1)
+    expect(filterStepsByRole(steps, null)).toHaveLength(1)
+  })
+
+  it("AQU-512: a below-floor role is excluded even one rung under minRole", () => {
+    const steps: TourStep[] = [{ anchor: "x", title: "t", body: "b", minRole: ROLE.PROJECT_LEAD }]
+    expect(filterStepsByRole(steps, ROLE.REVIEWER)).toHaveLength(0)
+    expect(filterStepsByRole(steps, ROLE.PROJECT_LEAD)).toHaveLength(1)
   })
 })

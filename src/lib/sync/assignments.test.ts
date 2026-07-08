@@ -10,7 +10,7 @@ vi.mock("./sync-worker-url", () => ({ syncWorkerHttpOrigin: () => "https://sync.
 
 import { fetchWithTimeout } from "../frontier/orgs"
 import { fetchSyncToken } from "./sync-token"
-import { getWorkload, getMyAssignments, getFileChapters, createAssignment, AssignmentEmitError } from "./assignments"
+import { getWorkload, getMyAssignments, getFileChapters, createAssignment, unassignAssignment, AssignmentEmitError } from "./assignments"
 
 const mockFetchWithTimeout = vi.mocked(fetchWithTimeout)
 const mockFetchSyncToken = vi.mocked(fetchSyncToken)
@@ -28,16 +28,22 @@ beforeEach(() => vi.clearAllMocks())
 afterEach(() => vi.unstubAllGlobals())
 
 describe("getWorkload", () => {
-  it("GETs the workload endpoint with auth and returns the array", async () => {
+  it("GETs the workload endpoint with auth and returns one row per assignment, with project attribution", async () => {
     mockFetchWithTimeout.mockResolvedValue(
-      jsonRes({ workload: [{ userId: 2, username: "anna", openAssignments: 1, cellsTotal: 3, cellsDone: 2 }] }),
+      jsonRes({
+        assignments: [
+          { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", assigneeUserId: 2, username: "anna", scopeLabel: "Genesis", cellsTotal: 3, cellsDone: 2, deadline: null },
+        ],
+      }),
     )
     const out = await getWorkload("jwt", 1)
     expect(mockFetchWithTimeout).toHaveBeenCalledWith(
       "https://auth.test/api/v2/orgs/1/assignments/workload",
       { headers: { Authorization: "Bearer jwt" } },
     )
-    expect(out).toEqual([{ userId: 2, username: "anna", openAssignments: 1, cellsTotal: 3, cellsDone: 2 }])
+    expect(out).toEqual([
+      { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", assigneeUserId: 2, username: "anna", scopeLabel: "Genesis", cellsTotal: 3, cellsDone: 2, deadline: null },
+    ])
   })
 
   it("throws on non-ok with a human message, not 'HTTP 403'", async () => {
@@ -125,6 +131,53 @@ describe("createAssignment", () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonRes({}, false, 500)))
     await expect(
       createAssignment({ jwt: "jwt", projectId: "p1", fileId: "f1", author: "wendi", assigneeUserId: 2, scope: [{ fileId: "f1" }], scopeKind: "books", scopeLabel: "Genesis" }),
+    ).rejects.toBeInstanceOf(AssignmentEmitError)
+  })
+})
+
+describe("unassignAssignment", () => {
+  it("POSTs one assignment.unassign event with the sync token, regardless of progress (AQU-494)", async () => {
+    mockFetchSyncToken.mockResolvedValue({ token: "synctoken" } as Awaited<ReturnType<typeof fetchSyncToken>>)
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const parsed = JSON.parse(init.body as string)
+      return jsonRes({ accepted: [{ id: parsed.events[0].id }], rejected: [] })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    await unassignAssignment({
+      jwt: "jwt",
+      projectId: "p1",
+      fileId: "f1",
+      author: "wendi",
+      assignmentId: "as-anna",
+    })
+
+    expect(mockFetchSyncToken).toHaveBeenCalledWith("jwt", "p1", "f1")
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("https://sync.test/events")
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer synctoken")
+    const sent = JSON.parse(init.body as string)
+    expect(sent.events).toHaveLength(1)
+    expect(sent.events[0].kind).toBe("assignment.unassign")
+    expect(sent.events[0].payload).toEqual({ assignmentId: "as-anna" })
+  })
+
+  it("throws AssignmentEmitError when the server rejects (e.g. role too low → 403)", async () => {
+    mockFetchSyncToken.mockResolvedValue({ token: "synctoken" } as Awaited<ReturnType<typeof fetchSyncToken>>)
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonRes({ accepted: [], rejected: [{ id: "x", status: 403, reason: "role too low for assignment.unassign" }] })),
+    )
+    await expect(
+      unassignAssignment({ jwt: "jwt", projectId: "p1", fileId: "f1", author: "anna", assignmentId: "as-anna" }),
+    ).rejects.toThrow(/role too low/)
+  })
+
+  it("throws when the POST is not ok", async () => {
+    mockFetchSyncToken.mockResolvedValue({ token: "synctoken" } as Awaited<ReturnType<typeof fetchSyncToken>>)
+    vi.stubGlobal("fetch", vi.fn(async () => jsonRes({}, false, 500)))
+    await expect(
+      unassignAssignment({ jwt: "jwt", projectId: "p1", fileId: "f1", author: "wendi", assignmentId: "as-anna" }),
     ).rejects.toBeInstanceOf(AssignmentEmitError)
   })
 })

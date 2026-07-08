@@ -31,4 +31,11 @@ Single wave — all four file-disjoint.
 Read-only reuse (no edits): AQU-513 → lib/audio/upload.ts, lib/sync/events-emit.ts; AQU-516 → lib/sync/cells-read.ts (fetchProjectFiles).
 
 ## §M Merge log
-(empty — appended as agent branches merge)
+- **AQU-509 — CANCELED** (not a real issue; transient client-side error per Ryder). Consolidation commit 55386ed56 preserved on branch `swarm/aqu-509`, NOT shipped; worktree removed.
+- **AQU-512** merged (5b025cbbc). Role-filter tour steps. Note: behaviorally near-neutral today (nav-settings anchor already 600-gated in OrgSidebar → resolveSteps DOM-drop already hid it from non-admins); adds explicit tested `minRole` mechanism. tsc 0, ProductTour 21/21.
+- **AQU-513** merged (0e475267a). New CellAudioUploadButton + 14-line additive wire in EditorTable. tsc 0, button test 4/4, EditorTable.editorActions 2/2.
+- **AQU-516** merged (17e6e1d60). fetchProjectFiles→all-files sidebar progress, live active-file entry preserved via mergeFileProgress. tsc 0, helper 5/5 + ProjectWorkspace/useHealth 34/34.
+
+**Integration gate (tip 8368361a4):** `tsc -b --noEmit`=0 · targeted vitest 64/64 (+EditorTable editorActions 2/2) · `vite build`=OK (44s, dist emitted). Full vitest suite not run (10min+ ceiling); targeted across all changed surfaces instead.
+
+**Landed:** fast-forwarded local `dev` to integration tip. UNPUSHED (Ryder pushes). **Live-UI QA: DEFERRED** — click-paths in each issue's SWARM-TODO / Linear comment.

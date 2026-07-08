@@ -148,10 +148,37 @@ describe("AgentWorkbench layout (chat spine vs stage)", () => {
     expect(screen.queryByText(/cells the agent reads and drafts appear here/)).toBeNull()
   })
 
-  it("summons the working-set stage once the run surfaces rows", async () => {
+  it("summons the working-set stage once the run STAGES drafts", async () => {
     await primeSessionWithDraftRun()
     render(<AgentWorkbench {...workbenchProps()} />)
     expect(screen.getByLabelText("Working set")).toBeInTheDocument()
+  })
+
+  it("a read-only run stays in the chat spine — passage cards, no grid", async () => {
+    // Reads render as PassageCards in the conversation; mirroring them into
+    // the stage was the double-display the user report flagged.
+    scriptedFrames = [
+      { type: "run_start", runId: "run-r" },
+      { type: "code_start", step: 1, kind: "read", summary: ":file" },
+      {
+        type: "code_result",
+        step: 1,
+        ok: true,
+        summary: "2 rows",
+        data: {
+          cells: [
+            { cellId: "c1", fileId: "f1", ref: "MRK 1:1", source: "The beginning", target: "Yeh ibtidaa", status: "drafted" },
+            { cellId: "c2", fileId: "f1", ref: "MRK 1:2", source: "As it is written", target: "", status: "untranslated" },
+          ],
+        },
+      },
+      { type: "done", runId: "run-r", status: "ok" },
+    ]
+    agentSessionStore(PROJECT).send({ wire: "show me mark 1", display: "show me mark 1", jwt: "jwt", request: { projectId: PROJECT } })
+    await waitFor(() => expect(agentSessionStore(PROJECT).getState().isStreaming).toBe(false))
+
+    render(<AgentWorkbench {...workbenchProps()} />)
+    expect(screen.queryByLabelText("Working set")).toBeNull()
   })
 })
 

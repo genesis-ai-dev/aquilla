@@ -51,6 +51,15 @@ export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchP
 
   const rows = useMemo(() => deriveWorkingSet(state.runs, decided), [state.runs, decided])
   const pending = useMemo(() => pendingRows(rows), [rows])
+  // The stage exists for REVIEW: staged drafts awaiting a decision, or the
+  // record of decisions made. Read-only sightings live in chat as passage
+  // cards — mirroring them into a grid is the double-display the
+  // agent-complete redesign removed.
+  const stageRows = useMemo(
+    () => rows.filter((r) => (r.proposed !== undefined && r.stagedEvent) || r.outcome),
+    [rows],
+  )
+  const hasReviewWork = stageRows.length > 0
 
   const activeRun = state.runs.find((r) => r.status === "running")
   const progress = activeRun?.progress
@@ -247,12 +256,12 @@ export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchP
         </span>
       </div>
 
-      {/* Chat is the SPINE (agent-complete §2): until the session surfaces an
-          artifact, the conversation is the whole surface — a centered column,
-          not a narrow rail beside an empty grid. The working set is a STAGE
-          summoned when rows exist, and the chat becomes its side narrator. */}
+      {/* Chat is the SPINE (agent-complete §2): until the session stages
+          something to review, the conversation is the whole surface — a
+          centered column. The working set is a STAGE summoned by review work
+          (pending drafts / decisions), and the chat becomes its narrator. */}
       <div className="flex min-h-0 flex-1">
-        {rows.length > 0 ? (
+        {hasReviewWork ? (
           <>
             <div className="flex w-[380px] min-w-[320px] flex-none flex-col border-r">
               <AgentDockView {...agent} renderProposalOverride={renderProposalOverride} />
@@ -260,7 +269,7 @@ export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchP
             <div className="min-w-0 flex-1">
               <WorkingSetPanel
                 ref={panelRef}
-                rows={rows}
+                rows={stageRows}
                 busy={applying}
                 lintRow={lintRow}
                 onAccept={(row, value) => acceptRows([{ row, value }])}

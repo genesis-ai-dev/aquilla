@@ -58,6 +58,13 @@ vi.mock("@/lib/sync/export-bundle", () => ({
   downloadProjectBundle: (...a: unknown[]) => downloadProjectBundle(...a),
 }))
 
+// AQU-500: stub the shared download helper so CSV-export tests can assert on
+// the blob/filename it was called with, without touching the DOM anchor click.
+const downloadBlob = vi.fn()
+vi.mock("@/lib/export/export-service", () => ({
+  downloadBlob: (...a: unknown[]) => downloadBlob(...a),
+}))
+
 const fetchSyncToken = vi.fn()
 vi.mock("@/lib/sync/sync-token", () => ({
   fetchSyncToken: (...a: unknown[]) => fetchSyncToken(...a),
@@ -939,5 +946,120 @@ describe("ProjectOverview file list sort/filter (AQU-499)", () => {
     // Re-sorting must never re-trigger the lazy per-file cell fetch for an
     // already-expanded file.
     expect(fetchAllFileCells).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ── AQU-500: CSV export / copy-to-clipboard ─────────────────────────────────
+
+describe("ProjectOverview CSV export (AQU-500)", () => {
+  // WHY: PMs want the progress table out into a spreadsheet. The control must
+  // (a) only appear when the org's export permission (useOrgSettings.canExport
+  // — the pre-existing FRO-253 primitive) allows it, and (b) export exactly
+  // the rows/order the PM currently sees, honoring AQU-499's sort/filter.
+
+  beforeEach(() => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    // happy-dom's navigator.clipboard is getter-only — define it per FRO-277's
+    // ImportDialog.partial-import.test.tsx pattern.
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      writable: true,
+      configurable: true,
+    })
+  })
+
+  function fileWith(fileId: string, name: string): import("@/lib/sync/cells-read").FileSummary {
+    return { fileId, projectId: "p1", name, fileType: "usfm", sourceLanguage: null, targetLanguage: null, cellCount: 10, filledCount: 5, approvedCount: 2, wordCount: 100, lastEditAt: null }
+  }
+
+  function useFiles(files: import("@/lib/sync/cells-read").FileSummary[]) {
+    fetchProjectFiles.mockResolvedValue(files)
+    useProject.mockReturnValue({
+      project: projectRecord({
+        level: 400,
+        name: "My Project",
+        files: files.map((f) => ({ id: f.fileId, name: f.name, type: "usfm", createdAt: "x", cellCount: f.cellCount })),
+      }),
+      status: "ready",
+      refresh,
+    })
+  }
+
+  it("shows the export controls when the org's export permission allows it", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles([fileWith("f1", "Genesis.usfm")])
+
+    renderOverview()
+
+    await screen.findByTestId("export-csv-copy")
+    expect(screen.getByTestId("export-csv-download")).toBeInTheDocument()
+  })
+
+  it("hides the export controls when the caller is below the org's export floor", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: false })
+    useFiles([fileWith("f1", "Genesis.usfm")])
+
+    renderOverview()
+
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(1))
+    expect(screen.queryByTestId("export-csv-copy")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("export-csv-download")).not.toBeInTheDocument()
+  })
+
+  it("copies the visible rows as CSV, honoring the current sort/filter", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles([fileWith("f1", "Zeta.usfm"), fileWith("f2", "Alpha.usfm")])
+
+    renderOverview()
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(2))
+
+    // Switch to alphabetical so the exported order must follow Alpha, Zeta —
+    // not file-list-fetch order — proving the export reads the sorted array.
+    await pickSelectOption(/sort files by/i, /^alphabetical$/i)
+
+    fireEvent.click(screen.getByTestId("export-csv-copy"))
+
+    await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1))
+    const csv = vi.mocked(navigator.clipboard.writeText).mock.calls[0][0] as string
+    expect(csv.split("\r\n")).toEqual([
+      "File,Filled,Approved,Total cells,Word count",
+      "Alpha.usfm,5,2,10,100",
+      "Zeta.usfm,5,2,10,100",
+    ])
+  })
+
+  it("filtering by name narrows what gets exported", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles([fileWith("f1", "Genesis.usfm"), fileWith("f2", "Exodus.usfm")])
+
+    renderOverview()
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(2))
+
+    fireEvent.change(screen.getByLabelText(/filter files by name/i), { target: { value: "gen" } })
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(1))
+
+    fireEvent.click(screen.getByTestId("export-csv-copy"))
+
+    await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1))
+    const csv = vi.mocked(navigator.clipboard.writeText).mock.calls[0][0] as string
+    expect(csv.split("\r\n")).toEqual([
+      "File,Filled,Approved,Total cells,Word count",
+      "Genesis.usfm,5,2,10,100",
+    ])
+  })
+
+  it("downloads a CSV blob named after the project", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles([fileWith("f1", "Genesis.usfm")])
+
+    renderOverview()
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(1))
+
+    fireEvent.click(screen.getByTestId("export-csv-download"))
+
+    expect(downloadBlob).toHaveBeenCalledTimes(1)
+    const [blob, filename] = downloadBlob.mock.calls[0]
+    expect(blob).toBeInstanceOf(Blob)
+    expect(filename).toBe("My-Project-progress.csv")
   })
 })

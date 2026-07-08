@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { MoreHorizontal, ChevronRight } from "lucide-react"
+import { MoreHorizontal, ChevronRight, Copy, Check, Download } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
@@ -22,6 +22,8 @@ import { fetchProjectFiles, fetchAllFileCells, type FileSummary } from "@/lib/sy
 import { fetchSyncToken } from "@/lib/sync/sync-token"
 import { buildCanonicalRollup, type BookRollup, type ChapterRollup } from "@/lib/progress/canonical-rollup"
 import { sortFiles, filterFilesByName, FILE_SORT_MODES, type FileSortMode } from "@/lib/progress/file-sort"
+import { progressRowsToCsv, progressCsvFilename } from "@/lib/progress/progress-csv"
+import { downloadBlob } from "@/lib/export/export-service"
 import { getProjectAssignments, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
 import { ROLE } from "@/lib/frontier/roles"
@@ -358,6 +360,11 @@ export function ProjectOverview() {
   // configuring anything.
   const [fileSortMode, setFileSortMode] = useState<FileSortMode>("last-updated")
   const [fileNameFilter, setFileNameFilter] = useState("")
+
+  // AQU-500: transient "copied" feedback for the CSV-export control, mirroring
+  // the copy-affordance pattern used elsewhere (e.g. ChatMarkdown's code-block
+  // copy button).
+  const [csvCopied, setCsvCopied] = useState(false)
 
   // AQU-493: chapter/verse rollup, lazily fetched per file on first expand.
   // `undefined` = not yet fetched, `null` = fetched but no canonical refs
@@ -771,6 +778,30 @@ export function ProjectOverview() {
                 const sorted = sortFiles(filtered, fileSortMode)
                 const shown = showAllFiles ? sorted : sorted.slice(0, FILE_ROW_CAP)
                 const hidden = sorted.length - shown.length
+
+                // AQU-500: export the full sorted+filtered list (honoring
+                // AQU-499's current sort/filter), not just the `shown` slice
+                // — the FILE_ROW_CAP is a display truncation for readability,
+                // not a data filter, so a PM exporting "what I see" should
+                // get every row matching their filter/sort, not just the
+                // first FILE_ROW_CAP rows.
+                async function handleCopyCsv() {
+                  const csv = progressRowsToCsv(sorted)
+                  try {
+                    await navigator.clipboard.writeText(csv)
+                    setCsvCopied(true)
+                    setTimeout(() => setCsvCopied(false), 1500)
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : "Couldn't copy to clipboard.")
+                  }
+                }
+
+                function handleDownloadCsv() {
+                  const csv = progressRowsToCsv(sorted)
+                  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+                  downloadBlob(blob, progressCsvFilename(project?.name ?? "project"))
+                }
+
                 return (
                   <div className="rounded-xl border bg-card p-5">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -786,6 +817,47 @@ export function ProjectOverview() {
                         </span>
                       </span>
                     </div>
+                    {/*
+                      SWARM-TODO(AQU-500): verify live — as a role WITH the org's
+                      export permission, open a Scripture project overview,
+                      change the file sort/filter (AQU-499), then click "Copy
+                      CSV" and paste into a spreadsheet: confirm the rows/columns
+                      match on-screen (file, filled, approved, total, words) in
+                      the same order as the table, and that a file name with a
+                      comma/quote lands in one cell correctly. Click "Download
+                      CSV" and confirm the .csv opens with the same rows. Then,
+                      as a role WITHOUT the org's export permission (org
+                      settings → exportMinRole set above that role), confirm
+                      neither Copy CSV nor Download CSV control renders.
+                    */}
+                    {orgSettings.canExport && sorted.length > 0 && (
+                      <div className="mb-3 flex items-center gap-2">
+                        <AppTooltip content="Copy the file list below as CSV">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void handleCopyCsv()}
+                            data-testid="export-csv-copy"
+                          >
+                            {csvCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                            {csvCopied ? "Copied" : "Copy CSV"}
+                          </Button>
+                        </AppTooltip>
+                        <AppTooltip content="Download the file list below as a .csv file">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={handleDownloadCsv}
+                            data-testid="export-csv-download"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            Download CSV
+                          </Button>
+                        </AppTooltip>
+                      </div>
+                    )}
                     {/*
                       SWARM-TODO(AQU-499): verify live — open a Scripture
                       project overview, change the "Sort files by" dropdown

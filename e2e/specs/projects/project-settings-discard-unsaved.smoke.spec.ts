@@ -37,7 +37,8 @@ test("project settings discard dialog: Keep editing stays on settings page", asy
   expect(projectId).toBeTruthy()
 
   // Navigate to project settings.
-  await alice.goto(`/project/${projectId}/settings`)
+  // AQU-501: Project name lives in the "General" sub-menu pane.
+  await alice.goto(`/project/${projectId}/settings?section=general`)
   await alice.waitForLoadState("networkidle")
 
   // Edit the project name to make isDirty=true.
@@ -71,7 +72,9 @@ test("project settings discard dialog: Keep editing stays on settings page", asy
   await keepEditingBtn.click()
 
   await expect(dialog).not.toBeVisible({ timeout: 3_000 })
-  await expect(alice).toHaveURL(/\/settings$/, { timeout: 3_000 })
+  // AQU-501: the pane is now expressed via `?section=`, so match the path
+  // rather than anchoring on end-of-string.
+  await expect(alice).toHaveURL(/\/settings(\?|$)/, { timeout: 3_000 })
 })
 
 test("project settings discard dialog: Discard navigates away from settings", async ({ alice }) => {
@@ -85,7 +88,8 @@ test("project settings discard dialog: Discard navigates away from settings", as
   const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}/settings`)
+  // AQU-501: Project name lives in the "General" sub-menu pane.
+  await alice.goto(`/project/${projectId}/settings?section=general`)
   await alice.waitForLoadState("networkidle")
 
   // Edit name → make dirty.

@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useParams, useNavigate } from "react-router-dom"
-import { ArrowLeft, Check, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDriveDownload } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react"
+import { useParams, useNavigate, useSearchParams } from "react-router-dom"
+import {
+  ArrowLeft, Check, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDriveDownload,
+  SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines,
+} from "lucide-react"
 import { Menu } from "@base-ui/react/menu"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
@@ -54,7 +57,8 @@ import { UpstreamChangesPanel } from "./linked/UpstreamChangesPanel"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useOrg } from "@/hooks/useOrg"
 import { ApiKeyField } from "./ApiKeyField"
-import { SettingsNav, useScrollSpy, type SettingsSection } from "./ProjectSettings/SettingsNav"
+import { SettingsNav, type SettingsSection } from "./ProjectSettings/SettingsNav"
+import { NavList, NavRow, BackLink } from "@/components/ui/nav-list"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
@@ -753,8 +757,88 @@ export function ProjectSettings() {
       )
     : ALL_SECTIONS.filter((s) => s.visible !== false)
 
-  const visibleIds = visibleSections.map((s) => s.id)
-  const activeId = useScrollSpy(visibleIds)
+  // AQU-501: sub-menu IA — group the flat section list into labeled panes so
+  // picking a sub-section shows only that pane, matching the org Settings
+  // index → detail pattern (src/pages/Settings.tsx) instead of one long
+  // scroll. Internal `?section=` search-param state (no new route — App.tsx
+  // untouched); search still filters within the active pane, and clears the
+  // pane to show cross-group matches (mirrors the old scroll-spy filter).
+  const SETTINGS_GROUPS: {
+    id: string
+    label: string
+    description: string
+    icon: ComponentType<{ className?: string }>
+    sectionIds: string[]
+  }[] = [
+    {
+      id: "general",
+      label: "General",
+      description: "Name, languages, username, Bible resources",
+      icon: SlidersHorizontal,
+      sectionIds: ["section-project-info", "section-bible-resources", "section-user"],
+    },
+    {
+      id: "source-sync",
+      label: "Source & sync",
+      description: "Linked source project, upstream changes, git sync",
+      icon: Link2,
+      sectionIds: ["section-source-link", "section-upstream-changes", "section-git-sync"],
+    },
+    {
+      id: "ai",
+      label: "AI & completion",
+      description: "Instructions, draft context, provider, voice, terminology",
+      icon: Sparkles,
+      sectionIds: [
+        "section-ai-instructions", "section-draft-context", "section-advanced-llm",
+        "section-voice", "section-local-models", "section-terminology", "section-termbase-sharing",
+      ],
+    },
+    {
+      id: "validation",
+      label: "Validation & health",
+      description: "Approvals, harmonization, staleness decay",
+      icon: ShieldCheck,
+      sectionIds: ["section-validation", "section-decay"],
+    },
+    {
+      id: "audio-media",
+      label: "Audio media",
+      description: "How audio is fetched from storage",
+      icon: AudioLines,
+      sectionIds: ["section-audio-media"],
+    },
+    {
+      id: "metrics",
+      label: "AI metrics",
+      description: "Post-edit distance and AI usage",
+      icon: BarChart3,
+      sectionIds: ["section-ai-metrics"],
+    },
+  ]
+
+  const visibleSectionIdSet = new Set(visibleSections.map((s) => s.id))
+  const visibleGroups = SETTINGS_GROUPS
+    .map((g) => ({ ...g, sectionIds: g.sectionIds.filter((id) => visibleSectionIdSet.has(id)) }))
+    .filter((g) => g.sectionIds.length > 0)
+
+  // Navigation between the index and a pane is a plain in-page Link to
+  // `?section=<id>` (read here via useSearchParams) — no new route, App.tsx
+  // untouched, and the pane is deep-linkable / back-button friendly.
+  const [searchParams] = useSearchParams()
+  const activeGroupId = searchParams.get("section")
+  const activeGroup = visibleGroups.find((g) => g.id === activeGroupId) ?? null
+  // An unknown/stale group id (e.g. its only section just became invisible)
+  // falls back to the index instead of rendering an empty pane.
+  const showIndex = !activeGroup || lowerQuery.length > 0
+
+  // While searching, show matches across every group (the old flat-filter
+  // behavior) rather than confining results to whichever pane is open.
+  const sectionsToRender = lowerQuery
+    ? visibleSections
+    : activeGroup
+      ? visibleSections.filter((s) => activeGroup.sectionIds.includes(s.id))
+      : []
 
   if (loading) return <div className="p-8 text-muted-foreground">Loading...</div>
 
@@ -822,30 +906,33 @@ export function ProjectSettings() {
           {saveError && <span className="text-destructive">{saveError}</span>}
         </div>
       </header>
-      <div className="mx-auto flex max-w-5xl gap-6 px-4 py-6">
-        {/* Left rail nav */}
-        <aside className="hidden w-44 shrink-0 lg:block">
-          <div className="sticky top-[60px]">
-            <SettingsNav
-              sections={visibleSections}
-              activeId={activeId}
-              onSearch={setSearchQuery}
-              searchQuery={searchQuery}
-            />
-          </div>
-        </aside>
+      <div className="mx-auto max-w-3xl px-4 py-6">
+        {/* Search — filters across every group, mirrors the old scroll-spy filter */}
+        <div className="mb-4">
+          <SettingsNav onSearch={setSearchQuery} searchQuery={searchQuery} />
+        </div>
 
         {/* Main content */}
         <main className="min-w-0 flex-1 space-y-6">
-          {/* Mobile search — only shows on narrow widths where rail is hidden */}
-          <div className="lg:hidden">
-            <SettingsNav
-              sections={visibleSections}
-              activeId={activeId}
-              onSearch={setSearchQuery}
-              searchQuery={searchQuery}
-            />
-          </div>
+        {showIndex ? (
+          !lowerQuery ? (
+            <NavList label="Settings">
+              {visibleGroups.map((g) => (
+                <NavRow
+                  key={g.id}
+                  to={`?section=${g.id}`}
+                  icon={g.icon}
+                  title={g.label}
+                  description={g.description}
+                />
+              ))}
+            </NavList>
+          ) : sectionsToRender.length === 0 ? (
+            <p className="px-2 py-1.5 text-sm text-muted-foreground">No matching settings.</p>
+          ) : null
+        ) : (
+          <BackLink to="?" label="Settings" />
+        )}
 
         {sharedConflict && (
           <div
@@ -863,7 +950,7 @@ export function ProjectSettings() {
             </button>
           </div>
         )}
-        {hasSourceLink && project?.sourceProjectId && visibleSections.some((s) => s.id === "section-source-link") && (
+        {hasSourceLink && project?.sourceProjectId && sectionsToRender.some((s) => s.id === "section-source-link") && (
           <SourceLinkSection
             projectId={id!}
             sourceProjectId={project.sourceProjectId}
@@ -875,7 +962,7 @@ export function ProjectSettings() {
             roleLevel={project?.syncRole?.level ?? null}
           />
         )}
-        {hasLiveSourceLink && visibleSections.some((s) => s.id === "section-upstream-changes") && (
+        {hasLiveSourceLink && sectionsToRender.some((s) => s.id === "section-upstream-changes") && (
           <UpstreamChangesPanel
             projectId={id!}
             files={project?.files ?? []}
@@ -884,7 +971,7 @@ export function ProjectSettings() {
             username={session?.username ?? "local"}
           />
         )}
-        {visibleSections.some((s) => s.id === "section-project-info") && (
+        {sectionsToRender.some((s) => s.id === "section-project-info") && (
           <Card id="section-project-info">
             <CardHeader><CardTitle>Project Info</CardTitle></CardHeader>
             <CardContent className="space-y-4">
@@ -916,7 +1003,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
-        {visibleSections.some((s) => s.id === "section-bible-resources") && (
+        {sectionsToRender.some((s) => s.id === "section-bible-resources") && (
           <Card id="section-bible-resources">
             <CardHeader>
               <CardTitle>Bible resources</CardTitle>
@@ -961,7 +1048,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
-        {visibleSections.some((s) => s.id === "section-user") && (
+        {sectionsToRender.some((s) => s.id === "section-user") && (
           <Card id="section-user">
             <CardHeader><CardTitle>User</CardTitle></CardHeader>
             <CardContent>
@@ -972,7 +1059,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
-        {visibleSections.some((s) => s.id === "section-ai-instructions") && (
+        {sectionsToRender.some((s) => s.id === "section-ai-instructions") && (
           <Card id="section-ai-instructions">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -1098,7 +1185,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
-        {visibleSections.some((s) => s.id === "section-draft-context") && (
+        {sectionsToRender.some((s) => s.id === "section-draft-context") && (
           <Card id="section-draft-context">
             <CardHeader>
               <CardTitle>Draft Context</CardTitle>
@@ -1129,7 +1216,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
-        {visibleSections.some((s) => s.id === "section-advanced-llm") && (
+        {sectionsToRender.some((s) => s.id === "section-advanced-llm") && (
           <details id="section-advanced-llm" className="group rounded-lg border bg-card">
             <summary className="cursor-pointer select-none list-none px-6 py-4 text-sm font-medium marker:hidden">
               <span className="flex items-center justify-between">
@@ -1307,7 +1394,7 @@ export function ProjectSettings() {
           </details>
         )}
 
-        {visibleSections.some((s) => s.id === "section-voice") && (
+        {sectionsToRender.some((s) => s.id === "section-voice") && (
           <Card id="section-voice">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -1340,7 +1427,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
-        {visibleSections.some((s) => s.id === "section-local-models") && (
+        {sectionsToRender.some((s) => s.id === "section-local-models") && (
           <Card id="section-local-models">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -1366,7 +1453,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
-        {visibleSections.some((s) => s.id === "section-decay") && (
+        {sectionsToRender.some((s) => s.id === "section-decay") && (
           <div id="section-decay">
             <DecaySettingsSection
               settings={decaySettings}
@@ -1375,7 +1462,7 @@ export function ProjectSettings() {
           </div>
         )}
 
-        {visibleSections.some((s) => s.id === "section-validation") && (
+        {sectionsToRender.some((s) => s.id === "section-validation") && (
           <div id="section-validation">
             <ValidationSettingsSection
               validationCount={validationCount}
@@ -1398,7 +1485,7 @@ export function ProjectSettings() {
         )}
 
         {/* FRO-186: Harmonization settings — harmonize_min_role floor. */}
-        {visibleSections.some((s) => s.id === "section-validation") && (
+        {sectionsToRender.some((s) => s.id === "section-validation") && (
           <Card>
             <CardHeader>
               <CardTitle>Harmonization</CardTitle>
@@ -1436,7 +1523,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
-        {visibleSections.some((s) => s.id === "section-audio-media") && (
+        {sectionsToRender.some((s) => s.id === "section-audio-media") && (
           <div id="section-audio-media">
             <AudioMediaStrategySection
               value={audioMediaStrategy}
@@ -1445,7 +1532,7 @@ export function ProjectSettings() {
           </div>
         )}
 
-        {project?.origin?.kind === "git" && visibleSections.some((s) => s.id === "section-git-sync") && (
+        {project?.origin?.kind === "git" && sectionsToRender.some((s) => s.id === "section-git-sync") && (
           <Card id="section-git-sync">
             <CardHeader><CardTitle>Git Sync</CardTitle></CardHeader>
             <CardContent className="space-y-3">
@@ -1475,7 +1562,7 @@ export function ProjectSettings() {
             </CardContent>
           </Card>
         )}
-        {visibleSections.some((s) => s.id === "section-terminology") && (
+        {sectionsToRender.some((s) => s.id === "section-terminology") && (
           <Card id="section-terminology">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -1492,7 +1579,7 @@ export function ProjectSettings() {
             </CardContent>
           </Card>
         )}
-        {id && SHOW_TERMBASE_SHARING_IN_SETTINGS && visibleSections.some((s) => s.id === "section-termbase-sharing") && (
+        {id && SHOW_TERMBASE_SHARING_IN_SETTINGS && sectionsToRender.some((s) => s.id === "section-termbase-sharing") && (
           <TermbaseSharingSection
             projectId={id}
             orgId={org?.id ?? null}
@@ -1500,7 +1587,7 @@ export function ProjectSettings() {
           />
         )}
 
-        {visibleSections.some((s) => s.id === "section-ai-metrics") && (
+        {sectionsToRender.some((s) => s.id === "section-ai-metrics") && (
           <PostEditMetricsSection
             metrics={postEditMetrics}
             isLoading={metricsLoading}

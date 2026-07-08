@@ -86,7 +86,7 @@
 | Editor      | Pre-acceptance warning band for forbidden terminology rendering | `e2e/specs/editor/preacceptance-warning-band.smoke.spec.ts` | ✅ |
 | Editor      | RTL hint "Adjust" button opens view settings menu and dismisses hint | `e2e/specs/editor/rtl-hint-adjust-opens-settings.smoke.spec.ts` | ✅ |
 | Editor      | Workspace "Settings" dropdown item navigates to project settings     | `e2e/specs/editor/workspace-settings-navigate.smoke.spec.ts`   |   ✅   |
-| Projects    | Settings nav section link click scrolls to anchor      | `e2e/specs/projects/project-settings-nav-link-click.smoke.spec.ts` | ✅ |
+| Projects    | Settings sub-menu link navigates to its pane and back (AQU-501) | `e2e/specs/projects/project-settings-nav-link-click.smoke.spec.ts` | ✅ |
 | Editor      | Next unfinished navigation basic flow                 | `e2e/specs/editor/next-unfinished.smoke.spec.ts`              |   ✅   |
 | Editor      | "Next unfinished" button enabled after import; navigates without error | `e2e/specs/editor/next-unfinished-button.smoke.spec.ts` | ✅ |
 | Editor      | Cmd+. keyboard shortcut jumps to next unfinished cell | `e2e/specs/editor/next-unfinished-keyboard-shortcut.smoke.spec.ts` | ✅ |
@@ -235,7 +235,7 @@
 | Projects    | Project settings decay section expands                | `e2e/specs/projects/project-settings-decay.smoke.spec.ts`     |   ✅   |
 | Projects    | Project settings more save options → Close without saving | `e2e/specs/projects/project-settings-more-save-options.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings named validators input               | `e2e/specs/projects/project-settings-named-validators.smoke.spec.ts` |   ✅   |
-| Projects    | Project settings nav search filter                    | `e2e/specs/projects/project-settings-nav-search.smoke.spec.ts` |   ✅   |
+| Projects    | Project settings search filter (across sub-menus, AQU-501) | `e2e/specs/projects/project-settings-nav-search.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings termbase publish toggle              | `e2e/specs/projects/project-settings-termbase-publish-toggle.smoke.spec.ts` | ⏸ hidden |
 | Projects    | Project settings validation section                   | `e2e/specs/projects/project-settings-validation.smoke.spec.ts` + `project-settings-validation-count.smoke.spec.ts` | ✅ |
 | Projects    | Assign work panel in project overview                 | `e2e/specs/projects/assign-work-panel.smoke.spec.ts`          |   ✅   |

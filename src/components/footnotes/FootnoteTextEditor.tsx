@@ -1,6 +1,7 @@
 import { Bold, Italic, Underline as UnderlineIcon } from "lucide-react"
 import type { KeyboardEvent, ReactNode } from "react"
 import { useEffect, useRef } from "react"
+import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 
@@ -102,14 +103,15 @@ function FormatButton({
   children: ReactNode
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon-sm"
       aria-label={label}
       onClick={onClick}
-      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground"
     >
       {children}
-    </button>
+    </Button>
   )
 }
 

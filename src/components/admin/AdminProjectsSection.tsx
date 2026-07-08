@@ -2,7 +2,7 @@ import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { FolderOpen } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import { AdminDataTable, type AdminColumn } from "./AdminDataTable"
 import { AttentionBadges, ValidatedBar } from "./shared"
 import { fmtDate } from "@/lib/admin/format"
@@ -102,19 +102,15 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-1">
         {LENSES.map((l) => (
-          <button
+          <Button
             key={l.value}
             type="button"
+            size="xs"
+            variant={lens === l.value ? "default" : "secondary"}
             onClick={() => setLens(l.value)}
-            className={cn(
-              "rounded-full px-3 py-1 text-xs font-medium transition-colors",
-              lens === l.value
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground",
-            )}
           >
             {l.label}
-          </button>
+          </Button>
         ))}
       </div>
 

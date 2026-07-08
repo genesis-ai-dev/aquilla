@@ -21,7 +21,7 @@ test("project settings Voice section Open Voice Studio button navigates to works
   await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1] ?? ""
 
-  await alice.goto(`/project/${projectId}/settings`)
+  await alice.goto(`/project/${projectId}/settings?section=ai`)
   await alice.waitForLoadState("networkidle")
 
   // "Open Voice Studio" button is visible in the Voice section.

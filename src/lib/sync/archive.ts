@@ -39,6 +39,7 @@ export interface ProjectStateResponse {
   id: string
   name: string
   gitlabProjectId: number | null
+  orgId: number | null
   archivedAt: string | null
   archivedBy: { id: number; username: string } | null
   /** Active/inactive lifecycle (migration 0033). Absent = active (compat). */

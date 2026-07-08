@@ -4,43 +4,41 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 /**
  * OrgSwitcher — create new org.
  *
- * OrgSwitcher.tsx renders a "+ Create org" button in the dropdown. Clicking
- * it reveals an input[aria-label="New org name"] + Create button. Submitting
- * creates the org and switches to it.
+ * OrgSwitcher.tsx renders a "Create" row in the dropdown. Clicking
+ * it opens a dialog with an organization name field. Submitting creates the
+ * org and switches to it.
  *
- * This spec: navigate to org home → open OrgSwitcher → click "+ Create org" →
- * type a name → click Create → the new org name appears in the trigger.
+ * This spec: navigate to org home → open OrgSwitcher → click "Create" →
+ * type a name in the dialog → submit → the new org name appears in the trigger.
  */
 test("OrgSwitcher Create org creates and switches to new org", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
 
   // Open the OrgSwitcher dropdown.
-  const trigger = alice.locator("button").filter({ has: alice.locator(".lucide-chevrons-up-down") }).first()
+  const trigger = alice.locator("button").filter({ has: alice.locator(".lucide-chevron-down") }).first()
   await expect(trigger).toBeVisible({ timeout: 10_000 })
   await trigger.click()
 
-  // Click "+ Create org".
-  const createOrgBtn = alice.getByRole("button", { name: /\+\s*Create org/i })
-  await expect(createOrgBtn).toBeVisible({ timeout: 3_000 })
-  await createOrgBtn.click()
+  // Click "Create".
+  const createOrgItem = alice.getByRole("menuitem", { name: /^create$/i })
+  await expect(createOrgItem).toBeVisible({ timeout: 3_000 })
+  await createOrgItem.click()
 
-  // The create input appears.
-  const createInput = alice.locator('input[aria-label="New org name"]')
-  await expect(createInput).toBeVisible({ timeout: 3_000 })
+  // The create dialog appears.
+  const dialog = alice.getByRole("dialog", { name: /create organization/i })
+  await expect(dialog).toBeVisible({ timeout: 3_000 })
 
   // Type the new org name.
   const newOrgName = `NewOrg ${Date.now()}`
-  await createInput.fill(newOrgName)
+  await dialog.getByLabel(/organization name/i).fill(newOrgName)
 
-  // Click Create.
-  const createBtn = alice.getByRole("button", { name: /^Create$/i })
-  await expect(createBtn).toBeVisible({ timeout: 2_000 })
-  await createBtn.click()
+  // Submit.
+  await dialog.getByRole("button", { name: /create organization/i }).click()
 
   // The switcher switches to the new org — its name appears in the trigger.
   await expect(
-    alice.locator("button").filter({ has: alice.locator(".lucide-chevrons-up-down") }).first()
+    alice.locator("button").filter({ has: alice.locator(".lucide-chevron-down") }).first()
       .getByText(newOrgName)
   ).toBeVisible({ timeout: 8_000 })
 })

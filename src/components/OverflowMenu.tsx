@@ -9,8 +9,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { ThemeToggle } from "@/branding/ThemeMode"
-import { ColorThemePicker } from "@/branding/ColorTheme"
 
 export interface OverflowMenuItem {
   id: string
@@ -23,8 +21,6 @@ export interface OverflowMenuItem {
 
 interface Props {
   items: OverflowMenuItem[]
-  /** When true (default), appends a Theme row at the bottom. */
-  includeTheme?: boolean
 }
 
 /**
@@ -32,7 +28,7 @@ interface Props {
  * (Members, Settings, Close Project, etc.) collapse here so the top bar stops
  * scaling sideways with every new feature.
  */
-export function OverflowMenu({ items, includeTheme = true }: Props) {
+export function OverflowMenu({ items }: Props) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -59,23 +55,6 @@ export function OverflowMenu({ items, includeTheme = true }: Props) {
             ),
           )}
         </DropdownMenuGroup>
-        {includeTheme && (
-          <>
-            {items.some((item) => item.type !== "separator") && (
-              <DropdownMenuSeparator />
-            )}
-            {/* Theme rows host interactive controls that shouldn't close the
-                menu on click, so they stay plain rows rather than menu items. */}
-            <div className="flex items-center justify-between gap-2 px-2 py-1 text-sm">
-              <span className="text-muted-foreground">Theme</span>
-              <ThemeToggle />
-            </div>
-            <div className="flex items-center justify-between gap-2 px-2 py-1 text-sm">
-              <span className="text-muted-foreground">Color</span>
-              <ColorThemePicker />
-            </div>
-          </>
-        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )

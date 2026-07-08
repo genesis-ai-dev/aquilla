@@ -10,8 +10,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
   Select,
@@ -213,46 +213,48 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
             so DialogBody sizes against DialogContent directly. */}
         <form onSubmit={handleSubmit} className="contents">
           <DialogBody className="space-y-5">
-            <div className="space-y-2">
-              <Label htmlFor="name">Project name</Label>
-              <Input
-                id="name"
-                className={FIELD_CLASS}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="My Translation Project"
-              />
-            </div>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="name">Project name</FieldLabel>
+                <Input
+                  id="name"
+                  className={FIELD_CLASS}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="My Translation Project"
+                />
+              </Field>
 
-            <div className="space-y-2">
-              <div className="flex items-center gap-1.5">
-                <Label htmlFor="source" layout="inline">Source language</Label>
-                <LanguageFieldHint />
-              </div>
-              <Input
-                id="source"
-                className={FIELD_CLASS}
-                value={sourceLanguage}
-                onChange={(e) => setSourceLanguage(e.target.value)}
-                placeholder="English, Grade 7 English, es-419…"
-              />
-            </div>
-
-            {shape !== "source-only" && (
-              <div className="space-y-2">
+              <Field>
                 <div className="flex items-center gap-1.5">
-                  <Label htmlFor="target" layout="inline">Target language</Label>
+                  <FieldLabel htmlFor="source">Source language</FieldLabel>
                   <LanguageFieldHint />
                 </div>
                 <Input
-                  id="target"
+                  id="source"
                   className={FIELD_CLASS}
-                  value={targetLanguage}
-                  onChange={(e) => setTargetLanguage(e.target.value)}
-                  placeholder="French, conversational Swahili, zh-Hant…"
+                  value={sourceLanguage}
+                  onChange={(e) => setSourceLanguage(e.target.value)}
+                  placeholder="English, Grade 7 English, es-419…"
                 />
-              </div>
-            )}
+              </Field>
+
+              {shape !== "source-only" && (
+                <Field>
+                  <div className="flex items-center gap-1.5">
+                    <FieldLabel htmlFor="target">Target language</FieldLabel>
+                    <LanguageFieldHint />
+                  </div>
+                  <Input
+                    id="target"
+                    className={FIELD_CLASS}
+                    value={targetLanguage}
+                    onChange={(e) => setTargetLanguage(e.target.value)}
+                    placeholder="French, conversational Swahili, zh-Hant…"
+                  />
+                </Field>
+              )}
+            </FieldGroup>
 
             {/* AD-9 project-shape picker, tucked behind an "Advanced" disclosure
                 and placed after the primary fields so the default create flow is
@@ -291,8 +293,8 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
 
               {shape === "linked-target" && (
                 <div className="mt-3 space-y-3 border-t pt-3">
-                  <div className="space-y-2">
-                    <Label htmlFor="upstream-project">Upstream project</Label>
+                  <Field>
+                    <FieldLabel htmlFor="upstream-project">Upstream project</FieldLabel>
                     <Select value={upstreamProjectId} onValueChange={(value) => setUpstreamProjectId(value ?? "")}>
                       <SelectTrigger id="upstream-project" className="w-full">
                         <SelectValue placeholder="Choose a project to link from…" />
@@ -307,10 +309,10 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
                         </SelectGroup>
                       </SelectContent>
                     </Select>
-                  </div>
+                  </Field>
 
-                  <div className="space-y-2">
-                    <Label>Clone or live?</Label>
+                  <Field>
+                    <FieldLabel>Clone or live?</FieldLabel>
                     <RadioGroup
                       value={linkMode}
                       onValueChange={(value) => setLinkMode(value as LinkMode)}
@@ -331,10 +333,10 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
                         </span>
                       </label>
                     </RadioGroup>
-                  </div>
+                  </Field>
 
-                  <div className="space-y-2">
-                    <Label>What should become this project&apos;s source?</Label>
+                  <Field>
+                    <FieldLabel>What should become this project&apos;s source?</FieldLabel>
                     <RadioGroup
                       value={linkConsumes}
                       onValueChange={(value) => setLinkConsumes(value as LinkConsumes)}
@@ -356,15 +358,15 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
                         </span>
                       </label>
                     </RadioGroup>
-                  </div>
+                  </Field>
                 </div>
               )}
             </details>
 
             {error && (
-              <p className="text-sm text-destructive" role="alert">
+              <FieldError role="alert">
                 {error}
-              </p>
+              </FieldError>
             )}
           </DialogBody>
 

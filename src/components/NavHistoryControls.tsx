@@ -12,8 +12,8 @@ import { useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEve
 import { ChevronLeft, ChevronRight, Clock } from "lucide-react"
 import { useNavHistory, type NavEntry, type NavHistoryValue } from "@/context/NavHistoryContext"
 import { Popover, PopoverContent } from "@/components/ui/popover"
+import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { cn } from "@/lib/utils"
 
 const HOLD_MS = 350
 
@@ -88,9 +88,11 @@ function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav
   const nearest = list[0]?.entry.title
 
   const button = (
-    <button
+    <Button
       ref={btnRef}
       type="button"
+      variant="ghost"
+      size="icon-xs"
       disabled={!enabled}
       aria-label={enabled && nearest ? `${label} to ${nearest}` : label}
       onPointerDown={onPointerDown}
@@ -99,15 +101,10 @@ function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav
       onPointerCancel={clearHold}
       onClick={onClick}
       onContextMenu={onContextMenu}
-      className={cn(
-        "flex size-6 items-center justify-center rounded-md transition-colors",
-        enabled
-          ? "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-          : "cursor-default text-muted-foreground/30",
-      )}
+      className={enabled ? undefined : "cursor-default text-muted-foreground/30"}
     >
       <Icon className="size-4" aria-hidden />
-    </button>
+    </Button>
   )
 
   return (

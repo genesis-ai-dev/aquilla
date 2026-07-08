@@ -6,6 +6,9 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchArchivedProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { unarchiveProjectRemote } from "@/lib/sync/archive"
+import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/ui/page"
+import { Archive, Building2 } from "lucide-react"
 
 export function ArchivedProjects() {
   const { activeOrgId } = useActiveOrg()
@@ -56,27 +59,31 @@ export function ArchivedProjects() {
         <div className="h-full overflow-y-auto overscroll-contain p-6 space-y-3" data-testid="archived-projects-scroll">
           {error && <p className="text-sm text-destructive">{error}</p>}
           {activeOrgId == null ? (
-            <div className="rounded-lg border bg-card p-6 text-center">
-              <p className="text-sm font-medium">Select an organization</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Archived projects are managed within a single organization.
-              </p>
-            </div>
+            <EmptyState
+              icon={Building2}
+              title="Select an organization"
+              description="Archived projects are managed within a single organization."
+            />
           ) : loading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : projects.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No archived projects.</p>
+            <EmptyState
+              icon={Archive}
+              title="No archived projects."
+            />
           ) : (
             <div className="rounded-lg border divide-y">
               {projects.map((p) => (
                 <div key={p.id} className="flex items-center justify-between gap-4 p-4">
                   <span className="font-medium">{p.name}</span>
-                  <button
-                    onClick={() => handleRestore(p.id)}
-                    className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent/40"
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void handleRestore(p.id)}
                   >
                     Restore
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>

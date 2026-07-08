@@ -1,6 +1,10 @@
 import { Fragment, useMemo, useState } from "react"
 import { Building2, ChevronRight, ExternalLink, Search, Users } from "lucide-react"
-import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { EmptyState } from "@/components/ui/page"
 import { cn } from "@/lib/utils"
 import { fmtDate } from "@/lib/admin/format"
@@ -66,16 +70,17 @@ export function AdminTenantsSection({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
-        <div className="relative min-w-0 flex-1 sm:max-w-xs">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
+        <InputGroup className="min-w-0 flex-1 sm:max-w-xs">
+          <InputGroupAddon>
+            <Search />
+          </InputGroupAddon>
+          <InputGroupInput
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search organizations…"
             aria-label="Search organizations"
-            className="pl-8"
           />
-        </div>
+        </InputGroup>
         <span className="ml-auto text-xs tabular-nums text-muted-foreground">
           {filtered.length === orgs.length ? `${orgs.length} orgs` : `${filtered.length} of ${orgs.length} orgs`}
         </span>

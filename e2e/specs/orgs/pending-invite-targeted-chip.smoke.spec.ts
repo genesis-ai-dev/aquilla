@@ -57,9 +57,9 @@ test("targeted invite chip appears on /members when invite has a recipient email
   await alice.waitForLoadState("networkidle")
 
   // The targeted invite chip with the email badge should be visible.
-  const targetedChip = alice.locator('[data-tooltip="Targeted invite: sign-up form will be prefilled with this email"]')
+  const inviteRow = alice.locator("li").filter({ hasText: name }).first()
+  const targetedChip = inviteRow.getByText("targeted@example.com")
   await expect(targetedChip).toBeVisible({ timeout: 10_000 })
-  await expect(targetedChip).toContainText("targeted@example.com")
 
   // Verify the open-link badge is NOT present for this invite (it has an email).
   // There should be none associated with this targeted invite row.

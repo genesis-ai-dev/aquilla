@@ -23,7 +23,7 @@ test("project settings decay section expands and changing target marks form dirt
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}/settings`)
+  await alice.goto(`/project/${projectId}/settings?section=validation`)
   await alice.waitForLoadState("networkidle")
 
   // The <summary> "Staleness & health" is visible.

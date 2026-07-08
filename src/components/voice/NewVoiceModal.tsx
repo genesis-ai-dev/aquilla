@@ -1,40 +1,65 @@
 // NewVoiceModal — one modal, two ways to make a voice:
-//   • Gemini voice — name it + describe how it sounds. The base timbre is a
-//     smart default (rotated so each new voice sounds distinct), so the form is
-//     just Name + Describe — nothing else to fiddle with.
+//   • TTS voice — name it, pick the engine (OmniVoice / Gemini / Kokoro / MMS —
+//     seeded from the project's configured engine), and fill the engine's one
+//     knob (Gemini: describe how it sounds; Kokoro: voice id; MMS: language;
+//     OmniVoice: nothing). Gemini's base timbre stays a smart default (rotated
+//     so each new voice sounds distinct).
 //   • Clone voice — name it + capture a short reference clip (record, upload, or
 //     reuse a take already in the project). Generation is re-voiced to match it.
 //
-// Editing an existing voice reuses this same modal, locked to the voice's kind.
-// Deliberately de-purpled: Gemini uses the brand accent, Clone uses emerald.
+// Editing an existing voice reuses this same modal, locked to the voice's kind
+// (the engine stays switchable for TTS voices).
+// Deliberately de-purpled: TTS uses the brand accent, Clone uses emerald.
 
 import { useCallback, useMemo, useState } from "react"
 import { AudioLines, Check, Plus, Sparkles, Star, Trash2, UserRound } from "lucide-react"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Spinner } from "@/components/ui/spinner"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { VoiceCloneSection } from "@/components/VoiceCloneSection"
 import { cn } from "@/lib/utils"
 import { newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
-import { GEMINI_TTS_VOICES, DEFAULT_GEMINI_VOICE } from "@/lib/audio/tts-providers"
+import {
+  DEFAULT_TTS_PROVIDER,
+  GEMINI_TTS_VOICES,
+  DEFAULT_GEMINI_VOICE,
+  TTS_PROVIDER_INFOS,
+  defaultVoiceNameForProvider,
+  isGeminiVoiceName,
+  normalizeVoiceForProvider,
+  providerInfo,
+} from "@/lib/audio/tts-providers"
+import { HAS_EXTENDED_MMS_MODELS, POPULAR_MMS_LANGUAGES } from "@/lib/audio/mms-languages"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { buildVoiceReferenceId, uploadVoiceReference } from "@/lib/audio/voice-clone"
 import { parseFrontierAudioUrl, fetchCellAudio } from "@/lib/audio/upload"
-import type { Voice } from "@/lib/parsers/types"
+import type { TtsProvider, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
 
-type Mode = "gemini" | "clone"
+type Mode = "tts" | "clone"
 
 export interface NewVoiceModalProps {
   open: boolean
   onClose: () => void
   /** Voice being edited; null = creating a new one. */
   voice: Voice | null
+  /** Project's configured TTS engine — seeds a new voice's engine. */
+  provider?: TtsProvider
   targetLanguage?: string
   isDefault: boolean
   /** Index used to pick a fresh palette color + base timbre for a new voice. */
@@ -92,26 +117,47 @@ const mimeForExt = (ext: string): string =>
   : "application/octet-stream"
 
 function NewVoiceModalBody({
-  onClose, voice, isDefault, paletteIndex, projectId, fileId, session, cells,
-  onSave, onDelete, onMakeDefault, initialMode, seedCellId,
+  onClose, voice, provider, targetLanguage, isDefault, paletteIndex, projectId, fileId,
+  session, cells, onSave, onDelete, onMakeDefault, initialMode, seedCellId,
 }: NewVoiceModalProps) {
   const isNew = voice === null
-  const lockedMode: Mode | null = voice ? (voice.referenceAudioId ? "clone" : "gemini") : null
-  const [mode, setMode] = useState<Mode>(lockedMode ?? initialMode ?? "gemini")
+  const lockedMode: Mode | null = voice ? (voice.referenceAudioId ? "clone" : "tts") : null
+  const [mode, setMode] = useState<Mode>(lockedMode ?? initialMode ?? "tts")
+
+  const projectProvider = provider ?? DEFAULT_TTS_PROVIDER
+  // Smart default: rotate Gemini's base timbre so a fresh voice sounds distinct
+  // without making the user pick one.
+  const rotatedGeminiVoice =
+    GEMINI_TTS_VOICES[paletteIndex % GEMINI_TTS_VOICES.length]?.name ?? DEFAULT_GEMINI_VOICE
 
   const [draft, setDraft] = useState<Voice>(() =>
     voice ?? {
       id: newVoiceId(),
       name: "",
       color: VOICE_PALETTE[paletteIndex % VOICE_PALETTE.length],
-      provider: "gemini",
-      // Smart default: rotate the base timbre so a fresh voice sounds distinct
-      // without making the user pick one.
-      voiceName: GEMINI_TTS_VOICES[paletteIndex % GEMINI_TTS_VOICES.length]?.name ?? DEFAULT_GEMINI_VOICE,
+      provider: projectProvider,
+      voiceName: projectProvider === "gemini"
+        ? rotatedGeminiVoice
+        : defaultVoiceNameForProvider(projectProvider, { targetLanguage }),
     },
   )
   const update = useCallback((patch: Partial<Voice>) => setDraft((d) => ({ ...d, ...patch })), [])
   const [deleteOpen, setDeleteOpen] = useState(false)
+
+  // Engine is per-voice; legacy voices without one follow the project default.
+  const activeProvider = draft.provider ?? projectProvider
+  const activeInfo = providerInfo(activeProvider)
+
+  const pickProvider = useCallback((next: TtsProvider) => {
+    setDraft((d) => {
+      const normalized = normalizeVoiceForProvider(d, next, { targetLanguage })
+      // Switching to Gemini keeps the rotated smart-default timbre.
+      if (next === "gemini" && !isGeminiVoiceName(d.voiceName)) {
+        normalized.voiceName = rotatedGeminiVoice
+      }
+      return normalized
+    })
+  }, [targetLanguage, rotatedGeminiVoice])
 
   // ── Clone: reuse a take already in the project ──────────────────────────────
   const takes = useMemo(() => {
@@ -150,9 +196,21 @@ function NewVoiceModalBody({
 
   const handleSave = useCallback(() => {
     const fallback = mode === "clone" ? "Cloned voice" : "New voice"
-    onSave({ ...draft, name: draft.name.trim() || fallback })
+    let next: Voice = { ...draft, name: draft.name.trim() || fallback }
+    if (mode === "clone") {
+      // A clone rides a cloning-capable engine; fall back to the hosted default
+      // if the draft's engine (kokoro/mms) can't re-voice a reference.
+      const base = draft.provider ?? projectProvider
+      const cloneProvider = providerInfo(base).supportsCloning ? base : DEFAULT_TTS_PROVIDER
+      next = normalizeVoiceForProvider(next, cloneProvider, { targetLanguage })
+    } else if (next.referenceAudioId) {
+      // A TTS voice never carries a reference (e.g. one added then abandoned by
+      // switching tabs) — a lingering one would silently make it a clone.
+      delete next.referenceAudioId
+    }
+    onSave(next)
     onClose()
-  }, [mode, draft, onSave, onClose])
+  }, [mode, draft, projectProvider, targetLanguage, onSave, onClose])
 
   return (
     <>
@@ -166,30 +224,28 @@ function NewVoiceModalBody({
             {isNew ? "New voice" : "Edit voice"}
           </h2>
 
-          <div className="space-y-4 pt-1">
-            {/* Kind tabs — hidden while editing (a voice's kind is fixed). */}
-            {isNew && (
-              <div className="grid grid-cols-2 gap-1 rounded-xl border bg-muted/40 p-1">
-                <TabButton
-                  active={mode === "gemini"}
-                  onClick={() => setMode("gemini")}
-                  icon={Sparkles}
-                  label="Gemini voice"
-                  tone="primary"
-                />
-                <TabButton
-                  active={mode === "clone"}
-                  onClick={() => setMode("clone")}
-                  icon={UserRound}
-                  label="Clone voice"
-                  tone="emerald"
-                />
-              </div>
-            )}
+          {/* Kind tabs — hidden while editing (a voice's kind is fixed). */}
+          {isNew && (
+            <Tabs
+              value={mode}
+              onValueChange={(value) => setMode(value as Mode)}
+              className="gap-0"
+            >
+              <TabsList size="lg" className="w-full" aria-label="Voice kind">
+                <TabsTrigger value="tts">
+                  <Sparkles /> TTS voice
+                </TabsTrigger>
+                <TabsTrigger value="clone">
+                  <UserRound /> Clone voice
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          )}
 
+          <FieldGroup className="space-y-4 pt-1">
             {/* Name */}
-            <div className="space-y-1.5">
-              <Label htmlFor="voice-name">Name</Label>
+            <Field>
+              <FieldLabel htmlFor="voice-name">Name</FieldLabel>
               <Input
                 id="voice-name"
                 value={draft.name}
@@ -199,24 +255,84 @@ function NewVoiceModalBody({
                 aria-label="Voice name"
                 autoFocus
               />
-            </div>
+            </Field>
 
-            {mode === "gemini" ? (
-              /* Describe how it sounds → Gemini voice direction (Voice.prompt). */
-              <div className="space-y-1.5">
-                <Label htmlFor="voice-describe">Describe the voice</Label>
-                <Textarea
-                  id="voice-describe"
-                  value={draft.prompt ?? ""}
-                  onChange={(e) => update({ prompt: e.target.value || undefined })}
-                  rows={3}
-                  placeholder="e.g. a warm older man, calm and clear"
-                />
-              </div>
+            {mode === "tts" ? (
+              <>
+                {/* Engine — per-voice, seeded from the project's configured one.
+                    Switching resets the base voice to that engine's default. */}
+                <Field>
+                  <FieldLabel>Engine</FieldLabel>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {TTS_PROVIDER_INFOS.map((info) => (
+                      <AppTooltip key={info.id} content={info.hint} className="max-w-xs">
+                        <button
+                          type="button"
+                          onClick={() => pickProvider(info.id)}
+                          aria-pressed={activeProvider === info.id}
+                          className={cn(
+                            "rounded-lg border px-2.5 py-2 text-left transition-colors",
+                            activeProvider === info.id ? "border-primary bg-primary/10" : "hover:bg-accent/40",
+                          )}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-medium">{info.shortTitle}</span>
+                            {info.badge && (
+                              <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+                                {info.badge}
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">{info.blurb}</p>
+                          {info.caveat && (
+                            <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground/70">{info.caveat}</p>
+                          )}
+                        </button>
+                      </AppTooltip>
+                    ))}
+                  </div>
+                </Field>
+
+                {activeProvider === "gemini" && (
+                  <Field>
+                    <FieldLabel htmlFor="voice-describe">Describe the voice</FieldLabel>
+                    <Textarea
+                      id="voice-describe"
+                      value={draft.prompt ?? ""}
+                      onChange={(e) => update({ prompt: e.target.value || undefined })}
+                      rows={3}
+                      placeholder="e.g. a warm older man, calm and clear"
+                    />
+                  </Field>
+                )}
+                {activeProvider === "kokoro" && (
+                  <Field>
+                    <FieldLabel htmlFor="voice-kokoro">Kokoro voice id</FieldLabel>
+                    <Input
+                      id="voice-kokoro"
+                      value={draft.voiceName ?? ""}
+                      onChange={(e) => update({ voiceName: e.target.value || undefined })}
+                      placeholder="e.g. af_bella"
+                      className="font-mono"
+                    />
+                  </Field>
+                )}
+                {activeProvider === "mms" && (
+                  <MmsLanguageField
+                    value={draft.voiceName ?? ""}
+                    onChange={(v) => update({ voiceName: v || undefined })}
+                  />
+                )}
+                {activeProvider === "omnivoice" && (
+                  <p className="text-xs text-muted-foreground">
+                    {activeInfo.title} uses a single neural voice. Use the Clone tab to
+                    make it sound like a specific person.
+                  </p>
+                )}
+              </>
             ) : (
-              /* Clone: capture a reference clip. */
-              <div className="space-y-2">
-                <Label>Reference audio</Label>
+              <Field>
+                <FieldLabel>Reference audio</FieldLabel>
                 <VoiceCloneSection
                   voice={draft}
                   projectId={projectId}
@@ -224,9 +340,9 @@ function NewVoiceModalBody({
                   session={session}
                   onChange={update}
                 />
-                <p className="text-xs text-muted-foreground">
+                <FieldDescription>
                   A short clip is enough — we generate a base voice and clone it to match.
-                </p>
+                </FieldDescription>
 
                 {/* Or reuse audio already in the project. */}
                 {takes.length > 0 && (
@@ -277,9 +393,9 @@ function NewVoiceModalBody({
                     </div>
                   </details>
                 )}
-              </div>
+              </Field>
             )}
-          </div>
+          </FieldGroup>
 
           {/* Footer */}
           <div className="-mx-5 -mb-5 mt-2 flex flex-wrap items-center gap-2 rounded-b-3xl bg-muted/40 p-5">
@@ -334,29 +450,60 @@ function NewVoiceModalBody({
   )
 }
 
-function TabButton({
-  active, onClick, icon: Icon, label, tone,
-}: {
-  active: boolean
-  onClick: () => void
-  icon: typeof Sparkles
-  label: string
-  tone: "primary" | "emerald"
-}) {
+/** MMS voiceName is a language code: a popular-languages select, plus a raw
+ *  code input when extended models are available. */
+function MmsLanguageField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const knownCode = POPULAR_MMS_LANGUAGES.some((l) => l.code === value)
+  const selectValue = knownCode ? value : HAS_EXTENDED_MMS_MODELS ? "__other__" : ""
+  const mmsOptions: { value: string; label: string; disabled?: boolean }[] = [
+    ...(!knownCode && !HAS_EXTENDED_MMS_MODELS
+      ? [{
+          value: "",
+          label: value ? `Unsupported code: ${value}` : "Choose a language",
+          disabled: true,
+        }]
+      : []),
+    ...POPULAR_MMS_LANGUAGES.map((l) => ({ value: l.code, label: `${l.name} (${l.code})` })),
+    ...(HAS_EXTENDED_MMS_MODELS ? [{ value: "__other__", label: "Other MMS code" }] : []),
+  ]
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-        !active && "text-muted-foreground hover:text-foreground",
-        active && tone === "primary" && "bg-primary text-primary-foreground shadow-sm",
-        active && tone === "emerald" && "bg-emerald-500 text-white shadow-sm",
+    <>
+      <Field>
+        <FieldLabel htmlFor="voice-mms-lang">Language</FieldLabel>
+        <Select
+          items={mmsOptions.map((o) => ({ value: o.value, label: o.label }))}
+          value={selectValue}
+          onValueChange={(v) => {
+            const next = v ?? ""
+            onChange(next === "__other__" ? "" : next)
+          }}
+        >
+          <SelectTrigger id="voice-mms-lang" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {mmsOptions.map((o) => (
+                <SelectItem key={o.value} value={o.value} disabled={o.disabled}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </Field>
+      {HAS_EXTENDED_MMS_MODELS && (
+        <Field>
+          <FieldLabel htmlFor="voice-mms-code">MMS code</FieldLabel>
+          <Input
+            id="voice-mms-code"
+            value={value}
+            onChange={(e) => onChange(e.target.value.trim().toLowerCase())}
+            placeholder="ita"
+            className="font-mono"
+          />
+        </Field>
       )}
-    >
-      <Icon className="h-4 w-4" />
-      {label}
-    </button>
+    </>
   )
 }

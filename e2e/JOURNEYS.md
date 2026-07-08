@@ -30,6 +30,7 @@
 | Validation  | Validate a cell, indicator turns emerald             | `e2e/specs/validation/validate.smoke.spec.ts`                 |   ✅   |
 | Validation  | History persists across navigation                   | `e2e/specs/validation/validation-persists-navigation.smoke.spec.ts` | ✅ |
 | AI          | Sparkle button fills cell from mock LLM              | `e2e/specs/ai/completion.smoke.spec.ts` (IDB-injected settings)            | ✅ |
+| AI          | Agent drafts open file → workbench accept-all lands in editor → undo restores pre-draft text | `e2e/specs/ai/agent-draft.spec.ts` (mock OpenRouter via e2e-up)     |        |
 | Collab      | File propagates from alice to bob                    | `e2e/specs/collab/file-propagation.smoke.spec.ts` (API project bootstrap)  | ✅ |
 | Collab      | Concurrent cell edit propagates alice → bob          | `e2e/specs/collab/concurrent-edit.smoke.spec.ts` (API project bootstrap)   | ✅ |
 | Collab      | Conflict resolution on same cell                     | _gap — Plan 2_                                                |        |
@@ -85,11 +86,11 @@
 | Editor      | Pre-acceptance warning band for forbidden terminology rendering | `e2e/specs/editor/preacceptance-warning-band.smoke.spec.ts` | ✅ |
 | Editor      | RTL hint "Adjust" button opens view settings menu and dismisses hint | `e2e/specs/editor/rtl-hint-adjust-opens-settings.smoke.spec.ts` | ✅ |
 | Editor      | Workspace "Settings" dropdown item navigates to project settings     | `e2e/specs/editor/workspace-settings-navigate.smoke.spec.ts`   |   ✅   |
-| Projects    | Settings nav section link click scrolls to anchor      | `e2e/specs/projects/project-settings-nav-link-click.smoke.spec.ts` | ✅ |
+| Projects    | Settings sub-menu link navigates to its pane and back (AQU-501) | `e2e/specs/projects/project-settings-nav-link-click.smoke.spec.ts` | ✅ |
 | Editor      | Next unfinished navigation basic flow                 | `e2e/specs/editor/next-unfinished.smoke.spec.ts`              |   ✅   |
 | Editor      | "Next unfinished" button enabled after import; navigates without error | `e2e/specs/editor/next-unfinished-button.smoke.spec.ts` | ✅ |
 | Editor      | Cmd+. keyboard shortcut jumps to next unfinished cell | `e2e/specs/editor/next-unfinished-keyboard-shortcut.smoke.spec.ts` | ✅ |
-| Editor      | EditorModeToggle Text↔Audio lens switch (aria-pressed) | `e2e/specs/editor/editor-mode-toggle.smoke.spec.ts`     |   ✅   |
+| Editor      | EditorModeToggle Text↔Audio lens switch (aria-selected) | `e2e/specs/editor/editor-mode-toggle.smoke.spec.ts`     |   ✅   |
 | Editor      | Bold keyboard shortcut (Ctrl+B) toggles bold mark     | `e2e/specs/editor/formatting-bold-keyboard-shortcut.smoke.spec.ts` | ✅ |
 | Editor      | Escape key clears cell selection (no editable focused) | `e2e/specs/editor/selection-clear-escape.smoke.spec.ts`           |   ✅   |
 | Comments    | Submit comment via Ctrl+Enter keyboard shortcut        | `e2e/specs/editor/comment-submit-keyboard.smoke.spec.ts`          |   ✅   |
@@ -124,7 +125,7 @@
 | Projects    | Project settings API key show/hide toggle             | `e2e/specs/projects/project-settings-api-key-toggle.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings termbase sharing section             | `e2e/specs/projects/project-settings-termbase-sharing.smoke.spec.ts` | ⏸ hidden |
 | Projects    | Multi-project invite submit from share panel          | `e2e/specs/projects/multi-project-invite-submit.smoke.spec.ts` |   ✅   |
-| Orgs        | Org rename from org switcher                          | `e2e/specs/orgs/org-switcher-rename.smoke.spec.ts` + `org-rename.smoke.spec.ts` | ✅ |
+| Orgs        | Org rename from settings page                         | `e2e/specs/orgs/org-rename.smoke.spec.ts` | ✅ |
 | Orgs        | Org settings page renders and shows rename            | `e2e/specs/orgs/org-settings.smoke.spec.ts` + `org-settings-rename.smoke.spec.ts` | ✅ |
 | Orgs        | Member access panel expand shows per-project access   | `e2e/specs/orgs/member-access-panel-expand.smoke.spec.ts`     |   ✅   |
 | Orgs        | Assigned to me page shows inbox                       | `e2e/specs/orgs/assigned-to-me-page.smoke.spec.ts` + `assigned.smoke.spec.ts` | ✅ |
@@ -135,8 +136,6 @@
 | Orgs        | Team attach/detach project                            | `e2e/specs/orgs/team-attach-project.smoke.spec.ts` + `team-detach-project.smoke.spec.ts` | ✅ |
 | Orgs        | Team delete dialog                                    | `e2e/specs/orgs/team-delete.smoke.spec.ts`                    |   ✅   |
 | Orgs        | Teams sort and filter                                 | `e2e/specs/orgs/teams-sort-and-filter.smoke.spec.ts`          |   ✅   |
-| Orgs        | Color theme picker                                    | `e2e/specs/orgs/color-theme-picker.smoke.spec.ts`             |   ✅   |
-| Orgs        | Theme toggle (dark/light)                             | `e2e/specs/orgs/theme-toggle.smoke.spec.ts`                   |   ✅   |
 | Editor      | Cell action popover shows Record audio + Add comment  | `e2e/specs/editor/cell-action-popover.smoke.spec.ts`          |   ✅   |
 | Editor      | Cell details expansion panel tabs (Decay/BT/Issues/History) | `e2e/specs/editor/cell-details.smoke.spec.ts` + `cell-expansion-bt-tab.smoke.spec.ts` + `cell-expansion-decay-tab.smoke.spec.ts` + `cell-expansion-issues-tab.smoke.spec.ts` | ✅ |
 | Editor      | Cell expansion panel closes on Escape key             | `e2e/specs/editor/cell-expansion-escape-close.smoke.spec.ts`  |   ✅   |
@@ -153,9 +152,6 @@
 | Editor      | Decay breakdown popover opens from cell indicator     | `e2e/specs/editor/decay-breakdown-popover.smoke.spec.ts`      |   ✅   |
 | Editor      | Sync status indicator in workspace status bar         | `e2e/specs/editor/sync-status-indicator.smoke.spec.ts`        |   ✅   |
 | Editor      | Workspace status bar shows file progress              | `e2e/specs/editor/workspace-status-bar.smoke.spec.ts`         |   ✅   |
-| Editor      | Workspace breadcrumb back button navigates            | `e2e/specs/editor/workspace-breadcrumb-back.smoke.spec.ts`    |   ✅   |
-| Editor      | Workspace header dashboard link navigates home        | `e2e/specs/editor/workspace-header-dashboard-link.smoke.spec.ts` |   ✅   |
-| Editor      | Workspace overflow close project navigates dashboard  | `e2e/specs/editor/workspace-overflow-close-project.smoke.spec.ts` |   ✅   |
 | Editor      | Tab strip open/close file tabs                        | `e2e/specs/editor/tab-strip.smoke.spec.ts`                    |   ✅   |
 | Editor      | File filter sidebar input narrows file list           | `e2e/specs/editor/file-filter.smoke.spec.ts`                  |   ✅   |
 | Editor      | File move to corpus dialog                            | `e2e/specs/editor/file-move-corpus.smoke.spec.ts`             |   ✅   |
@@ -223,7 +219,7 @@
 | Memory      | Add / edit / delete living memory entry               | `e2e/specs/projects/living-memory-add-entry.smoke.spec.ts` + `living-memory-edit-entry.smoke.spec.ts` + `living-memory-delete-entry.smoke.spec.ts` | ✅ |
 | Memory      | Living memory empty state                             | `e2e/specs/projects/living-memory-empty-state.smoke.spec.ts`  |   ✅   |
 | Memory      | Living memory standards section                       | `e2e/specs/projects/living-memory-standards-section.smoke.spec.ts` |   ✅   |
-| Voice       | Voice creation (NewVoiceModal: Gemini/Clone tabs · name · describe) | `e2e/specs/editor/voice-creation.smoke.spec.ts` | ✅ |
+| Voice       | Voice creation (NewVoiceModal: TTS/Clone tabs · name · 4-engine picker) | `e2e/specs/editor/voice-creation.smoke.spec.ts` | ✅ |
 | Voice       | Voice make default + save                             | `e2e/specs/orgs/voice-make-default.smoke.spec.ts` + `voice-save.smoke.spec.ts` | ✅ |
 | Voice       | Voice Gemini API key toggle                           | `e2e/specs/orgs/voice-gemini-api-key-toggle.smoke.spec.ts`    |   ✅   |
 | Voice       | Audio mode lens toggle in workspace                   | `e2e/specs/orgs/audio-mode.smoke.spec.ts`                     |   ✅   |
@@ -239,7 +235,7 @@
 | Projects    | Project settings decay section expands                | `e2e/specs/projects/project-settings-decay.smoke.spec.ts`     |   ✅   |
 | Projects    | Project settings more save options → Close without saving | `e2e/specs/projects/project-settings-more-save-options.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings named validators input               | `e2e/specs/projects/project-settings-named-validators.smoke.spec.ts` |   ✅   |
-| Projects    | Project settings nav search filter                    | `e2e/specs/projects/project-settings-nav-search.smoke.spec.ts` |   ✅   |
+| Projects    | Project settings search filter (across sub-menus, AQU-501) | `e2e/specs/projects/project-settings-nav-search.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings termbase publish toggle              | `e2e/specs/projects/project-settings-termbase-publish-toggle.smoke.spec.ts` | ⏸ hidden |
 | Projects    | Project settings validation section                   | `e2e/specs/projects/project-settings-validation.smoke.spec.ts` + `project-settings-validation-count.smoke.spec.ts` | ✅ |
 | Projects    | Assign work panel in project overview                 | `e2e/specs/projects/assign-work-panel.smoke.spec.ts`          |   ✅   |

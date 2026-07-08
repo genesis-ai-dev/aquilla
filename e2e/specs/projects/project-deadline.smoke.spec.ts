@@ -6,7 +6,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *
  * ProjectOverview.tsx renders a "Deadline" card with:
  *   - "Set deadline" button (when no deadline is set)
- *   - date input (aria-label="Project deadline") when editing
+ *   - "Deadline date" input when editing
  *   - Save / Cancel buttons
  *   - After saving: the date is shown + a "Change" and "Clear" button
  *
@@ -26,7 +26,7 @@ test("project overview set deadline then clear it", async ({ alice }) => {
   await setDeadlineBtn.click()
 
   // Date input appears.
-  const dateInput = alice.locator('[aria-label="Project deadline"]')
+  const dateInput = alice.getByLabel(/Deadline date/i)
   await expect(dateInput).toBeVisible({ timeout: 3_000 })
 
   // Fill a future date (using ISO format).

@@ -51,7 +51,8 @@ describe("ArchivedProjects", () => {
     fetchArchivedProjects.mockResolvedValue([])
     renderArchived()
 
-    expect(await screen.findByText("No archived projects.")).toBeInTheDocument()
+    await waitFor(() => expect(fetchArchivedProjects).toHaveBeenCalledWith("jwt", 1))
+    expect(screen.getByText("No archived projects.")).toBeInTheDocument()
   })
 
   // FRO-366: guard against the list clipping instead of scrolling — see

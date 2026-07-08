@@ -1,15 +1,16 @@
-// "Language reel": blitzes through real John 3:16 renderings from the eBible
-// corpus — accelerating, then decelerating onto one language, holding a beat,
-// then blitzing again. Dramatizes Aquilla's core low-resource value prop:
-// an AI first draft within reach for the thousands of languages that have
-// little data and often a single translator. The verses shown are REAL
-// existing translations (open eBible corpus), not AI output — the copy frames
-// them as the destination the AI now helps new communities reach fast.
+// "Language reel": blitzes through real UDHR Article 1 renderings — accelerating,
+// then decelerating onto one language, holding a beat, then blitzing again.
+// Dramatizes Aquilla's core low-resource value prop: an AI first draft within
+// reach for the thousands of languages that have little data and often a
+// single translator. The text shown is REAL existing translation (the
+// Universal Declaration of Human Rights, public domain, 500+ languages), not
+// AI output — the copy frames it as the destination the AI now helps new
+// communities reach fast.
 
 import { useEffect, useRef, useState } from "react"
-import { JOHN_316 } from "./john316.data"
+import { UDHR_ARTICLE1 } from "./udhr-article1.data"
 
-const DATA = JOHN_316
+const DATA = UDHR_ARTICLE1
 // Ease-in-out reel: starts quick, peaks, then slows into the landing.
 const BLITZ_DELAYS = [120, 80, 60, 52, 50, 52, 58, 70, 92, 124, 168, 224, 290]
 const HOLD_MS = 2200
@@ -42,6 +43,7 @@ const SCRIPT_RANGES: [string, RegExp][] = [
   ["Han / Kana", /[぀-ヿ一-鿿]/g],
   ["Hangul", /[가-힯]/g],
   ["Cyrillic", /[Ѐ-ӿ]/g],
+  ["Georgian", /[Ⴀ-ჿ]/g],
 ]
 
 function detectScript(text: string): string {
@@ -134,7 +136,7 @@ export function LanguageBlitz() {
               <IconCheckRing /> first-draft target ready
             </span>
           )}
-          <span className="aq-blitz-tag">John 3:16 · eBible corpus</span>
+          <span className="aq-blitz-tag">UDHR Article 1 · public-domain translations</span>
         </div>
       </div>
     </div>

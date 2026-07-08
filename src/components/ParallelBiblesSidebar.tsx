@@ -19,9 +19,13 @@ import {
   type HelloaoTranslation,
 } from "@/lib/parsers/helloao"
 import { cn } from "@/lib/utils"
-import { BookMarked, Plus, X } from "lucide-react"
+import { BookMarked, Plus, Search, X } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 
 const VERSIONS_STORAGE_KEY = "codex:parallel-bibles:versions"
 const OPEN_STORAGE_KEY_PREFIX = "codex:parallel-bibles:"
@@ -323,12 +327,18 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
         {/* Version picker */}
         {pickerOpen && (
           <div className="border-t p-3">
-            <Input
-              autoFocus
-              placeholder="Search versions (e.g. 'eng', 'BSB')"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
+            <InputGroup>
+              <InputGroupAddon>
+                <Search />
+              </InputGroupAddon>
+              <InputGroupInput
+                autoFocus
+                placeholder="Search versions (e.g. 'eng', 'BSB')"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                aria-label="Search Bible versions"
+              />
+            </InputGroup>
             {translationsErr ? (
               <p className="mt-2 text-xs text-destructive">Failed to load: {translationsErr}</p>
             ) : !translations ? (

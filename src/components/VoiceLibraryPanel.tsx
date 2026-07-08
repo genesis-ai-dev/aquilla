@@ -1,7 +1,7 @@
 // The Audio lens' Voices panel — a pure SELECTOR. One simple job: see your
 // voices, pick which one is active, set the narrator. Making a voice is a single
 // "New voice" button → NewVoiceModal, which carries both ways to make one
-// (Gemini / Clone) behind tabs.
+// (TTS / Clone) behind tabs, seeded with the project's configured engine.
 //
 // Click a row to select it (the active voice — the assign target). Drag a row
 // onto a line to assign it. The row's ⋯ menu edits / sets-narrator / deletes.
@@ -12,11 +12,16 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { cn } from "@/lib/utils"
-import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
+import type { ProjectTtsSettings, TtsProvider, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { PRESET_VOICES } from "@/lib/audio/voices"
-import { NewVoiceModal } from "@/components/voice/NewVoiceModal"
 import { providerInfo, resolveTtsProvider } from "@/lib/audio/tts-providers"
+import { NewVoiceModal } from "@/components/voice/NewVoiceModal"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { ROLE } from "@/lib/frontier/roles"
 import { denialMessage } from "@/lib/permissions/denial"
@@ -146,6 +151,10 @@ export function VoiceLibraryPanel({
     return q ? voices.filter((v) => v.name.toLowerCase().includes(q)) : voices
   }, [voices, query])
 
+  // A voice without its own engine follows the project's configured one — the
+  // same fallback generate-voice uses at synthesis time.
+  const projectProvider = resolveTtsProvider(settings)
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Header */}
@@ -156,16 +165,17 @@ export function VoiceLibraryPanel({
 
       {/* Search */}
       <div className="px-3 pb-2">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
+        <InputGroup>
+          <InputGroupAddon>
+            <Search />
+          </InputGroupAddon>
+          <InputGroupInput
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search voices…"
-            className="h-8 w-full rounded-lg border bg-background pl-8 pr-2 text-sm outline-none ring-primary/40 placeholder:text-muted-foreground focus:ring-2"
           />
-        </div>
+        </InputGroup>
       </div>
 
       {/* The selector list */}
@@ -179,7 +189,7 @@ export function VoiceLibraryPanel({
             <VoiceRow
               key={voice.id}
               voice={voice}
-              projectProvider={resolveTtsProvider(settings)}
+              projectProvider={projectProvider}
               active={voice.id === selectedId}
               isDefault={voice.id === defaultVoiceId}
               stats={castStats?.get(voice.id)}
@@ -215,6 +225,7 @@ export function VoiceLibraryPanel({
           open
           onClose={() => setEditing({ kind: "closed" })}
           voice={editing.kind === "edit" ? editing.voice : null}
+          provider={projectProvider}
           targetLanguage={targetLanguage}
           isDefault={editing.kind === "edit" ? editing.voice.id === defaultVoiceId : false}
           paletteIndex={voices.length}
@@ -225,7 +236,7 @@ export function VoiceLibraryPanel({
           onSave={saveVoice}
           onDelete={editing.kind === "edit" && canEditVoices ? () => deleteVoice(editing.voice) : undefined}
           onMakeDefault={editing.kind === "edit" && canEditVoices ? () => makeDefault(editing.voice) : undefined}
-          initialMode={editing.kind === "clone" ? "clone" : "gemini"}
+          initialMode={editing.kind === "clone" ? "clone" : "tts"}
           seedCellId={editing.kind === "clone" ? editing.seedCellId : null}
         />
       )}
@@ -241,7 +252,7 @@ function VoiceRow({
   voice: Voice
   /** The project's configured TTS provider — the fallback for voices that
    *  don't carry their own (e.g. cast minted on import). */
-  projectProvider: NonNullable<ProjectTtsSettings["provider"]>
+  projectProvider: TtsProvider
   active: boolean
   isDefault: boolean
   stats?: CastMemberStats
@@ -274,7 +285,7 @@ function VoiceRow({
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect() } }}
       title="Click to select · drag onto a line to assign"
       className={cn(
-        "group flex cursor-grab items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors active:cursor-grabbing",
+        "group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors",
         active ? "bg-primary/10" : "hover:bg-accent/50",
       )}
     >
@@ -307,15 +318,17 @@ function VoiceRow({
         <Popover open={menuOpen} onOpenChange={setMenuOpen}>
           <PopoverTrigger
             render={
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-xs"
                 onClick={(e) => e.stopPropagation()}
                 title="More"
                 aria-label="More voice actions"
-                className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus:opacity-100 group-hover:opacity-100 data-[popup-open]:opacity-100"
+                className="shrink-0 opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100 data-[popup-open]:opacity-100"
               >
                 <MoreHorizontal className="h-4 w-4" />
-              </button>
+              </Button>
             }
           />
           <PopoverContent align="end" side="bottom" className="w-44 p-1" onClick={(e) => e.stopPropagation()}>

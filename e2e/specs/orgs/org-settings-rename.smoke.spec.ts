@@ -15,7 +15,7 @@ import { test, expect } from "../../helpers/multi-user"
  * on other tests that rely on the default org name "Acme".
  */
 test("org settings rename and save updates org name", async ({ alice }) => {
-  await alice.goto("/settings")
+  await alice.goto("/settings/identity")
   await alice.waitForLoadState("networkidle")
 
   // Enter edit mode.

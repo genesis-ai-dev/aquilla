@@ -63,6 +63,16 @@ describe("worker/index — routing", () => {
     expect(await res.text()).toBe("served:/homepage.html")
   })
 
+  it("GET /bible-translation always serves bible-translation.html (no cookie)", async () => {
+    const res = await fetchWorker("/bible-translation")
+    expect(await res.text()).toBe("served:/bible-translation.html")
+  })
+
+  it("GET /bible-translation always serves bible-translation.html (even with aq_hint=1)", async () => {
+    const res = await fetchWorker("/bible-translation", "aq_hint=1")
+    expect(await res.text()).toBe("served:/bible-translation.html")
+  })
+
   it("GET /beta serves beta.html (static marketing page, no cookie)", async () => {
     const res = await fetchWorker("/beta")
     expect(await res.text()).toBe("served:/beta.html")
@@ -86,6 +96,16 @@ describe("worker/index — routing", () => {
   it("GET /case-studies/come-and-see serves case-study.html even when signed in", async () => {
     const res = await fetchWorker("/case-studies/come-and-see", "aq_hint=1")
     expect(await res.text()).toBe("served:/case-study.html")
+  })
+
+  it("GET /case-studies/biblica serves case-study-biblica.html (static marketing page)", async () => {
+    const res = await fetchWorker("/case-studies/biblica")
+    expect(await res.text()).toBe("served:/case-study-biblica.html")
+  })
+
+  it("GET /case-studies/biblica serves case-study-biblica.html even when signed in", async () => {
+    const res = await fetchWorker("/case-studies/biblica", "aq_hint=1")
+    expect(await res.text()).toBe("served:/case-study-biblica.html")
   })
 
   it("GET /project/abc passes through to ASSETS unchanged", async () => {

@@ -37,9 +37,18 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     // FRO-433: OrgProviderSection consumes these from the hook contract.
     orgProviderKeys: {},
     canEditOrgKeys: true,
+    // AQU-485: roster/member-progress visibility — default floor (Maintainer)
+    // and the mocked caller (owner, role 700) passes it.
+    canViewRoster: true,
+    rosterViewMinRole: 600,
+    canViewMemberProgress: true,
+    memberProgressViewMinRole: 600,
     refresh: vi.fn(async () => null),
     requestPromotion: vi.fn(async () => ({ kind: "blocked" })),
   }),
+  // AQU-485: Settings.tsx imports this directly (not part of the hook's
+  // return value) to gate the roster/progress Select controls owner-only.
+  canEditRosterProgressFloor: (level: number | null | undefined) => (level ?? 0) >= 700,
 }))
 
 beforeEach(() => localStorage.clear())
@@ -124,5 +133,37 @@ describe("Export policy saved acknowledgment", () => {
     // The server error must surface, and the Saved acknowledgment must not.
     expect(await screen.findByText(/server error/i)).toBeDefined()
     expect(screen.queryByTestId("export-role-saved")).toBeNull()
+  })
+})
+
+// AQU-485: roster + member-progress visibility settings UI.
+describe("Roster & member-progress visibility settings (AQU-485)", () => {
+  it("renders both independent controls, defaulting to Maintainer", async () => {
+    renderSettings("/settings/roster")
+    await waitFor(() => expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined())
+    expect(screen.getByLabelText(/who can view member progress/i)).toBeDefined()
+  })
+
+  it("shows Saved after successfully changing the roster floor, independent of the progress floor", async () => {
+    mockPatch.mockResolvedValueOnce({ kind: "ok", value: { orgId: 1, settings: { rosterViewMinRole: 400 }, version: 2, updatedAt: null, updatedBy: null } })
+    renderSettings("/settings/roster")
+    await waitFor(() => expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined())
+
+    await pickSelectOption(/who can view the roster/i, /contributor \(400\)/i)
+
+    await waitFor(() => expect(screen.getByTestId("roster-role-saved")).toBeDefined())
+    // Changing the roster floor must not touch the progress floor's ack state.
+    expect(screen.queryByTestId("progress-role-saved")).toBeNull()
+  })
+
+  it("surfaces a server error for the member-progress floor without a false Saved", async () => {
+    mockPatch.mockResolvedValueOnce({ kind: "error" as const, status: 500, message: "Server error" })
+    renderSettings("/settings/roster")
+    await waitFor(() => expect(screen.getByLabelText(/who can view member progress/i)).toBeDefined())
+
+    await pickSelectOption(/who can view member progress/i, /owner \(700\)/i)
+
+    expect(await screen.findByText(/server error/i)).toBeDefined()
+    expect(screen.queryByTestId("progress-role-saved")).toBeNull()
   })
 })

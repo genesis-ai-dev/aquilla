@@ -13,6 +13,13 @@ import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
 import { WorkloadRollup } from "./WorkloadRollup"
 import { UsageRollup } from "./UsageRollup"
 import { CreditsPanel } from "./CreditsPanel"
+import {
+  SectionVisibilityBadge,
+  SectionVisibilityGate,
+  sectionTintClass,
+} from "./SectionVisibilityBadge"
+import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
+import { ROLE } from "@/lib/frontier/roles"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
@@ -26,9 +33,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
-import { FolderPlus, X } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { FolderPlus, Search, X, Building2 } from "lucide-react"
 
 const STALE_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000
 
@@ -164,7 +178,7 @@ function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, 
 // Shared column template for the project table so the header row and the data
 // rows always line up. Name flexes; the metric + date columns are fixed-width.
 // Kept compact so the Name column survives inside the narrow all-orgs panel.
-const PROJECT_TABLE_COLS = "grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_4rem_6rem]"
+const PROJECT_TABLE_COLS = "grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_4rem_5.5rem_6rem]"
 
 /**
  * The org/portfolio project list as a compact table — one row per project with
@@ -177,14 +191,16 @@ function ProjectTable({
   projects,
   now,
   showOrg,
+  roleByProjectId,
 }: {
   projects: PortfolioProjectRow[]
   now: number
   showOrg: boolean
+  roleByProjectId?: Map<string, CloudProjectSummary["role"]>
 }) {
   return (
     <div className="overflow-x-auto">
-      <div className="min-w-[32rem]">
+      <div className="min-w-[38rem]">
         <div
           className={`grid ${PROJECT_TABLE_COLS} gap-x-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground`}
         >
@@ -192,6 +208,7 @@ function ProjectTable({
           <span className="whitespace-nowrap text-right">Translated</span>
           <span className="whitespace-nowrap text-right">Validated</span>
           <span className="whitespace-nowrap text-right">Audio</span>
+          <span className="whitespace-nowrap text-right">Role</span>
           <span className="whitespace-nowrap text-right">Updated</span>
         </div>
         <div className="divide-y">
@@ -199,6 +216,7 @@ function ProjectTable({
             const tpct = Math.round(translatedPct(p) * 100)
             const pct = Math.round(validatedPct(p) * 100)
             const apct = Math.round(audioPct(p) * 100)
+            const role = roleByProjectId?.get(p.id)
             const status = activityStatus(p, now)
             const dstatus = deadlineStatus(p, now)
             return (
@@ -234,6 +252,9 @@ function ProjectTable({
                 </span>
                 <span className="text-right tabular-nums text-muted-foreground" aria-label={`${apct}% audio`}>
                   {apct}%
+                </span>
+                <span className="truncate text-right text-xs text-muted-foreground">
+                  {role?.name.replace(/_/g, " ") ?? "—"}
                 </span>
                 <span
                   className={`truncate text-right text-xs ${
@@ -303,6 +324,16 @@ export function OrgHome() {
   const { session, loading: sessionLoading } = useFrontierSession()
   const navigate = useNavigate()
   const jwt = session?.jwt ?? null
+
+  // AQU-486: per-section visibility chrome for Team workload / Team usage
+  // (both gated by the AQU-485 memberProgressViewMinRole floor — they're both
+  // per-member productivity views) and the credits panel (a static
+  // maintainer-only floor hardcoded in CreditsPanel; no org-setting backs it
+  // yet, so its badge is informational only, with no advanced toggle).
+  const orgSettings = useOrgSettings(activeOrgId, activeOrg?.role?.level)
+  const canEditVisibility = canEditRosterProgressFloor(activeOrg?.role?.level)
+  const memberProgressReady = orgSettings.hasFetched
+  const memberProgressViewerRole = activeOrg?.role?.level ?? null
 
   const [projects, setProjects] = useState<PortfolioProjectRow[]>([])
   // FRO-335: accessible-project rows supply direct/group/org role attribution
@@ -439,7 +470,7 @@ export function OrgHome() {
             </p>
             <Link
               to={`/login?next=${encodeURIComponent("/")}`}
-              className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              className={cn(buttonVariants())}
             >
               Sign in
             </Link>
@@ -477,6 +508,7 @@ export function OrgHome() {
     activeOrgId,
     isAllOrgs ? "all-orgs" : "active-org",
   ).sharedWithMe
+  const roleByProjectId = new Map(accessibleProjects.map((project) => [project.id, project.role]))
 
   const orgSummaries: OrgPortfolioSummary[] = orgs
     .map((org) => {
@@ -517,8 +549,6 @@ export function OrgHome() {
     navigate(`/projects/${project.id}`)
   }
 
-  const projectSearchClassName =
-    "h-9 w-full rounded-md border border-border bg-background px-3 pr-9 text-sm focus-visible:border-muted-foreground/40 focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-sm"
   const projectControlGroupClassName =
     "flex min-w-fit shrink-0 items-center gap-2 whitespace-nowrap"
 
@@ -592,7 +622,7 @@ export function OrgHome() {
                         </div>
                         <Link
                           to={`/join/${inv.token}`}
-                          className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                          className={cn(buttonVariants({ size: "sm" }), "shrink-0")}
                         >
                           Review &amp; accept
                         </Link>
@@ -638,25 +668,33 @@ export function OrgHome() {
                           </p>
                         </div>
                         {orgSummaries.length > 0 && (
-                          <input
-                            type="search"
-                            value={orgQuery}
-                            onChange={(e) => setOrgQuery(e.target.value)}
-                            placeholder="Filter organizations…"
-                            aria-label="Filter organizations by name"
-                            className="h-9 w-full rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:w-56"
-                          />
+                          <InputGroup className="h-9 w-full sm:w-56">
+                            <InputGroupAddon>
+                              <Search />
+                            </InputGroupAddon>
+                            <InputGroupInput
+                              type="search"
+                              value={orgQuery}
+                              onChange={(e) => setOrgQuery(e.target.value)}
+                              placeholder="Filter organizations…"
+                              aria-label="Filter organizations by name"
+                            />
+                          </InputGroup>
                         )}
                       </div>
 
                       {orgSummaries.length === 0 ? (
-                        <div className="px-4 py-10 text-center">
-                          <p className="text-sm text-muted-foreground">No organizations yet.</p>
-                        </div>
+                        <EmptyState
+                          className="border-0 bg-transparent py-10"
+                          icon={Building2}
+                          title="No organizations yet."
+                        />
                       ) : visibleOrgSummaries.length === 0 ? (
-                        <div className="px-4 py-10 text-center">
-                          <p className="text-sm text-muted-foreground">No matching organizations.</p>
-                        </div>
+                        <EmptyState
+                          className="border-0 bg-transparent py-10"
+                          icon={Search}
+                          title="No matching organizations."
+                        />
                       ) : (
                         <div className="divide-y">
                           {visibleOrgSummaries.map((summary) => (
@@ -694,8 +732,11 @@ export function OrgHome() {
                           </div>
                         </div>
                         <div className="flex w-full flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden">
-                          <div className="relative min-w-[12rem] flex-[1_1_13rem] max-w-52">
-                            <input
+                          <InputGroup className="h-9 min-w-[12rem] flex-[1_1_13rem] max-w-52">
+                            <InputGroupAddon>
+                              <Search />
+                            </InputGroupAddon>
+                            <InputGroupInput
                               type="text"
                               value={projectQuery}
                               onChange={(e) => setProjectQuery(e.target.value)}
@@ -707,38 +748,36 @@ export function OrgHome() {
                               autoCorrect="off"
                               autoCapitalize="none"
                               spellCheck={false}
-                              className={projectSearchClassName}
                             />
                             {projectQuery && (
-                              <button
-                                type="button"
-                                aria-label="Clear project filter"
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => setProjectQuery("")}
-                                className="absolute right-2 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
-                              >
-                                <X className="size-3.5" aria-hidden />
-                              </button>
+                              <InputGroupAddon align="inline-end">
+                                <InputGroupButton
+                                  type="button"
+                                  size="icon-xs"
+                                  aria-label="Clear project filter"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => setProjectQuery("")}
+                                >
+                                  <X />
+                                </InputGroupButton>
+                              </InputGroupAddon>
                             )}
-                          </div>
+                          </InputGroup>
                           <div className={projectControlGroupClassName}>
                             <div className="flex items-center gap-2" aria-label="Project status filter">
                               <span className="text-xs font-medium text-muted-foreground">Status</span>
                               <div className="flex items-center gap-1">
                                 {STATUS_FILTERS.map((f) => (
-                                  <button
+                                  <Button
                                     key={f.value}
                                     type="button"
+                                    size="xs"
+                                    variant={statusFilter === f.value ? "default" : "secondary"}
                                     onClick={() => setStatusFilter(f.value)}
                                     aria-pressed={statusFilter === f.value}
-                                    className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
-                                      statusFilter === f.value
-                                        ? "bg-primary text-primary-foreground"
-                                        : "bg-muted text-muted-foreground hover:bg-muted/70"
-                                    }`}
                                   >
                                     {f.label}
-                                  </button>
+                                  </Button>
                                 ))}
                               </div>
                             </div>
@@ -768,17 +807,19 @@ export function OrgHome() {
                       </div>
 
                       {projects.length === 0 ? (
-                        <div className="px-4 py-10 text-center">
-                          <p className="text-sm text-muted-foreground">No projects yet.</p>
-                        </div>
+                        <EmptyState
+                          className="border-0 bg-transparent py-10"
+                          icon={FolderPlus}
+                          title="No projects yet."
+                        />
                       ) : visible.length === 0 ? (
-                        <div className="px-4 py-10 text-center">
-                          <p className="text-sm text-muted-foreground">
-                            {projectQuery ? "No matching projects." : currentProjectLens.empty}
-                          </p>
-                        </div>
+                        <EmptyState
+                          className="border-0 bg-transparent py-10"
+                          icon={Search}
+                          title={projectQuery ? "No matching projects." : currentProjectLens.empty}
+                        />
                       ) : (
-                        <ProjectTable projects={visible} now={now} showOrg />
+                        <ProjectTable projects={visible} now={now} showOrg roleByProjectId={roleByProjectId} />
                       )}
                     </section>
                   </div>
@@ -815,8 +856,11 @@ export function OrgHome() {
                   {/* Filter bar */}
                   {projects.length > 0 && (
                     <div className="flex w-full flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden">
-                      <div className="relative min-w-[12rem] flex-[1_1_13rem] max-w-52">
-                        <input
+                      <InputGroup className="h-9 min-w-[12rem] flex-[1_1_13rem] max-w-52">
+                        <InputGroupAddon>
+                          <Search />
+                        </InputGroupAddon>
+                        <InputGroupInput
                           type="text"
                           value={projectQuery}
                           onChange={(e) => setProjectQuery(e.target.value)}
@@ -828,38 +872,36 @@ export function OrgHome() {
                           autoCorrect="off"
                           autoCapitalize="none"
                           spellCheck={false}
-                          className={projectSearchClassName}
                         />
                         {projectQuery && (
-                          <button
-                            type="button"
-                            aria-label="Clear project filter"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => setProjectQuery("")}
-                            className="absolute right-2 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
-                          >
-                            <X className="size-3.5" aria-hidden />
-                          </button>
+                          <InputGroupAddon align="inline-end">
+                            <InputGroupButton
+                              type="button"
+                              size="icon-xs"
+                              aria-label="Clear project filter"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => setProjectQuery("")}
+                            >
+                              <X />
+                            </InputGroupButton>
+                          </InputGroupAddon>
                         )}
-                      </div>
+                      </InputGroup>
                       <div className={projectControlGroupClassName}>
                         <div className="flex items-center gap-2" aria-label="Project status filter">
                           <span className="text-xs font-medium text-muted-foreground">Status</span>
                           <div className="flex items-center gap-1">
                             {STATUS_FILTERS.map((f) => (
-                              <button
+                              <Button
                                 key={f.value}
                                 type="button"
+                                size="xs"
+                                variant={statusFilter === f.value ? "default" : "secondary"}
                                 onClick={() => setStatusFilter(f.value)}
                                 aria-pressed={statusFilter === f.value}
-                                className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
-                                  statusFilter === f.value
-                                    ? "bg-primary text-primary-foreground"
-                                    : "bg-muted text-muted-foreground hover:bg-muted/70"
-                                }`}
                               >
                                 {f.label}
-                              </button>
+                              </Button>
                             ))}
                           </div>
                         </div>
@@ -906,10 +948,14 @@ export function OrgHome() {
                       }
                     />
                   ) : visible.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No matching projects.</p>
+                    <EmptyState
+                      className="border-0 bg-transparent py-6"
+                      icon={Search}
+                      title="No matching projects."
+                    />
                   ) : (
                     <div className="overflow-hidden rounded-2xl border bg-card">
-                      <ProjectTable projects={visible} now={now} showOrg={false} />
+                      <ProjectTable projects={visible} now={now} showOrg={false} roleByProjectId={roleByProjectId} />
                     </div>
                   )}
 
@@ -920,14 +966,68 @@ export function OrgHome() {
                 </>
               )}
 
-              {jwt && !isAllOrgs && activeOrgId != null && <WorkloadRollup jwt={jwt} orgId={activeOrgId} />}
-              {jwt && !isAllOrgs && activeOrgId != null && <UsageRollup jwt={jwt} orgId={activeOrgId} />}
               {jwt && !isAllOrgs && activeOrgId != null && (
-                <CreditsPanel
-                  jwt={jwt}
-                  orgId={activeOrgId}
-                  orgRoleLevel={activeOrg?.role.level ?? 0}
-                />
+                <SectionVisibilityGate
+                  minRole={orgSettings.memberProgressViewMinRole}
+                  viewerRoleLevel={memberProgressViewerRole}
+                  ready={memberProgressReady}
+                >
+                  <div
+                    className={cn(
+                      "relative rounded-2xl",
+                      sectionTintClass(orgSettings.memberProgressViewMinRole),
+                    )}
+                    data-testid="section-team-workload"
+                  >
+                    <SectionVisibilityBadge
+                      minRole={orgSettings.memberProgressViewMinRole}
+                      canEdit={canEditVisibility}
+                      onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
+                      description="Who can see each teammate's assignment progress on this org's overview."
+                      className="absolute right-4 top-4 z-10"
+                    />
+                    <WorkloadRollup jwt={jwt} orgId={activeOrgId} />
+                  </div>
+                </SectionVisibilityGate>
+              )}
+              {jwt && !isAllOrgs && activeOrgId != null && (
+                <SectionVisibilityGate
+                  minRole={orgSettings.memberProgressViewMinRole}
+                  viewerRoleLevel={memberProgressViewerRole}
+                  ready={memberProgressReady}
+                >
+                  <div
+                    className={cn(
+                      "relative rounded-2xl",
+                      sectionTintClass(orgSettings.memberProgressViewMinRole),
+                    )}
+                    data-testid="section-team-usage"
+                  >
+                    <SectionVisibilityBadge
+                      minRole={orgSettings.memberProgressViewMinRole}
+                      canEdit={canEditVisibility}
+                      onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
+                      description="Who can see each teammate's usage on this org's overview."
+                      className="absolute right-4 top-4 z-10"
+                    />
+                    <UsageRollup jwt={jwt} orgId={activeOrgId} />
+                  </div>
+                </SectionVisibilityGate>
+              )}
+              {jwt && !isAllOrgs && activeOrgId != null && (
+                <SectionVisibilityGate minRole={ROLE.MAINTAINER} viewerRoleLevel={activeOrg?.role?.level ?? null}>
+                  <div
+                    className={cn("relative rounded-2xl", sectionTintClass(ROLE.MAINTAINER))}
+                    data-testid="section-credits"
+                  >
+                    <SectionVisibilityBadge minRole={ROLE.MAINTAINER} className="absolute right-4 top-4 z-10" />
+                    <CreditsPanel
+                      jwt={jwt}
+                      orgId={activeOrgId}
+                      orgRoleLevel={activeOrg?.role.level ?? 0}
+                    />
+                  </div>
+                </SectionVisibilityGate>
               )}
             </div>
           )}

@@ -14,7 +14,7 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { renderHook, waitFor, act } from "@testing-library/react"
-import { useOrgSettings } from "./useOrgSettings"
+import { useOrgSettings, canEditRosterProgressFloor } from "./useOrgSettings"
 import * as restClient from "@/lib/sync/org-settings"
 import type { OrgSettingsResponse, OrgPatchResult } from "@/lib/sync/org-settings"
 import type { TranslationRule } from "@/lib/parsers/types"
@@ -319,5 +319,87 @@ describe("useOrgSettings — rollback on rejected writes (FRO-255 follow-up)", (
 
     expect(result.current.orgRules.map((r) => r.id)).toEqual(["r1", "r2"])
     expect(result.current.version).toBe(4)
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// AQU-485: roster + member-progress visibility floors
+// ───────────────────────────────────────────────────────────────────────────
+
+function makeRosterResponse(
+  overrides: { rosterViewMinRole?: number; memberProgressViewMinRole?: number } = {},
+): OrgSettingsResponse {
+  return {
+    orgId: 1,
+    settings: { ...overrides },
+    version: 1,
+    updatedAt: "2026-01-01T00:00:00Z",
+    updatedBy: 1,
+  }
+}
+
+describe("useOrgSettings — canViewRoster default floor (AQU-485, unlike canExport)", () => {
+  // UNLIKE exportMinRole, absence of rosterViewMinRole must NOT mean "no
+  // gate" — it must resolve to the same safe default (Maintainer) the server
+  // applies, per the acceptance criterion "safe for sensitive teams out of
+  // the box." A regression back to exportMinRole's null-means-allow pattern
+  // here would silently re-open every org's roster to every member.
+  it("contributor (400) in an org with NO explicit rosterViewMinRole is DENIED (default=Maintainer)", async () => {
+    mockFetchResponse = makeRosterResponse() // no rosterViewMinRole key at all
+    const { result } = renderHook(() => useOrgSettings(1, 400))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+
+    expect(result.current.rosterViewMinRole).toBe(600) // resolved default, not null
+    expect(result.current.canViewRoster).toBe(false)
+  })
+
+  it("maintainer (600) in an org with NO explicit rosterViewMinRole is PERMITTED (at the default floor)", async () => {
+    mockFetchResponse = makeRosterResponse()
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.canViewRoster).toBe(true)
+  })
+
+  it("before the initial fetch resolves, canViewRoster is false (never optimistically open)", () => {
+    // Deliberately the INVERSE of canExport's pre-fetch escape hatch: a
+    // disclosure gate (roster) must not flash open before collapsing shut.
+    const { result } = renderHook(() => useOrgSettings(1, 100))
+    expect(result.current.hasFetched).toBe(false)
+    expect(result.current.canViewRoster).toBe(false)
+  })
+})
+
+describe("useOrgSettings — rosterViewMinRole and memberProgressViewMinRole are independent", () => {
+  it("roster open (viewer floor) while member-progress stays restricted (owner floor)", async () => {
+    mockFetchResponse = makeRosterResponse({ rosterViewMinRole: 100, memberProgressViewMinRole: 700 })
+    const { result } = renderHook(() => useOrgSettings(1, 400)) // contributor
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+
+    expect(result.current.canViewRoster).toBe(true) // 400 >= 100
+    expect(result.current.canViewMemberProgress).toBe(false) // 400 < 700
+  })
+
+  it("roster restricted (owner floor) while member-progress is open (viewer floor) — the inverse", async () => {
+    mockFetchResponse = makeRosterResponse({ rosterViewMinRole: 700, memberProgressViewMinRole: 100 })
+    const { result } = renderHook(() => useOrgSettings(1, 400))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+
+    expect(result.current.canViewRoster).toBe(false) // 400 < 700
+    expect(result.current.canViewMemberProgress).toBe(true) // 400 >= 100
+  })
+})
+
+describe("canEditRosterProgressFloor — owner-only write gate (AQU-485)", () => {
+  it("denies a maintainer (600) — matches the server's OWNER-only gate", () => {
+    expect(canEditRosterProgressFloor(600)).toBe(false)
+  })
+
+  it("permits an owner (700)", () => {
+    expect(canEditRosterProgressFloor(700)).toBe(true)
+  })
+
+  it("denies when the caller's role is unknown (null/undefined)", () => {
+    expect(canEditRosterProgressFloor(null)).toBe(false)
+    expect(canEditRosterProgressFloor(undefined)).toBe(false)
   })
 })

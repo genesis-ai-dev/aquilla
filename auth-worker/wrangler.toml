@@ -65,6 +65,14 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 binding = "HYPERDRIVE"
 id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 
+# CI's `wrangler deploy` (no --env) targets this top-level block for the
+# actually-live aquilla-identity worker (see ROUTE/ENV note above), so the
+# EMAIL binding must be duplicated here too, not just under [env.production] —
+# its absence here was silently making prod behave like the no-EMAIL dev
+# fallback (email sends were no-ops, and admin elevation leaked devCode).
+[[send_email]]
+name = "EMAIL"
+
 # Secrets (provisioned via `wrangler secret put`, never committed):
 #   SECRET_KEY      — frontier JWT signing key. MUST match prod
 #                     frontier-server so access tokens are interchangeable.
@@ -214,7 +222,7 @@ mode = "smart"
 
 # Staging runs on Neon (Postgres) to mirror prod. index.ts builds AQUILLA_PG
 # from the Postgres shim over Hyperdrive → the Neon `staging` branch (project
-# sweet-paper-88472094, branch br-old-credit-aja5brf7).
+# sweet-paper-88472094, branch `staging`).
 #
 # ONE-TIME PROVISIONING (FRO-146) — create the staging Hyperdrive config, then
 # paste its id below (replace the placeholder):
@@ -233,7 +241,7 @@ name = "EMAIL"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
 EMAIL_FROM = "noreply@support.aquilla.app"
-BASE_URL = "https://dev.aquilla.app"
+BASE_URL = "https://staging.aquilla.app"
 SYNC_WORKER_URL = "https://api.staging.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "staging"

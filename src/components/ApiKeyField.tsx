@@ -9,7 +9,7 @@
 import { useEffect, useState } from "react"
 import { RevealableInput } from "@/components/ui/revealable-input"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Label } from "@/components/ui/label"
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 
 interface ApiKeyFieldProps {
   label: string
@@ -53,8 +53,8 @@ export function ApiKeyField({
   }
 
   return (
-    <div className="space-y-2">
-      {label && <Label>{label}</Label>}
+    <Field className="space-y-2">
+      {label && <FieldLabel>{label}</FieldLabel>}
       <RevealableInput
         revealKind="key"
         value={draft}
@@ -92,7 +92,7 @@ export function ApiKeyField({
           Forget saved key
         </button>
       )}
-      {help && <p className="text-xs text-muted-foreground">{help}</p>}
-    </div>
+      {help && <FieldDescription>{help}</FieldDescription>}
+    </Field>
   )
 }

@@ -517,7 +517,7 @@ describe("createLinkUpstreamChangedHandler (FRO-479 push accelerator)", () => {
   it("tracks debounce state per handler instance, not globally", () => {
     // Two open projects (or two mounts) must not share a debounce clock —
     // each ProjectWorkspace mount builds its own handler.
-    let t = 0
+    const t = 0
     const syncA = vi.fn()
     const syncB = vi.fn()
     const handleA = createLinkUpstreamChangedHandler({

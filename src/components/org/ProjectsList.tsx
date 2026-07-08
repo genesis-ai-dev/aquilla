@@ -12,6 +12,15 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 import { attentionRank, deadlineStatus, getPortfolios, translatedPct, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { UserError } from "@/lib/errors/user-error"
+import { buttonVariants, Button } from "@/components/ui/button"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
+import { cn } from "@/lib/utils"
+import { FolderOpen, Search } from "lucide-react"
+import { EmptyState } from "@/components/ui/page"
 
 // ── Sort options ─────────────────────────────────────────────────────────────
 type SortKey = "name" | "role"
@@ -326,7 +335,7 @@ export function ProjectsList() {
             </p>
             <Link
               to={`/login?next=${encodeURIComponent("/projects")}`}
-              className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              className={cn(buttonVariants())}
             >
               Sign in
             </Link>
@@ -387,31 +396,33 @@ export function ProjectsList() {
                     <h1 className="text-base font-semibold">{isAllOrgs ? "All projects" : "Projects"}</h1>
                     <p className="text-xs text-muted-foreground">{projectCountLabel}</p>
                   </div>
-                  <input
-                    type="search"
-                    placeholder="Filter projects…"
-                    value={filter}
-                    onChange={(e) => setFilter(e.target.value)}
-                    className="h-9 w-full rounded-md border bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring sm:w-72"
-                  />
+                  <InputGroup className="h-9 w-full sm:w-72">
+                    <InputGroupAddon>
+                      <Search />
+                    </InputGroupAddon>
+                    <InputGroupInput
+                      type="search"
+                      placeholder="Filter projects…"
+                      value={filter}
+                      onChange={(e) => setFilter(e.target.value)}
+                      aria-label="Filter projects by name"
+                    />
+                  </InputGroup>
                 </div>
 
                 {isAllOrgs && (
                   <div className="flex flex-wrap items-center gap-1 border-b px-4 py-3" aria-label="Project list view">
                     {PROJECT_LENSES.map((lens) => (
-                      <button
+                      <Button
                         key={lens.value}
                         type="button"
+                        size="xs"
+                        variant={projectLens === lens.value ? "default" : "secondary"}
                         onClick={() => selectProjectLens(lens.value)}
                         aria-pressed={projectLens === lens.value}
-                        className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                          projectLens === lens.value
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-muted text-muted-foreground hover:bg-muted/70"
-                        }`}
                       >
                         {lens.label}
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 )}
@@ -443,15 +454,17 @@ export function ProjectsList() {
                 </div>
 
                 {filtered.length === 0 ? (
-                  <div className="px-4 py-10 text-center">
-                    <p className="text-sm text-muted-foreground">
-                      {filter
+                  <EmptyState
+                    className="border-0 bg-transparent py-10"
+                    icon={filter ? Search : FolderOpen}
+                    title={
+                      filter
                         ? "No projects match your filter."
                         : isAllOrgs
                           ? projectLensEmpty
-                          : "No projects in this org yet."}
-                    </p>
-                  </div>
+                          : "No projects in this org yet."
+                    }
+                  />
                 ) : (
                   <ul className="divide-y">
                     {filtered.map((p) => (

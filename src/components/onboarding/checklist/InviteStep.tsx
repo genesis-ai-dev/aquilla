@@ -2,7 +2,7 @@ import { useState } from "react"
 import { Copy, Plus, UserPlus, Check, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { FieldLabel } from "@/components/ui/field"
 import { createServerInvite } from "@/lib/sync/invites"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
@@ -113,9 +113,9 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
 
       {/* Direct username invite */}
       <form onSubmit={handleAddMember} className="space-y-2">
-        <Label htmlFor="invite-user" className="text-xs">
+        <FieldLabel htmlFor="invite-user" className="text-xs">
           Invite by Aquilla username
-        </Label>
+        </FieldLabel>
         <div className="flex gap-1.5">
           <Input
             id="invite-user"

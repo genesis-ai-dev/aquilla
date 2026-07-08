@@ -22,7 +22,7 @@ test("project settings More save options shows Close without saving", async ({ a
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}/settings`)
+  await alice.goto(`/project/${projectId}/settings?section=general`)
   await alice.waitForLoadState("networkidle")
 
   // Make the form dirty by changing the project name.

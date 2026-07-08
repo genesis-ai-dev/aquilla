@@ -16,7 +16,7 @@
 // see the "stale syncRole cache" test below, which fails on the old
 // `project.syncRole?.level` derivation.
 
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
@@ -24,6 +24,22 @@ import { SetupChecklistDrawer } from "./SetupChecklistDrawer"
 import type { ChecklistState } from "@/hooks/useSetupChecklist"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
+
+// RoleGatedStep's AppTooltip renders the full Base UI tooltip on hover/focus
+// (see tooltip.tsx's TooltipDelegationBoundary comment) — its async open
+// isn't reliably driveable in happy-dom. Only RoleGatedStep consumes this
+// module in the drawer's tree, so mocking it here still exercises every real
+// child step (AiInstructionsStep, InviteStep, VoiceStep, …) end-to-end; it
+// only replaces the tooltip's open/close mechanics with an always-rendered
+// content node so the role-naming string can be asserted directly.
+vi.mock("@/components/ui/tooltip", () => ({
+  AppTooltip: ({ children, content }: { children: React.ReactNode; content: React.ReactNode }) => (
+    <>
+      {children}
+      <div data-testid="tooltip-content">{content}</div>
+    </>
+  ),
+}))
 
 // useFrontierSession (via InviteStep/AiInstructionsStep) reaches useAccounts,
 // which needs a QueryClientProvider — same wrapper as useSetupChecklist's
@@ -89,8 +105,8 @@ describe("SetupChecklistDrawer — FRO-334 role-aware read-only rows", () => {
 
     // Tooltips exist and name a required role for at least the invite row
     // (project_lead) and the instructions/voice rows (maintainer).
-    const tooltips = Array.from(document.querySelectorAll("[data-tooltip]")).map((el) =>
-      el.getAttribute("data-tooltip") ?? "",
+    const tooltips = Array.from(document.querySelectorAll("[data-testid='tooltip-content']")).map(
+      (el) => el.textContent ?? "",
     )
     expect(tooltips.some((t) => /project_lead/i.test(t))).toBe(true)
     expect(tooltips.some((t) => /maintainer/i.test(t))).toBe(true)

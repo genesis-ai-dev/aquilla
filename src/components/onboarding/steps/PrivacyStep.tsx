@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
-import { Label } from "@/components/ui/label"
+import { FieldLabel } from "@/components/ui/field"
 import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
 import { ShieldCheck } from "lucide-react"
 
@@ -29,9 +29,9 @@ export function PrivacyStep({ onNext, onBack }: { onNext: () => void; onBack: ()
       <div className="rounded-lg border bg-card p-4">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
-            <Label htmlFor="analytics-consent" className="text-sm font-medium">
+            <FieldLabel htmlFor="analytics-consent" className="text-sm font-medium">
               Share usage data
-            </Label>
+            </FieldLabel>
             <p className="text-xs text-muted-foreground">
               Helps us provide support and improve Aquilla for everyone. Includes usage events
               and session recordings for diagnosing issues.

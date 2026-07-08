@@ -1,7 +1,20 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { RoleGatedStep } from "./RoleGatedStep"
 import { ROLE } from "@/lib/frontier/roles"
+
+// RoleGatedStep's job is computing the right role-naming string and gating
+// attributes — not exercising Base UI's async hover-open mechanics (that's
+// Base UI's own concern). Render AppTooltip's content unconditionally so this
+// test asserts against RoleGatedStep's own logic, not tooltip open/close timing.
+vi.mock("@/components/ui/tooltip", () => ({
+  AppTooltip: ({ children, content }: { children: React.ReactNode; content: React.ReactNode }) => (
+    <>
+      {children}
+      <div data-testid="tooltip-content">{content}</div>
+    </>
+  ),
+}))
 
 // FRO-334: Project Setup sidebar rows must render read-only (grayed +
 // tooltip naming the required role) for below-floor callers, never hidden
@@ -46,16 +59,8 @@ describe("RoleGatedStep", () => {
     )
     // Content stays visible (never hidden) — the "don't hide, gray out" rule.
     expect(screen.getByRole("button", { name: "Save instructions" })).toBeInTheDocument()
-
-    const gated = document.querySelector("[aria-disabled='true']")
-    expect(gated).toBeTruthy()
-
-    // Tooltip content (delegated data-tooltip attribute per tooltip.tsx test
-    // convention) must name the required role.
-    const tooltipHost = Array.from(document.querySelectorAll("[data-tooltip]")).find((el) =>
-      /maintainer/i.test(el.getAttribute("data-tooltip") ?? ""),
-    )
-    expect(tooltipHost).toBeTruthy()
+    expect(screen.getByTestId("role-gated-step")).toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByTestId("tooltip-content")).toHaveTextContent(/maintainer/i)
   })
 
   it("names project_lead as the required role for the invite floor", () => {
@@ -64,10 +69,7 @@ describe("RoleGatedStep", () => {
         <button>Add</button>
       </RoleGatedStep>,
     )
-    const tooltipHost = Array.from(document.querySelectorAll("[data-tooltip]")).find((el) =>
-      /project_lead/i.test(el.getAttribute("data-tooltip") ?? ""),
-    )
-    expect(tooltipHost).toBeTruthy()
+    expect(screen.getByTestId("tooltip-content")).toHaveTextContent(/project_lead/i)
   })
 
   it("blocks a contributor (400) from the project_lead (500) invite floor", () => {

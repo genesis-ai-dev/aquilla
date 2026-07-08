@@ -59,26 +59,58 @@ export async function lookupUser(jwt: string, username: string): Promise<LookedU
 }
 
 /**
+ * AQU-485: discriminated result for the roster fetch, distinguishing "no
+ * server-side access at all" from "org policy hides the roster" — the two
+ * collapse to the same `null` in the legacy `listProjectMembers` wrapper
+ * below, but callers that need to render "roster hidden by policy" (rather
+ * than a misleading "no members yet") should use this instead.
+ */
+export type ProjectRosterResult =
+  | { kind: "ok"; members: ProjectMember[] }
+  | { kind: "no-access" }
+  | { kind: "roster-hidden" }
+
+/**
+ * GET /api/v2/projects/:id/members, preserving the AQU-485
+ * roster-hidden-by-policy signal (`rosterHidden: true` in the 403 body) so
+ * callers can render "hidden by org policy" distinctly from "no access" /
+ * "genuinely empty."
+ */
+export async function fetchProjectRoster(
+  jwt: string,
+  projectId: string,
+): Promise<ProjectRosterResult> {
+  const res = await fetch(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members`,
+    { headers: authHeaders(jwt) }
+  );
+  if (res.status === 403) {
+    const body = await res.json().catch(() => null) as { rosterHidden?: boolean } | null;
+    return body?.rosterHidden ? { kind: "roster-hidden" } : { kind: "no-access" };
+  }
+  if (res.status === 404) return { kind: "no-access" };
+  if (!res.ok) throw new UserError(res.status, "", "project");
+  const body = (await res.json()) as { members: ProjectMember[] };
+  return { kind: "ok", members: body.members };
+}
+
+/**
  * GET /api/v2/projects/:id/members.
  *
  * Returns null when the caller has no server-side access to the project
- * (403) or the project doesn't exist server-side (404). Both are expected
- * conditions for local-only IndexedDB projects on the dashboard, where
- * the avatar stack should silently render empty rather than treat the
- * miss as an error. Real failures (5xx, network) still throw.
+ * (403) or the project doesn't exist server-side (404), OR when org policy
+ * hides the roster (AQU-485 rosterViewMinRole). All three are expected
+ * conditions for callers that don't distinguish them (e.g. the dashboard
+ * avatar stack, which should silently render empty either way). Callers
+ * that need to show "hidden by org policy" distinctly should use
+ * `fetchProjectRoster` instead. Real failures (5xx, network) still throw.
  */
 export async function listProjectMembers(
   jwt: string,
   projectId: string
 ): Promise<ProjectMember[] | null> {
-  const res = await fetch(
-    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members`,
-    { headers: authHeaders(jwt) }
-  );
-  if (res.status === 403 || res.status === 404) return null;
-  if (!res.ok) throw new UserError(res.status, "", "project");
-  const body = (await res.json()) as { members: ProjectMember[] };
-  return body.members;
+  const result = await fetchProjectRoster(jwt, projectId);
+  return result.kind === "ok" ? result.members : null;
 }
 
 /**

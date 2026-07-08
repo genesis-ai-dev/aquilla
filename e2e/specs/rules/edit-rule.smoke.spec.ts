@@ -49,7 +49,7 @@ test("edit rule button opens inline RuleEditor pre-filled with rule name", async
   await expect(alice.getByText(ruleName).first()).toBeVisible({ timeout: 5_000 })
 
   // Click "Edit rule" Pencil button.
-  const editBtn = alice.locator('[data-tooltip="Edit rule"]').first()
+  const editBtn = alice.locator('button[title="Edit rule"]').first()
   await expect(editBtn).toBeVisible({ timeout: 5_000 })
   await editBtn.click()
 

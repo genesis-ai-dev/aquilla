@@ -19,8 +19,13 @@ import { useState, useEffect, type FormEvent } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { RevealableInput } from "@/components/ui/revealable-input"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
@@ -138,17 +143,19 @@ function TokenExpiredView({ username }: { username: string }) {
         .
       </div>
       <form onSubmit={onSubmit} className="space-y-3">
-        <div>
-          <Label htmlFor="rp-email">Email</Label>
-          <Input
-            id="rp-email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-          />
-        </div>
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="rp-email">Email</FieldLabel>
+            <Input
+              id="rp-email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+            />
+          </Field>
+        </FieldGroup>
+        {error && <FieldError>{error}</FieldError>}
         <Button type="submit" disabled={busy || !emailOk} className="w-full">
           {busy ? "Sending…" : "Request a new link"}
         </Button>
@@ -242,19 +249,21 @@ export function ResetPassword() {
 
         {verifyState === "valid" && (
           <form onSubmit={onSubmit} className="space-y-4">
-            <div>
-              <Label htmlFor="rp-new-password">New password</Label>
-              <RevealableInput
-                id="rp-new-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="new-password"
-                minLength={8}
-                autoFocus
-              />
-              <PasswordChecklist password={password} />
-            </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="rp-new-password">New password</FieldLabel>
+                <RevealableInput
+                  id="rp-new-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="new-password"
+                  minLength={8}
+                  autoFocus
+                />
+                <PasswordChecklist password={password} />
+              </Field>
+            </FieldGroup>
+            {error && <FieldError>{error}</FieldError>}
             <Button type="submit" disabled={busy || !passwordOk} className="w-full">
               {busy ? "Setting password…" : "Set new password"}
             </Button>

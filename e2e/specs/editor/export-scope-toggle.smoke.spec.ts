@@ -10,13 +10,12 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 /**
  * ExportDialog — scope toggle (file vs project).
  *
- * ExportDialog has a radiogroup (aria-label="Export scope") with two
- * options rendered as Base UI radios (role=radio) inside labels reading
- * "Current file" (default) and "Whole project". The radio element itself
- * is sr-only — interaction goes through the label text.
+ * ExportDialog uses SegmentTabs (aria-label="Export scope") with tabs
+ * "Current file" (default) and "Whole project". Selection is reflected via
+ * aria-selected on each tab.
  *
- * This spec: open the export dialog → verify "Current file" is checked →
- * click the "Whole project" label → verify it becomes checked.
+ * This spec: open the export dialog → verify "Current file" is selected →
+ * click "Whole project" → verify it becomes selected.
  */
 test("export dialog scope toggle switches between file and project", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -36,18 +35,14 @@ test("export dialog scope toggle switches between file and project", async ({ al
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
 
-  // "Current file" radio is checked by default (Base UI: role=radio, sr-only).
-  const fileRadio = dialog.getByRole("radio", { name: "Current file" })
-  await expect(fileRadio).toBeChecked({ timeout: 3_000 })
+  const fileTab = dialog.getByRole("tab", { name: "Current file" })
+  await expect(fileTab).toHaveAttribute("aria-selected", "true", { timeout: 3_000 })
 
-  // Click the "Whole project" label to switch scope (the radio is sr-only,
-  // so the visible label is the click target).
-  const projectRadio = dialog.getByRole("radio", { name: "Whole project" })
-  await dialog.getByText("Whole project").click()
+  const projectTab = dialog.getByRole("tab", { name: "Whole project" })
+  await projectTab.click()
 
-  // "Whole project" radio is now checked.
-  await expect(projectRadio).toBeChecked({ timeout: 2_000 })
-  await expect(fileRadio).not.toBeChecked()
+  await expect(projectTab).toHaveAttribute("aria-selected", "true", { timeout: 2_000 })
+  await expect(fileTab).toHaveAttribute("aria-selected", "false")
 
   // Dismiss.
   await alice.keyboard.press("Escape")

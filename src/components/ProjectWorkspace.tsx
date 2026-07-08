@@ -433,6 +433,7 @@ export function ProjectWorkspace() {
   const workspaceTabs = useWorkspaceTabs({
     projectId: projectId ?? "",
     fileIds,
+    filesReady: Boolean(project),
     activeFileId,
     setActiveFileId,
   })

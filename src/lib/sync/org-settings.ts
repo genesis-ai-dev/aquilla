@@ -44,9 +44,8 @@ export interface OrgWideSettings {
    * rosterViewMinRole — being allowed to see WHO is on the team does not
    * imply being allowed to see WHAT each person did.
    *
-   * SWARM-TODO(AQU-498): no dedicated per-member progress view consumes this
-   * yet; it's defined + stored + server-enforced so the future productivity
-   * view can gate on it without another settings-blob migration.
+   * AQU-498: consumed by ProjectOverview's Team card + the sync-worker's
+   * member-activity-read-route (server-side floor via resolveMemberProgressFloor).
    */
   memberProgressViewMinRole?: number
   /**

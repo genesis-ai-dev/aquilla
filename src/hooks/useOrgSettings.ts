@@ -110,8 +110,9 @@ export interface UseOrgSettings {
    * defaulting to MAINTAINER when unset). Independent of canViewRoster — a
    * caller may see the roster while progress stays hidden, or vice versa.
    *
-   * SWARM-TODO(AQU-498): no per-member progress view consumes this yet;
-   * exposed here so the future productivity view can read it directly.
+   * AQU-498: gates ProjectOverview's Team card (SectionVisibilityGate),
+   * which now also hosts the per-teammate activity detail (recent actions +
+   * files-worked-on rollup) — see MemberActivityPanel.
    */
   canViewMemberProgress: boolean
   /** Effective member-progress-view floor: explicit org setting, or the MAINTAINER default when unset. */

@@ -83,6 +83,13 @@ vi.mock("@/lib/sync/assignments", () => ({
   getMyAssignments: vi.fn(async () => []),
 }))
 
+// AQU-498: member-activity fetch, consumed by useMemberActivity ->
+// MemberActivityPanel when a Team-card row's "Activity" affordance is clicked.
+const fetchMemberActivity = vi.fn()
+vi.mock("@/lib/sync/member-activity-read", () => ({
+  fetchMemberActivity: (...a: unknown[]) => fetchMemberActivity(...a),
+}))
+
 // AQU-486: useOrgSettings backs the per-section visibility floors
 // (rosterViewMinRole / memberProgressViewMinRole). Mocked hermetically here
 // (same pattern as Settings.test.tsx) rather than letting it hit real fetch —
@@ -820,6 +827,80 @@ describe("ProjectOverview per-section visibility (AQU-486)", () => {
     const badge = within(card).getByTestId("section-visibility-badge")
     expect(within(badge).queryByRole("combobox")).not.toBeInTheDocument()
     expect(badge.querySelector("svg.lucide-chevron-down")).not.toBeInTheDocument()
+  })
+})
+
+// ── AQU-498: member productivity detail (recent actions + files rollup) ────
+
+describe("ProjectOverview member activity detail (AQU-498)", () => {
+  // WHY: a team lead selecting a teammate should see recent actions + a
+  // files-worked-on rollup (volume + timing) — and, per acceptance
+  // criterion 3, ONLY when their role meets the AQU-485
+  // memberProgressViewMinRole floor. The detail view is nested inside the
+  // Team card's existing SectionVisibilityGate, so a below-floor caller must
+  // not even see the "Activity" affordance to click.
+
+  async function withWorkload() {
+    const { getProjectAssignments } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectAssignments).mockResolvedValue([
+      { userId: 1, username: "alice", openAssignments: 2, cellsTotal: 10, cellsDone: 4 },
+    ])
+  }
+
+  // getProjectAssignments.mockResolvedValue persists across tests (clearAllMocks
+  // clears call history, not implementation) — restore the file-wide empty
+  // default so later describe blocks don't inherit this suite's workload.
+  afterEach(async () => {
+    const { getProjectAssignments } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectAssignments).mockResolvedValue([])
+  })
+
+  it("clicking a teammate's Activity affordance renders recent actions + files rollup", async () => {
+    await withWorkload()
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    fetchMemberActivity.mockResolvedValue({
+      recentEvents: [
+        { id: "e1", kind: "target.cell.commit", fileId: "f1", cellId: "c1", clientTs: 1, serverTs: 1700000000000, serverSeq: 2 },
+      ],
+      fileRollup: [
+        { fileId: "f1", fileName: "Genesis", cellsTouched: 12, wordCount: 340, lastActivityAt: 1700000000000 },
+      ],
+    })
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: 600,
+      canViewMemberProgress: true,
+    })
+    useProject.mockReturnValue({ project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }), status: "ready", refresh })
+    renderOverview()
+
+    const activityButton = await screen.findByRole("button", { name: "View activity for alice" })
+    fireEvent.click(activityButton)
+
+    const panel = await screen.findByTestId("member-activity-panel")
+    expect(within(panel).getByText("Genesis")).toBeInTheDocument()
+    expect(within(panel).getByText(/12 cells · 340 words/)).toBeInTheDocument()
+    expect(within(panel).getByText("Edited a translation")).toBeInTheDocument()
+    expect(fetchMemberActivity).toHaveBeenCalledWith("p1", "alice", "tok", expect.anything())
+  })
+
+  it("hides the Team card (and its Activity affordance) entirely for a caller below the memberProgressViewMinRole floor", async () => {
+    await withWorkload()
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: 700, // org raised the floor to Owner-only
+      canViewMemberProgress: false,
+    })
+    // Project-lead (500) — below the raised floor.
+    useProject.mockReturnValue({ project: projectRecord({ level: 500, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }), status: "ready", refresh })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByRole("button", { name: "View activity for alice" })).not.toBeInTheDocument()
+    expect(screen.queryByTestId("member-activity-panel")).not.toBeInTheDocument()
   })
 })
 

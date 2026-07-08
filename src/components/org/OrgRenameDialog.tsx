@@ -58,8 +58,6 @@ export function OrgRenameDialog({
     },
   })
 
-  // Re-seed only when the dialog opens or the org name prop changes — not on
-  // every parent re-render (unstable deps here were wiping in-progress edits).
   useEffect(() => {
     if (!open) return
     form.reset()

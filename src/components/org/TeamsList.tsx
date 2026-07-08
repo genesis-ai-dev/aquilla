@@ -1,13 +1,19 @@
 import { useEffect, useState } from "react"
+import { useForm } from "@tanstack/react-form"
+import { z } from "zod"
 import { useNavigate } from "react-router-dom"
 import { Plus, Search, Users } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { Button } from "@/components/ui/button"
-import { ButtonGroup } from "@/components/ui/button-group"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Spinner } from "@/components/ui/spinner"
+import { isFieldInvalid } from "@/lib/forms/field-state"
+import { optionalString, requiredString } from "@/lib/forms/schemas"
+import { useSubmitError } from "@/lib/forms/submit-error"
 import {
   InputGroup,
   InputGroupAddon,
@@ -28,29 +34,16 @@ import {
 
 type SortOption = "name" | "members" | "projects"
 
+const createTeamSchema = z.object({
+  name: requiredString("Team name"),
+  description: optionalString,
+})
+
 const SORT_OPTIONS: { value: SortOption; label: string }[] = [
   { value: "name", label: "Name (A–Z)" },
   { value: "members", label: "Members (most first)" },
   { value: "projects", label: "Projects (most first)" },
 ]
-
-// AQU-333: three-position internal/public filter. Default is "internal",
-// which preserves the org's historical "shows internal groups only" default
-// render. The FRO-158 guarantee (public teams are never silently dropped)
-// still holds — they remain reachable via "all"/"public".
-type Visibility = "all" | "internal" | "public"
-
-const VISIBILITY_OPTIONS: { value: Visibility; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "internal", label: "Internal only" },
-  { value: "public", label: "Public only" },
-]
-
-function filterByVisibility(teams: TeamSummary[], visibility: Visibility): TeamSummary[] {
-  if (visibility === "internal") return teams.filter((t) => t.isInternal)
-  if (visibility === "public") return teams.filter((t) => !t.isInternal)
-  return teams
-}
 
 function sortTeams(teams: TeamSummary[], sort: SortOption): TeamSummary[] {
   return [...teams].sort((a, b) => {
@@ -68,13 +61,39 @@ export function TeamsList() {
   const [teams, setTeams] = useState<TeamSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
-  const [name, setName] = useState("")
-  const [description, setDescription] = useState("")
   const [query, setQuery] = useState("")
   const [sort, setSort] = useState<SortOption>("name")
-  const [visibility, setVisibility] = useState<Visibility>("internal")
+  const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
+
+  const createTeamForm = useForm({
+    defaultValues: { name: "", description: "" },
+    validators: { onSubmit: createTeamSchema },
+    onSubmit: async ({ value }) => {
+      if (!jwt || activeOrgId == null) return
+      clearSubmitError()
+      try {
+        const t = await createTeam(
+          jwt,
+          activeOrgId,
+          value.name.trim(),
+          value.description.trim() || undefined,
+        )
+        setCreating(false)
+        createTeamForm.reset()
+        navigate(`/teams/${t.id}`)
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : "Couldn't create team.")
+      }
+    },
+  })
 
   const isAdmin = (activeOrg?.role.level ?? 0) >= 600
+
+  useEffect(() => {
+    if (!creating) return
+    createTeamForm.reset()
+    clearSubmitError()
+  }, [creating, createTeamForm, clearSubmitError])
 
   useEffect(() => {
     if (!jwt || activeOrgId == null) {
@@ -90,11 +109,10 @@ export function TeamsList() {
     return () => { cancelled = true }
   }, [jwt, activeOrgId])
 
-  const byVisibility = filterByVisibility(teams, visibility)
   const filtered = sortTeams(
     query.trim()
-      ? byVisibility.filter((t) => t.name.toLowerCase().includes(query.trim().toLowerCase()))
-      : byVisibility,
+      ? teams.filter((t) => t.name.toLowerCase().includes(query.trim().toLowerCase()))
+      : teams,
     sort,
   )
 
@@ -121,7 +139,7 @@ export function TeamsList() {
           {isAdmin && (
             <Dialog
               open={creating}
-              onOpenChange={(o) => { if (!o) { setCreating(false); setName(""); setDescription("") } }}
+              onOpenChange={(o) => { if (!o) setCreating(false) }}
             >
               <DialogContent className="max-w-md">
                 <DialogHeader>
@@ -129,31 +147,65 @@ export function TeamsList() {
                 </DialogHeader>
                 <form
                   id="create-team-form"
-                  onSubmit={async (e) => {
+                  onSubmit={(e) => {
                     e.preventDefault()
-                    if (!jwt || activeOrgId == null || !name.trim()) return
-                    const t = await createTeam(jwt, activeOrgId, name.trim(), description.trim() || undefined)
-                    navigate(`/teams/${t.id}`)
+                    void createTeamForm.handleSubmit()
                   }}
-                  className="space-y-2"
                 >
-                  <Input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Team name"
-                    autoFocus
-                  />
-                  <Input
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Description (optional)"
-                  />
+                  <FieldGroup>
+                    <createTeamForm.Field
+                      name="name"
+                      children={(field) => {
+                        const invalid = isFieldInvalid(field)
+                        return (
+                          <Field data-invalid={invalid}>
+                            <FieldLabel htmlFor="create-team-name">Team name</FieldLabel>
+                            <Input
+                              id="create-team-name"
+                              name={field.name}
+                              value={field.state.value}
+                              onBlur={field.handleBlur}
+                              onChange={(e) => field.handleChange(e.target.value)}
+                              placeholder="Team name"
+                              aria-invalid={invalid}
+                              autoFocus
+                            />
+                            {invalid && <FieldError errors={field.state.meta.errors} />}
+                          </Field>
+                        )
+                      }}
+                    />
+                    <createTeamForm.Field
+                      name="description"
+                      children={(field) => (
+                        <Field>
+                          <FieldLabel htmlFor="create-team-desc">Description (optional)</FieldLabel>
+                          <Input
+                            id="create-team-desc"
+                            name={field.name}
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            placeholder="Description (optional)"
+                          />
+                        </Field>
+                      )}
+                    />
+                  </FieldGroup>
+                  {submitError && (
+                    <FieldError role="alert" className="mt-3">
+                      {submitError}
+                    </FieldError>
+                  )}
                 </form>
                 <DialogFooter>
-                  <Button type="button" variant="outline" onClick={() => { setCreating(false); setName(""); setDescription("") }}>
+                  <Button type="button" variant="outline" onClick={() => setCreating(false)}>
                     Cancel
                   </Button>
-                  <Button type="submit" form="create-team-form" disabled={!name.trim()}>Create</Button>
+                  <Button type="submit" form="create-team-form">
+                    {createTeamForm.state.isSubmitting && <Spinner data-icon="inline-start" />}
+                    {createTeamForm.state.isSubmitting ? "Creating…" : "Create"}
+                  </Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
@@ -189,19 +241,6 @@ export function TeamsList() {
                   </SelectGroup>
                 </SelectContent>
               </Select>
-              <ButtonGroup aria-label="Filter teams by visibility">
-                {VISIBILITY_OPTIONS.map((o) => (
-                  <Button
-                    key={o.value}
-                    size="sm"
-                    variant={visibility === o.value ? "default" : "outline"}
-                    aria-pressed={visibility === o.value}
-                    onClick={() => setVisibility(o.value)}
-                  >
-                    {o.label}
-                  </Button>
-                ))}
-              </ButtonGroup>
             </div>
           )}
 
@@ -230,21 +269,9 @@ export function TeamsList() {
           ) : filtered.length === 0 ? (
             <EmptyState
               icon={Search}
-              title={
-                query.trim()
-                  ? <>No teams match &ldquo;{query}&rdquo;</>
-                  : visibility === "public"
-                    ? "No public teams in this organization"
-                    : visibility === "internal"
-                      ? "No internal teams in this organization"
-                      : "No teams match your filters"
-              }
+              title={<>No teams match &ldquo;{query}&rdquo;</>}
               action={
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => { setQuery(""); setVisibility("all") }}
-                >
+                <Button size="sm" variant="outline" onClick={() => setQuery("")}>
                   Clear
                 </Button>
               }
@@ -261,18 +288,11 @@ export function TeamsList() {
                   <span className="mt-1 block text-sm tabular-nums text-muted-foreground">
                     {t.memberCount} members · {t.projectCount} projects
                   </span>
-                  <span className="mt-2 flex flex-wrap gap-1">
-                    {!t.isInternal && (
-                      <span className="inline-block rounded-full border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
-                        Public
-                      </span>
-                    )}
-                    {t.viewerIsMember && (
-                      <span className="inline-block rounded-full border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
-                        Member
-                      </span>
-                    )}
-                  </span>
+                  {t.viewerIsMember && (
+                    <span className="mt-2 inline-block rounded-full border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                      Member
+                    </span>
+                  )}
                 </button>
               ))}
             </div>

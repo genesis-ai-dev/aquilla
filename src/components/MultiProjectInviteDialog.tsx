@@ -71,8 +71,6 @@ export function MultiProjectInviteDialog({
 
   const selectedIds = useMemo(() => Object.keys(selections), [selections])
   const isEmailMode = recipient.mode === "email"
-  const canSubmit =
-    !busy && recipient.raw.trim().length > 0 && selectedIds.length > 0 && Boolean(session?.jwt)
   // Email mode: no server action — guide the operator to per-project Share panels.
   const canShowEmailGuide = isEmailMode && selectedIds.length > 0
 
@@ -93,7 +91,18 @@ export function MultiProjectInviteDialog({
   }
 
   async function handleInvite() {
-    if (!session?.jwt) return
+    if (!session?.jwt) {
+      setTopError("Sign in to invite collaborators.")
+      return
+    }
+    if (!recipient.raw.trim()) {
+      setTopError("Enter a username or email.")
+      return
+    }
+    if (selectedIds.length === 0) {
+      setTopError("Select at least one project.")
+      return
+    }
     setBusy(true)
     setTopError(null)
     setPerProjectError({})
@@ -331,7 +340,7 @@ export function MultiProjectInviteDialog({
               {done ? "Close" : "Cancel"}
             </Button>
             {!isEmailMode && (
-              <Button onClick={handleInvite} disabled={!canSubmit}>
+              <Button onClick={handleInvite} disabled={busy}>
                 {busy ? (
                   <>
                     <Spinner className="mr-1" />

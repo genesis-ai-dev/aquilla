@@ -24,25 +24,26 @@ export function PeerPresence({ peers, onJumpToPeer }: PeerPresenceProps) {
     <div className="relative">
       <AppTooltip content={`${peers.length} collaborator${peers.length !== 1 ? "s" : ""} online`}>
         <button
-          className="flex items-center gap-1 rounded px-1 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+          className="inline-flex h-7 items-center gap-1.5 rounded-full border border-border/70 bg-background/80 px-1.5 pr-2 text-xs text-muted-foreground shadow-sm transition-colors hover:border-border hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
           onClick={() => setShowPopover(!showPopover)}
+          aria-expanded={showPopover}
         >
-          <AvatarGroup className="-space-x-1.5 *:data-[slot=avatar]:ring-background">
+          <AvatarGroup className="-space-x-1 *:data-[slot=avatar]:ring-background">
             {visible.map((peer) => (
               <InitialsAvatar
                 key={peer.peerId}
                 name={peer.username}
-                size="sm"
+                size="xs"
                 color={peer.color}
               />
             ))}
             {overflow > 0 && (
-              <AvatarGroupCount className="size-6 text-[10px] font-semibold">
+              <AvatarGroupCount className="size-5 text-[9px] font-semibold">
                 +{overflow}
               </AvatarGroupCount>
             )}
           </AvatarGroup>
-          <span className="hidden max-w-28 truncate sm:inline">{label}</span>
+          <span className="hidden max-w-24 truncate leading-none sm:inline">{label}</span>
         </button>
       </AppTooltip>
 

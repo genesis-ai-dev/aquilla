@@ -4288,7 +4288,7 @@ export function ProjectWorkspace() {
             )}
             <WorkspaceStatusBar
               left={
-                <div className="flex items-center gap-3">
+                <div className="flex min-w-0 items-center gap-1.5">
                   <PeerPresence peers={presencePeers} onJumpToPeer={handleJumpToPresencePeer} />
                   <SyncStatusIndicator status={fileSyncStatus} />
                   <OutboxSyncIndicator

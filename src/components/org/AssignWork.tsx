@@ -36,7 +36,17 @@ export interface AssignWorkProps {
   jwt: string
   /** Manager's username — stamped as the event author (server re-verifies). */
   author: string
-  /** Called after a successful assign so the parent can refresh rollups. */
+  /**
+   * Called after a successful assign so the parent can refresh rollups.
+   *
+   * AQU-495 contract: this MUST actually revalidate whatever assignment list
+   * the caller renders (e.g. re-run `getProjectAssignments`/`getWorkload`) —
+   * it is not a generic "something changed" ping. A caller that points this
+   * at an unrelated refresh (e.g. a portfolio/audio reload) will silently
+   * leave its own list stale until a manual page refresh. See
+   * SWARM-TODO(AQU-495) in `src/lib/sync/assignments.ts` for a known
+   * violation of this contract.
+   */
   onAssigned?: () => void
 }
 

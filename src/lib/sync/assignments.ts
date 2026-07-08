@@ -104,6 +104,18 @@ export async function getMyAssignmentsForOrg(jwt: string, orgId: number): Promis
  * Manager view: per-assignee open workload + derived progress for ONE project
  * (maintainer+). Returns the same AssigneeWorkload shape as getWorkload() so
  * the Team card can reuse the same rendering.
+ *
+ * AQU-495: every caller of this function MUST re-invoke it (or otherwise
+ * revalidate its own list state) after createAssignment()/unassignAssignment()
+ * resolve — this is a plain-fetch AD-3 read, not subscribed to anything, so a
+ * stale caller shows "no open assignments" until a manual page reload.
+ * SWARM-TODO(AQU-495): ProjectOverview.tsx's "Team" card (org/ProjectOverview.tsx,
+ * ~line 1177) wires `<AssignWork onAssigned={loadRow} />`, but `loadRow` only
+ * re-fetches the org portfolio (`getPortfolio` → `setAudio`) — it never calls
+ * `getProjectAssignments(jwt, id).then(setWorkload)`. That file is out of this
+ * worktree's ownership (Lane B), so this is flagged rather than fixed here;
+ * the one-line fix is to also re-run the `getProjectAssignments` effect (or
+ * extract it into a `loadWorkload` callback and call both) from `onAssigned`.
  */
 export async function getProjectAssignments(
   jwt: string,

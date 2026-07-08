@@ -15,12 +15,6 @@ vi.mock("@/lib/frontier/orgs", () => ({
   listMyOrgs: vi.fn(async () => [{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }]),
   renameOrg: vi.fn(async () => {}),
 }))
-vi.mock("@/hooks/useOrg", () => ({
-  useOrgMembers: () => ({ members: [{ userId: 1 }, { userId: 2 }, { userId: 3 }], isLoading: false, error: null }),
-}))
-vi.mock("@/lib/frontier/portfolio", () => ({
-  getPortfolio: vi.fn(async () => [{ id: "p1" }, { id: "p2" }]),
-}))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 vi.mock("@/hooks/useOrgSettings", () => ({
   useOrgSettings: () => ({
@@ -98,12 +92,6 @@ describe("Org Settings", () => {
     // Exact "Save" targets the rename control (OrgProviderSection adds a "Save key").
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(renameOrg).toHaveBeenCalledWith("jwt", 1, "CAS"))
-  })
-
-  it("shows org facts (member + project counts)", async () => {
-    renderSettings()
-    await waitFor(() => expect(screen.getByText("3")).toBeInTheDocument()) // members
-    await waitFor(() => expect(screen.getByText("2")).toBeInTheDocument()) // projects
   })
 
   it("hides the rename control for a non-admin", async () => {

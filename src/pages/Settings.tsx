@@ -7,7 +7,7 @@ import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
-import { Page, PageHeader, Section, StatTile, EmptyState } from "@/components/ui/page"
+import { Page, PageHeader, Section, EmptyState } from "@/components/ui/page"
 import { NavList, NavRow, BackLink } from "@/components/ui/nav-list"
 import {
   Select,
@@ -22,10 +22,8 @@ import { RosterProgressSection } from "@/components/settings/RosterProgressSecti
 import { AssignmentAuthoritySection } from "@/components/settings/AssignmentAuthoritySection"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { useOrgMembers } from "@/hooks/useOrg"
 import { useOrgSettings, canEditRosterProgressFloor, canEditAssignmentAuthority } from "@/hooks/useOrgSettings"
 import { renameOrg } from "@/lib/frontier/orgs"
-import { getPortfolio } from "@/lib/frontier/portfolio"
 import { ROLE } from "@/lib/frontier/roles"
 
 /**
@@ -70,17 +68,6 @@ export function Settings() {
   const [name, setName] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  const { members } = useOrgMembers(activeOrgId)
-  const [projectCount, setProjectCount] = useState<number | null>(null)
-  useEffect(() => {
-    if (!jwt || activeOrgId == null) return
-    let cancelled = false
-    getPortfolio(jwt, activeOrgId)
-      .then((list) => { if (!cancelled) setProjectCount(list.length) })
-      .catch(() => { if (!cancelled) setProjectCount(null) })
-    return () => { cancelled = true }
-  }, [jwt, activeOrgId])
 
   // FRO-253/FRO-433: org settings (export floor + provider keys)
   const orgSettings = useOrgSettings(activeOrgId, activeOrg?.role?.level)
@@ -279,22 +266,6 @@ export function Settings() {
         }
       />
       <div className="space-y-6">
-        {/* Facts */}
-        <div className="grid grid-cols-2 gap-4">
-          {/* AQU-485: the settings owner (maintainer+ per canRename) may still be
-              below the configured rosterViewMinRole floor in theory, but in
-              practice canEdit here requires MAINTAINER — same as the default
-              roster floor — so this stat tile stays visible to the audience
-              that can already reach this page. Hide it defensively anyway so
-              a future floor above MAINTAINER doesn't leak the count here. */}
-          {orgSettings.canViewRoster ? (
-            <StatTile label="Members" value={members.length} />
-          ) : (
-            <StatTile label="Members" value="—" />
-          )}
-          <StatTile label="Projects" value={projectCount ?? "—"} />
-        </div>
-
         <NavList label="Organization">
           <NavRow to="/settings/identity" icon={Building2} title="Identity" hint={activeOrg?.name ?? "Untitled"} />
           <NavRow to="/settings/export" icon={Download} title="Export permissions" hint={FLOOR_LABEL[displayedExportMinRole] ?? "Maintainer"} />
@@ -319,10 +290,7 @@ export function Settings() {
     body = (
       <div className="space-y-6">
         <div className="h-28 animate-pulse rounded-2xl border bg-card" />
-        <div className="grid grid-cols-2 gap-4">
-          <div className="h-24 animate-pulse rounded-2xl border bg-card" />
-          <div className="h-24 animate-pulse rounded-2xl border bg-card" />
-        </div>
+        <div className="h-40 animate-pulse rounded-2xl border bg-card" />
       </div>
     )
   } else if (!activeOrg) {

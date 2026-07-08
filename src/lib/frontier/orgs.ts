@@ -224,6 +224,35 @@ export async function listOrgMembers(jwt: string, orgId: number): Promise<OrgMem
   return ((await res.json()) as { members: OrgMember[] }).members;
 }
 
+/**
+ * AQU-485: discriminated result for the org roster fetch, distinguishing
+ * "not an org member at all" from "org policy hides the roster" — both are
+ * 403s server-side, but surfaces that render the Members page need to show
+ * "hidden by org policy" rather than a generic error or an empty roster.
+ * Prefer this over `listOrgMembers` wherever that distinction matters.
+ */
+export type OrgRosterResult =
+  | { kind: "ok"; members: OrgMember[] }
+  | { kind: "no-access" }
+  | { kind: "roster-hidden" };
+
+/**
+ * GET /api/v2/orgs/:orgId/members, preserving the AQU-485
+ * roster-hidden-by-policy signal (`rosterHidden: true` in the 403 body).
+ */
+export async function fetchOrgRoster(jwt: string, orgId: number): Promise<OrgRosterResult> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/members`, {
+    headers: authHeaders(jwt),
+  });
+  if (res.status === 403) {
+    const body = (await res.json().catch(() => null)) as { rosterHidden?: boolean } | null;
+    return body?.rosterHidden ? { kind: "roster-hidden" } : { kind: "no-access" };
+  }
+  if (!res.ok) throw new UserError(res.status, "", "org");
+  const members = ((await res.json()) as { members: OrgMember[] }).members;
+  return { kind: "ok", members };
+}
+
 export async function addOrgMember(
   jwt: string, orgId: number, username: string, role: number
 ): Promise<OrgMember> {

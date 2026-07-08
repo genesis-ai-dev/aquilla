@@ -11,7 +11,8 @@
 // rather than silently overwriting each other.
 //
 // Settings keys (all optional): rules (TranslationRule[]). Shape is open
-// EXCEPT for exportMinRole — see EXPORT_FLOOR_WRITE_MIN_ROLE below.
+// EXCEPT for exportMinRole, rosterViewMinRole, and memberProgressViewMinRole —
+// see EXPORT_FLOOR_WRITE_MIN_ROLE / PERMISSION_POLICY_KEYS below.
 //
 // exportMinRole write gate: OWNER (700), not MAINTAINER.
 // Rationale: exportMinRole is a permission-policy key that determines who can
@@ -19,6 +20,12 @@
 // project-level maintainer lower the org's export security posture without
 // owner approval. Only org owners (700) should be able to raise or lower this
 // floor. All other settings keys retain the MAINTAINER (600) write gate.
+//
+// AQU-485: rosterViewMinRole (who can see the member list + count) and
+// memberProgressViewMinRole (who can see per-member progress) generalize the
+// same pattern — both are permission-policy keys gated OWNER-only on write,
+// for the same reason as exportMinRole (a maintainer must not be able to
+// unilaterally lower the org's roster/progress disclosure posture).
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -40,6 +47,17 @@ const EXPORT_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
 
 /** Valid role ladder levels that can be set as an exportMinRole floor. */
 const VALID_ROLE_LEVELS = new Set(Object.values(ROLE))
+
+/**
+ * AQU-485: permission-policy keys that gate a READ surface (roster / member
+ * progress), same write-gate rationale as exportMinRole. Keyed by the
+ * settings-blob field name; value is the human label used in error messages.
+ */
+const PERMISSION_POLICY_KEYS: Record<string, string> = {
+  exportMinRole: "exportMinRole",
+  rosterViewMinRole: "rosterViewMinRole",
+  memberProgressViewMinRole: "memberProgressViewMinRole",
+}
 
 interface OrgSettingsRow {
   org_id: number
@@ -150,32 +168,43 @@ orgSettings.on(
       )
     }
 
-    // FRO-253: validate exportMinRole if present in the patch.
-    // Must be a known role-ladder value (100–700). Garbage values (e.g. "owner",
-    // -1, 9999) are rejected with 400 so misconfiguration is immediately visible
-    // to the admin rather than silently coerced to the default.
-    const rawExportFloor = body.settings.exportMinRole
-    if (rawExportFloor !== undefined) {
+    // FRO-253 / AQU-485: validate every permission-policy key present in the
+    // patch (exportMinRole, rosterViewMinRole, memberProgressViewMinRole).
+    // Each must be a known role-ladder value (100–700); garbage values (e.g.
+    // "owner", -1, 9999) are rejected with 400 so misconfiguration is
+    // immediately visible rather than silently coerced to the default.
+    let existingForPolicyCheck: OrgSettingsResponse | null = null
+    for (const key of Object.keys(PERMISSION_POLICY_KEYS)) {
+      const rawFloor = body.settings[key]
+      if (rawFloor === undefined) continue
+
       // Gate on CHANGE, not presence: the client patch() is a whole-object
-      // read-modify-write, so every maintainer settings write echoes the
-      // existing exportMinRole back. An unchanged echo must pass, or setting
+      // read-modify-write, so every maintainer settings write echoes existing
+      // permission-policy keys back. An unchanged echo must pass, or setting
       // a floor locks maintainers out of ALL org-settings writes.
-      const existing = await loadSettings(c.env, orgId)
-      const currentFloor = (existing.settings as Record<string, unknown>).exportMinRole
-      const floorChanged = rawExportFloor !== currentFloor
-      // exportMinRole CHANGES require OWNER (700) — stricter than the general gate.
+      existingForPolicyCheck ??= await loadSettings(c.env, orgId)
+      const currentFloor = (existingForPolicyCheck.settings as Record<string, unknown>)[key]
+      const floorChanged = rawFloor !== currentFloor
+
+      // Permission-policy CHANGES require OWNER (700) — stricter than the
+      // general MAINTAINER settings-write gate.
       if (floorChanged && role < EXPORT_FLOOR_WRITE_MIN_ROLE) {
         return c.json(
           {
-            error: `exportMinRole requires org role >= owner (${EXPORT_FLOOR_WRITE_MIN_ROLE}); only org owners can change the export permission policy`,
+            error: `${key} requires org role >= owner (${EXPORT_FLOOR_WRITE_MIN_ROLE}); only org owners can change this permission policy`,
           },
           403,
         )
       }
-      if (floorChanged && (typeof rawExportFloor !== "number" || !Number.isFinite(rawExportFloor) || !VALID_ROLE_LEVELS.has(rawExportFloor as typeof ROLE[keyof typeof ROLE]))) {
+      if (
+        floorChanged &&
+        (typeof rawFloor !== "number" ||
+          !Number.isFinite(rawFloor) ||
+          !VALID_ROLE_LEVELS.has(rawFloor as typeof ROLE[keyof typeof ROLE]))
+      ) {
         return c.json(
           {
-            error: `exportMinRole must be one of the role ladder values: ${[...VALID_ROLE_LEVELS].sort((a, b) => a - b).join(", ")} (viewer=100, contributor=400, project_lead=500, maintainer=600, owner=700)`,
+            error: `${key} must be one of the role ladder values: ${[...VALID_ROLE_LEVELS].sort((a, b) => a - b).join(", ")} (viewer=100, contributor=400, project_lead=500, maintainer=600, owner=700)`,
           },
           400,
         )
@@ -322,9 +351,13 @@ orgSettings.post(
       ...current.settings,
       promotionRequests: [...existingRequests, newRequest],
     }
-    // FRO-253 invariant: this blob write must never alter the export floor.
-    if ((newSettings as Record<string, unknown>).exportMinRole !== (current.settings as Record<string, unknown>).exportMinRole) {
-      return c.json({ error: "internal: exportMinRole must not change via promotion requests" }, 500)
+    // FRO-253 / AQU-485 invariant: this blob write must never alter any
+    // permission-policy key (exportMinRole, rosterViewMinRole,
+    // memberProgressViewMinRole).
+    for (const key of Object.keys(PERMISSION_POLICY_KEYS)) {
+      if ((newSettings as Record<string, unknown>)[key] !== (current.settings as Record<string, unknown>)[key]) {
+        return c.json({ error: `internal: ${key} must not change via promotion requests` }, 500)
+      }
     }
     const newSettingsJson = JSON.stringify(newSettings)
     const newVersion = current.version + 1

@@ -12,6 +12,7 @@ import {
   addGroupMember,
   attachGroupProject,
   bumpOrgActivity,
+  canViewRoster,
   createGroup,
   createOrgForUser,
   deleteGroup,
@@ -22,6 +23,7 @@ import {
   getOrgGroupDetail,
   getOrgPortfolio,
   getOrgPortfolios,
+  getRosterViewMinRole,
   groupExistsInOrg,
   listEffectiveMembersForOrg,
   listOrgGroups,
@@ -250,7 +252,15 @@ orgs.get("/:orgId/members-matrix", async (c) => {
   })
 })
 
-/** GET /api/v2/orgs/:orgId/members — caller must be an org member. */
+/**
+ * GET /api/v2/orgs/:orgId/members — caller must be an org member.
+ *
+ * AQU-485: additionally gated by the org's configured rosterViewMinRole
+ * (default MAINTAINER=600). A member whose effective role is below the
+ * floor gets a distinct 403 (`error: "roster hidden by org policy"`,
+ * `rosterHidden: true`) rather than the member list — the caller must not
+ * be able to infer the roster or its size from this response.
+ */
 orgs.get("/:orgId/members", async (c) => {
   const user = c.get("user")
   const orgId = parseInt(c.req.param("orgId"), 10)
@@ -258,6 +268,11 @@ orgs.get("/:orgId/members", async (c) => {
 
   const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "not an org member" }, 403)
+
+  const rosterMinRole = await getRosterViewMinRole(c.env, orgId)
+  if (!canViewRoster(role, rosterMinRole)) {
+    return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
+  }
 
   const members = await listOrgMembersWithUsers(c.env, orgId)
   await bumpOrgActivity(c.env, user.id, orgId)

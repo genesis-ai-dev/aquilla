@@ -67,6 +67,20 @@ export function RulesPage() {
   // Derive harmonize_min_role gate from project settings and current role.
   const harmonizeMinRole = projectWideSettings.harmonize_min_role
   const userRoleLevel = project?.syncRole?.level ?? null
+
+  // AQU-480: adding/editing/deleting rules and toggling built-in checks all
+  // persist to project_settings, which the server gates at MAINTAINER (600) —
+  // the same floor as useProjectSettings' EDIT_ROLE_FLOOR. Below that, every
+  // write path (addRule/updateRule/deleteRule/setBuiltinOverride → patchShared)
+  // gets a swallowed 403, so the change appears to save then vanishes on reload.
+  // Gate the rule-management UI on that floor. Fail OPEN when the role is unknown
+  // (local/unsynced project — IDB is authoritative and the write genuinely
+  // persists), matching the harmonize gate below and the hook's null-role path.
+  const canManageRules = userRoleLevel == null || userRoleLevel >= ROLE.MAINTAINER
+  const manageRulesDeniedReason = canManageRules
+    ? null
+    : "Only maintainers and owners can add or change translation rules."
+
   const userCanHarmonize = useMemo(() => {
     if (userRoleLevel == null) return true // fail-open; server authoritative
     const FLOOR_MAP: Record<string, number> = {
@@ -182,8 +196,8 @@ export function RulesPage() {
           <BookOpen className="mr-1 h-3.5 w-3.5" />
           Terminology
         </Button>
-        <RuleSuggestDialog files={project?.files || []} completionSettings={project?.completionSettings} onAdd={addRule} projectId={id} cells={validatedCells} />
-        <RuleCreateDialog onAdd={addRule} />
+        <RuleSuggestDialog files={project?.files || []} completionSettings={project?.completionSettings} onAdd={addRule} projectId={id} cells={validatedCells} canManage={canManageRules} deniedReason={manageRulesDeniedReason} />
+        <RuleCreateDialog onAdd={addRule} canManage={canManageRules} deniedReason={manageRulesDeniedReason} />
       </header>
 
       <main className="mx-auto max-w-2xl space-y-6 p-6">
@@ -193,12 +207,24 @@ export function RulesPage() {
           </AppTooltip>
         )}
 
+        {/* AQU-480: contributors could add/edit rules that silently 403'd and
+            vanished on reload. Surface a visible read-only reason instead. */}
+        {!canManageRules && (
+          <div
+            role="status"
+            className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+          >
+            {manageRulesDeniedReason} Changes made here won't be saved.
+          </div>
+        )}
+
         <BuiltinChecksList
           builtinRules={builtinRules}
           infractions={builtinInfractions}
           onSetOverride={setBuiltinOverride}
           onHarmonize={handleHarmonize}
           canHarmonize={userCanHarmonize}
+          canManage={canManageRules}
         />
 
         <Card>
@@ -238,16 +264,20 @@ export function RulesPage() {
                         </Button>
                         <label className="flex items-center gap-1 text-xs">
                           <Switch size="sm" checked={rule.enabled}
+                            disabled={!canManageRules}
                             onCheckedChange={(checked) => updateRule(rule.id, { enabled: checked })} />
                           <span className="text-muted-foreground">Enabled</span>
                         </label>
-                        <Button variant="ghost" size="sm" aria-label={`Delete rule ${rule.name}`} onClick={() => setPendingDeleteRuleId(rule.id)}>
+                        <Button variant="ghost" size="sm" aria-label={`Delete rule ${rule.name}`}
+                          disabled={!canManageRules}
+                          title={manageRulesDeniedReason ?? undefined}
+                          onClick={() => setPendingDeleteRuleId(rule.id)}>
                           <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
                         </Button>
                       </div>
 
                       {expanded && (
-                        <AutofixEditor rule={rule} onUpdate={(af) => updateRule(rule.id, { autofix: af })} />
+                        <AutofixEditor rule={rule} onUpdate={(af) => updateRule(rule.id, { autofix: af })} disabled={!canManageRules} />
                       )}
                     </li>
                   )
@@ -277,7 +307,7 @@ export function RulesPage() {
   )
 }
 
-function AutofixEditor({ rule, onUpdate }: { rule: TranslationRule; onUpdate: (af: RuleAutofix | undefined) => void }) {
+function AutofixEditor({ rule, onUpdate, disabled = false }: { rule: TranslationRule; onUpdate: (af: RuleAutofix | undefined) => void; disabled?: boolean }) {
   const [pattern, setPattern] = useState(rule.autofix?.pattern ?? "")
   const [replacement, setReplacement] = useState(rule.autofix?.replacement ?? "")
   const [flags, setFlags] = useState(rule.autofix?.flags ?? "gi")
@@ -286,15 +316,15 @@ function AutofixEditor({ rule, onUpdate }: { rule: TranslationRule; onUpdate: (a
     <div className="mt-3 space-y-2 border-t pt-3">
       <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Saved autofix (regex)</p>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <Input data-autofix-field="pattern" placeholder="Pattern" value={pattern} onChange={(e) => setPattern(e.target.value)} />
-        <Input placeholder="Replacement" value={replacement} onChange={(e) => setReplacement(e.target.value)} />
-        <Input placeholder="Flags (e.g. gi)" value={flags} onChange={(e) => setFlags(e.target.value)} />
+        <Input data-autofix-field="pattern" placeholder="Pattern" value={pattern} onChange={(e) => setPattern(e.target.value)} disabled={disabled} />
+        <Input placeholder="Replacement" value={replacement} onChange={(e) => setReplacement(e.target.value)} disabled={disabled} />
+        <Input placeholder="Flags (e.g. gi)" value={flags} onChange={(e) => setFlags(e.target.value)} disabled={disabled} />
       </div>
       <div className="flex gap-2">
-        <Button size="sm" onClick={() => onUpdate(pattern ? { kind: "regex-replace", pattern, replacement, flags } : undefined)}>
+        <Button size="sm" disabled={disabled} onClick={() => onUpdate(pattern ? { kind: "regex-replace", pattern, replacement, flags } : undefined)}>
           Save autofix
         </Button>
-        <Button size="sm" variant="ghost" onClick={() => onUpdate(undefined)}>Clear</Button>
+        <Button size="sm" variant="ghost" disabled={disabled} onClick={() => onUpdate(undefined)}>Clear</Button>
       </div>
     </div>
   )

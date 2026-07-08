@@ -30,6 +30,8 @@ import {
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller"
 import { AgentRunView } from "./AgentRunView"
+import { PassageCard } from "./cards/PassageCard"
+import { passageRowsFor } from "./cards/registry"
 import { ProposalCard } from "./ProposalCard"
 import { AquiferProposalCard } from "./AquiferProposalCard"
 
@@ -89,7 +91,7 @@ export function AgentDockView({
   onPendingChipConsumed,
   renderProposalOverride,
 }: AgentDockViewProps) {
-  const { state, send, stop } = useAgentSession(projectId)
+  const { state, send, stop, noteActivity } = useAgentSession(projectId)
   const [includeContext, setIncludeContext] = useState(true)
   const composerRef = useRef<ChatComposerHandle>(null)
 
@@ -202,6 +204,18 @@ export function AgentDockView({
                           jwt={jwt}
                         />
                       )}
+                      renderToolCard={(item) => {
+                        const rows = passageRowsFor(item)
+                        return rows ? (
+                          <PassageCard
+                            cardKey={`${run.localId}:${item.id}`}
+                            rows={rows}
+                            projectId={projectId}
+                            jwt={jwt}
+                            onActivity={noteActivity}
+                          />
+                        ) : null
+                      }}
                     />
                   </MessageScrollerItem>
                 ))}

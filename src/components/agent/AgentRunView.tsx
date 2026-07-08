@@ -100,9 +100,12 @@ export interface AgentRunViewProps {
   renderProposal?: (proposal: AgentProposal) => ReactNode
   /** Same seam for Bible Aquifer publish proposals. */
   renderAquiferProposal?: (proposal: AquiferPublishProposal) => ReactNode
+  /** Card-registry seam (agent-complete §4): a rich live card rendered UNDER
+   *  a tool chip (e.g. PassageCard for read/draft rows). Null → chip only. */
+  renderToolCard?: (item: ToolItem) => ReactNode
 }
 
-export function AgentRunView({ run, renderProposal, renderAquiferProposal }: AgentRunViewProps) {
+export function AgentRunView({ run, renderProposal, renderAquiferProposal, renderToolCard }: AgentRunViewProps) {
   return (
     <div className="flex flex-col gap-2">
       {/* User prompt — right-aligned primary bubble. */}
@@ -130,8 +133,15 @@ export function AgentRunView({ run, renderProposal, renderAquiferProposal }: Age
                 </MessageContent>
               </Message>
             ) : null
-          case "tool":
-            return <ToolChip key={item.id} item={item} />
+          case "tool": {
+            const card = renderToolCard?.(item)
+            return (
+              <div key={item.id} className="flex flex-col gap-1">
+                <ToolChip item={item} />
+                {card}
+              </div>
+            )
+          }
           case "proposal":
             return renderProposal ? (
               <div key={item.id}>{renderProposal(item.proposal)}</div>

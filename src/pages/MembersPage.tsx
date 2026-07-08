@@ -305,7 +305,7 @@ function RosterWithProjectChips({
         <MembersPanel
           members={panelMembers}
           roleOptions={ORG_ROLE_OPTIONS}
-          defaultRole={ROLE.MAINTAINER}
+          newMemberDefaultRole={ROLE.MAINTAINER}
           callerUserId={callerUserId}
           callerMaxRole={ROLE.MAINTAINER}
           scopedUserSearch={false}

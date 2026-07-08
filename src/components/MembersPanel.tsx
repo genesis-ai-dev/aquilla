@@ -32,7 +32,14 @@ export interface MembersPanelRoleOption {
 interface MembersPanelProps {
   members: MembersPanelMember[];
   roleOptions: MembersPanelRoleOption[];
-  defaultRole: number;
+  /**
+   * Initial value of the "role to grant" picker when adding a NEW member.
+   * This is local UI state only — it is never persisted and has no effect
+   * on any existing member's role. There is no project-wide default role;
+   * every member's effective role comes solely from their own explicit
+   * grant (see AD-12 max-wins resolver in project-permissions.ts).
+   */
+  newMemberDefaultRole: number;
   onAdd: (username: string, role: number) => Promise<{ ok: boolean; error?: string }>;
   onRemove: (userId: number) => Promise<void>;
   onChangeRole?: (username: string, role: number) => Promise<void>;
@@ -48,7 +55,7 @@ interface MembersPanelProps {
 export function MembersPanel({
   members,
   roleOptions,
-  defaultRole,
+  newMemberDefaultRole,
   onAdd,
   onRemove,
   onChangeRole,
@@ -64,7 +71,7 @@ export function MembersPanel({
     mode: "username",
     raw: "",
   });
-  const [role, setRole] = useState(defaultRole);
+  const [role, setRole] = useState(newMemberDefaultRole);
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
@@ -80,7 +87,7 @@ export function MembersPanel({
       return;
     }
     setRecipient({ mode: "username", raw: "" });
-    setRole(defaultRole);
+    setRole(newMemberDefaultRole);
   }
 
   const grantableRoles = roleOptions.filter((r) => r.level <= callerMaxRole);

@@ -136,7 +136,7 @@ function MembersTab({ projectId }: { projectId: string }) {
         <MembersPanel
           members={panelMembers}
           roleOptions={[...PROJECT_ROLE_OPTIONS]}
-          defaultRole={ROLE.CONTRIBUTOR}
+          newMemberDefaultRole={ROLE.CONTRIBUTOR}
           callerUserId={callerUserId}
           callerMaxRole={callerMaxRole}
           onAdd={async (username, role) => {

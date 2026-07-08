@@ -903,6 +903,7 @@ export function ProjectWorkspace() {
   // immediately before emitting the commit event, so this ref is always
   // up-to-date by the time onCellCommitted fires.
   const lastOptimisticEditRef = useRef<{ cellId: string } | null>(null)
+  const pendingTargetCommitHeadsRef = useRef<Map<string, { eventId: string; parentId: string | null }>>(new Map())
 
   // RACE-3/QW-2: per-cell pending event id for the AI completion commit path.
   // Mirrors the per-row pendingTargetEventIdRef in EditorRow. Keyed by cellId
@@ -933,6 +934,44 @@ export function ProjectWorkspace() {
     },
     [applyOptimisticTargetEdit],
   )
+
+  const getPendingTargetEventId = useCallback((cellId: string) => {
+    return pendingTargetCommitHeadsRef.current.get(cellId)?.eventId ?? null
+  }, [])
+
+  const resolveTargetCommitParentId = useCallback((cell: Pick<CellData, "id" | "targetEventId" | "sourceEventId">) => {
+    return (
+      pendingTargetCommitHeadsRef.current.get(cell.id)?.eventId ??
+      pendingCompletionEventIdRef.current.get(cell.id) ??
+      cell.targetEventId ??
+      cell.sourceEventId ??
+      null
+    )
+  }, [])
+
+  const rememberPendingTargetCommit = useCallback((cellId: string, eventId: string, parentId: string | null) => {
+    pendingTargetCommitHeadsRef.current.set(cellId, { eventId, parentId })
+  }, [])
+
+  useEffect(() => {
+    if (pendingTargetCommitHeadsRef.current.size === 0) return
+    for (const summary of cellSummaries) {
+      const pending = pendingTargetCommitHeadsRef.current.get(summary.id)
+      if (!pending) continue
+      const projectedHead = summary.targetEventId ?? null
+      if (projectedHead === pending.eventId) {
+        pendingTargetCommitHeadsRef.current.delete(summary.id)
+        if (pendingCompletionEventIdRef.current.get(summary.id) === pending.eventId) {
+          pendingCompletionEventIdRef.current.delete(summary.id)
+        }
+      } else if (projectedHead && projectedHead !== pending.parentId) {
+        pendingTargetCommitHeadsRef.current.delete(summary.id)
+        if (pendingCompletionEventIdRef.current.get(summary.id) === pending.eventId) {
+          pendingCompletionEventIdRef.current.delete(summary.id)
+        }
+      }
+    }
+  }, [cellSummaries])
   // Phase 5 / AD-9 — Phase 3a-final wiring. Fetch the set of cell ids
   // whose source has advanced since the translator's last commit, so the
   // editor table can decorate stale rows with the AlertTriangle badge.
@@ -1139,15 +1178,17 @@ export function ProjectWorkspace() {
       const cell = cellStore.getCellView(cellId)
       if (!cell) return
       applyOptimisticTargetEdit(cellId, { value })
-      await emitTargetCellCommit({
+      const parentId = resolveTargetCommitParentId(cell)
+      const eventId = await emitTargetCellCommit({
         projectId: project.id,
         fileId: cell.fileId,
         cellId,
-        parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
+        parentId,
         sourceEventId: cell.sourceEventId ?? null,
         value,
         author: currentUsername,
       })
+      rememberPendingTargetCommit(cellId, eventId, parentId)
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       await refreshOutboxPending()
       revalidateCell(cellId)
@@ -1157,6 +1198,8 @@ export function ProjectWorkspace() {
       cellStore,
       applyOptimisticTargetEdit,
       currentUsername,
+      resolveTargetCommitParentId,
+      rememberPendingTargetCommit,
       getTokenForProjectFile,
       refreshOutboxPending,
       revalidateCell,
@@ -1493,7 +1536,7 @@ export function ProjectWorkspace() {
     // This prevents a second rapid completion commit from becoming a sibling
     // of the first (which the server dead-letters) when the read-back hasn't
     // landed yet.
-    const parentId = pendingCompletionEventIdRef.current.get(cell.id) ?? cell.targetEventId ?? cell.sourceEventId ?? null
+    const parentId = resolveTargetCommitParentId(cell)
     const eventId = await emitTargetCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
@@ -1508,6 +1551,7 @@ export function ProjectWorkspace() {
       aiSuggestion: true,
     })
     pendingCompletionEventIdRef.current.set(cell.id, eventId)
+    rememberPendingTargetCommit(cell.id, eventId, parentId)
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
     // Targeted: we just changed exactly one cell. Pull only that row's stats
@@ -1517,7 +1561,7 @@ export function ProjectWorkspace() {
     // confirms; the WS event.applied also pokes the same cell (coalesced).
     revalidateCellStats(cell.id)
     revalidateCell(cell.id)
-  }, [project?.id, applyOptimisticTargetEdit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell])
+  }, [project?.id, applyOptimisticTargetEdit, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
   /**
    * AD-2 sibling promotion: emit a new target-cell commit whose parentId is
@@ -1530,22 +1574,24 @@ export function ProjectWorkspace() {
     const cell = getActiveCell(historyCellId)
     if (!cell) return
     applyOptimisticTargetEdit(cell.id, { value: entry.value })
-    await emitTargetCellCommit({
+    const parentId = resolveTargetCommitParentId(cell)
+    const eventId = await emitTargetCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
       cellId: cell.id,
       // parentId must be the current chain head so AD-2 makes this the winner.
-      parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
+      parentId,
       sourceEventId: cell.sourceEventId ?? null,
       value: entry.value,
       author: currentUsername,
     })
+    rememberPendingTargetCommit(cell.id, eventId, parentId)
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
     // Single-cell promotion — targeted refetch (see commitCompletedCell).
     revalidateCellStats(cell.id)
     revalidateCell(cell.id)
-  }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateCellStats, revalidateCell])
+  }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
   const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, project?.translationBrief?.l1Summary ?? undefined,
@@ -2479,7 +2525,7 @@ export function ProjectWorkspace() {
       currentFileId: activeFileIdRef.current,
       selection: null,
     })
-    focusLockState.claim()
+    focusLockState.claim(cellId)
     // Debounce last-location cell write (500 ms) so rapid focus events
     // don't hammer localStorage.
     if (writeLocTimerRef.current !== null) clearTimeout(writeLocTimerRef.current)
@@ -2630,16 +2676,18 @@ export function ProjectWorkspace() {
     if (!cell) return
 
     applyOptimisticTargetEditWithCapture(cell.id, { value: updatedText, valueHtml: updatedText })
-    await emitTargetCellCommit({
+    const parentId = resolveTargetCommitParentId(cell)
+    const eventId = await emitTargetCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
       cellId: cell.id,
-      parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
+      parentId,
       sourceEventId: cell.sourceEventId ?? null,
       value: updatedText,
       valueHtml: updatedText,
       author: currentUsername,
     })
+    rememberPendingTargetCommit(cell.id, eventId, parentId)
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
     // Single-cell edit — targeted refetch (see commitCompletedCell).
@@ -2651,6 +2699,8 @@ export function ProjectWorkspace() {
     isReadOnly,
     getActiveCell,
     applyOptimisticTargetEditWithCapture,
+    resolveTargetCommitParentId,
+    rememberPendingTargetCommit,
     currentUsername,
     getTokenForProjectFile,
     refreshOutboxPending,
@@ -2969,17 +3019,19 @@ export function ProjectWorkspace() {
       const cell = getActiveCell(diff.cellId)
       if (!cell) continue
       if (cell.fileId === activeFileId) applyOptimisticTargetEdit(cell.id, { value: diff.after })
-      await emitTargetCellCommit({
+      const parentId = resolveTargetCommitParentId(cell)
+      const eventId = await emitTargetCellCommit({
         projectId: project.id,
         fileId: cell.fileId,
         cellId: cell.id,
-        parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
+        parentId,
         sourceEventId: cell.sourceEventId ?? null,
         value: diff.after,
         author: currentUsername,
         searchQuery: payload.findQuery,
         replaceString: payload.replaceQuery,
       })
+      rememberPendingTargetCommit(cell.id, eventId, parentId)
       touched.push(cell.id)
     }
     if (touched.length === 0) return
@@ -2990,7 +3042,7 @@ export function ProjectWorkspace() {
       if (getActiveCell(id)?.fileId === activeFileId) revalidateCell(id)
     }
     rebuildSearchIndex()
-  }, [project?.id, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex])
+  }, [project?.id, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex])
 
   const projectNavItems = useMemo(() => {
     const items = [
@@ -3183,7 +3235,10 @@ export function ProjectWorkspace() {
     [cellStoreVersion, getActiveCells, legacyCellsNeeded],
   )
 
-  const handleCellCommitted = useCallback(async (cellId?: string, _committedEventId?: string) => {
+  const handleCellCommitted = useCallback(async (cellId?: string, committedEventId?: string, parentId?: string | null) => {
+    if (cellId && committedEventId) {
+      rememberPendingTargetCommit(cellId, committedEventId, parentId ?? null)
+    }
     // Capture before async work — another edit could arrive during the flush.
     const pendingEdit = lastOptimisticEditRef.current
     lastOptimisticEditRef.current = null
@@ -3202,7 +3257,7 @@ export function ProjectWorkspace() {
       revalidateAuditStats()
       revalidateCells()
     }
-  }, [getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCellStats, revalidateCell, revalidateCells])
+  }, [getTokenForProjectFile, rememberPendingTargetCommit, refreshOutboxPending, revalidateAuditStats, revalidateCellStats, revalidateCell, revalidateCells])
 
   const workspaceHeaderMenuItems = useMemo((): OverflowMenuItem[] => {
     const diarizeLabel =
@@ -4115,6 +4170,7 @@ export function ProjectWorkspace() {
             onAttachMediaFile={handleAttachMediaFile}
             onAttachMediaUrl={handleAttachMediaUrl}
             onCellCommitted={handleCellCommitted}
+            getPendingTargetEventId={getPendingTargetEventId}
             onOptimisticEdit={applyOptimisticTargetEditWithCapture}
             cellLockHolders={cellLockHolders}
             presenceStore={presenceStore}

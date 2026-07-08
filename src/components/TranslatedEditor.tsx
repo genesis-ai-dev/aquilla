@@ -20,7 +20,7 @@
 import { useEditor, EditorContent, type Editor as TiptapEditor } from "@tiptap/react"
 import { BubbleMenu } from "@tiptap/react/menus"
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
-import { TextSelection } from "@tiptap/pm/state"
+import { TextSelection, type Transaction } from "@tiptap/pm/state"
 import type { EditorView } from "@tiptap/pm/view"
 import StarterKit from "@tiptap/starter-kit"
 import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code } from "lucide-react"
@@ -633,7 +633,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const [, forceEditorStateUpdate] = useState(0)
   useEffect(() => {
     if (!editor) return
-    const refresh = () => forceEditorStateUpdate((n) => (n + 1) % 1_000_000)
+    const refresh = ({ transaction }: { transaction?: Transaction } = {}) => {
+      if (transaction && !transaction.docChanged && !transaction.selectionSet) return
+      forceEditorStateUpdate((n) => (n + 1) % 1_000_000)
+    }
     editor.on("transaction", refresh)
     editor.on("selectionUpdate", refresh)
     return () => {

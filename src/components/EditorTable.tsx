@@ -128,6 +128,7 @@ import {
 const rowRenders = new Map<string, number>()
 const ESTIMATED_ROW_HEIGHT_PX = 140
 const LEGEND_LIST_DRAW_DISTANCE_PX = 240
+const EMPTY_CONCEPTS: Concept[] = []
 
 function clampIndex(index: number, length: number): number {
   if (length <= 0) return 0
@@ -485,7 +486,8 @@ interface EditorTableProps {
    *  refetches the cells projection. `committedEventId` is the event id the
    *  commit was assigned (known only here, before the projection round-trip);
    *  the parent's auto-BT pins to it so the BT isn't instantly stale. */
-  onCellCommitted?: (cellId: string, committedEventId?: string) => void | Promise<void>
+  onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void | Promise<void>
+  getPendingTargetEventId?: (cellId: string) => string | null
   /** Optimistic local patch fired BEFORE the outbox enqueue so the editor's
    *  rule infractions + per-cell UI re-derive instantly without waiting for
    *  the projection round-trip. The follow-up `onCellCommitted` -> revalidate
@@ -624,6 +626,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   orderedBy,
   onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
   onCellCommitted,
+  getPendingTargetEventId,
   onOptimisticEdit,
   cellLockHolders,
   presenceStore,
@@ -1245,6 +1248,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           editable={canEdit}
           canValidate={canValidate}
           onCellCommitted={onCellCommitted}
+          getPendingTargetEventId={getPendingTargetEventId}
           onOptimisticEdit={onOptimisticEdit}
           lockHolderLabel={cellLockHolders?.get(cell.id) ?? null}
           presenceStore={presenceStore}
@@ -1370,6 +1374,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onFootnoteCreated,
     onJumpToCell,
     onOpenAudioSetup,
+    getPendingTargetEventId,
     onOptimisticEdit,
     onProjectChanged,
     onReleaseCell,
@@ -1388,6 +1393,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     targetTextDirection,
     username,
   ])
+  const listExtraData = useMemo(
+    () => ({ cellStoreVersion, renderListItem }),
+    [cellStoreVersion, renderListItem],
+  )
 
   return (
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
@@ -1435,8 +1444,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             ref={listRef}
             refScrollView={setListScrollElement}
             data={displayCellIds}
+            dataVersion={cellStoreVersion}
             renderItem={renderListItem}
-            extraData={renderListItem}
+            extraData={listExtraData}
             keyExtractor={(cellId) => cellId}
             estimatedItemSize={ESTIMATED_ROW_HEIGHT_PX}
             drawDistance={LEGEND_LIST_DRAW_DISTANCE_PX}
@@ -1532,7 +1542,8 @@ interface MemoizedRowProps {
    *  hop changed). Same "stable boolean, resolved by the parent" shape as
    *  `isStaleSource` above. */
   isUpstreamStaleSource: boolean
-  onCellCommitted?: (cellId: string, committedEventId?: string) => void | Promise<void>
+  onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void | Promise<void>
+  getPendingTargetEventId?: (cellId: string) => string | null
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
   presenceStore?: ProjectPresenceStore | null
@@ -1646,7 +1657,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
-    onCellCommitted, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+    onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
     isStaleSource,
     isUpstreamStaleSource,
@@ -1786,6 +1797,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         getAlignmentModel={getAlignmentModel}
         onAlignmentSeedChange={onAlignmentSeedChange}
         onCellCommitted={onCellCommitted}
+        getPendingTargetEventId={getPendingTargetEventId}
         onOptimisticEdit={onOptimisticEdit}
         lockHolderLabel={lockHolderLabel}
         presenceStore={presenceStore}
@@ -1829,7 +1841,8 @@ interface EditorRowProps {
    *  upstream chain hop changed). Renders the violet/dotted second tone.
    *  Same once-per-file computation shape as `isStaleSource`. */
   isUpstreamStaleSource: boolean
-  onCellCommitted?: (cellId: string, committedEventId?: string) => void
+  onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void
+  getPendingTargetEventId?: (cellId: string) => string | null
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
   presenceStore?: ProjectPresenceStore | null
@@ -2126,11 +2139,11 @@ function humanFootnoteCellRef(cell: CellData): string {
 }
 
 function footnoteMarkerOptions(
-  cell: CellData,
+  targetText: string,
   anchor: FootnoteInsertionAnchor | null,
   numberOffset: number,
 ): Record<FootnoteMarkerStyle, AddFootnoteMarkerOption> {
-  const targetFootnotes = extractUsfmFootnotes(cell.translated ?? "")
+  const targetFootnotes = extractUsfmFootnotes(targetText)
   const insertionIndex = anchor?.plainPosition ?? Number.POSITIVE_INFINITY
   const targetFootnotesBeforeInsertion = targetFootnotes.filter((footnote) => footnote.index < insertionIndex)
   const numberedPreview = numberOffset + targetFootnotesBeforeInsertion.length + 1
@@ -2747,7 +2760,7 @@ function EditorRow({
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, micDenied,
   audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, onAskAiFromSelection,
-  onCellCommitted, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+  onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
   isUpstreamStaleSource,
@@ -2772,8 +2785,6 @@ function EditorRow({
   // keeps them out of MemoizedRow's React.memo compare surface.
   const { onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording } = useEditorActions()
   const remoteCellPresence = useCellPresence(presenceStore, cell.id)
-  const hasTranslatedText = Boolean(cell.translated?.trim())
-  const showCompletionOverlay = isLoading && !hasTranslatedText
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<ViolationAnchor | null>(null)
   const [examplesExpanded, setExamplesExpanded] = useState(false)
@@ -2825,11 +2836,16 @@ function EditorRow({
     ref: "",
     text: "",
   })
+  const [localTargetDraft, setLocalTargetDraft] = useState<{ value: string; valueHtml?: string } | null>(null)
   const [expanded, setExpanded] = useState(false)
   const [expansionTab, setExpansionTab] = useState<string>("backtranslation")
   const [btAlignmentOpen, setBtAlignmentOpen] = useState(false)
   const hasSourceFootnoteMarker = (cell.original ?? "").includes("\\f")
-  const hasTargetFootnoteMarker = (cell.translated ?? "").includes("\\f")
+  const visibleTranslated = localTargetDraft?.value ?? cell.translated
+  const visibleTranslatedHtml = localTargetDraft?.valueHtml ?? cell.translatedHtml
+  const hasTranslatedText = Boolean(visibleTranslated?.trim())
+  const showCompletionOverlay = isLoading && !hasTranslatedText
+  const hasTargetFootnoteMarker = (visibleTranslated ?? "").includes("\\f")
   const mayHaveFootnotes = hasSourceFootnoteMarker || hasTargetFootnoteMarker
   const showFootnotesInExpansion = footnoteViewMode === "off" && mayHaveFootnotes
   const shouldHydrateFootnotes =
@@ -2837,7 +2853,7 @@ function EditorRow({
     (expanded && expansionTab === "footnotes" && showFootnotesInExpansion)
   const allFootnotes = useMemo(
     () => shouldHydrateFootnotes ? getFootnoteDetails(cell.id) : EMPTY_CELL_FOOTNOTE_DETAILS,
-    [cell.id, cell.original, cell.translated, getFootnoteDetails, shouldHydrateFootnotes],
+    [cell.id, cell.original, visibleTranslated, getFootnoteDetails, shouldHydrateFootnotes],
   )
   const sourceDisplayFootnotes = useMemo(() => {
     if (!shouldHydrateFootnotes || !hasSourceFootnoteMarker) return EMPTY_EXTRACTED_FOOTNOTES
@@ -2860,6 +2876,13 @@ function EditorRow({
   const targetFootnotes = showFootnotesInline ? allFootnotes.targetFootnotes : EMPTY_EXTRACTED_FOOTNOTES
   const hasInlineFootnotes = sourceFootnotes.length > 0 || targetFootnotes.length > 0
   const isDocxFile = (cell.fileId ?? "").endsWith(".docx")
+  const terminologyConcepts = project.terminology ?? EMPTY_CONCEPTS
+
+  useEffect(() => {
+    if (!localTargetDraft) return
+    if ((cell.translated ?? "") !== localTargetDraft.value) return
+    setLocalTargetDraft(null)
+  }, [cell.translated, localTargetDraft])
 
   useEffect(() => {
     if (cell.targetEventId) pendingTargetEventIdRef.current = cell.targetEventId
@@ -2959,7 +2982,7 @@ function EditorRow({
     }
     return out
   }, [cellInfractions, waivedInfractions, waivedRuleIds, ruleSeverity])
-  const targetHasRichFormatting = hasMeaningfulRichText(cell.translatedHtml)
+  const targetHasRichFormatting = hasMeaningfulRichText(visibleTranslatedHtml)
 
   // Editor commit path. The plain TipTap editor (TranslatedEditor) calls
   // this on idle/blur/release with the current `{value, valueHtml}` snapshot.
@@ -2995,16 +3018,19 @@ function EditorRow({
     // `checkRulesForCell` for this one cell on the next render — no other
     // cell's cached infractions are invalidated. The server projection
     // arrives via `onCellCommitted` -> revalidate and overwrites this.
+    setLocalTargetDraft({ value, valueHtml })
     onOptimisticEdit?.(cell.id, { value, valueHtml })
     setWriteError(null)
-    // RACE-3/QW-2: use the pending event id (the last event WE enqueued for this
-    // cell) as parentId rather than the projection value. The projection row may
-    // lag by a round-trip when a second idle-commit fires before the read-back
-    // confirms; chaining from the projection value would make it a sibling of
-    // our own earlier event and dead-letter it. pendingTargetEventIdRef is
-    // updated from cell.targetEventId whenever the projection confirms (effect
-    // at line ~1621), so it stays correct once the server catches up.
-    const parentId = pendingTargetEventIdRef.current ?? cell.sourceEventId ?? null
+    // RACE-3/QW-2: use the last event id we enqueued for this cell as parentId
+    // rather than the lagging projection value. The workspace-level getter
+    // survives Legend List row remounts; the row-local ref covers repeated
+    // commits while this exact row instance remains mounted.
+    const parentId =
+      getPendingTargetEventId?.(cell.id) ??
+      pendingTargetEventIdRef.current ??
+      cell.targetEventId ??
+      cell.sourceEventId ??
+      null
     emitTargetCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
@@ -3018,7 +3044,7 @@ function EditorRow({
       pendingTargetEventIdRef.current = eventId
       // Pass the just-assigned event id: the auto-BT in the parent pins to it
       // so the BT describes THIS commit, not the lagging projection head.
-      void onCellCommitted?.(cell.id, eventId)
+      void onCellCommitted?.(cell.id, eventId, parentId)
     }).catch((err) => {
       // RES-4/M1-3: enqueue failure (IDB quota, private-mode, InsufficientRoleError)
       // must be loud. Revert the optimistic patch so the cell doesn't show
@@ -3026,13 +3052,14 @@ function EditorRow({
       console.error("[editor-commit] enqueue failed:", err)
       const msg = err instanceof Error ? err.message : "Could not save — please try again"
       setWriteError(msg)
+      setLocalTargetDraft(null)
       // Revert the optimistic patch to the last confirmed projection value.
       onOptimisticEdit?.(cell.id, {
         value: cell.translated ?? "",
         valueHtml: cell.translatedHtml ?? "",
       })
     })
-  }, [editable, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.translated, cell.translatedHtml, cell.sourceEventId, username, onCellCommitted, onOptimisticEdit, lockHolderLabel, checkLockHolder])
+  }, [editable, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder])
 
   // Terminology apply (spec 2c): REPLACE the active target selection with the
   // chosen rendering. The Apply affordance is only surfaced when there was a
@@ -3042,7 +3069,7 @@ function EditorRow({
   // there is no selection (defensive fallback), we append so the translator
   // can still chain multiple terms. Uses the same commit path as keyboard edits.
   const handleTermApply = useCallback((rendering: string) => {
-    const existing = cell.translated ?? ""
+    const existing = visibleTranslated ?? ""
     const selected = targetSelectionTextRef.current
     let next: string
     if (selected && existing.includes(selected)) {
@@ -3052,7 +3079,7 @@ function EditorRow({
       next = trimmed ? `${trimmed} ${rendering}` : rendering
     }
     handleEditorCommit({ value: next, valueHtml: next })
-  }, [cell.translated, handleEditorCommit])
+  }, [visibleTranslated, handleEditorCommit])
 
   const captureFootnoteAnchor = useCallback(() => {
     pendingFootnoteAnchorRef.current = translatedEditorRef.current?.getFootnoteInsertionAnchor() ?? null
@@ -3061,7 +3088,7 @@ function EditorRow({
   const openAddFootnoteDialog = useCallback((defaults?: AddFootnoteDialogDefaults) => {
     if (!pendingFootnoteAnchorRef.current) captureFootnoteAnchor()
     const anchor = pendingFootnoteAnchorRef.current
-    const markerOptions = footnoteMarkerOptions(cell, anchor, targetFootnoteNumberOffset)
+    const markerOptions = footnoteMarkerOptions(visibleTranslated ?? "", anchor, targetFootnoteNumberOffset)
     const markerStyle = defaults?.markerStyle ?? footnoteMarkerStyleFromCaller(defaults?.caller)
     setAddFootnoteDefaults({
       caller: defaults?.caller ?? "+",
@@ -3078,7 +3105,7 @@ function EditorRow({
       markerOptions,
     })
     setAddFootnoteOpen(true)
-  }, [captureFootnoteAnchor, cell, targetFootnoteNumberOffset])
+  }, [captureFootnoteAnchor, cell, visibleTranslated, targetFootnoteNumberOffset])
 
   const handleAddFootnote = useCallback((value: AddFootnoteDialogValue) => {
     const marker = createUsfmFootnoteMarker(value)
@@ -3088,14 +3115,14 @@ function EditorRow({
     ) ?? false
 
     if (!inserted) {
-      const next = `${cell.translated ?? ""}${marker}`
+      const next = `${visibleTranslated ?? ""}${marker}`
       handleEditorCommit({ value: next, valueHtml: next })
     }
 
     pendingFootnoteAnchorRef.current = null
     onFootnoteCreated?.()
     setAddFootnoteOpen(false)
-  }, [cell.translated, handleEditorCommit, onFootnoteCreated])
+  }, [visibleTranslated, handleEditorCommit, onFootnoteCreated])
 
   const handleCreateTargetFootnote = useCallback((sourceFootnote: ExtractedFootnote) => {
     pendingFootnoteAnchorRef.current = null
@@ -3208,14 +3235,14 @@ function EditorRow({
   // Recomputes naturally as the preview streams in and as the committed text /
   // BT verdict changes on later renders.
   const preAcceptanceWarnings = useMemo(() => {
-    const completionText = isLoading ? (completionPreview ?? "") : (cell.translated ?? "")
+    const completionText = isLoading ? (completionPreview ?? "") : (visibleTranslated ?? "")
     if (!completionText.trim()) return []
     return detectPreAcceptanceWarnings(
       completionText,
       cell.original ?? "",
-      project.terminology ?? [],
+      terminologyConcepts,
     )
-  }, [isLoading, completionPreview, cell.translated, cell.original, project.terminology])
+  }, [isLoading, completionPreview, visibleTranslated, cell.original, terminologyConcepts])
 
   // FRO-204: Chip click handler for terminology chips in the target (TranslatedEditor).
   // Records whether the target editor had a non-empty text selection at click time
@@ -3321,10 +3348,10 @@ function EditorRow({
 
   // Detect formatting loss: source has inline style marks that the target doesn't.
   const sourceHasFormatting = Boolean(cell.originalHtml && /<(b|strong|i|em|u|s|strike|del|code)\b/i.test(cell.originalHtml))
-  const targetHtml = cell.translatedHtml ?? ""
+  const targetHtml = visibleTranslatedHtml ?? ""
   const targetHasFormatting = /<(b|strong|i|em|u|s|strike|del|code)\b/i.test(targetHtml)
   const showFormattingLossWarning =
-    sourceHasFormatting && !targetHasFormatting && cell.translated.trim().length > 0
+    sourceHasFormatting && !targetHasFormatting && visibleTranslated.trim().length > 0
 
   const healthValue = health ?? (cell.status === "validated" ? 100 : 0)
 
@@ -3445,7 +3472,7 @@ function EditorRow({
     vs === "others" ? "text-muted-foreground/60" :
     "text-muted-foreground/30"
 
-  const hasContent = Boolean(cell.translated && cell.translated.trim())
+  const hasContent = Boolean(visibleTranslated && visibleTranslated.trim())
 
   // AD-14 amendment 2026-06-04: use server-derived confidence score from
   // healthMap when available (set by the confidence overlay in ProjectWorkspace
@@ -3508,9 +3535,9 @@ function EditorRow({
   // ── Expansion state ───────────────────────────────────────────────────────
   const alignmentModelForExpansion = useMemo(() => {
     if (!btAlignmentOpen || !expanded || expansionTab !== "backtranslation") return null
-    if (!cell.original.trim() || !cell.translated.trim()) return null
+    if (!cell.original.trim() || !visibleTranslated.trim()) return null
     return getAlignmentModel?.() ?? null
-  }, [btAlignmentOpen, cell.original, cell.translated, expanded, expansionTab, getAlignmentModel])
+  }, [btAlignmentOpen, cell.original, visibleTranslated, expanded, expansionTab, getAlignmentModel])
 
   // History tab: fetch the D1 event log on demand only when the History tab is
   // visible. `cell.history` from useCells is intentionally empty (EMPTY_HISTORY)
@@ -3532,7 +3559,7 @@ function EditorRow({
 
   // ── Compute attention signals for chevron + tab dots ──────────────────────
   const isBtStale = Boolean(
-    cell.backtranslation && cell.backtranslationForText !== cell.translated,
+    cell.backtranslation && cell.backtranslationForText !== visibleTranslated,
   )
   const transcriptText = useMemo(() => {
     if (!cellAudioTimings || cellAudioTimings.length === 0) return ""
@@ -3542,8 +3569,8 @@ function EditorRow({
     if (!hasAudio || !transcriptText) return true
     const norm = (s: string) =>
       s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").trim().replace(/\s+/g, " ")
-    return norm(transcriptText) === norm(cell.translated)
-  }, [hasAudio, transcriptText, cell.translated])
+    return norm(transcriptText) === norm(visibleTranslated)
+  }, [hasAudio, transcriptText, visibleTranslated])
   const transcriptNeedsAttention =
     hasAudio &&
     Boolean(cellAudioTimings && cellAudioTimings.length > 0) &&
@@ -3597,9 +3624,9 @@ function EditorRow({
   // persisted as the cell's back-translation.
   const [btStatsOpen, setBtStatsOpen] = useState(false)
   const statisticalGloss = useMemo(() => {
-    if (!btStatsOpen || !cell.translated.trim()) return ""
-    return getStatisticalBt?.(cell.translated) ?? ""
-  }, [btStatsOpen, cell.translated, getStatisticalBt])
+    if (!btStatsOpen || !visibleTranslated.trim()) return ""
+    return getStatisticalBt?.(visibleTranslated) ?? ""
+  }, [btStatsOpen, visibleTranslated, getStatisticalBt])
 
   // When editing starts, seed the input with the current BT text.
   const handleBtEditStart = useCallback(() => {
@@ -3990,7 +4017,7 @@ function EditorRow({
             {sourceSelection && (
               <SourceSelectionToolbar
                 sourceSelection={sourceSelection}
-                concepts={project.terminology ?? []}
+                concepts={terminologyConcepts}
                 onAskAi={handleAskAiFromSelection}
                 onAddToTermbase={onAddConceptFromSelection ? handleAddSelectionToTermbase : undefined}
                 onTermApply={handleTermApply}
@@ -4019,7 +4046,7 @@ function EditorRow({
                 ranges={sourceRanges}
                 showEvidence={examplesExpanded}
                 onRangeClick={openInlineRule}
-                concepts={project.terminology ?? []}
+                concepts={terminologyConcepts}
                 onTermApply={handleTermApply}
                 footnotePanelActive={footnotePanelActive}
                 footnoteNumberOffset={sourceFootnoteNumberOffset}
@@ -4110,15 +4137,15 @@ function EditorRow({
                 "relative flex min-h-[40px] flex-1 flex-col rounded-lg px-2 py-1.5 transition-colors",
                 hasInlineFootnotes && "min-h-0 py-0.5",
                 "hover:bg-muted/60 focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
-                !cell.translated?.trim() && "bg-muted/40",
+                !visibleTranslated?.trim() && "bg-muted/40",
               )}
             >
                 {isEditorActive ? (
                   <TranslatedEditor
                     ref={translatedEditorRef}
                     cellId={cell.id}
-                    initialPlain={cell.translated}
-                    initialHtml={cell.translatedHtml}
+                    initialPlain={visibleTranslated}
+                    initialHtml={visibleTranslatedHtml}
                     onCommit={handleEditorCommit}
                     onFocus={handleEditorFocus}
                     onBlur={handleEditorBlurOuter}
@@ -4140,7 +4167,7 @@ function EditorRow({
                     remoteChangedDuringEdit={remoteChangedWhileFocused}
                     onDiscardLocal={handleDiscardLocalAndReload}
                     onNavigateCell={onNavigateCell}
-                    terminologyConcepts={project.terminology ?? []}
+                    terminologyConcepts={terminologyConcepts}
                     onTermChipClick={handleTermChipClick}
                     footnoteNumberOffset={targetFootnoteNumberOffset}
                     showFootnoteTooltips={!footnotePanelActive}
@@ -4163,7 +4190,7 @@ function EditorRow({
                       "relative min-h-[40px] w-full whitespace-pre-wrap rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
                       "focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-1",
                       showCompletionOverlay && "opacity-30 transition-opacity",
-                      !cell.translated?.trim() && "text-muted-foreground/60",
+                      !visibleTranslated?.trim() && "text-muted-foreground/60",
                     )}
                     onClick={(event) => {
                       event.stopPropagation()
@@ -4186,17 +4213,17 @@ function EditorRow({
                       </div>
                     )}
                     <div ref={targetReadContentRef}>
-                      {targetHasRichFormatting && cell.translatedHtml ? (
+                      {targetHasRichFormatting && visibleTranslatedHtml ? (
                         <TargetRichHtml
-                          html={cell.translatedHtml}
+                          html={visibleTranslatedHtml}
                           footnotePanelActive={footnotePanelActive}
                           footnoteNumberOffset={targetFootnoteNumberOffset}
                         />
-                      ) : cell.translated?.trim() ? (
+                      ) : visibleTranslated?.trim() ? (
                         <TargetReadText
-                          text={cell.translated}
+                          text={visibleTranslated}
                           ranges={targetRanges}
-                          concepts={project.terminology ?? []}
+                          concepts={terminologyConcepts}
                           onRangeClick={openInlineRule}
                           onTermChipClick={handleTermChipClick}
                           footnotePanelActive={footnotePanelActive}
@@ -4220,7 +4247,7 @@ function EditorRow({
                   the popover body; the BaseUI Popover controlled-open + external
                   anchor positions it on the clicked chip. */}
               {termChipState && (() => {
-                const concepts = project.terminology ?? []
+                const concepts = terminologyConcepts
                 const onApply = targetHasSelectionRef.current
                   ? (rendering: string) => { handleTermApply(rendering); setTermChipState(null) }
                   : undefined
@@ -4281,11 +4308,11 @@ function EditorRow({
                 editable={editable}
                 isDocx={isDocxFile}
                 onSave={(footnoteIndex, newText) => {
-                  const updated = spliceFootnoteText(cell.translated ?? "", footnoteIndex, newText)
+                  const updated = spliceFootnoteText(visibleTranslated ?? "", footnoteIndex, newText)
                   handleEditorCommit({ value: updated, valueHtml: updated })
                 }}
                 onDelete={(footnoteIndex) => {
-                  const updated = deleteFootnote(cell.translated ?? "", footnoteIndex)
+                  const updated = deleteFootnote(visibleTranslated ?? "", footnoteIndex)
                   handleEditorCommit({ value: updated, valueHtml: updated })
                 }}
                 onCreateTarget={handleCreateTargetFootnote}
@@ -4390,7 +4417,7 @@ function EditorRow({
                     // FRO-278: if the cell already has human text, confirm
                     // before letting the AI overwrite it. Empty cells proceed
                     // immediately (byte-identical to previous behavior).
-                    if (cell.translated.trim()) {
+                    if (visibleTranslated.trim()) {
                       setShowGenerateConfirm(true)
                     } else {
                       onCompleteSingle(cell)
@@ -4495,10 +4522,10 @@ function EditorRow({
                 />
               )}
 
-              {cell.translated.trim().length > 0 && (
+              {visibleTranslated.trim().length > 0 && (
                 <CellTtsButton
                   cellId={cell.id}
-                  text={cell.translated}
+                  text={visibleTranslated}
                   original={cell.original}
                   context={cell.context}
                   cellLabel={cell.cellLabel}
@@ -4656,7 +4683,7 @@ function EditorRow({
                   </div>
 
                   {/* ── Body ────────────────────────────────────────────────── */}
-                  {cell.translated.trim().length === 0 ? (
+                  {visibleTranslated.trim().length === 0 ? (
                     <div className="flex flex-col items-center gap-1.5 rounded-xl bg-muted/40 px-3 py-6 text-center">
                       <FileText className="h-4 w-4 text-muted-foreground/40" />
                       <p className="text-xs text-muted-foreground">Translate this cell to read it back.</p>
@@ -4675,7 +4702,7 @@ function EditorRow({
                             <button
                               type="button"
                               onClick={() => onBacktranslate?.(cell, "refresh")}
-                              disabled={!isBacktranslationConfigured || isBacktranslating || cell.translated.trim().length === 0}
+                              disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
                               className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 transition-colors hover:bg-amber-500/25 dark:text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
@@ -4741,7 +4768,7 @@ function EditorRow({
                           <button
                             type="button"
                             onClick={() => onBacktranslate?.(cell, "read-back")}
-                            disabled={!isBacktranslationConfigured || isBacktranslating || cell.translated.trim().length === 0}
+                            disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
                             className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             {isBacktranslating ? (
@@ -4766,7 +4793,7 @@ function EditorRow({
                   {/* ── Statistical reference — collapsed by default. A rough
                       corpus-derived gloss kept as a cross-check on the AI
                       reading; local-only, never saved as the cell's BT. ──── */}
-                  {cell.translated.trim().length > 0 && getStatisticalBt && !btEditing && (
+                  {visibleTranslated.trim().length > 0 && getStatisticalBt && !btEditing && (
                     <div className="rounded-lg border border-border/60">
                       <button
                         type="button"
@@ -4797,7 +4824,7 @@ function EditorRow({
                     </div>
                   )}
                   {/* ── FRO-207: Interlinear alignment panel ──────────────── */}
-                  {cell.original.trim() && cell.translated.trim() && getAlignmentModel && !btEditing && (
+                  {cell.original.trim() && visibleTranslated.trim() && getAlignmentModel && !btEditing && (
                     <div className="rounded-lg border border-border/60">
                       <button
                         type="button"
@@ -4813,7 +4840,7 @@ function EditorRow({
                         <div data-aquilla-alignment-panel className="px-2.5 pb-2.5">
                           <InterlinearAlignmentPanel
                             sourceText={cell.original}
-                            targetText={cell.translated}
+                            targetText={visibleTranslated}
                             alignmentModel={alignmentModelForExpansion}
                             confirmedSeeds={project.alignmentSeeds ?? []}
                             onSeedChange={onAlignmentSeedChange ?? (() => undefined)}
@@ -4839,11 +4866,11 @@ function EditorRow({
                   editable={editable}
                   isDocx={isDocxFile}
                   onSave={(footnoteIndex, newText) => {
-                    const updated = spliceFootnoteText(cell.translated ?? "", footnoteIndex, newText)
+                    const updated = spliceFootnoteText(visibleTranslated ?? "", footnoteIndex, newText)
                     handleEditorCommit({ value: updated, valueHtml: updated })
                   }}
                   onDelete={(footnoteIndex) => {
-                    const updated = deleteFootnote(cell.translated ?? "", footnoteIndex)
+                    const updated = deleteFootnote(visibleTranslated ?? "", footnoteIndex)
                     handleEditorCommit({ value: updated, valueHtml: updated })
                   }}
                   onCreateTarget={handleCreateTargetFootnote}
@@ -4910,10 +4937,10 @@ function EditorRow({
                         <CellTranscriptPreview
                           ref={transcriptPreviewRef}
                           timings={cellAudioTimings}
-                          cellText={cell.translated}
+                          cellText={visibleTranslated}
                           cellId={cell.id}
                           alignedToCellText={
-                            tokenizeWords(cell.translated).length === cellAudioTimings.length
+                            tokenizeWords(visibleTranslated).length === cellAudioTimings.length
                           }
                           editable={editable}
                           onRetranscribe={handleTranscribe}
@@ -4986,10 +5013,10 @@ function EditorRow({
                       {generatedVoiceTimings && generatedVoiceTimings.length > 0 && (
                         <CellTranscriptPreview
                           timings={generatedVoiceTimings}
-                          cellText={cell.translated}
+                          cellText={visibleTranslated}
                           cellId={cell.id}
                           alignedToCellText={
-                            tokenizeWords(cell.translated).length === generatedVoiceTimings.length
+                            tokenizeWords(visibleTranslated).length === generatedVoiceTimings.length
                           }
                           editable={editable}
                           onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}

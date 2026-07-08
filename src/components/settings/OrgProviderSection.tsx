@@ -11,8 +11,7 @@ import { useState } from "react"
 import { Check } from "lucide-react"
 import { RevealableInput } from "@/components/ui/revealable-input"
 import { Button } from "@/components/ui/button"
-import { FieldLabel } from "@/components/ui/field"
-import { Section } from "@/components/ui/page"
+import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 
 interface OrgProviderSectionProps {
@@ -62,82 +61,68 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
 
   if (!hasFetched) {
     return (
-      <Section title="Provider API keys">
-        <p className="text-xs text-muted-foreground">Loading…</p>
-      </Section>
+      <SettingsGroup label="Provider keys">
+        <SettingsRow label="Gemini TTS API key" block>
+          <p className="text-xs text-muted-foreground">Loading…</p>
+        </SettingsRow>
+      </SettingsGroup>
     )
   }
 
   return (
-    <Section
-      title="Provider API keys"
-      description={
-        <>
-          Org-level keys act as a baseline for everyone in this org. Projects or
-          individuals can override with their own. Precedence: project key &gt;
-          personal key &gt; org key.
-        </>
-      }
-    >
+    <SettingsGroup label="Provider keys">
       {!canEditOrgKeys && (
-        <p className="mb-4 text-xs text-muted-foreground">
+        <div className="px-5 py-4 text-xs text-muted-foreground">
           Only org maintainers and owners can set org-level keys. You can still
           save a personal key in your project or personal settings.
-        </p>
+        </div>
       )}
-
-      <div className="space-y-4">
-        {/* Gemini TTS */}
-        <div className="space-y-2">
-          <FieldLabel htmlFor="org-gemini-tts-key" className="text-sm font-medium">
-            Gemini TTS API key
-          </FieldLabel>
-          <RevealableInput
-            id="org-gemini-tts-key"
-            revealKind="key"
-            value={displayed}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder={canEditOrgKeys ? "Paste Gemini API key…" : currentGeminiKey ? "(set by org admin)" : "(not set)"}
-            disabled={!canEditOrgKeys || busy}
-            autoComplete="off"
-            spellCheck={false}
-            className="font-mono"
-          />
-          <p className="text-xs text-muted-foreground">
-            Used by Gemini TTS synthesis for all org members when no project or
-            personal key is present.
-          </p>
-          {canEditOrgKeys && (
-            <div className="flex gap-2">
+      <SettingsRow
+        label="Gemini TTS API key"
+        description="Used by Gemini TTS synthesis for all org members when no project or personal key is present. Precedence: project key > personal key > org key."
+        block
+      >
+        <RevealableInput
+          id="org-gemini-tts-key"
+          revealKind="key"
+          value={displayed}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={canEditOrgKeys ? "Paste Gemini API key…" : currentGeminiKey ? "(set by org admin)" : "(not set)"}
+          disabled={!canEditOrgKeys || busy}
+          autoComplete="off"
+          spellCheck={false}
+          className="font-mono"
+        />
+        {canEditOrgKeys && (
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleSave}
+              disabled={busy || draft === null}
+            >
+              {busy ? "Saving…" : "Save key"}
+            </Button>
+            {currentGeminiKey && (
               <Button
                 type="button"
                 size="sm"
-                onClick={handleSave}
-                disabled={busy || draft === null}
+                variant="outline"
+                onClick={handleClear}
+                disabled={busy}
               >
-                {busy ? "Saving…" : "Save key"}
+                Clear
               </Button>
-              {currentGeminiKey && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={handleClear}
-                  disabled={busy}
-                >
-                  Clear
-                </Button>
-              )}
-            </div>
-          )}
-          {error && <p className="text-xs text-destructive">{error}</p>}
-          {saved && (
-            <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400" role="status" data-testid="org-key-saved">
-              <Check className="size-3.5" /> Saved
-            </p>
-          )}
-        </div>
-      </div>
-    </Section>
+            )}
+          </div>
+        )}
+        {error && <p className="text-xs text-destructive">{error}</p>}
+        {saved && (
+          <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400" role="status" data-testid="org-key-saved">
+            <Check className="size-3.5" /> Saved
+          </p>
+        )}
+      </SettingsRow>
+    </SettingsGroup>
   )
 }

@@ -51,6 +51,21 @@ const MembersPage = lazy(() =>
 const Settings = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.Settings })),
 )
+const OrgSettingsIdentity = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsIdentity })),
+)
+const OrgSettingsExport = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsExport })),
+)
+const OrgSettingsProviders = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsProviders })),
+)
+const OrgSettingsRoster = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsRoster })),
+)
+const OrgSettingsAssignment = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsAssignment })),
+)
 const TeamsList = lazy(() =>
   import("@/components/org/TeamsList").then((m) => ({ default: m.TeamsList })),
 )
@@ -204,8 +219,11 @@ function AppRoutes() {
 
         {/* Lazy — org admin pages */}
         <Route path="/settings" element={<Settings />} />
-        {/* Org settings detail sub-pages — index of nav rows lives at /settings */}
-        <Route path="/settings/:section" element={<Settings />} />
+        <Route path="/settings/identity" element={<OrgSettingsIdentity />} />
+        <Route path="/settings/export" element={<OrgSettingsExport />} />
+        <Route path="/settings/roster" element={<OrgSettingsRoster />} />
+        <Route path="/settings/assignment" element={<OrgSettingsAssignment />} />
+        <Route path="/settings/providers" element={<OrgSettingsProviders />} />
         <Route path="/members" element={<MembersPage />} />
         <Route path="/teams" element={<TeamsList />} />
         <Route path="/teams/:groupId" element={<TeamDetail />} />

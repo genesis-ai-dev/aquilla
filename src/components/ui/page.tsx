@@ -218,4 +218,80 @@ function EmptyState({
   )
 }
 
-export { Page, PageHeader, Section, StatTile, EmptyState }
+/**
+ * A labelled settings block: a floating group header (same weight as NavList's
+ * group label) above a bordered card. Use on detail sub-pages so the page title
+ * lives in PageHeader and only the controls sit in the card — matching the
+ * Linear-style settings layout.
+ */
+function SettingsGroup({
+  label,
+  className,
+  children,
+}: {
+  label?: React.ReactNode
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className={cn("space-y-2", className)}>
+      {label ? (
+        <p className="px-1 font-heading text-base font-medium tracking-tight text-foreground">
+          {label}
+        </p>
+      ) : null}
+      <div className="divide-y overflow-hidden rounded-2xl border bg-card">
+        {children}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * One setting inside a SettingsGroup card. Default layout is label/description
+ * on the left and a control on the right; pass `block` (or `children`) when the
+ * control needs the full row width (a select, a form, etc.).
+ */
+function SettingsRow({
+  label,
+  description,
+  control,
+  children,
+  block = false,
+  className,
+}: {
+  label: React.ReactNode
+  description?: React.ReactNode
+  control?: React.ReactNode
+  children?: React.ReactNode
+  block?: boolean
+  className?: string
+}) {
+  const body = children ?? control
+  if (block || children) {
+    return (
+      <div className={cn("space-y-3 px-5 py-4", className)}>
+        <div className="min-w-0 space-y-1">
+          <p className="text-sm font-medium text-foreground">{label}</p>
+          {description ? (
+            <p className="text-xs text-muted-foreground">{description}</p>
+          ) : null}
+        </div>
+        {body}
+      </div>
+    )
+  }
+  return (
+    <div className={cn("flex items-start justify-between gap-4 px-5 py-4", className)}>
+      <div className="min-w-0 space-y-1">
+        <p className="text-sm font-medium text-foreground">{label}</p>
+        {description ? (
+          <p className="text-xs text-muted-foreground">{description}</p>
+        ) : null}
+      </div>
+      {body ? <div className="shrink-0 pt-0.5">{body}</div> : null}
+    </div>
+  )
+}
+
+export { Page, PageHeader, Section, SettingsGroup, SettingsRow, StatTile, EmptyState }

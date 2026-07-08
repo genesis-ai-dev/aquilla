@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
+import React, { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
 import {
   LegendList,
   type LegendListRef,
@@ -111,6 +111,12 @@ import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { hasMeaningfulRichText, prepareReadOnlyRichTextHtml } from "@/lib/richtext/editor-content"
 import { findTermMatches } from "@/lib/richtext/terminology-chip-plugin"
+import {
+  useCellPresence,
+  type CellPresencePeer,
+  type ProjectPresenceStore,
+  type TargetPresenceSelection,
+} from "@/lib/sync/presence-store"
 
 // Per-row render counter. Always accumulated when perf logging is on (cheap)
 // but NOT auto-logged — render logs would flood the console and push the
@@ -488,12 +494,16 @@ interface EditorTableProps {
   /** Map of cellId → presence holder label. When present, the cell editor
    *  goes read-only with an "Alice is editing" banner. */
   cellLockHolders?: ReadonlyMap<string, string>
+  /** Project-wide presence store fed by the existing ProjectSync DO. Rows
+   *  subscribe per-cell so target cursor motion does not rerender the table. */
+  presenceStore?: ProjectPresenceStore | null
   /** Cell ids whose remote value changed while this client held the focus
    *  lock — surfaces the discard-and-reload banner. */
   cellsWithRemoteChange?: ReadonlySet<string>
   /** Parent-managed focus claim/release (per-cell). */
   onClaimCell?: (cellId: string) => void
   onReleaseCell?: (cellId: string) => void
+  onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
   /** Drop the "remote-changed-while-editing" flag for a cell. */
   onAckRemoteChange?: (cellId: string) => void
   isCompletionConfigured: boolean
@@ -616,8 +626,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onCellCommitted,
   onOptimisticEdit,
   cellLockHolders,
+  presenceStore,
   cellsWithRemoteChange,
-  onClaimCell, onReleaseCell, onAckRemoteChange,
+  onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   staleCellIds,
   upstreamStaleCellIds,
   getTokenForFile,
@@ -1236,9 +1247,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onCellCommitted={onCellCommitted}
           onOptimisticEdit={onOptimisticEdit}
           lockHolderLabel={cellLockHolders?.get(cell.id) ?? null}
+          presenceStore={presenceStore}
           remoteChangedWhileFocused={cellsWithRemoteChange?.has(cell.id) ?? false}
           onClaimCell={onClaimCell}
           onReleaseCell={onReleaseCell}
+          onTargetPresenceSelection={onTargetPresenceSelection}
           onAckRemoteChange={onAckRemoteChange}
           isCompletionConfigured={isCompletionConfigured}
           isCompletionAvailable={isCompletionAvailable}
@@ -1522,9 +1535,11 @@ interface MemoizedRowProps {
   onCellCommitted?: (cellId: string, committedEventId?: string) => void | Promise<void>
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
+  presenceStore?: ProjectPresenceStore | null
   remoteChangedWhileFocused: boolean
   onClaimCell?: (cellId: string) => void
   onReleaseCell?: (cellId: string) => void
+  onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
   onAckRemoteChange?: (cellId: string) => void
   isCompletionConfigured: boolean
   isCompletionAvailable: boolean
@@ -1631,8 +1646,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
-    onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
-    onClaimCell, onReleaseCell, onAckRemoteChange,
+    onCellCommitted, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+    onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
     isStaleSource,
     isUpstreamStaleSource,
     assigneeLabel,
@@ -1773,9 +1788,11 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onCellCommitted={onCellCommitted}
         onOptimisticEdit={onOptimisticEdit}
         lockHolderLabel={lockHolderLabel}
+        presenceStore={presenceStore}
         remoteChangedWhileFocused={remoteChangedWhileFocused}
         onClaimCell={onClaimCell}
         onReleaseCell={onReleaseCell}
+        onTargetPresenceSelection={onTargetPresenceSelection}
         onAckRemoteChange={onAckRemoteChange}
         sourceFontSize={sourceFontSize}
         targetFontSize={targetFontSize}
@@ -1815,9 +1832,11 @@ interface EditorRowProps {
   onCellCommitted?: (cellId: string, committedEventId?: string) => void
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
+  presenceStore?: ProjectPresenceStore | null
   remoteChangedWhileFocused: boolean
   onClaimCell?: (cellId: string) => void
   onReleaseCell?: (cellId: string) => void
+  onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
   onAckRemoteChange?: (cellId: string) => void
   isCompletionConfigured: boolean
   isCompletionAvailable: boolean
@@ -2252,6 +2271,194 @@ function SanitizedRichHtml({ html }: { html: string }) {
   )
 }
 
+interface RemotePresenceOverlayItem {
+  key: string
+  kind: "selection" | "caret" | "label"
+  username: string
+  color: string
+  style: React.CSSProperties
+}
+
+function RemoteTargetPresenceOverlay({
+  contentRef,
+  peers,
+}: {
+  contentRef: React.RefObject<HTMLElement | null>
+  peers: CellPresencePeer[]
+}) {
+  const [items, setItems] = useState<RemotePresenceOverlayItem[]>([])
+
+  useLayoutEffect(() => {
+    const root = contentRef.current
+    const container = root?.parentElement
+    if (!root || !container || peers.length === 0) {
+      setItems((current) => current.length === 0 ? current : [])
+      return
+    }
+
+    const next: RemotePresenceOverlayItem[] = []
+    const containerRect = container.getBoundingClientRect()
+    for (const peer of peers) {
+      const selection = peer.selection
+      if (!selection || selection.side !== "target") continue
+      const anchor = Math.max(0, selection.anchor)
+      const head = Math.max(0, selection.head)
+      const start = Math.min(anchor, head)
+      const end = Math.max(anchor, head)
+      const caretRect = rectForCaretOffset(root, end)
+      if (start !== end) {
+        const range = rangeForPlainOffsets(root, start, end)
+        if (range) {
+          Array.from(range.getClientRects()).forEach((rect, index) => {
+            if (rect.width <= 0 || rect.height <= 0) return
+            next.push({
+              key: `${peer.peerId}-selection-${index}`,
+              kind: "selection",
+              username: peer.username,
+              color: peer.color,
+              style: {
+                left: rect.left - containerRect.left,
+                top: rect.top - containerRect.top,
+                width: rect.width,
+                height: rect.height,
+                backgroundColor: peer.color,
+              },
+            })
+          })
+        }
+      }
+      if (caretRect) {
+        const left = caretRect.left - containerRect.left
+        const top = caretRect.top - containerRect.top
+        const height = Math.max(16, caretRect.height)
+        next.push({
+          key: `${peer.peerId}-caret`,
+          kind: "caret",
+          username: peer.username,
+          color: peer.color,
+          style: {
+            left,
+            top,
+            height,
+            backgroundColor: peer.color,
+          },
+        })
+        next.push({
+          key: `${peer.peerId}-label`,
+          kind: "label",
+          username: peer.username,
+          color: peer.color,
+          style: {
+            left: left + 3,
+            top: Math.max(0, top - 18),
+            backgroundColor: peer.color,
+          },
+        })
+      }
+    }
+    setItems(next)
+  }, [contentRef, peers])
+
+  if (items.length === 0) return null
+
+  return (
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
+      {items.map((item) => {
+        if (item.kind === "selection") {
+          return (
+            <span
+              key={item.key}
+              className="absolute rounded-[2px] opacity-20"
+              style={item.style}
+            />
+          )
+        }
+        if (item.kind === "caret") {
+          return (
+            <span
+              key={item.key}
+              className="absolute w-0.5 rounded-full"
+              style={item.style}
+            />
+          )
+        }
+        return (
+          <span
+            key={item.key}
+            className="absolute max-w-28 truncate rounded px-1 py-px text-[10px] font-medium leading-4 text-white shadow-sm"
+            style={item.style}
+          >
+            {item.username}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+function rangeForPlainOffsets(root: HTMLElement, start: number, end: number): Range | null {
+  const startPos = textNodePositionForOffset(root, start)
+  const endPos = textNodePositionForOffset(root, end)
+  if (!startPos || !endPos) return null
+  const range = document.createRange()
+  range.setStart(startPos.node, startPos.offset)
+  range.setEnd(endPos.node, endPos.offset)
+  return range
+}
+
+function rectForCaretOffset(root: HTMLElement, offset: number): DOMRect | null {
+  const collapsed = rangeForPlainOffsets(root, offset, offset)
+  const collapsedRect = firstUsableRect(collapsed)
+  if (collapsedRect) return collapsedRect
+
+  const before = offset > 0 ? rangeForPlainOffsets(root, offset - 1, offset) : null
+  const beforeRect = firstUsableRect(before)
+  if (beforeRect) {
+    return new DOMRect(beforeRect.right, beforeRect.top, 0, beforeRect.height)
+  }
+
+  const after = rangeForPlainOffsets(root, offset, offset + 1)
+  const afterRect = firstUsableRect(after)
+  if (afterRect) {
+    return new DOMRect(afterRect.left, afterRect.top, 0, afterRect.height)
+  }
+
+  return null
+}
+
+function firstUsableRect(range: Range | null): DOMRect | null {
+  if (!range) return null
+  for (const rect of Array.from(range.getClientRects())) {
+    if (rect.height > 0) return rect
+  }
+  const rect = range.getBoundingClientRect()
+  return rect.height > 0 ? rect : null
+}
+
+function textNodePositionForOffset(
+  root: HTMLElement,
+  targetOffset: number,
+): { node: Text; offset: number } | null {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement
+      if (parent?.closest("[data-presence-ignore]")) return NodeFilter.FILTER_REJECT
+      return NodeFilter.FILTER_ACCEPT
+    },
+  })
+  let remaining = Math.max(0, targetOffset)
+  let lastText: Text | null = null
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text
+    lastText = node
+    const length = node.data.length
+    if (remaining <= length) return { node, offset: remaining }
+    remaining -= length
+  }
+  if (lastText) return { node: lastText, offset: lastText.data.length }
+  return null
+}
+
 function TargetRichHtml({
   html,
   footnotePanelActive,
@@ -2540,8 +2747,8 @@ function EditorRow({
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, micDenied,
   audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, onAskAiFromSelection,
-  onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
-  onClaimCell, onReleaseCell, onAckRemoteChange,
+  onCellCommitted, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+  onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
   isUpstreamStaleSource,
   getTokenForFile,
@@ -2564,6 +2771,7 @@ function EditorRow({
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
   const { onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording } = useEditorActions()
+  const remoteCellPresence = useCellPresence(presenceStore, cell.id)
   const hasTranslatedText = Boolean(cell.translated?.trim())
   const showCompletionOverlay = isLoading && !hasTranslatedText
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
@@ -2608,6 +2816,7 @@ function EditorRow({
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false)
   const rowRef = useRef<HTMLDivElement | null>(null)
   const translatedEditorRef = useRef<TranslatedEditorHandle | null>(null)
+  const targetReadContentRef = useRef<HTMLDivElement | null>(null)
   const pendingFootnoteAnchorRef = useRef<FootnoteInsertionAnchor | null>(null)
   const [activeFootnoteIndex, setActiveFootnoteIndex] = useState<number | null>(null)
   const [addFootnoteOpen, setAddFootnoteOpen] = useState(false)
@@ -3047,9 +3256,13 @@ function EditorRow({
 
   const editorFocusedRef = useRef(false)
   const requestTargetEdit = useCallback(() => {
-    if (!editable || isLoading) return
+    if (!editable || isLoading || lockHolderLabel) return
     onActivateEditor(cell.id)
-  }, [editable, isLoading, onActivateEditor, cell.id])
+  }, [editable, isLoading, lockHolderLabel, onActivateEditor, cell.id])
+
+  const handleTargetPresenceSelection = useCallback((selection: TargetPresenceSelection | null) => {
+    onTargetPresenceSelection?.(cell.id, selection)
+  }, [cell.id, onTargetPresenceSelection])
 
   const handleEditorFocus = useCallback(() => {
     editorFocusedRef.current = true
@@ -3909,6 +4122,7 @@ function EditorRow({
                     onCommit={handleEditorCommit}
                     onFocus={handleEditorFocus}
                     onBlur={handleEditorBlurOuter}
+                    onSelectionChange={handleTargetPresenceSelection}
                     className={cn(
                       "w-full",
                       showCompletionOverlay && "opacity-30 transition-opacity",
@@ -3944,9 +4158,9 @@ function EditorRow({
                     aria-readonly={!editable || isLoading || Boolean(lockHolderLabel)}
                     aria-label={editorAriaLabel}
                     data-target-read-view
-                    tabIndex={editable && !isLoading ? 0 : undefined}
+                    tabIndex={editable && !isLoading && !lockHolderLabel ? 0 : undefined}
                     className={cn(
-                      "min-h-[40px] w-full whitespace-pre-wrap rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
+                      "relative min-h-[40px] w-full whitespace-pre-wrap rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
                       "focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-1",
                       showCompletionOverlay && "opacity-30 transition-opacity",
                       !cell.translated?.trim() && "text-muted-foreground/60",
@@ -3965,30 +4179,37 @@ function EditorRow({
                     {lockHolderLabel && (
                       <div
                         aria-live="polite"
+                        data-presence-ignore
                         className="pointer-events-none absolute right-1 top-1 z-10 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400"
                       >
                         {lockHolderLabel} is editing
                       </div>
                     )}
-                    {targetHasRichFormatting && cell.translatedHtml ? (
-                      <TargetRichHtml
-                        html={cell.translatedHtml}
-                        footnotePanelActive={footnotePanelActive}
-                        footnoteNumberOffset={targetFootnoteNumberOffset}
-                      />
-                    ) : cell.translated?.trim() ? (
-                      <TargetReadText
-                        text={cell.translated}
-                        ranges={targetRanges}
-                        concepts={project.terminology ?? []}
-                        onRangeClick={openInlineRule}
-                        onTermChipClick={handleTermChipClick}
-                        footnotePanelActive={footnotePanelActive}
-                        footnoteNumberOffset={targetFootnoteNumberOffset}
-                      />
-                    ) : (
-                      <span aria-hidden="true" className="block min-h-[1.6em]" />
-                    )}
+                    <div ref={targetReadContentRef}>
+                      {targetHasRichFormatting && cell.translatedHtml ? (
+                        <TargetRichHtml
+                          html={cell.translatedHtml}
+                          footnotePanelActive={footnotePanelActive}
+                          footnoteNumberOffset={targetFootnoteNumberOffset}
+                        />
+                      ) : cell.translated?.trim() ? (
+                        <TargetReadText
+                          text={cell.translated}
+                          ranges={targetRanges}
+                          concepts={project.terminology ?? []}
+                          onRangeClick={openInlineRule}
+                          onTermChipClick={handleTermChipClick}
+                          footnotePanelActive={footnotePanelActive}
+                          footnoteNumberOffset={targetFootnoteNumberOffset}
+                        />
+                      ) : (
+                        <span aria-hidden="true" className="block min-h-[1.6em]" />
+                      )}
+                    </div>
+                    <RemoteTargetPresenceOverlay
+                      contentRef={targetReadContentRef}
+                      peers={remoteCellPresence}
+                    />
                   </div>
                 )}
               {/* FRO-204: Terminology chip popover — controlled via termChipState.

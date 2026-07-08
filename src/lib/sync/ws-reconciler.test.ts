@@ -161,7 +161,13 @@ describe("parseProjectWsMessage", () => {
       JSON.stringify({
         t: "presence",
         users: [
-          { userId: "alice", focusedCell: "c1", ts: 100 },
+          {
+            userId: "alice",
+            focusedCell: "c1",
+            currentFileId: "file-1",
+            selection: { side: "target", anchor: 2, head: 5 },
+            ts: 100,
+          },
           { userId: "bob", ts: 200 },
         ],
       }),
@@ -170,6 +176,8 @@ describe("parseProjectWsMessage", () => {
     if (msg?.t === "presence") {
       expect(msg.users).toHaveLength(2)
       expect(msg.users[0].focusedCell).toBe("c1")
+      expect(msg.users[0].currentFileId).toBe("file-1")
+      expect(msg.users[0].selection).toEqual({ side: "target", anchor: 2, head: 5 })
       expect(msg.users[1].focusedCell).toBeUndefined()
     }
   })

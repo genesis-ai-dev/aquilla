@@ -43,12 +43,16 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     rosterViewMinRole: 600,
     canViewMemberProgress: true,
     memberProgressViewMinRole: 600,
+    // AQU-496: self-assignment authority — default leads-only.
+    allowSelfAssignment: false,
     refresh: vi.fn(async () => null),
     requestPromotion: vi.fn(async () => ({ kind: "blocked" })),
   }),
   // AQU-485: Settings.tsx imports this directly (not part of the hook's
   // return value) to gate the roster/progress Select controls owner-only.
   canEditRosterProgressFloor: (level: number | null | undefined) => (level ?? 0) >= 700,
+  // AQU-496: same pattern, gates the allowSelfAssignment Switch owner-only.
+  canEditAssignmentAuthority: (level: number | null | undefined) => (level ?? 0) >= 700,
 }))
 
 beforeEach(() => localStorage.clear())

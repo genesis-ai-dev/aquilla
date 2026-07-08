@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { Link, Navigate, useParams } from "react-router-dom"
-import { Archive, Building2, Check, Download, EyeOff, KeyRound, Users, UsersRound } from "lucide-react"
+import { Archive, Building2, Check, Download, EyeOff, KeyRound, UserCheck, Users, UsersRound } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
@@ -19,10 +19,11 @@ import {
 } from "@/components/ui/select"
 import { OrgProviderSection } from "@/components/settings/OrgProviderSection"
 import { RosterProgressSection } from "@/components/settings/RosterProgressSection"
+import { AssignmentAuthoritySection } from "@/components/settings/AssignmentAuthoritySection"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useOrgMembers } from "@/hooks/useOrg"
-import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
+import { useOrgSettings, canEditRosterProgressFloor, canEditAssignmentAuthority } from "@/hooks/useOrgSettings"
 import { renameOrg } from "@/lib/frontier/orgs"
 import { getPortfolio } from "@/lib/frontier/portfolio"
 import { ROLE } from "@/lib/frontier/roles"
@@ -55,6 +56,7 @@ const DETAIL_TITLES: Record<string, string> = {
   export: "Export permissions",
   roster: "Roster & progress visibility",
   providers: "AI provider keys",
+  assignment: "Assignment authority",
 }
 
 export function Settings() {
@@ -134,6 +136,11 @@ export function Settings() {
   // general MAINTAINER settings-write gate). UI lives in RosterProgressSection.
   const { rosterViewMinRole } = orgSettings
   const canEditRosterProgress = canEditRosterProgressFloor(activeOrg?.role?.level)
+
+  // AQU-496: assignment authority (allowSelfAssignment) — owner-only edit
+  // gate, same rationale as rosterViewMinRole/exportMinRole. UI lives in
+  // AssignmentAuthoritySection.
+  const canEditAssignAuthority = canEditAssignmentAuthority(activeOrg?.role?.level)
 
   // Show the effective floor: null means "not set → server default (Maintainer)".
   const displayedExportMinRole = exportMinRole ?? ROLE.MAINTAINER
@@ -292,6 +299,7 @@ export function Settings() {
           <NavRow to="/settings/identity" icon={Building2} title="Identity" hint={activeOrg?.name ?? "Untitled"} />
           <NavRow to="/settings/export" icon={Download} title="Export permissions" hint={FLOOR_LABEL[displayedExportMinRole] ?? "Maintainer"} />
           <NavRow to="/settings/roster" icon={EyeOff} title="Roster & progress visibility" hint={FLOOR_LABEL[rosterViewMinRole] ?? "Maintainer"} />
+          <NavRow to="/settings/assignment" icon={UserCheck} title="Assignment authority" hint={orgSettings.allowSelfAssignment ? "Self-assign on" : "Leads only"} />
           <NavRow to="/settings/providers" icon={KeyRound} title="AI provider keys" hint="Org keys" />
         </NavList>
 
@@ -334,6 +342,7 @@ export function Settings() {
       section === "identity" ? identityBody
       : section === "export" ? exportBody
       : section === "roster" ? <RosterProgressSection orgSettings={orgSettings} canEdit={canEditRosterProgress} />
+      : section === "assignment" ? <AssignmentAuthoritySection orgSettings={orgSettings} canEdit={canEditAssignAuthority} />
       : <OrgProviderSection orgSettings={orgSettings} />
     body = (
       <div className="space-y-4">

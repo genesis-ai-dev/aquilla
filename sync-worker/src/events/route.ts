@@ -634,7 +634,7 @@ export async function handleEventsWriteRequest(
 
   for (const rawEvent of rawEvents) {
     // Authorize.
-    const authResult = await authorize(token, rawEvent, env.SYNC_SECRET_KEY)
+    const authResult = await authorize(token, rawEvent, env.SYNC_SECRET_KEY, db)
     if (!authResult.ok) {
       rejected.push({
         id: rawEvent.id ?? '(unknown)',

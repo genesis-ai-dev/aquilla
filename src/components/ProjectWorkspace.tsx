@@ -76,7 +76,7 @@ import {
 import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitFileVideoSet } from "@/lib/sync/events-emit"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
-import { canPerform } from "@/lib/sync/role-policy"
+import { canPerform, canOpenAssignUi } from "@/lib/sync/role-policy"
 import { useFocusLock } from "@/hooks/useFocusLock"
 import type { WsReconciler } from "@/lib/sync/ws-reconciler"
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
@@ -1237,6 +1237,8 @@ export function ProjectWorkspace() {
     version: orgSettingsVersion,
     canExport: canExportByOrgPolicy,
     hasFetched: orgSettingsFetched,
+    // AQU-496: whether below-lead members may self-assign work.
+    allowSelfAssignment,
   } = useOrgSettings(
     project?.orgId ?? activeOrg?.id,
     projectOrg?.role?.level ?? null,
@@ -1879,7 +1881,16 @@ export function ProjectWorkspace() {
   // Fetched eagerly so the data is warm when the manager opens the assign modal.
   const [_projectWorkload, setProjectWorkload] = useState<AssigneeWorkload[]>([])
   const currentRoleLevel = project?.syncRole?.level ?? 0
-  const canAssignWork = currentRoleLevel >= ROLE.PROJECT_LEAD
+  // AQU-496: below PROJECT_LEAD, still allowed when the org has opted into
+  // allowSelfAssignment (member may self-assign; AssignModal enforces the
+  // self-only restriction on submit).
+  const canAssignWork = canOpenAssignUi(currentRoleLevel, allowSelfAssignment)
+  // AQU-496: the caller's own Frontier user id, resolved from the project
+  // member list by username — used to lock AssignModal's assignee picker to
+  // "self" in self-assign mode. Null if the roster hasn't loaded yet or the
+  // caller isn't in it (e.g. platform-admin path) — AssignModal fails closed
+  // in that case (no eligible assignee shown), not open.
+  const currentUserId = projectMembers.find((m) => m.username === currentUsername)?.userId ?? null
   const jwt = frontierSession?.jwt ?? null
 
   useEffect(() => {
@@ -4165,6 +4176,8 @@ export function ProjectWorkspace() {
           projectFiles={projectFiles}
           members={projectMembers}
           roleLevel={currentRoleLevel}
+          allowSelfAssignment={allowSelfAssignment}
+          callerUserId={currentUserId}
           selectedCellIds={getSelectedIds()}
           jwt={jwt ?? ""}
           author={currentUsername}

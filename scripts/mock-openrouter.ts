@@ -10,9 +10,11 @@
 //   OPENROUTER_API_KEY=mock
 //
 // Flows:
-//   * read   (default)            : sql → answer quoting the result block
-//   * draft  ("draft"/"translate"): sql for untranslated cells → emit drafts
-//                                   → closing prose
+//   * read   (default)            : read tool → answer quoting the result
+//   * draft  ("draft"/"translate"): draft tool → closing prose (the draft
+//                                   tool's INTERNAL model call is answered
+//                                   here too — strict [{i,t}] JSON)
+//   * check/validate/aquifer      : legacy execute flows (sql/emit/aquifer)
 //
 // Run: npx tsx scripts/mock-openrouter.ts [port]
 
@@ -36,6 +38,15 @@ function toolCall(args: Record<string, unknown>) {
   }
 }
 
+/** A v2 semantic-tool call (read / draft / search / propose …). */
+function namedToolCall(name: string, args: Record<string, unknown>) {
+  return {
+    id: `mock-call-${++callSeq}`,
+    type: "function",
+    function: { name, arguments: JSON.stringify(args) },
+  }
+}
+
 function respond(content: string | null, tool_calls?: unknown[]) {
   return {
     id: `mock-${Date.now()}-${callSeq}`,
@@ -48,26 +59,6 @@ function respond(content: string | null, tool_calls?: unknown[]) {
     usage: { prompt_tokens: 1200, completion_tokens: 180, cost: 0.0004 },
   }
 }
-
-const READ_SQL = `SELECT s.cell_id, s.canonical_ref, s.value AS source_text, t.value AS target_text
-FROM cells s
-JOIN files f ON f.id = s.file_id
-LEFT JOIN cells t
-  ON t.project_id = s.project_id AND t.file_id = s.file_id
- AND t.cell_id = s.cell_id AND t.side = 'target'
-WHERE s.project_id = :project AND s.side = 'source' AND f.name = 'Ruth'
-ORDER BY s.canonical_ref`
-
-const DRAFT_SQL = `SELECT s.cell_id, s.file_id, s.canonical_ref, s.value AS source_text
-FROM cells s
-JOIN files f ON f.id = s.file_id
-LEFT JOIN cells t
-  ON t.project_id = s.project_id AND t.file_id = s.file_id
- AND t.cell_id = s.cell_id AND t.side = 'target'
-WHERE s.project_id = :project AND s.side = 'source' AND f.name = 'Ruth'
-  AND s.canonical_ref IS NOT NULL
-  AND (t.value IS NULL OR t.value = '')
-ORDER BY s.canonical_ref`
 
 /** Parse the compressed pipe table: header row with named columns, then rows. */
 function parseTable(block: string): Record<string, string>[] {
@@ -100,6 +91,18 @@ ORDER BY s.canonical_ref`
 function script(messages: ChatMessage[]) {
   const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? ""
   const userText = typeof lastUser === "string" ? lastUser : ""
+
+  // The draft tool's INTERNAL model call: numbered source segments in, strict
+  // [{i,t}] JSON out. Detected by the user-turn shape the tool builds.
+  const translateMatch = userText.match(/^Translate these \d+ segments:/)
+  if (translateMatch) {
+    const drafts: { i: number; t: string }[] = []
+    for (const line of userText.split("\n")) {
+      const m = line.match(/^(\d+)\.\s*(?:\[[^\]]*\]\s*)?(.+)$/)
+      if (m) drafts.push({ i: Number(m[1]), t: `[bozza] ${m[2].trim()}` })
+    }
+    return respond(JSON.stringify(drafts))
+  }
   const wantsDraft = /draft|translate/i.test(userText)
   const wantsComment = /check|comment|review/i.test(userText)
   const wantsValidate = /validate/i.test(userText)
@@ -163,33 +166,27 @@ function script(messages: ChatMessage[]) {
   }
 
   if (!wantsDraft) {
+    // Default read flow — exercises the semantic read tool and its typed
+    // working-set payload.
     if (toolResults.length === 0) {
-      return respond("Let me check the cells in this file.", [toolCall({ sql: READ_SQL })])
+      return respond("Let me look at the open file.", [
+        namedToolCall("read", { filter: "all", limit: 30 }),
+      ])
     }
     return respond(
-      `Here's the current state of Ruth (rows with target_text ∅ still need translation):\n\n\`\`\`\n${lastToolContent.slice(0, 1500)}\n\`\`\``,
+      `Here's the current state (status untranslated = still needs work):\n\n\`\`\`\n${lastToolContent.slice(0, 1500)}\n\`\`\``,
     )
   }
 
-  // Draft flow.
+  // Draft flow — one call to the drafting pipeline; the tool's internal model
+  // call loops back to this mock (the Translate-these branch above).
   if (toolResults.length === 0) {
-    return respond("Reading the untranslated cells first.", [toolCall({ sql: DRAFT_SQL })])
-  }
-  if (toolResults.length === 1) {
-    const rows = parseTable(lastToolContent).slice(0, 10)
-    if (rows.length === 0) {
-      return respond("Every cell in Ruth already has a translation — nothing to draft.")
-    }
-    const events = rows.map((r) => ({
-      kind: "target.cell.commit",
-      fileId: r.file_id,
-      cellId: r.cell_id,
-      payload: { value: `[bozza] ${r.source_text.replace(/…$/, "")}` },
-    }))
-    return respond(`Drafting ${events.length} cells.`, [toolCall({ emit: events })])
+    return respond("Drafting the untranslated cells with the project's own patterns.", [
+      namedToolCall("draft", {}),
+    ])
   }
   return respond(
-    "I staged the drafts — review them in the proposal card and click Apply to commit.",
+    "I staged the drafts — review them in the proposal card (or the workbench working set) and apply the ones you want.",
   )
 }
 

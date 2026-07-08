@@ -2,22 +2,68 @@
  * protocol.ts — Translation agent wire contract (client mirror).
  *
  * AUTHORITATIVE SOURCE:
- * docs/superpowers/specs/2026-06-12-translation-agent-implementation-plan.md
+ * docs/superpowers/specs/2026-07-02-agent-mode-v2-design.md (supersedes the
+ * 2026-06-12 plan's §frames).
  *
- * These shapes MUST match the server slice (auth-worker/src/lib/agent/)
- * byte-for-byte. Do not extend or rename fields here without updating the
- * plan doc and the server types together.
+ * These shapes MUST match the server slice (auth-worker/src/lib/agent/ and
+ * auth-worker/src/routes/agent.ts) byte-for-byte. Do not extend or rename
+ * fields here without updating the design doc and the server types together.
  */
+
+// ── Tool kinds (v2 semantic tools + v1 escape hatches) ─────────────────────
+
+export type ToolKind =
+  | "read" // aligned source/target rows for a ref range / file span
+  | "examples" // few-shot pairs: validated first, then FTS-similar
+  | "search" // project-wide FTS (source | target | comments | terms)
+  | "draft" // server-side drafting pipeline → staged proposal
+  | "emit" // stage arbitrary events (propose)
+  | "sql" // guarded read-only SELECT (escape hatch)
+  | "docs" // cookbook fetch
+  | "aquifer" // Bible reference data (search/read/publish)
+
+// ── Typed tool-result payloads (display-only; the model sees compact text) ──
+
+export interface PassageRow {
+  cellId: string
+  fileId?: string
+  ref?: string
+  source: string
+  target: string
+  status?: "untranslated" | "drafted" | "stale" | "validated" | "flagged"
+}
+
+export interface ExamplePair {
+  ref?: string
+  source: string
+  target: string
+  validated?: boolean
+}
+
+export interface SearchHit {
+  cellId: string
+  fileId?: string
+  ref?: string
+  side: "source" | "target" | "comments" | "terms"
+  snippet: string
+}
+
+export interface ToolResultData {
+  cells?: PassageRow[]
+  examples?: ExamplePair[]
+  hits?: SearchHit[]
+}
 
 // ── SSE frames (server → client), `data:`-prefixed JSON lines ─────────────
 
 export type AgentFrame =
-  | { type: 'run_start'; runId: string }
+  | { type: 'run_start'; runId: string; sessionId?: string }
   | { type: 'assistant_delta'; text: string }
-  | { type: 'code_start'; step: number; kind: 'sql' | 'emit' | 'docs' | 'aquifer'; summary: string } // summary: first 120 chars of sql / "N events" / topic
-  | { type: 'code_result'; step: number; ok: boolean; summary: string }                  // compressed result block (what the model saw), truncated to 2000 chars for UI
+  | { type: 'code_start'; step: number; kind: ToolKind; summary: string } // summary: first 120 chars of sql / "N events" / topic / ref range
+  | { type: 'code_result'; step: number; ok: boolean; summary: string; data?: ToolResultData } // summary: compressed result block (what the model saw), ≤2000 chars for UI
   | { type: 'proposal'; proposal: AgentProposal }
   | { type: 'aquifer_proposal'; proposal: AquiferPublishProposal }
+  | { type: 'progress'; label: string; done: number; total: number } // bulk-job heartbeat
   | { type: 'usage'; promptTokens: number; completionTokens: number; costCents: number }
   | { type: 'done'; runId: string; status: 'ok' | 'capped' | 'error' }
   | { type: 'error'; message: string }
@@ -61,7 +107,13 @@ export interface AquiferPublishProposal {
 
 export interface AgentRunRequest {
   projectId: string
-  /** ≤10 turns, client truncates. */
+  /**
+   * Session-native (v2): when set, the server holds the full conversation
+   * (including tool results) under this id and the client sends ONLY the new
+   * user message. `messages` then carries exactly one user turn.
+   */
+  sessionId?: string
+  /** ≤10 turns, client truncates. With sessionId: exactly the new user turn. */
   messages: { role: 'user' | 'assistant'; content: string }[]
   context?: { fileId?: string; cellId?: string }
   /**

@@ -190,6 +190,13 @@ export interface EventPayloads {
      */
     agent_run_id?: string
     /**
+     * Compensating-undo provenance: set when this commit reverses an applied
+     * agent draft (restores the pre-run value). Carries the undone run's id
+     * for ledger rollups; never paired with ai_suggestion (the restored text
+     * is human-authored). Written by the client undo path (src/lib/agent/undo.ts).
+     */
+    undo_of_agent_run_id?: string
+    /**
      * FRO-186 / harmonization: when present, tags this commit as a harmonize
      * sweep event (cell.commit.harmonize variant per AD-2). The route layer
      * uses this field to enforce harmonize_min_role and to trigger the AD-14

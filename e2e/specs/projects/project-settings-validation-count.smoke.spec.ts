@@ -24,7 +24,7 @@ test("project settings validation count and role floor can be changed", async ({
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}/settings`)
+  await alice.goto(`/project/${projectId}/settings?section=validation`)
   await alice.waitForLoadState("networkidle")
 
   // Scroll to Validation section.

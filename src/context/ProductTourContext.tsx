@@ -9,6 +9,7 @@
 
 import { createContext, useContext, type ReactNode } from "react"
 import { ProductTour, useProductTourController } from "@/components/onboarding/ProductTour"
+import { useActiveOrg } from "@/context/OrgContext"
 
 interface ProductTourContextValue {
   /** Opens the tour (re-launch or programmatic). */
@@ -33,11 +34,26 @@ interface Props {
  */
 export function ProductTourProvider({ children }: Props) {
   const [open, openTour, closeTour] = useProductTourController()
+  // AQU-512: this is an org-level tour (org-switcher, org nav, org settings),
+  // so gate PM-only steps on the org role rather than the active *project*
+  // role — a translator can be a project_lead on one project and still be a
+  // plain contributor at the org they're currently viewing.
+  const { activeOrg } = useActiveOrg()
+  const roleLevel = activeOrg?.role.level ?? null
+  // SWARM-TODO(AQU-512): verify live — log in as a CONTRIBUTOR-level org
+  // member, open the tour (sidebar "Take the tour"), confirm the "Settings &
+  // members" step is skipped; log in as PROJECT_LEAD+ and confirm it appears.
+  // Note: OrgSidebar currently only renders the nav-settings `data-tour`
+  // anchor for role >= MAINTAINER (600) (`isAdmin` in OrgSidebar.tsx), one
+  // rung above this gate's PROJECT_LEAD (500) floor — so PROJECT_LEAD (500)
+  // callers pass the role check here but the step still gets dropped by the
+  // existing DOM-anchor check (anchor absent). Flagged, not fixed here:
+  // OrgSidebar.tsx is out of scope for this ticket.
 
   return (
     <ProductTourContext.Provider value={{ openTour }}>
       {children}
-      <ProductTour open={open} onClose={closeTour} />
+      <ProductTour open={open} onClose={closeTour} roleLevel={roleLevel} />
     </ProductTourContext.Provider>
   )
 }

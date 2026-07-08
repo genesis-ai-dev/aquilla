@@ -6,6 +6,7 @@ import { AssignModal } from "./AssignModal"
 // ── Mocks ───────────────────────────────────────────────────────────────────
 vi.mock("@/lib/sync/assignments", () => ({
   createAssignment: vi.fn(),
+  createBulkFileAssignments: vi.fn(),
   getFileChapters: vi.fn(),
   AssignmentEmitError: class AssignmentEmitError extends Error {
     constructor(message: string) { super(message); this.name = "AssignmentEmitError" }
@@ -16,10 +17,11 @@ vi.mock("@/lib/frontier/roles", async (importOriginal) => {
   return { ...actual }
 })
 
-import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
+import { createAssignment, createBulkFileAssignments, getFileChapters } from "@/lib/sync/assignments"
 import { ROLE } from "@/lib/frontier/roles"
 
 const mockCreate = vi.mocked(createAssignment)
+const mockBulkCreate = vi.mocked(createBulkFileAssignments)
 const mockChapters = vi.mocked(getFileChapters)
 
 const BASE_PROPS = {
@@ -45,6 +47,9 @@ const BASE_PROPS = {
 beforeEach(() => {
   vi.clearAllMocks()
   mockCreate.mockResolvedValue("new-assignment-id")
+  mockBulkCreate.mockImplementation(async (args) =>
+    args.entries.map((e) => ({ fileId: e.fileId, assignmentId: `assign-${e.fileId}` })),
+  )
   mockChapters.mockResolvedValue(["GEN 1", "GEN 2", "GEN 3"])
 })
 afterEach(() => vi.restoreAllMocks())
@@ -173,9 +178,9 @@ describe("selection scope", () => {
   })
 })
 
-// ── Scope: books ─────────────────────────────────────────────────────────────
+// ── Scope: books (AQU-497 bulk/season assign) ────────────────────────────────
 describe("books scope", () => {
-  it("calls createAssignment with all selected file ids", async () => {
+  it("calls createBulkFileAssignments once per selected file, not one event covering both", async () => {
     render(<AssignModal {...BASE_PROPS} />)
     // Switch to books scope
     await pickSelectOption(/scope/i, /books \(files\)/i)
@@ -189,14 +194,79 @@ describe("books scope", () => {
     // Pick member
     await pickSelectOption(/assign to/i, /anna/)
     fireEvent.click(screen.getByRole("button", { name: /assign/i }))
-    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
-    const args = mockCreate.mock.calls[0][0]
-    expect(args.scopeKind).toBe("books")
-    expect(args.scope).toHaveLength(2)
-    expect(args.scope.map((s: { fileId: string }) => s.fileId)).toContain("file-1")
-    expect(args.scope.map((s: { fileId: string }) => s.fileId)).toContain("file-2")
-    expect(args.scopeLabel).toContain("Genesis")
-    expect(args.scopeLabel).toContain("Exodus")
+    await waitFor(() => expect(mockBulkCreate).toHaveBeenCalledTimes(1))
+    // AQU-497: one PM action (one submit click) resolves to ONE
+    // createBulkFileAssignments call carrying an entry PER file — the "unit
+    // count" the ticket's acceptance criteria wants verified — rather than a
+    // single assignment.create whose scope[] spans both files. This is what
+    // makes each file individually removable afterward (see the doc comment
+    // on createBulkFileAssignments in src/lib/sync/assignments.ts).
+    const args = mockBulkCreate.mock.calls[0][0]
+    expect(args.entries).toHaveLength(2)
+    expect(args.entries.map((e) => e.fileId).sort()).toEqual(["file-1", "file-2"])
+    expect(args.assigneeUserId).toBe(42)
+    // Never falls back to the single-event path for this scope.
+    expect(mockCreate).not.toHaveBeenCalled()
+  })
+
+  it("labels each bulk entry with its shared corpusMarker group (season), so removal is traceable to a season", async () => {
+    render(<AssignModal {...BASE_PROPS} />)
+    await pickSelectOption(/scope/i, /books \(files\)/i)
+    fireEvent.click(screen.getByText("Genesis"))
+    fireEvent.click(screen.getByText("Exodus"))
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /assign/i }))
+    await waitFor(() => expect(mockBulkCreate).toHaveBeenCalledTimes(1))
+    const entries = mockBulkCreate.mock.calls[0][0].entries
+    expect(entries.find((e) => e.fileId === "file-1")?.scopeLabel).toBe("OT · Genesis")
+    expect(entries.find((e) => e.fileId === "file-2")?.scopeLabel).toBe("OT · Exodus")
+  })
+
+  it("'Select all' on the season/corpus group selects every file in that group in one click", async () => {
+    render(<AssignModal {...BASE_PROPS} />)
+    await pickSelectOption(/scope/i, /books \(files\)/i)
+    // Both fixture files share corpusMarker "OT" -> one group with a
+    // "Select all" affordance; this is the actual "assign a whole season at
+    // once" click-path (AQU-497 acceptance #1).
+    fireEvent.click(screen.getByRole("button", { name: /select all/i }))
+    const checkboxes = screen.getAllByRole("checkbox")
+    expect(checkboxes[0].getAttribute("aria-checked")).toBe("true")
+    expect(checkboxes[1].getAttribute("aria-checked")).toBe("true")
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /assign/i }))
+    await waitFor(() => expect(mockBulkCreate).toHaveBeenCalledTimes(1))
+    expect(mockBulkCreate.mock.calls[0][0].entries).toHaveLength(2)
+  })
+
+  it("applies one shared deadline to every file in the bulk batch", async () => {
+    render(<AssignModal {...BASE_PROPS} />)
+    await pickSelectOption(/scope/i, /books \(files\)/i)
+    fireEvent.click(screen.getByRole("button", { name: /select all/i }))
+    await pickSelectOption(/assign to/i, /anna/)
+    const deadlineInput = screen.getByLabelText(/deadline/i)
+    fireEvent.change(deadlineInput, { target: { value: "2026-08-15" } })
+    fireEvent.click(screen.getByRole("button", { name: /assign/i }))
+    await waitFor(() => expect(mockBulkCreate).toHaveBeenCalledTimes(1))
+    const args = mockBulkCreate.mock.calls[0][0]
+    expect(args.deadline).toBeTruthy()
+    expect(args.entries).toHaveLength(2)
+  })
+
+  it("surfaces partial failure without losing the assignments that succeeded", async () => {
+    mockBulkCreate.mockResolvedValueOnce([
+      { fileId: "file-1", assignmentId: "assign-1" },
+      { fileId: "file-2", error: "role too low" },
+    ])
+    render(<AssignModal {...BASE_PROPS} />)
+    await pickSelectOption(/scope/i, /books \(files\)/i)
+    fireEvent.click(screen.getByRole("button", { name: /select all/i }))
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /assign/i }))
+    await waitFor(() => expect(screen.getByText(/1 of 2 assignment/i)).toBeTruthy())
+    // A partial failure still revalidates the caller's list (one assignment
+    // did land) and does NOT auto-close the modal, so the PM can see the error.
+    expect(BASE_PROPS.onAssigned).toHaveBeenCalled()
+    expect(BASE_PROPS.onOpenChange).not.toHaveBeenCalled()
   })
 
   it("shows an error when no files are selected", async () => {

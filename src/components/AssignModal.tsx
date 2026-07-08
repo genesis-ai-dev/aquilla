@@ -4,9 +4,20 @@
 //   selection  → cells in the current editor selection (Set<string>)
 //   verses     → all cells in the active file
 //   chapters   → one or more chapters within the active file
-//   books      → one or more files (book-level)
+//   books      → one or more files (book-level) — AQU-497: the "assign a
+//                whole season" scope. Files are grouped by `corpusMarker`
+//                (the real season/testament grouping the sidebar already
+//                uses — see src/lib/sidebar/group-by-corpus.ts and the
+//                season/episode auto-detector in src/lib/file-labeling/
+//                detect.ts) with a "Select all" per group, so picking a
+//                season's files is one click instead of N.
 //
-// Emits one `assignment.create` event per invocation via createAssignment().
+// Emits one `assignment.create` event per invocation for the
+// selection/verses/chapters scopes via createAssignment(). The `books` scope
+// (AQU-497) emits ONE event PER selected file via createBulkFileAssignments —
+// see that function's doc comment in src/lib/sync/assignments.ts for why
+// (per-file progress rows + per-file removability), sharing one deadline and
+// one assignee across every file in the batch.
 // Role gate: renders for PROJECT_LEAD (500) and above unconditionally, OR for
 // CONTRIBUTOR (400)+ when the org has opted into `allowSelfAssignment`
 // (AQU-496) — in which case the assignee picker is locked to the caller
@@ -15,7 +26,7 @@
 // in sync-worker/src/events/authorize.ts; the client gate is a UX affordance,
 // not the security boundary.
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { UserCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -43,11 +54,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { DatePicker, dateToDeadlineString } from "@/components/ui/date-picker"
 import type { ProjectMember } from "@/lib/frontier/members"
 import type { FileReference } from "@/lib/parsers/types"
-import { createAssignment, getFileChapters, AssignmentEmitError } from "@/lib/sync/assignments"
+import {
+  createAssignment,
+  createBulkFileAssignments,
+  getFileChapters,
+  AssignmentEmitError,
+} from "@/lib/sync/assignments"
 import { ROLE } from "@/lib/frontier/roles"
 import { canOpenAssignUi, canSubmitAssignment } from "@/lib/sync/role-policy"
+import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 
 type ScopeKind = "selection" | "verses" | "chapters" | "books"
 
@@ -120,6 +138,7 @@ export function AssignModal({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState("")
+  const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
 
   // Reset on open. Self-assign mode locks the assignee to the caller so
   // there's no accidental "assign to someone else" click before the picker
@@ -133,8 +152,37 @@ export function AssignModal({
       setAvailableChapters([])
       setError(null)
       setNote("")
+      setDeadlineDate(undefined)
     }
   }, [open, selectedCellIds.size, isSelfAssignMode, callerUserId])
+
+  // AQU-497: group the books-scope file list by corpusMarker (real season/
+  // testament grouping — see file banner) so a whole season can be selected
+  // in one click via the per-group "Select all".
+  const fileGroups = useMemo(() => groupByCorpus(projectFiles), [projectFiles])
+  // fileId -> named group label (excludes the synthetic "Ungrouped" bucket),
+  // used to prefix each bulk-created assignment's scopeLabel so a PM can see
+  // which season an individually-removable row came from.
+  const groupLabelByFileId = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const group of fileGroups) {
+      if (group.label === "Ungrouped") continue
+      for (const f of group.files) map.set(f.id, group.label)
+    }
+    return map
+  }, [fileGroups])
+
+  const toggleFileGroup = useCallback((fileIds: string[]) => {
+    setSelectedFileIds((prev) => {
+      const next = new Set(prev)
+      const allSelected = fileIds.every((id) => next.has(id))
+      for (const id of fileIds) {
+        if (allSelected) next.delete(id)
+        else next.add(id)
+      }
+      return next
+    })
+  }, [])
 
   // Fetch chapters when scope=chapters and activeFileId is set
   useEffect(() => {
@@ -180,7 +228,48 @@ export function AssignModal({
       return
     }
 
-    // Build scope + scopeLabel based on scopeKind
+    const deadline = deadlineDate ? dateToDeadlineString(deadlineDate) : null
+
+    // AQU-497: books scope is a bulk (one-per-file) assignment — handled
+    // separately since it emits N events, not one, and reports partial
+    // failure per-file rather than an all-or-nothing error.
+    if (scopeKind === "books") {
+      if (selectedFileIds.size === 0) { setError("Select at least one book/file."); return }
+      const entries = Array.from(selectedFileIds).map((fid) => {
+        const name = projectFiles.find((f) => f.id === fid)?.name ?? fid
+        const groupLabel = groupLabelByFileId.get(fid)
+        return { fileId: fid, scopeLabel: groupLabel ? `${groupLabel} · ${name}` : name }
+      })
+      setSubmitting(true)
+      try {
+        const results = await createBulkFileAssignments({
+          jwt,
+          projectId,
+          author,
+          assigneeUserId: member.userId,
+          entries,
+          deadline,
+          note: note.trim() || null,
+        })
+        const failed = results.filter((r) => r.error)
+        const succeeded = results.length - failed.length
+        if (succeeded > 0) onAssigned()
+        if (failed.length > 0) {
+          setError(
+            `${failed.length} of ${results.length} assignment(s) failed` +
+            (succeeded > 0 ? ` (${succeeded} succeeded)` : "") +
+            `: ${failed[0].error}`,
+          )
+        } else {
+          onOpenChange(false)
+        }
+      } finally {
+        setSubmitting(false)
+      }
+      return
+    }
+
+    // Build scope + scopeLabel for the single-event scopes.
     let scope: { fileId: string; chapter?: string }[] = []
     let scopeLabel = ""
     let apiScopeKind: "books" | "chapters" = "books"
@@ -200,13 +289,6 @@ export function AssignModal({
       scope = Array.from(selectedChapters).map((ch) => ({ fileId: activeFileId, chapter: ch }))
       scopeLabel = `${Array.from(selectedChapters).join(", ")} in ${file?.name ?? activeFileId}`
       apiScopeKind = "chapters"
-    } else if (scopeKind === "books") {
-      if (selectedFileIds.size === 0) { setError("Select at least one book/file."); return }
-      scope = Array.from(selectedFileIds).map((fid) => ({ fileId: fid }))
-      const names = Array.from(selectedFileIds)
-        .map((fid) => projectFiles.find((f) => f.id === fid)?.name ?? fid)
-      scopeLabel = names.join(", ")
-      apiScopeKind = "books"
     }
 
     // Use activeFileId as the routing file for the event token.
@@ -224,6 +306,7 @@ export function AssignModal({
         scope,
         scopeKind: apiScopeKind,
         scopeLabel,
+        deadline,
         note: note.trim() || null,
       })
       onAssigned()
@@ -241,7 +324,7 @@ export function AssignModal({
     members, selectedMemberId, scopeKind, activeFileId, projectFiles,
     selectedCellIds.size, selectedChapters, selectedFileIds,
     jwt, projectId, author, note, onAssigned, onOpenChange,
-    roleLevel, allowSelfAssignment, callerUserId,
+    roleLevel, allowSelfAssignment, callerUserId, deadlineDate, groupLabelByFileId,
   ])
 
   // Role gate (AQU-496): PROJECT_LEAD (500)+ always renders; below that, only
@@ -311,17 +394,41 @@ export function AssignModal({
           {scopeKind === "books" && (
             <Field>
               <FieldLabel>Files / books</FieldLabel>
-              <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-md border p-2">
-                {projectFiles.map((f) => (
-                  <label key={f.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-muted/50">
-                    <Checkbox
-                      checked={selectedFileIds.has(f.id)}
-                      onCheckedChange={() => toggleFile(f.id)}
-                      className="size-3"
-                    />
-                    {f.name}
-                  </label>
-                ))}
+              <FieldDescription>
+                Files sharing a season/testament are grouped — use "Select all" to assign a
+                whole season in one action.
+              </FieldDescription>
+              <div className="max-h-56 space-y-2 overflow-y-auto rounded-md border p-2">
+                {fileGroups.map((group) => {
+                  const groupFileIds = group.files.map((f) => f.id)
+                  const allSelected = groupFileIds.every((id) => selectedFileIds.has(id))
+                  return (
+                    <div key={group.label}>
+                      <div className="flex items-center justify-between px-1 py-0.5">
+                        <span className="text-xs font-medium text-muted-foreground">{group.label}</span>
+                        {group.label !== "Ungrouped" && groupFileIds.length > 1 && (
+                          <button
+                            type="button"
+                            className="text-xs text-primary hover:underline"
+                            onClick={() => toggleFileGroup(groupFileIds)}
+                          >
+                            {allSelected ? "Clear" : "Select all"}
+                          </button>
+                        )}
+                      </div>
+                      {group.files.map((f) => (
+                        <label key={f.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-muted/50">
+                          <Checkbox
+                            checked={selectedFileIds.has(f.id)}
+                            onCheckedChange={() => toggleFile(f.id)}
+                            className="size-3"
+                          />
+                          {f.name}
+                        </label>
+                      ))}
+                    </div>
+                  )
+                })}
               </div>
             </Field>
           )}
@@ -378,6 +485,21 @@ export function AssignModal({
               <FieldDescription>
                 Self-assignment is on — you can claim this work for yourself. Only leads and
                 maintainers can assign work to someone else.
+              </FieldDescription>
+            )}
+          </Field>
+
+          <Field>
+            <FieldLabel htmlFor="assign-modal-deadline">Deadline (optional)</FieldLabel>
+            <DatePicker
+              id="assign-modal-deadline"
+              value={deadlineDate}
+              onChange={setDeadlineDate}
+              disabled={submitting}
+            />
+            {scopeKind === "books" && (
+              <FieldDescription>
+                Applies to every file selected above — one deadline for the whole batch.
               </FieldDescription>
             )}
           </Field>

@@ -46,6 +46,20 @@ import {
  * there too (its own `canAssign` gate at ~line 478 also needs the same
  * `canOpenAssignUi` swap that ProjectWorkspace.tsx got). The fully-wired,
  * verifiable click-path today is ProjectWorkspace.tsx's AssignModal.
+ *
+ * SWARM-TODO(AQU-497): "assign a whole season/book group in one action" was
+ * built in ProjectWorkspace.tsx's AssignModal (books scope: multi-file
+ * checklist grouped by corpusMarker with a per-group "Select all", one
+ * shared deadline, one assignment.create PER file via
+ * createBulkFileAssignments — see src/lib/sync/assignments.ts), NOT here.
+ * This component stays single-book-at-a-time by design — it's the fast
+ * one-off quick-assign on the org Team card, where the `files` prop is
+ * `{id, name}[]` (no corpusMarker) and its only caller (ProjectOverview.tsx,
+ * out of this worktree's ownership) doesn't pass season data. If a bulk
+ * affordance is ever wanted here too: extend `files` to
+ * `{id, name, corpusMarker?}[]`, group with groupByCorpus like AssignModal
+ * does, and call createBulkFileAssignments instead of createAssignment for
+ * multi-file selections — reuse, don't reinvent.
  */
 export interface AssignWorkProps {
   projectId: string

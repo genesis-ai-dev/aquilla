@@ -236,6 +236,75 @@ export async function createAssignment(args: CreateAssignmentArgs): Promise<stri
   return assignmentId
 }
 
+export interface BulkFileAssignmentEntry {
+  fileId: string
+  /** Pre-built label for this file's own assignment row, e.g. "Season 2 · Episode 3". */
+  scopeLabel: string
+}
+
+export interface CreateBulkFileAssignmentsArgs {
+  jwt: string
+  projectId: string
+  author: string
+  assigneeUserId: number
+  entries: BulkFileAssignmentEntry[]
+  /** One deadline applied to every assignment created by this call (AQU-497). */
+  deadline?: string | null
+  note?: string | null
+}
+
+export interface BulkFileAssignmentResult {
+  fileId: string
+  assignmentId?: string
+  error?: string
+}
+
+/**
+ * AQU-497: assign a whole season/book group to one member in a single PM
+ * action. Emits ONE `assignment.create` event PER file rather than a single
+ * event with a multi-file `scope[]` — deliberately, so that:
+ *   (1) each file keeps its own cells_total/cells_done row in the workload
+ *       projection (a PM tracking a season's progress needs per-episode
+ *       completion, not one blob counter mixing N files' cells — see
+ *       AQU-494's "one row per assignment, not per assignee" precedent), and
+ *   (2) `unassignAssignment` — which only closes a whole assignment_id, there
+ *       is no per-cell/per-file unassign primitive — can remove ONE file's
+ *       assignment without touching its season-mates, satisfying "individual
+ *       units remain individually removable afterward".
+ * The trade-off: this is N sync-worker requests instead of 1. Assignment
+ * creation is a deliberate, low-frequency manager action (see file banner
+ * comment), so that cost is acceptable; each entry is independent, so one
+ * failing does not roll back the others — callers should surface partial
+ * failure (see `error` per result) rather than treating this as atomic.
+ */
+export async function createBulkFileAssignments(
+  args: CreateBulkFileAssignmentsArgs,
+): Promise<BulkFileAssignmentResult[]> {
+  const results = await Promise.allSettled(
+    args.entries.map((entry) =>
+      createAssignment({
+        jwt: args.jwt,
+        projectId: args.projectId,
+        fileId: entry.fileId,
+        author: args.author,
+        assigneeUserId: args.assigneeUserId,
+        scope: [{ fileId: entry.fileId }],
+        scopeKind: "books",
+        scopeLabel: entry.scopeLabel,
+        deadline: args.deadline,
+        note: args.note,
+      }),
+    ),
+  )
+  return results.map((r, i) => {
+    const fileId = args.entries[i].fileId
+    if (r.status === "fulfilled") return { fileId, assignmentId: r.value }
+    const reason = r.reason
+    const error = reason instanceof Error ? reason.message : String(reason)
+    return { fileId, error }
+  })
+}
+
 export interface UnassignAssignmentArgs {
   jwt: string
   projectId: string

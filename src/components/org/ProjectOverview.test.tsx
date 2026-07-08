@@ -63,8 +63,10 @@ vi.mock("@/lib/sync/sync-token", () => ({
   fetchSyncToken: (...a: unknown[]) => fetchSyncToken(...a),
 }))
 const fetchProjectFiles = vi.fn()
+const fetchAllFileCells = vi.fn()
 vi.mock("@/lib/sync/cells-read", () => ({
   fetchProjectFiles: (...a: unknown[]) => fetchProjectFiles(...a),
+  fetchAllFileCells: (...a: unknown[]) => fetchAllFileCells(...a),
 }))
 
 // Mock assignments workload so Team card doesn't break tests
@@ -698,5 +700,110 @@ describe("ProjectOverview per-section visibility (AQU-486)", () => {
     const badge = within(card).getByTestId("section-visibility-badge")
     expect(within(badge).queryByRole("combobox")).not.toBeInTheDocument()
     expect(badge.querySelector("svg.lucide-chevron-down")).not.toBeInTheDocument()
+  })
+})
+
+// ── AQU-493: chapter/verse progress rollup ──────────────────────────────────
+
+describe("ProjectOverview chapter/verse rollup (AQU-493)", () => {
+  // WHY: Randall's dashboard walkthrough asked for a per-file breakdown that
+  // drills into book -> chapter -> verse progress for Scripture files, while
+  // leaving non-canonical files on the flat cell/file view (no crash, no
+  // empty tree). These tests exercise the expand affordance end-to-end
+  // against a mocked cells fetch, proving the rollup is real data (not a
+  // stub) and that percentages reconcile with the underlying cell counts.
+
+  type CellRow = import("@/lib/sync/cells-read-types").CellRow
+
+  function cellRow(over: Partial<CellRow> & { cellId: string; side: "source" | "target" }): CellRow {
+    return {
+      value: "", valueHtml: null, type: null, canonicalRef: null, anchorCellId: null,
+      eventId: "evt", sourceEventId: null, lastEditor: null, lastEditAt: 0,
+      validated: false, wordCount: 0, ...over,
+    } as CellRow
+  }
+
+  function versePair(cellId: string, ref: string, filled: boolean, approved: boolean): CellRow[] {
+    return [
+      cellRow({ cellId, side: "source", canonicalRef: ref, value: "source" }),
+      cellRow({ cellId, side: "target", canonicalRef: ref, value: filled ? "target text" : "", validated: approved }),
+    ]
+  }
+
+  beforeEach(() => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+  })
+
+  it("expanding a file with Bible references reveals a book row with reconciling chapter/verse progress", async () => {
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
+    fetchAllFileCells.mockResolvedValue([
+      ...versePair("c1", "GEN 1:1", true, true),
+      ...versePair("c2", "GEN 1:2", true, true),
+    ])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+
+    renderOverview()
+
+    const row = await screen.findByTestId("file-row")
+    fireEvent.click(within(row).getByRole("button", { name: /^expand/i }))
+
+    const bookRow = await screen.findByTestId("book-row")
+    expect(bookRow).toHaveTextContent("GEN")
+    // A fully-filled, fully-approved 2-verse book reconciles to 2/2/2 at book level.
+    expect(bookRow).toHaveTextContent("2/2/2")
+
+    fireEvent.click(bookRow)
+    const chapterRow = await screen.findByTestId("chapter-row")
+    expect(chapterRow).toHaveTextContent("2/2/2")
+
+    fireEvent.click(chapterRow)
+    const verseCells = await screen.findAllByTestId("verse-cell")
+    expect(verseCells).toHaveLength(2)
+  })
+
+  it("expanding a file without Bible references shows a fallback note, not an empty tree", async () => {
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
+    fetchAllFileCells.mockResolvedValue([
+      cellRow({ cellId: "c1", side: "source", value: "hello", canonicalRef: null }),
+      cellRow({ cellId: "c1", side: "target", value: "bonjour", canonicalRef: null }),
+    ])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "Notes.txt", type: "txt", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+
+    renderOverview()
+
+    const row = await screen.findByTestId("file-row")
+    fireEvent.click(within(row).getByRole("button", { name: /^expand/i }))
+
+    expect(await screen.findByText(/no chapter\/verse structure detected/i)).toBeInTheDocument()
+    expect(screen.queryByTestId("book-row")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("canonical-rollup-books")).not.toBeInTheDocument()
+  })
+
+  it("collapsing and re-expanding a file does not re-fetch its cells", async () => {
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
+    fetchAllFileCells.mockResolvedValue(versePair("c1", "GEN 1:1", true, true))
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+
+    renderOverview()
+    const row = await screen.findByTestId("file-row")
+    const toggle = within(row).getByRole("button", { name: /^expand/i })
+
+    fireEvent.click(toggle) // expand
+    await screen.findByTestId("book-row")
+    fireEvent.click(within(row).getByRole("button", { name: /^collapse/i })) // collapse
+    expect(screen.queryByTestId("book-row")).not.toBeInTheDocument()
+    fireEvent.click(within(row).getByRole("button", { name: /^expand/i })) // re-expand
+    await screen.findByTestId("book-row")
+
+    expect(fetchAllFileCells).toHaveBeenCalledTimes(1)
   })
 })

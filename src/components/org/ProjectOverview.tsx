@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { MoreHorizontal } from "lucide-react"
+import { MoreHorizontal, ChevronRight } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
@@ -18,8 +18,9 @@ import { downloadProjectBundle } from "@/lib/sync/export-bundle"
 import { AssignWork } from "./AssignWork"
 import { MembersTab } from "@/components/ProjectMembersPage"
 import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
-import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
+import { fetchProjectFiles, fetchAllFileCells, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
+import { buildCanonicalRollup, type BookRollup, type ChapterRollup } from "@/lib/progress/canonical-rollup"
 import { getProjectAssignments, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
 import { ROLE } from "@/lib/frontier/roles"
@@ -151,6 +152,125 @@ function FileProgressBars({ tPct, vPct }: { tPct: number; vPct: number }) {
   )
 }
 
+// ── Chapter/verse rollup (AQU-493) ───────────────────────────────────────────
+
+/** Small inline "N%" bar reused for the book/chapter rows of the rollup tree. */
+function MiniRollupBar({ filledPct, approvedPct }: { filledPct: number; approvedPct: number }) {
+  return (
+    <span className="flex w-24 shrink-0 flex-col gap-[3px]">
+      <span className="block h-1 rounded-full bg-muted overflow-hidden">
+        <span className="block h-full rounded-full bg-amber-500" style={{ width: `${filledPct}%` }} />
+      </span>
+      <span className="block h-1 rounded-full bg-muted overflow-hidden">
+        <span className="block h-full rounded-full bg-emerald-500" style={{ width: `${approvedPct}%` }} />
+      </span>
+    </span>
+  )
+}
+
+function ChapterRow({ chapter }: { chapter: ChapterRollup }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <li>
+      <button
+        type="button"
+        data-testid="chapter-row"
+        className="flex w-full items-center gap-2 py-0.5 text-left text-xs hover:text-foreground"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+        <span className="w-10 shrink-0 text-muted-foreground">Ch {chapter.chapterLabel}</span>
+        <MiniRollupBar filledPct={chapter.filledPct} approvedPct={chapter.approvedPct} />
+        <span className="text-[10px] tabular-nums text-muted-foreground">
+          {chapter.filledCount}/{chapter.approvedCount}/{chapter.cellCount}
+        </span>
+      </button>
+      {open && (
+        <ul className="ml-5 mt-0.5 mb-1 grid grid-cols-[repeat(auto-fill,minmax(2.5rem,1fr))] gap-1" aria-label={`${chapter.chapter} verses`}>
+          {chapter.verses.map((v) => (
+            <li
+              key={v.ref}
+              data-testid="verse-cell"
+              title={v.ref}
+              className={cn(
+                "rounded px-1.5 py-0.5 text-center text-[10px] tabular-nums",
+                v.approved ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                  : v.filled ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                  : "bg-muted text-muted-foreground",
+              )}
+            >
+              {v.verseLabel}
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  )
+}
+
+function BookRow({ book }: { book: BookRollup }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <li>
+      <button
+        type="button"
+        data-testid="book-row"
+        className="flex w-full items-center gap-2 py-0.5 text-left text-xs font-medium hover:text-foreground"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+        <span className="w-10 shrink-0">{book.book}</span>
+        <MiniRollupBar filledPct={book.filledPct} approvedPct={book.approvedPct} />
+        <span className="text-[10px] tabular-nums text-muted-foreground">
+          {book.filledCount}/{book.approvedCount}/{book.cellCount}
+        </span>
+      </button>
+      {open && (
+        <ul className="ml-5 mt-0.5" aria-label={`${book.book} chapters`}>
+          {book.chapters.map((c) => (
+            <ChapterRow key={c.chapter} chapter={c} />
+          ))}
+        </ul>
+      )}
+    </li>
+  )
+}
+
+/**
+ * Nested book › chapter › verse progress rollup shown under a file row once
+ * expanded. `books === null` means the file's cells carry no parseable
+ * canonical reference (AQU-493 detection is generic — see
+ * lib/progress/canonical-rollup.ts) — render an explanatory note instead of
+ * an empty tree, per the acceptance criteria.
+ *
+ * SWARM-TODO(AQU-493): verify live — open a Scripture project overview,
+ * click a file row's chevron to expand it, confirm chapter rows appear and
+ * their filled/approved counts sum to the file row's totals, then drill
+ * into a chapter to see the per-verse grid.
+ */
+function FileCanonicalRollup({ books, loading }: { books: BookRollup[] | null | undefined; loading: boolean }) {
+  if (loading) {
+    return <p className="ml-7 mt-1 text-xs text-muted-foreground">Loading chapter/verse breakdown…</p>
+  }
+  if (books === null) {
+    return (
+      <p className="ml-7 mt-1 text-xs text-muted-foreground">
+        No chapter/verse structure detected for this file.
+      </p>
+    )
+  }
+  if (books === undefined || books.length === 0) return null
+  return (
+    <ul className="ml-7 mt-1 border-l pl-3" data-testid="canonical-rollup-books" aria-label="Chapter/verse breakdown">
+      {books.map((b) => (
+        <BookRow key={b.book} book={b} />
+      ))}
+    </ul>
+  )
+}
+
 // ── Overflow menu (archive / download) ───────────────────────────────────────
 
 function OverflowMenu({ children }: { children: React.ReactNode }) {
@@ -222,6 +342,13 @@ export function ProjectOverview() {
   const [showAllFiles, setShowAllFiles] = useState(false)
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
 
+  // AQU-493: chapter/verse rollup, lazily fetched per file on first expand.
+  // `undefined` = not yet fetched, `null` = fetched but no canonical refs
+  // found (flat-view fallback), `BookRollup[]` = ready to render.
+  const [expandedFileId, setExpandedFileId] = useState<string | null>(null)
+  const [rollups, setRollups] = useState<Record<string, BookRollup[] | null>>({})
+  const [rollupLoading, setRollupLoading] = useState<Record<string, boolean>>({})
+
   // FRO-474: project-only invitees (direct project_members grant, no org
   // membership) have `activeOrgId == null` or an org that doesn't include this
   // project's org. The portfolio endpoint is org-scoped, so fall back to the
@@ -287,6 +414,30 @@ export function ProjectOverview() {
       .catch(() => { if (!cancelled) setFiles([]) })
     return () => { cancelled = true }
   }, [jwt, id, firstFileId, project?.name])
+
+  // AQU-493: expand/collapse a file row's chapter/verse rollup. Fetches the
+  // file's full cell set (paired source+target) once per file, on demand —
+  // the aggregate `/files` rollup used above has no per-cell reference data,
+  // so this is a separate lazy fetch scoped to whichever file is expanded.
+  const toggleFileRollup = useCallback(async (file: FileSummary) => {
+    if (expandedFileId === file.fileId) {
+      setExpandedFileId(null)
+      return
+    }
+    setExpandedFileId(file.fileId)
+    if (file.fileId in rollups || !jwt) return
+    setRollupLoading((s) => ({ ...s, [file.fileId]: true }))
+    try {
+      const tok = await fetchSyncToken(jwt, id, file.fileId, { projectName: project?.name })
+      const rows = await fetchAllFileCells(id, file.fileId, tok.token)
+      setRollups((r) => ({ ...r, [file.fileId]: buildCanonicalRollup(rows) }))
+    } catch (e) {
+      console.warn("[ProjectOverview] chapter/verse rollup fetch failed:", e)
+      setRollups((r) => ({ ...r, [file.fileId]: null }))
+    } finally {
+      setRollupLoading((s) => ({ ...s, [file.fileId]: false }))
+    }
+  }, [expandedFileId, rollups, jwt, id, project?.name])
 
   const isOwner = (project?.syncRole?.level ?? 0) >= 700
   const canManage = (project?.syncRole?.level ?? 0) >= 600
@@ -617,17 +768,32 @@ export function ProjectOverview() {
                       {shown.map((f) => {
                         const tPct = f.cellCount > 0 ? Math.round((f.filledCount / f.cellCount) * 100) : 0
                         const vPct = f.cellCount > 0 ? Math.round((f.approvedCount / f.cellCount) * 100) : 0
+                        const isExpanded = expandedFileId === f.fileId
                         return (
-                          <li key={f.fileId} data-testid="file-row" className="flex items-center gap-3 text-sm">
-                            <AppTooltip content={f.name}>
-                              <span className="w-36 shrink-0 truncate text-sm font-medium">{f.name}</span>
-                            </AppTooltip>
-                            <FileProgressBars tPct={tPct} vPct={vPct} />
-                            <AppTooltip content="filled / approved / total cells · word count">
-                              <span className="w-36 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                                {f.filledCount}/{f.approvedCount}/{f.cellCount} · {f.wordCount}w
-                              </span>
-                            </AppTooltip>
+                          <li key={f.fileId} data-testid="file-row">
+                            <div className="flex items-center gap-3 text-sm">
+                              <button
+                                type="button"
+                                aria-label={isExpanded ? `Collapse ${f.name}` : `Expand ${f.name}`}
+                                aria-expanded={isExpanded}
+                                onClick={() => void toggleFileRollup(f)}
+                                className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+                              >
+                                <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isExpanded && "rotate-90")} />
+                              </button>
+                              <AppTooltip content={f.name}>
+                                <span className="w-32 shrink-0 truncate text-sm font-medium">{f.name}</span>
+                              </AppTooltip>
+                              <FileProgressBars tPct={tPct} vPct={vPct} />
+                              <AppTooltip content="filled / approved / total cells · word count">
+                                <span className="w-36 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                                  {f.filledCount}/{f.approvedCount}/{f.cellCount} · {f.wordCount}w
+                                </span>
+                              </AppTooltip>
+                            </div>
+                            {isExpanded && (
+                              <FileCanonicalRollup books={rollups[f.fileId]} loading={rollupLoading[f.fileId] ?? false} />
+                            )}
                           </li>
                         )
                       })}

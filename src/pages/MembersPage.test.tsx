@@ -108,3 +108,43 @@ describe("MembersPage active-org", () => {
     expect(screen.queryByText("Legacy Org")).not.toBeInTheDocument()
   })
 })
+
+describe("MembersPage — AQU-485 roster visibility", () => {
+  // The whole point of AQU-485 is that a below-floor caller must not see the
+  // roster OR be able to infer it's merely "empty" — those are different
+  // facts (hidden vs. zero members) and conflating them defeats the feature.
+  it("renders a 'Roster hidden' state instead of an empty member list when rosterHidden is true", async () => {
+    const { useOrgMembers } = await import("@/hooks/useOrg")
+    vi.mocked(useOrgMembers).mockReturnValue({
+      members: [],
+      isLoading: false,
+      error: null,
+      rosterHidden: true,
+      refresh: vi.fn(async () => {}),
+      add: vi.fn(async () => null),
+      remove: vi.fn(async () => {}),
+      listMemberProjects: vi.fn(async () => []),
+    })
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <OrgProvider>
+            <MembersPage />
+          </OrgProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => expect(screen.getByText(/roster hidden/i)).toBeInTheDocument())
+    // Must not render the roster/add-member editing surface (the username
+    // typeahead used to add a direct org member) — that would itself imply
+    // an editable roster the caller isn't supposed to see.
+    expect(screen.queryByPlaceholderText(/aquilla username/i)).not.toBeInTheDocument()
+    // The "Project access" per-member breakdown section must also be absent
+    // — it would leak roster membership even if the top roster list is
+    // hidden. Match the section heading exactly (a page description sentence
+    // elsewhere mentions "project access" in unrelated prose).
+    expect(screen.queryByRole("heading", { name: /^project access$/i })).not.toBeInTheDocument()
+  })
+})

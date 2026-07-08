@@ -1033,3 +1033,106 @@ export async function canReadTermbase(
 
   return true
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-485: configurable roster + member-progress visibility
+//
+// Generalizes the FRO-253 exportMinRole pattern to two independent,
+// org-scoped read floors stored in the same org_settings JSON blob:
+//
+//   - rosterViewMinRole:        who can see the member list (+ count)
+//   - memberProgressViewMinRole: who can see per-member progress/productivity
+//
+// Sensitive teams may not want to reveal WHO is on a project (roster) even
+// to their own members, and separately may want to hide WHAT each member did
+// (progress) even from people who CAN see the roster. The two floors are
+// independent — one may be low while the other is high.
+//
+// Both default to MAINTAINER (600) when unset — the same safe default as
+// exportMinRole, and safe for sensitive teams out of the box. The write gate
+// for changing either key is OWNER (700), mirroring EXPORT_FLOOR_WRITE_MIN_ROLE
+// in org-settings.ts (this is a permission-policy key, not a general setting).
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Default floor for both roster and member-progress visibility. */
+export const DEFAULT_ROSTER_VIEW_MIN_ROLE = 600 // ROLE.MAINTAINER
+export const DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE = 600 // ROLE.MAINTAINER
+
+interface OrgSettingsRowShape {
+  settings: string
+}
+
+/**
+ * Read the raw org_settings JSON blob for a given org, tolerating a missing
+ * row (never configured) or malformed JSON (defensive — treat as empty).
+ */
+async function loadOrgSettingsBlob(env: Env, orgId: number): Promise<Record<string, unknown>> {
+  const row = await env.AQUILLA_PG.prepare(
+    "SELECT settings FROM org_settings WHERE org_id = ?",
+  )
+    .bind(orgId)
+    .first<OrgSettingsRowShape>()
+  if (!row) return {}
+  try {
+    const parsed = JSON.parse(row.settings)
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>
+    }
+  } catch {
+    // fall through
+  }
+  return {}
+}
+
+/** Extract a valid role-ladder floor from a settings blob key, or the default. */
+function extractRoleFloor(
+  settings: Record<string, unknown>,
+  key: string,
+  fallback: number,
+): number {
+  const raw = settings[key]
+  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 100 && raw <= 700) return raw
+  return fallback
+}
+
+/**
+ * Resolve the effective roster-view floor for an org (falls back to the
+ * MAINTAINER default when the org hasn't configured one).
+ */
+export async function getRosterViewMinRole(env: Env, orgId: number): Promise<number> {
+  const settings = await loadOrgSettingsBlob(env, orgId)
+  return extractRoleFloor(settings, "rosterViewMinRole", DEFAULT_ROSTER_VIEW_MIN_ROLE)
+}
+
+/**
+ * Resolve the effective member-progress-view floor for an org (falls back to
+ * the MAINTAINER default when the org hasn't configured one).
+ */
+export async function getMemberProgressViewMinRole(env: Env, orgId: number): Promise<number> {
+  const settings = await loadOrgSettingsBlob(env, orgId)
+  return extractRoleFloor(settings, "memberProgressViewMinRole", DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE)
+}
+
+/**
+ * True when `callerRoleLevel` meets or exceeds the org's configured roster
+ * floor. Pass the floor directly (from getRosterViewMinRole) to avoid a
+ * redundant settings fetch when the caller already has it.
+ */
+export function canViewRoster(callerRoleLevel: number | null, rosterMinRole: number): boolean {
+  if (callerRoleLevel == null) return false
+  return callerRoleLevel >= rosterMinRole
+}
+
+/**
+ * True when `callerRoleLevel` meets or exceeds the org's configured
+ * member-progress floor.
+ *
+ * SWARM-TODO(AQU-498): this helper is defined and enforced-ready now, but
+ * there is no dedicated per-member progress view yet to gate with it. The
+ * future productivity view should call this (server-side) before returning
+ * any per-member progress/productivity data.
+ */
+export function canViewMemberProgress(callerRoleLevel: number | null, progressMinRole: number): boolean {
+  if (callerRoleLevel == null) return false
+  return callerRoleLevel >= progressMinRole
+}

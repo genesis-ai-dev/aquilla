@@ -30,6 +30,26 @@ export interface OrgWideSettings {
    */
   exportMinRole?: number
   /**
+   * AQU-485: Minimum role level required to see the member roster (list +
+   * count) on org and project surfaces. Default (when absent) = MAINTAINER
+   * (600) — safe for sensitive teams that don't want to reveal who/how many
+   * are on a project, even to their own members. Independent of
+   * memberProgressViewMinRole: a team can show the roster while hiding
+   * per-member progress, or vice versa.
+   */
+  rosterViewMinRole?: number
+  /**
+   * AQU-485: Minimum role level required to see per-member progress /
+   * productivity. Default (when absent) = MAINTAINER (600). Separate from
+   * rosterViewMinRole — being allowed to see WHO is on the team does not
+   * imply being allowed to see WHAT each person did.
+   *
+   * SWARM-TODO(AQU-498): no dedicated per-member progress view consumes this
+   * yet; it's defined + stored + server-enforced so the future productivity
+   * view can gate on it without another settings-blob migration.
+   */
+  memberProgressViewMinRole?: number
+  /**
    * FRO-433: Org-scoped provider API keys. Set once by an org owner/maintainer;
    * used as the baseline for all members and projects in the org.
    * Precedence: project key > user (localStorage) key > org key.

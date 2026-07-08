@@ -121,8 +121,9 @@ import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/de
 import { applySuggestions, buildUndo } from "@/lib/file-labeling/apply"
 import { renameFile, moveFileToCorpus, renameCorpus, deleteFile } from "@/lib/store/file-operations"
 import { deleteFileProjection } from "@/lib/sync/file-projection"
-import { fetchDeletedFiles } from "@/lib/sync/cells-read"
+import { fetchDeletedFiles, fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { FileSummary } from "@/lib/sync/cells-read-types"
+import { fileSummariesToProgress, mergeFileProgress } from "@/lib/progress/file-summary-progress"
 import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -1959,7 +1960,44 @@ export function ProjectWorkspace() {
     rules,
     { decaySettings: project?.decaySettings, requiredValidations },
   )
-  const { healthMap, fileHealth: _fileHealth, projectHealth, fileProgress, infractions, openCommentCount, cellOpenCommentCount } = health
+  const { healthMap, fileHealth: _fileHealth, projectHealth, fileProgress: liveFileProgress, infractions, openCommentCount, cellOpenCommentCount } = health
+
+  // AQU-516: useHealth (above) only ever sees the currently-open file, so
+  // fileProgress historically had an entry for at most one file — every
+  // *other* row in the sidebar's FileRow rendered no progress bars at all.
+  // Fetch the server-projected per-file rollup (same source the PM dashboard's
+  // file table reads — org/ProjectOverview.tsx) once per project so every
+  // file gets a snapshot, then merge the live, per-keystroke-accurate entry
+  // for the open file back on top so it doesn't regress to the last fetch.
+  const [allFilesProgressSnapshot, setAllFilesProgressSnapshot] = useState<
+    Map<string, { translated: number; validated: number; total: number }>
+  >(new Map())
+  useEffect(() => {
+    if (!project?.id || !frontierSession?.jwt) return
+    let cancelled = false
+    fetchProjectFiles(project.id, frontierSession.jwt)
+      .then((summaries) => {
+        if (cancelled) return
+        setAllFilesProgressSnapshot(fileSummariesToProgress(summaries))
+      })
+      .catch(() => {
+        // Non-fatal — sidebar rows simply fall back to no progress bar
+        // (existing behavior) until the next successful fetch.
+      })
+    return () => { cancelled = true }
+    // Re-fetch whenever the file count changes (import/delete) so newly
+    // added files pick up a snapshot without a full reload.
+  }, [project?.id, project?.files.length, frontierSession?.jwt])
+  const fileProgress = useMemo(
+    () => mergeFileProgress(allFilesProgressSnapshot, liveFileProgress),
+    [allFilesProgressSnapshot, liveFileProgress],
+  )
+  // SWARM-TODO(AQU-516) live-verify: open a project with multiple files,
+  // don't open any file — every file in the sidebar should show a progress
+  // indicator (amber/emerald bars in FileRow), and the numbers should match
+  // the PM dashboard's file table (org/ProjectOverview.tsx, same
+  // fetchProjectFiles source). Then open one file and confirm its bars stay
+  // live-accurate (move on edit) rather than freezing at the snapshot value.
 
   // PROTOTYPE (AD-14 health-as-confidence): derive per-cell health on read from
   // FTS5 similarity to validated cells, and overlay it onto the endorsement

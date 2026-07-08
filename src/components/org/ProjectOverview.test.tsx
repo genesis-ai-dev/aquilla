@@ -111,6 +111,8 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   rosterViewMinRole: 600,
   canViewMemberProgress: true,
   memberProgressViewMinRole: 600,
+  // AQU-496: default leads-only (matches the server's safe default).
+  allowSelfAssignment: false,
   refresh: vi.fn(async () => null),
   patch: vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })),
   requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),

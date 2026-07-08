@@ -4,8 +4,9 @@
 // module boundary so the type system AND lint together form a two-layer guard.
 
 import type { EventKind, EventClaims, RawEvent } from './types'
-import { requiredRoleFor } from './role-policy'
+import { requiredRoleFor, ROLE } from './role-policy'
 import { verifyTokenForDoc, verifyTokenForProject, type SyncTokenClaims } from '../auth'
+import { resolveAllowSelfAssignment } from './assignment-authority'
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
 export const PROJECT_SENTINEL_FILE_ID = '__project__'
@@ -14,6 +15,17 @@ export const PROJECT_SENTINEL_FILE_ID = '__project__'
 function isCommentKind(kind: string): boolean {
   return kind === 'comment.create' || kind === 'comment.edit' ||
     kind === 'comment.delete' || kind === 'comment.resolve'
+}
+
+/**
+ * AQU-496: true when `raw` is an `assignment.create` event whose payload
+ * assigns the scope to the CALLER themselves (never to anyone else). This is
+ * the only shape the self-assign carve-out below ever permits.
+ */
+function isSelfAssignCreate(raw: RawEvent<EventKind>, callerUserId: number): boolean {
+  if (raw.kind !== 'assignment.create') return false
+  const payload = raw.payload as { assigneeUserId?: unknown } | undefined
+  return typeof payload?.assigneeUserId === 'number' && payload.assigneeUserId === callerUserId
 }
 
 // Private symbol — NOT exported. Code outside this file cannot reproduce
@@ -69,6 +81,15 @@ export async function authorize<K extends EventKind>(
   token: string | null | undefined,
   raw: RawEvent<K>,
   secret: string | undefined,
+  /**
+   * AQU-496: optional DB handle for the self-assign carve-out below. Only
+   * `assignment.create` ever reads it (one org_settings lookup, memoized
+   * nowhere — callers batching many events should expect one query per
+   * below-floor assignment.create). Omitting `db` simply disables the
+   * carve-out (falls back to the static PROJECT_LEAD floor) rather than
+   * erroring — every existing caller/test that doesn't pass it keeps working.
+   */
+  db?: AquillaDb,
 ): Promise<AuthorizeResult<K>> {
   // 1. Secret must be configured — misconfigured deployment, not a client error.
   if (!secret) {
@@ -134,7 +155,20 @@ export async function authorize<K extends EventKind>(
 
   // Role gate: check that the token's role is sufficient for this event kind.
   if (tokenClaims.role < requiredRoleFor(raw.kind)) {
-    return { ok: false, status: 403, reason: `role too low for ${raw.kind}` }
+    // AQU-496: assignment.create self-assign carve-out. A below-lead member
+    // (CONTRIBUTOR=400+) may still pass here if (a) a DB handle was supplied,
+    // (b) the payload assigns the scope to THEMSELVES (never another user —
+    // isSelfAssignCreate checks this), and (c) the project's org has opted
+    // into allowSelfAssignment. Leads/maintainers never reach this branch —
+    // their role already clears requiredRoleFor above.
+    const selfAssignOk =
+      db != null &&
+      tokenClaims.role >= ROLE.CONTRIBUTOR &&
+      isSelfAssignCreate(raw as RawEvent<EventKind>, tokenClaims.userId) &&
+      (await resolveAllowSelfAssignment(db, raw.projectId))
+    if (!selfAssignOk) {
+      return { ok: false, status: 403, reason: `role too low for ${raw.kind}` }
+    }
   }
 
   const claims: EventClaims = {

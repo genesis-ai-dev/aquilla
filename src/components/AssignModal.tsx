@@ -7,8 +7,13 @@
 //   books      → one or more files (book-level)
 //
 // Emits one `assignment.create` event per invocation via createAssignment().
-// Role gate: only renders for PROJECT_LEAD (500) and above — server enforces
-// the same floor; the client gate is a UX affordance, not the security boundary.
+// Role gate: renders for PROJECT_LEAD (500) and above unconditionally, OR for
+// CONTRIBUTOR (400)+ when the org has opted into `allowSelfAssignment`
+// (AQU-496) — in which case the assignee picker is locked to the caller
+// themselves (a below-lead member may only claim work for THEMSELVES, never
+// assign to anyone else). Server enforces the same floor + self-only carve-out
+// in sync-worker/src/events/authorize.ts; the client gate is a UX affordance,
+// not the security boundary.
 
 import { useCallback, useEffect, useState } from "react"
 import { UserCheck } from "lucide-react"
@@ -16,6 +21,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   Field,
+  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
@@ -41,6 +47,7 @@ import type { ProjectMember } from "@/lib/frontier/members"
 import type { FileReference } from "@/lib/parsers/types"
 import { createAssignment, getFileChapters, AssignmentEmitError } from "@/lib/sync/assignments"
 import { ROLE } from "@/lib/frontier/roles"
+import { canOpenAssignUi, canSubmitAssignment } from "@/lib/sync/role-policy"
 
 type ScopeKind = "selection" | "verses" | "chapters" | "books"
 
@@ -56,6 +63,17 @@ interface AssignModalProps {
   members: ProjectMember[]
   /** Current user's role level — used to gate the modal. */
   roleLevel: number
+  /**
+   * AQU-496: whether the org allows below-lead (CONTRIBUTOR+) members to
+   * self-assign. Default false — leads/maintainers-only, pre-AQU-496 behavior.
+   */
+  allowSelfAssignment?: boolean
+  /**
+   * AQU-496: the caller's own Frontier user id. Required to lock the assignee
+   * picker to "self" when `roleLevel` is below PROJECT_LEAD — without it, a
+   * below-lead caller sees no eligible assignee (fails closed, not open).
+   */
+  callerUserId?: number | null
   /** Current editor selection (cell ids). Used for the selection scope. */
   selectedCellIds: ReadonlySet<string>
   /** JWT for API calls. */
@@ -81,11 +99,18 @@ export function AssignModal({
   projectFiles,
   members,
   roleLevel,
+  allowSelfAssignment = false,
+  callerUserId = null,
   selectedCellIds,
   jwt,
   author,
   onAssigned,
 }: AssignModalProps) {
+  // AQU-496: below PROJECT_LEAD, the only reason this modal can be open at
+  // all is the self-assign carve-out (see canOpenAssignUi gate below) — so
+  // "below lead" and "self-assign mode" are equivalent here.
+  const isSelfAssignMode = roleLevel < ROLE.PROJECT_LEAD
+
   const [scopeKind, setScopeKind] = useState<ScopeKind>("verses")
   const [selectedMemberId, setSelectedMemberId] = useState<string>("")
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set())
@@ -96,18 +121,20 @@ export function AssignModal({
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState("")
 
-  // Reset on open
+  // Reset on open. Self-assign mode locks the assignee to the caller so
+  // there's no accidental "assign to someone else" click before the picker
+  // is disabled below.
   useEffect(() => {
     if (open) {
       setScopeKind(selectedCellIds.size > 0 ? "selection" : "verses")
-      setSelectedMemberId("")
+      setSelectedMemberId(isSelfAssignMode && callerUserId != null ? String(callerUserId) : "")
       setSelectedFileIds(new Set())
       setSelectedChapters(new Set())
       setAvailableChapters([])
       setError(null)
       setNote("")
     }
-  }, [open, selectedCellIds.size])
+  }, [open, selectedCellIds.size, isSelfAssignMode, callerUserId])
 
   // Fetch chapters when scope=chapters and activeFileId is set
   useEffect(() => {
@@ -144,6 +171,14 @@ export function AssignModal({
     setError(null)
     const member = members.find((m) => String(m.userId) === selectedMemberId)
     if (!member) { setError("Select a member."); return }
+
+    // AQU-496 defense-in-depth: re-check even though the picker is already
+    // locked to self in self-assign mode — the server is authoritative and
+    // will 403 regardless, but this avoids a round-trip for the obvious case.
+    if (!canSubmitAssignment(roleLevel, allowSelfAssignment, callerUserId, member.userId)) {
+      setError("You can only assign work to yourself.")
+      return
+    }
 
     // Build scope + scopeLabel based on scopeKind
     let scope: { fileId: string; chapter?: string }[] = []
@@ -206,10 +241,25 @@ export function AssignModal({
     members, selectedMemberId, scopeKind, activeFileId, projectFiles,
     selectedCellIds.size, selectedChapters, selectedFileIds,
     jwt, projectId, author, note, onAssigned, onOpenChange,
+    roleLevel, allowSelfAssignment, callerUserId,
   ])
 
-  // Role gate: only render for PROJECT_LEAD (500)+
-  if (roleLevel < ROLE.PROJECT_LEAD) return null
+  // Role gate (AQU-496): PROJECT_LEAD (500)+ always renders; below that, only
+  // when the org's allowSelfAssignment carve-out applies (canOpenAssignUi).
+  if (!canOpenAssignUi(roleLevel, allowSelfAssignment)) return null
+
+  // AQU-496: in self-assign mode the picker is locked to the caller's own
+  // membership row. If callerUserId couldn't be resolved (edge case — caller
+  // not found in the project's member list), the picker has no options and
+  // canSubmit stays false, so this fails closed rather than open.
+  const assigneeItems = isSelfAssignMode
+    ? members
+        .filter((m) => m.userId === callerUserId)
+        .map((m) => ({ value: String(m.userId), label: `${m.username} (you)` }))
+    : [
+        { value: "", label: "Select member…" },
+        ...members.map((m) => ({ value: String(m.userId), label: m.username })),
+      ]
 
   const canSubmit = Boolean(selectedMemberId) && !submitting
 
@@ -306,27 +356,30 @@ export function AssignModal({
           <Field>
             <FieldLabel htmlFor="assign-modal-assignee">Assign to</FieldLabel>
             <Select
-              items={[
-                { value: "", label: "Select member…" },
-                ...members.map((m) => ({ value: String(m.userId), label: m.username })),
-              ]}
+              items={assigneeItems}
               value={selectedMemberId}
               onValueChange={(v) => setSelectedMemberId(v ?? "")}
+              disabled={isSelfAssignMode}
             >
               <SelectTrigger id="assign-modal-assignee" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  <SelectItem value="">Select member…</SelectItem>
-                  {members.map((m) => (
-                    <SelectItem key={m.userId} value={String(m.userId)}>
-                      {m.username}
+                  {assigneeItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
                     </SelectItem>
                   ))}
                 </SelectGroup>
               </SelectContent>
             </Select>
+            {isSelfAssignMode && (
+              <FieldDescription>
+                Self-assignment is on — you can claim this work for yourself. Only leads and
+                maintainers can assign work to someone else.
+              </FieldDescription>
+            )}
           </Field>
 
           <Field>

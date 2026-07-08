@@ -51,7 +51,7 @@ afterEach(() => vi.restoreAllMocks())
 
 // ── Role gate ────────────────────────────────────────────────────────────────
 describe("role gate", () => {
-  it("renders nothing when roleLevel is below PROJECT_LEAD", () => {
+  it("renders nothing when roleLevel is below PROJECT_LEAD (allowSelfAssignment defaults to off)", () => {
     const { container } = render(
       <AssignModal {...BASE_PROPS} roleLevel={ROLE.CONTRIBUTOR} />,
     )
@@ -61,6 +61,59 @@ describe("role gate", () => {
   it("renders the modal when roleLevel is PROJECT_LEAD", () => {
     render(<AssignModal {...BASE_PROPS} />)
     expect(screen.getByText("Assign work")).toBeTruthy()
+  })
+})
+
+// ── AQU-496: self-assign carve-out ──────────────────────────────────────────
+describe("self-assign carve-out (AQU-496)", () => {
+  const SELF_MEMBER = { userId: 42, username: "anna", role: { level: 400, name: "contributor", source: "override" as const }, secondarySources: [] }
+  const SELF_ASSIGN_PROPS = {
+    ...BASE_PROPS,
+    roleLevel: ROLE.CONTRIBUTOR,
+    allowSelfAssignment: true,
+    callerUserId: 42,
+    members: [SELF_MEMBER, BASE_PROPS.members[1]],
+  }
+
+  it("still renders nothing below CONTRIBUTOR (VIEWER) even with allowSelfAssignment on", () => {
+    const { container } = render(
+      <AssignModal {...SELF_ASSIGN_PROPS} roleLevel={ROLE.VIEWER} />,
+    )
+    expect(container.firstChild).toBeNull()
+  })
+
+  it("renders for a CONTRIBUTOR when allowSelfAssignment is on", () => {
+    render(<AssignModal {...SELF_ASSIGN_PROPS} />)
+    expect(screen.getByText("Assign work")).toBeTruthy()
+  })
+
+  it("locks the assignee picker to the caller and disables it", () => {
+    render(<AssignModal {...SELF_ASSIGN_PROPS} />)
+    const trigger = screen.getByRole("combobox", { name: /assign to/i })
+    expect(trigger.textContent).toMatch(/anna/i)
+    expect((trigger as HTMLButtonElement).disabled).toBe(true)
+    // "bob" (a different member) must never appear as a pickable option.
+    expect(screen.queryByText("bob")).toBeNull()
+  })
+
+  it("submits assignment.create with the caller's own userId as assigneeUserId", async () => {
+    render(<AssignModal {...SELF_ASSIGN_PROPS} />)
+    fireEvent.click(screen.getByRole("button", { name: /assign/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    const args = mockCreate.mock.calls[0][0]
+    expect(args.assigneeUserId).toBe(42)
+  })
+
+  it("shows explanatory copy that self-assignment is on", () => {
+    render(<AssignModal {...SELF_ASSIGN_PROPS} />)
+    expect(screen.getByText(/self-assignment is on/i)).toBeTruthy()
+  })
+
+  it("fails closed (no eligible assignee, submit blocked) when callerUserId can't be resolved", () => {
+    render(<AssignModal {...SELF_ASSIGN_PROPS} callerUserId={null} />)
+    // Trigger renders no committed label — placeholder only, nothing to pick.
+    const assignBtn = screen.getByRole("button", { name: /^assign$/i })
+    expect((assignBtn as HTMLButtonElement).disabled).toBe(true)
   })
 })
 

@@ -49,6 +49,17 @@ export interface OrgWideSettings {
    */
   memberProgressViewMinRole?: number
   /**
+   * AQU-496: whether members below project_lead (500) may emit
+   * `assignment.create` for THEMSELVES (claim a book/take) — never for
+   * anyone else. Default (when absent) = false, preserving the pre-AQU-496
+   * leads-only behavior. Leads/maintainers can always assign regardless.
+   * Same OWNER-only write gate as exportMinRole/rosterViewMinRole (see
+   * EXPORT_FLOOR_WRITE_MIN_ROLE in auth-worker/src/routes/org-settings.ts) —
+   * a maintainer must not be able to unilaterally loosen who can assign work.
+   * Enforced server-side in sync-worker (authorize.ts self-assign carve-out).
+   */
+  allowSelfAssignment?: boolean
+  /**
    * FRO-433: Org-scoped provider API keys. Set once by an org owner/maintainer;
    * used as the baseline for all members and projects in the org.
    * Precedence: project key > user (localStorage) key > org key.

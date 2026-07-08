@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
+import { canSubmitAssignment } from "@/lib/sync/role-policy"
 import { Button } from "@/components/ui/button"
 import {
   DatePicker,
@@ -8,6 +9,7 @@ import {
 } from "@/components/ui/date-picker"
 import {
   Field,
+  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
@@ -22,11 +24,28 @@ import {
 } from "@/components/ui/select"
 
 /**
- * Manager affordance (project_lead+) on the project overview: assign a book or
- * chapter scope to an org member. Collapsed to an "Assign…" button until
- * opened; emits one assignment.create on submit. Book scope = whole file;
- * chapter scope = a real chapter picked from the file's chapter dropdown
- * (the canonical_ref prefix, e.g. "GEN 1", matched server-side via LIKE).
+ * Manager affordance (project_lead+ by default) on the project overview:
+ * assign a book or chapter scope to an org member. Collapsed to an "Assign…"
+ * button until opened; emits one assignment.create on submit. Book scope =
+ * whole file; chapter scope = a real chapter picked from the file's chapter
+ * dropdown (the canonical_ref prefix, e.g. "GEN 1", matched server-side via
+ * LIKE).
+ *
+ * AQU-496: below-lead self-assignment is supported via the optional
+ * `roleLevel` / `allowSelfAssignment` / `callerUserId` props — when the
+ * caller's role is below project_lead but the org has opted into
+ * allowSelfAssignment, the assignee picker locks to the caller themselves
+ * (never anyone else; server re-enforces in sync-worker/events/authorize.ts).
+ * Omitting these props preserves the original lead-only behavior byte for
+ * byte (all three default to values that keep the pre-AQU-496 gate).
+ *
+ * SWARM-TODO(AQU-496): the only current caller (org/ProjectOverview.tsx,
+ * "Team" card) does not pass roleLevel/allowSelfAssignment/callerUserId yet —
+ * that file is out of this worktree's ownership (concurrent AQU-49x lane), so
+ * self-assignment isn't reachable from that surface until it's wired up
+ * there too (its own `canAssign` gate at ~line 478 also needs the same
+ * `canOpenAssignUi` swap that ProjectWorkspace.tsx got). The fully-wired,
+ * verifiable click-path today is ProjectWorkspace.tsx's AssignModal.
  */
 export interface AssignWorkProps {
   projectId: string
@@ -36,6 +55,15 @@ export interface AssignWorkProps {
   jwt: string
   /** Manager's username — stamped as the event author (server re-verifies). */
   author: string
+  /**
+   * AQU-496: caller's role level. Defaults to PROJECT_LEAD (500) so callers
+   * that don't pass it keep the pre-AQU-496 "always a manager" assumption.
+   */
+  roleLevel?: number
+  /** AQU-496: whether the org allows below-lead members to self-assign. */
+  allowSelfAssignment?: boolean
+  /** AQU-496: the caller's own Frontier user id, for self-assign mode. */
+  callerUserId?: number | null
   /**
    * Called after a successful assign so the parent can refresh rollups.
    *
@@ -50,10 +78,29 @@ export interface AssignWorkProps {
   onAssigned?: () => void
 }
 
-export function AssignWork({ projectId, files, orgId, jwt, author, onAssigned }: AssignWorkProps) {
+const DEFAULT_ROLE_LEVEL = 500 // ROLE.PROJECT_LEAD — see src/lib/sync/role-policy.ts
+
+export function AssignWork({
+  projectId,
+  files,
+  orgId,
+  jwt,
+  author,
+  roleLevel = DEFAULT_ROLE_LEVEL,
+  allowSelfAssignment = false,
+  callerUserId = null,
+  onAssigned,
+}: AssignWorkProps) {
+  // AQU-496: mirrors AssignModal's isSelfAssignMode — true only when the
+  // caller is below lead (the only way this component is usable below lead
+  // is via the allowSelfAssignment carve-out; callers gate rendering on
+  // canOpenAssignUi upstream, same contract as AssignModal).
+  const isSelfAssignMode = roleLevel < DEFAULT_ROLE_LEVEL
   const [open, setOpen] = useState(false)
   const [members, setMembers] = useState<OrgMember[]>([])
-  const [assigneeId, setAssigneeId] = useState<number | "">("")
+  const [assigneeId, setAssigneeId] = useState<number | "">(
+    isSelfAssignMode && callerUserId != null ? callerUserId : "",
+  )
   const [fileId, setFileId] = useState(files[0]?.id ?? "")
   const [chapter, setChapter] = useState("")
   const [chapters, setChapters] = useState<string[]>([])
@@ -85,6 +132,13 @@ export function AssignWork({ projectId, files, orgId, jwt, author, onAssigned }:
 
   async function submit() {
     if (assigneeId === "" || !fileId) return
+    // AQU-496 defense-in-depth: re-check even though the picker is already
+    // locked to self in self-assign mode — the server is authoritative and
+    // will 403 regardless.
+    if (!canSubmitAssignment(roleLevel, allowSelfAssignment, callerUserId, Number(assigneeId))) {
+      setError("You can only assign work to yourself.")
+      return
+    }
     const fileName = files.find((f) => f.id === fileId)?.name ?? "file"
     const chap = chapter.trim()
     const scopeKind = chap ? "chapters" : "books"
@@ -133,26 +187,47 @@ export function AssignWork({ projectId, files, orgId, jwt, author, onAssigned }:
           <Field>
             <FieldLabel htmlFor="assign-work-assignee">Assignee</FieldLabel>
             <Select
-              items={[
-                { value: "", label: "Select member…" },
-                ...members.map((m) => ({ value: String(m.userId), label: m.username })),
-              ]}
+              items={
+                isSelfAssignMode
+                  ? members
+                      .filter((m) => m.userId === callerUserId)
+                      .map((m) => ({ value: String(m.userId), label: `${m.username} (you)` }))
+                  : [
+                      { value: "", label: "Select member…" },
+                      ...members.map((m) => ({ value: String(m.userId), label: m.username })),
+                    ]
+              }
               value={assigneeId === "" ? "" : String(assigneeId)}
               onValueChange={(v) => setAssigneeId(v == null || v === "" ? "" : Number(v))}
-              disabled={busy}
+              disabled={busy || isSelfAssignMode}
             >
               <SelectTrigger id="assign-work-assignee" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  <SelectItem value="">Select member…</SelectItem>
-                  {members.map((m) => (
-                    <SelectItem key={m.userId} value={String(m.userId)}>{m.username}</SelectItem>
-                  ))}
+                  {isSelfAssignMode ? (
+                    members
+                      .filter((m) => m.userId === callerUserId)
+                      .map((m) => (
+                        <SelectItem key={m.userId} value={String(m.userId)}>{m.username} (you)</SelectItem>
+                      ))
+                  ) : (
+                    <>
+                      <SelectItem value="">Select member…</SelectItem>
+                      {members.map((m) => (
+                        <SelectItem key={m.userId} value={String(m.userId)}>{m.username}</SelectItem>
+                      ))}
+                    </>
+                  )}
                 </SelectGroup>
               </SelectContent>
             </Select>
+            {isSelfAssignMode && (
+              <FieldDescription>
+                Self-assignment is on — you can claim this work for yourself.
+              </FieldDescription>
+            )}
           </Field>
           <Field>
             <FieldLabel htmlFor="assign-work-book">Book</FieldLabel>

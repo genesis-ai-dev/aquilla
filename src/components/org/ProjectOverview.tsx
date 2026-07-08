@@ -786,6 +786,17 @@ export function ProjectOverview() {
                         </span>
                       </span>
                     </div>
+                    {/*
+                      SWARM-TODO(AQU-499): verify live — open a Scripture
+                      project overview, change the "Sort files by" dropdown
+                      to "Canonical order" and confirm Genesis-before-Exodus
+                      (and OT-before-NT) row order; switch to "Alphabetical"
+                      and confirm plain name order; type into the filter box
+                      and confirm rows narrow to matching file names; expand
+                      a file's chapter/verse rollup (AQU-493), change sort,
+                      and confirm the same file's rollup is still expanded
+                      after its row moves.
+                    */}
                     <div className="mb-3 flex flex-wrap items-center gap-2">
                       <Input
                         type="text"

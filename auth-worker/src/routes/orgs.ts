@@ -193,8 +193,11 @@ orgs.get("/:orgId/members/:userId/access", async (c) => {
 })
 
 /**
- * GET /api/v2/orgs/:orgId/assignments/workload — per-assignee open workload +
- * derived progress across the org's active projects. Maintainer+ (managers).
+ * GET /api/v2/orgs/:orgId/assignments/workload — every open assignment across
+ * the org's active projects, with project + progress attribution (AQU-494:
+ * one row per assignment, not aggregated by assignee, so the manager can see
+ * which project each assignment belongs to and remove any one of them).
+ * Maintainer+ (managers).
  */
 orgs.get("/:orgId/assignments/workload", async (c) => {
   const user = c.get("user")
@@ -204,8 +207,8 @@ orgs.get("/:orgId/assignments/workload", async (c) => {
   if (role == null || role < ROLE.MAINTAINER) {
     return c.json({ error: "org role >= maintainer required" }, 403)
   }
-  const workload = await getOrgAssignmentWorkload(c.env, orgId)
-  return c.json({ workload })
+  const assignments = await getOrgAssignmentWorkload(c.env, orgId)
+  return c.json({ assignments })
 })
 
 /**

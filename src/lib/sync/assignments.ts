@@ -24,6 +24,25 @@ export interface AssigneeWorkload {
   cellsDone: number
 }
 
+/**
+ * One open assignment in the org-wide "Team workload" view, with its project
+ * attribution (mirrors OrgAssignmentRow on the server — AQU-494). `fileId` is
+ * one of the assignment's resolved cells' files, used to route an unassign
+ * event's sync-token request; null only if the scope resolved to zero cells.
+ */
+export interface OrgWorkloadAssignment {
+  assignmentId: string
+  projectId: string
+  projectName: string
+  fileId: string | null
+  assigneeUserId: number
+  username: string | null
+  scopeLabel: string
+  cellsTotal: number
+  cellsDone: number
+  deadline: string | null
+}
+
 /** A single open assignment in the caller's inbox (mirrors the server). */
 export interface MyAssignment {
   assignmentId: string
@@ -37,14 +56,19 @@ export interface MyAssignment {
   createdAt: number
 }
 
-/** Manager view: per-assignee open workload + derived progress (maintainer+). */
-export async function getWorkload(jwt: string, orgId: number): Promise<AssigneeWorkload[]> {
+/**
+ * Manager view: every open assignment across the org's active projects, with
+ * project + derived progress attribution (maintainer+). One row per
+ * assignment — AQU-494: a per-assignee aggregate couldn't say which project
+ * an assignment belonged to.
+ */
+export async function getWorkload(jwt: string, orgId: number): Promise<OrgWorkloadAssignment[]> {
   const res = await fetchWithTimeout(
     `${FRONTIER_BASE}/api/v2/orgs/${orgId}/assignments/workload`,
     { headers: { Authorization: `Bearer ${jwt}` } },
   )
   if (!res.ok) throw new UserError(res.status, "", "org")
-  return ((await res.json()) as { workload: AssigneeWorkload[] }).workload
+  return ((await res.json()) as { assignments: OrgWorkloadAssignment[] }).assignments
 }
 
 /** Assignee inbox: the caller's open assignments in one project (any member). */
@@ -116,6 +140,45 @@ export class AssignmentEmitError extends Error {
   }
 }
 
+/**
+ * POST one already-built assignment.* event to the sync-worker, mint its
+ * sync token, and await server acceptance. Shared by createAssignment and
+ * unassignAssignment. Throws AssignmentEmitError on transport failure or
+ * server rejection (e.g. role too low → 403, surfaced from `rejected`).
+ */
+async function postAssignmentEvent(
+  jwt: string,
+  projectId: string,
+  fileId: string,
+  event: ReturnType<typeof buildRawEvent>,
+): Promise<void> {
+  const { token } = await fetchSyncToken(jwt, projectId, fileId)
+  let res: Response
+  try {
+    res = await fetch(`${syncWorkerHttpOrigin()}/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ events: [event] }),
+    })
+  } catch (err) {
+    throw new AssignmentEmitError(err instanceof Error ? err.message : "network error")
+  }
+  if (!res.ok) {
+    throw new AssignmentEmitError(`Request failed (HTTP ${res.status})`, res.status)
+  }
+  const body = (await res.json().catch(() => null)) as {
+    accepted?: Array<{ id: string }>
+    rejected?: Array<{ id: string; status: number; reason: string }>
+  } | null
+  const rejected = body?.rejected ?? []
+  if (rejected.length > 0) {
+    throw new AssignmentEmitError(rejected[0].reason || "event rejected", rejected[0].status)
+  }
+  if (!(body?.accepted ?? []).some((a) => a.id === event.id)) {
+    throw new AssignmentEmitError("event was not accepted by the server")
+  }
+}
+
 export interface CreateAssignmentArgs {
   jwt: string
   projectId: string
@@ -157,30 +220,38 @@ export async function createAssignment(args: CreateAssignmentArgs): Promise<stri
     },
   })
 
-  const { token } = await fetchSyncToken(args.jwt, args.projectId, args.fileId)
-  let res: Response
-  try {
-    res = await fetch(`${syncWorkerHttpOrigin()}/events`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ events: [event] }),
-    })
-  } catch (err) {
-    throw new AssignmentEmitError(err instanceof Error ? err.message : "network error")
-  }
-  if (!res.ok) {
-    throw new AssignmentEmitError(`Assign failed (HTTP ${res.status})`, res.status)
-  }
-  const body = (await res.json().catch(() => null)) as {
-    accepted?: Array<{ id: string }>
-    rejected?: Array<{ id: string; status: number; reason: string }>
-  } | null
-  const rejected = body?.rejected ?? []
-  if (rejected.length > 0) {
-    throw new AssignmentEmitError(rejected[0].reason || "assignment rejected", rejected[0].status)
-  }
-  if (!(body?.accepted ?? []).some((a) => a.id === event.id)) {
-    throw new AssignmentEmitError("assignment was not accepted by the server")
-  }
+  await postAssignmentEvent(args.jwt, args.projectId, args.fileId, event)
   return assignmentId
+}
+
+export interface UnassignAssignmentArgs {
+  jwt: string
+  projectId: string
+  /** A file within the project — routes the sync token (project-level
+   *  semantics live in the payload, same convention as createAssignment). */
+  fileId: string
+  /** The caller's username (stamped as the event author; server re-verifies). */
+  author: string
+  assignmentId: string
+}
+
+/**
+ * Emit one `assignment.unassign` event to soft-close an assignment (AQU-494:
+ * "remove"/"clear" an assignment from the team-workload view). Works
+ * regardless of the assignment's progress — completed or not, this just sets
+ * `unassigned_at` server-side; it never touches assignment_cells or the
+ * underlying cells, so validated work is untouched. Awaits server acceptance;
+ * throws AssignmentEmitError on transport failure or rejection (e.g. role too
+ * low → 403).
+ */
+export async function unassignAssignment(args: UnassignAssignmentArgs): Promise<void> {
+  const event = buildRawEvent({
+    kind: "assignment.unassign",
+    projectId: args.projectId,
+    fileId: args.fileId,
+    parentId: null,
+    author: args.author,
+    payload: { assignmentId: args.assignmentId },
+  })
+  await postAssignmentEvent(args.jwt, args.projectId, args.fileId, event)
 }

@@ -155,6 +155,40 @@ describe("deriveProjectStatus", () => {
   })
 })
 
+describe("ProjectOverview load states", () => {
+  it("shows retry UI for unreachable project loads instead of an endless loading state", async () => {
+    useProject.mockReturnValue({
+      project: null,
+      status: "unreachable",
+      refresh,
+    })
+
+    renderOverview()
+
+    expect(await screen.findByText(/can't reach the server/i)).toBeInTheDocument()
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /^retry$/i }))
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows a sign-in state when the project cannot load because there is no session", async () => {
+    useProject.mockReturnValue({
+      project: null,
+      status: "no-session",
+      refresh,
+    })
+
+    renderOverview()
+
+    expect(await screen.findByText(/sign in to open this project from the cloud/i)).toBeInTheDocument()
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }))
+    expect(navigate).toHaveBeenCalledWith("/login?next=%2Fprojects%2Fp1")
+  })
+})
+
 // ── Per-metric conditionality ──────────────────────────────────────────────
 
 describe("ProjectOverview per-metric conditionality (FRO-168)", () => {

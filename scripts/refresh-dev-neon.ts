@@ -21,6 +21,10 @@ function env(name: string, fallback?: string): string {
   throw new Error(`${name} is required`)
 }
 
+function optionalEnv(name: string): string | null {
+  return process.env[name]?.trim() || null
+}
+
 function ensureSafeTarget(branch: string, source: string): void {
   const normalized = branch.toLowerCase()
   if (["main", "prod", "production"].includes(normalized)) {
@@ -101,26 +105,44 @@ function pgEnvFromConnectionString(connectionString: string): NodeJS.ProcessEnv 
   }
 }
 
-async function checkHealth(url: string): Promise<void> {
+async function checkHttp(
+  url: string,
+  label: string,
+  headers: Record<string, string> = {},
+): Promise<void> {
   const attempts = 6
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), 15_000)
-      const response = await fetch(url, { signal: controller.signal })
+      const response = await fetch(url, { signal: controller.signal, headers })
       clearTimeout(timeout)
       if (response.ok) {
-        console.log(`✓ Dev API health check passed: ${url}`)
+        console.log(`✓ ${label} passed: ${url}`)
         return
       }
-      console.log(`Dev API health attempt ${attempt}/${attempts} returned HTTP ${response.status}`)
+      const body = await response.text().catch(() => "")
+      console.log(`${label} attempt ${attempt}/${attempts} returned HTTP ${response.status}${body ? `: ${body.slice(0, 300)}` : ""}`)
     } catch (error) {
-      console.log(`Dev API health attempt ${attempt}/${attempts} failed: ${String(error)}`)
+      console.log(`${label} attempt ${attempt}/${attempts} failed: ${String(error)}`)
     }
 
     if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 5_000))
   }
-  throw new Error(`Dev API health check failed after ${attempts} attempts: ${url}`)
+  throw new Error(`${label} failed after ${attempts} attempts: ${url}`)
+}
+
+async function checkProjectRead(url: string | null, token: string | null): Promise<void> {
+  if (!url) {
+    console.log("Skipping dev project-read health check: DEV_API_PROJECT_READ_URL is not set")
+    return
+  }
+  if (!token) {
+    throw new Error("DEV_API_PROJECT_READ_TOKEN is required when DEV_API_PROJECT_READ_URL is set")
+  }
+  await checkHttp(url, "Dev API project-read check", {
+    Authorization: `Bearer ${token}`,
+  })
 }
 
 async function main() {
@@ -130,6 +152,8 @@ async function main() {
   const database = env("NEON_DEV_DATABASE", DEFAULT_DATABASE)
   const role = env("NEON_DEV_ROLE", DEFAULT_ROLE)
   const healthUrl = env("DEV_API_HEALTH_URL", DEFAULT_HEALTH_URL)
+  const projectReadUrl = optionalEnv("DEV_API_PROJECT_READ_URL")
+  const projectReadToken = optionalEnv("DEV_API_PROJECT_READ_TOKEN")
 
   ensureSafeTarget(devBranch, sourceBranch)
 
@@ -162,7 +186,8 @@ async function main() {
     await run("pnpm", ["neon:apply"], { env: migrationEnv })
   }
 
-  await checkHealth(healthUrl)
+  await checkHttp(healthUrl, "Dev API health check")
+  await checkProjectRead(projectReadUrl, projectReadToken)
 }
 
 main().catch((error) => {

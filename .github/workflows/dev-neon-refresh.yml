@@ -60,4 +60,6 @@ jobs:
           NEON_DEV_DATABASE: neondb
           NEON_DEV_ROLE: neondb_owner
           DEV_API_HEALTH_URL: https://api.dev.aquilla.app/identity/api/v2/health
+          DEV_API_PROJECT_READ_URL: ${{ secrets.DEV_API_PROJECT_READ_URL }}
+          DEV_API_PROJECT_READ_TOKEN: ${{ secrets.DEV_API_PROJECT_READ_TOKEN }}
         run: pnpm neon:refresh-dev

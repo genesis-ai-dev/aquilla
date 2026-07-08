@@ -365,6 +365,38 @@ export function ProjectOverview() {
       ? `${project.sourceLanguage} → ${project.targetLanguage}`
       : project?.targetLanguage ?? project?.sourceLanguage ?? null
 
+  const nonReadyContent =
+    status === "loading" ? (
+      <p className="text-sm text-muted-foreground">Loading…</p>
+    ) : status === "unreachable" ? (
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950">
+        <span className="text-amber-800 dark:text-amber-200">
+          Can't reach the server — this project may still be available.
+        </span>
+        <Button
+          type="button"
+          size="sm"
+          onClick={refresh}
+          className="shrink-0 bg-amber-800 text-white hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600"
+        >
+          Retry
+        </Button>
+      </div>
+    ) : status === "no-session" ? (
+      <div className="rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
+        <p>Sign in to open this project from the cloud.</p>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="mt-3"
+          onClick={() => navigate(`/login?next=${encodeURIComponent(`/projects/${id}`)}`)}
+        >
+          Sign in
+        </Button>
+      </div>
+    ) : null
+
   return (
     <AppShell
       sidebar={<OrgSidebar />}
@@ -381,10 +413,10 @@ export function ProjectOverview() {
             />
           )}
           <div className="p-6">
-          {status !== "ready" ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
-          ) : (
-            <div className="max-w-5xl space-y-4">
+            {status !== "ready" ? (
+              nonReadyContent
+            ) : (
+              <div className="max-w-5xl space-y-4">
               {/* ── Header card ── */}
               <div className="rounded-xl border bg-card p-6">
                 <div className="flex items-start justify-between gap-4">

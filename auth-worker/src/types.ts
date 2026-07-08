@@ -91,6 +91,9 @@ export interface Env {
   /** Fallback model for the translation agent (routes/agent.ts) when
    *  platform_settings.agentModel is unset. Default: anthropic/claude-haiku-4-5. */
   AGENT_MODEL_DEFAULT?: string
+  /** Fallback model for the agent's server-side `draft` tool when
+   *  platform_settings.agentDraftModel is unset. Default: the agent model. */
+  AGENT_DRAFT_MODEL_DEFAULT?: string
   /** Dev/e2e only: override the OpenRouter API base (e.g. the scripted mock
    *  in scripts/mock-openrouter.ts). Never set in prod. */
   OPENROUTER_BASE_URL?: string

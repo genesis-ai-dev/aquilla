@@ -37,6 +37,10 @@ export interface PlatformSettings {
   defaultLlmModel?: string
   /** Model the translation agent runs on (routes/agent.ts). */
   agentModel?: string
+  /** Model the agent's server-side `draft` tool translates with (falls back
+   *  to the agent model — the orchestrator can stay cheap while drafting
+   *  quality comes from a stronger model). */
+  agentDraftModel?: string
   /** Allowlist of model IDs accepted by the AI guard (lib/ai-budget.ts). */
   allowedModels?: string[]
   /** Max AI requests per user per UTC day. */

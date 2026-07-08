@@ -88,9 +88,14 @@ describe("buildSystemPrompt — role filtering", () => {
     expect(prompt).toContain('"segment 8"')
   })
 
-  it("nudges cookbook-first for task-shaped work", () => {
+  it("teaches the semantic tools and demotes sql to an escape hatch", () => {
     const prompt = buildSystemPrompt({ ...baseCtx, roleLevel: 400 })
-    expect(prompt).toContain("cookbook FIRST")
+    expect(prompt).toContain("read(")
+    expect(prompt).toContain("draft(")
+    expect(prompt).toContain("examples(")
+    expect(prompt).toContain("ESCAPE HATCH")
+    // The recipe steers drafting through the pipeline tool, not hand-writing.
+    expect(prompt).toContain("Do NOT hand-write translations")
   })
 
   // Budget mirrors frequency: drafting is the 80% case, so its canonical

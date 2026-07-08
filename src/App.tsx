@@ -189,6 +189,8 @@ function AppRoutes() {
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
         {/* FRO-194: /rules deep-link renders inside ProjectWorkspace shell — shell stays mounted. */}
         <Route path="/project/:id/rules" element={<ProjectWorkspace />} />
+        {/* Agent workbench — full-screen agent surface inside the shell (agent-mode-v2 §4). */}
+        <Route path="/project/:id/agent" element={<ProjectWorkspace />} />
         {/* ISSUE-3 fix: /voice deep-link — workspace detects suffix and activates audio lens. */}
         <Route path="/project/:id/voice" element={<ProjectWorkspace />} />
         {/* FRO-254: terminology/comments/memory now render inside the ProjectWorkspace shell

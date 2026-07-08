@@ -63,6 +63,16 @@ describe("worker/index — routing", () => {
     expect(await res.text()).toBe("served:/homepage.html")
   })
 
+  it("GET /bible-translation always serves bible-translation.html (no cookie)", async () => {
+    const res = await fetchWorker("/bible-translation")
+    expect(await res.text()).toBe("served:/bible-translation.html")
+  })
+
+  it("GET /bible-translation always serves bible-translation.html (even with aq_hint=1)", async () => {
+    const res = await fetchWorker("/bible-translation", "aq_hint=1")
+    expect(await res.text()).toBe("served:/bible-translation.html")
+  })
+
   it("GET /beta serves beta.html (static marketing page, no cookie)", async () => {
     const res = await fetchWorker("/beta")
     expect(await res.text()).toBe("served:/beta.html")

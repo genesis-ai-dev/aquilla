@@ -49,6 +49,8 @@ export function deriveNavTitle(pathname: string): string {
         return "Project settings"
       case "rules":
         return "Checks & rules"
+      case "agent":
+        return "Agent"
       case "voice":
         return "Voice"
       case "terminology":

@@ -255,7 +255,7 @@ describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
   // WHY: audio-only projects must hide text metrics; text-only must hide audio.
   // Showing irrelevant metrics confuses managers scanning project state.
 
-  it("text-only project: shows Translated/Validated tiles but hides Audio tile", async () => {
+  it("text-only project: shows Translated/Validated tiles but hides Has Audio / Audio Validated tiles", async () => {
     fetchSyncToken.mockResolvedValue({ token: "tok" })
     fetchProjectFiles.mockResolvedValue([])
     useProject.mockReturnValue({
@@ -273,11 +273,14 @@ describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
     // Translated and Validated tiles should appear (text content present)
     await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
     expect(screen.getAllByText("Validated").length).toBeGreaterThan(0)
-    // Audio tile must NOT appear (audioCells === 0)
-    expect(screen.queryByText("Audio")).not.toBeInTheDocument()
+    // Neither audio tile may appear (audioCells === 0) — AQU-490: this also
+    // guards against a false-positive "Audio Validated" figure on a
+    // text-only project, since neither field exists to fabricate one from.
+    expect(screen.queryByText("Has Audio")).not.toBeInTheDocument()
+    expect(screen.queryByText("Audio Validated")).not.toBeInTheDocument()
   })
 
-  it("audio-only project: shows Audio tile but hides Translated/Validated tiles", async () => {
+  it("audio-only project: shows Has Audio + Audio Validated (N/A) tiles but hides Translated/Validated tiles", async () => {
     fetchSyncToken.mockResolvedValue({ token: "tok" })
     fetchProjectFiles.mockResolvedValue([])
     useProject.mockReturnValue({
@@ -294,17 +297,23 @@ describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
     }])
     renderOverview()
 
-    // Audio tile should appear
-    await waitFor(() => expect(screen.getAllByText("Audio").length).toBeGreaterThan(0))
+    // Has Audio (coverage) tile should appear
+    await waitFor(() => expect(screen.getAllByText("Has Audio").length).toBeGreaterThan(0))
     // Translated and Validated must NOT appear (filledCells === 0 means showText is false,
     // but note: totalCells > 0 means hasText=true in current logic which guards on totalCells.
     // The real guard is audioCells > 0 for audio, and totalCells > 0 for text.
     // For audio-only: filledCells=0 but totalCells=100, so text bars still show.
     // Per FRO-168 spec: hide text metrics only when "no text content (translatable cells > 0)".
     // totalCells > 0 means there IS translatable content, so text bars appear even if empty.
-    // The audio-only guard is specifically: audioCells > 0 shows Audio, always shows text when totalCells > 0.
-    // This test therefore confirms Audio appears when audioCells > 0.
-    expect(screen.getAllByText("Audio").length).toBeGreaterThan(0)
+    // The audio-only guard is specifically: audioCells > 0 shows Has Audio, always shows text when totalCells > 0.
+    // This test therefore confirms Has Audio appears when audioCells > 0.
+    expect(screen.getAllByText("Has Audio").length).toBeGreaterThan(0)
+    // AQU-490: a distinct audio-validated count doesn't exist server-side
+    // (see the in-component comment for the full investigation). The tile
+    // must appear — labeled, honest, and reading "N/A" — never a fabricated
+    // percentage.
+    expect(screen.getByText("Audio Validated")).toBeInTheDocument()
+    expect(screen.getByText("N/A")).toBeInTheDocument()
   })
 })
 
@@ -453,8 +462,8 @@ describe("ProjectOverview audio progress (FRO-160)", () => {
     renderOverview()
 
     // The progress section should be present (totalCells > 0).
-    // The "Audio" label must appear in the StatBar list.
-    await waitFor(() => expect(screen.getAllByText("Audio").length).toBeGreaterThan(0))
+    // The "Has Audio" label must appear in the StatBar list (AQU-490 relabel).
+    await waitFor(() => expect(screen.getAllByText("Has Audio").length).toBeGreaterThan(0))
     // The audio StatBar displays "30%" in its percentage column.
     // getAllByText because translated (80%) and validated (50%) also render %.
     const pctLabels = screen.getAllByText(/^\d+%$/)
@@ -485,11 +494,12 @@ describe("ProjectOverview audio progress (FRO-160)", () => {
 
     renderOverview()
 
-    // When audioCells === 0, Audio tile/bar is hidden (per-metric conditionality).
+    // When audioCells === 0, Has Audio tile/bar is hidden (per-metric conditionality).
     // So we just confirm the progress section renders with text metrics.
     await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
-    // Audio should be hidden
-    expect(screen.queryByText("Audio")).not.toBeInTheDocument()
+    // Audio tiles should be hidden
+    expect(screen.queryByText("Has Audio")).not.toBeInTheDocument()
+    expect(screen.queryByText("Audio Validated")).not.toBeInTheDocument()
   })
 })
 

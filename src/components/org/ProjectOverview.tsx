@@ -111,10 +111,19 @@ function DeadlineChip({ status }: { status: "overdue" | "soon" | "ok" | null }) 
 
 // ── Stat tiles (big %) ────────────────────────────────────────────────────────
 
-function StatTile({ label, pct, colorClass, tooltip }: { label: string; pct: number; colorClass: string; tooltip?: string }) {
+function StatTile({ label, pct, colorClass, tooltip, display }: {
+  label: string
+  pct: number
+  colorClass: string
+  tooltip?: string
+  /** AQU-490: override the rendered value (e.g. "N/A") when there is no real
+   *  metric to show a percentage for. `pct` is still required by callers but
+   *  ignored visually when `display` is set. */
+  display?: string
+}) {
   const tile = (
     <div className="flex flex-col items-center rounded-lg bg-muted/40 px-5 py-3 text-center">
-      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{Math.round(pct * 100)}%</p>
+      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{display ?? `${Math.round(pct * 100)}%`}</p>
       <p className="mt-0.5 text-[11px] text-muted-foreground">{label}</p>
     </div>
   )
@@ -688,6 +697,17 @@ export function ProjectOverview() {
                   with project access can see it. The badge is read-only
                   (informational), matching that reality rather than implying
                   a toggle that doesn't exist server-side. */}
+              {/*
+               * SWARM-TODO(AQU-490): verify live — open an oral/dubbed project
+               * overview with partial audio validation and confirm the Progress
+               * card shows "Has Audio" (coverage, relabeled from "Audio") and a
+               * separate "Audio Validated" tile reading "N/A" with a tooltip
+               * explaining validation isn't tracked per-medium yet; then open a
+               * text-only project and confirm neither audio tile renders (no
+               * misleading figure). Blocked on new server work — see the
+               * in-card comment above the "Audio Validated" tile for exactly
+               * what's missing.
+               */}
               {audio && audio.totalCells > 0 && (
                 <div className="rounded-xl border bg-card p-5">
                   <div className="mb-3 flex items-center justify-between gap-2">
@@ -712,9 +732,45 @@ export function ProjectOverview() {
                       </>
                     )}
                     {showAudio && (
-                      <StatTile label="Audio" pct={audioPct(audio)} colorClass="text-sky-600" />
+                      <>
+                        <StatTile
+                          label="Has Audio"
+                          pct={audioPct(audio)}
+                          colorClass="text-sky-600"
+                          tooltip="Percentage of cells that have at least one audio recording attached. This is coverage, not validation — see 'Audio Validated' for review status."
+                        />
+                        {/*
+                         * AQU-490 (was TODO(FRO-168)): a distinct audio-VALIDATION metric
+                         * is not reachable today. Investigated 2026-07-08:
+                         *   - `cells.validated` (db/postgres/schema.sql) is ONE boolean per
+                         *     cell, shared by text and audio review — there is no per-medium
+                         *     validated flag.
+                         *   - `cell_audio` (the per-take audio table) has no
+                         *     validated/approved column at all.
+                         *   - The `cell.validate` event payload
+                         *     (sync-worker/src/events/types.ts) is `{ editEventId }` only —
+                         *     no medium/kind field distinguishing "validated the text" from
+                         *     "validated the audio".
+                         *   - `readValidationCountAudio` (src/lib/progress/read-validation-count.ts)
+                         *     is a live, unrelated setting: the *required number of
+                         *     validators* for audio-bearing projects, not a count of
+                         *     validated audio cells. AQU-298's "possibly dead" flag was
+                         *     about a different symbol; this one is alive but doesn't help.
+                         * Needs new server work: either a `cell_audio.approved` column (or
+                         * equivalent) populated by a medium-aware validate event, or a
+                         * `validated_audio_cells` rollup column on `files`/portfolio SQL
+                         * analogous to `approved_count`. Until then this is an honest
+                         * placeholder, not a fabricated metric.
+                         */}
+                        <StatTile
+                          label="Audio Validated"
+                          pct={0}
+                          display="N/A"
+                          colorClass="text-muted-foreground"
+                          tooltip="Not tracked yet — the server does not record whether a validation applies to text or audio content (see AQU-490)."
+                        />
+                      </>
                     )}
-                    {/* TODO(FRO-168): audio VALIDATION metric — need audioCells with approved-audio count from server */}
                   </div>
 
                   {/* Detail bars below tiles */}
@@ -749,7 +805,7 @@ export function ProjectOverview() {
                     {showAudio && (
                       <>
                         <StatBar
-                          label="Audio"
+                          label="Has Audio"
                           value={audio.audioCells}
                           total={audio.totalCells}
                           fillClass="bg-sky-500"

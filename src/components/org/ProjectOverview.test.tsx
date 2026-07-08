@@ -357,6 +357,69 @@ describe("ProjectOverview file list show-more", () => {
   })
 })
 
+// ── File-breakdown column headers (AQU-492) ────────────────────────────────
+
+describe("ProjectOverview file-breakdown column headers (AQU-492)", () => {
+  // WHY: the per-file numbers used to render as a bare "5/2/10 · 100w" string
+  // with only a tooltip explaining it. A PM must be able to read each figure
+  // cold — so the table needs a labeled header row, and the underlying counts
+  // must still render correctly per file (not just the header labels).
+
+  it("renders a labeled header row above the file list with units, and each file's raw numbers still render", async () => {
+    const fileList = [fileSummary(1), fileSummary(2)]
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue(fileList)
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: fileList.map((f) => ({ id: f.fileId, name: f.name, type: "usfm", createdAt: "x", cellCount: f.cellCount })) }),
+      status: "ready",
+      refresh,
+    })
+
+    renderOverview()
+
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(2))
+
+    // Column headers: clear label + implicit unit for each figure.
+    const header = screen.getByTestId("file-breakdown-header")
+    expect(within(header).getByText("File")).toBeInTheDocument()
+    expect(within(header).getByText("Filled")).toBeInTheDocument()
+    expect(within(header).getByText("Approved")).toBeInTheDocument()
+    expect(within(header).getByText("Total")).toBeInTheDocument()
+    expect(within(header).getByText("Words")).toBeInTheDocument()
+
+    // Per-file numbers (from fileSummary: cellCount 10, filledCount 5,
+    // approvedCount 2, wordCount 100) still render — one set per row, now as
+    // separate labeled cells instead of a single "5/2/10 · 100w" string.
+    const rows = screen.getAllByTestId("file-row")
+    expect(rows).toHaveLength(2)
+    for (const row of rows) {
+      expect(within(row).getByText("5")).toBeInTheDocument()
+      expect(within(row).getByText("2")).toBeInTheDocument()
+      expect(within(row).getByText("10")).toBeInTheDocument()
+      expect(within(row).getByText("100")).toBeInTheDocument()
+    }
+  })
+
+  it("does not render the header row when the filter matches no files", async () => {
+    const fileList = [fileSummary(1)]
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue(fileList)
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: fileList.map((f) => ({ id: f.fileId, name: f.name, type: "usfm", createdAt: "x", cellCount: f.cellCount })) }),
+      status: "ready",
+      refresh,
+    })
+
+    renderOverview()
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(1))
+
+    fireEvent.change(screen.getByLabelText("Filter files by name"), { target: { value: "no-such-file" } })
+
+    await waitFor(() => expect(screen.queryByTestId("file-row")).not.toBeInTheDocument())
+    expect(screen.queryByTestId("file-breakdown-header")).not.toBeInTheDocument()
+  })
+})
+
 // ── Archive / restore ──────────────────────────────────────────────────────
 
 describe("ProjectOverview archive/restore", () => {

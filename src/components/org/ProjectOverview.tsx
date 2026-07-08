@@ -954,40 +954,67 @@ export function ProjectOverview() {
                     {sorted.length === 0 ? (
                       <p className="text-sm text-muted-foreground">No files match “{fileNameFilter}”.</p>
                     ) : (
-                    <ul className="space-y-2" aria-label="Files">
-                      {shown.map((f) => {
-                        const tPct = f.cellCount > 0 ? Math.round((f.filledCount / f.cellCount) * 100) : 0
-                        const vPct = f.cellCount > 0 ? Math.round((f.approvedCount / f.cellCount) * 100) : 0
-                        const isExpanded = expandedFileId === f.fileId
-                        return (
-                          <li key={f.fileId} data-testid="file-row">
-                            <div className="flex items-center gap-3 text-sm">
-                              <button
-                                type="button"
-                                aria-label={isExpanded ? `Collapse ${f.name}` : `Expand ${f.name}`}
-                                aria-expanded={isExpanded}
-                                onClick={() => void toggleFileRollup(f)}
-                                className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent/40 hover:text-foreground"
-                              >
-                                <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isExpanded && "rotate-90")} />
-                              </button>
-                              <AppTooltip content={f.name}>
-                                <span className="w-32 shrink-0 truncate text-sm font-medium">{f.name}</span>
-                              </AppTooltip>
-                              <FileProgressBars tPct={tPct} vPct={vPct} />
-                              <AppTooltip content="filled / approved / total cells · word count">
-                                <span className="w-36 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                                  {f.filledCount}/{f.approvedCount}/{f.cellCount} · {f.wordCount}w
-                                </span>
-                              </AppTooltip>
-                            </div>
-                            {isExpanded && (
-                              <FileCanonicalRollup books={rollups[f.fileId]} loading={rollupLoading[f.fileId] ?? false} />
-                            )}
-                          </li>
-                        )
-                      })}
-                    </ul>
+                    <>
+                      {/*
+                        AQU-492: two-level layout — a header row labels each
+                        numeric column once, so per-row values (below) never
+                        need to be re-explained. Header and row cell widths
+                        must stay in lockstep (same width + gap classes) for
+                        the columns to line up; the tooltip on each row is
+                        kept as a redundant, not load-bearing, explainer.
+                      */}
+                      <div
+                        className="mb-1.5 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                        data-testid="file-breakdown-header"
+                      >
+                        <span className="w-5 shrink-0" />
+                        <span className="w-32 shrink-0">File</span>
+                        <span className="flex-1">Progress</span>
+                        <span className="flex shrink-0 items-center gap-4">
+                          <span className="w-10 text-right">Filled</span>
+                          <span className="w-14 text-right">Approved</span>
+                          <span className="w-10 text-right">Total</span>
+                          <span className="w-12 text-right">Words</span>
+                        </span>
+                      </div>
+                      <ul className="space-y-2" aria-label="Files">
+                        {shown.map((f) => {
+                          const tPct = f.cellCount > 0 ? Math.round((f.filledCount / f.cellCount) * 100) : 0
+                          const vPct = f.cellCount > 0 ? Math.round((f.approvedCount / f.cellCount) * 100) : 0
+                          const isExpanded = expandedFileId === f.fileId
+                          return (
+                            <li key={f.fileId} data-testid="file-row">
+                              <div className="flex items-center gap-3 text-sm">
+                                <button
+                                  type="button"
+                                  aria-label={isExpanded ? `Collapse ${f.name}` : `Expand ${f.name}`}
+                                  aria-expanded={isExpanded}
+                                  onClick={() => void toggleFileRollup(f)}
+                                  className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+                                >
+                                  <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isExpanded && "rotate-90")} />
+                                </button>
+                                <AppTooltip content={f.name}>
+                                  <span className="w-32 shrink-0 truncate text-sm font-medium">{f.name}</span>
+                                </AppTooltip>
+                                <FileProgressBars tPct={tPct} vPct={vPct} />
+                                <AppTooltip content="Cells filled / cells approved / total cells · word count">
+                                  <span className="flex shrink-0 items-center gap-4 text-xs tabular-nums text-muted-foreground">
+                                    <span className="w-10 text-right">{f.filledCount}</span>
+                                    <span className="w-14 text-right">{f.approvedCount}</span>
+                                    <span className="w-10 text-right">{f.cellCount}</span>
+                                    <span className="w-12 text-right">{f.wordCount}</span>
+                                  </span>
+                                </AppTooltip>
+                              </div>
+                              {isExpanded && (
+                                <FileCanonicalRollup books={rollups[f.fileId]} loading={rollupLoading[f.fileId] ?? false} />
+                              )}
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    </>
                     )}
                     {!showAllFiles && hidden > 0 && (
                       <button

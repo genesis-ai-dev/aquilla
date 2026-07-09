@@ -185,6 +185,33 @@ describe("useProjectSettings — read path", () => {
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled())
   })
 
+  it("re-fetches on window focus so another client's policy change propagates without reload (AQU-349)", async () => {
+    const fetchSpy = vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
+      version: 1, updatedAt: "x", updatedBy: { id: 1, username: "ryder" },
+      settings: { validationCount: 3 },
+    })
+    renderHook(() => useProjectSettings("p1", 700))
+    // Initial mount fetch.
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
+    // The owner lowers the threshold on another client; this client only learns
+    // of it on its next re-GET. A tab focus must trigger that re-GET.
+    act(() => {
+      window.dispatchEvent(new Event("focus"))
+    })
+    await waitFor(() => expect(fetchSpy.mock.calls.length).toBeGreaterThan(1))
+  })
+
+  it("re-fetches on visibilitychange back to visible (AQU-349)", async () => {
+    const fetchSpy = vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue(null)
+    renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
+    act(() => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" })
+      document.dispatchEvent(new Event("visibilitychange"))
+    })
+    await waitFor(() => expect(fetchSpy.mock.calls.length).toBeGreaterThan(1))
+  })
+
   it("does not crash when local IDB read fails", async () => {
     const idbMod = await import("@/lib/store/project-index")
     vi.mocked(idbMod.getProject).mockRejectedValueOnce(new Error("idb unavailable"))

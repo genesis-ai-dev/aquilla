@@ -43,7 +43,69 @@ import {
 import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { Skeleton } from "@/components/ui/skeleton"
 import { FolderPlus, Search, X, Building2 } from "lucide-react"
+
+function ProjectRowSkeleton() {
+  return (
+    <div className="flex items-center gap-4 p-4">
+      <div className="min-w-0 flex-1 space-y-2">
+        <Skeleton className="h-4 w-1/3" />
+        <Skeleton className="h-1.5 w-full rounded-full" />
+        <Skeleton className="h-1.5 w-full rounded-full" />
+      </div>
+      <div className="shrink-0 space-y-2 text-right">
+        <Skeleton className="ml-auto h-3 w-16" />
+        <Skeleton className="ml-auto h-3 w-16" />
+      </div>
+    </div>
+  )
+}
+
+function OrgHomeSkeleton({ isAllOrgs }: { isAllOrgs: boolean }) {
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="h-[88px] space-y-2 rounded-2xl border bg-card p-4">
+            <Skeleton className="h-3 w-16" />
+            <Skeleton className="h-6 w-10" />
+          </div>
+        ))}
+      </div>
+      {isAllOrgs ? (
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+          <section className="rounded-2xl border bg-card">
+            <div className="border-b px-4 py-3">
+              <Skeleton className="h-5 w-28" />
+            </div>
+            <div className="divide-y">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <ProjectRowSkeleton key={i} />
+              ))}
+            </div>
+          </section>
+          <section className="rounded-2xl border bg-card">
+            <div className="border-b px-4 py-3">
+              <Skeleton className="h-5 w-20" />
+            </div>
+            <div className="divide-y">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <ProjectRowSkeleton key={i} />
+              ))}
+            </div>
+          </section>
+        </div>
+      ) : (
+        <div className="rounded-2xl border divide-y">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <ProjectRowSkeleton key={i} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 const STALE_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000
 
@@ -616,14 +678,7 @@ export function OrgHome() {
         <Page size="wide">
           <PageHeader title={workspaceLabel} />
           {isPageLoading ? (
-            <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className="h-[88px] animate-pulse rounded-2xl border bg-card" />
-                ))}
-              </div>
-              <div className="h-64 animate-pulse rounded-2xl border bg-card" />
-            </div>
+            <OrgHomeSkeleton isAllOrgs={isAllOrgs} />
           ) : error ? (
             <p className="text-sm text-destructive">{error}</p>
           ) : (

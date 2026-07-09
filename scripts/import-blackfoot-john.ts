@@ -31,6 +31,9 @@ import { parseLabelTrack, groupSegmentsByVerse } from "../src/lib/parsers/label-
 const AUTH = process.env.AUTH_BASE ?? "http://127.0.0.1:8788"
 const SYNC = process.env.SYNC_BASE ?? "http://127.0.0.1:8789"
 const PROJECT_ID = process.env.PROJECT_ID ?? "dev-project"
+const PROJECT_NAME = process.env.PROJECT_NAME ?? "Dev Project"
+// Prod: paste a real identity access token (JWT). Dev: leave unset → /__dev__/login.
+const ACCESS_TOKEN = process.env.ACCESS_TOKEN
 const BASE_DIR = process.argv[2] ?? "/Users/ryderwishart/Downloads/John"
 const BOOK = "JHN"
 const SOURCE_LANG = "bla" // Blackfoot (ISO 639-3)
@@ -62,13 +65,17 @@ interface AttachEvent {
   clientTs: number
 }
 
-async function devLogin(): Promise<string> {
+/** Prod: use the provided identity access token. Dev: mint one via /__dev__/login. */
+async function getUserJwt(): Promise<string> {
+  if (ACCESS_TOKEN) return ACCESS_TOKEN
   const res = await fetch(`${AUTH}/__dev__/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: "{}",
   })
-  if (!res.ok) throw new Error(`dev login HTTP ${res.status}`)
+  if (!res.ok) {
+    throw new Error(`dev login HTTP ${res.status} — set ACCESS_TOKEN for non-dev targets`)
+  }
   return ((await res.json()) as { access_token: string }).access_token
 }
 
@@ -76,7 +83,7 @@ async function mintToken(userJwt: string, fileId: string): Promise<string> {
   const res = await fetch(`${AUTH}/api/v2/sync-token`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${userJwt}` },
-    body: JSON.stringify({ projectId: PROJECT_ID, fileId, projectName: "Dev Project" }),
+    body: JSON.stringify({ projectId: PROJECT_ID, fileId, projectName: PROJECT_NAME }),
   })
   if (!res.ok) throw new Error(`sync-token HTTP ${res.status}`)
   return ((await res.json()) as { token: string }).token
@@ -157,7 +164,7 @@ async function main() {
   const verses = allVerses.filter((v) => v.chapter >= 1 && v.chapter <= LIMIT_CHAPTERS)
   console.log(`  parsed ${allVerses.length} verses; importing ${verses.length} (chapters 1–${LIMIT_CHAPTERS})`)
 
-  const jwt = await devLogin()
+  const jwt = await getUserJwt()
   const fileId = randomUUID()
   const token = await mintToken(jwt, fileId)
 

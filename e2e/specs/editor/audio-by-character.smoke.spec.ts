@@ -3,7 +3,7 @@
 // Selectors verified live against the running app (ExportDialog):
 //   - toolbar opener:  header ⋯ menu → "Export file" (FRO-331)
 //   - format option:   text "Audio by character" (the radio's <label>)
-//   - scope lock:      "Whole project" radio is disabled for this format
+//   - scope lock:      "Whole project" tab is disabled for this format
 //   - empty preview:   "No cells with audio found in this file."
 //   - dialog action:   button "Export" (exact) inside the dialog
 //
@@ -43,8 +43,8 @@ test("alice sees Audio-by-character export, scope-locked to file, and gets a zip
   // The "Audio by character" format option is present; select it.
   await dialog.getByText("Audio by character").click()
 
-  // Scope locks to file: the "Whole project" radio is disabled for this format.
-  await expect(dialog.getByRole("radio", { name: /whole project/i })).toBeDisabled()
+  // Scope locks to file: the "Whole project" scope tab is disabled for this format.
+  await expect(dialog.getByRole("tab", { name: /whole project/i })).toBeDisabled()
 
   // A no-audio project reports no audio in the preview.
   await expect(dialog.getByText("No cells with audio found in this file.")).toBeVisible({

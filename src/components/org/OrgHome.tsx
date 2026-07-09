@@ -13,6 +13,13 @@ import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
 import { WorkloadRollup } from "./WorkloadRollup"
 import { UsageRollup } from "./UsageRollup"
 import { CreditsPanel } from "./CreditsPanel"
+import {
+  SectionVisibilityBadge,
+  SectionVisibilityGate,
+  sectionTintClass,
+} from "./SectionVisibilityBadge"
+import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
+import { ROLE } from "@/lib/frontier/roles"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
@@ -171,7 +178,7 @@ function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, 
 // Shared column template for the project table so the header row and the data
 // rows always line up. Name flexes; the metric + date columns are fixed-width.
 // Kept compact so the Name column survives inside the narrow all-orgs panel.
-const PROJECT_TABLE_COLS = "grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_4rem_6rem]"
+const PROJECT_TABLE_COLS = "grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_4rem_5.5rem_6rem]"
 
 /**
  * The org/portfolio project list as a compact table — one row per project with
@@ -184,14 +191,16 @@ function ProjectTable({
   projects,
   now,
   showOrg,
+  roleByProjectId,
 }: {
   projects: PortfolioProjectRow[]
   now: number
   showOrg: boolean
+  roleByProjectId?: Map<string, CloudProjectSummary["role"]>
 }) {
   return (
     <div className="overflow-x-auto">
-      <div className="min-w-[32rem]">
+      <div className="min-w-[38rem]">
         <div
           className={`grid ${PROJECT_TABLE_COLS} gap-x-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground`}
         >
@@ -199,6 +208,7 @@ function ProjectTable({
           <span className="whitespace-nowrap text-right">Translated</span>
           <span className="whitespace-nowrap text-right">Validated</span>
           <span className="whitespace-nowrap text-right">Audio</span>
+          <span className="whitespace-nowrap text-right">Role</span>
           <span className="whitespace-nowrap text-right">Updated</span>
         </div>
         <div className="divide-y">
@@ -206,6 +216,7 @@ function ProjectTable({
             const tpct = Math.round(translatedPct(p) * 100)
             const pct = Math.round(validatedPct(p) * 100)
             const apct = Math.round(audioPct(p) * 100)
+            const role = roleByProjectId?.get(p.id)
             const status = activityStatus(p, now)
             const dstatus = deadlineStatus(p, now)
             return (
@@ -241,6 +252,9 @@ function ProjectTable({
                 </span>
                 <span className="text-right tabular-nums text-muted-foreground" aria-label={`${apct}% audio`}>
                   {apct}%
+                </span>
+                <span className="truncate text-right text-xs text-muted-foreground">
+                  {role?.name.replace(/_/g, " ") ?? "—"}
                 </span>
                 <span
                   className={`truncate text-right text-xs ${
@@ -310,6 +324,16 @@ export function OrgHome() {
   const { session, loading: sessionLoading } = useFrontierSession()
   const navigate = useNavigate()
   const jwt = session?.jwt ?? null
+
+  // AQU-486: per-section visibility chrome for Team workload / Team usage
+  // (both gated by the AQU-485 memberProgressViewMinRole floor — they're both
+  // per-member productivity views) and the credits panel (a static
+  // maintainer-only floor hardcoded in CreditsPanel; no org-setting backs it
+  // yet, so its badge is informational only, with no advanced toggle).
+  const orgSettings = useOrgSettings(activeOrgId, activeOrg?.role?.level)
+  const canEditVisibility = canEditRosterProgressFloor(activeOrg?.role?.level)
+  const memberProgressReady = orgSettings.hasFetched
+  const memberProgressViewerRole = activeOrg?.role?.level ?? null
 
   const [projects, setProjects] = useState<PortfolioProjectRow[]>([])
   // FRO-335: accessible-project rows supply direct/group/org role attribution
@@ -484,6 +508,7 @@ export function OrgHome() {
     activeOrgId,
     isAllOrgs ? "all-orgs" : "active-org",
   ).sharedWithMe
+  const roleByProjectId = new Map(accessibleProjects.map((project) => [project.id, project.role]))
 
   const orgSummaries: OrgPortfolioSummary[] = orgs
     .map((org) => {
@@ -794,7 +819,7 @@ export function OrgHome() {
                           title={projectQuery ? "No matching projects." : currentProjectLens.empty}
                         />
                       ) : (
-                        <ProjectTable projects={visible} now={now} showOrg />
+                        <ProjectTable projects={visible} now={now} showOrg roleByProjectId={roleByProjectId} />
                       )}
                     </section>
                   </div>
@@ -930,7 +955,7 @@ export function OrgHome() {
                     />
                   ) : (
                     <div className="overflow-hidden rounded-2xl border bg-card">
-                      <ProjectTable projects={visible} now={now} showOrg={false} />
+                      <ProjectTable projects={visible} now={now} showOrg={false} roleByProjectId={roleByProjectId} />
                     </div>
                   )}
 
@@ -941,14 +966,68 @@ export function OrgHome() {
                 </>
               )}
 
-              {jwt && !isAllOrgs && activeOrgId != null && <WorkloadRollup jwt={jwt} orgId={activeOrgId} />}
-              {jwt && !isAllOrgs && activeOrgId != null && <UsageRollup jwt={jwt} orgId={activeOrgId} />}
               {jwt && !isAllOrgs && activeOrgId != null && (
-                <CreditsPanel
-                  jwt={jwt}
-                  orgId={activeOrgId}
-                  orgRoleLevel={activeOrg?.role.level ?? 0}
-                />
+                <SectionVisibilityGate
+                  minRole={orgSettings.memberProgressViewMinRole}
+                  viewerRoleLevel={memberProgressViewerRole}
+                  ready={memberProgressReady}
+                >
+                  <div
+                    className={cn(
+                      "relative rounded-2xl",
+                      sectionTintClass(orgSettings.memberProgressViewMinRole),
+                    )}
+                    data-testid="section-team-workload"
+                  >
+                    <SectionVisibilityBadge
+                      minRole={orgSettings.memberProgressViewMinRole}
+                      canEdit={canEditVisibility}
+                      onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
+                      description="Who can see each teammate's assignment progress on this org's overview."
+                      className="absolute right-4 top-4 z-10"
+                    />
+                    <WorkloadRollup jwt={jwt} orgId={activeOrgId} />
+                  </div>
+                </SectionVisibilityGate>
+              )}
+              {jwt && !isAllOrgs && activeOrgId != null && (
+                <SectionVisibilityGate
+                  minRole={orgSettings.memberProgressViewMinRole}
+                  viewerRoleLevel={memberProgressViewerRole}
+                  ready={memberProgressReady}
+                >
+                  <div
+                    className={cn(
+                      "relative rounded-2xl",
+                      sectionTintClass(orgSettings.memberProgressViewMinRole),
+                    )}
+                    data-testid="section-team-usage"
+                  >
+                    <SectionVisibilityBadge
+                      minRole={orgSettings.memberProgressViewMinRole}
+                      canEdit={canEditVisibility}
+                      onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
+                      description="Who can see each teammate's usage on this org's overview."
+                      className="absolute right-4 top-4 z-10"
+                    />
+                    <UsageRollup jwt={jwt} orgId={activeOrgId} />
+                  </div>
+                </SectionVisibilityGate>
+              )}
+              {jwt && !isAllOrgs && activeOrgId != null && (
+                <SectionVisibilityGate minRole={ROLE.MAINTAINER} viewerRoleLevel={activeOrg?.role?.level ?? null}>
+                  <div
+                    className={cn("relative rounded-2xl", sectionTintClass(ROLE.MAINTAINER))}
+                    data-testid="section-credits"
+                  >
+                    <SectionVisibilityBadge minRole={ROLE.MAINTAINER} className="absolute right-4 top-4 z-10" />
+                    <CreditsPanel
+                      jwt={jwt}
+                      orgId={activeOrgId}
+                      orgRoleLevel={activeOrg?.role.level ?? 0}
+                    />
+                  </div>
+                </SectionVisibilityGate>
               )}
             </div>
           )}

@@ -41,16 +41,19 @@ const mockRefresh = vi.fn().mockResolvedValue(undefined)
 const mockAdd = vi.fn().mockResolvedValue(mockMembers[0])
 const mockRemove = vi.fn().mockResolvedValue(undefined)
 
+const mockUseProjectMembers = vi.fn(() => ({
+  members: mockMembers,
+  isLoading: false,
+  error: null,
+  rosterHidden: false,
+  refresh: mockRefresh,
+  add: mockAdd,
+  remove: mockRemove,
+  changeRole: mockAdd,
+}))
+
 vi.mock("@/hooks/useProjectMembers", () => ({
-  useProjectMembers: () => ({
-    members: mockMembers,
-    isLoading: false,
-    error: null,
-    refresh: mockRefresh,
-    add: mockAdd,
-    remove: mockRemove,
-    changeRole: mockAdd,
-  }),
+  useProjectMembers: () => mockUseProjectMembers(),
 }))
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -253,5 +256,40 @@ describe("ProjectMembersPage", () => {
     await waitFor(() => {
       expect(mockAdd).toHaveBeenCalledWith("dave", 400)
     })
+  })
+})
+
+describe("ProjectMembersPage — AQU-485 roster visibility", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  // The whole point of AQU-485's project-level gate is that a below-floor
+  // caller must not see the member list OR the add-member form (which would
+  // imply an editable roster exists) — rendering "no members" instead would
+  // be a lie (the roster is hidden, not empty).
+  it("renders a 'Roster hidden' state instead of the member list when rosterHidden is true", async () => {
+    mockUseProjectMembers.mockReturnValueOnce({
+      members: [],
+      isLoading: false,
+      error: null,
+      rosterHidden: true,
+      refresh: mockRefresh,
+      add: mockAdd,
+      remove: mockRemove,
+      changeRole: mockAdd,
+    })
+
+    renderPage()
+
+    expect(screen.getByText(/roster hidden/i)).toBeInTheDocument()
+    expect(screen.queryByText("alice")).not.toBeInTheDocument()
+    expect(screen.queryByPlaceholderText("Aquilla username")).not.toBeInTheDocument()
+  })
+
+  it("renders the normal member list when rosterHidden is false (control)", () => {
+    renderPage()
+    expect(screen.queryByText(/roster hidden/i)).not.toBeInTheDocument()
+    expect(screen.getByText("alice")).toBeInTheDocument()
   })
 })

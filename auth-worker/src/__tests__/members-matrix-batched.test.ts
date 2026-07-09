@@ -209,6 +209,15 @@ describe("GET /api/v2/orgs/:orgId/members-matrix (FRO-218 batched endpoint)", ()
     // return only the projects she has any effective access to, and the per-project
     // reference (called as anna) must agree on role/source for each project.
     await seedFixture()
+    // AQU-485: rosterViewMinRole defaults to maintainer(600), which would 403
+    // the per-project /members reference call below (anna's winning role on
+    // "pa" is contributor=400, below the default floor) — that's an
+    // orthogonal, deliberate visibility gate, not something this test's
+    // matrix-vs-per-project EQUIVALENCE check is about. Open the roster floor
+    // for this fixture's org so both endpoints are directly comparable again.
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_settings (org_id, settings, version, updated_by) VALUES (1, '{\"rosterViewMinRole\":100}', 1, 1)",
+    ).run()
     const annaJwt = await jwtFor("anna")
 
     // --- per-project reference (anna calling) --------------------------------

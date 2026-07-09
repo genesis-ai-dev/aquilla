@@ -8,7 +8,9 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { SelectionBar } from "./SelectionBar"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { CellStore } from "@/hooks/useActiveCellStore"
 import type { CellData } from "@/hooks/useCells"
+import type { CellRow } from "@/lib/sync/cells-read-types"
 import { ROLE } from "@/lib/frontier/roles"
 import * as selectionModule from "@/lib/audio/selection"
 
@@ -52,11 +54,63 @@ function makeCell(over: Partial<CellData> = {}): CellData {
 
 const CELLS = [makeCell({ id: "cell-1" }), makeCell({ id: "cell-2" })]
 
+function makeRows(cells: CellData[]): CellRow[] {
+  return cells.flatMap((cell, index) => {
+    const canonicalRef = cell.context || cell.group || null
+    const anchorCellId = index > 0 ? cells[index - 1].id : null
+    return [
+      {
+        cellId: cell.id,
+        side: "source",
+        value: cell.original,
+        valueHtml: cell.originalHtml ?? null,
+        type: cell.type,
+        canonicalRef,
+        anchorCellId,
+        eventId: `${cell.id}-source`,
+        sourceEventId: null,
+        lastEditor: null,
+        lastEditAt: 1,
+        validated: false,
+        wordCount: cell.original.trim().split(/\s+/).filter(Boolean).length,
+      },
+      {
+        cellId: cell.id,
+        side: "target",
+        value: cell.translated,
+        valueHtml: cell.translatedHtml ?? null,
+        type: cell.type,
+        canonicalRef,
+        anchorCellId,
+        eventId: `${cell.id}-target`,
+        sourceEventId: `${cell.id}-source`,
+        lastEditor: "alice",
+        lastEditAt: 2,
+        validated: false,
+        wordCount: cell.translated.trim().split(/\s+/).filter(Boolean).length,
+      },
+    ]
+  })
+}
+
+function makeStore(cells: CellData[]): CellStore {
+  const store = new CellStore()
+  store.setRuntime({
+    projectId: "proj-1",
+    fileId: "file-1",
+    username: "alice",
+    requiredValidations: 1,
+    auditStats: new Map(),
+  })
+  store.replaceRows(makeRows(cells), { full: true, maxServerSeq: 1 })
+  return store
+}
+
 function renderBar(project: ProjectRecord) {
   return render(
     <SelectionBar
       project={project}
-      cells={CELLS}
+      cellStore={makeStore(CELLS)}
       session={null}
       username="alice"
       completeBatch={vi.fn()}

@@ -13,7 +13,7 @@ import { useState, useCallback } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import {
   ArrowLeft, UserPlus, LinkIcon, ShieldOff, RefreshCcw,
-  AlertTriangle, Copy, Users,
+  AlertTriangle, Copy, Lock, Users,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -142,7 +142,7 @@ export function MembersTab({
   className?: string
 }) {
   const { session } = useFrontierSession()
-  const { members, isLoading, error, refresh, add, remove } = useProjectMembers(projectId)
+  const { members, isLoading, error, rosterHidden, refresh, add, remove } = useProjectMembers(projectId)
   const callerMaxRole = ROLE.MAINTAINER
   const callerUserId = null
 
@@ -175,6 +175,25 @@ export function MembersTab({
   }, [add, newUsername, newRole])
 
   const grantableRoles = PROJECT_ROLE_OPTIONS.filter((r) => r.level <= callerMaxRole)
+
+  // AQU-485: the project's org rosterViewMinRole policy hides the roster
+  // from this caller. Render a distinct "hidden" state — no member list, no
+  // count, and no add-member form (which would itself imply an editable
+  // roster exists) — never an empty shell that leaks "zero members."
+  if (rosterHidden) {
+    return (
+      <div className={className}>
+        <div className="flex flex-col items-center gap-2 rounded border py-10 text-center text-muted-foreground">
+          <Lock className="h-5 w-5" />
+          <p className="text-sm font-medium text-foreground">Roster hidden</p>
+          <p className="max-w-xs text-xs">
+            This organization has restricted who can view the member list. Ask an owner or
+            maintainer if you need access.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className={className}>

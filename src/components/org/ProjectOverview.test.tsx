@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, waitFor, fireEvent } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { ProjectOverview, deriveProjectStatus } from "./ProjectOverview"
@@ -58,13 +58,22 @@ vi.mock("@/lib/sync/export-bundle", () => ({
   downloadProjectBundle: (...a: unknown[]) => downloadProjectBundle(...a),
 }))
 
+// AQU-500: stub the shared download helper so CSV-export tests can assert on
+// the blob/filename it was called with, without touching the DOM anchor click.
+const downloadBlob = vi.fn()
+vi.mock("@/lib/export/export-service", () => ({
+  downloadBlob: (...a: unknown[]) => downloadBlob(...a),
+}))
+
 const fetchSyncToken = vi.fn()
 vi.mock("@/lib/sync/sync-token", () => ({
   fetchSyncToken: (...a: unknown[]) => fetchSyncToken(...a),
 }))
 const fetchProjectFiles = vi.fn()
+const fetchAllFileCells = vi.fn()
 vi.mock("@/lib/sync/cells-read", () => ({
   fetchProjectFiles: (...a: unknown[]) => fetchProjectFiles(...a),
+  fetchAllFileCells: (...a: unknown[]) => fetchAllFileCells(...a),
 }))
 
 // Mock assignments workload so Team card doesn't break tests
@@ -72,6 +81,38 @@ vi.mock("@/lib/sync/assignments", () => ({
   getWorkload: vi.fn(async () => []),
   getProjectAssignments: vi.fn(async () => []),
   getMyAssignments: vi.fn(async () => []),
+}))
+
+// AQU-486: useOrgSettings backs the per-section visibility floors
+// (rosterViewMinRole / memberProgressViewMinRole). Mocked hermetically here
+// (same pattern as Settings.test.tsx) rather than letting it hit real fetch —
+// individual describe blocks override the return value per test.
+type OrgSettingsMock = ReturnType<typeof import("@/hooks/useOrgSettings").useOrgSettings>
+const defaultOrgSettingsMock = (): OrgSettingsMock => ({
+  settings: {},
+  orgRules: [],
+  promotionRequests: [],
+  canRequestPromotion: false,
+  version: 1,
+  hasFetched: true,
+  canEdit: true,
+  canEditOrgKeys: true,
+  orgProviderKeys: {},
+  canExport: true,
+  exportMinRole: null,
+  canViewRoster: true,
+  rosterViewMinRole: 600,
+  canViewMemberProgress: true,
+  memberProgressViewMinRole: 600,
+  refresh: vi.fn(async () => null),
+  patch: vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })),
+  requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
+})
+const useOrgSettingsMock = vi.fn<() => OrgSettingsMock>(defaultOrgSettingsMock)
+const canEditRosterProgressFloorMock = vi.fn((level: number | null | undefined) => (level ?? 0) >= 700)
+vi.mock("@/hooks/useOrgSettings", () => ({
+  useOrgSettings: () => useOrgSettingsMock(),
+  canEditRosterProgressFloor: (level: number | null | undefined) => canEditRosterProgressFloorMock(level),
 }))
 
 function projectRecord(over: Partial<ProjectRecord> & { level: number; deletedAt?: string }): ProjectRecord {
@@ -108,12 +149,31 @@ beforeEach(async () => {
   // implementations, so restore the default (single org, auto-selected) here.
   const { listMyOrgs } = await import("@/lib/frontier/orgs")
   vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
+  // AQU-486: reset the org-settings mock to its default (everything visible,
+  // maintainer floor) — vi.clearAllMocks() does not undo a persistent
+  // mockReturnValue set by an earlier test.
+  useOrgSettingsMock.mockReturnValue(defaultOrgSettingsMock())
+  canEditRosterProgressFloorMock.mockImplementation((level: number | null | undefined) => (level ?? 0) >= 700)
 })
 afterEach(() => vi.clearAllMocks())
 
 /** Build a FileSummary stub for testing the file list. */
 function fileSummary(i: number): import("@/lib/sync/cells-read").FileSummary {
   return { fileId: `f${i}`, projectId: "p1", name: `File${i}.usfm`, fileType: "usfm", sourceLanguage: null, targetLanguage: null, cellCount: 10, filledCount: 5, approvedCount: 2, wordCount: 100, lastEditAt: null }
+}
+
+// Drive the shadcn (Base UI) Select the same way AssignWork.test.tsx does:
+// open the trigger, hover-highlight the option, commit with Enter fired on
+// the option itself (the click path doesn't reliably commit under happy-dom).
+async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
+  const trigger = screen.getByRole("combobox", { name: triggerName })
+  fireEvent.click(trigger)
+  const option = await screen.findByRole("option", { name: optionName })
+  const label = option.textContent ?? ""
+  fireEvent.pointerMove(option)
+  fireEvent.mouseMove(option)
+  fireEvent.keyDown(option, { key: "Enter" })
+  await waitFor(() => expect(trigger.textContent).toContain(label))
 }
 
 // ── Status chip derivation ─────────────────────────────────────────────────
@@ -155,13 +215,47 @@ describe("deriveProjectStatus", () => {
   })
 })
 
+describe("ProjectOverview load states", () => {
+  it("shows retry UI for unreachable project loads instead of an endless loading state", async () => {
+    useProject.mockReturnValue({
+      project: null,
+      status: "unreachable",
+      refresh,
+    })
+
+    renderOverview()
+
+    expect(await screen.findByText(/can't reach the server/i)).toBeInTheDocument()
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /^retry$/i }))
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows a sign-in state when the project cannot load because there is no session", async () => {
+    useProject.mockReturnValue({
+      project: null,
+      status: "no-session",
+      refresh,
+    })
+
+    renderOverview()
+
+    expect(await screen.findByText(/sign in to open this project from the cloud/i)).toBeInTheDocument()
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }))
+    expect(navigate).toHaveBeenCalledWith("/login?next=%2Fprojects%2Fp1")
+  })
+})
+
 // ── Per-metric conditionality ──────────────────────────────────────────────
 
 describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
   // WHY: audio-only projects must hide text metrics; text-only must hide audio.
   // Showing irrelevant metrics confuses managers scanning project state.
 
-  it("text-only project: shows Translated/Validated tiles but hides Audio tile", async () => {
+  it("text-only project: shows Translated/Validated tiles but hides Has Audio / Audio Validated tiles", async () => {
     fetchSyncToken.mockResolvedValue({ token: "tok" })
     fetchProjectFiles.mockResolvedValue([])
     useProject.mockReturnValue({
@@ -179,11 +273,14 @@ describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
     // Translated and Validated tiles should appear (text content present)
     await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
     expect(screen.getAllByText("Validated").length).toBeGreaterThan(0)
-    // Audio tile must NOT appear (audioCells === 0)
-    expect(screen.queryByText("Audio")).not.toBeInTheDocument()
+    // Neither audio tile may appear (audioCells === 0) — AQU-490: this also
+    // guards against a false-positive "Audio Validated" figure on a
+    // text-only project, since neither field exists to fabricate one from.
+    expect(screen.queryByText("Has Audio")).not.toBeInTheDocument()
+    expect(screen.queryByText("Audio Validated")).not.toBeInTheDocument()
   })
 
-  it("audio-only project: shows Audio tile but hides Translated/Validated tiles", async () => {
+  it("audio-only project: shows Has Audio + Audio Validated (N/A) tiles but hides Translated/Validated tiles", async () => {
     fetchSyncToken.mockResolvedValue({ token: "tok" })
     fetchProjectFiles.mockResolvedValue([])
     useProject.mockReturnValue({
@@ -200,17 +297,23 @@ describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
     }])
     renderOverview()
 
-    // Audio tile should appear
-    await waitFor(() => expect(screen.getAllByText("Audio").length).toBeGreaterThan(0))
+    // Has Audio (coverage) tile should appear
+    await waitFor(() => expect(screen.getAllByText("Has Audio").length).toBeGreaterThan(0))
     // Translated and Validated must NOT appear (filledCells === 0 means showText is false,
     // but note: totalCells > 0 means hasText=true in current logic which guards on totalCells.
     // The real guard is audioCells > 0 for audio, and totalCells > 0 for text.
     // For audio-only: filledCells=0 but totalCells=100, so text bars still show.
     // Per FRO-168 spec: hide text metrics only when "no text content (translatable cells > 0)".
     // totalCells > 0 means there IS translatable content, so text bars appear even if empty.
-    // The audio-only guard is specifically: audioCells > 0 shows Audio, always shows text when totalCells > 0.
-    // This test therefore confirms Audio appears when audioCells > 0.
-    expect(screen.getAllByText("Audio").length).toBeGreaterThan(0)
+    // The audio-only guard is specifically: audioCells > 0 shows Has Audio, always shows text when totalCells > 0.
+    // This test therefore confirms Has Audio appears when audioCells > 0.
+    expect(screen.getAllByText("Has Audio").length).toBeGreaterThan(0)
+    // AQU-490: a distinct audio-validated count doesn't exist server-side
+    // (see the in-component comment for the full investigation). The tile
+    // must appear — labeled, honest, and reading "N/A" — never a fabricated
+    // percentage.
+    expect(screen.getByText("Audio Validated")).toBeInTheDocument()
+    expect(screen.getByText("N/A")).toBeInTheDocument()
   })
 })
 
@@ -251,6 +354,69 @@ describe("ProjectOverview file list show-more", () => {
     // Header should now say "(16)" not "top 12 of 16"
     expect(screen.queryByText(/top 12 of 16/)).not.toBeInTheDocument()
     expect(screen.getByText(/\(16\)/)).toBeInTheDocument()
+  })
+})
+
+// ── File-breakdown column headers (AQU-492) ────────────────────────────────
+
+describe("ProjectOverview file-breakdown column headers (AQU-492)", () => {
+  // WHY: the per-file numbers used to render as a bare "5/2/10 · 100w" string
+  // with only a tooltip explaining it. A PM must be able to read each figure
+  // cold — so the table needs a labeled header row, and the underlying counts
+  // must still render correctly per file (not just the header labels).
+
+  it("renders a labeled header row above the file list with units, and each file's raw numbers still render", async () => {
+    const fileList = [fileSummary(1), fileSummary(2)]
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue(fileList)
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: fileList.map((f) => ({ id: f.fileId, name: f.name, type: "usfm", createdAt: "x", cellCount: f.cellCount })) }),
+      status: "ready",
+      refresh,
+    })
+
+    renderOverview()
+
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(2))
+
+    // Column headers: clear label + implicit unit for each figure.
+    const header = screen.getByTestId("file-breakdown-header")
+    expect(within(header).getByText("File")).toBeInTheDocument()
+    expect(within(header).getByText("Filled")).toBeInTheDocument()
+    expect(within(header).getByText("Approved")).toBeInTheDocument()
+    expect(within(header).getByText("Total")).toBeInTheDocument()
+    expect(within(header).getByText("Words")).toBeInTheDocument()
+
+    // Per-file numbers (from fileSummary: cellCount 10, filledCount 5,
+    // approvedCount 2, wordCount 100) still render — one set per row, now as
+    // separate labeled cells instead of a single "5/2/10 · 100w" string.
+    const rows = screen.getAllByTestId("file-row")
+    expect(rows).toHaveLength(2)
+    for (const row of rows) {
+      expect(within(row).getByText("5")).toBeInTheDocument()
+      expect(within(row).getByText("2")).toBeInTheDocument()
+      expect(within(row).getByText("10")).toBeInTheDocument()
+      expect(within(row).getByText("100")).toBeInTheDocument()
+    }
+  })
+
+  it("does not render the header row when the filter matches no files", async () => {
+    const fileList = [fileSummary(1)]
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue(fileList)
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: fileList.map((f) => ({ id: f.fileId, name: f.name, type: "usfm", createdAt: "x", cellCount: f.cellCount })) }),
+      status: "ready",
+      refresh,
+    })
+
+    renderOverview()
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(1))
+
+    fireEvent.change(screen.getByLabelText("Filter files by name"), { target: { value: "no-such-file" } })
+
+    await waitFor(() => expect(screen.queryByTestId("file-row")).not.toBeInTheDocument())
+    expect(screen.queryByTestId("file-breakdown-header")).not.toBeInTheDocument()
   })
 })
 
@@ -359,8 +525,8 @@ describe("ProjectOverview audio progress (FRO-160)", () => {
     renderOverview()
 
     // The progress section should be present (totalCells > 0).
-    // The "Audio" label must appear in the StatBar list.
-    await waitFor(() => expect(screen.getAllByText("Audio").length).toBeGreaterThan(0))
+    // The "Has Audio" label must appear in the StatBar list (AQU-490 relabel).
+    await waitFor(() => expect(screen.getAllByText("Has Audio").length).toBeGreaterThan(0))
     // The audio StatBar displays "30%" in its percentage column.
     // getAllByText because translated (80%) and validated (50%) also render %.
     const pctLabels = screen.getAllByText(/^\d+%$/)
@@ -391,11 +557,12 @@ describe("ProjectOverview audio progress (FRO-160)", () => {
 
     renderOverview()
 
-    // When audioCells === 0, Audio tile/bar is hidden (per-metric conditionality).
+    // When audioCells === 0, Has Audio tile/bar is hidden (per-metric conditionality).
     // So we just confirm the progress section renders with text metrics.
     await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
-    // Audio should be hidden
-    expect(screen.queryByText("Audio")).not.toBeInTheDocument()
+    // Audio tiles should be hidden
+    expect(screen.queryByText("Has Audio")).not.toBeInTheDocument()
+    expect(screen.queryByText("Audio Validated")).not.toBeInTheDocument()
   })
 })
 
@@ -547,5 +714,425 @@ describe("ProjectOverview AI-drafted segment (FRO-292)", () => {
     await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
     // "AI Drafted" must NOT appear when count is 0 (forward-only honest rendering)
     expect(screen.queryByText("AI Drafted")).not.toBeInTheDocument()
+  })
+})
+
+// ── AQU-486: per-section visibility chrome ──────────────────────────────────
+
+describe("ProjectOverview per-section visibility (AQU-486)", () => {
+  // WHY: the Members card must be a hard gate on the AQU-485 rosterViewMinRole
+  // floor — a below-floor caller must not see the card at all (no empty
+  // placeholder leaking that a roster exists), while a permitted caller sees
+  // it, with a badge naming who can see it and (if they can edit) an inline
+  // control to change the floor without leaving the page.
+
+  it("hides the Members card entirely when the org has raised the roster floor above the caller's role", async () => {
+    // WHY: canManage (project role >= 600) alone used to be the only gate on
+    // this card. AQU-486 adds a second, independent gate — the org's
+    // rosterViewMinRole floor — and the floor must win: a maintainer-level
+    // caller (canManage=true) whose role still falls short of an
+    // owner-raised floor must see nothing, not an empty card.
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: 700, // org raised the floor to Owner-only
+      canViewRoster: false,
+    })
+    useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByTestId("overview-members-card")).not.toBeInTheDocument()
+  })
+
+  it("shows the Members card with a visibility badge for a caller meeting the roster floor", async () => {
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: 600,
+      canViewRoster: true,
+    })
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-members-card")
+    expect(within(card).getByTestId("section-visibility-badge")).toHaveTextContent(/maintainers & owners/i)
+  })
+
+  it("a maintainer can change the roster floor via the inline advanced toggle", async () => {
+    const patch = vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } }))
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: 600,
+      canViewRoster: true,
+      patch,
+    })
+    canEditRosterProgressFloorMock.mockReturnValue(true)
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-members-card")
+    fireEvent.click(within(card).getByTestId("section-visibility-badge"))
+
+    const trigger = await screen.findByRole("combobox", { name: /who can see this section/i })
+    fireEvent.click(trigger)
+    const option = await screen.findByRole("option", { name: /everyone with access/i })
+    fireEvent.pointerMove(option)
+    fireEvent.mouseMove(option)
+    fireEvent.keyDown(option, { key: "Enter" })
+
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ rosterViewMinRole: 100 }))
+  })
+
+  it("does not show the advanced toggle chevron for a caller who cannot edit the floor", async () => {
+    canEditRosterProgressFloorMock.mockReturnValue(false)
+    useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-members-card")
+    // Scoped to the badge itself, not the whole card — MembersTab's own
+    // "Add member" role picker renders an unrelated combobox in this card
+    // regardless of the visibility badge's edit state.
+    const badge = within(card).getByTestId("section-visibility-badge")
+    expect(within(badge).queryByRole("combobox")).not.toBeInTheDocument()
+    expect(badge.querySelector("svg.lucide-chevron-down")).not.toBeInTheDocument()
+  })
+})
+
+// ── AQU-493: chapter/verse progress rollup ──────────────────────────────────
+
+describe("ProjectOverview chapter/verse rollup (AQU-493)", () => {
+  // WHY: Randall's dashboard walkthrough asked for a per-file breakdown that
+  // drills into book -> chapter -> verse progress for Scripture files, while
+  // leaving non-canonical files on the flat cell/file view (no crash, no
+  // empty tree). These tests exercise the expand affordance end-to-end
+  // against a mocked cells fetch, proving the rollup is real data (not a
+  // stub) and that percentages reconcile with the underlying cell counts.
+
+  type CellRow = import("@/lib/sync/cells-read-types").CellRow
+
+  function cellRow(over: Partial<CellRow> & { cellId: string; side: "source" | "target" }): CellRow {
+    return {
+      value: "", valueHtml: null, type: null, canonicalRef: null, anchorCellId: null,
+      eventId: "evt", sourceEventId: null, lastEditor: null, lastEditAt: 0,
+      validated: false, wordCount: 0, ...over,
+    } as CellRow
+  }
+
+  function versePair(cellId: string, ref: string, filled: boolean, approved: boolean): CellRow[] {
+    return [
+      cellRow({ cellId, side: "source", canonicalRef: ref, value: "source" }),
+      cellRow({ cellId, side: "target", canonicalRef: ref, value: filled ? "target text" : "", validated: approved }),
+    ]
+  }
+
+  beforeEach(() => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+  })
+
+  it("expanding a file with Bible references reveals a book row with reconciling chapter/verse progress", async () => {
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
+    fetchAllFileCells.mockResolvedValue([
+      ...versePair("c1", "GEN 1:1", true, true),
+      ...versePair("c2", "GEN 1:2", true, true),
+    ])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+
+    renderOverview()
+
+    const row = await screen.findByTestId("file-row")
+    fireEvent.click(within(row).getByRole("button", { name: /^expand/i }))
+
+    const bookRow = await screen.findByTestId("book-row")
+    expect(bookRow).toHaveTextContent("GEN")
+    // A fully-filled, fully-approved 2-verse book reconciles to 2/2/2 at book level.
+    expect(bookRow).toHaveTextContent("2/2/2")
+
+    fireEvent.click(bookRow)
+    const chapterRow = await screen.findByTestId("chapter-row")
+    expect(chapterRow).toHaveTextContent("2/2/2")
+
+    fireEvent.click(chapterRow)
+    const verseCells = await screen.findAllByTestId("verse-cell")
+    expect(verseCells).toHaveLength(2)
+  })
+
+  it("expanding a file without Bible references shows a fallback note, not an empty tree", async () => {
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
+    fetchAllFileCells.mockResolvedValue([
+      cellRow({ cellId: "c1", side: "source", value: "hello", canonicalRef: null }),
+      cellRow({ cellId: "c1", side: "target", value: "bonjour", canonicalRef: null }),
+    ])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "Notes.txt", type: "txt", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+
+    renderOverview()
+
+    const row = await screen.findByTestId("file-row")
+    fireEvent.click(within(row).getByRole("button", { name: /^expand/i }))
+
+    expect(await screen.findByText(/no chapter\/verse structure detected/i)).toBeInTheDocument()
+    expect(screen.queryByTestId("book-row")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("canonical-rollup-books")).not.toBeInTheDocument()
+  })
+
+  it("collapsing and re-expanding a file does not re-fetch its cells", async () => {
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
+    fetchAllFileCells.mockResolvedValue(versePair("c1", "GEN 1:1", true, true))
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+
+    renderOverview()
+    const row = await screen.findByTestId("file-row")
+    const toggle = within(row).getByRole("button", { name: /^expand/i })
+
+    fireEvent.click(toggle) // expand
+    await screen.findByTestId("book-row")
+    fireEvent.click(within(row).getByRole("button", { name: /^collapse/i })) // collapse
+    expect(screen.queryByTestId("book-row")).not.toBeInTheDocument()
+    fireEvent.click(within(row).getByRole("button", { name: /^expand/i })) // re-expand
+    await screen.findByTestId("book-row")
+
+    expect(fetchAllFileCells).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ── AQU-499: file list sort/filter ──────────────────────────────────────────
+
+describe("ProjectOverview file list sort/filter (AQU-499)", () => {
+  // WHY: Randall's dashboard walkthrough — the file list was sorted by total
+  // cells with no visible control, which "is not very helpful" for tracking
+  // what recently changed. These tests lock in the visible sort control
+  // (last-updated default, canonical, alphabetical), the name filter, and
+  // that AQU-493's per-row expand state survives a re-sort (it's keyed by
+  // fileId, not row position).
+
+  beforeEach(() => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+  })
+
+  function fileWith(fileId: string, name: string, lastEditAt: number | null): import("@/lib/sync/cells-read").FileSummary {
+    return { fileId, projectId: "p1", name, fileType: "usfm", sourceLanguage: null, targetLanguage: null, cellCount: 10, filledCount: 5, approvedCount: 2, wordCount: 100, lastEditAt }
+  }
+
+  function rowNames(): (string | null | undefined)[] {
+    return screen.getAllByTestId("file-row").map((row) => row.querySelector(".font-medium")?.textContent)
+  }
+
+  function useFiles(files: import("@/lib/sync/cells-read").FileSummary[]) {
+    fetchProjectFiles.mockResolvedValue(files)
+    useProject.mockReturnValue({
+      project: projectRecord({
+        level: 400,
+        files: files.map((f) => ({ id: f.fileId, name: f.name, type: "usfm", createdAt: "x", cellCount: f.cellCount })),
+      }),
+      status: "ready",
+      refresh,
+    })
+  }
+
+  it("defaults to last-updated: most-recently-progressed file first, unedited files last", async () => {
+    useFiles([
+      fileWith("f1", "Old.usfm", 100),
+      fileWith("f2", "Newest.usfm", 300),
+      fileWith("f3", "NeverEdited.usfm", null),
+      fileWith("f4", "Mid.usfm", 200),
+    ])
+
+    renderOverview()
+
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(4))
+    expect(rowNames()).toEqual(["Newest.usfm", "Mid.usfm", "Old.usfm", "NeverEdited.usfm"])
+  })
+
+  it("switching to canonical order puts Genesis before Exodus regardless of last-updated", async () => {
+    useFiles([
+      fileWith("f1", "EXO.usfm", 999), // most recently edited, but canonical must still win
+      fileWith("f2", "GEN.usfm", 1),
+    ])
+
+    renderOverview()
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(2))
+    expect(rowNames()).toEqual(["EXO.usfm", "GEN.usfm"]) // last-updated default sanity check
+
+    await pickSelectOption(/sort files by/i, /^canonical order$/i)
+
+    expect(rowNames()).toEqual(["GEN.usfm", "EXO.usfm"])
+  })
+
+  it("switching to alphabetical orders rows by name", async () => {
+    useFiles([fileWith("f1", "Zeta.usfm", null), fileWith("f2", "Alpha.usfm", null)])
+
+    renderOverview()
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(2))
+
+    await pickSelectOption(/sort files by/i, /^alphabetical$/i)
+
+    expect(rowNames()).toEqual(["Alpha.usfm", "Zeta.usfm"])
+  })
+
+  it("typing in the name filter narrows the visible rows", async () => {
+    useFiles([
+      fileWith("f1", "GEN.usfm", null),
+      fileWith("f2", "EXO.usfm", null),
+      fileWith("f3", "Notes.txt", null),
+    ])
+
+    renderOverview()
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(3))
+
+    fireEvent.change(screen.getByLabelText(/filter files by name/i), { target: { value: "gen" } })
+
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(1))
+    expect(rowNames()).toEqual(["GEN.usfm"])
+  })
+
+  it("keeps AQU-493's expanded chapter/verse rollup on the same file after re-sorting moves its row", async () => {
+    useFiles([fileWith("f1", "EXO.usfm", 50), fileWith("f2", "GEN.usfm", 100)])
+    fetchAllFileCells.mockResolvedValue([
+      { cellId: "c1", side: "source", canonicalRef: "GEN 1:1", value: "src", valueHtml: null, type: null, anchorCellId: null, eventId: "e", sourceEventId: null, lastEditor: null, lastEditAt: 0, validated: false, wordCount: 0 },
+      { cellId: "c1", side: "target", canonicalRef: "GEN 1:1", value: "tgt", valueHtml: null, type: null, anchorCellId: null, eventId: "e", sourceEventId: null, lastEditor: null, lastEditAt: 0, validated: true, wordCount: 0 },
+    ] as import("@/lib/sync/cells-read-types").CellRow[])
+
+    renderOverview()
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(2))
+
+    // Default (last-updated) order: GEN.usfm (100) first, EXO.usfm (50) second.
+    expect(rowNames()).toEqual(["GEN.usfm", "EXO.usfm"])
+    const genRow = screen.getAllByTestId("file-row")[0]
+    fireEvent.click(within(genRow).getByRole("button", { name: /^expand GEN\.usfm$/i }))
+    await screen.findByTestId("book-row")
+
+    // Flip to alphabetical (EXO.usfm < GEN.usfm) so GEN actually moves to a
+    // different row position — proving expansion tracks fileId, not index.
+    await pickSelectOption(/sort files by/i, /^alphabetical$/i)
+    expect(rowNames()).toEqual(["EXO.usfm", "GEN.usfm"])
+
+    const newGenRow = screen.getAllByTestId("file-row")[1]
+    expect(within(newGenRow).getByRole("button", { name: /^collapse GEN\.usfm$/i })).toBeInTheDocument()
+    expect(within(newGenRow).getByTestId("book-row")).toBeInTheDocument()
+    // Re-sorting must never re-trigger the lazy per-file cell fetch for an
+    // already-expanded file.
+    expect(fetchAllFileCells).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ── AQU-500: CSV export / copy-to-clipboard ─────────────────────────────────
+
+describe("ProjectOverview CSV export (AQU-500)", () => {
+  // WHY: PMs want the progress table out into a spreadsheet. The control must
+  // (a) only appear when the org's export permission (useOrgSettings.canExport
+  // — the pre-existing FRO-253 primitive) allows it, and (b) export exactly
+  // the rows/order the PM currently sees, honoring AQU-499's sort/filter.
+
+  beforeEach(() => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    // happy-dom's navigator.clipboard is getter-only — define it per FRO-277's
+    // ImportDialog.partial-import.test.tsx pattern.
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      writable: true,
+      configurable: true,
+    })
+  })
+
+  function fileWith(fileId: string, name: string): import("@/lib/sync/cells-read").FileSummary {
+    return { fileId, projectId: "p1", name, fileType: "usfm", sourceLanguage: null, targetLanguage: null, cellCount: 10, filledCount: 5, approvedCount: 2, wordCount: 100, lastEditAt: null }
+  }
+
+  function useFiles(files: import("@/lib/sync/cells-read").FileSummary[]) {
+    fetchProjectFiles.mockResolvedValue(files)
+    useProject.mockReturnValue({
+      project: projectRecord({
+        level: 400,
+        name: "My Project",
+        files: files.map((f) => ({ id: f.fileId, name: f.name, type: "usfm", createdAt: "x", cellCount: f.cellCount })),
+      }),
+      status: "ready",
+      refresh,
+    })
+  }
+
+  it("shows the export controls when the org's export permission allows it", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles([fileWith("f1", "Genesis.usfm")])
+
+    renderOverview()
+
+    await screen.findByTestId("export-csv-copy")
+    expect(screen.getByTestId("export-csv-download")).toBeInTheDocument()
+  })
+
+  it("hides the export controls when the caller is below the org's export floor", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: false })
+    useFiles([fileWith("f1", "Genesis.usfm")])
+
+    renderOverview()
+
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(1))
+    expect(screen.queryByTestId("export-csv-copy")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("export-csv-download")).not.toBeInTheDocument()
+  })
+
+  it("copies the visible rows as CSV, honoring the current sort/filter", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles([fileWith("f1", "Zeta.usfm"), fileWith("f2", "Alpha.usfm")])
+
+    renderOverview()
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(2))
+
+    // Switch to alphabetical so the exported order must follow Alpha, Zeta —
+    // not file-list-fetch order — proving the export reads the sorted array.
+    await pickSelectOption(/sort files by/i, /^alphabetical$/i)
+
+    fireEvent.click(screen.getByTestId("export-csv-copy"))
+
+    await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1))
+    const csv = vi.mocked(navigator.clipboard.writeText).mock.calls[0][0] as string
+    expect(csv.split("\r\n")).toEqual([
+      "File,Filled,Approved,Total cells,Word count",
+      "Alpha.usfm,5,2,10,100",
+      "Zeta.usfm,5,2,10,100",
+    ])
+  })
+
+  it("filtering by name narrows what gets exported", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles([fileWith("f1", "Genesis.usfm"), fileWith("f2", "Exodus.usfm")])
+
+    renderOverview()
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(2))
+
+    fireEvent.change(screen.getByLabelText(/filter files by name/i), { target: { value: "gen" } })
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(1))
+
+    fireEvent.click(screen.getByTestId("export-csv-copy"))
+
+    await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1))
+    const csv = vi.mocked(navigator.clipboard.writeText).mock.calls[0][0] as string
+    expect(csv.split("\r\n")).toEqual([
+      "File,Filled,Approved,Total cells,Word count",
+      "Genesis.usfm,5,2,10,100",
+    ])
+  })
+
+  it("downloads a CSV blob named after the project", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles([fileWith("f1", "Genesis.usfm")])
+
+    renderOverview()
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(1))
+
+    fireEvent.click(screen.getByTestId("export-csv-download"))
+
+    expect(downloadBlob).toHaveBeenCalledTimes(1)
+    const [blob, filename] = downloadBlob.mock.calls[0]
+    expect(blob).toBeInstanceOf(Blob)
+    expect(filename).toBe("My-Project-progress.csv")
   })
 })

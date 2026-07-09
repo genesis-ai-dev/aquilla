@@ -65,8 +65,8 @@ test("pending invite appears on /members and can be revoked", async ({ alice }) 
   await expect(revokeBtn).toBeVisible({ timeout: 10_000 })
 
   // Since no email was provided, the "Open link" badge should be visible.
-  const openLinkBadge = alice.locator('[data-tooltip="Open link: anyone holding the URL can redeem"]').first()
-  await expect(openLinkBadge).toBeVisible({ timeout: 3_000 })
+  const inviteRow = alice.locator("li").filter({ hasText: name }).first()
+  await expect(inviteRow.getByText(/open link/i)).toBeVisible({ timeout: 3_000 })
 
   // Click revoke — row disappears optimistically.
   await revokeBtn.click()

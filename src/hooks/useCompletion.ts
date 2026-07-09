@@ -102,7 +102,7 @@ export function useCompletion(
   //   allCells: fileCells,    (from `const fileCells = cells` — the current file's cells snapshot)
   // e.g.:  useCompletion(...existingArgs, frontierSession, commitCompletedCell, rules, fileCells)
   rules?: TranslationRule[],
-  allCells?: CellData[],
+  allCells?: CellData[] | (() => CellData[]),
   /** The project brief's L1 summary — injected into every prompt (Task 6). */
   briefSummary?: string,
   draftContext: DraftContextSettings = DEFAULT_DRAFT_CONTEXT,
@@ -138,6 +138,10 @@ export function useCompletion(
   // "Available" = service is reachable right now. Used to disable Generate
   // with a clear "service unavailable" message — never to gate setup.
   const isAvailable = provider === "frontier" ? frontierAvailable : true
+  const getAllCells = useCallback(
+    () => typeof allCells === "function" ? allCells() : allCells ?? [],
+    [allCells],
+  )
 
   const completeSingle = useCallback(async (cell: CellData, signal?: AbortSignal) => {
     if (!isConfigured || !isAvailable) return
@@ -161,14 +165,13 @@ export function useCompletion(
     // Collect validated pairs from the project's cells, ranked by relevance to
     // the cell being drafted. These represent human corrections — "fix it once,
     // the system learns." Limit to top_k most-relevant to keep the prompt tight.
-    const validatedPairs = allCells
-      ? collectValidatedPairs(allCells, cell.original, topK)
-      : []
+    const corpusCells = getAllCells()
+    const validatedPairs = collectValidatedPairs(corpusCells, cell.original, topK)
 
     try {
       // Left-context = committed target of the preceding cells (D4).
       const precedingContext = gatherPrecedingContext(
-        allCells ?? [],
+        corpusCells,
         cell.id,
         draftContext.precedingTargetCells,
       )
@@ -237,7 +240,7 @@ export function useCompletion(
       setCompleting((p) => new Map(p).set(cell.id, "error"))
       setErrors((p) => new Map(p).set(cell.id, err instanceof Error ? err.message : "Failed"))
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session, provider, commitCompletedCell, rules, allCells, briefSummary, draftContext])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session, provider, commitCompletedCell, rules, getAllCells, briefSummary, draftContext])
 
   // Segmented batch translation: each sub-batch goes out as one <vN>-framed
   // prompt and the response is demuxed back to cells. LLMs translate a passage
@@ -275,6 +278,7 @@ export function useCompletion(
     // finally-clear pass this ID so a stale run cannot affect us.
     const runId = resetBatchCompletionState(cells.length)
     memMark(`completeBatch.start(${cells.length}c)`)
+    const corpusCells = getAllCells()
 
     let priorBatch: { source: string; target: string }[] = []
     const fallbackQueue: CellData[] = []
@@ -336,9 +340,7 @@ export function useCompletion(
         // Use the chunk's concatenated text as the relevance query so validated
         // pairs about the same topic/terms are ranked highest.
         const batchTopK = effectiveSettings.top_k ?? 15
-        const batchValidatedPairs = allCells
-          ? collectValidatedPairs(allCells, concatenated, batchTopK)
-          : []
+        const batchValidatedPairs = collectValidatedPairs(corpusCells, concatenated, batchTopK)
         const messages = buildBatchPrompt({
           sourceLanguage, targetLanguage,
           systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
@@ -512,7 +514,7 @@ export function useCompletion(
       clearBatchCompletionProgress(runId)
       memMark(`completeBatch.end(${cells.length}c)`)
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, completeSingle, commitCompletedCell, rules, allCells, briefSummary])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, completeSingle, commitCompletedCell, rules, getAllCells, briefSummary])
 
   // completeParagraph: draft a whole paragraph group as ONE model call, fan results
   // out to per-cell commits via the existing commitCompletedCell path (D3, D11).
@@ -520,7 +522,7 @@ export function useCompletion(
     if (!isConfigured || !isAvailable) return
 
     // 1. Identify paragraph group from the starting cell.
-    const cells = allCells ?? []
+    const cells = getAllCells()
     const groupIds = paragraphGroupForCell(cells, startCellId)
     if (!groupIds.length) {
       console.warn("[useCompletion] completeParagraph: cell not found in any paragraph group", startCellId)
@@ -556,9 +558,7 @@ export function useCompletion(
       // Validated pairs from living memory for relevance-ranked few-shot.
       const topK = effectiveSettings.top_k ?? 15
       const concatenated = groupCells.map((c) => c.original).join(" ")
-      const validatedPairs = allCells
-        ? collectValidatedPairs(allCells, concatenated, topK)
-        : []
+      const validatedPairs = collectValidatedPairs(cells, concatenated, topK)
 
       // Retrieve passage examples for the paragraph's source text.
       let passages: import("./useSearchIndex").PassageHit[] = []
@@ -689,7 +689,7 @@ export function useCompletion(
         setErrors((p) => new Map(p).set(c.id, msg))
       }
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, commitCompletedCell, rules, allCells, briefSummary, draftContext])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, commitCompletedCell, rules, getAllCells, briefSummary, draftContext])
 
   return { completeSingle, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, isConfigured, isAvailable, completing, examples, errors, previews }
 }

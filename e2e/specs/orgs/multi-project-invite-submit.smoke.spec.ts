@@ -48,7 +48,7 @@ test("multi-project invite submits and closes the dialog", async ({ alice }) => 
   await usernameInput.fill("bob")
 
   // Pick "bob" from the typeahead suggestions (plain buttons, no listbox role).
-  const suggestion = dialog.getByRole("button", { name: /^bob$/ })
+  const suggestion = alice.getByRole("button", { name: /^bob$/ })
   await expect(suggestion).toBeVisible({ timeout: 5_000 })
   await suggestion.click()
 

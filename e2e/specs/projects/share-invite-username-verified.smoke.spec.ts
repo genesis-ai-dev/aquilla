@@ -1,7 +1,7 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { ensureAuthState } from "../../helpers/auth"
-import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
+import { addOrgMember, createOrg, ROLE } from "../../helpers/frontier-api"
 
 /**
  * UsernameTypeahead — "Verified Aquilla user" badge.
@@ -9,13 +9,14 @@ import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
  * UsernameTypeahead.tsx renders a "verified" badge (title="Verified Aquilla
  * user", green background) when value.mode === "username" && value.resolved.
  *
- * The typeahead resolves a username when the user picks a suggestion from
- * the dropdown (handlePick sets value.resolved) — typing alone doesn't set
- * the badge. The user search is scoped to org/project-overlap users
- * (FRO-321), hence bob is seeded into alice's org first.
+ * The typeahead resolves a username when the user picks a suggestion from the
+ * dropdown (handlePick sets value.resolved) — typing alone doesn't set the
+ * badge. The user search is scoped to org/project-overlap users (FRO-321).
+ * Bob is seeded into a separate alice-owned org so he is searchable but is not
+ * already an effective member of the project under test.
  *
  * This spec:
- *   1. Adds bob to alice's org (so the scoped search can find him)
+ *   1. Adds bob to a separate alice-owned org (so scoped search can find him)
  *   2. Creates a project (alice owns it) and opens its workspace
  *   3. Opens the Share panel → Members tab → types "bob" → picks the
  *      "bob" suggestion
@@ -23,8 +24,8 @@ import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
  */
 test("share panel username typeahead shows Verified Aquilla user badge", async ({ alice }) => {
   const aliceSession = await ensureAuthState("alice")
-  const acme = await getMyOrg(aliceSession.jwt)
-  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
+  const searchScopeOrg = await createOrg(aliceSession.jwt, `Z Verified Badge Search Scope ${Date.now()}`)
+  await addOrgMember(aliceSession.jwt, searchScopeOrg.id, "bob", ROLE.VIEWER)
 
   const dash = new Dashboard(alice)
   await dash.goto()
@@ -60,12 +61,12 @@ test("share panel username typeahead shows Verified Aquilla user badge", async (
   // appears once a suggestion is PICKED (value.resolved is set by
   // handlePick, not by typing alone).
   await usernameInput.fill("bob")
-  const suggestion = dialog.getByRole("button", { name: "bob", exact: true })
+  const suggestion = alice.getByRole("button", { name: "bob", exact: true })
   await expect(suggestion).toBeVisible({ timeout: 8_000 })
   await suggestion.click()
 
   // The "Verified Aquilla user" badge appears next to the input.
-  const verifiedBadge = dialog.locator('[data-tooltip="Verified Aquilla user"]')
+  const verifiedBadge = dialog.getByText(/verified/i)
   await expect(verifiedBadge).toBeVisible({ timeout: 8_000 })
   await expect(verifiedBadge).toContainText(/verified/i)
 

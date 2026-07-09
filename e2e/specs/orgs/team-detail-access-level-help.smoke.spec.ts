@@ -14,7 +14,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 test("team detail shows Access level definitions help indicator", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
-  await alice.waitForURL(/\/projects/, { timeout: 5_000 })
+  await expect(alice.getByRole("link", { name: /^Teams$/i })).toBeVisible({ timeout: 10_000 })
 
   // Navigate to the teams list at /teams.
   await alice.goto("/teams")

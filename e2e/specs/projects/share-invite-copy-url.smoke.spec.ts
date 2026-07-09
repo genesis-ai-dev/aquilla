@@ -45,7 +45,7 @@ test("share panel Copy URL button shows Copied confirmation", async ({ alice }) 
   await createBtn.click()
 
   // Wait for the URL input + Copy URL button to appear.
-  const copyBtn = dialog.locator('[data-tooltip="Copy URL"] button, button[aria-label="Copy URL"]')
+  const copyBtn = dialog.locator('button[title="Copy URL"]').first()
   await expect(copyBtn).toBeVisible({ timeout: 10_000 })
 
   // Click Copy URL.

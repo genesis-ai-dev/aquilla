@@ -25,8 +25,9 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { cn } from "@/lib/utils"
-import { useComments } from "@/hooks/useComments"
+import { useComments, type CommentScope } from "@/hooks/useComments"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
+import { canPerform } from "@/lib/sync/role-policy"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useProject } from "@/hooks/useProject"
@@ -175,6 +176,21 @@ function scopeLabel(comment: CommentRecord, fileMap: Map<string, string>): strin
     return `File ${name}`
   }
   return "Project"
+}
+
+/**
+ * AQU-351: derive the CommentScope a reply should carry from its thread root,
+ * so replying from the project-wide Comments view targets the same
+ * cell/file/project the root comment lives on. Exported for unit testing.
+ */
+export function replyScopeForRoot(root: CommentRecord): CommentScope {
+  if (root.scopeKind === "cell" && root.fileId && root.cellId) {
+    return { kind: "cell", fileId: root.fileId, cellId: root.cellId }
+  }
+  if (root.scopeKind === "file" && root.fileId) {
+    return { kind: "file", fileId: root.fileId }
+  }
+  return { kind: "project" }
 }
 
 // ── @mention typeahead in comment composer ────────────────────────────────
@@ -377,17 +393,23 @@ interface ThreadProps {
   replies: CommentRecord[]
   currentUsername?: string
   fileMap: Map<string, string>
+  /** AQU-351: whether the current user may post replies from this view. */
+  canReply?: boolean
   onResolve: (commentId: string, resolved: boolean) => void
   onEdit: (commentId: string, body: string) => Promise<void>
   onDelete: (commentId: string) => Promise<void>
+  /** AQU-351: post a reply on this thread. Resolves once the optimistic
+   *  insert lands (the hook shows it immediately). */
+  onReply?: (root: CommentRecord, body: string) => Promise<void>
   onNavigate?: (root: CommentRecord) => void
 }
 
 function CommentThreadCard({
-  root, replies, currentUsername, fileMap, onResolve, onEdit, onDelete, onNavigate,
+  root, replies, currentUsername, fileMap, canReply, onResolve, onEdit, onDelete, onReply, onNavigate,
 }: ThreadProps) {
   const [open, setOpen] = useState(!root.resolved)
   const [replyText, setReplyText] = useState("")
+  const [isPostingReply, setIsPostingReply] = useState(false)
 
   // Inline edit state
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -398,11 +420,26 @@ function CommentThreadCard({
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [isDeletingConfirm, setIsDeletingConfirm] = useState(false)
 
+  // AQU-351: replies from the Comments view are now wired through the same
+  // useComments.addComment path the cell editor uses. The hook inserts the
+  // reply optimistically, so it appears under the thread with no manual
+  // refresh — that IS the post-submit confirmation.
+  async function submitReply() {
+    const body = replyText.trim()
+    if (!body || !onReply || isPostingReply) return
+    setIsPostingReply(true)
+    try {
+      await onReply(root, body)
+      setReplyText("")
+    } finally {
+      setIsPostingReply(false)
+    }
+  }
+
   function handleReplyKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
       e.preventDefault()
-      // Reply submit is a no-op here (CommentsPage is read-only for new replies)
-      // The cell-scoped CommentThread.tsx handles replies in-editor.
+      void submitReply()
     }
   }
 
@@ -586,20 +623,28 @@ function CommentThreadCard({
                   )}
                 </div>
               ))}
-              {/* Reply composer with @mention typeahead */}
-              <div className="mt-1 space-y-1.5">
-                <MentionTextarea
-                  value={replyText}
-                  onChange={setReplyText}
-                  placeholder="Reply… (type @ to mention)"
-                  rows={2}
-                  onKeyDown={handleReplyKeyDown}
-                />
-                <p className="text-[10px] text-muted-foreground">
-                  Replies from this view are not yet wired — open the cell in the editor to reply.
-                  {/* SWARM-TODO: wire reply submission from CommentsPage when a cell-reply endpoint is available */}
-                </p>
-              </div>
+              {/* AQU-351: reply composer, now wired through useComments. */}
+              {canReply !== false && onReply && (
+                <div className="mt-1 space-y-1.5">
+                  <MentionTextarea
+                    value={replyText}
+                    onChange={setReplyText}
+                    placeholder="Reply… (type @ to mention, ⌘/Ctrl+Enter to send)"
+                    rows={2}
+                    onKeyDown={handleReplyKeyDown}
+                  />
+                  <div className="flex justify-end">
+                    <Button
+                      size="sm"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => void submitReply()}
+                      disabled={isPostingReply || !replyText.trim()}
+                    >
+                      {isPostingReply ? <Spinner className="size-3" /> : "Reply"}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </CollapsibleContent>
         </Card>
@@ -794,11 +839,25 @@ export function CommentsPage() {
     )
   }, [projectId, session?.jwt])
 
-  const { comments, isLoading, isError, resolveThread, editComment, deleteComment, refresh } = useComments({
+  const { comments, isLoading, isError, addComment, resolveThread, editComment, deleteComment, refresh } = useComments({
     projectId: projectId ?? null,
     getToken,
     author: session?.username ?? 'unknown',
   })
+
+  // AQU-351: gate the reply composer by the same comment.create policy the
+  // cell drawer (CommentsDrawer) enforces, so a viewer never sees a composer
+  // whose write the server would reject. `canPerform` returns true when the
+  // role is unknown (legacy/unsynced projects), matching the drawer fallback.
+  const canReply = canPerform("comment.create", project?.syncRole?.level ?? null)
+
+  async function handleReply(root: CommentRecord, body: string) {
+    await addComment({
+      scope: replyScopeForRoot(root),
+      body,
+      parentCommentId: root.commentId,
+    })
+  }
 
   // Separate top-level threads from replies.
   const { roots, repliesByParent } = useMemo(() => {
@@ -956,9 +1015,11 @@ export function CommentsPage() {
               replies={repliesByParent.get(root.commentId) ?? []}
               currentUsername={session?.username}
               fileMap={fileMap}
+              canReply={canReply}
               onResolve={resolveThread}
               onEdit={editComment}
               onDelete={deleteComment}
+              onReply={handleReply}
               onNavigate={handleNavigate}
             />
           ))}

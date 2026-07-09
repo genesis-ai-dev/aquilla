@@ -141,6 +141,27 @@ describe("useComments — optimistic comment survives refresh (FRO-228 WARN)", (
   })
 })
 
+describe("useComments — refetch on window focus (AQU-351 liveness)", () => {
+  it("re-fetches comments when the tab/window regains focus", async () => {
+    mockFetchComments.mockResolvedValue([makeServerComment()])
+    const { result } = renderHook(() =>
+      useComments({ projectId: "proj-1", getToken: GET_TOKEN, author: "alice" }),
+    )
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+    const callsAfterMount = mockFetchComments.mock.calls.length
+
+    // Simulate the user returning to the tab.
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"))
+    })
+
+    await waitFor(() =>
+      expect(mockFetchComments.mock.calls.length).toBeGreaterThan(callsAfterMount),
+    )
+  })
+})
+
 describe("useComments — sentinel fileId for project-scoped mutations (FRO-228 BLOCKER 1 client side)", () => {
   it("addComment with project scope enqueues event with __project__ fileId sentinel", async () => {
     mockFetchComments.mockResolvedValue([])
@@ -160,6 +181,38 @@ describe("useComments — sentinel fileId for project-scoped mutations (FRO-228 
     const enqueuedEvent = mockEnqueueEvent.mock.calls[0][0] as { kind: string; fileId?: string }
     expect(enqueuedEvent.kind).toBe("comment.create")
     expect(enqueuedEvent.fileId).toBe("__project__")
+  })
+
+  it("addComment as a reply carries parentCommentId in the payload and inserts optimistically", async () => {
+    mockFetchComments.mockResolvedValue([
+      makeServerComment({ commentId: "root-1", scopeKind: "cell", fileId: "file-abc", cellId: "cell-123" }),
+    ])
+    const { result } = renderHook(() =>
+      useComments({ projectId: "proj-1", getToken: GET_TOKEN, author: "alice" }),
+    )
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.comments).toHaveLength(1)
+
+    await act(async () => {
+      await result.current.addComment({
+        scope: { kind: "cell", fileId: "file-abc", cellId: "cell-123" },
+        body: "A reply",
+        parentCommentId: "root-1",
+      })
+    })
+
+    const enqueuedEvent = mockEnqueueEvent.mock.calls[0][0] as {
+      kind: string
+      fileId?: string
+      payload: { parentCommentId: string | null }
+    }
+    expect(enqueuedEvent.kind).toBe("comment.create")
+    expect(enqueuedEvent.fileId).toBe("file-abc")
+    expect(enqueuedEvent.payload.parentCommentId).toBe("root-1")
+
+    // Reply is visible immediately (optimistic) as a child of the root.
+    const reply = result.current.comments.find((c) => c.body === "A reply")
+    expect(reply?.parentCommentId).toBe("root-1")
   })
 
   it("addComment with cell scope enqueues event with the cell's real fileId (not sentinel)", async () => {

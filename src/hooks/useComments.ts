@@ -164,6 +164,28 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
     }
   }, [projectId, refresh])
 
+  // AQU-351: refetch when the tab/window regains focus so a Comments view (or
+  // cell drawer) left open picks up comments others added without a manual
+  // refresh. This is the "refetch-on-focus at minimum" liveness model from the
+  // issue; true server-push would ride the project DO broadcast, which does not
+  // yet relay comment.* events. mergeWithOptimistic keeps pending local
+  // comments visible across the refetch.
+  useEffect(() => {
+    if (!projectId) return
+    const onFocus = () => {
+      refresh().catch(() => {/* refresh sets isError */})
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") onFocus()
+    }
+    window.addEventListener("focus", onFocus)
+    document.addEventListener("visibilitychange", onVisibility)
+    return () => {
+      window.removeEventListener("focus", onFocus)
+      document.removeEventListener("visibilitychange", onVisibility)
+    }
+  }, [projectId, refresh])
+
   /**
    * Derive the envelope fileId for a comment mutation.
    * - Cell/file scoped comments: use the comment's own fileId.

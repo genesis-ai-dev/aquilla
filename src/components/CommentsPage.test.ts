@@ -2,7 +2,7 @@
 // These test business logic only — no React rendering needed.
 
 import { describe, it, expect } from "vitest"
-import { applyFilters, applySorting, DEFAULT_FILTER, resolveFileName } from "./CommentsPage"
+import { applyFilters, applySorting, DEFAULT_FILTER, resolveFileName, replyScopeForRoot } from "./CommentsPage"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
 
 function makeComment(overrides: Partial<CommentRecord> = {}): CommentRecord {
@@ -214,5 +214,32 @@ describe("resolveFileName", () => {
     const result = resolveFileName("uuid-gen", emptyMap)
     expect(result.exists).toBe(false)
     expect(result.name).toBe("Deleted file")
+  })
+})
+
+// ── replyScopeForRoot: AQU-351 reply targeting ────────────────────────────
+// A reply posted from the project-wide Comments view must carry the same
+// scope as its thread root so it lands on the right cell/file/project.
+
+describe("replyScopeForRoot", () => {
+  it("targets the root's cell for a cell-scoped thread", () => {
+    const root = makeComment({ scopeKind: "cell", fileId: "GEN.sfm", cellId: "GEN 1:1" })
+    expect(replyScopeForRoot(root)).toEqual({ kind: "cell", fileId: "GEN.sfm", cellId: "GEN 1:1" })
+  })
+
+  it("targets the root's file for a file-scoped thread", () => {
+    const root = makeComment({ scopeKind: "file", fileId: "GEN.sfm", cellId: null })
+    expect(replyScopeForRoot(root)).toEqual({ kind: "file", fileId: "GEN.sfm" })
+  })
+
+  it("targets the project for a project-scoped thread", () => {
+    const root = makeComment({ scopeKind: "project", fileId: null, cellId: null })
+    expect(replyScopeForRoot(root)).toEqual({ kind: "project" })
+  })
+
+  it("falls back to project scope when a cell thread is missing its cellId", () => {
+    // Defensive: never emit a malformed cell scope (missing cellId/fileId).
+    const root = makeComment({ scopeKind: "cell", fileId: "GEN.sfm", cellId: null })
+    expect(replyScopeForRoot(root)).toEqual({ kind: "project" })
   })
 })

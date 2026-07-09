@@ -8,17 +8,15 @@ import { test, expect } from "../../helpers/multi-user"
 test("preferences AI provider Save override validates empty endpoint on click", async ({
   alice,
 }) => {
-  await alice.goto("/preferences")
+  await alice.goto("/preferences/provider-keys")
   await alice.waitForLoadState("networkidle")
 
-  const toggleBtn = alice.locator("button[aria-expanded]").filter({ hasText: /AI provider/i })
+  const toggleBtn = alice.getByRole("button", { name: /AI provider \(advanced\)/i })
   await expect(toggleBtn).toBeVisible({ timeout: 10_000 })
-  if ((await toggleBtn.getAttribute("aria-expanded")) !== "true") {
+  const endpointInput = alice.locator("#prov-endpoint")
+  if (!(await endpointInput.isVisible().catch(() => false))) {
     await toggleBtn.click()
   }
-  await expect(toggleBtn).toHaveAttribute("aria-expanded", "true", { timeout: 3_000 })
-
-  const endpointInput = alice.locator("#prov-endpoint")
   await expect(endpointInput).toBeVisible({ timeout: 3_000 })
 
   const saveBtn = alice.getByRole("button", { name: /Save override|Update override/i })

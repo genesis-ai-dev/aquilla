@@ -15,7 +15,8 @@ test("project settings custom provider reveals endpoint and model inputs", async
 
   const projectId = alice.url().match(/\/project\/([^/?]+)/)?.[1]
   expect(projectId).toBeTruthy()
-  await alice.goto(`/project/${projectId}/settings`)
+  // AQU-501: Advanced LLM lives under the AI & completion settings pane.
+  await alice.goto(`/project/${projectId}/settings?section=ai`)
 
   const advancedSummary = alice.getByText("Advanced LLM settings").first()
   await expect(advancedSummary).toBeVisible({ timeout: 10_000 })

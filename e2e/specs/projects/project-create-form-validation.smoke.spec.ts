@@ -12,14 +12,9 @@ test("project create dialog shows validation errors when required fields are mis
   const dash = new Dashboard(alice)
   await dash.goto()
 
-  const newProjectBtn = alice.getByRole("button", { name: /\+ New Project/i })
-  await expect(newProjectBtn).toBeVisible({ timeout: 10_000 })
-  await newProjectBtn.click()
+  const dialog = await dash.openCreateProjectDialog()
 
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
-
-  const createBtn = alice.getByRole("button", { name: /^Create Project$/i })
+  const createBtn = dialog.getByRole("button", { name: /^Create Project$/i })
   await expect(createBtn).toBeEnabled({ timeout: 3_000 })
 
   await createBtn.click()

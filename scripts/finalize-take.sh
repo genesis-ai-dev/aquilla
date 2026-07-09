@@ -14,7 +14,7 @@ SLUG="${1:?emitted slug, e.g. field-translator__editor-translate-cell}"
 DEST="${2:?dest walkthrough name, e.g. editor-translate-cell}"
 VIDEO="${3:-}"   # optional explicit video.webm — REQUIRED when many takes are in output/
                  # (assemble else pairs the storyboard with the most-recent .webm).
-MAIN="/Users/ryderwishart/prototypes/codex-web-app"
+MAIN="/Users/ryderwishart/frontierrnd/aquilla"
 REC="/Users/ryderwishart/prototypes/codex-rec"
 OUT="$REC/e2e/recordings/output"
 

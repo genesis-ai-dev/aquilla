@@ -4286,7 +4286,14 @@ export function ProjectWorkspace() {
           sourceCells={importSourceCells}
           ttsSettings={tts.settings}
           onCastUpdated={(patch) => tts.saveTts(patch)}
-          existingFiles={project.files} />
+          existingFiles={project.files}
+          patchDcsCursor={async (cursor) => {
+            // Pin the project to the imported Door43 release (spec §8). Server
+            // floor is MAINTAINER(600); a below-floor caller gets a blocked
+            // outcome (import still succeeded, only the pin is skipped).
+            const outcome = await patchSettings({ dcsUpstream: cursor })
+            return outcome.kind === "ok"
+          }} />
       </Suspense>
       {activeFileId && (
         <Suspense fallback={null}>

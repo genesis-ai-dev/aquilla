@@ -259,6 +259,50 @@ describe("events-emit", () => {
       expect(second.payload.anchorCellId).toBe("cell-1")
     })
 
+    it("emitSourceCellCommit advances the source chain head chained on parentId", async () => {
+      // The DCS delta path: a content-changed upstream cell commits on the
+      // source lane, chained on its current head, carrying a deterministic id
+      // for idempotent re-runs.
+      const id = await emitSourceCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "TIT-1-1",
+        parentId: "source-head-1",
+        value: "verse 1 (v89)",
+        valueHtml: "<p>verse 1 (v89)</p>",
+        id: "det-event-1",
+        author: "import-bot",
+      })
+      expect(id).toBe("det-event-1")
+      expect(await outboxPendingCount()).toBe(1)
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"source.cell.commit">
+      expect(ev.kind).toBe("source.cell.commit")
+      expect(ev.id).toBe("det-event-1")
+      expect(ev.parentId).toBe("source-head-1")
+      expect(ev.cellId).toBe("TIT-1-1")
+      expect(ev.fileId).toBe("f")
+      expect(ev.payload.value).toBe("verse 1 (v89)")
+      expect(ev.payload.valueHtml).toBe("<p>verse 1 (v89)</p>")
+    })
+
+    it("emitSourceCellCommit omits valueHtml when not supplied and defaults its id", async () => {
+      const id = await emitSourceCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "TIT-1-2",
+        parentId: "source-head-2",
+        value: "verse 2 (v89)",
+        author: "import-bot",
+      })
+      expect(typeof id).toBe("string")
+      expect(id.length).toBeGreaterThan(0)
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"source.cell.commit">
+      expect(ev.payload.value).toBe("verse 2 (v89)")
+      expect("valueHtml" in ev.payload).toBe(false)
+    })
+
     it("emitFileCreate is project-scoped and genesis", async () => {
       await emitFileCreate({
         projectId: "p",

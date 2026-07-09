@@ -21,7 +21,12 @@ let sessionValue: { session: { jwt: string } | null; loading: boolean } = { sess
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => sessionValue }))
 
 vi.mock("@/components/git-import/FrontierSignupForm", () => ({
-  FrontierSignupForm: ({ onSuccess }: { onSuccess: () => void }) => <button onClick={onSuccess}>do-signup</button>,
+  FrontierSignupForm: ({ onSuccess, initialEmail }: { onSuccess: () => void; initialEmail?: string | null }) => (
+    <div>
+      <span data-testid="signup-initial-email">{initialEmail ?? ""}</span>
+      <button onClick={onSuccess}>do-signup</button>
+    </div>
+  ),
 }))
 vi.mock("@/components/git-import/FrontierLoginForm", () => ({
   FrontierLoginForm: ({ onSuccess }: { onSuccess: () => void }) => <button onClick={onSuccess}>do-login</button>,
@@ -118,6 +123,35 @@ function fakeJwt(secondsFromNow: number): string {
   const exp = Math.floor(Date.now() / 1000) + secondsFromNow
   return `h.${btoa(JSON.stringify({ exp }))}.s`
 }
+
+// AQU-338: the cold-signup form must know what the invite's email means —
+// prefilled from a bound invite, or explicitly free-form for an anyone-with-link
+// invite — instead of silently rendering an empty field.
+describe("JoinPage AQU-338: invite email prefill on cold signup", () => {
+  it("prefills the signup email from an email-bound invite and offers to change it", async () => {
+    vi.mocked(previewServerInvite).mockResolvedValueOnce({
+      ok: true,
+      data: { projectId: "p1", projectName: "John", role: { level: 400, name: "contributor" }, expiresAt: null, email: "invitee@example.com" },
+    })
+    renderJoin()
+    await screen.findByText("John") // preview resolved
+    fireEvent.click(screen.getByText("Create an account"))
+    expect(screen.getByTestId("signup-initial-email")).toHaveTextContent("invitee@example.com")
+    expect(screen.getByText(/pre-filled the email from your invitation/i)).toBeInTheDocument()
+  })
+
+  it("leaves the email empty and explains the anyone-with-link case when the invite has no bound email", async () => {
+    vi.mocked(previewServerInvite).mockResolvedValueOnce({
+      ok: true,
+      data: { projectId: "p1", projectName: "John", role: { level: 400, name: "contributor" }, expiresAt: null, email: null },
+    })
+    renderJoin()
+    await screen.findByText("John")
+    fireEvent.click(screen.getByText("Create an account"))
+    expect(screen.getByTestId("signup-initial-email").textContent).toBe("")
+    expect(screen.getByText(/isn't bound to an email/i)).toBeInTheDocument()
+  })
+})
 
 describe("JoinPage expired session", () => {
   // Regression: an expired stored JWT used to land the user on the confirm

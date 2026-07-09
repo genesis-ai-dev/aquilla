@@ -178,6 +178,13 @@ export function JoinPage() {
   const previewLoading =
     (showPreviewCard || showConfirmCard) && preview === null && previewLoadState === null
 
+  // AQU-338: an email-bound single-project invite carries the recipient email
+  // in its preview — prefill the cold-signup form with it. An anyone-with-link
+  // invite (no bound email, valid per FRO-283) leaves the field empty and shows
+  // honest helper copy instead. Multi-project previews don't expose a bound
+  // email today, so they fall into the anyone-with-link branch.
+  const boundEmail = preview?.kind === "single" ? preview.data.email : null
+
   // Invite summary — shared by the signed-out (auth) and signed-in (confirm)
   // branches.
   const previewSummary =
@@ -356,7 +363,18 @@ export function JoinPage() {
                 )}
                 {authMode === "signup" && (
                   <div className="space-y-3">
-                    <FrontierSignupForm onSuccess={() => {}} />
+                    {/* AQU-338: be honest about what the email field means —
+                        prefilled-and-changeable for a bound invite, or
+                        free-form for an anyone-with-link invite. Gated on the
+                        preview so we never assert "unbound" while it loads. */}
+                    {preview && (
+                      <p className="text-xs text-muted-foreground">
+                        {boundEmail
+                          ? "We've pre-filled the email from your invitation — you can use a different one if you prefer."
+                          : "This invite isn't bound to an email — sign up with any email you'd like."}
+                      </p>
+                    )}
+                    <FrontierSignupForm onSuccess={() => {}} initialEmail={boundEmail} />
                     <p className="text-center text-xs text-muted-foreground">
                       Already have an account?{" "}
                       <button

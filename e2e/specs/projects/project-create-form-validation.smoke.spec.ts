@@ -19,20 +19,18 @@ test("project create dialog shows validation errors when required fields are mis
 
   await createBtn.click()
   await expect(dialog.getByText(/project name is required/i)).toBeVisible({ timeout: 2_000 })
+  await expect(dialog.getByText(/source language is required/i)).toBeVisible({ timeout: 2_000 })
+  await expect(dialog.getByText(/target language is required/i)).toBeVisible({ timeout: 2_000 })
 
   const nameInput = dialog.locator("#name")
   await nameInput.fill("My Test Project")
-  const sourceInput = dialog.locator("#source")
-  await sourceInput.fill("")
-  await createBtn.click()
-  await expect(dialog.getByText(/source language is required/i)).toBeVisible({ timeout: 2_000 })
-
-  await sourceInput.fill("en")
+  await dialog.locator("#source").fill("en")
   await createBtn.click()
   await expect(dialog.getByText(/target language is required/i)).toBeVisible({ timeout: 2_000 })
 
   await dialog.locator("#target").fill("fr")
   await expect(createBtn).toBeEnabled({ timeout: 2_000 })
+  await expect(dialog.getByText(/target language is required/i)).toHaveCount(0)
 
   await alice.keyboard.press("Escape")
 })

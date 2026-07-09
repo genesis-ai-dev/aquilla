@@ -1,6 +1,7 @@
-import { useState } from "react"
-import { HelpCircle, ExternalLink, Mail, BookOpen } from "lucide-react"
+import { useCallback, useState } from "react"
+import { HelpCircle, ExternalLink, Mail, BookOpen, Map } from "lucide-react"
 import { Discord } from "@/components/icons/Discord"
+import { useProductTourContext } from "@/context/ProductTourContext"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,6 +28,12 @@ const SUPPORT_EMAIL =
  */
 export function HelpMenu() {
   const [open, setOpen] = useState(false)
+  const { openTour } = useProductTourContext()
+
+  const handleTour = useCallback(() => {
+    setOpen(false)
+    openTour()
+  }, [openTour])
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -48,6 +55,10 @@ export function HelpMenu() {
         sideOffset={4}
       >
         <DropdownMenuGroup>
+          <DropdownMenuItem onClick={handleTour}>
+            <Map />
+            Take the tour
+          </DropdownMenuItem>
           <DropdownMenuItem
             render={
               <a

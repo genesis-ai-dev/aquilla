@@ -1,7 +1,4 @@
-import { useCallback } from "react"
 import { NavLink } from "react-router-dom"
-import { Map } from "lucide-react"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { useActiveOrg } from "@/context/OrgContext"
 import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
 import { useProjectsForNavigation } from "@/hooks/useAccessibleProjects"
@@ -9,7 +6,6 @@ import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { OrgSwitcher } from "./OrgSwitcher"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { HelpMenu } from "@/components/HelpMenu"
-import { useProductTourContext } from "@/context/ProductTourContext"
 
 const link = ({ isActive }: { isActive: boolean }) =>
   `block rounded-md px-2 py-1.5 text-sm ${isActive ? "bg-accent font-medium" : "hover:bg-accent/60"}`
@@ -19,7 +15,6 @@ export function OrgSidebar() {
   const isAdmin = !isAllOrgs && (activeOrg?.role.level ?? 0) >= 600
   // Platform-operator (site-wide admin) — separate axis from the org role.
   const { isAdmin: isPlatformAdmin } = usePlatformAdmin()
-  const { openTour } = useProductTourContext()
 
   // FRO-474: project-only invitees (direct project_members grant, no org
   // membership for that project) have no org-scoped nav surface to reach
@@ -27,11 +22,6 @@ export function OrgSidebar() {
   // used on the dashboard (FRO-335/FRO-428) — so they always have a way in.
   const { projects: accessibleProjects } = useProjectsForNavigation()
   const sharedProjects = partitionSharedProjects(accessibleProjects, orgs, activeOrgId).sharedWithMe
-
-  const handleTour = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    openTour()
-  }, [openTour])
 
   return (
     <div className="flex h-full min-w-0 flex-col gap-1 overflow-hidden p-2">
@@ -82,17 +72,6 @@ export function OrgSidebar() {
         )}
       </nav>
       <div className="mt-auto pt-2 flex flex-col gap-1">
-        {/* FRO-243: Re-launch product tour */}
-        <AppTooltip content="Take the product tour">
-          <button
-            type="button"
-            onClick={handleTour}
-            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground transition-colors"
-          >
-            <Map className="h-3.5 w-3.5" aria-hidden />
-            Take the tour
-          </button>
-        </AppTooltip>
         <HelpMenu />
         <div data-tour="account-switcher">
           <AccountSwitcher variant="sidebar" />

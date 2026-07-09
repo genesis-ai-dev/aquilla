@@ -12,7 +12,7 @@ import {
 // Configured at build time with sane defaults so help links always work.
 const DOCS_URL =
   (import.meta.env.VITE_DOCS_URL as string | undefined)?.trim() ||
-  "https://docs.aquilla.app"
+  "https://help.aquilla.app"
 const DISCORD_URL =
   (import.meta.env.VITE_DISCORD_INVITE_URL as string | undefined)?.trim() ||
   "https://discord.gg/T2EndwXe4W"
@@ -59,7 +59,7 @@ export function HelpMenu() {
             }
           >
             <BookOpen />
-            Docs
+            Help
             <ExternalLink className="ml-auto opacity-60" />
           </DropdownMenuItem>
           <DropdownMenuItem

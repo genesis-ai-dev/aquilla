@@ -1080,6 +1080,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     void doFetch(true)
   }, [doFetch])
 
+  const refreshCellsCacheFromStore = useCallback((maxServerSeq?: number) => {
+    const pid = projectRef.current
+    const fid = fileRef.current
+    if (!pid || !fid) return
+    void writeCellsCache(pid, fid, store.toRows(), maxServerSeq ?? store.getMaxServerSeq() ?? undefined)
+  }, [store])
+
   const revalidateCellRef = useRef<(cellId: string) => void>(() => {})
   const revalidateCell = useCallback((cellId: string) => {
     const pid = projectRef.current
@@ -1110,6 +1117,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
           store.clearConfirmedShadows(rows, startSeq)
           store.markCellFresh(cellId)
           store.replaceRowsForCell(cellId, rows)
+          refreshCellsCacheFromStore()
           return
         }
       } catch {
@@ -1127,7 +1135,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         }
       }
     })()
-  }, [doFetch, store])
+  }, [doFetch, refreshCellsCacheFromStore, store])
   revalidateCellRef.current = revalidateCell
 
   const applyOptimisticTargetEdit = useCallback((cellId: string, patch: { value: string; valueHtml?: string }) => {

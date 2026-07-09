@@ -1010,6 +1010,13 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     void doFetch(true)
   }, [doFetch])
 
+  const refreshCellsCacheFromRows = useCallback(() => {
+    const projectId = projectRef.current
+    const fileId = fileRef.current
+    if (!projectId || !fileId) return
+    void writeCellsCache(projectId, fileId, rowsRef.current, maxServerSeqRef.current ?? undefined)
+  }, [])
+
   // Targeted single-cell refetch. WS `event.applied` calls this with the
   // changed cellId so a remote validate/commit only pulls one row instead
   // of re-streaming the entire file (which is ~thousands of cells for a
@@ -1095,6 +1102,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
           for (const r of bySide.values()) next.push(r)
           rowsRef.current = next
           rebuildFromCache()
+          refreshCellsCacheFromRows()
           return
         }
       } catch {
@@ -1114,7 +1122,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         }
       }
     })()
-  }, [doFetch, rebuildFromCache, clearConfirmedShadows])
+  }, [doFetch, rebuildFromCache, clearConfirmedShadows, refreshCellsCacheFromRows])
   revalidateCellRef.current = revalidateCell
 
   // Optimistic local patch for the target row of a single cell. We mutate

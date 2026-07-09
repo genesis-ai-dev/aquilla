@@ -14,6 +14,8 @@ export interface CloudFileSummary {
   name: string
   type: string
   cellCount: number
+  sourceLanguage?: string | null
+  targetLanguage?: string | null
   /** Timeline-segment-model order lens ('time' | 'sequence'); absent ⇒ sequence. */
   orderedBy?: string
   sourceTextDirection?: "ltr" | "rtl" | null
@@ -223,6 +225,8 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
       type: f.type as FileType,
       createdAt: now,
       cellCount: f.cellCount,
+      ...(f.sourceLanguage ? { sourceLanguage: f.sourceLanguage } : {}),
+      ...(f.targetLanguage ? { targetLanguage: f.targetLanguage } : {}),
       ...(f.orderedBy === "time" || f.orderedBy === "sequence" ? { orderedBy: f.orderedBy } : {}),
       ...(f.sourceTextDirection === "ltr" || f.sourceTextDirection === "rtl" ? { sourceTextDirection: f.sourceTextDirection } : {}),
       ...(f.targetTextDirection === "ltr" || f.targetTextDirection === "rtl" ? { targetTextDirection: f.targetTextDirection } : {}),

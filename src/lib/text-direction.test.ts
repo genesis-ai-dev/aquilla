@@ -9,6 +9,8 @@ import {
 describe("text-direction", () => {
   it("detects RTL languages from codes and names", () => {
     expect(languageDefaultDirection("ar")).toBe("rtl")
+    expect(languageDefaultDirection("arb")).toBe("rtl")
+    expect(languageDefaultDirection("Arabic")).toBe("rtl")
     expect(languageDefaultDirection("heb")).toBe("rtl")
     expect(languageDefaultDirection("Persian")).toBe("rtl")
     expect(languageDefaultDirection("English")).toBe("ltr")

@@ -1059,7 +1059,18 @@ export function ProjectWorkspace() {
     if (next >= 0) editorRef.current?.focusCellEditorIndex(next)
   }, [findNextUnfinished])
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
-  const fileMeta = useFileMeta(activeFileId, project?.sourceLanguage, project?.targetLanguage, {
+  const activeSourceLanguage = activeFile?.sourceLanguage || project?.sourceLanguage
+  const activeTargetLanguage = activeFile?.targetLanguage || project?.targetLanguage
+  const editorProject = useMemo<ProjectRecord | null>(() => {
+    if (!project) return null
+    const sourceLanguage = activeSourceLanguage ?? project.sourceLanguage
+    const targetLanguage = activeTargetLanguage ?? project.targetLanguage
+    if (sourceLanguage === project.sourceLanguage && targetLanguage === project.targetLanguage) {
+      return project
+    }
+    return { ...project, sourceLanguage, targetLanguage }
+  }, [activeSourceLanguage, activeTargetLanguage, project])
+  const fileMeta = useFileMeta(activeFileId, activeSourceLanguage, activeTargetLanguage, {
     sourceTextDirection: activeFile?.sourceTextDirection,
     targetTextDirection: activeFile?.targetTextDirection,
   })
@@ -4136,7 +4147,7 @@ export function ProjectWorkspace() {
                   tooltip per control. */}
               <TooltipDelegationBoundary>
               <EditorTable
-            ref={editorRef} project={project} cellStore={cellStore}
+            ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
             showFootnotesInline={footnoteViewMode === "inline"}
             footnotePanelActive={footnoteViewMode !== "off"}
             footnoteViewMode={footnoteViewMode}

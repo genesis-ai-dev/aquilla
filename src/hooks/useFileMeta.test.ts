@@ -25,6 +25,11 @@ describe("useFileMeta (Phase 2b, localStorage-backed)", () => {
     await waitFor(() => expect(result.current.targetTextDirection).toBe("rtl"))
   })
 
+  it("auto-detects targetTextDirection from Arabic ISO 639-3 targetLanguage", async () => {
+    const { result } = renderHook(() => useFileMeta("file-a", "en", "arb"))
+    await waitFor(() => expect(result.current.targetTextDirection).toBe("rtl"))
+  })
+
   it("auto-detects sourceTextDirection from sourceLanguage", async () => {
     const { result } = renderHook(() => useFileMeta("file-a", "he", "en"))
     await waitFor(() => expect(result.current.sourceTextDirection).toBe("rtl"))

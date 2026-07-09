@@ -942,6 +942,8 @@ export async function emitParsedFile(
       createdAt: new Date().toISOString(),
       cellCount: cells.length,
       orderedBy,
+      ...(ctx.sourceLanguage ? { sourceLanguage: ctx.sourceLanguage } : {}),
+      ...(ctx.targetLanguage ? { targetLanguage: ctx.targetLanguage } : {}),
       ...(ctx.sourceTextDirection ? { sourceTextDirection: ctx.sourceTextDirection } : {}),
       ...(ctx.targetTextDirection ? { targetTextDirection: ctx.targetTextDirection } : {}),
       ...(result.corpusMarker ? { corpusMarker: result.corpusMarker } : {}),
@@ -1410,6 +1412,8 @@ export async function importParatextAsTarget(
         type: "usfm",
         createdAt: new Date().toISOString(),
         cellCount: cells.length,
+        ...(ctx.sourceLanguage ? { sourceLanguage: ctx.sourceLanguage } : {}),
+        ...(ctx.targetLanguage ? { targetLanguage: ctx.targetLanguage } : {}),
         ...(plan.project.settings.rightToLeft ? { targetTextDirection: "rtl" as const } : {}),
         ...(bookPlan.corpusMarker ? { corpusMarker: bookPlan.corpusMarker } : {}),
       })

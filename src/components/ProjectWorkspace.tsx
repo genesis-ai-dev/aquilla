@@ -4,6 +4,7 @@ import { useProject } from "@/hooks/useProject"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { deriveNavTitle } from "@/lib/navigation/deriveTitle"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
+import { pickRestoreFileId } from "@/lib/editor/restore-file"
 import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
 import { WorkspaceSkeleton } from "./WorkspaceSkeleton"
 import { TabStrip } from "./TabStrip"
@@ -547,16 +548,17 @@ export function ProjectWorkspace() {
     // because this effect is declared before currentUsername is computed.
     const uid = currentUsernameRef.current
     const savedLoc = readLastLocation(uid, projectId)
-    const last = (savedLoc?.fileId && fileIds.includes(savedLoc.fileId) ? savedLoc.fileId : null)
-      ?? readLastActiveFileId(projectId)
-    const firstOpenTab = workspaceTabs.tabs[0]?.fileId ?? null
-    const onlyFile = projectFiles.length === 1 ? projectFiles[0]?.id : null
-    const nextFileId =
-      last && fileIds.includes(last)
-        ? last
-        : firstOpenTab && fileIds.includes(firstOpenTab)
-          ? firstOpenTab
-          : onlyFile
+    // AQU-339: the final fallback is the first project file (not "only when
+    // there's exactly one file") so a cold-loaded, freshly-joined multi-file
+    // project auto-selects a sensible default source text instead of landing
+    // on a bare "No file selected" prompt the user has to click through.
+    const nextFileId = pickRestoreFileId({
+      fileIds,
+      savedFileId: savedLoc?.fileId && fileIds.includes(savedLoc.fileId) ? savedLoc.fileId : null,
+      lastActiveFileId: readLastActiveFileId(projectId),
+      firstOpenTabFileId: workspaceTabs.tabs[0]?.fileId ?? null,
+      firstProjectFileId: projectFiles[0]?.id ?? null,
+    })
     if (!nextFileId) return
     // If there is a remembered cell, park it in the ref so the scroll-restore
     // effect can consume it once cells are loaded.

@@ -685,6 +685,51 @@ export async function emitSourceCellCreate(
   return eventId
 }
 
+export interface SourceCellCommitInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** Current chain-head event_id for this source cell row (from `cells.event_id`
+   *  on the source side). Chains the commit off the prior winning source event. */
+  parentId: string | null
+  value: string
+  valueHtml?: string
+  /** Authorship — a project_lead+ user editing the template/self-contained source. */
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `source.cell.commit` event — a project_lead's edit to a SOURCE cell's
+ * text (e.g. the Come and See template owner fixing an English line, which then
+ * propagates to downstream linked projects via the mirror sync). Chain-mutating,
+ * like `target.cell.commit`, but with NO `sourceEventId` pin (source rows are
+ * the pin target, not the pinned).
+ *
+ * The `source.cell.commit` role floor (PROJECT_LEAD, 500) is enforced generically
+ * by `enqueueEvent` — when the signed-in user's known role is below it, this
+ * throws `InsufficientRoleError` and nothing enters the durable outbox. The
+ * server's live-mode lock additionally rejects commits on mirrored source cells
+ * in live-linked downstream projects (see sync-worker route.ts); the editor
+ * only surfaces the affordance where editing is permitted.
+ */
+export async function emitSourceCellCommit(input: SourceCellCommitInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "source.cell.commit",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: input.parentId ?? null,
+    author: input.author,
+    payload: {
+      value: input.value,
+      ...(input.valueHtml !== undefined ? { valueHtml: input.valueHtml } : {}),
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface SourceCellDeleteInput {
   projectId: string
   fileId: string

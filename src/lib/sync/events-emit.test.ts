@@ -3,6 +3,7 @@ import "fake-indexeddb/auto"
 import {
   buildRawEvent,
   emitTargetCellCommit,
+  emitSourceCellCommit,
   emitCellValidate,
   emitCellUnvalidate,
   emitSourceCellCreate,
@@ -149,6 +150,52 @@ describe("events-emit", () => {
       expect(
         (peek[0].event as unknown as OutboxRawEvent<"target.cell.commit">).parentId,
       ).toBe(null)
+    })
+  })
+
+  describe("emitSourceCellCommit", () => {
+    it("enqueues a chain-mutating source.cell.commit with no sourceEventId pin", async () => {
+      const id = await emitSourceCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        parentId: "src-head-1",
+        value: "fixed English line",
+        valueHtml: "<p>fixed English line</p>",
+        author: "lead",
+      })
+      expect(typeof id).toBe("string")
+      expect(await outboxPendingCount()).toBe(1)
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"source.cell.commit">
+      expect(ev.kind).toBe("source.cell.commit")
+      // Chains off the source row's current head (advances cells.event_id).
+      expect(ev.parentId).toBe("src-head-1")
+      expect(ev.cellId).toBe("c")
+      expect(ev.fileId).toBe("f")
+      expect(ev.payload.value).toBe("fixed English line")
+      expect(ev.payload.valueHtml).toBe("<p>fixed English line</p>")
+      // Source rows carry no AD-9 staleness pin.
+      expect((ev.payload as Record<string, unknown>).sourceEventId).toBeUndefined()
+    })
+
+    it("refuses to enqueue below the PROJECT_LEAD (500) floor — never reaches the outbox", async () => {
+      setCqrsOutboxBridge({ projectId: "p", activeFileId: "f", username: "u", roleLevel: ROLE.CONTRIBUTOR })
+      try {
+        await expect(
+          emitSourceCellCommit({
+            projectId: "p",
+            fileId: "f",
+            cellId: "c",
+            parentId: null,
+            value: "nope",
+            author: "u",
+          }),
+        ).rejects.toBeInstanceOf(InsufficientRoleError)
+        expect(await outboxPendingCount()).toBe(0)
+      } finally {
+        setCqrsOutboxBridge(null)
+      }
     })
   })
 

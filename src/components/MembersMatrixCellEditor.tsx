@@ -4,6 +4,7 @@ import type { SecondarySrc } from "@/lib/frontier/members"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
+import { TableCell } from "@/components/ui/table"
 import {
   Tooltip,
   TooltipContent,
@@ -127,7 +128,7 @@ export function MembersMatrixCellEditor({
   // otherwise. Click opens the add-role popover.
   if (!cell) {
     return (
-      <td className="border-l p-0">
+      <TableCell className="border-l p-0">
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger
             render={
@@ -151,7 +152,7 @@ export function MembersMatrixCellEditor({
             />
           </PopoverContent>
         </Popover>
-      </td>
+      </TableCell>
     )
   }
 
@@ -159,7 +160,7 @@ export function MembersMatrixCellEditor({
   // edit popover (always — even for immutable cells, where the popover
   // shows the explanation).
   return (
-    <td className={`border-l p-0 ${cellClassName}`}>
+    <TableCell className={`border-l p-0 ${cellClassName}`}>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           render={
@@ -236,7 +237,7 @@ export function MembersMatrixCellEditor({
           )}
         </PopoverContent>
       </Popover>
-    </td>
+    </TableCell>
   )
 }
 

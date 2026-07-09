@@ -20,6 +20,14 @@
 import { useState, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import type { SourceCellRef } from "@/lib/import"
 import { generateLabelTemplate, parseCsvRows, splitCastName } from "@/lib/parsers/spreadsheet"
 import { emitCastAssign } from "@/lib/sync/events-emit"
@@ -212,24 +220,24 @@ export function LabelImportPanel({
             {preview.length} label{preview.length !== 1 ? "s" : ""} to import
           </p>
           <ScrollArea className="max-h-40 rounded-md border">
-            <table className="w-full text-xs">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="px-2 py-1 text-left font-medium text-foreground/70">Ref</th>
-                  <th className="px-2 py-1 text-left font-medium text-foreground/70">Voice</th>
-                  <th className="px-2 py-1 text-left font-medium text-foreground/70">Camera</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Ref</TableHead>
+                  <TableHead>Voice</TableHead>
+                  <TableHead>Camera</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {preview.slice(0, 20).map((p, i) => (
-                  <tr key={i}>
-                    <td className="px-2 py-1 font-mono text-foreground/70">{p.ref}</td>
-                    <td className="px-2 py-1 text-foreground/80">{p.castName}</td>
-                    <td className="px-2 py-1 text-muted-foreground">{p.cameraState ?? "—"}</td>
-                  </tr>
+                  <TableRow key={i}>
+                    <TableCell className="font-mono">{p.ref}</TableCell>
+                    <TableCell>{p.castName}</TableCell>
+                    <TableCell className="text-muted-foreground">{p.cameraState ?? "—"}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </ScrollArea>
           {preview.length > 20 && (
             <p className="mt-1 text-xs text-muted-foreground">…and {preview.length - 20} more</p>

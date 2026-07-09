@@ -19,9 +19,52 @@ import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
 import { getProjectAssignments, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
 
 /** Max per-file rows shown on the overview; the rest are counted as "+N more". */
 const FILE_ROW_CAP = 12
+
+function ProjectOverviewSkeleton() {
+  return (
+    <div className="max-w-5xl space-y-4">
+      <div className="rounded-xl border bg-card shadow-sm p-6 space-y-2">
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-6 w-48" />
+          <Skeleton className="h-5 w-16 rounded-full" />
+        </div>
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="h-4 w-20" />
+      </div>
+      <div className="rounded-xl border bg-card shadow-sm p-5 space-y-4">
+        <Skeleton className="h-3 w-20" />
+        <div className="flex flex-wrap gap-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-14 w-24 rounded-lg" />
+          ))}
+        </div>
+        <div className="space-y-2.5">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-2.5 w-full rounded-full" />
+          ))}
+        </div>
+      </div>
+      <div className="rounded-xl border bg-card shadow-sm p-5 space-y-3">
+        <Skeleton className="h-3 w-16" />
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-3">
+            <Skeleton className="h-4 w-36" />
+            <Skeleton className="h-1.5 flex-1 rounded-full" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+        ))}
+      </div>
+      <div className="rounded-xl border bg-card shadow-sm p-5 space-y-2">
+        <Skeleton className="h-3 w-20" />
+        <Skeleton className="h-4 w-40" />
+      </div>
+    </div>
+  )
+}
 
 // ── Status chip ──────────────────────────────────────────────────────────────
 
@@ -355,7 +398,7 @@ export function ProjectOverview() {
           )}
           <div className="p-6">
           {status !== "ready" ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+            <ProjectOverviewSkeleton />
           ) : (
             <div className="max-w-5xl space-y-4">
               {/* ── Header card ── */}

@@ -3846,6 +3846,7 @@ export function ProjectWorkspace() {
               targetTextDirection={fileMeta.targetTextDirection}
               sourceAutoDirectionSummary={activeFileDirectionSummary.source}
               targetAutoDirectionSummary={activeFileDirectionSummary.target}
+              directionWarningScope={activeFile?.id ?? null}
               cellLabelsEnabled={cellLabelsEnabled}
               footnoteViewMode={footnoteViewMode}
               onFootnoteViewModeChange={setFootnoteViewMode}

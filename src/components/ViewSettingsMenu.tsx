@@ -1,6 +1,6 @@
 import { useState, forwardRef, useImperativeHandle } from "react"
 import { Menu } from "@base-ui/react/menu"
-import { Eye } from "lucide-react"
+import { AlertTriangle, Eye, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -23,6 +23,7 @@ interface ViewSettingsMenuProps {
   targetTextDirection: TextDirection
   sourceAutoDirectionSummary?: TextDirectionSummary | null
   targetAutoDirectionSummary?: TextDirectionSummary | null
+  directionWarningScope?: string | null
   cellLabelsEnabled: boolean
   tnSidebarEnabled: boolean
   /** FRO-317: USFM \f...\f* footnote display mode. */
@@ -51,6 +52,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   targetTextDirection,
   sourceAutoDirectionSummary,
   targetAutoDirectionSummary,
+  directionWarningScope,
   cellLabelsEnabled,
   tnSidebarEnabled,
   footnoteViewMode = "off",
@@ -66,13 +68,86 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   onFootnoteViewModeChange,
 }, ref) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const mismatch = getManualDirectionMismatch({
+    sourceMode: sourceDirectionMode,
+    targetMode: targetDirectionMode,
+    sourceSummary: sourceAutoDirectionSummary,
+    targetSummary: targetAutoDirectionSummary,
+  })
+  const mismatchSignature = mismatch
+    ? `${directionWarningScope ?? ""}:${mismatch.side}:${mismatch.forced}:${mismatch.detected}`
+    : null
+  const [dismissedMismatchSignature, setDismissedMismatchSignature] = useState<string | null>(null)
+  const showMismatchWarning = Boolean(
+    fileOpen &&
+    mismatch &&
+    mismatchSignature &&
+    dismissedMismatchSignature !== mismatchSignature &&
+    !menuOpen,
+  )
+  const detectedManualDirection = mismatch?.detected === "mixed" ? null : (mismatch?.detected ?? null)
 
   useImperativeHandle(ref, () => ({
     open: () => setMenuOpen(true),
   }))
 
+  function applyDirectionMismatchFix(mode: DirectionMode) {
+    if (!mismatch) return
+    if (mismatch.side === "source") onSourceDirectionModeChange(mode)
+    else onTargetDirectionModeChange(mode)
+  }
+
   return (
     <div className="relative flex items-center">
+      {showMismatchWarning && mismatch && (
+        <div
+          className={cn(
+            "absolute right-full top-1/2 z-30 mr-2 flex -translate-y-1/2 items-center gap-2 whitespace-nowrap",
+            "rounded-2xl bg-card px-3 py-2 text-xs",
+            "animate-in fade-in-0 slide-in-from-right-2 duration-200",
+          )}
+          role="status"
+        >
+          <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0 text-amber-600" />
+          <span className="text-foreground">
+            {mismatch.sideLabel} is forced{" "}
+            <strong>{directionName(mismatch.forced)}</strong>, but content looks{" "}
+            <strong>{detectedDirectionName(mismatch.detected)}</strong>
+          </span>
+          <button
+            type="button"
+            onClick={() => applyDirectionMismatchFix("auto")}
+            className="rounded-full px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card active:scale-[0.95]"
+          >
+            Auto
+          </button>
+          {detectedManualDirection && (
+            <button
+              type="button"
+              onClick={() => applyDirectionMismatchFix(detectedManualDirection)}
+              className="rounded-full px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card active:scale-[0.95]"
+            >
+              {detectedManualDirection.toUpperCase()}
+            </button>
+          )}
+          <AppTooltip content="Dismiss">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => setDismissedMismatchSignature(mismatchSignature)}
+              aria-label="Dismiss direction warning"
+              className="size-5 rounded-full text-muted-foreground/70"
+            >
+              <X className="h-3 w-3" />
+            </Button>
+          </AppTooltip>
+          <span
+            className="absolute left-full top-1/2 -translate-y-1/2 border-y-4 border-l-4 border-y-transparent border-l-card"
+            aria-hidden="true"
+          />
+        </div>
+      )}
       <Menu.Root open={menuOpen} onOpenChange={setMenuOpen}>
         <Menu.Trigger
           render={
@@ -348,4 +423,54 @@ function DirPill({
       {label}
     </span>
   )
+}
+
+interface DirectionMismatchInput {
+  sourceMode: DirectionMode
+  targetMode: DirectionMode
+  sourceSummary?: TextDirectionSummary | null
+  targetSummary?: TextDirectionSummary | null
+}
+
+interface DirectionMismatch {
+  side: "source" | "target"
+  sideLabel: "Source" | "Target"
+  forced: TextDirection
+  detected: TextDirectionSummary
+}
+
+function getManualDirectionMismatch({
+  sourceMode,
+  targetMode,
+  sourceSummary,
+  targetSummary,
+}: DirectionMismatchInput): DirectionMismatch | null {
+  return (
+    getManualDirectionMismatchForSide("target", targetMode, targetSummary) ??
+    getManualDirectionMismatchForSide("source", sourceMode, sourceSummary)
+  )
+}
+
+function getManualDirectionMismatchForSide(
+  side: "source" | "target",
+  mode: DirectionMode,
+  summary?: TextDirectionSummary | null,
+): DirectionMismatch | null {
+  if (mode === "auto" || summary == null) return null
+  if (summary === mode) return null
+  return {
+    side,
+    sideLabel: side === "source" ? "Source" : "Target",
+    forced: mode,
+    detected: summary,
+  }
+}
+
+function directionName(direction: TextDirection): string {
+  return direction === "rtl" ? "right-to-left" : "left-to-right"
+}
+
+function detectedDirectionName(direction: TextDirectionSummary): string {
+  if (direction === "mixed") return "mixed"
+  return directionName(direction)
 }

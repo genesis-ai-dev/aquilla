@@ -160,7 +160,7 @@ export function OrgSwitcher() {
                   <OrgMark name={name} />
                   <span className="truncate">{name}</span>
                   <span className="flex shrink-0 items-center gap-1.5">
-                    <span className="text-xs text-muted-foreground">{o.role.name}</span>
+                    <span className="text-xs text-muted-foreground capitalize">{o.role.name}</span>
                     {selected && <Check className="size-4 opacity-60" />}
                   </span>
                 </DropdownMenuItem>
@@ -180,7 +180,7 @@ export function OrgSwitcher() {
                     <OrgMark name={g.name ?? `Org #${g.id}`} />
                     <span className="truncate">{g.name ?? `Org #${g.id}`}</span>
                     <span className="flex shrink-0 items-center gap-1.5">
-                      <span className="text-xs text-muted-foreground">Guest</span>
+                      <span className="text-xs text-muted-foreground capitalize">guest</span>
                     </span>
                   </DropdownMenuItem>
                 ))}

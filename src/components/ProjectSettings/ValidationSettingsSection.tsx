@@ -11,15 +11,22 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
+import { VALIDATION_FLOOR_ROLE_OPTIONS } from "@/lib/frontier/roles"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 type ValidationRoleFloor = NonNullable<ProjectRecord["validationRoleFloor"]>
 
-const ROLE_OPTIONS: { value: ValidationRoleFloor; label: string }[] = [
-  { value: "reviewer", label: "Reviewer (default)" },
-  { value: "project_lead", label: "Project Lead" },
-  { value: "maintainer", label: "Maintainer" },
-]
+// AQU-352: the minimum-validator-role floor draws its labels from the canonical
+// role source (roles.ts) so they read identically to the member / invite /
+// share surfaces — no per-surface role-name drift. The offered set is an
+// intentional subset (reviewer and up); subsetting is fine, renaming is not.
+// `roleName` (the option's `name`) is exactly the ProjectRecord
+// `validationRoleFloor` literal, so it doubles as the stored value.
+const ROLE_OPTIONS: { value: ValidationRoleFloor; label: string }[] =
+  VALIDATION_FLOOR_ROLE_OPTIONS.map((o) => ({
+    value: o.name as ValidationRoleFloor,
+    label: o.name,
+  }))
 
 interface Props {
   validationCount: number
@@ -164,7 +171,7 @@ export function ValidationSettingsSection({
             </Select>
           </DisabledFieldTooltip>
           <p className="text-xs text-muted-foreground">
-            Only users with at least this role can cast a validation vote.
+            Only users with at least this role can cast a validation vote. Defaults to reviewer.
             {/* SWARM-TODO(server-enforcement): enforce in sync-worker cell.validate branch */}
           </p>
         </div>

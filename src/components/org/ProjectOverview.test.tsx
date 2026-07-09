@@ -185,7 +185,7 @@ describe("deriveProjectStatus", () => {
   function makePortfolio(opts: Partial<PortfolioProject> = {}): PortfolioProject {
     return {
       id: "p1", name: "Test", totalCells: 100, filledCells: 50, validatedCells: 20,
-      aiDraftedCells: 0, audioCells: 0, recordedMs: 0, lastEditAt: null, deadlineAt: null, ...opts,
+      aiDraftedCells: 0, audioCells: 0, validatedAudioCells: 0, recordedMs: 0, lastEditAt: null, deadlineAt: null, ...opts,
     }
   }
 
@@ -266,6 +266,7 @@ describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
       id: "p1", name: "John", totalCells: 100, filledCells: 80, validatedCells: 50,
       aiDraftedCells: 0,
       audioCells: 0, // no audio
+      validatedAudioCells: 0,
       recordedMs: 0, lastEditAt: null, deadlineAt: null,
     }])
     renderOverview()
@@ -293,6 +294,7 @@ describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
       validatedCells: 0,
       aiDraftedCells: 0,
       audioCells: 60, // audio present
+      validatedAudioCells: 0,
       recordedMs: 90000, lastEditAt: null, deadlineAt: null,
     }])
     renderOverview()
@@ -516,6 +518,7 @@ describe("ProjectOverview audio progress (FRO-160)", () => {
         validatedCells: 50,
         aiDraftedCells: 0,
         audioCells: 30,   // 30 cells have recordings → 30%
+        validatedAudioCells: 0,
         recordedMs: 90000,
         lastEditAt: Date.now(),
         deadlineAt: null,
@@ -549,6 +552,7 @@ describe("ProjectOverview audio progress (FRO-160)", () => {
         validatedCells: 50,
         aiDraftedCells: 0,
         audioCells: 0,    // no recordings at all → correct 0%
+        validatedAudioCells: 0,
         recordedMs: 0,
         lastEditAt: Date.now(),
         deadlineAt: null,
@@ -621,7 +625,7 @@ describe("ProjectOverview project-only invitee access (FRO-474)", () => {
     })
     getPortfolio.mockResolvedValue([{
       id: "p1", name: "John", totalCells: 100, filledCells: 50, validatedCells: 20,
-      aiDraftedCells: 0, audioCells: 0, recordedMs: 0, lastEditAt: null, deadlineAt: null,
+      aiDraftedCells: 0, audioCells: 0, validatedAudioCells: 0, recordedMs: 0, lastEditAt: null, deadlineAt: null,
     }])
 
     renderOverview()
@@ -683,6 +687,7 @@ describe("ProjectOverview AI-drafted segment (FRO-292)", () => {
       validatedCells: 30,
       aiDraftedCells: 40, // 40 AI-drafted cells awaiting review
       audioCells: 0,
+      validatedAudioCells: 0,
       recordedMs: 0, lastEditAt: null, deadlineAt: null,
     }])
     renderOverview()
@@ -707,7 +712,7 @@ describe("ProjectOverview AI-drafted segment (FRO-292)", () => {
       id: "p1", name: "John", totalCells: 100,
       filledCells: 80, validatedCells: 50,
       aiDraftedCells: 0, // no tracked AI drafts
-      audioCells: 0, recordedMs: 0, lastEditAt: null, deadlineAt: null,
+      audioCells: 0, validatedAudioCells: 0, recordedMs: 0, lastEditAt: null, deadlineAt: null,
     }])
     renderOverview()
 

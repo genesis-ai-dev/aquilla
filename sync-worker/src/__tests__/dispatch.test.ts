@@ -29,6 +29,8 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'cell.audio.attach': { audioId: 'audio-1.wav', url: 'frontier-audio://audio-1.wav', slot: 'recording' },
     'cell.audio.select': { audioId: 'audio-1.wav', slot: 'recording' },
     'cell.audio.remove': { audioId: 'audio-1.wav' },
+    'cell.audio.validate': { audioId: 'audio-1.wav' },
+    'cell.audio.unvalidate': { audioId: 'audio-1.wav' },
     'file.create': { name: 'Genesis', fileType: 'codex' },
     'file.rename': { name: 'Genesis (renamed)' },
     'file.delete': {},

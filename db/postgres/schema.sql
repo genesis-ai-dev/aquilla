@@ -421,6 +421,15 @@ CREATE TABLE cell_audio (
     created_ts         BIGINT NOT NULL,
     trim_start_ms      BIGINT,
     trim_end_ms        BIGINT,
+    -- AQU-508: audio validation, distinct from text validation (cells.validated).
+    -- A reviewer approves the *selected* clip of a cell via cell.audio.validate;
+    -- cell.audio.unvalidate clears it. The audio-validated rollup counts cells
+    -- whose selected, live clip is approved (deleted = 0 AND selected = 1 AND
+    -- approved = 1) — so re-recording (which selects a new clip) drops the cell
+    -- back to "needs re-validation" until the new take is approved.
+    approved           INTEGER NOT NULL DEFAULT 0,
+    approved_by        TEXT,
+    approved_ts        BIGINT,
     PRIMARY KEY (project_id, file_id, cell_id, audio_id)
 );
 

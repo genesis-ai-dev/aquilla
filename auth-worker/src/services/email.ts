@@ -6,6 +6,12 @@
 
 import type { Env } from "../types"
 
+// Replies to our transactional mail must reach a human. EMAIL_FROM is an
+// unmonitored `noreply@`, so every send sets Reply-To to this (routed) inbox
+// unless a deploy overrides it via EMAIL_REPLY_TO. NOTE: this address must be
+// wired up in Cloudflare Email Routing for a reply to actually land anywhere.
+const DEFAULT_REPLY_TO = "support@aquilla.app"
+
 function buildPasswordResetHtml(resetUrl: string): string {
   return `
     <html>
@@ -93,6 +99,15 @@ function buildWelcomeHtml(
             </a>
           </p>`
     : ""
+  // Support line. This email is sent from an unmonitored noreply@ address, so
+  // point people at the live Discord (a real person answers there today) and
+  // offer replies as a secondary path — the Reply-To routes them to support@.
+  const supportLine = discordUrl
+    ? `Got a question or stuck on something? Come find us in our
+            <a href="${discordUrl}" style="color: #2563eb;">Discord community</a> —
+            a real person answers. You can also just reply to this email.`
+    : `Got a question or stuck on something? Just reply to this email — we
+            read every message.`
   return `
     <html>
       <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #111;">
@@ -112,8 +127,7 @@ function buildWelcomeHtml(
           ${communityBlock}
           <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
           <p style="color: #6b7280; font-size: 0.875rem;">
-            Got a question or stuck on something? Just reply to this email — a
-            real person reads it.
+            ${supportLine}
           </p>
         </div>
       </body>
@@ -135,17 +149,21 @@ export async function sendWelcomeEmail(
 ): Promise<void> {
   if (!env.EMAIL) return
   const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
+  const replyTo = env.EMAIL_REPLY_TO || DEFAULT_REPLY_TO
   const appUrl = env.BASE_URL || "https://aquilla.app"
   const discordUrl = env.DISCORD_INVITE_URL
   const html = buildWelcomeHtml(username, appUrl, discordUrl, verifyUrl)
   const text =
     `Welcome to Aquilla, ${username}! Open the app: ${appUrl}` +
     (verifyUrl ? `\nVerify your email: ${verifyUrl}` : "") +
-    (discordUrl ? `\nJoin our community: ${discordUrl}` : "") +
-    `\n\nGot a question? Just reply to this email.`
+    (discordUrl ? `\nJoin our community on Discord: ${discordUrl}` : "") +
+    (discordUrl
+      ? `\n\nQuestions or stuck? Ask in our Discord community (link above) — a real person answers. You can also just reply to this email.`
+      : `\n\nQuestions or stuck? Just reply to this email — we read every message.`)
   try {
     await env.EMAIL.send({
       from,
+      replyTo,
       to: [toEmail],
       subject: "Welcome to Aquilla",
       html,
@@ -170,11 +188,13 @@ export async function sendProjectInviteEmail(
 ): Promise<void> {
   if (!env.EMAIL) return
   const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
+  const replyTo = env.EMAIL_REPLY_TO || DEFAULT_REPLY_TO
   const html = buildProjectInviteHtml(joinUrl, projectName)
   const text = `You've been invited to ${projectName}. Accept: ${joinUrl}`
   try {
     await env.EMAIL.send({
       from,
+      replyTo,
       to: [toEmail],
       subject: `You've been invited to ${projectName}`,
       html,
@@ -227,11 +247,13 @@ export async function sendOrgInviteEmail(
 ): Promise<void> {
   if (!env.EMAIL) return
   const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
+  const replyTo = env.EMAIL_REPLY_TO || DEFAULT_REPLY_TO
   const html = buildOrgInviteHtml(joinUrl, orgName)
   const text = `You've been invited to join ${orgName} on Aquilla. Join: ${joinUrl}`
   try {
     await env.EMAIL.send({
       from,
+      replyTo,
       to: [toEmail],
       subject: `You've been invited to join ${orgName}`,
       html,
@@ -280,11 +302,13 @@ export async function sendAdminElevationCodeEmail(
 ): Promise<boolean> {
   if (!env.EMAIL) return false
   const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
+  const replyTo = env.EMAIL_REPLY_TO || DEFAULT_REPLY_TO
   const html = buildAdminElevationHtml(code, ttlMinutes)
   const text = `Your Aquilla admin console access code is ${code}. It expires in ${ttlMinutes} minutes.`
   try {
     await env.EMAIL.send({
       from,
+      replyTo,
       to: [toEmail],
       subject: "Your Aquilla admin access code",
       html,
@@ -307,11 +331,13 @@ export async function sendPasswordResetEmail(
     throw new Error("EMAIL binding is not configured")
   }
   const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
+  const replyTo = env.EMAIL_REPLY_TO || DEFAULT_REPLY_TO
   const html = buildPasswordResetHtml(resetUrl)
   const text = `Reset your password: ${resetUrl}`
   try {
     await env.EMAIL.send({
       from,
+      replyTo,
       to: [toEmail],
       subject: "Password Reset Request",
       html,

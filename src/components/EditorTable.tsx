@@ -30,7 +30,7 @@ import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsS
 import { hasTiming } from "@/lib/timeline/derive"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform } from "@/lib/sync/role-policy"
-import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { needsAttention, needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
@@ -634,7 +634,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onVisibleFootnotesChange,
   onFootnoteCreated,
 }, ref) {
-  const { canEdit, canValidate, readOnlyLabel } = useEditorCapabilities(project)
+  const { canEdit, canValidate, canEditSource, readOnlyLabel } = useEditorCapabilities(project)
   // Probe mic permission once (shared across all rows) so the help affordance
   // on CellAudioRecordButton activates when the user has blocked the mic.
   const { micDenied } = useMicPermission(audioLens !== null)
@@ -1235,6 +1235,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           username={username}
           editable={canEdit}
           canValidate={canValidate}
+          canEditSource={canEditSource}
           onCellCommitted={onCellCommitted}
           onOptimisticEdit={onOptimisticEdit}
           lockHolderLabel={cellLockHolders?.get(cell.id) ?? null}
@@ -1315,6 +1316,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     backtranslating,
     backtranslationErrors,
     canEdit,
+    canEditSource,
     canValidate,
     cellStore,
     cellLockHolders,
@@ -1513,6 +1515,9 @@ interface MemoizedRowProps {
   editable: boolean
   /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
   canValidate: boolean
+  /** True when the user may edit SOURCE text (source.cell.commit): cloud
+   *  project_lead+ (500) on a non-live-linked project. See canEditSource. */
+  canEditSource: boolean
   /** Phase 5 / AD-9: source has advanced since this target was last committed.
    *  Resolved once per file by the parent (membership look-up) so this prop
    *  is just a stable boolean — preserves the row's React.memo invariant. */
@@ -1625,7 +1630,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     isEditorActive,
     onActivateEditor,
     onDeactivateEditor,
-    project, username, editable, canValidate, isCompletionConfigured, isCompletionAvailable,
+    project, username, editable, canValidate, canEditSource, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
     getFootnoteDetails,
@@ -1722,6 +1727,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         username={username}
         editable={editable}
         canValidate={canValidate}
+        canEditSource={canEditSource}
         isStaleSource={isStaleSource}
         isUpstreamStaleSource={isUpstreamStaleSource}
         isCompletionConfigured={isCompletionConfigured}
@@ -1806,6 +1812,10 @@ interface EditorRowProps {
   editable: boolean
   /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
   canValidate: boolean
+  /** True when the user may edit SOURCE text (source.cell.commit): cloud
+   *  project_lead+ (500) on a non-live-linked project. Surfaces the per-cell
+   *  "Edit source" affordance. See useProjectPermissions.canEditSource. */
+  canEditSource: boolean
   /** Phase 5 / AD-9 — true when the source has advanced since the last
    *  target commit. Renders a small warning badge next to the validation
    *  status. Computed once-per-file by the parent. */
@@ -2527,7 +2537,7 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
 
 function EditorRow({
   project, cell, isEditorActive, onActivateEditor, onDeactivateEditor,
-  username, editable, canValidate, isCompletionConfigured, isCompletionAvailable, isLoading,
+  username, editable, canValidate, canEditSource, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, highlights, error, health,
   cellInfractions, waivedInfractions, ruleMap,
@@ -2593,6 +2603,15 @@ function EditorRow({
   // Controls the confirm dialog shown before creating the draft concept.
   const [showAddConceptDialog, setShowAddConceptDialog] = useState(false)
   const pendingTargetEventIdRef = useRef<string | null>(cell.targetEventId ?? null)
+  // Source-edit affordance (project_lead+ on non-live projects). Editing the
+  // SOURCE lane emits source.cell.commit — the template-owner correction that
+  // propagates to downstream linked projects. `sourceDraft` is a LOCAL optimistic
+  // hold of the just-committed text (kept out of the target-only optimistic-shadow
+  // machinery in useCells) shown until the projection round-trips.
+  const [sourceEditing, setSourceEditing] = useState(false)
+  const [sourceDraft, setSourceDraft] = useState<{ value: string; valueHtml: string } | null>(null)
+  const pendingSourceEventIdRef = useRef<string | null>(cell.sourceEventId ?? null)
+  const sourceColRef = useRef<HTMLDivElement | null>(null)
   // RES-4: local error state for enqueue failures (IDB quota, role errors).
   // Surfaces a compact inline message below the editor instead of swallowing.
   /** voice-chip drag-over state: the voiceId being dragged over this cell's audio area */
@@ -2826,6 +2845,75 @@ function EditorRow({
       })
     })
   }, [editable, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.translated, cell.translatedHtml, cell.sourceEventId, username, onCellCommitted, onOptimisticEdit, lockHolderLabel, checkLockHolder])
+
+  // Source-edit commit path. The inline source editor (a plain TranslatedEditor)
+  // calls this on idle/blur with the current source `{value, valueHtml}`. We emit
+  // a `source.cell.commit` chained off the source row's head (AD-2). No AD-9 pin —
+  // source rows are the pin target, not the pinned. The server enforces the
+  // PROJECT_LEAD floor and the live-mode mirror lock; `enqueueEvent` also mirrors
+  // the role floor client-side (InsufficientRoleError).
+  const handleSourceCommit = useCallback(({ value, valueHtml }: { value: string; valueHtml: string }) => {
+    if (!canEditSource || !project.id) return
+    // Belt-and-suspenders role-mirror (canEditSource already encodes ≥500), in
+    // case a role downgrade hasn't propagated to the capability yet.
+    if (!canPerform("source.cell.commit", project.syncRole?.level ?? null)) {
+      console.warn("[source-edit] aborting: role too low for source.cell.commit")
+      return
+    }
+    // Optimistic local hold so the source column shows the new text immediately
+    // (cleared by the effect below once cell.original round-trips).
+    setSourceDraft({ value, valueHtml })
+    setWriteError(null)
+    const parentId = pendingSourceEventIdRef.current ?? cell.sourceEventId ?? null
+    emitSourceCellCommit({
+      projectId: project.id,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      parentId,
+      value,
+      valueHtml,
+      author: username,
+    }).then((eventId) => {
+      pendingSourceEventIdRef.current = eventId
+      void onCellCommitted?.(cell.id)
+    }).catch((err) => {
+      console.error("[source-edit] enqueue failed:", err)
+      const msg = err instanceof Error ? err.message : "Could not save source edit — please try again"
+      setWriteError(msg)
+      setSourceDraft(null)
+    })
+  }, [canEditSource, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.sourceEventId, username, onCellCommitted])
+
+  // Adopt the projection's source head as the next chain parent — for both our
+  // own confirmed commits and remote source commits (mirror-sync / peer leads).
+  useEffect(() => {
+    if (cell.sourceEventId) pendingSourceEventIdRef.current = cell.sourceEventId
+  }, [cell.sourceEventId])
+
+  // Clear the optimistic source draft once the server projection carries it.
+  useEffect(() => {
+    if (sourceDraft && (cell.original ?? "") === sourceDraft.value) setSourceDraft(null)
+  }, [cell.original, sourceDraft])
+
+  // Focus the inline source editor when entering edit mode (mirrors the target
+  // editor's focus effect, but scoped to the source column so it can't grab the
+  // target ProseMirror).
+  useEffect(() => {
+    if (!sourceEditing) return
+    let attempts = 0
+    let frame = window.requestAnimationFrame(function focusEditor() {
+      const pm = sourceColRef.current?.querySelector<HTMLElement>(".ProseMirror")
+      if (!pm) {
+        if (attempts < 8) {
+          attempts += 1
+          frame = window.requestAnimationFrame(focusEditor)
+        }
+        return
+      }
+      if (document.activeElement !== pm) pm.focus()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [sourceEditing])
 
   // Terminology apply (spec 2c): REPLACE the active target selection with the
   // chosen rendering. The Apply affordance is only surfaced when there was a
@@ -3762,6 +3850,7 @@ function EditorRow({
         ) : (
           <div
             data-showcase="editor.source"
+            ref={sourceColRef}
             className={cn(
               "relative flex flex-col transition-opacity",
               isSynthBusy && "opacity-70",
@@ -3770,7 +3859,7 @@ function EditorRow({
             aria-label="Source text"
             data-cell-type="source"
             style={{ fontSize: `${sourceFontSize}px`, lineHeight: "1.6" }}
-            onMouseUp={(onAddConceptFromSelection || onAskAiFromSelection) ? handleSourceMouseUp : undefined}
+            onMouseUp={(!sourceEditing && (onAddConceptFromSelection || onAskAiFromSelection)) ? handleSourceMouseUp : undefined}
           >
             {/* Source-selection toolbar. Appears when source text is selected:
                 "Ask AI" pushes the selection into the agent as a context chip,
@@ -3797,13 +3886,46 @@ function EditorRow({
                   </span>
                 </AppTooltip>
               )}
+              {/* Source-edit affordance (project_lead+, non-live projects). Emits
+                  source.cell.commit — the template-owner correction that propagates
+                  downstream. Read-only source stays the default; editing is explicit. */}
+              {canEditSource && (
+                <AppTooltip content={sourceEditing ? "Done editing source" : "Edit source text"}>
+                  <button
+                    type="button"
+                    aria-label={sourceEditing ? "Done editing source" : "Edit source text"}
+                    aria-pressed={sourceEditing}
+                    onClick={() => setSourceEditing((v) => !v)}
+                    className={cn(
+                      "ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors",
+                      sourceEditing
+                        ? "bg-primary/10 text-primary"
+                        : "text-muted-foreground/50 opacity-0 hover:bg-muted/60 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
+                    )}
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                </AppTooltip>
+              )}
             </div>
             <SourceReferenceAttachments metadata={cell.metadata} />
-            {cell.originalHtml ? (
-              <SanitizedRichHtml html={cell.originalHtml} />
+            {sourceEditing ? (
+              <TranslatedEditor
+                cellId={`${cell.id}::source`}
+                initialPlain={sourceDraft?.value ?? cell.original}
+                initialHtml={sourceDraft?.valueHtml ?? cell.originalHtml}
+                onCommit={handleSourceCommit}
+                onBlur={() => setSourceEditing(false)}
+                editable
+                ariaLabel="Edit source text"
+                placeholder="Source text…"
+                className="w-full rounded-lg ring-1 ring-primary/30 focus-within:ring-primary/50"
+              />
+            ) : (sourceDraft?.valueHtml || cell.originalHtml) ? (
+              <SanitizedRichHtml html={sourceDraft?.valueHtml || cell.originalHtml || ""} />
             ) : (
               <UsfmSourceText
-                text={cell.original}
+                text={sourceDraft?.value ?? cell.original}
                 highlights={highlights}
                 ranges={sourceRanges}
                 showEvidence={examplesExpanded}

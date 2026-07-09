@@ -53,6 +53,8 @@ import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
+import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
+import { readCursor } from "@/lib/dcs/cursor"
 import { UpstreamChangesPanel } from "./linked/UpstreamChangesPanel"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useOrg } from "@/hooks/useOrg"
@@ -213,6 +215,7 @@ export function ProjectSettings() {
     conflict: sharedConflict,
     dismissConflict,
     hasFetched: sharedSettingsFetched,
+    settings: sharedSettingsBlob,
   } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null)
 
   // Org context for the termbase-sharing section. The user's org; the section's
@@ -725,9 +728,18 @@ export function ProjectSettings() {
   // upstream — see the mirror-sync short-circuit in stale-source-route.ts).
   const hasLiveSourceLink = hasSourceLink && project?.sourceLinkMode !== "clone"
 
+  // DCS importer: a self-contained adapter project (pinned to a Door43 release
+  // via project_settings.dcsUpstream) is not a downstream link, so it never
+  // shows SourceLinkSection. Surface the Door43 upstream panel directly here.
+  // Rendered only when NOT a downstream link — a downstream that also carries a
+  // dcsUpstream cursor already gets the panel embedded in SourceLinkSection, so
+  // this guard prevents a double mount.
+  const hasDcsUpstream = !hasSourceLink && !!readCursor((sharedSettingsBlob ?? {}) as Record<string, unknown>)
+
   const ALL_SECTIONS: SettingsSection[] = [
     { id: "section-source-link", label: "Source link", keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
     { id: "section-upstream-changes", label: "Upstream changes", keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
+    { id: "section-dcs-upstream", label: "Door43 upstream", keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
     { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language"] },
     { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
@@ -970,6 +982,9 @@ export function ProjectSettings() {
             roleLevel={project?.syncRole?.level ?? null}
             username={session?.username ?? "local"}
           />
+        )}
+        {hasDcsUpstream && sectionsToRender.some((s) => s.id === "section-dcs-upstream") && (
+          <DcsUpstreamPanel projectId={id!} roleLevel={project?.syncRole?.level ?? null} />
         )}
         {sectionsToRender.some((s) => s.id === "section-project-info") && (
           <Card id="section-project-info">

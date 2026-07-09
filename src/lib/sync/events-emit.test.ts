@@ -3,6 +3,7 @@ import "fake-indexeddb/auto"
 import {
   buildRawEvent,
   emitTargetCellCommit,
+  emitSourceCellCommit,
   emitCellValidate,
   emitCellUnvalidate,
   emitSourceCellCreate,
@@ -152,6 +153,52 @@ describe("events-emit", () => {
     })
   })
 
+  describe("emitSourceCellCommit", () => {
+    it("enqueues a chain-mutating source.cell.commit with no sourceEventId pin", async () => {
+      const id = await emitSourceCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        parentId: "src-head-1",
+        value: "fixed English line",
+        valueHtml: "<p>fixed English line</p>",
+        author: "lead",
+      })
+      expect(typeof id).toBe("string")
+      expect(await outboxPendingCount()).toBe(1)
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"source.cell.commit">
+      expect(ev.kind).toBe("source.cell.commit")
+      // Chains off the source row's current head (advances cells.event_id).
+      expect(ev.parentId).toBe("src-head-1")
+      expect(ev.cellId).toBe("c")
+      expect(ev.fileId).toBe("f")
+      expect(ev.payload.value).toBe("fixed English line")
+      expect(ev.payload.valueHtml).toBe("<p>fixed English line</p>")
+      // Source rows carry no AD-9 staleness pin.
+      expect((ev.payload as Record<string, unknown>).sourceEventId).toBeUndefined()
+    })
+
+    it("refuses to enqueue below the PROJECT_LEAD (500) floor — never reaches the outbox", async () => {
+      setCqrsOutboxBridge({ projectId: "p", activeFileId: "f", username: "u", roleLevel: ROLE.CONTRIBUTOR })
+      try {
+        await expect(
+          emitSourceCellCommit({
+            projectId: "p",
+            fileId: "f",
+            cellId: "c",
+            parentId: null,
+            value: "nope",
+            author: "u",
+          }),
+        ).rejects.toBeInstanceOf(InsufficientRoleError)
+        expect(await outboxPendingCount()).toBe(0)
+      } finally {
+        setCqrsOutboxBridge(null)
+      }
+    })
+  })
+
   describe("emitCellValidate / emitCellUnvalidate", () => {
     it("validate events use null parentId — they're additive, not chain mutating", async () => {
       await emitCellValidate({
@@ -210,6 +257,50 @@ describe("events-emit", () => {
       expect(first.parentId).toBe(null)
       expect(first.payload.anchorCellId).toBe(null)
       expect(second.payload.anchorCellId).toBe("cell-1")
+    })
+
+    it("emitSourceCellCommit advances the source chain head chained on parentId", async () => {
+      // The DCS delta path: a content-changed upstream cell commits on the
+      // source lane, chained on its current head, carrying a deterministic id
+      // for idempotent re-runs.
+      const id = await emitSourceCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "TIT-1-1",
+        parentId: "source-head-1",
+        value: "verse 1 (v89)",
+        valueHtml: "<p>verse 1 (v89)</p>",
+        id: "det-event-1",
+        author: "import-bot",
+      })
+      expect(id).toBe("det-event-1")
+      expect(await outboxPendingCount()).toBe(1)
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"source.cell.commit">
+      expect(ev.kind).toBe("source.cell.commit")
+      expect(ev.id).toBe("det-event-1")
+      expect(ev.parentId).toBe("source-head-1")
+      expect(ev.cellId).toBe("TIT-1-1")
+      expect(ev.fileId).toBe("f")
+      expect(ev.payload.value).toBe("verse 1 (v89)")
+      expect(ev.payload.valueHtml).toBe("<p>verse 1 (v89)</p>")
+    })
+
+    it("emitSourceCellCommit omits valueHtml when not supplied and defaults its id", async () => {
+      const id = await emitSourceCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "TIT-1-2",
+        parentId: "source-head-2",
+        value: "verse 2 (v89)",
+        author: "import-bot",
+      })
+      expect(typeof id).toBe("string")
+      expect(id.length).toBeGreaterThan(0)
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"source.cell.commit">
+      expect(ev.payload.value).toBe("verse 2 (v89)")
+      expect("valueHtml" in ev.payload).toBe(false)
     })
 
     it("emitFileCreate is project-scoped and genesis", async () => {

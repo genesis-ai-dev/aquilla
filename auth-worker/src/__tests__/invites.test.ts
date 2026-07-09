@@ -254,6 +254,118 @@ describe("GET /api/v2/projects/invite-preview/:token", () => {
   })
 })
 
+// ── FRO-347 follow-up (legacy single-project preview) ────────────────────────
+//
+// BUG: GET /invite-preview/:token returned 410 code:"used" whenever
+// invite.used_at was set — with no check for "is the caller the original
+// redeemer, and are they still a member?" — so a signed-in user re-opening
+// their own already-redeemed invite link hit a terminal "already been used"
+// error even though accept-invite is an idempotent no-op for them. Same bug
+// FRO-347 fixed in the multi-invite preview (routes/invites.ts); this mirrors
+// that fix for the legacy route.
+describe("invite-preview: still-member re-click is a friendly continue, not a hard error", () => {
+  async function seedAndRedeem(
+    token: string,
+    projectId: string,
+    leadId: number,
+    memberUsername: string,
+  ) {
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, ?)",
+    )
+      .bind(projectId, "Legacy preview idempotent project", leadId)
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(token, projectId, 400, leadId, new Date(Date.now() + 86400000).toISOString())
+      .run()
+    const acceptRes = await app.request(
+      "/api/v2/projects/accept-invite",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor(memberUsername)),
+        body: JSON.stringify({ token }),
+      },
+      env,
+    )
+    expect(acceptRes.status).toBe(200)
+  }
+
+  it("still-member redeemer previewing their own used link gets the normal preview (200)", async () => {
+    await seedUser(70, "lead70")
+    await seedUser(71, "stillmember71")
+    await seedAndRedeem("tok-347L-a", "p-fro347L-a", 70, "stillmember71")
+
+    const res = await app.request(
+      "/api/v2/projects/invite-preview/tok-347L-a",
+      { method: "GET", headers: authHeader(await jwtFor("stillmember71")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      projectId: string
+      projectName: string
+      role: { level: number; name: string }
+    }
+    expect(body.projectId).toBe("p-fro347L-a")
+    expect(body.projectName).toBe("Legacy preview idempotent project")
+    expect(body.role).toEqual({ level: 400, name: "contributor" })
+  })
+
+  it("removed redeemer previewing their old link still gets 410 used", async () => {
+    await seedUser(72, "lead72")
+    await seedUser(73, "removed73")
+    await seedAndRedeem("tok-347L-b", "p-fro347L-b", 72, "removed73")
+
+    await env.AQUILLA_PG.prepare(
+      "DELETE FROM project_members WHERE project_id = ? AND user_id = ?",
+    )
+      .bind("p-fro347L-b", 73)
+      .run()
+
+    const res = await app.request(
+      "/api/v2/projects/invite-preview/tok-347L-b",
+      { method: "GET", headers: authHeader(await jwtFor("removed73")) },
+      env,
+    )
+    expect(res.status).toBe(410)
+    const body = (await res.json()) as { code?: string }
+    expect(body.code).toBe("used")
+  })
+
+  it("a different authenticated user previewing someone else's used link still gets 410 used", async () => {
+    await seedUser(74, "lead74")
+    await seedUser(75, "redeemer75")
+    await seedUser(76, "onlooker76")
+    await seedAndRedeem("tok-347L-c", "p-fro347L-c", 74, "redeemer75")
+
+    const res = await app.request(
+      "/api/v2/projects/invite-preview/tok-347L-c",
+      { method: "GET", headers: authHeader(await jwtFor("onlooker76")) },
+      env,
+    )
+    expect(res.status).toBe(410)
+    const body = (await res.json()) as { code?: string }
+    expect(body.code).toBe("used")
+  })
+
+  it("an unauthenticated preview of a used link is unchanged — still 410 used", async () => {
+    await seedUser(77, "lead77")
+    await seedUser(78, "redeemer78")
+    await seedAndRedeem("tok-347L-d", "p-fro347L-d", 77, "redeemer78")
+
+    const res = await app.request(
+      "/api/v2/projects/invite-preview/tok-347L-d",
+      { method: "GET" }, // no Authorization header
+      env,
+    )
+    expect(res.status).toBe(410)
+    const body = (await res.json()) as { code?: string }
+    expect(body.code).toBe("used")
+  })
+})
+
 // ── Multi-project invite acceptance (RACE-7 fixes) ───────────────────────────
 
 describe("POST /api/v2/invites/:token/accept — idempotency and race guard", () => {

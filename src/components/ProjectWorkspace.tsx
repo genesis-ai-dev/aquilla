@@ -135,6 +135,7 @@ import {
 } from "@/components/ui/dialog"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
+import { summarizeTextDirections } from "@/lib/text-direction"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
@@ -1074,6 +1075,18 @@ export function ProjectWorkspace() {
     sourceTextDirection: activeFile?.sourceTextDirection,
     targetTextDirection: activeFile?.targetTextDirection,
   })
+  const activeFileDirectionSummary = useMemo(() => {
+    function* sourceValues() {
+      for (const summary of cellSummaries) yield summary.originalHtml ?? summary.original
+    }
+    function* targetValues() {
+      for (const summary of cellSummaries) yield summary.translatedHtml ?? summary.translated
+    }
+    return {
+      source: summarizeTextDirections(sourceValues()),
+      target: summarizeTextDirections(targetValues()),
+    }
+  }, [cellSummaries])
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
   const [footnoteViewMode, setFootnoteViewMode] = useFootnotesPreference(projectId!)
   const [visibleFootnotes, setVisibleFootnotes] = useState<VisibleFootnoteEntry[]>([])
@@ -3831,11 +3844,12 @@ export function ProjectWorkspace() {
               targetDirectionMode={fileMeta.targetDirectionMode}
               sourceTextDirection={fileMeta.sourceTextDirection}
               targetTextDirection={fileMeta.targetTextDirection}
+              sourceAutoDirectionSummary={activeFileDirectionSummary.source}
+              targetAutoDirectionSummary={activeFileDirectionSummary.target}
               cellLabelsEnabled={cellLabelsEnabled}
               footnoteViewMode={footnoteViewMode}
               onFootnoteViewModeChange={setFootnoteViewMode}
               tnSidebarEnabled={tnSidebarVisible}
-              rtlHintDismissed={fileMeta.rtlHintDismissed}
               sourceFontSize={fontSizes.source}
               targetFontSize={fontSizes.target}
               onLineNumbersChange={fileMeta.setLineNumbersEnabled}
@@ -3848,7 +3862,6 @@ export function ProjectWorkspace() {
                 setTnSidebarVisible(v)
                 if (projectId) writeTnSidebarVisible(projectId, v)
               }}
-              onDismissRtlHint={fileMeta.dismissRtlHint}
             />
           </WorkspaceHeader>
         }

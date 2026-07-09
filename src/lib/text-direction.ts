@@ -1,5 +1,6 @@
 export type TextDirection = "ltr" | "rtl"
 export type DirectionMode = "auto" | TextDirection
+export type TextDirectionSummary = TextDirection | "mixed"
 
 const RTL_LANGUAGE_CODES = new Set([
   "ar", "ara", "arb", "arz",
@@ -99,6 +100,20 @@ export function detectStrongTextDirection(value: string | undefined | null): Tex
   return null
 }
 
+export function summarizeTextDirections(values: Iterable<string | undefined | null>): TextDirectionSummary | null {
+  let hasLtr = false
+  let hasRtl = false
+  for (const value of values) {
+    const direction = detectStrongTextDirection(value)
+    if (direction === "ltr") hasLtr = true
+    if (direction === "rtl") hasRtl = true
+    if (hasLtr && hasRtl) return "mixed"
+  }
+  if (hasRtl) return "rtl"
+  if (hasLtr) return "ltr"
+  return null
+}
+
 export function resolveTextDirection(
   mode: DirectionMode,
   text: string | undefined | null,
@@ -111,4 +126,3 @@ export function resolveTextDirection(
 export function resolveDefaultDirection(mode: DirectionMode, fallback: TextDirection): TextDirection {
   return mode === "auto" ? fallback : mode
 }
-

@@ -4,6 +4,7 @@ import {
   languageDefaultDirection,
   resolveTextDirection,
   stripDirectionMarkup,
+  summarizeTextDirections,
 } from "./text-direction"
 
 describe("text-direction", () => {
@@ -31,5 +32,12 @@ describe("text-direction", () => {
     expect(resolveTextDirection("auto", "random?", "rtl")).toBe("ltr")
     expect(resolveTextDirection("auto", "123", "rtl")).toBe("rtl")
     expect(resolveTextDirection("ltr", "العربية", "rtl")).toBe("ltr")
+  })
+
+  it("summarizes loaded content directions for auto labels", () => {
+    expect(summarizeTextDirections(["123", "العربية"])).toBe("rtl")
+    expect(summarizeTextDirections(["English", "123"])).toBe("ltr")
+    expect(summarizeTextDirections(["English", "العربية"])).toBe("mixed")
+    expect(summarizeTextDirections(["123", "", null])).toBeNull()
   })
 })

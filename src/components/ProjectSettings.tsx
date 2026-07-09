@@ -977,7 +977,29 @@ export function ProjectSettings() {
             <CardContent className="space-y-4">
               <div>
                 <FieldLabel htmlFor="pname">Project Name</FieldLabel>
-                <Input id="pname" value={name} onChange={(e) => setName(e.target.value)} />
+                {/* AQU-480: a synced project's name comes from the server and has
+                    no rename endpoint (see auth-worker projects route — INSERT
+                    only). Editing this field only wrote local IDB, which reverts
+                    on the next server sync — a silent no-op for every role, and
+                    un-gated for contributors. Gate it read-only with an honest
+                    reason on cloud projects; local projects keep it editable
+                    (their IDB record IS the source of truth). */}
+                <DisabledFieldTooltip
+                  disabled={isCloudProject}
+                  tooltip={isCloudProject ? "Renaming a synced project isn't supported yet." : null}
+                >
+                  <Input
+                    id="pname"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    disabled={isCloudProject}
+                  />
+                </DisabledFieldTooltip>
+                {isCloudProject && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Renaming a synced project isn't supported yet.
+                  </p>
+                )}
               </div>
               {sharedUpdatedBy && sharedUpdatedAt && sharedVersion != null && sharedVersion > 0 && (
                 <p className="text-xs text-muted-foreground">

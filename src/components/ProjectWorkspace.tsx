@@ -118,7 +118,7 @@ import { useFileFontSizes, setFileViewPref } from "@/lib/store/file-view-prefs"
 import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
-import { applySuggestions, buildUndo } from "@/lib/file-labeling/apply"
+import { applySuggestions, buildUndo, hasEffectiveChange } from "@/lib/file-labeling/apply"
 import { renameFile, moveFileToCorpus, renameCorpus, deleteFile } from "@/lib/store/file-operations"
 import { deleteFileProjection } from "@/lib/sync/file-projection"
 import { fetchDeletedFiles, fetchProjectFiles } from "@/lib/sync/cells-read"
@@ -2818,17 +2818,22 @@ export function ProjectWorkspace() {
 
   const handleApplySuggestions = useCallback(async (chosen: RenameSuggestion[]) => {
     if (!project || chosen.length === 0) return
-    const next = applySuggestions(project, chosen)
+    // AQU-374: only act on suggestions that actually change something. A no-op
+    // (name and corpus already match) must not flash the "Applied renames."
+    // success toast — that was the reported "runs to success but renames nothing".
+    const effective = chosen.filter(hasEffectiveChange)
+    if (effective.length === 0) return
+    const next = applySuggestions(project, effective)
     // Optimistic: surface new labels instantly and drop applied files from the banner.
     setOptimisticRenames((current) => {
       const map = new Map(current)
-      for (const s of chosen) map.set(s.fileId, s.suggestedName)
+      for (const s of effective) map.set(s.fileId, s.suggestedName)
       return map
     })
     setClientProject(next)
     // Persist corpus/originalName locally (server file.rename only carries name).
     await updateProject(next)
-    const nameChanges = chosen.filter((s) => s.currentName !== s.suggestedName)
+    const nameChanges = effective.filter((s) => s.currentName !== s.suggestedName)
     if (nameChanges.length > 0) {
       try {
         await Promise.all(
@@ -2842,12 +2847,25 @@ export function ProjectWorkspace() {
           ),
         )
       } catch (e) {
+        // AQU-374: a failed enqueue must not masquerade as success. Roll back the
+        // optimistic overlay + local record and surface the error instead of
+        // showing the "Applied renames." toast.
         console.error("[rename] file.rename emit failed during suggestion apply", e)
+        setOptimisticRenames((current) => {
+          const map = new Map(current)
+          for (const s of effective) map.delete(s.fileId)
+          return map
+        })
+        setClientProject(project)
+        void updateProject(project)
+        refresh()
+        alert(e instanceof Error ? `Rename failed: ${e.message}` : "Rename failed")
+        return
       }
     }
     refresh()
-    setUndo({ chosen })
-    setTimeout(() => setUndo((u) => (u?.chosen === chosen ? null : u)), 10000)
+    setUndo({ chosen: effective })
+    setTimeout(() => setUndo((u) => (u?.chosen === effective ? null : u)), 10000)
   }, [project, currentUsername, refresh])
 
   const handleApplyOneSuggestion = useCallback(async (fileId: string) => {

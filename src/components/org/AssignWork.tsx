@@ -121,7 +121,6 @@ export function AssignWork({
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [done, setDone] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -161,7 +160,6 @@ export function AssignWork({
     const deadline = deadlineDate ? dateToDeadlineString(deadlineDate) : ""
     setBusy(true)
     setError(null)
-    setDone(null)
     try {
       await createAssignment({
         jwt,
@@ -174,10 +172,13 @@ export function AssignWork({
         scopeLabel,
         deadline: deadline || null,
       })
-      const name = members.find((m) => m.userId === Number(assigneeId))?.username ?? "member"
-      setDone(`Assigned ${scopeLabel} to ${name}.`)
+      // Success: collapse the panel back to the "Assign…" button so the manager
+      // sees the refreshed TEAM workload rather than the still-open form. Reset
+      // the transient fields so a reopened panel starts clean. (AQU-336)
       setChapter("")
       setDeadlineDate(undefined)
+      setError(null)
+      setOpen(false)
       onAssigned?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -310,14 +311,13 @@ export function AssignWork({
             type="button"
             size="sm"
             variant="outline"
-            onClick={() => { setOpen(false); setError(null); setDone(null) }}
+            onClick={() => { setOpen(false); setError(null) }}
             disabled={busy}
           >
             Cancel
           </Button>
         </div>
         {error && <FieldError>{error}</FieldError>}
-        {done && <p className="text-sm text-foreground">{done}</p>}
       </FieldGroup>
     </div>
   )

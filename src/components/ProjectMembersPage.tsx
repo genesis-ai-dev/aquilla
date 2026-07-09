@@ -29,7 +29,7 @@ import { cn } from "@/lib/utils"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
-  revokeAllProjectAccess, type RevokeAllResult,
+  revokeAllProjectAccess, partitionMembers, type RevokeAllResult,
 } from "@/lib/frontier/members"
 import { createServerInvite } from "@/lib/sync/invites"
 import {
@@ -176,6 +176,113 @@ export function MembersTab({
 
   const grantableRoles = PROJECT_ROLE_OPTIONS.filter((r) => r.level <= callerMaxRole)
 
+  // AQU-454: a project's roster should read as the project's team, not a copy
+  // of the whole org. Org members inherit access to every project via AD-12
+  // max-wins (04-features/members-and-sharing.md), so a large org floods each
+  // project's member list. We still show everyone (spec: "view all members …
+  // with a one-line summary of which paths contribute") but split the list so
+  // people actually granted access to THIS project (direct / group / creator)
+  // are distinct from those who only reach it through an org-wide role.
+  const { projectMembers, orgAccessMembers } = partitionMembers(members)
+
+  const renderMemberRow = (m: ProjectMember) => {
+    const isSelf = callerUserId !== null && m.userId === callerUserId
+    const isLocked = m.role.source === "org" || m.role.source === "creator"
+    const lockedHint =
+      m.role.source === "org"
+        ? "Access via org membership — remove from org to revoke"
+        : m.role.source === "creator"
+          ? "Project creator"
+          : undefined
+
+    return (
+      <li
+        key={m.userId}
+        className="flex flex-wrap items-center gap-2 px-4 py-3 text-sm"
+      >
+        <span className="font-medium">{m.username}</span>
+        <SourceBadge source={m.role.source} />
+        <span className="text-xs text-muted-foreground">{m.role.name}</span>
+
+        {/* Secondary sources */}
+        {m.secondarySources && m.secondarySources.length > 0 && (
+          <span className="text-[10px] text-muted-foreground">
+            + {m.secondarySources.map((s) => `${s.source}:${s.name}`).join(", ")}
+          </span>
+        )}
+
+        <div className="ml-auto flex items-center gap-2">
+          {/* Role change dropdown — only for direct grants, not self */}
+          {!isLocked && !isSelf && (
+            <Select
+              items={[
+                // Current role may sit above the caller's grantable
+                // cap; include it so the closed trigger renders the
+                // role name instead of the raw level.
+                ...(grantableRoles.some((r) => r.level === m.role.level)
+                  ? []
+                  : [{ value: String(m.role.level), label: m.role.name }]),
+                ...grantableRoles.map((r) => ({
+                  value: String(r.level),
+                  label: r.name,
+                })),
+              ]}
+              value={String(m.role.level)}
+              onValueChange={(v) => {
+                void add(m.username, parseInt(v ?? "", 10))
+              }}
+            >
+              <SelectTrigger size="sm" aria-label="Change role">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {grantableRoles.map((r) => (
+                    <SelectItem key={r.level} value={String(r.level)}>
+                      {r.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          )}
+
+          {/* Remove button for direct grants */}
+          {!isLocked && !isSelf && m.role.source === "override" ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-muted-foreground"
+              onClick={() => void remove(m.userId)}
+            >
+              Remove
+            </Button>
+          ) : isLocked ? (
+            <AppTooltip content={lockedHint}>
+              <span className="text-[10px] text-muted-foreground">
+                {lockedHint ?? ""}
+              </span>
+            </AppTooltip>
+          ) : null}
+
+          {/* Revoke all — available when session exists + maintainer+ */}
+          {session?.jwt && !isSelf && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="gap-1 text-destructive/70 hover:text-destructive"
+              title="Revoke all access to this project"
+              onClick={() => setRevokeTarget(m)}
+            >
+              <ShieldOff className="h-3.5 w-3.5" />
+              Revoke all
+            </Button>
+          )}
+        </div>
+      </li>
+    )
+  }
+
   // AQU-485: the project's org rosterViewMinRole policy hides the roster
   // from this caller. Render a distinct "hidden" state — no member list, no
   // count, and no add-member form (which would itself imply an editable
@@ -220,7 +327,9 @@ export function MembersTab({
             always project-scoped (the effective roster for THIS project,
             per-row labeled with how each person got access below). */}
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-medium">Members of this project</h2>
+          <h2 className="text-sm font-medium">
+            {orgAccessMembers.length > 0 ? "Project members" : "Current members"}
+          </h2>
           <Button
             variant="ghost"
             size="sm"
@@ -243,112 +352,37 @@ export function MembersTab({
         ) : members.length === 0 ? (
           <p className="text-sm text-muted-foreground">No members yet.</p>
         ) : (
-          <ul className="divide-y rounded border">
-            {members.map((m) => {
-              const isSelf =
-                callerUserId !== null && m.userId === callerUserId
-              const isLocked =
-                m.role.source === "org" ||
-                m.role.source === "creator"
-              const lockedHint =
-                m.role.source === "org"
-                  ? "Access via org membership — remove from org to revoke"
-                  : m.role.source === "creator"
-                    ? "Project creator"
-                    : undefined
+          <>
+            {projectMembers.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No one has been added directly to this project yet.
+              </p>
+            ) : (
+              <ul className="divide-y rounded border">
+                {projectMembers.map(renderMemberRow)}
+              </ul>
+            )}
 
-              return (
-                <li
-                  key={m.userId}
-                  className="flex flex-wrap items-center gap-2 px-4 py-3 text-sm"
-                >
-                  <span className="font-medium">{m.username}</span>
-                  <SourceBadge source={m.role.source} />
-                  <span className="text-xs text-muted-foreground">
-                    {m.role.name}
-                  </span>
-
-                  {/* Secondary sources */}
-                  {m.secondarySources && m.secondarySources.length > 0 && (
-                    <span className="text-[10px] text-muted-foreground">
-                      + {m.secondarySources
-                        .map((s) => `${s.source}:${s.name}`)
-                        .join(", ")}
-                    </span>
-                  )}
-
-                  <div className="ml-auto flex items-center gap-2">
-                    {/* Role change dropdown — only for direct grants, not self */}
-                    {!isLocked && !isSelf && (
-                      <Select
-                        items={[
-                          // Current role may sit above the caller's grantable
-                          // cap; include it so the closed trigger renders the
-                          // role name instead of the raw level.
-                          ...(grantableRoles.some((r) => r.level === m.role.level)
-                            ? []
-                            : [{ value: String(m.role.level), label: m.role.name }]),
-                          ...grantableRoles.map((r) => ({
-                            value: String(r.level),
-                            label: r.name,
-                          })),
-                        ]}
-                        value={String(m.role.level)}
-                        onValueChange={(v) => {
-                          void add(m.username, parseInt(v ?? "", 10))
-                        }}
-                      >
-                        <SelectTrigger size="sm" aria-label="Change role">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectGroup>
-                            {grantableRoles.map((r) => (
-                              <SelectItem key={r.level} value={String(r.level)}>
-                                {r.name}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        </SelectContent>
-                      </Select>
-                    )}
-
-                    {/* Remove button for direct grants */}
-                    {!isLocked && !isSelf && m.role.source === "override" ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-muted-foreground"
-                        onClick={() => void remove(m.userId)}
-                      >
-                        Remove
-                      </Button>
-                    ) : isLocked ? (
-                      <AppTooltip content={lockedHint}>
-                        <span className="text-[10px] text-muted-foreground">
-                          {lockedHint ?? ""}
-                        </span>
-                      </AppTooltip>
-                    ) : null}
-
-                    {/* Revoke all — available when session exists + maintainer+ */}
-                    {session?.jwt && !isSelf && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="gap-1 text-destructive/70 hover:text-destructive"
-                        title="Revoke all access to this project"
-                        onClick={() => setRevokeTarget(m)}
-                      >
-                        <ShieldOff className="h-3.5 w-3.5" />
-                        Revoke all
-                      </Button>
-                    )}
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
+            {/* AQU-454: org-wide members reach this project via their org role,
+                not a project grant. Kept visible (per spec) but sectioned so the
+                roster above reads as the actual project team. */}
+            {orgAccessMembers.length > 0 && (
+              <div className="mt-5" data-testid="org-access-members">
+                <h3 className="mb-1 text-sm font-medium">
+                  Organization members with access
+                </h3>
+                <p className="mb-2 text-xs text-muted-foreground">
+                  {orgAccessMembers.length}{" "}
+                  {orgAccessMembers.length === 1 ? "person has" : "people have"}{" "}
+                  access through their organization role — they were not added to
+                  this project directly. Remove them from the org to revoke.
+                </p>
+                <ul className="divide-y rounded border">
+                  {orgAccessMembers.map(renderMemberRow)}
+                </ul>
+              </div>
+            )}
+          </>
         )}
       </div>
 

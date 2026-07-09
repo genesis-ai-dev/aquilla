@@ -82,7 +82,10 @@ describe("AssignWork", () => {
       ),
     )
     expect(onAssigned).toHaveBeenCalled()
-    expect(await screen.findByText(/Assigned John to anna/)).toBeInTheDocument()
+    // On success the panel collapses back to the "Assign…" button (AQU-336);
+    // the expanded form (and its assignee select) is gone.
+    expect(await screen.findByRole("button", { name: "Assign…" })).toBeInTheDocument()
+    expect(screen.queryByRole("group", { name: "Assign work" })).not.toBeInTheDocument()
   })
 
   it("emits a chapter-scope assignment when a chapter is picked from the dropdown", async () => {
@@ -127,6 +130,9 @@ describe("AssignWork", () => {
 
     expect(await screen.findByText(/role too low/)).toBeInTheDocument()
     expect(mockCreate).toHaveBeenCalled()
+    // On failure the panel must stay open so the error is visible and the
+    // assign can be retried (AQU-336 must not collapse on the error path).
+    expect(screen.getByRole("group", { name: "Assign work" })).toBeInTheDocument()
   })
 })
 

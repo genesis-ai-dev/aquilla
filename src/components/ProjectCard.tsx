@@ -94,8 +94,15 @@ export function ProjectCard({
     >
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">
-          <CardTitle className="text-lg">{project.name}</CardTitle>
-          <div className="flex items-center gap-1.5">
+          {/* min-w-0 lets the title shrink below its content width inside the
+              flex row (flex items default to min-width:auto, which is what let
+              a long unbroken name overflow); break-words forces breaks inside
+              an otherwise unbreakable token so the full name wraps onto
+              multiple lines and stays inside the card (AQU-332). */}
+          <CardTitle className="text-lg min-w-0 break-words">{project.name}</CardTitle>
+          {/* shrink-0 keeps the badge cluster at its natural size so the
+              wrapping title yields space to it rather than pushing it out. */}
+          <div className="flex items-center gap-1.5 shrink-0">
             {!isTrashed && projectHealth !== null && (
               <HealthRing
                 health={projectHealth}

@@ -82,10 +82,19 @@ function PasswordChecklist({ password, email }: { password: string; email: strin
   )
 }
 
-export function FrontierSignupForm({ onSuccess }: { onSuccess: () => void }) {
+export function FrontierSignupForm({
+  onSuccess,
+  initialEmail,
+}: {
+  onSuccess: () => void
+  /** AQU-338: seed the email field (e.g. the recipient email an invite is
+   *  bound to). Optional — omit for the plain signup surface. */
+  initialEmail?: string | null
+}) {
   const { register } = useFrontierSession()
   const [username, setUsername] = useState("")
-  const [email, setEmail] = useState("")
+  const [email, setEmail] = useState(initialEmail ?? "")
+  const [emailEdited, setEmailEdited] = useState(false)
   const [password, setPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -101,6 +110,13 @@ export function FrontierSignupForm({ onSuccess }: { onSuccess: () => void }) {
       window.removeEventListener("offline", handleOffline)
     }
   }, [])
+
+  // AQU-338: the invite preview can resolve after this form mounts, so adopt a
+  // late-arriving prefill — but stop once the user edits the field, so we never
+  // clobber what they typed.
+  useEffect(() => {
+    if (!emailEdited && initialEmail) setEmail(initialEmail)
+  }, [initialEmail, emailEdited])
 
   // Server enforces: username 3-50 chars, email format, password >= 8 chars.
   const usernameOk = username.trim().length >= 3 && username.trim().length <= 50
@@ -148,7 +164,10 @@ export function FrontierSignupForm({ onSuccess }: { onSuccess: () => void }) {
             id="s-email"
             type="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value)
+              setEmailEdited(true)
+            }}
             autoComplete="email"
           />
         </Field>

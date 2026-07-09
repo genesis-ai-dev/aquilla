@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectMembersPage } from "./ProjectMembersPage"
+import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 
 // ─── Mocks ────────────────────────────────────────────────────────────────
 
@@ -281,6 +282,91 @@ describe("ProjectMembersPage", () => {
     await waitFor(() => {
       expect(mockAdd).toHaveBeenCalledWith("dave", 400)
     })
+  })
+})
+
+describe("partitionMembers (AQU-454)", () => {
+  const mk = (
+    userId: number,
+    username: string,
+    source: ProjectMember["role"]["source"],
+    secondary: ProjectMember["secondarySources"] = [],
+  ): ProjectMember => ({
+    userId,
+    username,
+    role: { level: 100, name: "viewer", source },
+    secondarySources: secondary,
+  })
+
+  it("keeps direct, group, and creator members in the project bucket", () => {
+    const { projectMembers, orgAccessMembers } = partitionMembers([
+      mk(1, "direct", "override"),
+      mk(2, "group", "group"),
+      mk(3, "creator", "creator"),
+    ])
+    expect(projectMembers.map((m) => m.username)).toEqual(["direct", "group", "creator"])
+    expect(orgAccessMembers).toHaveLength(0)
+  })
+
+  it("routes org-baseline-only members to the org bucket", () => {
+    const { projectMembers, orgAccessMembers } = partitionMembers([mk(1, "orgonly", "org")])
+    expect(projectMembers).toHaveLength(0)
+    expect(orgAccessMembers.map((m) => m.username)).toEqual(["orgonly"])
+  })
+
+  it("treats a member with a secondary project path as a project member", () => {
+    // Winning path is org (e.g. org owner) but they also hold a direct grant —
+    // they belong on the team, not the org-access list.
+    const { projectMembers, orgAccessMembers } = partitionMembers([
+      mk(1, "ownerplus", "org", [{ source: "override", level: 400, name: "contributor" }]),
+    ])
+    expect(projectMembers.map((m) => m.username)).toEqual(["ownerplus"])
+    expect(orgAccessMembers).toHaveLength(0)
+  })
+
+  it("preserves order within each bucket", () => {
+    const { projectMembers, orgAccessMembers } = partitionMembers([
+      mk(1, "a", "override"),
+      mk(2, "b", "org"),
+      mk(3, "c", "override"),
+      mk(4, "d", "org"),
+    ])
+    expect(projectMembers.map((m) => m.username)).toEqual(["a", "c"])
+    expect(orgAccessMembers.map((m) => m.username)).toEqual(["b", "d"])
+  })
+})
+
+describe("ProjectMembersPage — AQU-454 roster sectioning", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("sections org-baseline members under a distinct heading", () => {
+    renderPage()
+    // bob (source: org) is the only org-baseline member in the mock roster.
+    expect(screen.getByText("Project members")).toBeInTheDocument()
+    const orgSection = screen.getByTestId("org-access-members")
+    expect(orgSection).toHaveTextContent("Organization members with access")
+    expect(orgSection).toHaveTextContent("bob")
+    // alice/carol (direct grants) must NOT be inside the org-access section.
+    expect(orgSection).not.toHaveTextContent("alice")
+    expect(orgSection).not.toHaveTextContent("carol")
+  })
+
+  it("omits the org-access section when every member has a project grant", () => {
+    mockUseProjectMembers.mockReturnValueOnce({
+      members: [mockMembers[0], mockMembers[2]], // alice + carol, both direct
+      isLoading: false,
+      error: null,
+      rosterHidden: false,
+      refresh: mockRefresh,
+      add: mockAdd,
+      remove: mockRemove,
+      changeRole: mockAdd,
+    })
+    renderPage()
+    expect(screen.queryByTestId("org-access-members")).not.toBeInTheDocument()
+    expect(screen.getByText("Current members")).toBeInTheDocument()
   })
 })
 

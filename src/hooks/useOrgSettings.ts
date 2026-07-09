@@ -43,6 +43,15 @@ const ROSTER_PROGRESS_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
 const DEFAULT_ROSTER_VIEW_MIN_ROLE = ROLE.MAINTAINER
 const DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE = ROLE.MAINTAINER
 
+// AQU-496: allowSelfAssignment is the same kind of permission-policy key as
+// exportMinRole/rosterViewMinRole/memberProgressViewMinRole — OWNER-only to
+// change (auth-worker/src/routes/org-settings.ts PERMISSION_POLICY_KEYS),
+// because it loosens who may write `assignment.create`. Unlike the others it's
+// a boolean, and its safe default is `false` (leads-only — pre-AQU-496
+// behavior), not a role-ladder floor.
+const ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE = ROLE.OWNER
+const DEFAULT_ALLOW_SELF_ASSIGNMENT = false
+
 export interface UseOrgSettings {
   /** Current org settings (rules, etc). Always defined (empty when unloaded). */
   settings: OrgWideSettings
@@ -110,12 +119,22 @@ export interface UseOrgSettings {
    * defaulting to MAINTAINER when unset). Independent of canViewRoster — a
    * caller may see the roster while progress stays hidden, or vice versa.
    *
-   * SWARM-TODO(AQU-498): no per-member progress view consumes this yet;
-   * exposed here so the future productivity view can read it directly.
+   * AQU-498: gates ProjectOverview's Team card (SectionVisibilityGate),
+   * which now also hosts the per-teammate activity detail (recent actions +
+   * files-worked-on rollup) — see MemberActivityPanel.
    */
   canViewMemberProgress: boolean
   /** Effective member-progress-view floor: explicit org setting, or the MAINTAINER default when unset. */
   memberProgressViewMinRole: number
+  /**
+   * AQU-496: effective self-assignment authority — true when members below
+   * project_lead may claim `assignment.create` for THEMSELVES. Explicit org
+   * setting, or `false` (leads-only) when unset — preserves pre-AQU-496
+   * behavior byte-for-byte for orgs that haven't opted in. Server-enforced;
+   * see `resolveAllowSelfAssignment` in
+   * `sync-worker/src/events/assignment-authority.ts`.
+   */
+  allowSelfAssignment: boolean
   /** Force a re-GET. */
   refresh: () => Promise<OrgSettingsResponse | null>
   /** Patch org settings (adds/replaces top-level keys). Blocked if !canEdit —
@@ -210,6 +229,12 @@ export function useOrgSettings(
     if (typeof raw === "number" && Number.isFinite(raw) && raw >= 100 && raw <= 700) return raw
     return DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE
   })()
+
+  // AQU-496: effective self-assignment authority — explicit org setting, or
+  // false (leads-only) when unset.
+  const allowSelfAssignment = server?.settings?.allowSelfAssignment === true
+    ? true
+    : DEFAULT_ALLOW_SELF_ASSIGNMENT
 
   // The effective role to check: project-resolved (AD-12 max-wins) when
   // available, falling back to org role for non-project contexts.
@@ -320,6 +345,7 @@ export function useOrgSettings(
     rosterViewMinRole,
     canViewMemberProgress,
     memberProgressViewMinRole,
+    allowSelfAssignment,
     refresh,
     patch,
     requestPromotion,
@@ -334,4 +360,13 @@ export function useOrgSettings(
  */
 export function canEditRosterProgressFloor(callerRoleLevel: number | null | undefined): boolean {
   return (callerRoleLevel ?? 0) >= ROSTER_PROGRESS_FLOOR_WRITE_MIN_ROLE
+}
+
+/**
+ * AQU-496: True when `callerRoleLevel` is allowed to CHANGE the
+ * allowSelfAssignment setting (OWNER-only, same rationale as
+ * canEditRosterProgressFloor above).
+ */
+export function canEditAssignmentAuthority(callerRoleLevel: number | null | undefined): boolean {
+  return (callerRoleLevel ?? 0) >= ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE
 }

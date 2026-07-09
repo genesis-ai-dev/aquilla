@@ -1135,10 +1135,14 @@ export function canViewRoster(callerRoleLevel: number | null, rosterMinRole: num
  * True when `callerRoleLevel` meets or exceeds the org's configured
  * member-progress floor.
  *
- * SWARM-TODO(AQU-498): this helper is defined and enforced-ready now, but
- * there is no dedicated per-member progress view yet to gate with it. The
- * future productivity view should call this (server-side) before returning
- * any per-member progress/productivity data.
+ * SWARM-TODO(AQU-498): still unconsumed by any auth-worker route — the
+ * per-member activity view AQU-498 shipped reads straight from sync-worker
+ * (GET /api/v1/projects/:projectId/members/:author/activity, gated by its
+ * own resolveMemberProgressFloor in member-progress-floor.ts, since
+ * sync-worker doesn't depend on auth-worker). If a future auth-worker route
+ * needs the same floor (e.g. a member-progress summary folded into
+ * /projects/:projectId/members), it should call this helper rather than
+ * re-deriving the comparison.
  */
 export function canViewMemberProgress(callerRoleLevel: number | null, progressMinRole: number): boolean {
   if (callerRoleLevel == null) return false

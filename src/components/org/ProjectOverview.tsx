@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom"
 import { MoreHorizontal, ChevronRight, Copy, Check, Download } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { ExpandableName } from "@/components/ui/expandable-name"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { OrgSidebar } from "./OrgSidebar"
@@ -17,6 +18,7 @@ import { InactiveProjectBanner } from "@/components/InactiveProjectBanner"
 import { downloadProjectBundle } from "@/lib/sync/export-bundle"
 import { AssignWork } from "./AssignWork"
 import { MembersTab } from "@/components/ProjectMembersPage"
+import { MemberActivityPanel } from "./MemberActivityPanel"
 import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { fetchProjectFiles, fetchAllFileCells, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
@@ -363,6 +365,23 @@ export function ProjectOverview() {
   const [showAllFiles, setShowAllFiles] = useState(false)
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
 
+  // AQU-498: which teammate's activity detail is expanded in the Team card
+  // (null = none selected). Username, not userId, since that's the events
+  // log's author key (see MemberActivityPanel's doc comment).
+  //
+  // SWARM-TODO(AQU-498): selection is scoped to `workload` (assignees with at
+  // least one open assignment) — reusing the Team card's existing, already
+  // memberProgressViewMinRole-gated roster rather than the project's full
+  // member list (MembersTab), which is gated by the INDEPENDENT
+  // rosterViewMinRole floor (AQU-485). A member with zero open assignments
+  // currently has no row to click here even though they may have historical
+  // activity. True vertical slice for now; widening selection to the full
+  // roster needs either (a) accepting the roster-floor dependency (a caller
+  // could then see progress without roster access, or vice versa — a real
+  // permission-composition question), or (b) a project-scoped "list authors
+  // who have ever committed an event" endpoint independent of both floors.
+  const [selectedMemberUsername, setSelectedMemberUsername] = useState<string | null>(null)
+
   // AQU-499: sort/filter controls for the per-file breakdown list. Default
   // sort is last-updated (most-recently-progressed first) per acceptance
   // criteria — a PM opening the overview should see recent activity without
@@ -429,12 +448,27 @@ export function ProjectOverview() {
   }, [status, navigate])
 
   // Load per-project assignment roster for the Team card (maintainer+)
-  useEffect(() => {
+  // AQU-495: extracted into a callback so a fresh assignment (onAssigned) can
+  // revalidate the workload list live, not only on mount — the walkthrough bug
+  // was "No open assignments in this project yet." lingering until manual reload.
+  const loadWorkload = useCallback(async () => {
     if (!jwt || !id) return
-    getProjectAssignments(jwt, id)
-      .then(setWorkload)
-      .catch(() => setWorkload([]))
+    try {
+      setWorkload(await getProjectAssignments(jwt, id))
+    } catch {
+      setWorkload([])
+    }
   }, [jwt, id])
+
+  useEffect(() => {
+    void loadWorkload()
+  }, [loadWorkload])
+
+  // AQU-495: after a successful assign, refresh BOTH the portfolio row and the
+  // open-assignments workload list so the Team card updates without a reload.
+  const handleAssigned = useCallback(async () => {
+    await Promise.all([loadRow(), loadWorkload()])
+  }, [loadRow, loadWorkload])
 
   // Per-file rollups
   const firstFileId = project?.files[0]?.id ?? null
@@ -446,6 +480,19 @@ export function ProjectOverview() {
       .then((rows) => { if (!cancelled) setFiles(rows) })
       .catch(() => { if (!cancelled) setFiles([]) })
     return () => { cancelled = true }
+  }, [jwt, id, firstFileId, project?.name])
+
+  // AQU-498: token minter for MemberActivityPanel — same project-scoped
+  // sync-token mint used for the per-file rollups above (verifyTokenForProject
+  // only checks projectId, so any file-scoped token in this project works).
+  const getMemberActivityToken = useCallback(async (): Promise<string | null> => {
+    if (!jwt || !firstFileId) return null
+    try {
+      const tok = await fetchSyncToken(jwt, id, firstFileId, { projectName: project?.name })
+      return tok.token
+    } catch {
+      return null
+    }
   }, [jwt, id, firstFileId, project?.name])
 
   // AQU-493: expand/collapse a file row's chapter/verse rollup. Fetches the
@@ -994,8 +1041,14 @@ export function ProjectOverview() {
                                 >
                                   <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isExpanded && "rotate-90")} />
                                 </button>
+                                {/* AQU-491: full name was hover-only (tooltip); ExpandableName
+                                    adds a click-to-reveal Popover so a truncated file name is
+                                    discoverable without hovering. Tooltip kept for parity/hover
+                                    users; both read from the same fixed w-32 column. */}
                                 <AppTooltip content={f.name}>
-                                  <span className="w-32 shrink-0 truncate text-sm font-medium">{f.name}</span>
+                                  <span className="w-32 shrink-0 text-sm font-medium">
+                                    <ExpandableName name={f.name} />
+                                  </span>
                                 </AppTooltip>
                                 <FileProgressBars tPct={tPct} vPct={vPct} />
                                 <AppTooltip content="Cells filled / cells approved / total cells · word count">
@@ -1147,11 +1200,13 @@ export function ProjectOverview() {
                     <ul className="space-y-2">
                       {workload.map((w) => {
                         const donePct = w.cellsTotal > 0 ? Math.round((w.cellsDone / w.cellsTotal) * 100) : 0
+                        const isSelected = w.username != null && w.username === selectedMemberUsername
                         return (
                           <li key={w.userId} className="flex items-center gap-3 text-sm">
+                            {/* AQU-491: click-to-reveal affordance, see file-name cell above. */}
                             <AppTooltip content={w.username ?? String(w.userId)}>
-                              <span className="w-32 shrink-0 font-medium truncate">
-                                {w.username ?? `User ${w.userId}`}
+                              <span className="w-32 shrink-0 font-medium">
+                                <ExpandableName name={w.username ?? `User ${w.userId}`} />
                               </span>
                             </AppTooltip>
                             <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
@@ -1160,10 +1215,36 @@ export function ProjectOverview() {
                             <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
                               {w.openAssignments} open · {donePct}%
                             </span>
+                            {/* AQU-498: select a teammate to see their recent actions +
+                                files-worked-on rollup. Sits inside this SAME
+                                memberProgressViewMinRole gate, so no separate
+                                permission plumbing is needed here. */}
+                            {w.username != null && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 shrink-0 px-2 text-xs text-muted-foreground"
+                                aria-label={`View activity for ${w.username}`}
+                                aria-pressed={isSelected}
+                                onClick={() => setSelectedMemberUsername(isSelected ? null : (w.username as string))}
+                              >
+                                {isSelected ? "Hide" : "Activity"}
+                              </Button>
+                            )}
                           </li>
                         )
                       })}
                     </ul>
+                  )}
+
+                  {selectedMemberUsername && (
+                    <MemberActivityPanel
+                      projectId={id}
+                      username={selectedMemberUsername}
+                      getToken={getMemberActivityToken}
+                      onClose={() => setSelectedMemberUsername(null)}
+                    />
                   )}
 
                   {canAssign && !isArchived && activeOrgId != null && (project?.files.length ?? 0) > 0 && (
@@ -1174,7 +1255,7 @@ export function ProjectOverview() {
                         orgId={activeOrgId}
                         jwt={jwt ?? ""}
                         author={session?.username ?? ""}
-                        onAssigned={loadRow}
+                        onAssigned={handleAssigned}
                       />
                     </div>
                   )}

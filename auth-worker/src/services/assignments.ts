@@ -30,55 +30,81 @@ const CELLS_DONE_SUBQUERY = `(
 )`
 
 /**
- * Per-assignee open workload + derived progress across an org's ACTIVE
- * (non-archived) projects. One row per open assignment is fetched then rolled
- * up per assignee in JS (the cells_done subquery is per-assignment).
+ * One open assignment in the org-wide "Team workload" manager view, with its
+ * project attribution (AQU-494: a bare per-assignee rollup couldn't say which
+ * project an assignment belonged to once a member had work in more than one
+ * project — one row per assignment fixes that). `fileId` is one of the
+ * assignment's resolved cells' files, carried so the caller can route an
+ * unassign event's sync-token request without a second lookup; it's null
+ * only for the edge case of a scope that resolved to zero cells.
+ */
+export interface OrgAssignmentRow {
+  assignmentId: string
+  projectId: string
+  projectName: string
+  fileId: string | null
+  assigneeUserId: number
+  username: string | null
+  scopeLabel: string
+  cellsTotal: number
+  cellsDone: number
+  deadline: string | null
+}
+
+/**
+ * Every open assignment across an org's ACTIVE (non-archived) projects, with
+ * project + progress attribution — the manager workload view (AQU-494).
+ * Newest first.
  */
 export async function getOrgAssignmentWorkload(
   env: Env,
   orgId: number,
-): Promise<AssigneeWorkload[]> {
+): Promise<OrgAssignmentRow[]> {
   const rows = await env.AQUILLA_PG.prepare(
-    `SELECT a.assignee_user_id AS assignee_user_id,
+    `SELECT a.assignment_id    AS assignment_id,
+            a.project_id       AS project_id,
+            p.name             AS project_name,
+            a.assignee_user_id AS assignee_user_id,
             u.username         AS assignee_username,
+            a.scope_label      AS scope_label,
             a.cells_total      AS cells_total,
-            ${CELLS_DONE_SUBQUERY} AS cells_done
+            ${CELLS_DONE_SUBQUERY} AS cells_done,
+            a.deadline         AS deadline,
+            (SELECT ac.file_id FROM assignment_cells ac
+              WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id
        FROM assignments a
        JOIN projects p ON p.id = a.project_id
        LEFT JOIN users u ON u.id = a.assignee_user_id
       WHERE p.org_id = ? AND p.archived_at IS NULL
-        AND a.unassigned_at IS NULL AND a.completed_at IS NULL`,
+        AND a.unassigned_at IS NULL AND a.completed_at IS NULL
+      ORDER BY a.created_at DESC`,
   )
     .bind(orgId)
     .all<{
+      assignment_id: string
+      project_id: string
+      project_name: string
       assignee_user_id: number
       assignee_username: string | null
+      scope_label: string
       cells_total: number
       cells_done: number
+      deadline: string | null
+      file_id: string | null
     }>()
 
-  const byUser = new Map<number, AssigneeWorkload>()
-  for (const r of rows.results ?? []) {
-    let w = byUser.get(r.assignee_user_id)
-    if (!w) {
-      w = {
-        userId: r.assignee_user_id,
-        username: r.assignee_username,
-        openAssignments: 0,
-        cellsTotal: 0,
-        cellsDone: 0,
-      }
-      byUser.set(r.assignee_user_id, w)
-    }
-    w.openAssignments += 1
-    w.cellsTotal += r.cells_total
-    w.cellsDone += r.cells_done
-  }
-  // Most outstanding work (largest remaining) first — the manager's attention
-  // order.
-  return [...byUser.values()].sort(
-    (a, b) => b.cellsTotal - b.cellsDone - (a.cellsTotal - a.cellsDone),
-  )
+  return (rows.results ?? []).map((r) => ({
+    assignmentId: r.assignment_id,
+    projectId: r.project_id,
+    projectName: r.project_name,
+    fileId: r.file_id,
+    assigneeUserId: r.assignee_user_id,
+    username: r.assignee_username,
+    scopeLabel: r.scope_label,
+    cellsTotal: r.cells_total,
+    cellsDone: r.cells_done,
+    deadline: r.deadline,
+  }))
 }
 
 /**

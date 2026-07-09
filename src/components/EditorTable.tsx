@@ -73,6 +73,8 @@ import { CellVoicePanel } from "./cell/CellVoicePanel"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
 // popover (FRO-237). The component itself is no longer in the overflow popover.
 import { getUnsupportedReason } from "./CellAudioRecordButton"
+// AQU-513: plain file-picker upload next to the mic — works on mobile too.
+import { CellAudioUploadButton } from "./CellAudioUploadButton"
 import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice } from "@/lib/audio/voices"
 import { useNavigate } from "react-router-dom"
@@ -4530,6 +4532,20 @@ function EditorRow({
                   </div>
                 )
               })()}
+
+              {/* AQU-513: file-picker upload next to the mic — a plain
+                  <input type="file"> so phone browsers can attach an
+                  existing wav/mp3/m4a recording without a desktop. Same
+                  gating as the mic (no audio yet, editable). */}
+              {!hasAudio && editable && (
+                <CellAudioUploadButton
+                  projectId={project.id}
+                  fileId={cell.fileId}
+                  cellId={cell.id}
+                  username={username}
+                  disabled={!editable}
+                />
+              )}
 
               {hasAudio && (
                 <RailButton

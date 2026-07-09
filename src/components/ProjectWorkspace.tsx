@@ -76,7 +76,7 @@ import {
 import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitFileVideoSet } from "@/lib/sync/events-emit"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
-import { canPerform } from "@/lib/sync/role-policy"
+import { canPerform, canOpenAssignUi } from "@/lib/sync/role-policy"
 import { useFocusLock } from "@/hooks/useFocusLock"
 import type { WsReconciler } from "@/lib/sync/ws-reconciler"
 import {
@@ -127,8 +127,9 @@ import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/de
 import { applySuggestions, buildUndo, hasEffectiveChange } from "@/lib/file-labeling/apply"
 import { renameFile, moveFileToCorpus, renameCorpus, deleteFile } from "@/lib/store/file-operations"
 import { deleteFileProjection } from "@/lib/sync/file-projection"
-import { fetchDeletedFiles } from "@/lib/sync/cells-read"
+import { fetchDeletedFiles, fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { FileSummary } from "@/lib/sync/cells-read-types"
+import { fileSummariesToProgress, mergeFileProgress } from "@/lib/progress/file-summary-progress"
 import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -190,8 +191,8 @@ const CommentsPageContent = lazy(() =>
 const LivingMemoryPageContent = lazy(() =>
   import("./LivingMemoryPage").then((mod) => ({ default: mod.LivingMemoryPage })),
 )
-const TerminologyPageContent = lazy(() =>
-  import("./TerminologyPage").then((mod) => ({ default: mod.TerminologyPage })),
+const GlossaryEditorContent = lazy(() =>
+  import("./GlossaryEditor").then((mod) => ({ default: mod.GlossaryEditor })),
 )
 // FRO-180: per-project members management surface.
 const ProjectMembersPageContent = lazy(() =>
@@ -1329,6 +1330,8 @@ export function ProjectWorkspace() {
     version: orgSettingsVersion,
     canExport: canExportByOrgPolicy,
     hasFetched: orgSettingsFetched,
+    // AQU-496: whether below-lead members may self-assign work.
+    allowSelfAssignment,
   } = useOrgSettings(
     project?.orgId ?? activeOrg?.id,
     projectOrg?.role?.level ?? null,
@@ -1974,7 +1977,16 @@ export function ProjectWorkspace() {
   // Fetched eagerly so the data is warm when the manager opens the assign modal.
   const [_projectWorkload, setProjectWorkload] = useState<AssigneeWorkload[]>([])
   const currentRoleLevel = project?.syncRole?.level ?? 0
-  const canAssignWork = currentRoleLevel >= ROLE.PROJECT_LEAD
+  // AQU-496: below PROJECT_LEAD, still allowed when the org has opted into
+  // allowSelfAssignment (member may self-assign; AssignModal enforces the
+  // self-only restriction on submit).
+  const canAssignWork = canOpenAssignUi(currentRoleLevel, allowSelfAssignment)
+  // AQU-496: the caller's own Frontier user id, resolved from the project
+  // member list by username — used to lock AssignModal's assignee picker to
+  // "self" in self-assign mode. Null if the roster hasn't loaded yet or the
+  // caller isn't in it (e.g. platform-admin path) — AssignModal fails closed
+  // in that case (no eligible assignee shown), not open.
+  const currentUserId = projectMembers.find((m) => m.username === currentUsername)?.userId ?? null
   const jwt = frontierSession?.jwt ?? null
 
   useEffect(() => {
@@ -2043,7 +2055,44 @@ export function ProjectWorkspace() {
     rules,
     { decaySettings: project?.decaySettings, requiredValidations },
   )
-  const { healthMap, fileHealth: _fileHealth, projectHealth, fileProgress, infractions, openCommentCount, cellOpenCommentCount } = health
+  const { healthMap, fileHealth: _fileHealth, projectHealth, fileProgress: liveFileProgress, infractions, openCommentCount, cellOpenCommentCount } = health
+
+  // AQU-516: useHealth (above) only ever sees the currently-open file, so
+  // fileProgress historically had an entry for at most one file — every
+  // *other* row in the sidebar's FileRow rendered no progress bars at all.
+  // Fetch the server-projected per-file rollup (same source the PM dashboard's
+  // file table reads — org/ProjectOverview.tsx) once per project so every
+  // file gets a snapshot, then merge the live, per-keystroke-accurate entry
+  // for the open file back on top so it doesn't regress to the last fetch.
+  const [allFilesProgressSnapshot, setAllFilesProgressSnapshot] = useState<
+    Map<string, { translated: number; validated: number; total: number }>
+  >(new Map())
+  useEffect(() => {
+    if (!project?.id || !frontierSession?.jwt) return
+    let cancelled = false
+    fetchProjectFiles(project.id, frontierSession.jwt)
+      .then((summaries) => {
+        if (cancelled) return
+        setAllFilesProgressSnapshot(fileSummariesToProgress(summaries))
+      })
+      .catch(() => {
+        // Non-fatal — sidebar rows simply fall back to no progress bar
+        // (existing behavior) until the next successful fetch.
+      })
+    return () => { cancelled = true }
+    // Re-fetch whenever the file count changes (import/delete) so newly
+    // added files pick up a snapshot without a full reload.
+  }, [project?.id, project?.files.length, frontierSession?.jwt])
+  const fileProgress = useMemo(
+    () => mergeFileProgress(allFilesProgressSnapshot, liveFileProgress),
+    [allFilesProgressSnapshot, liveFileProgress],
+  )
+  // SWARM-TODO(AQU-516) live-verify: open a project with multiple files,
+  // don't open any file — every file in the sidebar should show a progress
+  // indicator (amber/emerald bars in FileRow), and the numbers should match
+  // the PM dashboard's file table (org/ProjectOverview.tsx, same
+  // fetchProjectFiles source). Then open one file and confirm its bars stay
+  // live-accurate (move on edit) rather than freezing at the snapshot value.
 
   // PROTOTYPE (AD-14 health-as-confidence): derive per-cell health on read from
   // FTS5 similarity to validated cells, and overlay it onto the endorsement
@@ -3683,6 +3732,8 @@ export function ProjectWorkspace() {
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
                   canExportByOrgPolicy={canExportByOrgPolicy}
+                  onOpenGlossary={() => navigate(`/project/${projectId}/terminology`)}
+                  glossaryActive={centerSurface === "terminology"}
                 />
                 <SidebarProjectSection items={projectNavItems} />
                 {/* FRO-192: member's per-project assignment pickup panel. */}
@@ -4109,7 +4160,7 @@ export function ProjectWorkspace() {
           // FRO-254: Terminology page inside the shell.
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading terminology…</div>}>
-              <TerminologyPageContent />
+              <GlossaryEditorContent />
             </Suspense>
           </div>
         ) : centerSurface === "members" ? (
@@ -4400,6 +4451,8 @@ export function ProjectWorkspace() {
           projectFiles={projectFiles}
           members={projectMembers}
           roleLevel={currentRoleLevel}
+          allowSelfAssignment={allowSelfAssignment}
+          callerUserId={currentUserId}
           selectedCellIds={getSelectedIds()}
           jwt={jwt ?? ""}
           author={currentUsername}

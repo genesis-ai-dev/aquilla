@@ -36,6 +36,12 @@ const mockMembers = [
       { source: "org" as const, level: 100, name: "viewer" },
     ],
   },
+  {
+    userId: 4,
+    username: "erin",
+    role: { level: 400, name: "contributor", source: "group" as const },
+    secondarySources: [],
+  },
 ]
 
 const mockRefresh = vi.fn().mockResolvedValue(undefined)
@@ -126,6 +132,25 @@ describe("ProjectMembersPage", () => {
     // bob is via org, carol has a secondary org source
     const orgBadges = screen.getAllByText("via org")
     expect(orgBadges.length).toBeGreaterThanOrEqual(1)
+  })
+
+  // AQU-488: a first-time PM must be able to tell this list is scoped to
+  // THIS project (not the whole org) without asking anyone.
+  it("labels the members list with an explicit project scope", () => {
+    renderPage()
+    expect(screen.getByText("Members of this project")).toBeInTheDocument()
+  })
+
+  // AQU-488: every row must indicate how that person has access — direct
+  // project invite, org membership, or team — not just org-sourced ones.
+  it("labels each row with its access path (direct invite / org / team)", () => {
+    renderPage()
+    // alice + carol are direct (override) grants
+    expect(screen.getAllByText("direct invite").length).toBeGreaterThanOrEqual(2)
+    // bob is org-sourced
+    expect(screen.getAllByText("via org").length).toBeGreaterThanOrEqual(1)
+    // erin has access via a team (group) grant
+    expect(screen.getByText("via team")).toBeInTheDocument()
   })
 
   it("shows secondary sources for members with multiple paths", () => {

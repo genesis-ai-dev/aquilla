@@ -719,6 +719,8 @@ export interface FileCreateInput {
   fileType: string
   sourceLanguage?: string
   targetLanguage?: string
+  sourceTextDirection?: "ltr" | "rtl"
+  targetTextDirection?: "ltr" | "rtl"
   /** Timeline-segment-model order lens: 'time' | 'sequence'. */
   orderedBy?: string
   author: string
@@ -741,6 +743,8 @@ export async function emitFileCreate(input: FileCreateInput): Promise<string> {
       fileType: input.fileType,
       ...(input.sourceLanguage !== undefined ? { sourceLanguage: input.sourceLanguage } : {}),
       ...(input.targetLanguage !== undefined ? { targetLanguage: input.targetLanguage } : {}),
+      ...(input.sourceTextDirection !== undefined ? { sourceTextDirection: input.sourceTextDirection } : {}),
+      ...(input.targetTextDirection !== undefined ? { targetTextDirection: input.targetTextDirection } : {}),
       ...(input.orderedBy !== undefined ? { orderedBy: input.orderedBy } : {}),
     },
     clientTs: input.clientTs,

@@ -45,6 +45,11 @@ import type { Concept } from "@/lib/terminology/types"
 import { findActiveTimingIndex } from "@/lib/audio/timings"
 import type { WordTiming } from "@/lib/codex-editor/types"
 import type { TargetPresenceSelection } from "@/lib/sync/presence-store"
+import {
+  detectStrongTextDirection,
+  type DirectionMode,
+  type TextDirection,
+} from "@/lib/text-direction"
 
 /** Window before a quiet keystroke pause counts as a commit-worthy idle. */
 export const COMMIT_IDLE_MS = 1_200
@@ -92,6 +97,9 @@ interface TranslatedEditorProps {
   className?: string
   compactHeight?: boolean
   editable?: boolean
+  textDirection?: TextDirection
+  directionMode?: DirectionMode
+  lang?: string
   /** "Alice is editing" — when present, the editor is read-only and the banner shows. */
   heldByLabel?: string | null
   infractions?: RuleInfraction[]
@@ -162,6 +170,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   className,
   compactHeight = false,
   editable = true,
+  textDirection = "ltr",
+  directionMode = "ltr",
+  lang,
   heldByLabel,
   infractions,
   ruleSeverity,
@@ -189,6 +200,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => { onEscapeToGridRef.current = onEscapeToGrid }, [onEscapeToGrid])
   const onSelectionChangeRef = useRef(onSelectionChange)
   useEffect(() => { onSelectionChangeRef.current = onSelectionChange }, [onSelectionChange])
+  const textDirectionRef = useRef<TextDirection>(textDirection)
+  useEffect(() => { textDirectionRef.current = textDirection }, [textDirection])
+  const directionModeRef = useRef<DirectionMode>(directionMode)
+  useEffect(() => { directionModeRef.current = directionMode }, [directionMode])
   const footnoteNumberOffsetRef = useRef(footnoteNumberOffset)
   useEffect(() => { footnoteNumberOffsetRef.current = footnoteNumberOffset }, [footnoteNumberOffset])
   const showFootnoteTooltipsRef = useRef(showFootnoteTooltips)
@@ -239,6 +254,15 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => { onCommitRef.current = onCommit }, [onCommit])
 
   const commitEditorSnapshot = useRef<(reason?: string) => void>(() => undefined)
+  const applyEditorDirection = useCallback((editorInstance: TiptapEditor | null) => {
+    if (!editorInstance) return
+    const next = directionModeRef.current === "auto"
+      ? detectStrongTextDirection(editorInstance.getText()) ?? textDirectionRef.current
+      : textDirectionRef.current
+    editorInstance.view.dom.setAttribute("dir", next)
+    if (lang) editorInstance.view.dom.setAttribute("lang", lang)
+    else editorInstance.view.dom.removeAttribute("lang")
+  }, [lang])
   const publishSelection = useCallback((editorInstance: TiptapEditor | null) => {
     if (!editorInstance || isReadOnlyRef.current) return
     const { selection, doc } = editorInstance.state
@@ -295,6 +319,8 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         role: "textbox",
         "aria-multiline": "true",
         ...(ariaLabel ? { "aria-label": ariaLabel } : {}),
+        dir: textDirection,
+        ...(lang ? { lang } : {}),
         class: cn(
           // The surrounding bg-muted well in EditorTable already reads as an
           // input, so the editor surface itself stays transparent — no flat
@@ -444,6 +470,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       },
     },
     onUpdate({ editor }) {
+      applyEditorDirection(editor)
       scheduleSelectionPublish(editor)
       // Reset idle timer on every keystroke; commit when the user pauses.
       if (idleTimerRef.current !== null) clearTimeout(idleTimerRef.current)
@@ -461,6 +488,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       scheduleSelectionPublish(editor)
     },
     onFocus({ editor }) {
+      applyEditorDirection(editor)
       onFocus?.()
       publishSelection(editor)
     },
@@ -485,6 +513,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       onBlur?.()
     },
   }, [cellId])
+
+  useEffect(() => {
+    applyEditorDirection(editor)
+  }, [applyEditorDirection, editor, textDirection, directionMode])
 
   useEffect(() => {
     return () => {

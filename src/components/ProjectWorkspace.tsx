@@ -1058,7 +1058,11 @@ export function ProjectWorkspace() {
     const next = findNextUnfinished(currentIndex)
     if (next >= 0) editorRef.current?.focusCellEditorIndex(next)
   }, [findNextUnfinished])
-  const fileMeta = useFileMeta(activeFileId, project?.sourceLanguage, project?.targetLanguage)
+  const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
+  const fileMeta = useFileMeta(activeFileId, project?.sourceLanguage, project?.targetLanguage, {
+    sourceTextDirection: activeFile?.sourceTextDirection,
+    targetTextDirection: activeFile?.targetTextDirection,
+  })
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
   const [footnoteViewMode, setFootnoteViewMode] = useFootnotesPreference(projectId!)
   const [visibleFootnotes, setVisibleFootnotes] = useState<VisibleFootnoteEntry[]>([])
@@ -1067,7 +1071,6 @@ export function ProjectWorkspace() {
   // (eye) menu, rendered by EditorTable.
   const fontSizes = useFileFontSizes(activeFileId)
 
-  const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const isSubtitleFile = activeFile?.type === "vtt" || activeFile?.type === "srt"
 
   const workspaceBreadcrumb = useMemo(() => ({
@@ -3795,6 +3798,8 @@ export function ProjectWorkspace() {
               hideTrigger
               fileOpen={Boolean(activeFileId)}
               lineNumbersEnabled={fileMeta.lineNumbersEnabled}
+              sourceDirectionMode={fileMeta.sourceDirectionMode}
+              targetDirectionMode={fileMeta.targetDirectionMode}
               sourceTextDirection={fileMeta.sourceTextDirection}
               targetTextDirection={fileMeta.targetTextDirection}
               cellLabelsEnabled={cellLabelsEnabled}
@@ -3805,8 +3810,8 @@ export function ProjectWorkspace() {
               sourceFontSize={fontSizes.source}
               targetFontSize={fontSizes.target}
               onLineNumbersChange={fileMeta.setLineNumbersEnabled}
-              onSourceTextDirectionChange={fileMeta.setSourceTextDirection}
-              onTargetTextDirectionChange={fileMeta.setTargetTextDirection}
+              onSourceDirectionModeChange={fileMeta.setSourceDirectionMode}
+              onTargetDirectionModeChange={fileMeta.setTargetDirectionMode}
               onCellLabelsChange={setCellLabelsEnabled}
               onSourceFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { sourceFontSize: v }) }}
               onTargetFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { targetFontSize: v }) }}
@@ -4156,6 +4161,8 @@ export function ProjectWorkspace() {
             onSeekToCue={isSubtitleFile ? handleCueSeek : undefined}
             lineNumbersEnabled={fileMeta.lineNumbersEnabled}
             cellLabelsEnabled={cellLabelsEnabled}
+            sourceDirectionMode={fileMeta.sourceDirectionMode}
+            targetDirectionMode={fileMeta.targetDirectionMode}
             sourceTextDirection={fileMeta.sourceTextDirection}
             targetTextDirection={fileMeta.targetTextDirection}
             isAnonymous={!frontierSession}

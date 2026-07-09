@@ -46,6 +46,8 @@ interface FileSummary {
   eventId: string
   sourceLanguage: string | null
   targetLanguage: string | null
+  sourceTextDirection: 'ltr' | 'rtl' | null
+  targetTextDirection: 'ltr' | 'rtl' | null
   /** Timeline-segment-model order lens, read from meta. Null ⇒ client treats
    *  it as 'sequence'. */
   orderedBy: string | null
@@ -66,6 +68,12 @@ function mapRow(row: FileRowRaw): FileSummary {
   let meta: {
     source_language?: string
     target_language?: string
+    sourceLanguage?: string
+    targetLanguage?: string
+    source_text_direction?: string
+    target_text_direction?: string
+    sourceTextDirection?: string
+    targetTextDirection?: string
     orderedBy?: string
     coreMediaUrl?: string
   } = {}
@@ -82,8 +90,10 @@ function mapRow(row: FileRowRaw): FileSummary {
     role: row.role,
     kind: row.kind,
     eventId: row.event_id,
-    sourceLanguage: meta.source_language ?? null,
-    targetLanguage: meta.target_language ?? null,
+    sourceLanguage: meta.source_language ?? meta.sourceLanguage ?? null,
+    targetLanguage: meta.target_language ?? meta.targetLanguage ?? null,
+    sourceTextDirection: normalizeTextDirection(meta.source_text_direction ?? meta.sourceTextDirection),
+    targetTextDirection: normalizeTextDirection(meta.target_text_direction ?? meta.targetTextDirection),
     orderedBy: meta.orderedBy ?? null,
     coreMediaUrl: meta.coreMediaUrl ?? null,
     cellCount: row.cell_count,
@@ -93,6 +103,10 @@ function mapRow(row: FileRowRaw): FileSummary {
     lastEditAt: row.last_edit_at,
     deletedAt: row.deleted_at ?? null,
   }
+}
+
+function normalizeTextDirection(value: string | undefined): 'ltr' | 'rtl' | null {
+  return value === 'ltr' || value === 'rtl' ? value : null
 }
 
 // Active listing:  GET /api/v1/projects/:projectId/files

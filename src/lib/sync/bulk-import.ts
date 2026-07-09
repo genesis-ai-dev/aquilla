@@ -57,6 +57,8 @@ export interface BulkImportFileMeta {
   parserVersion?: string
   sourceLanguage?: string
   targetLanguage?: string
+  sourceTextDirection?: "ltr" | "rtl"
+  targetTextDirection?: "ltr" | "rtl"
   /** USFM book code (\id) — lets the server projection group/order by book. */
   bookCode?: string
   /** Timeline-segment-model order lens ('time' | 'sequence'). Stored in

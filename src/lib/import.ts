@@ -339,6 +339,8 @@ export interface ImportContext {
   /** Optional language pair to stamp on the `file.create` payload. */
   sourceLanguage?: string
   targetLanguage?: string
+  sourceTextDirection?: "ltr" | "rtl"
+  targetTextDirection?: "ltr" | "rtl"
   /** Mints a sync-token scoped to (projectId, fileId) for the bulk upload. */
   getToken: (fileId: string) => Promise<string | null>
   /** Fired as cells upload — drives the dialog progress UI. */
@@ -354,6 +356,11 @@ export interface ImportContext {
    * "skipped by user" rather than being uploaded.
    */
   skipKeys?: ReadonlySet<string>
+}
+
+function normalizeImportedDirection(value: string | undefined | null): "ltr" | "rtl" | undefined {
+  const normalized = value?.trim().toLowerCase()
+  return normalized === "ltr" || normalized === "rtl" ? normalized : undefined
 }
 
 export interface ImportFileResult {
@@ -453,6 +460,7 @@ export async function importEBible(
     "ebible",
     {
       ...ctx,
+      sourceTextDirection: normalizeImportedDirection(translation.textDirection) ?? ctx.sourceTextDirection,
       signal: signal ?? ctx.signal,
       onCellEnqueued: (count, total) => {
         onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total })
@@ -627,6 +635,7 @@ export async function importHelloao(
     "helloao",
     {
       ...ctx,
+      sourceTextDirection: normalizeImportedDirection(translation.textDirection) ?? ctx.sourceTextDirection,
       signal: signal ?? ctx.signal,
       onCellEnqueued: (count, total) => {
         onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total })
@@ -912,6 +921,8 @@ export async function emitParsedFile(
       parserVersion: "workspace-import-v1",
       sourceLanguage: ctx.sourceLanguage,
       targetLanguage: ctx.targetLanguage,
+      sourceTextDirection: ctx.sourceTextDirection,
+      targetTextDirection: ctx.targetTextDirection,
       orderedBy,
       ...(result.bookCode ? { bookCode: result.bookCode } : {}),
     },
@@ -931,6 +942,8 @@ export async function emitParsedFile(
       createdAt: new Date().toISOString(),
       cellCount: cells.length,
       orderedBy,
+      ...(ctx.sourceTextDirection ? { sourceTextDirection: ctx.sourceTextDirection } : {}),
+      ...(ctx.targetTextDirection ? { targetTextDirection: ctx.targetTextDirection } : {}),
       ...(result.corpusMarker ? { corpusMarker: result.corpusMarker } : {}),
       ...(result.originalName ? { originalName: result.originalName } : {}),
     },
@@ -1015,6 +1028,8 @@ export async function emitMediaFile(
       parserVersion: "workspace-import-v1",
       sourceLanguage: ctx.sourceLanguage,
       targetLanguage: ctx.targetLanguage,
+      sourceTextDirection: ctx.sourceTextDirection,
+      targetTextDirection: ctx.targetTextDirection,
       orderedBy: "time",
     },
     cells,
@@ -1219,6 +1234,7 @@ export async function commitParatextProject(
   const baseCtx: ImportContext = {
     ...ctx,
     sourceLanguage: plan.project.settings.languageIsoCode || ctx.sourceLanguage,
+    sourceTextDirection: plan.project.settings.rightToLeft ? "rtl" : ctx.sourceTextDirection,
   }
   const isSkipped = (bookId: string) => ctx.skipKeys?.has(bookId.toUpperCase()) ?? false
   const cellsTotal = plan.books.reduce(
@@ -1367,6 +1383,7 @@ export async function importParatextAsTarget(
           parserVersion: "paratext-target-v1",
           sourceLanguage: ctx.sourceLanguage,
           targetLanguage: ctx.targetLanguage,
+          targetTextDirection: plan.project.settings.rightToLeft ? "rtl" : ctx.targetTextDirection,
           bookCode: bookPlan.bookId,
         },
         cells,
@@ -1393,6 +1410,7 @@ export async function importParatextAsTarget(
         type: "usfm",
         createdAt: new Date().toISOString(),
         cellCount: cells.length,
+        ...(plan.project.settings.rightToLeft ? { targetTextDirection: "rtl" as const } : {}),
         ...(bookPlan.corpusMarker ? { corpusMarker: bookPlan.corpusMarker } : {}),
       })
       cellsUploaded = cellsBefore + cells.length + targets.length

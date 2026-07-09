@@ -79,6 +79,11 @@ import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { looksLikeUuid } from "@/lib/uuid"
 import { isPerfLogEnabled } from "@/lib/perf-log"
+import {
+  type DirectionMode,
+  type TextDirection,
+  resolveTextDirection,
+} from "@/lib/text-direction"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { ViolationPopover, type ViolationAnchor } from "./ViolationPopover"
 import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
@@ -544,8 +549,10 @@ interface EditorTableProps {
   onSeekToCue?: (cellId: string) => void
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
-  sourceTextDirection: "ltr" | "rtl"
-  targetTextDirection: "ltr" | "rtl"
+  sourceDirectionMode?: DirectionMode
+  targetDirectionMode?: DirectionMode
+  sourceTextDirection: TextDirection
+  targetTextDirection: TextDirection
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
   // onAiSetupNeeded/onOpenRecording moved to EditorActionsContext (FRO perf
@@ -619,7 +626,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onSaveBacktranslation, getStatisticalBt,
   cellOpenCommentCount,
   activeCueIndex, onSeekToCue,
-  lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
+  lineNumbersEnabled, cellLabelsEnabled, sourceDirectionMode = "auto", targetDirectionMode = "auto", sourceTextDirection, targetTextDirection,
   isAnonymous, onJumpToCell,
   audioLens, onOpenAudioSetup,
   onAttachMediaFile, onAttachMediaUrl,
@@ -1280,6 +1287,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           rowIndex={index}
           lineNumbersEnabled={lineNumbersEnabled}
           cellLabelsEnabled={cellLabelsEnabled}
+          sourceDirectionMode={sourceDirectionMode}
+          targetDirectionMode={targetDirectionMode}
           sourceTextDirection={sourceTextDirection}
           targetTextDirection={targetTextDirection}
           gridCols={gridCols}
@@ -1386,10 +1395,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     ruleMap,
     showFootnotesInline,
     sourceFontSize,
+    sourceDirectionMode,
     sourceTextDirection,
     staleCellIds,
     upstreamStaleCellIds,
     targetFontSize,
+    targetDirectionMode,
     targetTextDirection,
     username,
   ])
@@ -1575,8 +1586,10 @@ interface MemoizedRowProps {
   rowIndex: number
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
-  sourceTextDirection: "ltr" | "rtl"
-  targetTextDirection: "ltr" | "rtl"
+  sourceDirectionMode: DirectionMode
+  targetDirectionMode: DirectionMode
+  sourceTextDirection: TextDirection
+  targetTextDirection: TextDirection
   gridCols: "grid-cols-[44px_1fr_1fr]"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
@@ -1654,7 +1667,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
     getFootnoteDetails,
     onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
-    sourceTextDirection, targetTextDirection, isAnonymous,
+    sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
     onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
@@ -1774,6 +1787,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         rowIndex={rowIndex}
         lineNumbersEnabled={lineNumbersEnabled}
         cellLabelsEnabled={cellLabelsEnabled}
+        sourceDirectionMode={sourceDirectionMode}
+        targetDirectionMode={targetDirectionMode}
         sourceTextDirection={sourceTextDirection}
         targetTextDirection={targetTextDirection}
         gridCols={gridCols}
@@ -1895,8 +1910,10 @@ interface EditorRowProps {
   rowIndex: number
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
-  sourceTextDirection: "ltr" | "rtl"
-  targetTextDirection: "ltr" | "rtl"
+  sourceDirectionMode: DirectionMode
+  targetDirectionMode: DirectionMode
+  sourceTextDirection: TextDirection
+  targetTextDirection: TextDirection
   gridCols: "grid-cols-[44px_1fr_1fr]"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
@@ -2757,7 +2774,7 @@ function EditorRow({
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
-  rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
+  rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, micDenied,
   audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, onAskAiFromSelection,
   onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
@@ -2845,6 +2862,18 @@ function EditorRow({
   const visibleTranslatedHtml = localTargetDraft?.valueHtml ?? cell.translatedHtml
   const hasTranslatedText = Boolean(visibleTranslated?.trim())
   const showCompletionOverlay = isLoading && !hasTranslatedText
+  const sourceCellDirection = useMemo(
+    () => resolveTextDirection(sourceDirectionMode, cell.originalHtml ?? cell.original, sourceTextDirection),
+    [sourceDirectionMode, sourceTextDirection, cell.originalHtml, cell.original],
+  )
+  const targetCellDirection = useMemo(
+    () => resolveTextDirection(
+      targetDirectionMode,
+      showCompletionOverlay ? (completionPreview ?? "") : (visibleTranslatedHtml ?? visibleTranslated),
+      targetTextDirection,
+    ),
+    [targetDirectionMode, targetTextDirection, showCompletionOverlay, completionPreview, visibleTranslatedHtml, visibleTranslated],
+  )
   const hasTargetFootnoteMarker = (visibleTranslated ?? "").includes("\\f")
   const mayHaveFootnotes = hasSourceFootnoteMarker || hasTargetFootnoteMarker
   const showFootnotesInExpansion = footnoteViewMode === "off" && mayHaveFootnotes
@@ -4004,7 +4033,7 @@ function EditorRow({
               "relative flex flex-col transition-opacity",
               isSynthBusy && "opacity-70",
             )}
-            dir={sourceTextDirection}
+            dir={sourceCellDirection}
             aria-label="Source text"
             data-cell-type="source"
             style={{ fontSize: `${sourceFontSize}px`, lineHeight: "1.6" }}
@@ -4072,7 +4101,7 @@ function EditorRow({
             "relative flex flex-col pl-3 pr-9 transition-opacity",
             isSynthBusy && "opacity-70",
           )}
-          dir={targetTextDirection}
+          dir="ltr"
           style={{ fontSize: `${targetFontSize}px`, lineHeight: "1.6" }}
         >
           {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
@@ -4150,6 +4179,9 @@ function EditorRow({
                     onFocus={handleEditorFocus}
                     onBlur={handleEditorBlurOuter}
                     onSelectionChange={handleTargetPresenceSelection}
+                    textDirection={targetCellDirection}
+                    directionMode={targetDirectionMode}
+                    lang={project.targetLanguage || undefined}
                     className={cn(
                       "w-full",
                       showCompletionOverlay && "opacity-30 transition-opacity",
@@ -4185,6 +4217,8 @@ function EditorRow({
                     aria-readonly={!editable || isLoading || Boolean(lockHolderLabel)}
                     aria-label={editorAriaLabel}
                     data-target-read-view
+                    dir={targetCellDirection}
+                    lang={project.targetLanguage || undefined}
                     tabIndex={editable && !isLoading && !lockHolderLabel ? 0 : undefined}
                     className={cn(
                       "relative min-h-[40px] w-full whitespace-pre-wrap rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
@@ -4278,7 +4312,7 @@ function EditorRow({
                     /* Streaming preview flows top-down like normal cell
                        text — same metrics as TipTap underneath so the
                        handoff at isLoading=false has no visible jump. */
-                    <p className="whitespace-pre-wrap px-2 py-1 leading-relaxed text-foreground/90">
+                    <p className="whitespace-pre-wrap px-2 py-1 leading-relaxed text-foreground/90" dir={targetCellDirection}>
                       {completionPreview}
                       <span
                         aria-hidden

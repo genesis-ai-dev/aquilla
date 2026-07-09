@@ -6,6 +6,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
 import type { FootnoteViewMode } from "@/lib/footnotes/types"
+import type { DirectionMode, TextDirection } from "@/lib/text-direction"
 
 export interface ViewSettingsMenuHandle {
   open: () => void
@@ -16,8 +17,10 @@ interface ViewSettingsMenuProps {
   hideTrigger?: boolean
   fileOpen: boolean
   lineNumbersEnabled: boolean
-  sourceTextDirection: "ltr" | "rtl"
-  targetTextDirection: "ltr" | "rtl"
+  sourceDirectionMode: DirectionMode
+  targetDirectionMode: DirectionMode
+  sourceTextDirection: TextDirection
+  targetTextDirection: TextDirection
   cellLabelsEnabled: boolean
   tnSidebarEnabled: boolean
   /** FRO-317: USFM \f...\f* footnote display mode. */
@@ -28,8 +31,8 @@ interface ViewSettingsMenuProps {
   /** Per-file target-column font size in px. */
   targetFontSize: number
   onLineNumbersChange: (v: boolean) => void
-  onSourceTextDirectionChange: (v: "ltr" | "rtl") => void
-  onTargetTextDirectionChange: (v: "ltr" | "rtl") => void
+  onSourceDirectionModeChange: (v: DirectionMode) => void
+  onTargetDirectionModeChange: (v: DirectionMode) => void
   onCellLabelsChange: (v: boolean) => void
   onSourceFontSizeChange: (v: number) => void
   onTargetFontSizeChange: (v: number) => void
@@ -42,6 +45,8 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   hideTrigger = false,
   fileOpen,
   lineNumbersEnabled,
+  sourceDirectionMode,
+  targetDirectionMode,
   sourceTextDirection,
   targetTextDirection,
   cellLabelsEnabled,
@@ -51,8 +56,8 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   sourceFontSize,
   targetFontSize,
   onLineNumbersChange,
-  onSourceTextDirectionChange,
-  onTargetTextDirectionChange,
+  onSourceDirectionModeChange,
+  onTargetDirectionModeChange,
   onCellLabelsChange,
   onSourceFontSizeChange,
   onTargetFontSizeChange,
@@ -60,7 +65,9 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   onFootnoteViewModeChange,
   onDismissRtlHint,
 }, ref) {
-  const rtlDetected = sourceTextDirection === "rtl" || targetTextDirection === "rtl"
+  const sourceAutoRtl = sourceDirectionMode === "auto" && sourceTextDirection === "rtl"
+  const targetAutoRtl = targetDirectionMode === "auto" && targetTextDirection === "rtl"
+  const rtlDetected = sourceAutoRtl || targetAutoRtl
   const showHint = fileOpen && rtlDetected && !rtlHintDismissed
   const [menuOpen, setMenuOpen] = useState(false)
   const [hintVisible, setHintVisible] = useState(showHint)
@@ -98,9 +105,9 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
           <Languages className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
           <span className="text-foreground">
             Detected <strong>right-to-left</strong> for{" "}
-            {sourceTextDirection === "rtl" && targetTextDirection === "rtl"
+            {sourceAutoRtl && targetAutoRtl
               ? "source and target"
-              : sourceTextDirection === "rtl"
+              : sourceAutoRtl
                 ? "source"
                 : "target"}
           </span>
@@ -210,22 +217,20 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                 Text Direction
               </div>
-              <Menu.Item
+              <DirectionModeRow
+                label="Source"
                 disabled={!fileOpen}
-                onClick={() => onSourceTextDirectionChange(sourceTextDirection === "ltr" ? "rtl" : "ltr")}
-                className="flex cursor-pointer select-none items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-50"
-              >
-                <span>Source</span>
-                <DirPill dir={sourceTextDirection} />
-              </Menu.Item>
-              <Menu.Item
+                mode={sourceDirectionMode}
+                resolved={sourceTextDirection}
+                onChange={onSourceDirectionModeChange}
+              />
+              <DirectionModeRow
+                label="Target"
                 disabled={!fileOpen}
-                onClick={() => onTargetTextDirectionChange(targetTextDirection === "ltr" ? "rtl" : "ltr")}
-                className="flex cursor-pointer select-none items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-50"
-              >
-                <span>Target</span>
-                <DirPill dir={targetTextDirection} />
-              </Menu.Item>
+                mode={targetDirectionMode}
+                resolved={targetTextDirection}
+                onChange={onTargetDirectionModeChange}
+              />
               <div className="-mx-1 my-1.5 h-px rounded-full" role="separator" />
               <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                 Font Size
@@ -346,10 +351,62 @@ function FontSizeRow({
   )
 }
 
-function DirPill({ dir }: { dir: "ltr" | "rtl" }) {
+function DirectionModeRow({
+  label,
+  mode,
+  resolved,
+  disabled,
+  onChange,
+}: {
+  label: string
+  mode: DirectionMode
+  resolved: TextDirection
+  disabled: boolean
+  onChange: (mode: DirectionMode) => void
+}) {
+  const modes: DirectionMode[] = ["auto", "ltr", "rtl"]
+  return (
+    <div className={cn(
+      "rounded-lg px-2 py-1.5",
+      disabled && "opacity-50",
+    )}>
+      <div className="mb-1 flex items-center justify-between gap-2 text-sm">
+        <span>{label}</span>
+        <DirPill dir={resolved} mode={mode} />
+      </div>
+      <div className="grid grid-cols-3 gap-1">
+        {modes.map((nextMode) => {
+          const active = mode === nextMode
+          return (
+            <button
+              key={nextMode}
+              type="button"
+              disabled={disabled}
+              aria-label={`${label} direction ${nextMode === "auto" ? "Auto" : nextMode.toUpperCase()}`}
+              aria-pressed={active}
+              onClick={() => onChange(nextMode)}
+              className={cn(
+                "rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35",
+                active
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted/60 text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                disabled && "cursor-not-allowed hover:bg-muted/60 hover:text-muted-foreground",
+              )}
+            >
+              {nextMode === "auto" ? "Auto" : nextMode.toUpperCase()}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function DirPill({ dir, mode }: { dir: TextDirection; mode: DirectionMode }) {
   return (
     <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">
-      {dir.toUpperCase()}
+      {mode === "auto" ? `AUTO ${dir.toUpperCase()}` : dir.toUpperCase()}
     </span>
   )
 }

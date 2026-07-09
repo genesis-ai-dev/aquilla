@@ -59,6 +59,8 @@ interface ImportFileMeta {
   parserVersion?: string
   sourceLanguage?: string
   targetLanguage?: string
+  sourceTextDirection?: 'ltr' | 'rtl'
+  targetTextDirection?: 'ltr' | 'rtl'
   /** Timeline-segment-model order lens ('time' | 'sequence') → files.meta. */
   orderedBy?: string
 }
@@ -198,6 +200,8 @@ export async function handleBulkImportRequest(
         parserVersion: f.parserVersion,
         sourceLanguage: f.sourceLanguage,
         targetLanguage: f.targetLanguage,
+        sourceTextDirection: f.sourceTextDirection,
+        targetTextDirection: f.targetTextDirection,
         ...(f.orderedBy !== undefined ? { orderedBy: f.orderedBy } : {}),
       },
       clientTs,

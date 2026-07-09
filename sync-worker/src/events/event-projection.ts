@@ -874,6 +874,8 @@ case 'cell.audio.attach': {
       const langMeta: Record<string, string> = {}
       if (p.sourceLanguage) langMeta.sourceLanguage = p.sourceLanguage
       if (p.targetLanguage) langMeta.targetLanguage = p.targetLanguage
+      if (p.sourceTextDirection) langMeta.sourceTextDirection = p.sourceTextDirection
+      if (p.targetTextDirection) langMeta.targetTextDirection = p.targetTextDirection
       // Timeline-segment-model: the file's order lens lives in meta (JSON),
       // alongside languages — no files-table column needed.
       if (p.orderedBy) langMeta.orderedBy = p.orderedBy

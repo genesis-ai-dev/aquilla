@@ -8,6 +8,8 @@ export interface ProjectFileSummary {
   name: string
   type: string
   cellCount: number
+  sourceTextDirection?: "ltr" | "rtl" | null
+  targetTextDirection?: "ltr" | "rtl" | null
 }
 
 export interface ProjectMemberRoleSource {

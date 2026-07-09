@@ -10,7 +10,7 @@
  *   the OrgSidebar footer button.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { X, ChevronRight, ChevronLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -443,7 +443,18 @@ export function ProductTour({ open, onClose, roleLevel = null }: ProductTourProp
   }, [open])
 
   // Update anchorRect whenever the step or viewport changes.
-  useEffect(() => {
+  //
+  // AQU-409: this MUST be a layout effect, not a passive one. On a step change
+  // React re-renders synchronously with the *new* step but the *stale*
+  // anchorRect from the previous step (the rect lives in state and only catches
+  // up in this effect). With a passive `useEffect` that catch-up runs *after*
+  // the browser has already painted one frame, so the spotlight + tooltip flash
+  // at the old anchor's position (computed against the new placement) before
+  // jumping to the correct spot — the "flicker across the screen" on the final
+  // step, where the anchor moves furthest (left sidebar → lower-left account
+  // area). `useLayoutEffect` re-measures and re-renders before the browser
+  // paints, so the intermediate frame is never shown.
+  useLayoutEffect(() => {
     if (!open || visibleSteps.length === 0) {
       setAnchorRect(null)
       return

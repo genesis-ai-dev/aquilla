@@ -510,19 +510,35 @@ html.dark[data-color-theme="rose"] {
   pointer-events: auto;
 }
 
-/* Safari mis-paints native text-selection rectangles around our
-   contenteditable=false footnote pills (it paints the wrong/adjacent region
-   when a selection edge sits at an element offset next to the atom). So in
-   editors that contain footnotes we hide the native selection paint and draw
-   the highlight ourselves via the .usfm-text-sel decoration below, positioned
-   by document position rather than by Safari's buggy selection rects. */
-.usfm-fn-editor ::selection {
+/* Safari and some Chromium/Firefox bidi edge cases can mis-paint native
+   selection around wrapped RTL text and contenteditable=false footnote atoms.
+   In those cells the measured-selection plugin hides native paint and draws
+   browser-measured client rects in an overlay, so wrapped lines and superscript
+   footnote markers highlight from actual geometry instead of logical spans. */
+.pm-measured-selection::selection,
+.pm-measured-selection ::selection {
   background: transparent;
+  color: inherit;
 }
-.usfm-fn-editor .usfm-text-sel,
-.usfm-fn-editor .usfm-footnote-marker.usfm-text-sel {
-  background-color: Highlight;
-  color: HighlightText;
+
+.pm-selection-overlay-host {
+  position: relative;
+}
+
+.pm-selection-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.pm-selection-overlay-rect {
+  position: absolute;
+  border-radius: 0.125rem;
+  background: Highlight;
+  opacity: 0.34;
+  pointer-events: none;
 }
 
 /* When the footnote node is the sole selection (e.g. clicked) ProseMirror tags

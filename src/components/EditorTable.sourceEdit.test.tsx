@@ -15,7 +15,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
+import { CellStore } from "@/hooks/useActiveCellStore"
 import type { CellData } from "@/hooks/useCells"
+import type { CellRow } from "@/lib/sync/cells-read-types"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
 
@@ -91,6 +93,61 @@ function makeCell(id: string): CellData {
   }
 }
 
+// Build a CellStore from CellData[] the way EditorTable now expects it
+// (the component moved from a `cells` prop to a `cellStore`). Same shape as
+// EditorTable.selectionTargeting.test's helper.
+function makeRows(cells: CellData[]): CellRow[] {
+  return cells.flatMap((cell, index) => {
+    const canonicalRef = cell.context || cell.group || null
+    const anchorCellId = index > 0 ? cells[index - 1].id : null
+    return [
+      {
+        cellId: cell.id,
+        side: "source",
+        value: cell.original,
+        valueHtml: cell.originalHtml ?? null,
+        type: cell.type,
+        canonicalRef,
+        anchorCellId,
+        eventId: `${cell.id}-source`,
+        sourceEventId: null,
+        lastEditor: null,
+        lastEditAt: 1,
+        validated: false,
+        wordCount: cell.original.trim().split(/\s+/).filter(Boolean).length,
+      },
+      {
+        cellId: cell.id,
+        side: "target",
+        value: cell.translated,
+        valueHtml: cell.translatedHtml ?? null,
+        type: cell.type,
+        canonicalRef,
+        anchorCellId,
+        eventId: `${cell.id}-target`,
+        sourceEventId: `${cell.id}-source`,
+        lastEditor: "lead",
+        lastEditAt: 2,
+        validated: false,
+        wordCount: cell.translated.trim().split(/\s+/).filter(Boolean).length,
+      },
+    ]
+  })
+}
+
+function makeStore(cells: CellData[], projectId: string): CellStore {
+  const store = new CellStore()
+  store.setRuntime({
+    projectId,
+    fileId: "file-1",
+    username: "lead",
+    requiredValidations: 1,
+    auditStats: new Map(),
+  })
+  store.replaceRows(makeRows(cells), { full: true, maxServerSeq: 1 })
+  return store
+}
+
 function renderTable(project: ProjectRecord) {
   const qc = new QueryClient()
   return render(
@@ -98,7 +155,7 @@ function renderTable(project: ProjectRecord) {
       <EditorActionsProvider value={{}}>
         <EditorTable
           project={project}
-          cells={[makeCell("cell-1")]}
+          cellStore={makeStore([makeCell("cell-1")], project.id)}
           username="lead"
           isCompletionConfigured={false}
           isCompletionAvailable={false}

@@ -344,6 +344,7 @@ describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
       id: "p1", name: "John", totalCells: 100, filledCells: 80, validatedCells: 50,
       aiDraftedCells: 0,
       audioCells: 60,
+      validatedAudioCells: 0,
       recordedMs: 90000, lastEditAt: null, deadlineAt: null,
     }])
     renderOverview()

@@ -124,3 +124,42 @@ describe("ProjectCard health ring", () => {
     expect(screen.getByText("0")).toBeInTheDocument()
   })
 })
+
+describe("ProjectCard long unbroken project name (AQU-332)", () => {
+  // A 40+ character name with no spaces or dashes — no natural break points.
+  const longName =
+    "averylongprojectnametomakesurethatthenamewrapsinsideitscard"
+
+  it("lets the title shrink and force-wrap so it stays inside the card", () => {
+    const project = makeProject({ name: longName })
+    render(<ProjectCard project={project} onClick={() => {}} />)
+    const title = screen.getByText(longName)
+    // min-w-0 overrides the flex item's default min-width:auto so it can shrink
+    // below its content width; break-words forces breaks inside the unbroken
+    // token so it wraps instead of overflowing the card's right edge.
+    expect(title.className).toContain("min-w-0")
+    expect(title.className).toContain("break-words")
+  })
+
+  it("keeps the badge cluster at its natural size next to the wrapping title", () => {
+    const project = makeProject({
+      name: longName,
+      origin: {
+        kind: "git",
+        cloneUrl: "https://example.com/repo.git",
+        gitlabProjectId: 1,
+        branch: "main",
+        headSha: "abc123",
+        importedAt: "2026-01-01T00:00:00.000Z",
+      },
+    })
+    render(<ProjectCard project={project} onClick={() => {}} />)
+    const title = screen.getByText(longName)
+    // The badge cluster is the title's sibling in the header flex row.
+    const badgeCluster = title.nextElementSibling
+    expect(badgeCluster).not.toBeNull()
+    expect(badgeCluster?.className).toContain("shrink-0")
+    // The git badge stays visible alongside the (now multi-line) title.
+    expect(screen.getByText("git")).toBeInTheDocument()
+  })
+})

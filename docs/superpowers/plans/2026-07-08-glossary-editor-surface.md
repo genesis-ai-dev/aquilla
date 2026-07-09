@@ -743,7 +743,7 @@ Expected: FAIL — cannot resolve `./GlossaryEditor`.
  * The Concept[] model is unchanged, so blots / prompt-injection / violation
  * compilation (which read active concepts) need no changes.
  */
-import { useMemo, useState, useCallback } from "react"
+import { useMemo, useState, useCallback, useRef, useEffect } from "react"
 import { useParams } from "react-router-dom"
 import { BookOpen, Download, Upload, Sparkles, ChevronDown, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -768,6 +768,7 @@ import { extractCandidates } from "@/lib/terminology/candidates"
 import { importConceptsCsv, exportConceptsCsv } from "@/lib/terminology/csv"
 import { importConceptsTbx, exportConceptsTbx } from "@/lib/terminology/tbx"
 import { GlossaryRow } from "@/components/GlossaryRow"
+import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 
 function downloadBlob(content: string, filename: string, mime: string) {
   const blob = new Blob([content], { type: mime })
@@ -782,8 +783,34 @@ function downloadBlob(content: string, filename: string, mime: string) {
 export function GlossaryEditor() {
   const { id } = useParams<{ id: string }>()
   const { project, loading, patchSettings } = useProject(id!)
-  const { session } = useFrontierSession()
-  const { files: cellFiles } = useProjectCells({ projectId: id })
+  const { session: frontierSession } = useFrontierSession()
+
+  // Cells are needed only for candidate mining ("Suggest terms"). Wire the
+  // token fetcher exactly like TerminologyPage so useProjectCells can fetch.
+  const jwtRef = useRef<string | null>(null)
+  useEffect(() => {
+    jwtRef.current = frontierSession?.jwt ?? null
+  }, [frontierSession?.jwt])
+
+  const projectFiles = useMemo(
+    () => (project?.files ?? []).map((f) => ({ id: f.id, name: f.name, type: f.type })),
+    [project?.files],
+  )
+  const getToken = useMemo(() => {
+    if (!project?.id) return async (_fileId: string) => null as string | null
+    return buildFileScopedTokenFetcher(() => jwtRef.current, project.id, {
+      projectName: project.name ?? undefined,
+      gitlabProjectId:
+        project.origin?.kind === "git" ? project.origin.gitlabProjectId : undefined,
+    })
+  }, [project?.id, project?.name, project?.origin])
+
+  const { files: cellFiles } = useProjectCells({
+    projectId: id ?? null,
+    projectFiles,
+    getToken,
+    enabled: Boolean(project?.id && projectFiles.length > 0),
+  })
 
   const concepts = useMemo(() => project?.terminology ?? [], [project])
   const hasOrigin = Boolean(project?.origin)
@@ -1072,10 +1099,10 @@ export function GlossaryEditor() {
 }
 ```
 
-> **Verify before relying on shapes:**
-> - `useProjectCells` return: confirm the field is `files` and each file's cell array + the source-text field name (`original`) against `src/hooks/useProjectCells.ts`. Adjust the `handleSuggest` corpus mapping to match. If the shape differs, keep the intent: build `string[]` of source texts.
-> - `importConceptsCsv/importConceptsTbx` return `Concept[]`; confirm against `src/lib/terminology/csv.ts` / `tbx.ts` and adjust if they return a wrapper.
-> - The `Button render={<span />}` pattern for the file-input label mirrors this repo's shadcn `Button` `render` prop (see `GatedButton` in `TerminologyPage.tsx`). Confirm the prop name.
+> **Shapes — RESOLVED (verified against the repo; use as written):**
+> - `useProjectCells` — signature is `{ projectId, projectFiles: {id;name;type}[], getToken, enabled }` and it returns `{ files: { fileId; fileName; cells: CellData[] }[]; isLoading; isTruncated }`. The wiring above (jwtRef + `buildFileScopedTokenFetcher` + `projectFiles` memo) is the correct call, copied from `TerminologyPage.tsx`. `CellData.original` is the source text — the `handleSuggest` corpus mapping `cellFiles.flatMap(f => f.cells.map(c => c.original))` is correct.
+> - `importConceptsCsv` / `importConceptsTbx` return `Concept[]` (confirmed in `src/lib/terminology/csv.ts:42` / `tbx.ts:112`) — the `[...existing, ...imported]` spread is correct.
+> - `Button` is `@base-ui/react/button`'s `ButtonPrimitive`, which supports the `render` prop via spread props — `<Button ... render={<span />}>` inside the file-input `<label>` is valid.
 
 - [ ] **Step 4: Run test to verify it passes**
 

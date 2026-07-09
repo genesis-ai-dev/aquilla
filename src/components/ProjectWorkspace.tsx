@@ -184,8 +184,8 @@ const CommentsPageContent = lazy(() =>
 const LivingMemoryPageContent = lazy(() =>
   import("./LivingMemoryPage").then((mod) => ({ default: mod.LivingMemoryPage })),
 )
-const TerminologyPageContent = lazy(() =>
-  import("./TerminologyPage").then((mod) => ({ default: mod.TerminologyPage })),
+const GlossaryEditorContent = lazy(() =>
+  import("./GlossaryEditor").then((mod) => ({ default: mod.GlossaryEditor })),
 )
 // FRO-180: per-project members management surface.
 const ProjectMembersPageContent = lazy(() =>
@@ -3928,7 +3928,7 @@ export function ProjectWorkspace() {
           // FRO-254: Terminology page inside the shell.
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading terminology…</div>}>
-              <TerminologyPageContent />
+              <GlossaryEditorContent />
             </Suspense>
           </div>
         ) : centerSurface === "members" ? (

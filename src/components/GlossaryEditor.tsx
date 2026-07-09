@@ -50,6 +50,7 @@ export function GlossaryEditor() {
   const { id } = useParams<{ id: string }>()
   const { project, loading, patchSettings } = useProject(id!)
   const { session: frontierSession } = useFrontierSession()
+  const importInputRef = useRef<HTMLInputElement>(null)
 
   // Cells are needed only for candidate mining ("Suggest terms"). Wire the
   // token fetcher exactly like TerminologyPage so useProjectCells can fetch.
@@ -223,21 +224,20 @@ export function GlossaryEditor() {
             <Button variant="outline" size="sm" onClick={handleSuggest}>
               <Sparkles className="mr-1 h-4 w-4" /> Suggest terms
             </Button>
-            <label className="inline-flex">
-              <input
-                type="file"
-                accept=".csv,.tbx"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0]
-                  if (f) handleImport(f)
-                  e.target.value = ""
-                }}
-              />
-              <Button variant="outline" size="sm" render={<span />}>
-                <Upload className="mr-1 h-4 w-4" /> Import
-              </Button>
-            </label>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv,.tbx"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) handleImport(f)
+                e.target.value = ""
+              }}
+            />
+            <Button variant="outline" size="sm" onClick={() => importInputRef.current?.click()}>
+              <Upload className="mr-1 h-4 w-4" /> Import
+            </Button>
             <Button
               variant="outline"
               size="sm"

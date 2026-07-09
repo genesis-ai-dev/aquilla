@@ -101,6 +101,70 @@ function InlineCell({
   )
 }
 
+/**
+ * One rendering row inside the expander: text buffers locally and commits
+ * on blur/Enter (Escape reverts), mirroring InlineCell — status + remove
+ * stay immediate since they're discrete actions, not free text.
+ */
+function ExpanderRenderingRow({
+  index,
+  rendering,
+  canManage,
+  onCommitText,
+  onChangeStatus,
+  onRemove,
+}: {
+  index: number
+  rendering: TermRendering
+  canManage: boolean
+  onCommitText: (next: string) => void
+  onChangeStatus: (next: RenderingStatus) => void
+  onRemove: () => void
+}) {
+  const [draft, setDraft] = useState(rendering.rendering)
+  return (
+    <div className="flex items-center gap-2">
+      <Input
+        value={draft}
+        placeholder="rendering"
+        disabled={!canManage}
+        className="h-7 flex-1 text-sm"
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          if (draft !== rendering.rendering) onCommitText(draft)
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur()
+          if (e.key === "Escape") setDraft(rendering.rendering)
+        }}
+      />
+      <Select
+        items={RENDERING_STATUS_OPTIONS}
+        value={rendering.status}
+        onValueChange={(v: string | null) => onChangeStatus((v ?? rendering.status) as RenderingStatus)}
+      >
+        <SelectTrigger aria-label={`Rendering ${index + 1} status`} className="h-7 w-32 text-xs" disabled={!canManage}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            {RENDERING_STATUS_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+      {canManage && (
+        <Button variant="ghost" size="icon-sm" aria-label={`Remove rendering ${index + 1}`} onClick={onRemove}>
+          <X className="h-4 w-4" />
+        </Button>
+      )}
+    </div>
+  )
+}
+
 export function GlossaryRow({
   concept,
   canManage,
@@ -203,40 +267,15 @@ export function GlossaryRow({
             <p className="text-xs text-muted-foreground">No renderings yet.</p>
           )}
           {concept.renderings.map((r, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <Input
-                value={r.rendering}
-                placeholder="rendering"
-                disabled={!canManage}
-                className="h-7 flex-1 text-sm"
-                onChange={(e) => updateRendering(i, { ...r, rendering: e.target.value })}
-              />
-              <Select
-                items={RENDERING_STATUS_OPTIONS}
-                value={r.status}
-                onValueChange={(v: string | null) =>
-                  updateRendering(i, { ...r, status: (v ?? r.status) as RenderingStatus })
-                }
-              >
-                <SelectTrigger aria-label={`Rendering ${i + 1} status`} className="h-7 w-32 text-xs" disabled={!canManage}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {RENDERING_STATUS_OPTIONS.map((o) => (
-                      <SelectItem key={o.value} value={o.value}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              {canManage && (
-                <Button variant="ghost" size="icon-sm" aria-label={`Remove rendering ${i + 1}`} onClick={() => removeRendering(i)}>
-                  <X className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
+            <ExpanderRenderingRow
+              key={i}
+              index={i}
+              rendering={r}
+              canManage={canManage}
+              onCommitText={(next) => updateRendering(i, { ...r, rendering: next })}
+              onChangeStatus={(next) => updateRendering(i, { ...r, status: next })}
+              onRemove={() => removeRendering(i)}
+            />
           ))}
           {canManage && (
             <Button variant="ghost" size="sm" className="text-xs" onClick={addRendering}>

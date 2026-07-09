@@ -57,6 +57,18 @@ describe("GlossaryRow", () => {
     expect(h.onRestore).toHaveBeenCalledWith("c1")
   })
 
+  it("buffers an expander rendering edit locally and commits only on blur", () => {
+    const h = noopHandlers()
+    render(<GlossaryRow concept={c({})} canManage {...h} />)
+    fireEvent.click(screen.getByLabelText("Expand renderings"))
+    const input = screen.getByDisplayValue("favor")
+    fireEvent.change(input, { target: { value: "favora" } })
+    expect(h.onEditRenderings).not.toHaveBeenCalled()
+    fireEvent.blur(input)
+    expect(h.onEditRenderings).toHaveBeenCalledTimes(1)
+    expect(h.onEditRenderings).toHaveBeenCalledWith("c1", [{ rendering: "favora", status: "preferred" }])
+  })
+
   it("hides edit affordances when canManage is false", () => {
     render(<GlossaryRow concept={c({})} canManage={false} {...noopHandlers()} />)
     fireEvent.click(screen.getByText("favor"))

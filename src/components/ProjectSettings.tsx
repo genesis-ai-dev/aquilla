@@ -499,6 +499,10 @@ export function ProjectSettings() {
   const preset = CUSTOM_PRESETS.find((p) => p.id === presetId) ?? CUSTOM_PRESETS[0]
 
   async function handleConnect() {
+    if (!endpoint.trim()) {
+      setConnectionError("Endpoint URL is required")
+      return
+    }
     await loadModels({ force: true })
   }
 
@@ -1327,7 +1331,7 @@ export function ProjectSettings() {
                         placeholder="http://localhost:8000"
                         className="flex-1"
                       />
-                      <Button size="sm" onClick={handleConnect} disabled={connecting || !endpoint.trim()}>
+                      <Button size="sm" onClick={handleConnect} disabled={connecting}>
                         {connecting ? <Spinner /> : "Connect"}
                       </Button>
                     </div>

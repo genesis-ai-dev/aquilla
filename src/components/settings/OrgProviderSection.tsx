@@ -7,13 +7,23 @@
 // Precedence at synthesis time:
 //   project key > user (localStorage) key > org key (this section)
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { useForm } from "@tanstack/react-form"
 import { Check } from "lucide-react"
 import { RevealableInput } from "@/components/ui/revealable-input"
 import { Button } from "@/components/ui/button"
-import { FieldLabel } from "@/components/ui/field"
-import { Section } from "@/components/ui/page"
+import { Field, FieldError, FieldGroup } from "@/components/ui/field"
+import { Spinner } from "@/components/ui/spinner"
+import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
+import { isFieldInvalid } from "@/lib/forms/field-state"
+import { optionalString } from "@/lib/forms/schemas"
+import { useSubmitError } from "@/lib/forms/submit-error"
+import { z } from "zod"
+
+const formSchema = z.object({
+  geminiKey: optionalString,
+})
 
 interface OrgProviderSectionProps {
   orgSettings: UseOrgSettings
@@ -22,122 +32,126 @@ interface OrgProviderSectionProps {
 export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
   const { orgProviderKeys, canEditOrgKeys, patch, hasFetched } = orgSettings
 
-  // Defensive: an org with no keys yet (or a partial hook contract) yields no map.
   const keys = orgProviderKeys ?? {}
   const currentGeminiKey = keys["gemini-tts"] ?? ""
-  const [draft, setDraft] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+  const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
 
-  // Use draft if the user is editing, otherwise show the stored value.
-  const displayed = draft ?? currentGeminiKey
+  const form = useForm({
+    defaultValues: { geminiKey: currentGeminiKey },
+    validators: { onSubmit: formSchema },
+    onSubmit: async ({ value }) => {
+      if (!canEditOrgKeys) return
+      clearSubmitError()
+      const trimmed = value.geminiKey.trim()
+      const result = await patch({
+        orgProviderKeys: {
+          ...keys,
+          "gemini-tts": trimmed || undefined,
+        },
+      })
+      if (result.kind === "ok") {
+        setSaved(true)
+        setTimeout(() => setSaved(false), 2500)
+      } else if (result.kind === "blocked" || result.kind === "forbidden") {
+        setSubmitError("Only org maintainers and owners can set org-level API keys.")
+      } else if (result.kind === "error") {
+        setSubmitError(result.message ?? "Save failed")
+      }
+    },
+  })
 
-  async function handleSave() {
-    const trimmed = displayed.trim()
-    setBusy(true)
-    setError(null)
-    setSaved(false)
-    const result = await patch({
-      orgProviderKeys: {
-        ...keys,
-        "gemini-tts": trimmed || undefined,
-      },
-    })
-    if (result.kind === "ok") {
-      setDraft(null)
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2500)
-    } else if (result.kind === "blocked" || result.kind === "forbidden") {
-      setError("Only org maintainers and owners can set org-level API keys.")
-    } else if (result.kind === "error") {
-      setError(result.message ?? "Save failed")
-    }
-    setBusy(false)
-  }
-
-  function handleClear() {
-    setDraft("")
-  }
+  useEffect(() => {
+    form.setFieldValue("geminiKey", currentGeminiKey)
+  }, [currentGeminiKey, form])
 
   if (!hasFetched) {
     return (
-      <Section title="Provider API keys">
-        <p className="text-xs text-muted-foreground">Loading…</p>
-      </Section>
+      <SettingsGroup label="Provider keys">
+        <SettingsRow label="Gemini TTS API key" block>
+          <p className="text-xs text-muted-foreground">Loading…</p>
+        </SettingsRow>
+      </SettingsGroup>
     )
   }
 
   return (
-    <Section
-      title="Provider API keys"
-      description={
-        <>
-          Org-level keys act as a baseline for everyone in this org. Projects or
-          individuals can override with their own. Precedence: project key &gt;
-          personal key &gt; org key.
-        </>
-      }
-    >
+    <SettingsGroup label="Provider keys">
       {!canEditOrgKeys && (
-        <p className="mb-4 text-xs text-muted-foreground">
+        <div className="px-5 py-4 text-xs text-muted-foreground">
           Only org maintainers and owners can set org-level keys. You can still
           save a personal key in your project or personal settings.
-        </p>
+        </div>
       )}
+      <SettingsRow
+        label="Gemini TTS API key"
+        description="Used by Gemini TTS synthesis for all org members when no project or personal key is present. Precedence: project key > personal key > org key."
+        block
+      >
+        <form
+          id="org-provider-form"
+          className="flex flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void form.handleSubmit()
+          }}
+        >
+          <FieldGroup>
+            <form.Field
+              name="geminiKey"
+              children={(field) => {
+                const invalid = isFieldInvalid(field)
+                return (
+                  <Field data-invalid={invalid}>
+                    <RevealableInput
+                      id="org-gemini-tts-key"
+                      revealKind="key"
+                      name={field.name}
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      placeholder={canEditOrgKeys ? "Paste Gemini API key…" : currentGeminiKey ? "(set by org admin)" : "(not set)"}
+                      readOnly={!canEditOrgKeys}
+                      aria-invalid={invalid}
+                      autoComplete="off"
+                      spellCheck={false}
+                      className="font-mono"
+                    />
+                    {invalid && <FieldError errors={field.state.meta.errors} />}
+                  </Field>
+                )
+              }}
+            />
+          </FieldGroup>
 
-      <div className="space-y-4">
-        {/* Gemini TTS */}
-        <div className="space-y-2">
-          <FieldLabel htmlFor="org-gemini-tts-key" className="text-sm font-medium">
-            Gemini TTS API key
-          </FieldLabel>
-          <RevealableInput
-            id="org-gemini-tts-key"
-            revealKind="key"
-            value={displayed}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder={canEditOrgKeys ? "Paste Gemini API key…" : currentGeminiKey ? "(set by org admin)" : "(not set)"}
-            disabled={!canEditOrgKeys || busy}
-            autoComplete="off"
-            spellCheck={false}
-            className="font-mono"
-          />
-          <p className="text-xs text-muted-foreground">
-            Used by Gemini TTS synthesis for all org members when no project or
-            personal key is present.
-          </p>
           {canEditOrgKeys && (
             <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                onClick={handleSave}
-                disabled={busy || draft === null}
-              >
-                {busy ? "Saving…" : "Save key"}
+              <Button type="submit" form="org-provider-form" size="sm">
+                {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
+                {form.state.isSubmitting ? "Saving…" : "Save key"}
               </Button>
               {currentGeminiKey && (
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={handleClear}
-                  disabled={busy}
+                  onClick={() => form.setFieldValue("geminiKey", "")}
                 >
                   Clear
                 </Button>
               )}
             </div>
           )}
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {submitError && (
+            <FieldError className="text-xs">{submitError}</FieldError>
+          )}
           {saved && (
             <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400" role="status" data-testid="org-key-saved">
               <Check className="size-3.5" /> Saved
             </p>
           )}
-        </div>
-      </div>
-    </Section>
+        </form>
+      </SettingsRow>
+    </SettingsGroup>
   )
 }

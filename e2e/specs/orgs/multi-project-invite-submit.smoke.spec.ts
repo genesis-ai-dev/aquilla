@@ -12,7 +12,7 @@ import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
  *     plain buttons labelled with the username
  *   - Project rows with role=checkbox toggles (aria-label="Select <name>")
  *   - Role select per selected project
- *   - "Add to projects" submit button (disabled until a user + project chosen)
+ *   - "Add to projects" submit button (stays enabled; validates on click)
  *   - On success the dialog STAYS OPEN, shows an "added" chip per project,
  *     and the Cancel button becomes "Close".
  *

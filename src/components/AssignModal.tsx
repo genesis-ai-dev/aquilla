@@ -344,8 +344,6 @@ export function AssignModal({
         ...members.map((m) => ({ value: String(m.userId), label: m.username })),
       ]
 
-  const canSubmit = Boolean(selectedMemberId) && !submitting
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm">
@@ -523,7 +521,7 @@ export function AssignModal({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={!canSubmit}>
+          <Button onClick={handleSubmit} disabled={submitting}>
             {submitting ? <Spinner className="mr-1" /> : null}
             Assign
           </Button>

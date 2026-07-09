@@ -16,7 +16,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *   - Book <select> (project files)
  *   - Chapter <select> (optional sections)
  *   - Deadline <input type="date"> (optional)
- *   - "Assign" button (disabled until assignee + file selected)
+ *   - "Assign" button (stays enabled; validates on click)
  *
  * On submit, createAssignment() posts an assignment.create event to the
  * sync-worker. On success, {done} message appears:

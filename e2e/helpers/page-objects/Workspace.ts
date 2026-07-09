@@ -36,14 +36,12 @@ export class Workspace {
     // Navigate to the Upload Files panel by clicking its card.
     await uploadCard.click()
     // UploadPanel is now visible with a "Choose Files" button.
-    await expect(this.page.getByRole("button", { name: /Choose Files/i })).toBeVisible({
-      timeout: 5_000,
-    })
-    // The panel has two file inputs: file picker + folder picker (webkitdirectory).
-    // Target the plain file picker.
-    await this.page
-      .locator('input[type="file"]:not([webkitdirectory])')
-      .setInputFiles(filePath)
+    // Prefer the import dialog's file picker — cell audio upload inputs also
+    // match a bare `input[type=file]:not([webkitdirectory])` once the editor
+    // has hydrated, which trips Playwright's strict mode.
+    const chooseFilesBtn = this.page.getByRole("button", { name: /Choose Files/i })
+    await expect(chooseFilesBtn).toBeVisible({ timeout: 5_000 })
+    await chooseFilesBtn.locator('input[type="file"]').setInputFiles(filePath)
     // FRO-310: selecting a file now lands on a Preview panel (parsed cells +
     // counts) instead of starting the upload immediately. Confirm it to kick
     // off the actual bulk upload.

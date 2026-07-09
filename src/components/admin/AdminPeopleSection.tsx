@@ -1,7 +1,15 @@
 import { useMemo } from "react"
+import { type ColumnDef } from "@tanstack/react-table"
 import { AlertTriangle, ShieldCheck, Users } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { AdminDataTable, type AdminColumn } from "./AdminDataTable"
+import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { fmtDate } from "@/lib/admin/format"
 import type { AdminUser, AdminAdmin } from "@/lib/frontier/admin"
 
@@ -18,42 +26,81 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
   )
   const orphanAdmins = useMemo(() => admins.filter((a) => !a.hasAccount), [admins])
 
-  const columns: AdminColumn<AdminUser>[] = [
-    {
-      key: "user",
-      header: "User",
-      sortValue: (u) => (u.displayName ?? u.username).toLowerCase(),
-      render: (u) => (
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-foreground">
-            {u.displayName ? `${u.displayName} (${u.username})` : u.username}
-          </span>
-          {adminEmails.has(u.email.trim().toLowerCase()) && (
-            <Badge variant="secondary" className="gap-1 text-[11px]">
-              <ShieldCheck className="size-3" /> Platform admin
-            </Badge>
-          )}
-        </div>
-      ),
-    },
-    { key: "email", header: "Email", sortValue: (u) => u.email.toLowerCase(), render: (u) => u.email },
-    { key: "orgs", header: "Orgs", align: "right", sortValue: (u) => u.orgCount, render: (u) => u.orgCount },
-    {
-      key: "lastActive",
-      header: "Last active",
-      sortValue: (u) => (u.lastActiveAt ? Date.parse(u.lastActiveAt) : null),
-      render: (u) => fmtDate(u.lastActiveAt),
-    },
-    {
-      key: "joined",
-      header: "Joined",
-      sortValue: (u) => Date.parse(u.createdAt) || null,
-      render: (u) => fmtDate(u.createdAt),
-    },
-  ]
+  const columns = useMemo<ColumnDef<AdminUser>[]>(
+    () => [
+      {
+        id: "user",
+        accessorFn: (u) => (u.displayName ?? u.username).toLowerCase(),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="User" />,
+        cell: ({ row }) => {
+          const u = row.original
+          return (
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-foreground">
+                {u.displayName ? `${u.displayName} (${u.username})` : u.username}
+              </span>
+              {adminEmails.has(u.email.trim().toLowerCase()) && (
+                <Badge variant="secondary" className="gap-1 text-[11px]">
+                  <ShieldCheck /> Platform admin
+                </Badge>
+              )}
+            </div>
+          )
+        },
+      },
+      {
+        accessorKey: "email",
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Email" />,
+      },
+      {
+        accessorKey: "orgCount",
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Orgs" className="justify-end" />
+        ),
+        cell: ({ row }) => (
+          <div className="text-right tabular-nums">{row.original.orgCount}</div>
+        ),
+      },
+      {
+        id: "lastActive",
+        accessorFn: (u) => (u.lastActiveAt ? Date.parse(u.lastActiveAt) : null),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Last active" />,
+        sortingFn: (a, b) => {
+          const av = a.original.lastActiveAt ? Date.parse(a.original.lastActiveAt) : null
+          const bv = b.original.lastActiveAt ? Date.parse(b.original.lastActiveAt) : null
+          if (av == null && bv == null) return 0
+          if (av == null) return 1
+          if (bv == null) return -1
+          return av - bv
+        },
+        cell: ({ row }) => fmtDate(row.original.lastActiveAt),
+      },
+      {
+        id: "joined",
+        accessorFn: (u) => Date.parse(u.createdAt) || 0,
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Joined" />,
+        cell: ({ row }) => fmtDate(row.original.createdAt),
+      },
+    ],
+    [adminEmails],
+  )
+
+  if (users.length === 0) {
+    return (
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <Users />
+          </EmptyMedia>
+          <EmptyTitle>No users yet</EmptyTitle>
+          <EmptyDescription>People appear here once they register.</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    )
+  }
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       {orphanAdmins.length > 0 && (
         <div className="flex items-start gap-2 rounded-2xl border border-amber-500/30 bg-amber-50/60 px-4 py-3 text-sm dark:bg-amber-950/20">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
@@ -67,14 +114,25 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
         </div>
       )}
 
-      <AdminDataTable
+      <DataTable
         columns={columns}
-        rows={users}
-        getRowKey={(u) => u.id}
-        searchText={(u) => `${u.username} ${u.displayName ?? ""} ${u.email}`}
+        data={users}
+        getRowId={(u) => String(u.id)}
+        initialSorting={[{ id: "lastActive", desc: true }]}
         searchPlaceholder="Search people…"
-        initialSort={{ key: "lastActive", dir: "desc" }}
-        empty={{ icon: Users, title: "No users yet", description: "People appear here once they register." }}
+        globalFilterFn={(row, _columnId, filterValue) => {
+          const q = String(filterValue).trim().toLowerCase()
+          if (!q) return true
+          const u = row.original
+          return `${u.username} ${u.displayName ?? ""} ${u.email}`.toLowerCase().includes(q)
+        }}
+        toolbar={(table) => (
+          <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+            {table.getFilteredRowModel().rows.length === users.length
+              ? `${users.length}`
+              : `${table.getFilteredRowModel().rows.length} of ${users.length}`}
+          </span>
+        )}
         testId="admin-people-table"
       />
     </div>

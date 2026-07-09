@@ -1,7 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { type ColumnDef } from "@tanstack/react-table"
 import { FlaskConical, RefreshCw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { EmptyState } from "@/components/ui/page"
+import { Button } from "@/components/ui/button"
+import { DataTable } from "@/components/ui/data-table"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
+import { Skeleton } from "@/components/ui/skeleton"
 import { getAbResults, type AbResultRow } from "@/lib/frontier/admin"
 import { cn } from "@/lib/utils"
 
@@ -46,69 +56,170 @@ export function AbResultsPanel({ jwt }: { jwt: string }) {
     void refresh()
   }, [refresh])
 
+  const columns = useMemo<ColumnDef<AbResultRow>[]>(
+    () => [
+      {
+        id: "model",
+        accessorKey: "model",
+        header: "Model",
+        cell: ({ row }) => (
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-xs text-foreground">{row.original.model}</span>
+            <Badge
+              variant={row.original.arm === "challenger" ? "default" : "secondary"}
+              className="text-[10px]"
+            >
+              {row.original.arm}
+            </Badge>
+          </div>
+        ),
+      },
+      {
+        accessorKey: "requests",
+        header: () => <div className="text-right">Requests</div>,
+        cell: ({ row }) => (
+          <div className="text-right tabular-nums">{row.original.requests.toLocaleString()}</div>
+        ),
+      },
+      {
+        id: "avgEdit",
+        accessorKey: "avgEditDistance",
+        header: "Avg edit",
+        cell: ({ row }) => <EditDistanceCell value={row.original.avgEditDistance} />,
+      },
+      {
+        id: "acceptance",
+        header: "Acceptance",
+        cell: ({ row }) => {
+          const r = row.original
+          const decided = r.accepted + r.edited + r.rejected
+          const acceptPct = decided > 0 ? Math.round((r.accepted / decided) * 100) : null
+          if (acceptPct == null) {
+            return <span className="text-xs text-muted-foreground">no decisions yet</span>
+          }
+          return (
+            <div className="flex items-center gap-2">
+              <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
+                <div
+                  className={cn(
+                    "h-full rounded-full",
+                    acceptPct >= 70 ? "bg-emerald-500" : acceptPct >= 40 ? "bg-primary" : "bg-amber-500",
+                  )}
+                  style={{ width: `${acceptPct}%` }}
+                  aria-hidden
+                />
+              </div>
+              <span className="text-xs tabular-nums">
+                {acceptPct}%{" "}
+                <span className="text-muted-foreground">
+                  ({r.accepted}/{decided})
+                </span>
+              </span>
+            </div>
+          )
+        },
+      },
+      {
+        accessorKey: "edited",
+        header: () => <div className="text-right">Edited</div>,
+        cell: ({ row }) => <div className="text-right tabular-nums">{row.original.edited}</div>,
+      },
+      {
+        id: "pending",
+        header: () => <div className="text-right">Pending</div>,
+        cell: ({ row }) => {
+          const r = row.original
+          const decided = r.accepted + r.edited + r.rejected
+          const pending = r.requests - r.errors - decided
+          return (
+            <div className="text-right tabular-nums text-muted-foreground">
+              {Math.max(0, pending)}
+            </div>
+          )
+        },
+      },
+      {
+        accessorKey: "errors",
+        header: () => <div className="text-right">Errors</div>,
+        cell: ({ row }) => (
+          <div
+            className={cn(
+              "text-right tabular-nums",
+              row.original.errors > 0 && "text-destructive",
+            )}
+          >
+            {row.original.errors}
+          </div>
+        ),
+      },
+      {
+        id: "latency",
+        accessorKey: "avgLatencyMs",
+        header: () => <div className="text-right">Latency</div>,
+        cell: ({ row }) => (
+          <div className="text-right tabular-nums text-muted-foreground">
+            {row.original.avgLatencyMs == null
+              ? "—"
+              : `${(row.original.avgLatencyMs / 1000).toFixed(1)}s`}
+          </div>
+        ),
+      },
+    ],
+    [],
+  )
+
   if (loading && rows === null) {
-    return <div className="h-24 animate-pulse rounded-lg border bg-card" />
+    return <Skeleton className="h-24 w-full rounded-lg" />
   }
   if (error) return <p className="text-xs text-destructive">{error}</p>
   if (!rows || rows.length === 0) {
     return (
-      <EmptyState
-        icon={FlaskConical}
-        title="No experiment data yet"
-        description="Rows appear as default-model requests are served while an experiment is enabled."
-      />
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <FlaskConical />
+          </EmptyMedia>
+          <EmptyTitle>No experiment data yet</EmptyTitle>
+          <EmptyDescription>
+            Rows appear as default-model requests are served while an experiment is enabled.
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     )
   }
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
         {[7, 30, 90].map((d) => (
-          <button
+          <Button
             key={d}
             type="button"
+            size="xs"
+            variant={days === d ? "default" : "ghost"}
             onClick={() => setDays(d)}
-            className={cn(
-              "rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors",
-              days === d
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground",
-            )}
           >
             {d}d
-          </button>
+          </Button>
         ))}
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-xs"
+          className="ml-auto"
           onClick={() => void refresh()}
           aria-label="Refresh results"
-          className="ml-auto rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
         >
-          <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
-        </button>
+          <RefreshCw className={cn(loading && "animate-spin")} />
+        </Button>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full text-sm" data-testid="ab-results-table">
-          <thead>
-            <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
-              <th className="px-3 py-2 font-medium">Model</th>
-              <th className="px-3 py-2 text-right font-medium">Requests</th>
-              <th className="px-3 py-2 font-medium">Avg edit</th>
-              <th className="px-3 py-2 font-medium">Acceptance</th>
-              <th className="px-3 py-2 text-right font-medium">Edited</th>
-              <th className="px-3 py-2 text-right font-medium">Pending</th>
-              <th className="px-3 py-2 text-right font-medium">Errors</th>
-              <th className="px-3 py-2 text-right font-medium">Latency</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <ResultRow key={`${r.arm}:${r.model}`} row={r} />
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        data={rows}
+        getRowId={(row) => `${row.arm}:${row.model}`}
+        testId="ab-results-table"
+      />
       <p className="text-xs text-muted-foreground">
         Avg edit = how much of the model's draft humans rewrote before settling (0% = kept
         verbatim) — the primary quality signal, lower is better. Acceptance = validated without
@@ -116,61 +227,6 @@ export function AbResultsPanel({ jwt }: { jwt: string }) {
         once both arms have a few dozen decided drafts.
       </p>
     </div>
-  )
-}
-
-function ResultRow({ row }: { row: AbResultRow }) {
-  const decided = row.accepted + row.edited + row.rejected
-  const pending = row.requests - row.errors - decided
-  const acceptPct = decided > 0 ? Math.round((row.accepted / decided) * 100) : null
-
-  return (
-    <tr className="border-t">
-      <td className="px-3 py-2">
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-xs text-foreground">{row.model}</span>
-          <Badge variant={row.arm === "challenger" ? "default" : "secondary"} className="text-[10px]">
-            {row.arm}
-          </Badge>
-        </div>
-      </td>
-      <td className="px-3 py-2 text-right tabular-nums">{row.requests.toLocaleString()}</td>
-      <td className="px-3 py-2">
-        <EditDistanceCell value={row.avgEditDistance} />
-      </td>
-      <td className="px-3 py-2">
-        {acceptPct == null ? (
-          <span className="text-xs text-muted-foreground">no decisions yet</span>
-        ) : (
-          <div className="flex items-center gap-2">
-            <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
-              <div
-                className={cn(
-                  "h-full rounded-full",
-                  acceptPct >= 70 ? "bg-emerald-500" : acceptPct >= 40 ? "bg-primary" : "bg-amber-500",
-                )}
-                style={{ width: `${acceptPct}%` }}
-                aria-hidden
-              />
-            </div>
-            <span className="text-xs tabular-nums">
-              {acceptPct}%{" "}
-              <span className="text-muted-foreground">
-                ({row.accepted}/{decided})
-              </span>
-            </span>
-          </div>
-        )}
-      </td>
-      <td className="px-3 py-2 text-right tabular-nums">{row.edited}</td>
-      <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{Math.max(0, pending)}</td>
-      <td className={cn("px-3 py-2 text-right tabular-nums", row.errors > 0 && "text-destructive")}>
-        {row.errors}
-      </td>
-      <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
-        {row.avgLatencyMs == null ? "—" : `${(row.avgLatencyMs / 1000).toFixed(1)}s`}
-      </td>
-    </tr>
   )
 }
 

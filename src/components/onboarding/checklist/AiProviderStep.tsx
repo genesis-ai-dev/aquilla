@@ -2,7 +2,8 @@ import { useState } from "react"
 import { Sparkles, Server, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { FieldLabel } from "@/components/ui/field"
+import { FieldError, FieldLabel } from "@/components/ui/field"
+import { Spinner } from "@/components/ui/spinner"
 import { FRONTIER_CHAT_URL } from "@/hooks/useCompletionSettings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { ProjectRecord, CompletionProvider } from "@/lib/parsers/types"
@@ -31,10 +32,20 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
     currentProvider === "custom" ? (project.completionSettings?.model ?? "") : ""
   )
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const saveSettings = useSaveCompletionSettings(project.id, onUpdated)
 
   async function handleSave() {
+    if (selected === "frontier" && !session) {
+      setError("Sign in with a Frontier account to use the managed model.")
+      return
+    }
+    if (selected === "custom" && !customEndpoint.trim()) {
+      setError("Endpoint URL is required")
+      return
+    }
+    setError(null)
     setBusy(true)
     try {
       const isFrontier = selected === "frontier"
@@ -48,9 +59,6 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
       setBusy(false)
     }
   }
-
-  const canSave =
-    selected === "frontier" ? Boolean(session) : Boolean(customEndpoint.trim())
 
   return (
     <div className="space-y-3">
@@ -109,12 +117,13 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
         </div>
       )}
 
+      {error && <FieldError>{error}</FieldError>}
       <Button
         size="sm"
         onClick={handleSave}
-        disabled={!canSave || busy}
         className="w-full"
       >
+        {busy && <Spinner data-icon="inline-start" />}
         {busy ? "Saving…" : "Save provider"}
       </Button>
     </div>

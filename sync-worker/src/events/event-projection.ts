@@ -862,6 +862,40 @@ case 'cell.audio.attach': {
       )
       return ['cell_audio']
     }
+
+    case 'cell.audio.validate':
+    case 'cell.audio.unvalidate': {
+      // AQU-508: audio validation, distinct from the text-side cell.validate.
+      // A reviewer approves (or withdraws approval of) one clip — the cell's
+      // selected take. Approval is keyed by audio_id, so re-recording (which
+      // attaches + selects a new clip) leaves the old take approved but no
+      // longer selected; the rollup requires selected = 1, so the cell drops
+      // back to "needs re-validation" until the new take is approved.
+      const p = event.payload as EventPayloads['cell.audio.validate']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      if (event.kind === 'cell.audio.validate') {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cell_audio SET approved = 1, approved_by = ?, approved_ts = ?
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+            )
+            .bind(event.author, event.serverTs, event.projectId, event.fileId, event.cellId, p.audioId),
+        )
+      } else {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cell_audio SET approved = 0, approved_by = NULL, approved_ts = NULL
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+            )
+            .bind(event.projectId, event.fileId, event.cellId, p.audioId),
+        )
+      }
+      return ['cell_audio']
+    }
     case 'file.create': {
       const p = event.payload as EventPayloads['file.create']
       if (!event.fileId) {

@@ -179,54 +179,28 @@ export function JoinPage() {
     (showPreviewCard || showConfirmCard) && preview === null && previewLoadState === null
 
   // Invite summary — shared by the signed-out (auth) and signed-in (confirm)
-  // branches.
+  // branches. Single- and multi-project tokens both render through the one
+  // InviteSummary component so the singular/plural copy stays correct (a
+  // single-project token actually arrives via the multi endpoint — see the
+  // preview effect above — so the "kind: multi, length 1" case is the common
+  // real-world path and must not say "each"; AQU-337).
   const previewSummary =
     preview?.kind === "single" ? (
-      <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
-        <p className="text-sm">
-          Project:{" "}
-          <strong className="font-medium">{preview.data.projectName}</strong>
-        </p>
-        <p className="text-xs text-muted-foreground">
-          You'll join as{" "}
-          <span className="capitalize">
-            {preview.data.role.name.replace(/_/g, " ")}
-          </span>
-          {preview.data.email && (
-            <>
-              {" "}— invitation sent to{" "}
-              <span className="font-mono">{preview.data.email}</span>
-            </>
-          )}
-          .
-        </p>
-      </div>
+      <InviteSummary
+        projects={[
+          {
+            projectId: preview.data.projectId,
+            projectName: preview.data.projectName,
+          },
+        ]}
+        roleName={preview.data.role.name}
+        email={preview.data.email}
+      />
     ) : preview?.kind === "multi" ? (
-      <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
-        <p className="text-sm">
-          You're invited to{" "}
-          <strong className="font-medium">
-            {preview.data.projects.length} project
-            {preview.data.projects.length === 1 ? "" : "s"}
-          </strong>
-          :
-        </p>
-        <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
-          {preview.data.projects.map((p) => (
-            <li key={p.projectId}>
-              {p.projectName}
-              {p.archived ? " (archived)" : ""}
-            </li>
-          ))}
-        </ul>
-        <p className="text-xs text-muted-foreground">
-          You'll join each as{" "}
-          <span className="capitalize">
-            {preview.data.role.name.replace(/_/g, " ")}
-          </span>
-          .
-        </p>
-      </div>
+      <InviteSummary
+        projects={preview.data.projects}
+        roleName={preview.data.role.name}
+      />
     ) : previewLoading ? (
       <div className="flex items-center gap-2 py-1">
         <Spinner className="text-muted-foreground" />
@@ -397,6 +371,89 @@ export function JoinPage() {
           )}
         </CardContent>
       </Card>
+    </div>
+  )
+}
+
+/** One project row in the invite summary. `projectName` is preferred for
+ * display; `projectId` is only a fallback so a nameless row never shows blank
+ * (AQU-337 acceptance: show the project name, not the opaque id). */
+export interface InviteSummaryProject {
+  projectId: string
+  projectName: string
+  archived?: boolean
+}
+
+/**
+ * Invite-summary card body, shared by the single- and multi-project preview
+ * branches. Pluralization is driven purely by how many projects the token
+ * grants:
+ *
+ * - Exactly one project → "You'll join as {role}." (no "each"), with the
+ *   project named inline. This is the case the cold-signup walkthrough hit
+ *   (AQU-337): a single-project token that arrives through the multi endpoint
+ *   used to render "You'll join each as …", which is wrong for one invitee /
+ *   one project.
+ * - More than one project → the bulleted project list plus "You'll join each
+ *   as {role}." — here "each" correctly distributes the role over the list.
+ *
+ * The multi-invite payload carries a single `role` for the whole token (there
+ * is no per-project role in the preview data model), so the role line is
+ * shared across all rows by design.
+ */
+export function InviteSummary({
+  projects,
+  roleName,
+  email,
+}: {
+  projects: InviteSummaryProject[]
+  roleName: string
+  email?: string | null
+}) {
+  const role = <span className="capitalize">{roleName.replace(/_/g, " ")}</span>
+  const emailSuffix = email ? (
+    <>
+      {" "}— invitation sent to <span className="font-mono">{email}</span>
+    </>
+  ) : null
+
+  if (projects.length === 1) {
+    const p = projects[0]
+    return (
+      <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
+        <p className="text-sm">
+          Project:{" "}
+          <strong className="font-medium">
+            {p.projectName || p.projectId}
+            {p.archived ? " (archived)" : ""}
+          </strong>
+        </p>
+        <p className="text-xs text-muted-foreground">
+          You'll join as {role}
+          {emailSuffix}.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
+      <p className="text-sm">
+        You're invited to{" "}
+        <strong className="font-medium">{projects.length} projects</strong>:
+      </p>
+      <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+        {projects.map((p) => (
+          <li key={p.projectId}>
+            {p.projectName || p.projectId}
+            {p.archived ? " (archived)" : ""}
+          </li>
+        ))}
+      </ul>
+      <p className="text-xs text-muted-foreground">
+        You'll join each as {role}
+        {emailSuffix}.
+      </p>
     </div>
   )
 }

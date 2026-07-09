@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
-import { JoinPage } from "./JoinPage"
+import { JoinPage, InviteSummary } from "./JoinPage"
 import { acceptServerInvite, previewMultiInvite, acceptMultiInvite, previewServerInvite } from "@/lib/sync/invites"
 
 const navigate = vi.fn()
@@ -258,5 +258,88 @@ describe("JoinPage preview error states (signed-out)", () => {
     expect(screen.getByText(/ask the project owner/i)).toBeInTheDocument()
     expect(screen.queryByText("do-login")).not.toBeInTheDocument()
     expect(screen.queryByText("do-signup")).not.toBeInTheDocument()
+  })
+})
+
+// AQU-337: the invite summary must read correctly for a single invitee. A
+// single-project token arrives through the multi endpoint (one project row),
+// and the old copy unconditionally said "You'll join each as …" — wrong for
+// one invitee / one project. These tests pin the singular/plural boundary and
+// the project-name display so the copy can't silently regress.
+describe("InviteSummary (AQU-337 singular/plural copy)", () => {
+  it("single project: says 'join as' with no 'each', and names the project", () => {
+    render(
+      <InviteSummary
+        projects={[{ projectId: "p1", projectName: "Genesis Pilot" }]}
+        roleName="viewer"
+      />,
+    )
+    expect(screen.getByText(/you'll join as/i)).toBeInTheDocument()
+    expect(screen.queryByText(/join each/i)).not.toBeInTheDocument()
+    expect(screen.getByText("Genesis Pilot")).toBeInTheDocument()
+    expect(screen.getByText("viewer")).toBeInTheDocument()
+  })
+
+  it("multiple projects: says 'join each as' and lists every project name", () => {
+    render(
+      <InviteSummary
+        projects={[
+          { projectId: "p1", projectName: "Alpha" },
+          { projectId: "p2", projectName: "Beta" },
+          { projectId: "p3", projectName: "Gamma" },
+        ]}
+        roleName="contributor"
+      />,
+    )
+    expect(screen.getByText(/you'll join each as/i)).toBeInTheDocument()
+    expect(screen.getByText("3 projects")).toBeInTheDocument()
+    expect(screen.getByText("Alpha")).toBeInTheDocument()
+    expect(screen.getByText("Beta")).toBeInTheDocument()
+    expect(screen.getByText("Gamma")).toBeInTheDocument()
+  })
+
+  it("formats an underscored role name into words", () => {
+    render(
+      <InviteSummary
+        projects={[{ projectId: "p1", projectName: "Genesis Pilot" }]}
+        roleName="project_lead"
+      />,
+    )
+    expect(screen.getByText("project lead")).toBeInTheDocument()
+  })
+
+  it("renders the bound email suffix when present", () => {
+    render(
+      <InviteSummary
+        projects={[{ projectId: "p1", projectName: "Genesis Pilot" }]}
+        roleName="viewer"
+        email="ryan@example.com"
+      />,
+    )
+    expect(screen.getByText(/invitation sent to/i)).toBeInTheDocument()
+    expect(screen.getByText("ryan@example.com")).toBeInTheDocument()
+  })
+
+  it("falls back to the project id when the name is empty", () => {
+    render(
+      <InviteSummary
+        projects={[{ projectId: "p-503", projectName: "" }]}
+        roleName="viewer"
+      />,
+    )
+    expect(screen.getByText("p-503")).toBeInTheDocument()
+  })
+
+  it("marks archived projects in a multi-project list", () => {
+    render(
+      <InviteSummary
+        projects={[
+          { projectId: "p1", projectName: "Alpha" },
+          { projectId: "p2", projectName: "Beta", archived: true },
+        ]}
+        roleName="viewer"
+      />,
+    )
+    expect(screen.getByText(/Beta \(archived\)/)).toBeInTheDocument()
   })
 })

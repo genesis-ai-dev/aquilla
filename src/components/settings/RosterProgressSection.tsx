@@ -12,9 +12,13 @@
 // general MAINTAINER settings-write gate, mirroring exportMinRole's
 // EXPORT_FLOOR_WRITE_MIN_ROLE (auth-worker/src/routes/org-settings.ts).
 //
-// SWARM-TODO(AQU-498): no dedicated per-member progress view consumes
-// memberProgressViewMinRole yet — this section defines + stores the policy
-// so that future view can gate on it without another settings-blob change.
+// AQU-498: consumed by ProjectOverview's Team card (per-teammate "Activity"
+// affordance -> MemberActivityPanel), which lives inside the same
+// SectionVisibilityGate this section's memberProgressViewMinRole feeds.
+// SWARM-TODO(AQU-498): that view's member-selection list is currently scoped
+// to assignees with open assignments (the Team card's existing roster), not
+// every project member — see the SWARM-TODO in ProjectOverview.tsx next to
+// `selectedMemberUsername` for why and what widening it would take.
 
 import { useEffect, useState } from "react"
 import { Check } from "lucide-react"

@@ -45,7 +45,7 @@ test("cell details panel expands and shows all five tabs", async ({ alice }) => 
   await expect(panel).toBeVisible({ timeout: 5_000 })
 
   // 3. All five tabs should be present (they render as role="tab").
-  for (const tabName of ["Staleness", "BT", "Recording", "Issues", "History"]) {
+  for (const tabName of ["Staleness", "Back-translation", "Recording", "Issues", "History"]) {
     await expect(panel.getByRole("tab", { name: tabName })).toBeVisible({ timeout: 3_000 })
   }
 

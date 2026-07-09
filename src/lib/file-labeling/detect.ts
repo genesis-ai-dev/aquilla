@@ -43,7 +43,9 @@ function detectBibleBook(file: FileReference): RenameSuggestion | null {
     currentName: file.name,
     suggestedName: name,
     currentCorpus: file.corpusMarker,
-    suggestedCorpus: corpus,
+    // Drop a no-op corpus change (e.g. "OT → OT") so it isn't listed as a
+    // change the user must review (AQU-374).
+    suggestedCorpus: corpus === file.corpusMarker ? undefined : corpus,
     source: "bible-book",
   }
 }
@@ -86,7 +88,7 @@ function detectSeasonEpisode(file: FileReference): RenameSuggestion | null {
     currentName: file.name,
     suggestedName,
     currentCorpus: file.corpusMarker,
-    suggestedCorpus,
+    suggestedCorpus: file.corpusMarker === suggestedCorpus ? undefined : suggestedCorpus,
     source: "season-episode",
   }
 }
@@ -124,7 +126,7 @@ function detectNumberedFamily(files: FileReference[]): RenameSuggestion[] {
         currentName: e.file.name,
         suggestedName: padded,
         currentCorpus: e.file.corpusMarker,
-        suggestedCorpus: e.stem,
+        suggestedCorpus: e.file.corpusMarker === e.stem ? undefined : e.stem,
         source: "numbered-family",
       })
     }

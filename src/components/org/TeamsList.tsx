@@ -5,6 +5,7 @@ import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { Button } from "@/components/ui/button"
+import { ButtonGroup } from "@/components/ui/button-group"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import {
@@ -33,6 +34,24 @@ const SORT_OPTIONS: { value: SortOption; label: string }[] = [
   { value: "projects", label: "Projects (most first)" },
 ]
 
+// AQU-333: three-position internal/public filter. Default is "internal",
+// which preserves the org's historical "shows internal groups only" default
+// render. The FRO-158 guarantee (public teams are never silently dropped)
+// still holds — they remain reachable via "all"/"public".
+type Visibility = "all" | "internal" | "public"
+
+const VISIBILITY_OPTIONS: { value: Visibility; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "internal", label: "Internal only" },
+  { value: "public", label: "Public only" },
+]
+
+function filterByVisibility(teams: TeamSummary[], visibility: Visibility): TeamSummary[] {
+  if (visibility === "internal") return teams.filter((t) => t.isInternal)
+  if (visibility === "public") return teams.filter((t) => !t.isInternal)
+  return teams
+}
+
 function sortTeams(teams: TeamSummary[], sort: SortOption): TeamSummary[] {
   return [...teams].sort((a, b) => {
     if (sort === "members") return b.memberCount - a.memberCount
@@ -53,6 +72,7 @@ export function TeamsList() {
   const [description, setDescription] = useState("")
   const [query, setQuery] = useState("")
   const [sort, setSort] = useState<SortOption>("name")
+  const [visibility, setVisibility] = useState<Visibility>("internal")
 
   const isAdmin = (activeOrg?.role.level ?? 0) >= 600
 
@@ -70,10 +90,11 @@ export function TeamsList() {
     return () => { cancelled = true }
   }, [jwt, activeOrgId])
 
+  const byVisibility = filterByVisibility(teams, visibility)
   const filtered = sortTeams(
     query.trim()
-      ? teams.filter((t) => t.name.toLowerCase().includes(query.trim().toLowerCase()))
-      : teams,
+      ? byVisibility.filter((t) => t.name.toLowerCase().includes(query.trim().toLowerCase()))
+      : byVisibility,
     sort,
   )
 
@@ -168,6 +189,19 @@ export function TeamsList() {
                   </SelectGroup>
                 </SelectContent>
               </Select>
+              <ButtonGroup aria-label="Filter teams by visibility">
+                {VISIBILITY_OPTIONS.map((o) => (
+                  <Button
+                    key={o.value}
+                    size="sm"
+                    variant={visibility === o.value ? "default" : "outline"}
+                    aria-pressed={visibility === o.value}
+                    onClick={() => setVisibility(o.value)}
+                  >
+                    {o.label}
+                  </Button>
+                ))}
+              </ButtonGroup>
             </div>
           )}
 
@@ -196,9 +230,21 @@ export function TeamsList() {
           ) : filtered.length === 0 ? (
             <EmptyState
               icon={Search}
-              title={<>No teams match &ldquo;{query}&rdquo;</>}
+              title={
+                query.trim()
+                  ? <>No teams match &ldquo;{query}&rdquo;</>
+                  : visibility === "public"
+                    ? "No public teams in this organization"
+                    : visibility === "internal"
+                      ? "No internal teams in this organization"
+                      : "No teams match your filters"
+              }
               action={
-                <Button size="sm" variant="outline" onClick={() => setQuery("")}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => { setQuery(""); setVisibility("all") }}
+                >
                   Clear
                 </Button>
               }
@@ -215,11 +261,18 @@ export function TeamsList() {
                   <span className="mt-1 block text-sm tabular-nums text-muted-foreground">
                     {t.memberCount} members · {t.projectCount} projects
                   </span>
-                  {t.viewerIsMember && (
-                    <span className="mt-2 inline-block rounded-full border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
-                      Member
-                    </span>
-                  )}
+                  <span className="mt-2 flex flex-wrap gap-1">
+                    {!t.isInternal && (
+                      <span className="inline-block rounded-full border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                        Public
+                      </span>
+                    )}
+                    {t.viewerIsMember && (
+                      <span className="inline-block rounded-full border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                        Member
+                      </span>
+                    )}
+                  </span>
                 </button>
               ))}
             </div>

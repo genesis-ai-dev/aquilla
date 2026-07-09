@@ -23,9 +23,17 @@ import posthog from "@/lib/posthog"
 
 interface RuleCreateDialogProps {
   onAdd: (rule: Omit<TranslationRule, "id" | "createdAt">) => void
+  /**
+   * AQU-480: creating a rule persists to project_settings (MAINTAINER-gated on
+   * the server). When false, the trigger is disabled-with-tooltip so a
+   * below-floor user can't open the dialog and add a rule that silently 403s
+   * and vanishes on reload. Defaults true.
+   */
+  canManage?: boolean
+  deniedReason?: string | null
 }
 
-export function RuleCreateDialog({ onAdd }: RuleCreateDialogProps) {
+export function RuleCreateDialog({ onAdd, canManage = true, deniedReason }: RuleCreateDialogProps) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
@@ -116,7 +124,15 @@ export function RuleCreateDialog({ onAdd }: RuleCreateDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" />}>
+      <DialogTrigger
+        render={
+          <Button
+            size="sm"
+            disabled={!canManage}
+            title={!canManage ? (deniedReason ?? undefined) : undefined}
+          />
+        }
+      >
         + Add Rule
       </DialogTrigger>
       <DialogContent className="max-w-lg">

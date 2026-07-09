@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { getPortfolio, validatedPct, attentionRank, audioPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "./portfolio"
+import { getPortfolio, validatedPct, attentionRank, audioPct, audioValidatedPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "./portfolio"
 
 const ORIG = global.fetch
 
 function project(over: Partial<PortfolioProject>): PortfolioProject {
-  return { id: "p", name: "P", totalCells: 0, validatedCells: 0, filledCells: 0, aiDraftedCells: 0, lastEditAt: null, audioCells: 0, recordedMs: 0, deadlineAt: null, ...over }
+  return { id: "p", name: "P", totalCells: 0, validatedCells: 0, filledCells: 0, aiDraftedCells: 0, lastEditAt: null, audioCells: 0, validatedAudioCells: 0, recordedMs: 0, deadlineAt: null, ...over }
 }
 
 afterEach(() => {
@@ -51,6 +51,16 @@ describe("audioPct", () => {
 
   it("returns 0 when totalCells is 0", () => {
     expect(audioPct(project({ totalCells: 0, audioCells: 0 }))).toBe(0)
+  })
+})
+
+describe("audioValidatedPct (AQU-508)", () => {
+  it("is validated audio over covered audio, not over total cells", () => {
+    expect(audioValidatedPct(project({ totalCells: 200, audioCells: 50, validatedAudioCells: 20 }))).toBe(0.4)
+  })
+
+  it("returns 0 when no cells have audio (avoids divide-by-zero)", () => {
+    expect(audioValidatedPct(project({ totalCells: 100, audioCells: 0, validatedAudioCells: 0 }))).toBe(0)
   })
 })
 

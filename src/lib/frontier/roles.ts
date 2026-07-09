@@ -79,6 +79,23 @@ export const ORG_ROLE_PICKER: readonly RoleLevel[] = [
   ROLE.MAINTAINER,
 ]
 
+/**
+ * Roles offered as the project's "minimum validator role" floor
+ * (ValidationSettingsSection). An intentional subset of the canonical ladder:
+ * reviewer (300) is the lowest role that can validate cells (see
+ * `roleDescription`), and the floor caps at maintainer — owner is the org
+ * boundary, not a per-project validation floor. Drawn from the canonical ladder
+ * so the labels read identically to every other role surface (member / invite /
+ * share) — no per-surface taxonomy drift (AQU-352). The names these map to
+ * (`reviewer` / `project_lead` / `maintainer`) are exactly the ProjectRecord
+ * `validationRoleFloor` union; keep the two in sync.
+ */
+export const VALIDATION_FLOOR_ROLES: readonly RoleLevel[] = [
+  ROLE.REVIEWER,
+  ROLE.PROJECT_LEAD,
+  ROLE.MAINTAINER,
+]
+
 /** Canonical role name for a given level (mirrors server's ROLE_NAMES). */
 export function roleName(level: number): string {
   switch (level) {
@@ -130,3 +147,6 @@ export const ORG_ROLE_OPTIONS: readonly RoleOption[] =
 
 export const LINK_ROLE_OPTIONS: readonly RoleOption[] =
   LINK_ROLE_ALLOWED.map(toOption)
+
+export const VALIDATION_FLOOR_ROLE_OPTIONS: readonly RoleOption[] =
+  VALIDATION_FLOOR_ROLES.map(toOption)

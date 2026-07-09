@@ -80,6 +80,8 @@ export function dispatchEvent(
     case 'cell.audio.attach':
     case 'cell.audio.select':
     case 'cell.audio.remove':
+    case 'cell.audio.validate':
+    case 'cell.audio.unvalidate':
       return {
         ok: true,
         result: handleCellEvent(

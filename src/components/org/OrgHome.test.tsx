@@ -381,7 +381,7 @@ describe("activityStatus", () => {
   const now = Date.now()
   const base: PortfolioProject = {
     id: "p", name: "P", totalCells: 100, validatedCells: 0, filledCells: 0, aiDraftedCells: 0,
-    lastEditAt: null, audioCells: 0, recordedMs: 0, deadlineAt: null,
+    lastEditAt: null, audioCells: 0, validatedAudioCells: 0, recordedMs: 0, deadlineAt: null,
   }
 
   it("treats a never-edited, never-translated project as not-started, not stalled", () => {

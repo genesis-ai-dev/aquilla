@@ -35,6 +35,10 @@ const GENESIS_PROJECT_ID = "dev-project-genesis"
 const GENESIS_PROJECT_NAME = "Genesis"
 const EXODUS_PROJECT_ID = "dev-project-exodus"
 const EXODUS_PROJECT_NAME = "Exodus"
+const LEVITICUS_PROJECT_ID = "dev-project-leviticus"
+const LEVITICUS_PROJECT_NAME = "Leviticus"
+const NUMBERS_PROJECT_ID = "dev-project-numbers"
+const NUMBERS_PROJECT_NAME = "Numbers"
 const ALICE_USERNAME = "alice"
 const ALICE_EMAIL = "alice@local.test"
 const BOB_USERNAME = "bob"
@@ -49,6 +53,13 @@ interface OrgIdRow {
 }
 interface GroupIdRow {
   id: number
+}
+
+/** ISO date N calendar days from today — matches e2e deadline helpers. */
+function isoDateOffset(days: number): string {
+  const date = new Date()
+  date.setDate(date.getDate() + days)
+  return date.toISOString().slice(0, 10)
 }
 
 /** Upsert a user by username (password "dev"), returning its id. */
@@ -84,17 +95,19 @@ async function upsertProject(
   name: string,
   orgId: number,
   createdBy: number,
+  deadlineAt: string | null = null,
 ): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO projects (id, name, org_id, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `INSERT INTO projects (id, name, org_id, created_by, deadline_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
        ON CONFLICT(id) DO UPDATE SET
          name = excluded.name,
          org_id = excluded.org_id,
+         deadline_at = excluded.deadline_at,
          updated_at = CURRENT_TIMESTAMP`,
     )
-    .bind(projectId, name, orgId, createdBy)
+    .bind(projectId, name, orgId, createdBy, deadlineAt)
     .run()
 }
 
@@ -214,6 +227,12 @@ async function seedDev(db: AquillaDb): Promise<{
 
   await upsertProject(db, GENESIS_PROJECT_ID, GENESIS_PROJECT_NAME, orgId, userId)
   await upsertProject(db, EXODUS_PROJECT_ID, EXODUS_PROJECT_NAME, orgId, userId)
+
+  // Deadline demos for org portfolio status (overdue / due soon).
+  await upsertProject(db, LEVITICUS_PROJECT_ID, LEVITICUS_PROJECT_NAME, orgId, userId, isoDateOffset(-3))
+  await upsertProjectMember(db, LEVITICUS_PROJECT_ID, userId, ROLE.OWNER, userId)
+  await upsertProject(db, NUMBERS_PROJECT_ID, NUMBERS_PROJECT_NAME, orgId, userId, isoDateOffset(3))
+  await upsertProjectMember(db, NUMBERS_PROJECT_ID, userId, ROLE.OWNER, userId)
 
   // alice is an org maintainer → inherits access to every org project (the
   // "org" path). On Genesis she also has a direct OWNER row, so "override"

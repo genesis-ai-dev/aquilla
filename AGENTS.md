@@ -4,7 +4,7 @@ Rules for any AI coding assistant working in this repo (Claude Code, Cursor, Cop
 
 ## CI — deploy build is the gating check
 
-**`npm run build` (i.e. `tsc -b && vite build`) is the CI gate, not `tsc --noEmit`.** Do not revert the CI workflow to `--noEmit` — it misses project-reference / `erasableSyntaxOnly` errors that only `tsc -b` catches (see FRO-213 / FRO-219).
+**`npm run build` (i.e. `tsc -b && vite build`) is the CI gate, not `tsc --noEmit`.** Do not revert the CI workflow to `--noEmit` — it misses project-reference / `erasableSyntaxOnly` errors that only `tsc -b` catches (see AQU-213 / AQU-219).
 
 ## Testing — non-negotiable
 
@@ -66,9 +66,9 @@ Both routes 404 unless `WRANGLER_LOCAL=1`. Prod `wrangler.toml` never sets it; t
 
 For the E2E suite, prefer the existing `/__test__/reset` + alice/bob/carol helpers (`e2e/helpers/seed.ts`) — those give clean isolation per test. The `/__dev__/login` bypass is for manual browser dev and ad-hoc Playwright probes.
 
-## Issue workflow (Linear — FrontierR&D team)
+## Issue workflow (Linear — Aquilla team)
 
-Bugs and tasks live in Linear (team `FrontierR&D`, key `FRO`). Move issues through the
+Bugs and tasks live in Linear (team `Aquilla`, key `AQU`). Move issues through the
 status pipeline as work progresses — keep the board honest so anyone (human or agent)
 can see exactly where each issue stands.
 
@@ -77,7 +77,7 @@ validating, or QA-testing in this repo, run it instead of touching the board by 
 it resolves the issue's current status and does the next right transition:
 
 - `/issue next` — pick up the top `Todo` and start working it.
-- `/issue FRO-123` — act on a specific issue from wherever it currently sits.
+- `/issue AQU-123` — act on a specific issue from wherever it currently sits.
 - `/issue debug "thing is broken"` — file a new bug, then start it.
 - `/issue improve "make X nicer"` — file a new improvement, then start it.
 - add `--deploy` to deploy for dev validation and advance to `Dev Verification Needed` after the fix.
@@ -97,18 +97,38 @@ So every issue carries a spec question:
   `05-user-stories/<story>.md` (`Acceptance criteria` / `Error / edge cases`) and/or
   `04-features/<feature>.md`. Describe the *rule* ("the create form shows only fields for the
   selected shape"), not the specific code fix. Refactor/consolidate/append as the truth
-  demands; bump `last-updated` + add a `revisions:` entry citing the `FRO-###`.
+  demands; bump `last-updated` + add a `revisions:` entry citing the `AQU-###`.
 - If no spec change is needed, say so on the issue (cite the section you checked).
 - The spec is currently **behind** the prototype (Neon/Hyperdrive backend; timeline- vs
   segment-ordered files). The Linear project *"Bring aquilla-specs into line with prototype
   divergence"* tracks that catch-up — link it if your edit touches a diverged area.
 
+### Agent-ready vs. human-in-the-loop (the pickup contract)
+
+Whether an agent may pick an issue up is read straight off the **status** — there are no
+`ready-for-agent`/`ready-for-human` labels; status carries it:
+
+- **`Triage` = the human queue.** Anything that needs a human *first* — an architectural or
+  design decision, a review, external access, or hands-on human implementation — plus any
+  un-vetted incoming issue. Linear's Triage status sits *outside* the Backlog→Todo→… flow
+  (an issue in Triage has no normal workflow status — that is the point). **Agents never pick
+  up a Triage issue.** `to-issues` files its **HITL** slices straight into `Triage`; `/triage`
+  moves an issue out of `Triage` only once it is either genuinely agent-ready (→ `Todo`) or
+  explicitly a human's to implement.
+- **`Todo` = agent-ready (AFK).** Fully specified, acceptance criteria present, no human
+  decision outstanding. This is the **only** queue `/issue next` and `/swarm` draw from.
+  `Backlog` is agent-ready-but-deferred — promote it to `Todo` to enqueue it.
+
+Category is orthogonal: tag every issue **`Bug`**, **`Feature`**, or **`Improvement`** (the
+`/triage` category role).
+
 Status pipeline:
 
 | Status | Meaning | Who/when |
 | --- | --- | --- |
-| **Backlog** | Captured, not yet scoped for work | triage |
-| **Todo** | Ready to be picked up by dev/AI | pull from here to start work |
+| **Triage** | Human queue — needs review/decision, or not yet vetted. **HITL work lives here.** | agents NEVER pick up from here |
+| **Backlog** | Captured & agent-ready, but deferred | promote to `Todo` to release it |
+| **Todo** | Agent-ready (AFK) — fully specified w/ acceptance criteria | the ONLY queue `/issue next` & `/swarm` pull from |
 | **Dispatched** | Dev/AI has **begun work** on the task | set when you pick the issue up |
 | **Fixed** | Dev/AI has fixed it, **not deployed yet** | set the moment the fix is committed |
 | **Dev Verification Needed** | Fix deployed to the **dev branch**, awaiting dev-team validation | set after deploying to dev |
@@ -125,28 +145,28 @@ Rules:
    dev→QA hand-off. **QA owns the merge to `main`** and advances the ticket to
    `Deployed`/`Done` as part of that merge. Don't set `Deployed`/`Done` yourself unless you
    are the one doing the QA merge.
-5. **Every commit must carry its `FRO-###`.** Linear auto-suggests a branch name, and the
-   `prepare-commit-msg` hook auto-injects the ticket from a `…/fro-###-…` branch (and warns
+5. **Every commit must carry its `AQU-###`.** Linear auto-suggests a branch name, and the
+   `prepare-commit-msg` hook auto-injects the ticket from a `…/aqu-###-…` branch (and warns
    when it can't derive one). QA reviews a PR-to-main by scanning which tickets its commits
    reference — a ticketless `fix`/`feat` commit is invisible to that process.
    `chore`/`docs`/`polish` commits may go ticketless.
 6. **Prototyping fast-path:** while prototyping we sometimes merge straight to `main` with
    `--no-verify`, skipping the staging/QA gates. Allowed — but the commit **still needs its
-   `FRO-###`** so the ticket stays traceable to the merge.
+   `AQU-###`** so the ticket stays traceable to the merge.
 
 ### One ticket = one branch = one worktree
 
 The failure mode to avoid: agents pile unrelated work onto whatever branch is checked
-out, so a branch named for FRO-A ends up holding FRO-B commits **and** a junk drawer of
+out, so a branch named for AQU-A ends up holding AQU-B commits **and** a junk drawer of
 uncommitted changes spanning five concerns. That destroys the QA PR→ticket mapping and
 makes the work impossible to review or revert cleanly.
 
 - **Each ticket gets its own git worktree off live `origin/main`**, on the Linear-suggested
-  branch (`ryder/fro-###-…`). Never share the main checkout between tickets. Use
+  branch (`ryder/aqu-###-…`). Never share the main checkout between tickets. Use
   `git worktree add` (see `using-git-worktrees`); the main checkout is frequently dirty.
 - **Start clean.** Before picking up a ticket, the working tree should be clean (or your
-  changes stashed). Don't start FRO-B on top of FRO-A's uncommitted spillover.
-- **Don't cross-commit.** A commit's `FRO-###` must match the branch's ticket. The
+  changes stashed). Don't start AQU-B on top of AQU-A's uncommitted spillover.
+- **Don't cross-commit.** A commit's `AQU-###` must match the branch's ticket. The
   `pre-commit` hook **warns** (never blocks) when the branch already holds commits for a
   different ticket — heed it and move the stray work to its own worktree.
 - **Untangling after the fact is expensive and lossy** — prevention (isolation at pickup)
@@ -158,7 +178,7 @@ makes the work impossible to review or revert cleanly.
 
 > **Staging** lives at `https://dev.aquilla.app` (API `api.dev.aquilla.app`), backed by the
 > Neon `staging` branch via Hyperdrive. Deploy with `pnpm run deploy:aquilla:staging`. Setup
-> + one-time provisioning are in [`docs/STAGING.md`](docs/STAGING.md) (tracked by FRO-146 —
+> + one-time provisioning are in [`docs/STAGING.md`](docs/STAGING.md) (tracked by AQU-146 —
 > not fully provisioned until the staging Hyperdrive id is filled in).
 
 ## Useful slash commands

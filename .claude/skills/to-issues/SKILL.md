@@ -7,7 +7,13 @@ description: Break a plan, spec, or PRD into independently-grabbable issues on t
 
 Break a plan into independently-grabbable issues using vertical slices (tracer bullets).
 
-**Issue tracker for this repo:** Linear, team `FrontierR&D` (key `FRO`, id `de0f5d29-418f-4f62-ade7-02f77974c598`), project `Prototype Debugging` (id `215cff7b-1a95-443d-9343-1f1528754462`). See the `/issue` command and `AGENTS.md` → "Issue workflow" for the status pipeline and triage labels.
+**Issue tracker for this repo:** Linear, team `Aquilla` (key `AQU`, id `de0f5d29-418f-4f62-ade7-02f77974c598`), project `Prototype Debugging` (id `215cff7b-1a95-443d-9343-1f1528754462`). See the `/issue` command and `AGENTS.md` → "Issue workflow" for the status pipeline and the agent-vs-human pickup contract.
+
+**Where each slice lands (this is the whole point of the HITL/AFK split):**
+
+- **AFK slice → status `Todo`** (`a3c6383f-3893-4691-a75a-b4add1ff1ce1`). Agent-ready: the swarm and `/issue next` pull from here. Only publish to `Todo` if acceptance criteria are actually present.
+- **HITL slice → status `Triage`** (`086173c5-e3e4-4f37-93d5-ae2f069ab6a6`). The human queue — a human must make the decision / do the review / implement before it's agent-ready. Agents never pick these up. `/triage` promotes it to `Todo` once (and if) it becomes AFK.
+- Tag every issue with a category label: **`Bug`**, **`Feature`**, or **`Improvement`**.
 
 ## Process
 
@@ -57,7 +63,7 @@ Iterate until the user approves the breakdown.
 
 ### 6. Publish the issues to the issue tracker
 
-For each approved slice, publish a new issue to the issue tracker. Use the issue body template below. These issues are considered ready for AFK agents, so publish them with the correct triage label unless instructed otherwise.
+For each approved slice, publish a new issue to the issue tracker. Use the issue body template below. **Set the status by the slice's type** (see "Where each slice lands" above): **AFK → `Todo`**, **HITL → `Triage`**. Add the `Bug`/`Feature`/`Improvement` category label. Never publish an AFK slice to `Todo` without acceptance criteria — if you can't write them, it's HITL, and it goes to `Triage`.
 
 **Set BOTH the team and the project on every issue.** Verify the publish response actually shows the project assigned — do not assume it stuck.
 

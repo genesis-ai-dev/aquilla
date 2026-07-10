@@ -57,6 +57,32 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(byId.pb).toMatchObject({ audioCells: 0, recordedMs: 0 })
   })
 
+  it("AQU-523: surfaces the source/target language pair from project_settings, null when unset", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    // pa: languages set in project_settings; pb: no settings row; pc: settings
+    // row present but with no language keys (the empty-defaults case).
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1), ('pb', 'Mark', 1, 1), ('pc', 'Luke', 1, 1)").run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings, version) VALUES
+        ('pa', '{"sourceLanguage":"Greek","targetLanguage":"Bambara"}', 1),
+        ('pc', '{}', 1)`,
+    ).run()
+    // A file per project keeps the LEFT JOIN row-multiplication realistic — the
+    // MAX() over the 1:1 settings join must still collapse to one value.
+    await env.AQUILLA_PG.prepare("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1), ('e2', 1, 'pa', 'file.create', 'wendi', '{}', 2000, 2000, 2), ('e3', 1, 'pb', 'file.create', 'wendi', '{}', 500, 500, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO files (id, project_id, name, event_id, cell_count, approved_count, last_edit_at) VALUES ('f1', 'pa', 'GEN', 'e1', 100, 40, 1000), ('f2', 'pa', 'EXO', 'e2', 100, 10, 2000), ('f3', 'pb', 'MRK', 'e3', 50, 50, 500)").run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string; sourceLanguage: string | null; targetLanguage: string | null; totalCells: number }> }
+    const byId = Object.fromEntries(body.projects.map((p) => [p.id, p]))
+    expect(byId.pa).toMatchObject({ sourceLanguage: "Greek", targetLanguage: "Bambara", totalCells: 200 })
+    expect(byId.pb).toMatchObject({ sourceLanguage: null, targetLanguage: null })
+    expect(byId.pc).toMatchObject({ sourceLanguage: null, targetLanguage: null })
+  })
+
   it("AQU-508: validatedAudioCells counts cells whose selected clip is approved, distinct from coverage", async () => {
     await seedUser(1, "wendi")
     await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()

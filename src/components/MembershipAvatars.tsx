@@ -2,6 +2,7 @@ import type { ProjectMember } from "@/lib/frontier/members"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { roleDisplayText } from "@/lib/frontier/roles"
 
 interface MembershipAvatarsProps {
   members: ProjectMember[]
@@ -19,7 +20,7 @@ export function MembershipAvatars({ members, maxVisible = 4 }: MembershipAvatars
       aria-label={`${members.length} member${members.length !== 1 ? "s" : ""}`}
     >
       {visible.map((m) => (
-        <AppTooltip key={m.userId} content={`${m.username} (${m.role.name})`}>
+        <AppTooltip key={m.userId} content={`${m.username} (${roleDisplayText(m.role.name)})`}>
           <InitialsAvatar name={m.username} size="sm" singleInitial />
         </AppTooltip>
       ))}

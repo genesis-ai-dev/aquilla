@@ -96,6 +96,21 @@ export const VALIDATION_FLOOR_ROLES: readonly RoleLevel[] = [
   ROLE.MAINTAINER,
 ]
 
+/** Underscore-free role string for display with CSS `capitalize`. */
+export function formatRoleDisplay(name: string): string {
+  return name.replace(/_/g, " ")
+}
+
+/** Title-cased role label for plain-text contexts (tooltips, aria labels). */
+export function roleDisplayText(name: string): string {
+  return formatRoleDisplay(name).replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+/** Display label from a numeric role level. */
+export function roleDisplayLabel(level: number): string {
+  return roleDisplayText(roleName(level))
+}
+
 /** Canonical role name for a given level (mirrors server's ROLE_NAMES). */
 export function roleName(level: number): string {
   switch (level) {

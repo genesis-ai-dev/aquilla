@@ -22,7 +22,7 @@ const bodyFirstCells = () =>
   screen
     .getAllByRole("row")
     .slice(1)
-    .map((tr) => within(tr).getAllByRole("cell")[0]?.textContent ?? "")
+    .map((tr) => (within(tr).getAllByRole("cell")[0]?.textContent ?? "").replace(/\s*Platform admin$/i, ""))
 
 describe("AdminPeopleSection", () => {
   it("badges the allowlisted user (case-insensitive email match)", () => {
@@ -57,24 +57,33 @@ describe("AdminPeopleSection", () => {
     expect(screen.getByText("No results.")).toBeInTheDocument()
   })
 
+  it("shows short calendar dates for last active and joined", () => {
+    render(<AdminPeopleSection users={users} admins={admins} />)
+    const joined = new Date("2026-01-01").toLocaleDateString(undefined, {
+      month: "long",
+      day: "numeric",
+    })
+    expect(screen.getAllByText(joined).length).toBeGreaterThanOrEqual(1)
+  })
+
   it("cycles Orgs sort on header click: desc → asc → clear", () => {
     render(<AdminPeopleSection users={users} admins={admins} />)
     const orgsHeader = screen.getByRole("button", { name: /Orgs/i })
     // Default initial sort is lastActive desc — capture names after switching to Orgs.
     fireEvent.click(orgsHeader) // desc by orgCount
-    expect(bodyFirstCells().map((t) => t.replace(/ Platform admin$/, ""))).toEqual([
+    expect(bodyFirstCells()).toEqual([
       "Alpha (alpha)",
       "Ryder (ryder)",
       "casey",
     ])
     fireEvent.click(orgsHeader) // asc
-    expect(bodyFirstCells().map((t) => t.replace(/ Platform admin$/, ""))).toEqual([
+    expect(bodyFirstCells()).toEqual([
       "casey",
       "Ryder (ryder)",
       "Alpha (alpha)",
     ])
     fireEvent.click(orgsHeader) // clear — falls back to insertion order
-    expect(bodyFirstCells().map((t) => t.replace(/ Platform admin$/, ""))).toEqual([
+    expect(bodyFirstCells()).toEqual([
       "Ryder (ryder)",
       "casey",
       "Alpha (alpha)",

@@ -1,6 +1,7 @@
-import { useState } from "react"
-import { HelpCircle, ExternalLink, Mail, BookOpen } from "lucide-react"
+import { useCallback, useState } from "react"
+import { HelpCircle, ExternalLink, Mail, BookOpen, Map } from "lucide-react"
 import { Discord } from "@/components/icons/Discord"
+import { useProductTourContext } from "@/context/ProductTourContext"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,7 +13,7 @@ import {
 // Configured at build time with sane defaults so help links always work.
 const DOCS_URL =
   (import.meta.env.VITE_DOCS_URL as string | undefined)?.trim() ||
-  "https://docs.aquilla.app"
+  "https://help.aquilla.app"
 const DISCORD_URL =
   (import.meta.env.VITE_DISCORD_INVITE_URL as string | undefined)?.trim() ||
   "https://discord.gg/T2EndwXe4W"
@@ -27,6 +28,12 @@ const SUPPORT_EMAIL =
  */
 export function HelpMenu() {
   const [open, setOpen] = useState(false)
+  const { openTour } = useProductTourContext()
+
+  const handleTour = useCallback(() => {
+    setOpen(false)
+    openTour()
+  }, [openTour])
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -48,6 +55,10 @@ export function HelpMenu() {
         sideOffset={4}
       >
         <DropdownMenuGroup>
+          <DropdownMenuItem onClick={handleTour}>
+            <Map />
+            Take the tour
+          </DropdownMenuItem>
           <DropdownMenuItem
             render={
               <a
@@ -59,7 +70,7 @@ export function HelpMenu() {
             }
           >
             <BookOpen />
-            Docs
+            Help
             <ExternalLink className="ml-auto opacity-60" />
           </DropdownMenuItem>
           <DropdownMenuItem

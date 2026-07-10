@@ -30,6 +30,15 @@ describe("AdminTenantsSection", () => {
     expect(screen.queryByText("Alpha")).not.toBeInTheDocument()
   })
 
+  it("shows a short created date with tooltip", () => {
+    render(<AdminTenantsSection orgs={orgs} teams={teams} onOpenOrg={vi.fn()} />)
+    const created = new Date("2026-01-01").toLocaleDateString(undefined, {
+      month: "long",
+      day: "numeric",
+    })
+    expect(screen.getByText(created)).toBeInTheDocument()
+  })
+
   it("calls onOpenOrg when Open is clicked", () => {
     const onOpenOrg = vi.fn()
     render(<AdminTenantsSection orgs={orgs} teams={teams} onOpenOrg={onOpenOrg} />)

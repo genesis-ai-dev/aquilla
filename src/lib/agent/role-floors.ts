@@ -16,7 +16,7 @@
  */
 
 import { requiredRoleFor, ROLE } from "@/lib/sync/role-policy"
-import { roleName } from "@/lib/frontier/roles"
+import { roleDisplayLabel } from "@/lib/frontier/roles"
 
 export { ROLE }
 
@@ -58,6 +58,6 @@ export function canApply(kind: string, roleLevel: number | null | undefined): Ca
   return {
     allowed: false,
     requiredLevel: required,
-    reason: `Requires ${roleName(required).replace(/_/g, " ")} role or higher`,
+    reason: `Requires ${roleDisplayLabel(required)} role or higher`,
   }
 }

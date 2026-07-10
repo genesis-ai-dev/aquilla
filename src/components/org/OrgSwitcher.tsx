@@ -7,6 +7,7 @@ import { fetchAccessibleProjects } from "@/lib/sync/cloud-projects"
 import { isOrgScopedRoute } from "./org-route-scope"
 import { OrgCreateDialog } from "./OrgCreateDialog"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { RoleLabel } from "@/components/RoleLabel"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -160,7 +161,7 @@ export function OrgSwitcher() {
                   <OrgMark name={name} />
                   <span className="truncate">{name}</span>
                   <span className="flex shrink-0 items-center gap-1.5">
-                    <span className="text-xs text-muted-foreground">{o.role.name}</span>
+                    <RoleLabel name={o.role.name} className="text-xs text-muted-foreground" />
                     {selected && <Check className="size-4 opacity-60" />}
                   </span>
                 </DropdownMenuItem>
@@ -180,7 +181,7 @@ export function OrgSwitcher() {
                     <OrgMark name={g.name ?? `Org #${g.id}`} />
                     <span className="truncate">{g.name ?? `Org #${g.id}`}</span>
                     <span className="flex shrink-0 items-center gap-1.5">
-                      <span className="text-xs text-muted-foreground">Guest</span>
+                      <RoleLabel name="guest" className="text-xs text-muted-foreground" />
                     </span>
                   </DropdownMenuItem>
                 ))}

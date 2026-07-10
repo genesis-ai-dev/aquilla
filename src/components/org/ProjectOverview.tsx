@@ -35,6 +35,7 @@ import {
   sectionTintClass,
 } from "./SectionVisibilityBadge"
 import { Badge } from "@/components/ui/badge"
+import { ProjectDeadlineStatuses, ProjectStatusChip } from "@/components/ProjectStatus"
 import {
   Dialog,
   DialogContent,
@@ -128,30 +129,16 @@ export function deriveProjectStatus(
 }
 
 function StatusChip({ status }: { status: ProjectStatus }) {
-  if (status === "no-deadline") return null
-  const map: Record<Exclude<ProjectStatus, "no-deadline">, { label: string; cls: string }> = {
-    "on-track": { label: "On track", cls: "border-transparent bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" },
-    "due-soon": { label: "Due soon", cls: "border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300" },
-    "overdue":  { label: "Overdue",  cls: "border-transparent bg-destructive/10 text-destructive" },
-  }
-  const { label, cls } = map[status as Exclude<ProjectStatus, "no-deadline">]
-  return (
-    <Badge className={cls} data-testid="status-chip">
-      {label}
-    </Badge>
-  )
+  // Overdue / due-soon live only on the Deadline card — avoid duplicating them in the header.
+  if (status === "no-deadline" || status === "overdue" || status === "due-soon") return null
+  return <ProjectStatusChip kind="on-track" testId="status-chip" />
 }
 
 // ── Deadline chip ─────────────────────────────────────────────────────────────
 
 function DeadlineChip({ status }: { status: "overdue" | "soon" | "ok" | null }) {
-  if (!status) return null
-  const map = {
-    ok:      { cls: "border-transparent bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" },
-    soon:    { cls: "border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300" },
-    overdue: { cls: "border-transparent bg-destructive/10 text-destructive" },
-  }
-  return <Badge className={map[status].cls}>{status === "overdue" ? "Overdue" : status === "soon" ? "Due soon" : "On track"}</Badge>
+  if (status === "ok") return <ProjectStatusChip kind="on-track" />
+  return <ProjectDeadlineStatuses deadline={status} testId="status-chip" />
 }
 
 // ── Stat tiles (big %) ────────────────────────────────────────────────────────
@@ -719,9 +706,7 @@ export function ProjectOverview() {
                       <h1 className="text-xl font-semibold leading-tight truncate">{project?.name}</h1>
                       {/* Compact status chip next to the title */}
                       <StatusChip status={projectStatus} />
-                      {isArchived && (
-                        <Badge variant="secondary" className="shrink-0">Archived</Badge>
-                      )}
+                      {isArchived && <ProjectStatusChip kind="archived" className="shrink-0" />}
                       {!isArchived && isFrozen && (
                         <Badge
                           className="shrink-0 border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"

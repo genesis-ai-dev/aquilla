@@ -84,4 +84,28 @@ describe("DataTable", () => {
     fireEvent.click(countHeader) // clear
     expect(bodyNames()).toEqual(unsorted)
   })
+
+  it("applies dense row padding when dense is set", () => {
+    const { container } = render(
+      <DataTable columns={columns} data={rows} getRowId={(r) => String(r.id)} dense />,
+    )
+    const cell = container.querySelector('[data-slot="table-cell"]')
+    expect(cell?.className).toMatch(/py-1\.5/)
+    const head = container.querySelector('[data-slot="table-head"]')
+    expect(head?.className).toMatch(/h-9/)
+  })
+
+  it("renders emptyState below the toolbar when data is empty", () => {
+    render(
+      <DataTable
+        columns={columns}
+        data={[]}
+        searchPlaceholder="Search…"
+        emptyState={<div data-testid="custom-empty">Nothing here</div>}
+      />,
+    )
+    expect(screen.getByLabelText("Search…")).toBeInTheDocument()
+    expect(screen.getByTestId("custom-empty")).toBeInTheDocument()
+    expect(screen.queryByRole("table")).not.toBeInTheDocument()
+  })
 })

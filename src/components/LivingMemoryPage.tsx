@@ -19,13 +19,7 @@ import { BookOpen, Users, AlertTriangle, Plus, Pencil, Trash2, Lock, ExternalLin
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
+import { EmptyState } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -112,23 +106,17 @@ function LivingMemorySkeleton() {
 
 function RecentExamplesEmpty() {
   return (
-    <Empty
-      className="border-0 py-12"
+    <EmptyState
+      variant="inline"
+      className="py-12"
       role="status"
       aria-label="No validated translations"
-    >
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <BookOpen />
-        </EmptyMedia>
-        <EmptyTitle className="text-foreground/70">No validated translations yet</EmptyTitle>
-        <EmptyDescription className="max-w-xs text-xs leading-relaxed">
-          When translators and reviewers reach the required validation threshold on a cell, that
-          source&thinsp;&rarr;&thinsp;target pair appears here. The AI draws on these pairs in
-          every subsequent draft.
-        </EmptyDescription>
-      </EmptyHeader>
-    </Empty>
+      icon={BookOpen}
+      title="No validated translations yet"
+      titleClassName="text-foreground/70"
+      description="When translators and reviewers reach the required validation threshold on a cell, that source → target pair appears here. The AI draws on these pairs in every subsequent draft."
+      descriptionClassName="max-w-xs text-xs leading-relaxed"
+    />
   )
 }
 

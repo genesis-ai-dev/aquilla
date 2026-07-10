@@ -45,6 +45,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { roleDisplayText } from "@/lib/frontier/roles"
+import { RoleLabel } from "@/components/RoleLabel"
 
 const ROLE_OPTIONS = [
   { level: 100, name: "viewer" },
@@ -77,7 +79,8 @@ const ROLE_DESCRIPTIONS: Record<number, string> = {
 
 function roleLabel(roleLevel: number | null | undefined): string {
   if (roleLevel == null) return "Unknown"
-  return ROLE_OPTIONS.find((role) => role.level === roleLevel)?.name ?? `Level ${roleLevel}`
+  const name = ROLE_OPTIONS.find((role) => role.level === roleLevel)?.name
+  return name ? roleDisplayText(name) : `Level ${roleLevel}`
 }
 
 function lockedOrgRoleTooltip(roleLevel: number | null | undefined): string {
@@ -457,6 +460,7 @@ export function TeamDetail() {
 
                   {team.members.length === 0 ? (
                     <EmptyState
+                      variant="inline"
                       icon={Users}
                       title="No members."
                       description={isAdmin ? "Add org members to this team to grant them shared project access." : undefined}
@@ -470,7 +474,7 @@ export function TeamDetail() {
                             {isOwner ? (
                               /* Owners can change the member's org-level role via the upsert endpoint */
                               <Select
-                                items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: r.name }))}
+                                items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: roleDisplayText(r.name) }))}
                                 value={m.roleLevel != null ? String(m.roleLevel) : ""}
                                 onValueChange={(v) => { if (v) void handleChangeMemberRole(m.username, Number(v)) }}
                               >
@@ -485,7 +489,7 @@ export function TeamDetail() {
                                   <SelectGroup>
                                     {ROLE_OPTIONS.map((r) => (
                                       <SelectItem key={r.level} value={String(r.level)}>
-                                        {r.name}
+                                        <RoleLabel name={r.name} />
                                       </SelectItem>
                                     ))}
                                   </SelectGroup>
@@ -573,7 +577,7 @@ export function TeamDetail() {
                           </SelectContent>
                         </Select>
                         <Select
-                          items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: r.name }))}
+                          items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: roleDisplayText(r.name) }))}
                           value={selectedRole}
                           onValueChange={(v) => setSelectedRole(v ?? "")}
                         >
@@ -583,7 +587,7 @@ export function TeamDetail() {
                           <SelectContent>
                             <SelectGroup>
                               {ROLE_OPTIONS.map((r) => (
-                                <SelectItem key={r.level} value={String(r.level)}>{r.name}</SelectItem>
+                                <SelectItem key={r.level} value={String(r.level)}><RoleLabel name={r.name} /></SelectItem>
                               ))}
                             </SelectGroup>
                           </SelectContent>
@@ -602,6 +606,7 @@ export function TeamDetail() {
 
                     {(team?.projects ?? []).length === 0 && !loading ? (
                       <EmptyState
+                        variant="inline"
                         icon={FolderGit2}
                         title="No projects."
                         description={isAdmin ? "Attach a project to grant this team access at a chosen role." : undefined}
@@ -621,7 +626,7 @@ export function TeamDetail() {
                               {isAdmin ? (
                                 <>
                                   <Select
-                                    items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: r.name }))}
+                                    items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: roleDisplayText(r.name) }))}
                                     value={String(p.grantedRoleLevel)}
                                     onValueChange={(v) => { if (v) void handleChangeProjectRole(p.id, Number(v)) }}
                                   >
@@ -631,7 +636,7 @@ export function TeamDetail() {
                                     <SelectContent>
                                       <SelectGroup>
                                         {ROLE_OPTIONS.map((r) => (
-                                          <SelectItem key={r.level} value={String(r.level)}>{r.name}</SelectItem>
+                                          <SelectItem key={r.level} value={String(r.level)}><RoleLabel name={r.name} /></SelectItem>
                                         ))}
                                       </SelectGroup>
                                     </SelectContent>

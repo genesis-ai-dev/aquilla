@@ -1,5 +1,6 @@
 import { GitBranch, MoreVertical, PauseCircle, Trash2, Undo2 } from "lucide-react"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -10,6 +11,7 @@ import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useProjectHealth } from "@/hooks/useProjectHealth"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { roleName } from "@/lib/frontier/roles"
+import { RoleLabel } from "@/components/RoleLabel"
 
 /**
  * Has this project ever lived server-side? Two signals:
@@ -121,26 +123,24 @@ export function ProjectCard({
             )}
             {!isTrashed && isInactive && (
               <AppTooltip content="This project is inactive and cannot be edited until reactivated">
-                <span
-                  className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 px-2 py-0.5 text-[10px] font-medium"
-                  data-testid="inactive-badge"
-                >
-                  <PauseCircle className="h-3 w-3" aria-hidden />
+                <Badge variant="secondary" data-testid="inactive-badge">
+                  <PauseCircle data-icon="inline-start" />
                   Inactive
-                </span>
+                </Badge>
               </AppTooltip>
             )}
             {!isTrashed && myRoleLabel && (
               <AppTooltip content="Your role on this project">
-                <span className="inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-medium capitalize">
-                  {myRoleLabel.replace(/_/g, " ")}
-                </span>
+                <Badge variant="secondary">
+                  <RoleLabel name={myRoleLabel} />
+                </Badge>
               </AppTooltip>
             )}
             {isGit && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                <GitBranch className="h-3 w-3" /> git
-              </span>
+              <Badge variant="secondary">
+                <GitBranch data-icon="inline-start" />
+                git
+              </Badge>
             )}
             {!isTrashed && (canTrash || canToggleLifecycle) && (
               <Popover>

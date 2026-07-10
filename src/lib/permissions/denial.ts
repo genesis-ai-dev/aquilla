@@ -11,7 +11,7 @@
  * imported from hooks, util files, and components alike.
  */
 
-import { roleName } from "@/lib/frontier/roles"
+import { roleName, roleDisplayText } from "@/lib/frontier/roles"
 
 /**
  * Human-readable explanation for why an action is denied.
@@ -21,11 +21,11 @@ import { roleName } from "@/lib/frontier/roles"
  * @returns  A string like "You need at least contributor access to do this."
  */
 export function denialMessage(minRoleLevel: number, currentLevel: number | null | undefined): string {
-  const minName = roleName(minRoleLevel)
+  const minName = roleDisplayText(roleName(minRoleLevel))
   if (currentLevel == null) {
     return `You need at least ${minName} access to do this.`
   }
-  const currentName = roleName(currentLevel)
+  const currentName = roleDisplayText(roleName(currentLevel))
   return `Your current role (${currentName}) does not have permission to do this. At least ${minName} is required.`
 }
 

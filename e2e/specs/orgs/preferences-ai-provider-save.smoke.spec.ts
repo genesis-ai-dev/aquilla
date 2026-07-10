@@ -1,47 +1,35 @@
 import { test, expect } from "../../helpers/multi-user"
 
 /**
- * PersonalProviderSection — "Save override" button enables when endpoint is filled.
+ * PersonalProviderSection — "Save override" validates endpoint on submit.
  *
- * PersonalProviderSection.tsx has:
- *   - Input id="prov-endpoint" (placeholder "https://openrouter.ai/api/v1")
- *   - Button "Save override" (disabled when endpoint is empty)
- *
- * When the endpoint input is non-empty, canSave = true and the button is enabled.
- * Clearing the input disables the button again.
- *
- * This spec: navigate to /preferences/provider-keys → expand the provider section →
- * fill the endpoint input → verify "Save override" is enabled →
- * clear the input → verify button is disabled.
+ * Submit stays enabled; clicking with an empty endpoint shows a validation error.
  */
-test("preferences AI provider Save override button enables when endpoint is filled", async ({
+test("preferences AI provider Save override validates empty endpoint on click", async ({
   alice,
 }) => {
   await alice.goto("/preferences/provider-keys")
   await alice.waitForLoadState("networkidle")
 
-  // Expand the personal provider section.
   const toggleBtn = alice.getByRole("button", { name: /AI provider \(advanced\)/i })
   await expect(toggleBtn).toBeVisible({ timeout: 10_000 })
   const endpointInput = alice.locator("#prov-endpoint")
   if (!(await endpointInput.isVisible().catch(() => false))) {
     await toggleBtn.click()
   }
-
-  // The endpoint input is visible.
   await expect(endpointInput).toBeVisible({ timeout: 3_000 })
 
-  // Save override button starts disabled (endpoint is empty).
   const saveBtn = alice.getByRole("button", { name: /Save override|Update override/i })
-  await expect(saveBtn).toBeDisabled({ timeout: 2_000 })
-
-  // Fill the endpoint.
-  await endpointInput.fill("https://openrouter.ai/api/v1")
-
-  // Save override button is now enabled.
   await expect(saveBtn).toBeEnabled({ timeout: 2_000 })
 
-  // Clear the endpoint — button disabled again.
+  await saveBtn.click()
+  await expect(alice.getByText(/endpoint url is required/i)).toBeVisible({ timeout: 2_000 })
+
+  await endpointInput.fill("https://openrouter.ai/api/v1")
+  await saveBtn.click()
+  await expect(alice.getByTestId("provider-override-saved")).toBeVisible({ timeout: 3_000 })
+
   await endpointInput.clear()
-  await expect(saveBtn).toBeDisabled({ timeout: 2_000 })
+  await saveBtn.click()
+  await expect(alice.getByText(/endpoint url is required/i)).toBeVisible({ timeout: 2_000 })
 })

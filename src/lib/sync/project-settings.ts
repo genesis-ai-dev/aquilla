@@ -79,6 +79,14 @@ export interface ProjectWideSettings {
    * See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
    */
   bibleResourcesEnabled?: boolean
+  /**
+   * DCS (Door43) external-upstream cursor (spec §8). Present when this project is
+   * a DCS-linked source/"adapter" project — pins it to a Door43 release so the
+   * freshness/delta engine can ask "am I out of date?". Written by the Door43
+   * importer; replacing this key replaces the whole cursor object.
+   * See docs/superpowers/specs/2026-07-06-dcs-importer-design.md §8.
+   */
+  dcsUpstream?: import("@/lib/dcs/types").DcsCursor
 }
 
 export interface ProjectSettingsResponse {

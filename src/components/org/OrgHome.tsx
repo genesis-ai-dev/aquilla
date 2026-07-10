@@ -7,6 +7,8 @@ import { useActiveOrg } from "@/context/OrgContext"
 import type { OrgSummary } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { portfolioActivityStatus } from "@/lib/project-status"
+import { ProjectDeadlineStatuses } from "@/components/ProjectStatus"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
@@ -19,11 +21,13 @@ import {
   sectionTintClass,
 } from "./SectionVisibilityBadge"
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
-import { ROLE } from "@/lib/frontier/roles"
+import { ROLE, roleDisplayText } from "@/lib/frontier/roles"
+import { RoleLabel } from "@/components/RoleLabel"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import { OrgSetupChecklist } from "./OrgSetupChecklist"
+import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import {
   Select,
@@ -34,6 +38,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Button, buttonVariants } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import {
   InputGroup,
   InputGroupAddon,
@@ -43,11 +48,77 @@ import {
 import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { Skeleton } from "@/components/ui/skeleton"
 import { FolderPlus, Search, X, Building2 } from "lucide-react"
 
-const STALE_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000
+function ProjectRowSkeleton() {
+  return (
+    <div className="flex items-center gap-4 p-4">
+      <div className="min-w-0 flex-1 space-y-2">
+        <Skeleton className="h-4 w-1/3" />
+        <Skeleton className="h-1.5 w-full rounded-full" />
+        <Skeleton className="h-1.5 w-full rounded-full" />
+      </div>
+      <div className="shrink-0 space-y-2 text-right">
+        <Skeleton className="ml-auto h-3 w-16" />
+        <Skeleton className="ml-auto h-3 w-16" />
+      </div>
+    </div>
+  )
+}
+
+function OrgHomeSkeleton({ isAllOrgs }: { isAllOrgs: boolean }) {
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="h-[88px] space-y-2 rounded-2xl border bg-card p-4">
+            <Skeleton className="h-3 w-16" />
+            <Skeleton className="h-6 w-10" />
+          </div>
+        ))}
+      </div>
+      {isAllOrgs ? (
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+          <section className="rounded-2xl border bg-card">
+            <div className="border-b px-4 py-3">
+              <Skeleton className="h-5 w-28" />
+            </div>
+            <div className="divide-y">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <ProjectRowSkeleton key={i} />
+              ))}
+            </div>
+          </section>
+          <section className="rounded-2xl border bg-card">
+            <div className="border-b px-4 py-3">
+              <Skeleton className="h-5 w-20" />
+            </div>
+            <div className="divide-y">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <ProjectRowSkeleton key={i} />
+              ))}
+            </div>
+          </section>
+        </div>
+      ) : (
+        <div className="rounded-2xl border divide-y">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <ProjectRowSkeleton key={i} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 
 type ActivityStatus = "not-started" | "stalled" | "active"
+
+/** @deprecated Import portfolioActivityStatus from @/lib/project-status */
+export function activityStatus(p: PortfolioProject, now: number): ActivityStatus {
+  return portfolioActivityStatus(p, now)
+}
 
 type StatusFilter = "all" | "stalled" | "overdue"
 
@@ -131,17 +202,6 @@ function isProjectLens(value: string | null | undefined): value is ProjectLens {
   return PROJECT_LENS_VALUES.includes(value as ProjectLens)
 }
 
-/**
- * A project that has never been edited and has no translated cells hasn't
- * stalled — it just hasn't started yet. "Stalled" is reserved for projects
- * that had activity and then went quiet for 14+ days.
- */
-export function activityStatus(p: PortfolioProject, now: number): ActivityStatus {
-  if (p.lastEditAt == null && p.filledCells === 0) return "not-started"
-  if (p.lastEditAt == null || now - p.lastEditAt > STALE_THRESHOLD_MS) return "stalled"
-  return "active"
-}
-
 function averagePct(projects: PortfolioProjectRow[], readPct: (project: PortfolioProjectRow) => number): number {
   return projects.length > 0 ? projects.reduce((sum, project) => sum + readPct(project), 0) / projects.length : 0
 }
@@ -151,7 +211,7 @@ function orgDisplayName(org: OrgSummary): string {
 }
 
 function roleLabel(org: OrgSummary): string {
-  return org.role.name.replace(/_/g, " ")
+  return roleDisplayText(org.role.name)
 }
 
 function formatShortDate(value: number | null): string {
@@ -254,20 +314,11 @@ function ProjectTable({
                 <span className="flex min-w-0 items-center gap-2">
                   <span className="truncate font-medium">{p.name}</span>
                   {showOrg && p.orgName && (
-                    <span className="max-w-[8rem] shrink-0 truncate rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    <Badge variant="secondary" className="max-w-[8rem] shrink-0 truncate">
                       {p.orgName}
-                    </span>
+                    </Badge>
                   )}
-                  {dstatus === "overdue" && (
-                    <span className="shrink-0 rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-medium text-destructive">
-                      Overdue
-                    </span>
-                  )}
-                  {dstatus === "soon" && (
-                    <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
-                      Due soon
-                    </span>
-                  )}
+                  <ProjectDeadlineStatuses deadline={dstatus} className="shrink-0" />
                 </span>
 
                 <span className="text-right font-medium tabular-nums text-foreground" aria-label={`${tpct}% translated`}>
@@ -280,7 +331,7 @@ function ProjectTable({
                   {apct}%
                 </span>
                 <span className="truncate text-right text-xs text-muted-foreground">
-                  {role?.name.replace(/_/g, " ") ?? "—"}
+                  {role?.name ? <RoleLabel name={role.name} /> : "—"}
                 </span>
                 <span
                   className={`truncate text-right text-xs ${
@@ -332,11 +383,11 @@ function SharedWithYouSection({
             >
               <p className="flex-1 min-w-0 truncate font-medium">{p.name}</p>
               {label && (
-                <span className="shrink-0 truncate rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                <Badge variant="secondary" className="shrink-0 truncate">
                   {label}
-                </span>
+                </Badge>
               )}
-              <span className="shrink-0 text-xs text-muted-foreground">{p.role.name}</span>
+              <RoleLabel name={p.role.name} className="shrink-0 text-xs text-muted-foreground" />
             </Link>
           )
         })}
@@ -596,6 +647,17 @@ export function OrgHome() {
   })
   const visible = sortProjectsByLens(filteredProjects, projectLens, now)
 
+  const statusFilteredProjects = projects.filter((p) => {
+    switch (statusFilter) {
+      case "stalled":
+        return activityStatus(p, now) === "stalled"
+      case "overdue":
+        return deadlineStatus(p, now) === "overdue"
+      default:
+        return true
+    }
+  })
+
   return (
     <AppShell
       sidebar={<OrgSidebar />}
@@ -605,9 +667,7 @@ export function OrgHome() {
           {activeOrgId != null ? (
             <ProjectCreateDialog orgId={activeOrgId} onCreated={handleCreated} />
           ) : (
-            <span className="rounded-full border bg-muted/40 px-3 py-1 text-xs text-muted-foreground">
-              Select an organization to create a project
-            </span>
+            <Badge variant="outline">Select an organization to create a project</Badge>
           )}
         </div>
       }
@@ -616,14 +676,7 @@ export function OrgHome() {
         <Page size="wide">
           <PageHeader title={workspaceLabel} />
           {isPageLoading ? (
-            <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className="h-[88px] animate-pulse rounded-2xl border bg-card" />
-                ))}
-              </div>
-              <div className="h-64 animate-pulse rounded-2xl border bg-card" />
-            </div>
+            <OrgHomeSkeleton isAllOrgs={isAllOrgs} />
           ) : error ? (
             <p className="text-sm text-destructive">{error}</p>
           ) : (
@@ -642,7 +695,7 @@ export function OrgHome() {
                             {inv.projects.map((p) => p.projectName).join(", ")}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            Invited by {inv.createdBy} as {inv.role.name.replace(/_/g, " ")}
+                            Invited by {inv.createdBy} as <RoleLabel name={inv.role.name} />
                             {inv.expiresAt ? ` · expires ${new Date(inv.expiresAt).toLocaleDateString()}` : ""}
                           </p>
                         </div>
@@ -711,13 +764,15 @@ export function OrgHome() {
 
                       {orgSummaries.length === 0 ? (
                         <EmptyState
-                          className="border-0 bg-transparent py-10"
+                          variant="inline"
+                          className="py-10"
                           icon={Building2}
                           title="No organizations yet."
                         />
                       ) : visibleOrgSummaries.length === 0 ? (
                         <EmptyState
-                          className="border-0 bg-transparent py-10"
+                          variant="inline"
+                          className="py-10"
                           icon={Search}
                           title="No matching organizations."
                         />
@@ -733,9 +788,9 @@ export function OrgHome() {
                               <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-2">
                                   <p className="truncate font-medium">{orgDisplayName(summary.org)}</p>
-                                  <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                  <Badge variant="secondary" className="shrink-0">
                                     {roleLabel(summary.org)}
-                                  </span>
+                                  </Badge>
                                 </div>
                                 <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
                                   <span>{summary.projectCount} project{summary.projectCount === 1 ? "" : "s"}</span>
@@ -834,13 +889,15 @@ export function OrgHome() {
 
                       {projects.length === 0 ? (
                         <EmptyState
-                          className="border-0 bg-transparent py-10"
+                          variant="inline"
+                          className="py-10"
                           icon={FolderPlus}
                           title="No projects yet."
                         />
                       ) : visible.length === 0 ? (
                         <EmptyState
-                          className="border-0 bg-transparent py-10"
+                          variant="inline"
+                          className="py-10"
                           icon={Search}
                           title={projectQuery ? "No matching projects." : currentProjectLens.empty}
                         />
@@ -879,84 +936,7 @@ export function OrgHome() {
                     />
                   </div>
 
-                  {/* Filter bar */}
-                  {projects.length > 0 && (
-                    <div className="flex w-full flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden">
-                      <InputGroup className="h-9 min-w-[12rem] flex-[1_1_13rem] max-w-52">
-                        <InputGroupAddon>
-                          <Search />
-                        </InputGroupAddon>
-                        <InputGroupInput
-                          type="text"
-                          value={projectQuery}
-                          onChange={(e) => setProjectQuery(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Escape") e.currentTarget.blur()
-                          }}
-                          placeholder="Filter projects…"
-                          aria-label="Filter projects by name"
-                          autoCorrect="off"
-                          autoCapitalize="none"
-                          spellCheck={false}
-                        />
-                        {projectQuery && (
-                          <InputGroupAddon align="inline-end">
-                            <InputGroupButton
-                              type="button"
-                              size="icon-xs"
-                              aria-label="Clear project filter"
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => setProjectQuery("")}
-                            >
-                              <X />
-                            </InputGroupButton>
-                          </InputGroupAddon>
-                        )}
-                      </InputGroup>
-                      <div className={projectControlGroupClassName}>
-                        <div className="flex items-center gap-2" aria-label="Project status filter">
-                          <span className="text-xs font-medium text-muted-foreground">Status</span>
-                          <div className="flex items-center gap-1">
-                            {STATUS_FILTERS.map((f) => (
-                              <Button
-                                key={f.value}
-                                type="button"
-                                size="xs"
-                                variant={statusFilter === f.value ? "default" : "secondary"}
-                                onClick={() => setStatusFilter(f.value)}
-                                aria-pressed={statusFilter === f.value}
-                              >
-                                {f.label}
-                              </Button>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2" aria-label="Project sort">
-                          <span className="text-xs font-medium text-muted-foreground">Sort by</span>
-                          <Select
-                            items={PROJECT_LENSES.map((lens) => ({ value: lens.value, label: lens.label }))}
-                            value={projectLens}
-                            onValueChange={handleProjectLensChange}
-                          >
-                            <SelectTrigger aria-label="Sort projects" size="sm" className="min-w-40 bg-background">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectGroup>
-                                {PROJECT_LENSES.map((lens) => (
-                                  <SelectItem key={lens.value} value={lens.value}>
-                                    {lens.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectGroup>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Project directory */}
+                  {/* Status filter + admin-style project table */}
                   {projects.length === 0 ? (
                     <EmptyState
                       icon={FolderPlus}
@@ -973,15 +953,36 @@ export function OrgHome() {
                         </div>
                       }
                     />
-                  ) : visible.length === 0 ? (
-                    <EmptyState
-                      className="border-0 bg-transparent py-6"
-                      icon={Search}
-                      title="No matching projects."
-                    />
                   ) : (
-                    <div className="overflow-hidden rounded-2xl border bg-card">
-                      <ProjectTable projects={visible} now={now} showOrg={false} roleByProjectId={roleByProjectId} />
+                    <div className="flex flex-col gap-3">
+                      <div className="flex flex-wrap items-center gap-1" aria-label="Project status filter">
+                        {STATUS_FILTERS.map((f) => (
+                          <Button
+                            key={f.value}
+                            type="button"
+                            size="xs"
+                            variant={statusFilter === f.value ? "default" : "secondary"}
+                            onClick={() => setStatusFilter(f.value)}
+                            aria-pressed={statusFilter === f.value}
+                          >
+                            {f.label}
+                          </Button>
+                        ))}
+                      </div>
+
+                      <OrgProjectsDataTable
+                        projects={statusFilteredProjects}
+                        now={now}
+                        roleByProjectId={roleByProjectId}
+                        initialLens={projectLens}
+                        emptyTitle={
+                          statusFilter === "stalled"
+                            ? "No stalled projects."
+                            : statusFilter === "overdue"
+                              ? "No overdue projects."
+                              : "No projects yet."
+                        }
+                      />
                     </div>
                   )}
 

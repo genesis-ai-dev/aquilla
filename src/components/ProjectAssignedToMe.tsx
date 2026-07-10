@@ -10,6 +10,7 @@
 
 import { useEffect, useState, useCallback } from "react"
 import { ChevronDown, ChevronRight, ClipboardList } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { getMyAssignments, type MyAssignment } from "@/lib/sync/assignments"
@@ -68,9 +69,7 @@ export function ProjectAssignedToMe({
         <ClipboardList className="h-3 w-3 shrink-0" />
         <span className="truncate">My assignments</span>
         {assignments.length > 0 && (
-          <span className="ml-auto shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-            {assignments.length}
-          </span>
+          <Badge className="ml-auto shrink-0">{assignments.length}</Badge>
         )}
       </button>
 

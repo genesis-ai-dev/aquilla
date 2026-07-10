@@ -263,7 +263,8 @@ export function RulesSurface({
               )}
               {orgRules.length === 0 ? (
                 <EmptyState
-                  className="border-0 bg-transparent px-0 py-4"
+                  variant="inline"
+                  className="px-0 py-4"
                   icon={Building2}
                   title="No org-level rules yet"
                   description="Add one or promote a project rule."
@@ -390,7 +391,8 @@ export function RulesSurface({
           <CardContent>
             {userRules.length === 0 ? (
               <EmptyState
-                className="border-0 bg-transparent px-0 py-4"
+                variant="inline"
+                className="px-0 py-4"
                 icon={ScrollText}
                 title="No project rules yet"
                 description={

@@ -110,7 +110,8 @@ export function SearchResultsView({
       <div className="flex-1 overflow-y-auto">
         {results.length === 0 ? (
           <EmptyState
-            className="h-full border-0 bg-transparent"
+            variant="inline"
+            className="h-full"
             icon={Search}
             title="No results"
           />

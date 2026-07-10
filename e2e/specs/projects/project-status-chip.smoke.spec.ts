@@ -8,17 +8,10 @@ function isoDateOffset(days: number): string {
 }
 
 /**
- * ProjectOverview — StatusChip shows "Due soon" / "Overdue".
+ * ProjectOverview — deadline urgency ("Due soon" / "Overdue") shows on the
+ * Deadline card only (not duplicated in the header).
  *
- * ProjectOverview.tsx renders a StatusChip (data-testid="status-chip") next
- * to the project title in the overview header. It only renders when:
- *   - "on-track"  → deadline > 7 days away
- *   - "due-soon"  → deadline within the next 7 days
- *   - "overdue"   → deadline is in the past
- *   - "no-deadline" → chip hidden
- *
- * This spec sets a past deadline to trigger "Overdue" and verifies the
- * chip text + testid.
+ * data-testid="status-chip" is on the Deadline card chip when overdue or due soon.
  */
 test("status chip shows Overdue when deadline is in the past", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -46,7 +39,7 @@ test("status chip shows Overdue when deadline is in the past", async ({ alice })
   await expect(saveBtn).toBeEnabled()
   await saveBtn.click()
 
-  // The StatusChip (data-testid="status-chip") should now show "Overdue".
+  // The deadline card chip should now show "Overdue".
   const chip = alice.locator('[data-testid="status-chip"]')
   await expect(chip).toBeVisible({ timeout: 10_000 })
   await expect(chip).toHaveText(/Overdue/i)
@@ -75,7 +68,7 @@ test("status chip shows Due soon when deadline is within 7 days", async ({ alice
   await expect(saveBtn).toBeEnabled()
   await saveBtn.click()
 
-  // The StatusChip should show "Due soon".
+  // The deadline card chip should show "Due soon".
   const chip = alice.locator('[data-testid="status-chip"]')
   await expect(chip).toBeVisible({ timeout: 10_000 })
   await expect(chip).toHaveText(/Due soon/i)

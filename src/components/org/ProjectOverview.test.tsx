@@ -349,6 +349,7 @@ describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
       validatedAudioCells: 0,
       aiDraftedCells: 0,
       audioCells: 60,
+      validatedAudioCells: 0,
       recordedMs: 90000, lastEditAt: null, deadlineAt: null,
     }])
     renderOverview()

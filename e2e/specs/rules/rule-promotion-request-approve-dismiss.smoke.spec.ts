@@ -53,7 +53,7 @@ test("Org owner can dismiss a rule promotion request", async ({ alice, bob }) =>
   await expect(nameInput).toBeVisible({ timeout: 5_000 })
   await nameInput.fill(ruleName)
 
-  // Pattern is required — "Create rule" stays disabled without it.
+  // Pattern is required for a valid rule.
   const patInput = bob.locator("#re-pat")
   await expect(patInput).toBeVisible({ timeout: 3_000 })
   await patInput.fill("test-pattern")

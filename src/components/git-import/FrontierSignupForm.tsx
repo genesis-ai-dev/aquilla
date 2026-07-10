@@ -1,4 +1,6 @@
-import { useState, useEffect, type FormEvent } from "react"
+import { useEffect, useState } from "react"
+import { useForm } from "@tanstack/react-form"
+import { z } from "zod"
 import { Button } from "@/components/ui/button"
 import {
   Field,
@@ -9,8 +11,11 @@ import {
 import { Input } from "@/components/ui/input"
 import { Check, X } from "lucide-react"
 import { RevealableInput } from "@/components/ui/revealable-input"
+import { Spinner } from "@/components/ui/spinner"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { FrontierAuthError } from "@/lib/frontier/auth"
+import { isFieldInvalid } from "@/lib/forms/field-state"
+import { useSubmitError } from "@/lib/forms/submit-error"
 
 /** Pure function — exported for unit testing. */
 export function checkPasswordRequirements(password: string, email: string) {
@@ -56,7 +61,7 @@ function PasswordChecklist({ password, email }: { password: string; email: strin
   ]
 
   return (
-    <div className="mt-1.5 space-y-1">
+    <div className="mt-1.5 flex flex-col gap-1">
       {items.map(({ key, label }) => {
         const ok = checks[key]
         return (
@@ -71,7 +76,7 @@ function PasswordChecklist({ password, email }: { password: string; email: strin
         )
       })}
       {hasTyped && (
-        <div className="mt-1 space-y-0.5">
+        <div className="mt-1 flex flex-col gap-0.5">
           <div className="h-1 w-full rounded bg-muted overflow-hidden">
             <div className={`h-full rounded transition-all ${strengthColor} ${strengthWidth}`} />
           </div>
@@ -82,23 +87,56 @@ function PasswordChecklist({ password, email }: { password: string; email: strin
   )
 }
 
-export function FrontierSignupForm({
-  onSuccess,
-  initialEmail,
-}: {
-  onSuccess: () => void
-  /** AQU-338: seed the email field (e.g. the recipient email an invite is
-   *  bound to). Optional — omit for the plain signup surface. */
-  initialEmail?: string | null
-}) {
+const signupSchema = z
+  .object({
+    username: z
+      .string()
+      .trim()
+      .min(3, "Username must be at least 3 characters")
+      .max(50, "Username must be at most 50 characters"),
+    email: z
+      .string()
+      .trim()
+      .min(1, "Email is required")
+      .email("Enter a valid email address"),
+    password: z.string().min(1, "Password is required"),
+  })
+  .superRefine((data, ctx) => {
+    const checks = checkPasswordRequirements(data.password, data.email)
+    if (!checks.minLength) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Password must be at least 8 characters",
+        path: ["password"],
+      })
+    }
+    if (!checks.notContainsEmail) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Password must not contain your email",
+        path: ["password"],
+      })
+    }
+  })
+
+export function FrontierSignupForm({ onSuccess }: { onSuccess: () => void }) {
   const { register } = useFrontierSession()
-  const [username, setUsername] = useState("")
-  const [email, setEmail] = useState(initialEmail ?? "")
-  const [emailEdited, setEmailEdited] = useState(false)
-  const [password, setPassword] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
   const [isOnline, setIsOnline] = useState(() => navigator.onLine)
+
+  const form = useForm({
+    defaultValues: { username: "", email: "", password: "" },
+    validators: { onSubmit: signupSchema },
+    onSubmit: async ({ value }) => {
+      clearSubmitError()
+      try {
+        await register(value.username.trim(), value.email.trim(), value.password)
+        onSuccess()
+      } catch (err) {
+        setSubmitError(err instanceof FrontierAuthError ? err.message : "Sign up failed")
+      }
+    },
+  })
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true)
@@ -111,81 +149,97 @@ export function FrontierSignupForm({
     }
   }, [])
 
-  // AQU-338: the invite preview can resolve after this form mounts, so adopt a
-  // late-arriving prefill — but stop once the user edits the field, so we never
-  // clobber what they typed.
-  useEffect(() => {
-    if (!emailEdited && initialEmail) setEmail(initialEmail)
-  }, [initialEmail, emailEdited])
-
-  // Server enforces: username 3-50 chars, email format, password >= 8 chars.
-  const usernameOk = username.trim().length >= 3 && username.trim().length <= 50
-  const emailOk = /.+@.+\..+/.test(email.trim())
-  const pwChecks = checkPasswordRequirements(password, email)
-  const passwordOk = pwChecks.minLength && pwChecks.notContainsEmail
-  const canSubmit = usernameOk && emailOk && passwordOk && !busy && isOnline
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault()
-    setError(null)
-    setBusy(true)
-    try {
-      await register(username.trim(), email.trim(), password)
-      onSuccess()
-    } catch (err) {
-      setError(err instanceof FrontierAuthError ? err.message : "Sign up failed")
-    } finally {
-      setBusy(false)
-    }
-  }
-
   return (
-    <form onSubmit={onSubmit} className="space-y-3">
+    <form
+      id="signup-form"
+      onSubmit={(e) => {
+        e.preventDefault()
+        void form.handleSubmit()
+      }}
+      className="flex flex-col gap-3"
+    >
       {!isOnline && (
         <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
           You're offline — connect to sign in
         </p>
       )}
       <FieldGroup>
-        <Field>
-          <FieldLabel htmlFor="s-user">Username</FieldLabel>
-          <Input
-            id="s-user"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            autoComplete="username"
-            minLength={3}
-            maxLength={50}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="s-email">Email</FieldLabel>
-          <Input
-            id="s-email"
-            type="email"
-            value={email}
-            onChange={(e) => {
-              setEmail(e.target.value)
-              setEmailEdited(true)
-            }}
-            autoComplete="email"
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="s-pass">Password</FieldLabel>
-          <RevealableInput
-            id="s-pass"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="new-password"
-            minLength={8}
-          />
-          <PasswordChecklist password={password} email={email} />
-        </Field>
+        <form.Field
+          name="username"
+          children={(field) => {
+            const invalid = isFieldInvalid(field)
+            return (
+              <Field data-invalid={invalid}>
+                <FieldLabel htmlFor="s-user">Username</FieldLabel>
+                <Input
+                  id="s-user"
+                  name={field.name}
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                  aria-invalid={invalid}
+                  autoComplete="username"
+                  maxLength={50}
+                />
+                {invalid && <FieldError errors={field.state.meta.errors} />}
+              </Field>
+            )
+          }}
+        />
+        <form.Field
+          name="email"
+          children={(field) => {
+            const invalid = isFieldInvalid(field)
+            return (
+              <Field data-invalid={invalid}>
+                <FieldLabel htmlFor="s-email">Email</FieldLabel>
+                <Input
+                  id="s-email"
+                  name={field.name}
+                  type="email"
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                  aria-invalid={invalid}
+                  autoComplete="email"
+                />
+                {invalid && <FieldError errors={field.state.meta.errors} />}
+              </Field>
+            )
+          }}
+        />
+        <form.Subscribe
+          selector={(state) => state.values.email}
+          children={(email) => (
+            <form.Field
+              name="password"
+              children={(field) => {
+                const invalid = isFieldInvalid(field)
+                return (
+                  <Field data-invalid={invalid}>
+                    <FieldLabel htmlFor="s-pass">Password</FieldLabel>
+                    <RevealableInput
+                      id="s-pass"
+                      name={field.name}
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      aria-invalid={invalid}
+                      autoComplete="new-password"
+                    />
+                    <PasswordChecklist password={field.state.value} email={email} />
+                    {invalid && <FieldError errors={field.state.meta.errors} />}
+                  </Field>
+                )
+              }}
+            />
+          )}
+        />
       </FieldGroup>
-      {error && <FieldError>{error}</FieldError>}
-      <Button type="submit" disabled={!canSubmit} className="w-full">
-        {busy ? "Creating account…" : "Create account"}
+      {submitError && <FieldError>{submitError}</FieldError>}
+      <Button type="submit" form="signup-form" className="w-full">
+        {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
+        {form.state.isSubmitting ? "Creating account…" : "Create account"}
       </Button>
     </form>
   )

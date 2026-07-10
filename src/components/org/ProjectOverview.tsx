@@ -42,6 +42,7 @@ import {
   sectionTintClass,
 } from "./SectionVisibilityBadge"
 import { Badge } from "@/components/ui/badge"
+import { ProjectDeadlineStatuses, ProjectStatusChip } from "@/components/ProjectStatus"
 import {
   Dialog,
   DialogContent,
@@ -62,9 +63,52 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Skeleton } from "@/components/ui/skeleton"
 
 /** Max per-file rows shown on the overview; the rest are counted as "+N more". */
 const FILE_ROW_CAP = 12
+
+function ProjectOverviewSkeleton() {
+  return (
+    <div className="max-w-5xl space-y-4">
+      <div className="rounded-xl border bg-card shadow-sm p-6 space-y-2">
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-6 w-48" />
+          <Skeleton className="h-5 w-16 rounded-full" />
+        </div>
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="h-4 w-20" />
+      </div>
+      <div className="rounded-xl border bg-card shadow-sm p-5 space-y-4">
+        <Skeleton className="h-3 w-20" />
+        <div className="flex flex-wrap gap-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-14 w-24 rounded-lg" />
+          ))}
+        </div>
+        <div className="space-y-2.5">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-2.5 w-full rounded-full" />
+          ))}
+        </div>
+      </div>
+      <div className="rounded-xl border bg-card shadow-sm p-5 space-y-3">
+        <Skeleton className="h-3 w-16" />
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-3">
+            <Skeleton className="h-4 w-36" />
+            <Skeleton className="h-1.5 flex-1 rounded-full" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+        ))}
+      </div>
+      <div className="rounded-xl border bg-card shadow-sm p-5 space-y-2">
+        <Skeleton className="h-3 w-20" />
+        <Skeleton className="h-4 w-40" />
+      </div>
+    </div>
+  )
+}
 
 // ── Status chip ──────────────────────────────────────────────────────────────
 
@@ -92,30 +136,16 @@ export function deriveProjectStatus(
 }
 
 function StatusChip({ status }: { status: ProjectStatus }) {
-  if (status === "no-deadline") return null
-  const map: Record<Exclude<ProjectStatus, "no-deadline">, { label: string; cls: string }> = {
-    "on-track": { label: "On track", cls: "border-transparent bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" },
-    "due-soon": { label: "Due soon", cls: "border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300" },
-    "overdue":  { label: "Overdue",  cls: "border-transparent bg-destructive/10 text-destructive" },
-  }
-  const { label, cls } = map[status as Exclude<ProjectStatus, "no-deadline">]
-  return (
-    <Badge className={cls} data-testid="status-chip">
-      {label}
-    </Badge>
-  )
+  // Overdue / due-soon live only on the Deadline card — avoid duplicating them in the header.
+  if (status === "no-deadline" || status === "overdue" || status === "due-soon") return null
+  return <ProjectStatusChip kind="on-track" testId="status-chip" />
 }
 
 // ── Deadline chip ─────────────────────────────────────────────────────────────
 
 function DeadlineChip({ status }: { status: "overdue" | "soon" | "ok" | null }) {
-  if (!status) return null
-  const map = {
-    ok:      { cls: "border-transparent bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" },
-    soon:    { cls: "border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300" },
-    overdue: { cls: "border-transparent bg-destructive/10 text-destructive" },
-  }
-  return <Badge className={map[status].cls}>{status === "overdue" ? "Overdue" : status === "soon" ? "Due soon" : "On track"}</Badge>
+  if (status === "ok") return <ProjectStatusChip kind="on-track" />
+  return <ProjectDeadlineStatuses deadline={status} testId="status-chip" />
 }
 
 // ── Stat tiles (big %) ────────────────────────────────────────────────────────
@@ -704,7 +734,7 @@ export function ProjectOverview() {
 
   const nonReadyContent =
     status === "loading" ? (
-      <p className="text-sm text-muted-foreground">Loading…</p>
+      <ProjectOverviewSkeleton />
     ) : status === "unreachable" ? (
       <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950">
         <span className="text-amber-800 dark:text-amber-200">
@@ -762,9 +792,7 @@ export function ProjectOverview() {
                       <h1 className="text-xl font-semibold leading-tight truncate">{project?.name}</h1>
                       {/* Compact status chip next to the title */}
                       <StatusChip status={projectStatus} />
-                      {isArchived && (
-                        <Badge variant="secondary" className="shrink-0">Archived</Badge>
-                      )}
+                      {isArchived && <ProjectStatusChip kind="archived" className="shrink-0" />}
                       {!isArchived && isFrozen && (
                         <Badge
                           className="shrink-0 border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"

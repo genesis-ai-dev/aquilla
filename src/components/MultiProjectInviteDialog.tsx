@@ -14,12 +14,14 @@ import {
   ROLE,
   PROJECT_ROLE_OPTIONS,
   roleName,
+  roleDisplayText,
   type RoleLevel,
 } from "@/lib/frontier/roles"
 import { addProjectMember, lookupUser } from "@/lib/frontier/members"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead"
+import { RoleLabel } from "@/components/RoleLabel"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
 interface MultiProjectInviteDialogProps {
@@ -71,8 +73,6 @@ export function MultiProjectInviteDialog({
 
   const selectedIds = useMemo(() => Object.keys(selections), [selections])
   const isEmailMode = recipient.mode === "email"
-  const canSubmit =
-    !busy && recipient.raw.trim().length > 0 && selectedIds.length > 0 && Boolean(session?.jwt)
   // Email mode: no server action — guide the operator to per-project Share panels.
   const canShowEmailGuide = isEmailMode && selectedIds.length > 0
 
@@ -93,7 +93,18 @@ export function MultiProjectInviteDialog({
   }
 
   async function handleInvite() {
-    if (!session?.jwt) return
+    if (!session?.jwt) {
+      setTopError("Sign in to invite collaborators.")
+      return
+    }
+    if (!recipient.raw.trim()) {
+      setTopError("Enter a username or email.")
+      return
+    }
+    if (selectedIds.length === 0) {
+      setTopError("Select at least one project.")
+      return
+    }
     setBusy(true)
     setTopError(null)
     setPerProjectError({})
@@ -236,7 +247,7 @@ export function MultiProjectInviteDialog({
                           <Select
                             items={roleChoices.map((r) => ({
                               value: String(r.level),
-                              label: r.name,
+                              label: roleDisplayText(r.name),
                             }))}
                             value={String(selections[p.id])}
                             onValueChange={(v) =>
@@ -255,7 +266,7 @@ export function MultiProjectInviteDialog({
                               <SelectGroup>
                                 {roleChoices.map((r) => (
                                   <SelectItem key={r.level} value={String(r.level)}>
-                                    {r.name}
+                                    <RoleLabel name={r.name} />
                                   </SelectItem>
                                 ))}
                               </SelectGroup>
@@ -284,7 +295,7 @@ export function MultiProjectInviteDialog({
                   <>
                     {" "}— roles:{" "}
                     {[...new Set(selectedIds.map((id) => selections[id]!))]
-                      .map((lvl) => roleName(lvl))
+                      .map((lvl) => roleDisplayText(roleName(lvl)))
                       .join(", ")}
                   </>
                 )}
@@ -331,7 +342,7 @@ export function MultiProjectInviteDialog({
               {done ? "Close" : "Cancel"}
             </Button>
             {!isEmailMode && (
-              <Button onClick={handleInvite} disabled={!canSubmit}>
+              <Button onClick={handleInvite} disabled={busy}>
                 {busy ? (
                   <>
                     <Spinner className="mr-1" />

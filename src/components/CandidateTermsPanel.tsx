@@ -21,13 +21,7 @@
 import { ArrowUpRight, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
+import { EmptyState } from "@/components/ui/empty"
 import {
   Tooltip,
   TooltipContent,
@@ -71,15 +65,14 @@ export function CandidateTermsPanel({
 }: CandidateTermsPanelProps) {
   if (candidates.length === 0) {
     return (
-      <Empty className="rounded-lg py-10">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <Sparkles />
-          </EmptyMedia>
-          <EmptyTitle className="sr-only">No candidate terms</EmptyTitle>
-          <EmptyDescription>No candidate terms found in the loaded cells.</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      <EmptyState
+        variant="panel"
+        className="rounded-lg py-10"
+        icon={Sparkles}
+        title="No candidate terms"
+        titleClassName="sr-only"
+        description="No candidate terms found in the loaded cells."
+      />
     )
   }
 

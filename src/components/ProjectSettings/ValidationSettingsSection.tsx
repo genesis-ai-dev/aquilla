@@ -11,7 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
-import { VALIDATION_FLOOR_ROLE_OPTIONS } from "@/lib/frontier/roles"
+import { VALIDATION_FLOOR_ROLE_OPTIONS, roleDisplayText } from "@/lib/frontier/roles"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 type ValidationRoleFloor = NonNullable<ProjectRecord["validationRoleFloor"]>
@@ -25,7 +25,7 @@ type ValidationRoleFloor = NonNullable<ProjectRecord["validationRoleFloor"]>
 const ROLE_OPTIONS: { value: ValidationRoleFloor; label: string }[] =
   VALIDATION_FLOOR_ROLE_OPTIONS.map((o) => ({
     value: o.name as ValidationRoleFloor,
-    label: o.name,
+    label: roleDisplayText(o.name),
   }))
 
 interface Props {

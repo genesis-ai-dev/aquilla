@@ -3,6 +3,7 @@ import { AlertTriangle, HelpCircle, FolderOpen, Users } from "lucide-react"
 import { useProjectsMembersMatrix } from "@/hooks/useProjectsMembersMatrix"
 import { useOrg } from "@/hooks/useOrg"
 import { ROLE } from "@/lib/frontier/roles"
+import { RoleLabel } from "@/components/RoleLabel"
 import { MembersMatrixCellEditor } from "./MembersMatrixCellEditor"
 import { MemberAccessDrillDown } from "./MemberAccessDrillDown"
 import { AccessModelLegend } from "./AccessModelLegend"
@@ -202,8 +203,8 @@ function ProjectHeaderCell({
           </AppTooltip>
         )}
       </div>
-      <div className="mt-0.5 text-[10px] capitalize text-muted-foreground">
-        {project.role?.name?.replace(/_/g, " ") ?? ""}
+      <div className="mt-0.5 text-[10px] text-muted-foreground">
+        {project.role?.name ? <RoleLabel name={project.role.name} /> : ""}
       </div>
     </TableHead>
   )

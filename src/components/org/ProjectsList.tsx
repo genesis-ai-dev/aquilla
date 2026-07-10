@@ -13,6 +13,7 @@ import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 import { attentionRank, deadlineStatus, getPortfolios, translatedPct, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { UserError } from "@/lib/errors/user-error"
 import { buttonVariants, Button } from "@/components/ui/button"
+import { RoleLabel } from "@/components/RoleLabel"
 import { Badge } from "@/components/ui/badge"
 import {
   InputGroup,
@@ -165,7 +166,7 @@ function ProjectRow({
         </span>
 
         {/* Role */}
-        <span className="shrink-0 justify-self-start text-xs text-muted-foreground">{p.role.name}</span>
+        <RoleLabel name={p.role.name} className="shrink-0 justify-self-start text-xs text-muted-foreground" />
       </button>
     </li>
   )

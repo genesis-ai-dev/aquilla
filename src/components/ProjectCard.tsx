@@ -11,6 +11,7 @@ import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useProjectHealth } from "@/hooks/useProjectHealth"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { roleName } from "@/lib/frontier/roles"
+import { RoleLabel } from "@/components/RoleLabel"
 
 /**
  * Has this project ever lived server-side? Two signals:
@@ -130,8 +131,8 @@ export function ProjectCard({
             )}
             {!isTrashed && myRoleLabel && (
               <AppTooltip content="Your role on this project">
-                <Badge variant="secondary" className="capitalize">
-                  {myRoleLabel.replace(/_/g, " ")}
+                <Badge variant="secondary">
+                  <RoleLabel name={myRoleLabel} />
                 </Badge>
               </AppTooltip>
             )}

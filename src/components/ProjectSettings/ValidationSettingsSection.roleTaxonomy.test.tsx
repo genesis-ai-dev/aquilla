@@ -11,7 +11,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { render } from "@testing-library/react"
 import { ValidationSettingsSection } from "./ValidationSettingsSection"
-import { roleName } from "@/lib/frontier/roles"
+import { roleDisplayText, roleName } from "@/lib/frontier/roles"
 
 function renderFloor(validationRoleFloor: "reviewer" | "project_lead" | "maintainer") {
   return render(
@@ -33,22 +33,21 @@ function floorValueText(container: HTMLElement): string {
 }
 
 describe("ValidationSettingsSection — validator-role taxonomy (AQU-352)", () => {
-  it("shows the canonical role name for project_lead, not 'Project Lead'", () => {
+  it("shows the capitalized canonical role name for project_lead", () => {
     const { container } = renderFloor("project_lead")
     const text = floorValueText(container)
-    expect(text).toContain(roleName(500)) // "project_lead"
-    expect(text).not.toMatch(/Project Lead/)
+    expect(text).toContain(roleDisplayText(roleName(500))) // "Project Lead"
   })
 
-  it("shows 'reviewer' without a '(default)' suffix baked into the label", () => {
+  it("shows 'Reviewer' without a '(default)' suffix baked into the label", () => {
     const { container } = renderFloor("reviewer")
     const text = floorValueText(container)
-    expect(text).toContain(roleName(300)) // "reviewer"
+    expect(text).toContain(roleDisplayText(roleName(300))) // "Reviewer"
     expect(text).not.toMatch(/\(default\)/)
   })
 
-  it("shows the canonical name for maintainer", () => {
+  it("shows the capitalized canonical name for maintainer", () => {
     const { container } = renderFloor("maintainer")
-    expect(floorValueText(container)).toContain(roleName(600)) // "maintainer"
+    expect(floorValueText(container)).toContain(roleDisplayText(roleName(600))) // "Maintainer"
   })
 })

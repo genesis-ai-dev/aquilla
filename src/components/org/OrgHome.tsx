@@ -21,7 +21,8 @@ import {
   sectionTintClass,
 } from "./SectionVisibilityBadge"
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
-import { ROLE } from "@/lib/frontier/roles"
+import { ROLE, roleDisplayText } from "@/lib/frontier/roles"
+import { RoleLabel } from "@/components/RoleLabel"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
@@ -210,7 +211,7 @@ function orgDisplayName(org: OrgSummary): string {
 }
 
 function roleLabel(org: OrgSummary): string {
-  return org.role.name.replace(/_/g, " ")
+  return roleDisplayText(org.role.name)
 }
 
 function formatShortDate(value: number | null): string {
@@ -330,7 +331,7 @@ function ProjectTable({
                   {apct}%
                 </span>
                 <span className="truncate text-right text-xs text-muted-foreground">
-                  {role?.name.replace(/_/g, " ") ?? "—"}
+                  {role?.name ? <RoleLabel name={role.name} /> : "—"}
                 </span>
                 <span
                   className={`truncate text-right text-xs ${
@@ -386,7 +387,7 @@ function SharedWithYouSection({
                   {label}
                 </Badge>
               )}
-              <span className="shrink-0 text-xs text-muted-foreground">{p.role.name}</span>
+              <RoleLabel name={p.role.name} className="shrink-0 text-xs text-muted-foreground" />
             </Link>
           )
         })}
@@ -694,7 +695,7 @@ export function OrgHome() {
                             {inv.projects.map((p) => p.projectName).join(", ")}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            Invited by {inv.createdBy} as {inv.role.name.replace(/_/g, " ")}
+                            Invited by {inv.createdBy} as <RoleLabel name={inv.role.name} />
                             {inv.expiresAt ? ` · expires ${new Date(inv.expiresAt).toLocaleDateString()}` : ""}
                           </p>
                         </div>

@@ -36,7 +36,9 @@ import {
   ROLE,
   LINK_ROLE_OPTIONS,
   PROJECT_ROLE_OPTIONS,
+  roleDisplayText,
 } from "@/lib/frontier/roles"
+import { RoleLabel } from "@/components/RoleLabel"
 import type { ProjectMember } from "@/lib/frontier/members"
 import { toUserFacingError } from "@/lib/errors/user-error"
 
@@ -202,7 +204,7 @@ export function MembersTab({
       >
         <span className="font-medium">{m.username}</span>
         <SourceBadge source={m.role.source} />
-        <span className="text-xs text-muted-foreground">{m.role.name}</span>
+        <RoleLabel name={m.role.name} className="text-xs text-muted-foreground" />
 
         {/* Secondary sources */}
         {m.secondarySources && m.secondarySources.length > 0 && (
@@ -221,10 +223,10 @@ export function MembersTab({
                 // role name instead of the raw level.
                 ...(grantableRoles.some((r) => r.level === m.role.level)
                   ? []
-                  : [{ value: String(m.role.level), label: m.role.name }]),
+                  : [{ value: String(m.role.level), label: roleDisplayText(m.role.name) }]),
                 ...grantableRoles.map((r) => ({
                   value: String(r.level),
-                  label: r.name,
+                  label: roleDisplayText(r.name),
                 })),
               ]}
               value={String(m.role.level)}
@@ -409,7 +411,7 @@ export function MembersTab({
           <Select
             items={grantableRoles.map((r) => ({
               value: String(r.level),
-              label: r.name,
+              label: roleDisplayText(r.name),
             }))}
             value={String(newRole)}
             onValueChange={(v) => setNewRole(parseInt(v ?? "", 10))}
@@ -726,7 +728,7 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
           <Select
             items={LINK_ROLE_OPTIONS.map((opt) => ({
               value: String(opt.level),
-              label: opt.name,
+              label: roleDisplayText(opt.name),
             }))}
             value={String(inviteRole)}
             onValueChange={(v) => setInviteRole(Number(v ?? ""))}
@@ -739,7 +741,7 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
               <SelectGroup>
                 {LINK_ROLE_OPTIONS.map((opt) => (
                   <SelectItem key={opt.level} value={String(opt.level)}>
-                    {opt.name}
+                    <RoleLabel name={opt.name} />
                   </SelectItem>
                 ))}
               </SelectGroup>
@@ -867,7 +869,7 @@ function GrantPathRow({
       <span className={cn("font-medium capitalize", removable ? "text-foreground" : "text-muted-foreground")}>
         {source}
       </span>
-      <span className="text-muted-foreground">→ {name} (level {level})</span>
+      <span className="text-muted-foreground">→ <RoleLabel name={name} /> (level {level})</span>
       {removable ? (
         <span className="text-xs text-destructive/70">will be removed</span>
       ) : (

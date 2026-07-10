@@ -24,6 +24,7 @@ import { OrgInviteByEmail } from "@/components/org/OrgInviteByEmail"
 import { MemberAccessRow } from "@/components/org/MemberAccessPanel"
 import { ExternalCollaboratorsSection } from "@/components/org/ExternalCollaboratorsSection"
 import { ROLE, ORG_ROLE_PICKER, roleName } from "@/lib/frontier/roles"
+import { RoleLabel } from "@/components/RoleLabel"
 import { formatRelativeTime } from "@/lib/time/relative"
 import type { OrgMemberProject, PendingOrgInvite } from "@/lib/frontier/orgs"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -410,9 +411,7 @@ function PendingInviteRow({
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="font-medium truncate">{invite.projectName}</span>
           <span className="text-muted-foreground">·</span>
-          <span className="capitalize text-muted-foreground">
-            {invite.role.name.replace(/_/g, " ")}
-          </span>
+          <RoleLabel name={invite.role.name} className="text-muted-foreground" />
           {invite.email ? (
             <AppTooltip content="Targeted invite: sign-up form will be prefilled with this email">
               <span className="rounded bg-blue-500/15 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 text-[9px] font-mono">

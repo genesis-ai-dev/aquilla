@@ -1331,7 +1331,9 @@ case 'cell.audio.attach': {
               event.serverTs,
             ),
         )
-        return ['cells']
+        if (!opts?.deferFileCounters)
+          stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
+        return ['cells', 'files']
       }
 
       const value = p.value ?? ''

@@ -34,9 +34,15 @@
 // contract).
 
 import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
-import { buildEventProjectionStmts, contentHash, type PersistedEvent } from './event-projection'
+import {
+  buildEventProjectionStmts,
+  contentHash,
+  fileCountersRecomputeStmt,
+  type PersistedEvent,
+} from './event-projection'
 import { buildBulkEventInsertStmt, allocateSeqRange, type SeqEventInsertRow } from './event-insert'
 import type { EventPayloads } from './types'
+import { fullProgressRecomputeStmts } from './progress-projection'
 
 const BATCH_LIMIT = 100
 const MIRROR_AUTHOR = 'link-sync'
@@ -1008,16 +1014,10 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
     touchedFiles.add(downstreamFileIdOf.get(upstreamFileId)!)
   }
   for (const fileId of touchedFiles) {
-    await db
-      .prepare(
-        `UPDATE files SET
-           cell_count = (SELECT COUNT(DISTINCT cell_id) FROM cells WHERE project_id = ? AND file_id = ?),
-           word_count = (SELECT COALESCE(SUM(word_count), 0) FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target'),
-           updated_at = ?
-         WHERE id = ? AND project_id = ?`,
-      )
-      .bind(downstreamProjectId, fileId, downstreamProjectId, fileId, now, fileId, downstreamProjectId)
-      .run()
+    await db.batch([
+      fileCountersRecomputeStmt(db, downstreamProjectId, fileId, now),
+      ...fullProgressRecomputeStmts(db, downstreamProjectId, fileId, now),
+    ])
   }
 
   // Cursor write: GREATEST(cursor, head) at the very end (§5) — a crashed or

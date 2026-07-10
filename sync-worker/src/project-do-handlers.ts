@@ -70,6 +70,20 @@ export interface ServerProjectArchived {
   archivedAt: string | null
   deletedBy: string | null
 }
+/** Identity owns the durable settings row; this frame refreshes connected
+ * clients' overlays and validation-derived progress immediately. */
+export interface ServerProjectSettingsUpdated {
+  t: "project.settings.updated"
+  project: string
+  version: number
+}
+/** Sent after the first, file-creating bulk-import chunk has committed. */
+export interface ServerFileProgressUpdated {
+  t: "file.progress.updated"
+  project: string
+  file: string
+  fileCreated: boolean
+}
 /**
  * FRO-346: sent to a removed member's own sockets right before the DO
  * closes them (code 4403). `userId` is the presence identity (username) —
@@ -113,6 +127,8 @@ export type ProjectDoServerMessage =
   | ServerLockClaimed
   | ServerLockReleased
   | ServerProjectArchived
+  | ServerProjectSettingsUpdated
+  | ServerFileProgressUpdated
   | ServerMemberRemoved
   | ServerLinkUpstreamChanged
 

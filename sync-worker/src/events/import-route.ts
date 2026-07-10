@@ -35,6 +35,8 @@ import {
   type PersistedEvent,
 } from './event-projection'
 import { allocateSeqRange, buildBulkEventInsertStmt } from './event-insert'
+import { fullProgressRecomputeStmts } from './progress-projection'
+import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
 
 /** Rows per multi-row INSERT. Bounded by postgres.js's 65,534-bind-param
  *  ceiling: events rows bind 12 params, cells rows 20 → 1000 rows stays an
@@ -44,6 +46,7 @@ const BULK_ROWS = 1000
 export interface ImportRouteEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  ProjectSync?: DurableObjectNamespace
 }
 
 interface ImportFileMeta {
@@ -99,6 +102,9 @@ interface ImportBody {
   /** Tag for which parser/serializer pair to use on export. Required when
    *  rawSource is set. Currently only "usfm". */
   rawSourceFormat?: string
+  /** Empty final request sent after concurrent source chunks finish. It emits
+   * one accurate realtime progress invalidation and writes no cell events. */
+  complete?: boolean
 }
 
 function isImportBody(x: unknown): x is ImportBody {
@@ -107,7 +113,8 @@ function isImportBody(x: unknown): x is ImportBody {
   return (
     typeof b.projectId === 'string' &&
     typeof b.fileId === 'string' &&
-    Array.isArray(b.cells)
+    Array.isArray(b.cells) &&
+    (b.complete === undefined || typeof b.complete === 'boolean')
   )
 }
 
@@ -121,6 +128,7 @@ function isImportBody(x: unknown): x is ImportBody {
 export async function handleBulkImportRequest(
   request: Request,
   env: ImportRouteEnv,
+  ctx?: ExecutionContext,
 ): Promise<Response | null> {
   const url = new URL(request.url)
   if (url.pathname !== '/import') return null
@@ -162,6 +170,26 @@ export async function handleBulkImportRequest(
   }
   if (auth.claims.role < ROLE.PROJECT_LEAD) {
     return withCors(new Response('role too low for source import', { status: 403 }), request)
+  }
+
+  // The browser sends this empty, authenticated marker only after every
+  // concurrent data chunk has committed. The last data chunk already rebuilt
+  // the file and section rollups, so avoid needlessly recomputing a large
+  // file here. Its only job is to fan out one accurate realtime invalidation.
+  if (body.complete && !body.file && body.cells.length === 0) {
+    if (env.ProjectSync) {
+      const notify = notifyProjectDoFileProgressChanged(
+        env,
+        body.projectId,
+        body.fileId,
+        false,
+      ).catch((err) => {
+        console.warn(`[import] ProjectSync completion notify failed for ${body.projectId}/${body.fileId}:`, err)
+      })
+      if (ctx) ctx.waitUntil(notify)
+      else void notify
+    }
+    return withCors(Response.json({ accepted: 0, fileId: body.fileId }), request)
   }
 
   const author =
@@ -307,6 +335,7 @@ export async function handleBulkImportRequest(
     // in the DB that belong to this file (including those from prior chunks of the
     // same import if the client retries). Self-healing by design — always correct.
     stmts.push(fileCountersRecomputeStmt(db, body.projectId, body.fileId, serverTs))
+    stmts.push(...fullProgressRecomputeStmts(db, body.projectId, body.fileId, serverTs))
 
     // ~6 statements per request (vs ~3000 in the per-cell shape), committed in
     // one transaction.
@@ -316,6 +345,22 @@ export async function handleBulkImportRequest(
       Response.json({ error: `DB batch failed: ${String(err)}` }, { status: 500 }),
       request,
     )
+  }
+
+  // The first chunk is the only one that creates a file. Notify once here;
+  // later chunks are intentionally silent so a large import cannot turn into
+  // a flood of editor revalidations for every connected collaborator.
+  if ((body.file || body.complete) && env.ProjectSync) {
+    const notify = notifyProjectDoFileProgressChanged(
+      env,
+      body.projectId,
+      body.fileId,
+      Boolean(body.file),
+    ).catch((err) => {
+      console.warn(`[import] ProjectSync notify failed for ${body.projectId}/${body.fileId}:`, err)
+    })
+    if (ctx) ctx.waitUntil(notify)
+    else void notify
   }
 
   return withCors(Response.json({ accepted: body.cells.length, fileId: body.fileId }), request)

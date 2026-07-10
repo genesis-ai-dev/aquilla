@@ -1,4 +1,4 @@
-import { useSectionProgress } from "@/hooks/useSectionProgress"
+import { useSectionProgressState } from "@/hooks/useSectionProgress"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
@@ -16,12 +16,20 @@ interface Props {
  * the old dot-grid which was hard to interpret.
  */
 export function FileSectionGrid({ projectId, fileId, validationCount, getTokenForFile, onSectionClick }: Props) {
-  const sections = useSectionProgress(projectId, fileId, validationCount, getTokenForFile)
+  const { sections, error, retry } = useSectionProgressState(projectId, fileId, validationCount, getTokenForFile)
 
   if (sections === null) {
     return <div className="px-6 py-1 text-[10px] text-muted-foreground">Loading…</div>
   }
   if (sections.length === 0) {
+    if (error) {
+      return (
+        <div className="flex items-center gap-2 px-6 py-1 text-[10px] text-muted-foreground">
+          <span>Progress unavailable.</span>
+          <button type="button" className="font-medium text-foreground hover:underline" onClick={retry}>Retry</button>
+        </div>
+      )
+    }
     return null
   }
 

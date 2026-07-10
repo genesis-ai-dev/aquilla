@@ -63,6 +63,53 @@ describe("GET /api/v1/projects/:projectId/files", () => {
     expect(body.files[0].cellCount).toBe(1213)
   })
 
+  it("prefers a projected zero over stale legacy counters", async () => {
+    const { db } = await makeTestDb({
+      files: [{
+        id: "file-zero", project_id: "proj-a", name: "Genesis",
+        cell_count: 10, filled_count: 8, approved_count: 6,
+      }],
+      project_settings: [{
+        project_id: "proj-a", settings: JSON.stringify({ validationCount: 2 }), version: 1,
+      }],
+      file_section_progress: [{
+        project_id: "proj-a", file_id: "file-zero", scope: "file", section_key: "",
+        total_count: 3, filled_count: 0, validator_histogram: {}, revision: 1, updated_at: 1,
+      }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-zero" })
+    const response = (await handleFilesReadRequest(new Request(
+      "https://w/api/v1/projects/proj-a/files/file-zero",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), envWith(db)))!
+    const body = await response.json() as {
+      file: { cellCount: number; filledCount: number; approvedCount: number }
+    }
+
+    expect(body.file).toMatchObject({ cellCount: 3, filledCount: 0, approvedCount: 0 })
+  })
+
+  it("caps legacy validationCount values at the 15+ histogram bucket", async () => {
+    const { db } = await makeTestDb({
+      files: [{ id: "file-cap", project_id: "proj-a", name: "Genesis", approved_count: 0 }],
+      project_settings: [{
+        project_id: "proj-a", settings: JSON.stringify({ validationCount: 99 }), version: 1,
+      }],
+      file_section_progress: [{
+        project_id: "proj-a", file_id: "file-cap", scope: "file", section_key: "",
+        total_count: 1, filled_count: 1, validator_histogram: JSON.stringify({ 15: 1 }), revision: 1, updated_at: 1,
+      }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-cap" })
+    const response = (await handleFilesReadRequest(new Request(
+      "https://w/api/v1/projects/proj-a/files/file-cap",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), envWith(db)))!
+    const body = await response.json() as { file: { approvedCount: number } }
+
+    expect(body.file.approvedCount).toBe(1)
+  })
+
   it("returns 401 without an Authorization header", async () => {
     const { db } = await makeTestDb({ files: [] })
     const req = new Request("https://w/api/v1/projects/proj-a/files")

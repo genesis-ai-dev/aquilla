@@ -66,6 +66,8 @@ export type ProjectWsServerMessage =
   | { t: "lock.claimed"; cellId: string; by: { userId: string; ts: number } }
   | { t: "lock.released"; cellId: string; by: { userId: string; ts: number } }
   | { t: "project.archived"; project: string; archivedAt?: string; deletedBy?: string }
+  | { t: "project.settings.updated"; project: string; version: number }
+  | { t: "file.progress.updated"; project: string; file: string; fileCreated: boolean }
   /** FRO-346: this user's membership was revoked; the DO closes the socket
    *  (code 4403) right after. `userId` is the presence identity (username). */
   | { t: "member.removed"; project: string; userId: string }
@@ -411,6 +413,20 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
       cellId: m.cellId,
       by: { userId: b.userId, ts: b.ts },
     }
+  }
+  if (t === "project.settings.updated") {
+    if (typeof m.project !== "string" || typeof m.version !== "number" || !Number.isInteger(m.version)) {
+      return null
+    }
+    return { t, project: m.project, version: m.version }
+  }
+  if (t === "file.progress.updated") {
+    if (
+      typeof m.project !== "string"
+      || typeof m.file !== "string"
+      || typeof m.fileCreated !== "boolean"
+    ) return null
+    return { t, project: m.project, file: m.file, fileCreated: m.fileCreated }
   }
   if (t === "member.removed") {
     // FRO-346: the DO sends this to a removed member's sockets right before

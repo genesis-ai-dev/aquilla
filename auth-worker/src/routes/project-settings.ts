@@ -26,6 +26,7 @@ import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
+import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
 
 const projectSettings = new Hono<AuthHonoEnv>()
 
@@ -60,7 +61,58 @@ function normalizeSettings(settings: Record<string, unknown>): Record<string, un
   if (next.healthSettings == null && next.decaySettings != null) {
     next.healthSettings = next.decaySettings
   }
+  // Validation histograms are intentionally capped at 15+. Persist the same
+  // bounded value every reader uses so old/hand-written settings cannot make
+  // the file rollup disagree with the detailed progress endpoint.
+  if (next.validationCount != null) {
+    next.validationCount = validationThreshold(next)
+  }
   return next
+}
+
+function validationThreshold(settings: Record<string, unknown>): number {
+  const value = Math.floor(Number(settings.validationCount))
+  return Number.isFinite(value) ? Math.min(15, Math.max(1, value)) : 1
+}
+
+function validationProjectionStmts(
+  db: AuthHonoEnv["Bindings"]["AQUILLA_PG"],
+  projectId: string,
+  threshold: number,
+  newVersion: number,
+  newSettingsJson: string,
+) {
+  // Both statements are guarded by the settings row written earlier in the
+  // same batch. If the optimistic UPDATE matched zero rows, these are no-ops;
+  // the caller then returns 409 without any projection changes.
+  const guard = `EXISTS (
+    SELECT 1 FROM project_settings
+     WHERE project_id = ? AND version = ? AND settings = ?
+  )`
+  return [
+    db.prepare(
+      `UPDATE cells c
+          SET validated = CASE WHEN (
+            SELECT COUNT(*) FROM cell_validators v
+             WHERE v.project_id = c.project_id
+               AND v.file_id = c.file_id
+               AND v.cell_id = c.cell_id
+               AND v.event_id = c.event_id
+          ) >= ? THEN 1 ELSE 0 END
+        WHERE c.project_id = ? AND c.side = 'target' AND ${guard}`,
+    ).bind(threshold, projectId, projectId, newVersion, newSettingsJson),
+    db.prepare(
+      `UPDATE files f
+          SET approved_count = (
+            SELECT COUNT(*) FROM cells c
+             WHERE c.project_id = f.project_id
+               AND c.file_id = f.id
+               AND c.side = 'target'
+               AND c.validated = 1
+          )
+        WHERE f.project_id = ? AND ${guard}`,
+    ).bind(projectId, projectId, newVersion, newSettingsJson),
+  ]
 }
 
 function rowToResponse(row: ProjectSettingsRow): ProjectSettingsResponse {
@@ -196,25 +248,37 @@ projectSettings.on(
       )
     }
 
-    const newSettingsJson = JSON.stringify(normalizeSettings(body.settings))
+    const normalizedSettings = normalizeSettings(body.settings)
+    const newSettingsJson = JSON.stringify(normalizedSettings)
     const newVersion = current.version + 1
+    const oldThreshold = validationThreshold(current.settings)
+    const newThreshold = validationThreshold(normalizedSettings)
+    const thresholdChanged = oldThreshold !== newThreshold
 
     // No existing row yet — INSERT. Otherwise UPDATE with a version guard
     // so a racing writer can't sneak past us.
     if (current.updatedAt == null) {
       try {
-        await c.env.AQUILLA_PG.prepare(
-          `INSERT INTO project_settings
-             (project_id, settings, version, updated_by)
-           VALUES (?, ?, ?, ?)`,
-        )
-          .bind(projectId, newSettingsJson, newVersion, user.id)
-          .run()
+        const stmts = [
+          c.env.AQUILLA_PG.prepare(
+            `INSERT INTO project_settings
+               (project_id, settings, version, updated_by)
+             VALUES (?, ?, ?, ?)`,
+          ).bind(projectId, newSettingsJson, newVersion, user.id),
+        ]
+        if (thresholdChanged) {
+          stmts.push(...validationProjectionStmts(
+            c.env.AQUILLA_PG, projectId, newThreshold, newVersion, newSettingsJson,
+          ))
+        }
+        await c.env.AQUILLA_PG.batch(stmts)
       } catch (err) {
         // Race: another request inserted between our load and insert.
-        // Re-read and 409.
+        // Re-read and return 409 only if another writer actually won. A
+        // projection/database failure must remain a 500, not masquerade as a
+        // version conflict.
         const fresh = await loadSettings(c.env, projectId)
-        if (fresh.version !== newVersion) {
+        if (fresh.version !== current.version) {
           return c.json({ error: "version mismatch", current: fresh }, 409)
         }
         const message = err instanceof Error ? err.message : String(err)
@@ -222,25 +286,43 @@ projectSettings.on(
         return c.json({ error: `write failed: ${message}` }, 500)
       }
     } else {
-      const result = await c.env.AQUILLA_PG.prepare(
-        `UPDATE project_settings
-            SET settings   = ?,
-                version    = version + 1,
-                updated_at = CURRENT_TIMESTAMP,
-                updated_by = ?
-          WHERE project_id = ? AND version = ?`,
-      )
-        .bind(newSettingsJson, user.id, projectId, ifMatchVersion)
-        .run()
+      const stmts = [
+        c.env.AQUILLA_PG.prepare(
+          `UPDATE project_settings
+              SET settings   = ?,
+                  version    = version + 1,
+                  updated_at = CURRENT_TIMESTAMP,
+                  updated_by = ?
+            WHERE project_id = ? AND version = ?
+            RETURNING version`,
+        ).bind(newSettingsJson, user.id, projectId, ifMatchVersion),
+      ]
+      if (thresholdChanged) {
+        stmts.push(...validationProjectionStmts(
+          c.env.AQUILLA_PG, projectId, newThreshold, newVersion, newSettingsJson,
+        ))
+      }
+      const [result] = await c.env.AQUILLA_PG.batch(stmts)
 
       const changes = result.meta?.changes
-      if (typeof changes === "number" && changes === 0) {
+      if ((typeof changes === "number" && changes === 0) || result.results.length === 0) {
         const fresh = await loadSettings(c.env, projectId)
         return c.json({ error: "version mismatch", current: fresh }, 409)
       }
     }
 
     const fresh = await loadSettings(c.env, projectId)
+    // Settings live in identity while connected editor clients listen to the
+    // project sync DO. This is a best-effort acceleration: a missed frame is
+    // recovered by the existing focus/reconnect settings read.
+    const notifyPromise = notifySyncWorkerOfProjectSettingsChange(c.env, projectId, fresh.version)
+    try {
+      c.executionCtx.waitUntil(notifyPromise)
+    } catch {
+      // Hono's direct test harness has no ExecutionContext. The notification
+      // remains best-effort there just as it is in a deployed Worker.
+      void notifyPromise
+    }
     return c.json(fresh)
   },
 )

@@ -45,6 +45,7 @@ import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
+import { useRailIdleHide } from "@/hooks/useRailIdleHide"
 import { CellExpansion } from "./CellExpansion"
 import { tokenizeWords } from "@/lib/audio/timings"
 import { useCellAudio } from "@/hooks/useCellAudio"
@@ -3382,6 +3383,9 @@ function EditorRow({
   const [hasFocusWithin, setHasFocusWithin] = useState(false)
   const [isTapSelected, setIsTapSelected] = useState(false)
   const hoverLeaveTimerRef = useRef<number | null>(null)
+  // AQU-354: does a rail control specifically hold focus? Used to pin the rail
+  // open (an in-progress interaction must never be idle-collapsed).
+  const [railHasFocus, setRailHasFocus] = useState(false)
 
   // ── Expansion state ───────────────────────────────────────────────────────
   const alignmentModelForExpansion = useMemo(() => {
@@ -3464,7 +3468,17 @@ function EditorRow({
     if (!expanded || expansionTab !== "backtranslation") setBtAlignmentOpen(false)
   }, [expanded, expansionTab])
 
-  const railRevealed = isHovering || hasFocusWithin || isTapSelected || expanded
+  // AQU-354: reveal the rail on the ephemeral triggers, but idle-collapse it
+  // after a short pause so it stops covering the "changed elsewhere while you
+  // were editing" conflict banner (whose Discard button sits under the rail).
+  // Pins (expansion open, a rail control focused, a rail popover open) keep the
+  // rail visible so an in-progress interaction is never yanked away.
+  const railRevealTriggered = isHovering || hasFocusWithin || isTapSelected
+  const railPinned = expanded || railHasFocus || showMicDeniedHelp || showGenerateConfirm
+  const { revealed: railRevealed, registerActivity: registerRailActivity } = useRailIdleHide({
+    revealTriggered: railRevealTriggered,
+    pinned: railPinned,
+  })
 
   // ── BT tab edit state ─────────────────────────────────────────────────────
   const [btEditing, setBtEditing] = useState(false)
@@ -3513,6 +3527,8 @@ function EditorRow({
       hoverLeaveTimerRef.current = null
     }
     setIsHovering(true)
+    // AQU-354: a fresh hover re-summons the rail if it had idle-collapsed.
+    registerRailActivity()
   }
   const handleRowMouseLeave = () => {
     if (hoverLeaveTimerRef.current !== null) window.clearTimeout(hoverLeaveTimerRef.current)
@@ -3521,7 +3537,11 @@ function EditorRow({
       hoverLeaveTimerRef.current = null
     }, 120)
   }
-  const handleRowFocusCapture = () => setHasFocusWithin(true)
+  const handleRowFocusCapture = () => {
+    setHasFocusWithin(true)
+    // AQU-354: focusing anything in the row re-summons an idle-collapsed rail.
+    registerRailActivity()
+  }
   const handleRowBlurCapture = (e: React.FocusEvent) => {
     const next = e.relatedTarget as Node | null
     if (next && rowRef.current?.contains(next)) return
@@ -3545,6 +3565,8 @@ function EditorRow({
     // doesn't surprise the user with a stale bulk action target.
     clearSelection()
     setIsTapSelected((p) => !p)
+    // AQU-354: a tap re-summons the rail if it had idle-collapsed.
+    registerRailActivity()
   }
 
   /**
@@ -4255,7 +4277,17 @@ function EditorRow({
             are position:relative with auto z-index, so the row's local z-10
             doesn't escape the sticky header's z-10 context). */}
         <div className="pointer-events-none absolute right-2 top-0.5 z-20 flex">
-          <div className="pointer-events-auto">
+          <div
+            className="pointer-events-auto"
+            // AQU-354: track focus landing on / leaving a rail control so the
+            // idle auto-hide never collapses the rail while it is being used.
+            onFocusCapture={() => setRailHasFocus(true)}
+            onBlurCapture={(e) => {
+              const next = e.relatedTarget as Node | null
+              if (next && e.currentTarget.contains(next)) return
+              setRailHasFocus(false)
+            }}
+          >
             <CellActionRail
               revealed={railRevealed}
               expanded={expanded}

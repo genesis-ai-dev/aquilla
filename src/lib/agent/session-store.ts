@@ -10,6 +10,14 @@
  *
  * Prompts sent while a run is streaming are QUEUED and dispatched in order
  * when the current run settles (agentic-CLI steering, not a locked composer).
+ *
+ * PERSISTENCE (AQU-415): the agent conversation survives a page reload. The
+ * durable slice — server sessionId, the run timeline, per-row review decisions,
+ * and queued card-activity notes — is written to localStorage (via the injected
+ * `SessionPersistence`) whenever the session settles, and rehydrated when the
+ * per-project store is first constructed. Transient stream state (isStreaming /
+ * the in-memory send queue, which carries the JWT) is never persisted, and a
+ * run caught mid-stream by the reload is normalized to a terminal state on load.
  */
 
 import { useCallback, useSyncExternalStore } from "react"
@@ -53,23 +61,96 @@ export interface AgentSessionState {
 
 type RunAgentFn = typeof realRunAgent
 
+/**
+ * The durable slice of a session, in JSON-serializable form (Map → entries).
+ * Deliberately excludes `isStreaming`/`queued` — the queue holds JWTs and a
+ * reload always ends any in-flight stream.
+ */
+export interface PersistedSession {
+  sessionId: string
+  runs: AgentRunUi[]
+  decided: [string, RowDecision][]
+  activity: { key: string; note: string }[]
+}
+
+/** Storage adapter for a session's durable slice. */
+export interface SessionPersistence {
+  load(): PersistedSession | null
+  save(session: PersistedSession): void
+}
+
+/**
+ * localStorage-backed persistence for one project's agent session. All access
+ * is guarded — a disabled/quota-full/unavailable store degrades to ephemeral
+ * behaviour rather than throwing (Tauri, private mode, SSR).
+ */
+export function localStoragePersistence(projectId: string): SessionPersistence {
+  const key = `aquilla:agent-session:v1:${projectId}`
+  return {
+    load() {
+      try {
+        const raw = localStorage.getItem(key)
+        if (!raw) return null
+        const parsed = JSON.parse(raw) as PersistedSession
+        if (typeof parsed?.sessionId !== "string" || !Array.isArray(parsed.runs)) return null
+        return {
+          sessionId: parsed.sessionId,
+          runs: parsed.runs,
+          decided: Array.isArray(parsed.decided) ? parsed.decided : [],
+          activity: Array.isArray(parsed.activity) ? parsed.activity : [],
+        }
+      } catch {
+        return null
+      }
+    },
+    save(session) {
+      try {
+        localStorage.setItem(key, JSON.stringify(session))
+      } catch {
+        /* quota exceeded or storage unavailable — stay ephemeral */
+      }
+    },
+  }
+}
+
+/**
+ * A run still `running` when the reload froze it can never resume (its server
+ * stream is gone), so present it as an interrupted, terminal run rather than a
+ * forever-spinner. Completed/errored runs pass through untouched.
+ */
+function hydrateRun(run: AgentRunUi): AgentRunUi {
+  return run.status === "running" ? failRun(run, "Interrupted by a page reload.") : run
+}
+
 export class AgentSessionStore {
   private state: AgentSessionState
   private listeners = new Set<() => void>()
   private abortController: AbortController | null = null
   private queue: AgentSendOptions[] = []
   private readonly runAgent: RunAgentFn
+  private readonly persistence?: SessionPersistence
 
-  constructor(runAgentImpl: RunAgentFn = realRunAgent) {
+  constructor(runAgentImpl: RunAgentFn = realRunAgent, persistence?: SessionPersistence) {
     this.runAgent = runAgentImpl
-    this.state = {
-      sessionId: crypto.randomUUID(),
-      runs: [],
-      isStreaming: false,
-      queued: [],
-      decided: new Map(),
-      activity: [],
-    }
+    this.persistence = persistence
+    const restored = persistence?.load()
+    this.state = restored
+      ? {
+          sessionId: restored.sessionId,
+          runs: restored.runs.map(hydrateRun),
+          isStreaming: false,
+          queued: [],
+          decided: new Map(restored.decided),
+          activity: restored.activity,
+        }
+      : {
+          sessionId: crypto.randomUUID(),
+          runs: [],
+          isStreaming: false,
+          queued: [],
+          decided: new Map(),
+          activity: [],
+        }
   }
 
   getState = (): AgentSessionState => this.state
@@ -82,6 +163,19 @@ export class AgentSessionStore {
   private set(partial: Partial<AgentSessionState>): void {
     this.state = { ...this.state, ...partial }
     for (const l of this.listeners) l()
+    // Persist only when the session is settled — skips the high-frequency
+    // per-frame writes during a stream (they'd re-serialize the whole timeline
+    // on every token); the terminal `isStreaming: false` set flushes the final
+    // state. reset()'s fresh empty state is written the same way, clearing the
+    // prior conversation.
+    if (this.persistence && !this.state.isStreaming) {
+      this.persistence.save({
+        sessionId: this.state.sessionId,
+        runs: this.state.runs,
+        decided: [...this.state.decided],
+        activity: [...this.state.activity],
+      })
+    }
   }
 
   private updateRun(localId: string, next: (run: AgentRunUi) => AgentRunUi): void {
@@ -181,7 +275,7 @@ const stores = new Map<string, AgentSessionStore>()
 export function agentSessionStore(projectId: string): AgentSessionStore {
   let store = stores.get(projectId)
   if (!store) {
-    store = new AgentSessionStore()
+    store = new AgentSessionStore(realRunAgent, localStoragePersistence(projectId))
     stores.set(projectId, store)
   }
   return store

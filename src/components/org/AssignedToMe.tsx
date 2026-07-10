@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { ClipboardList, Building2 } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { AppShell } from "@/components/AppShell"
 import { EmptyState } from "@/components/ui/page"
 import { OrgSidebar } from "./OrgSidebar"
@@ -86,9 +87,9 @@ export function AssignedToMe() {
                       <p className="font-medium">{a.scopeLabel}</p>
                       <span className="shrink-0 text-xs text-muted-foreground">{a.projectName}</span>
                       {a.deadline && (
-                        <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        <Badge variant="secondary" className="shrink-0">
                           Due {a.deadline}
-                        </span>
+                        </Badge>
                       )}
                     </div>
                     <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">

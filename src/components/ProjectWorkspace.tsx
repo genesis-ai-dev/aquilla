@@ -79,6 +79,12 @@ import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/s
 import { canPerform, canOpenAssignUi } from "@/lib/sync/role-policy"
 import { useFocusLock } from "@/hooks/useFocusLock"
 import type { WsReconciler } from "@/lib/sync/ws-reconciler"
+import {
+  createProjectPresenceStore,
+  usePresencePeers,
+  type ProjectPresencePeer,
+  type TargetPresenceSelection,
+} from "@/lib/sync/presence-store"
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
@@ -124,12 +130,14 @@ import { deleteFileProjection } from "@/lib/sync/file-projection"
 import { fetchDeletedFiles, fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { FileSummary } from "@/lib/sync/cells-read-types"
 import { fileSummariesToProgress, mergeFileProgress } from "@/lib/progress/file-summary-progress"
+import { invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
 import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
+import { summarizeTextDirections } from "@/lib/text-direction"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
@@ -148,7 +156,7 @@ import { buildGlosser, type BtSeed, type Glosser } from "@/lib/completion/bt-glo
 import { memMark } from "@/lib/perf-log"
 import { buildAlignmentModel, type AlignmentModel } from "@/lib/completion/interlinear"
 import { resolveBtTargetEventId } from "@/lib/completion/bt-auto"
-// AQU-192: assignment work-pickup UI
+// FRO-192: assignment work-pickup UI
 import { AssignModal } from "./AssignModal"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
 import { getMyAssignments, getProjectAssignments, type MyAssignment, type AssigneeWorkload } from "@/lib/sync/assignments"
@@ -176,7 +184,7 @@ const FileTargetImportDialog = lazy(() =>
   import("./FileTargetImportDialog").then((mod) => ({ default: mod.FileTargetImportDialog })),
 )
 
-// AQU-254: In-project views rendered inside the editor shell. Lazy-loaded so
+// FRO-254: In-project views rendered inside the editor shell. Lazy-loaded so
 // the heavy workspace chunk doesn't pull them in for every route.
 const CommentsPageContent = lazy(() =>
   import("./CommentsPage").then((mod) => ({ default: mod.CommentsPage })),
@@ -187,11 +195,11 @@ const LivingMemoryPageContent = lazy(() =>
 const GlossaryEditorContent = lazy(() =>
   import("./GlossaryEditor").then((mod) => ({ default: mod.GlossaryEditor })),
 )
-// AQU-180: per-project members management surface.
+// FRO-180: per-project members management surface.
 const ProjectMembersPageContent = lazy(() =>
   import("./ProjectMembersPage").then((mod) => ({ default: mod.ProjectMembersPage })),
 )
-// AQU-249 fix (Fix 2): module-level promise chain that serializes
+// FRO-249 fix (Fix 2): module-level promise chain that serializes
 // handleImported's getProject→updateProject read-modify-write so that
 // concurrent imports don't race and the last write doesn't silently drop
 // earlier refs. This is module-scoped (not component-scoped) deliberately —
@@ -211,7 +219,7 @@ function projectRecordsEquivalent(a: ProjectRecord | null, b: ProjectRecord | nu
   }
 }
 
-// ── AQU-234: pure guard — exported for unit testing ───────────────────────────
+// ── FRO-234: pure guard — exported for unit testing ───────────────────────────
 /**
  * Returns true iff the completion-settings save should actually patch
  * systemPrompt on the server. Guards against two failure modes:
@@ -251,6 +259,16 @@ export function shouldSelfHealZeroFileLink(args: {
   if (sourceLinkMode !== "live") return false
   if (fileCount > 0) return false
   if (alreadyAttemptedProjectId === projectId) return false
+  return true
+}
+
+const PRESENCE_LOCK_STALE_CLEAR_MS = 31_000
+
+function sameStringMap(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>): boolean {
+  if (a.size !== b.size) return false
+  for (const [key, value] of a) {
+    if (b.get(key) !== value) return false
+  }
   return true
 }
 
@@ -307,7 +325,7 @@ export function ProjectWorkspace() {
   // Optimistic file-label renames (fileId → new name), applied locally before
   // the file.rename event round-trips so the new label shows instantly.
   const [optimisticRenames, setOptimisticRenames] = useState<Map<string, string>>(new Map())
-  // AQU-272: soft-deleted file ids hidden from the sidebar until the server
+  // FRO-272: soft-deleted file ids hidden from the sidebar until the server
   // read reflects the file.delete event. Same class as optimistic renames —
   // patchProject(IDB) writes are invisible (useProject reads server), so
   // without this overlay a deleted file lingers until the outbox flushes and
@@ -317,7 +335,7 @@ export function ProjectWorkspace() {
   // across reloads would need server backing; the in-session state is what the
   // X button and "apply" flows actually need.)
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false)
-  // AQU-249/AQU-255 fix (Fix 4): transient notice shown when the user explicitly
+  // FRO-249/FRO-255 fix (Fix 4): transient notice shown when the user explicitly
   // confirmed a direction but their role is below MAINTAINER (600) so the change
   // could not be saved project-wide. Auto-dismissed after 6 s.
   const [directionRoleNotice, setDirectionRoleNotice] = useState<string | null>(null)
@@ -434,6 +452,7 @@ export function ProjectWorkspace() {
   const workspaceTabs = useWorkspaceTabs({
     projectId: projectId ?? "",
     fileIds,
+    filesReady: Boolean(project),
     activeFileId,
     setActiveFileId,
   })
@@ -510,7 +529,7 @@ export function ProjectWorkspace() {
     // The in-project overlay surfaces (/rules, /comments, /memory, /terminology,
     // /members) deliberately carry no file in the URL — don't treat that as
     // "no file selected" and bounce back to the editor, or these surfaces become
-    // unreachable. (AQU-194 added /rules; AQU-254 adds the others; AQU-180 adds /members.)
+    // unreachable. (FRO-194 added /rules; FRO-254 adds the others; FRO-180 adds /members.)
     if (
       location.pathname.endsWith("/rules") ||
       location.pathname.endsWith("/comments") ||
@@ -583,8 +602,8 @@ export function ProjectWorkspace() {
 
   // Center surface — derived from the URL path so deep-links work and the
   // shell (sidebar + top bar + bottom status bar) never unmounts.
-  // AQU-194 added "rules"; AQU-254 adds "comments", "memory", "terminology";
-  // AQU-180 adds "members".
+  // FRO-194 added "rules"; FRO-254 adds "comments", "memory", "terminology";
+  // FRO-180 adds "members".
   const centerSurface: "editor" | "rules" | "comments" | "memory" | "terminology" | "members" | "agent" =
     location.pathname.endsWith("/rules") ? "rules" :
     location.pathname.endsWith("/comments") ? "comments" :
@@ -601,7 +620,7 @@ export function ProjectWorkspace() {
     if (open) setDrawerRuleId(open)
   }, [searchParams])
 
-  // AQU-295: CommentsPage deep-links here with ?cellId=<id>. Park the value so
+  // FRO-295: CommentsPage deep-links here with ?cellId=<id>. Park the value so
   // the scroll-restore effect (below) can consume it once cells are loaded.
   useEffect(() => {
     const cellId = searchParams.get("cellId")
@@ -613,7 +632,7 @@ export function ProjectWorkspace() {
   const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
   const [shareOpen, setShareOpen] = useState(false)
-  // AQU-308: left dock active tab (null = collapsed rail only)
+  // FRO-308: left dock active tab (null = collapsed rail only)
   const [dockTab, setDockTab] = useState<DockTab | null>("files")
   // Agent workbench (agent-mode-v2 §4) is a takeover surface: collapse the
   // dock to the rail on entry (a second agent chat beside the workbench is
@@ -639,7 +658,7 @@ export function ProjectWorkspace() {
     setPendingChip(chip)
     setDockTab("agent")
   }, [])
-  // AQU-309: expanded search results overlay in the main area
+  // FRO-309: expanded search results overlay in the main area
   const [searchExpandedQuery, setSearchExpandedQuery] = useState<string | null>(null)
   const [aiSetupOpen, setAiSetupOpen] = useState(false)
   const [recordingCellId, setRecordingCellId] = useState<string | null>(null)
@@ -648,7 +667,7 @@ export function ProjectWorkspace() {
   // specific line's take, and the rail's button can open it for a manual pick.
   const [makeCharacterOpen, setMakeCharacterOpen] = useState(false)
   const [makeCharacterSeedCellId, setMakeCharacterSeedCellId] = useState<string | null>(null)
-  // AQU-192: Assign… modal
+  // FRO-192: Assign… modal
   const [assignModalOpen, setAssignModalOpen] = useState(false)
   // Increment to force a refresh of the assignments pickup panel after a new
   // assignment is created. The EditorTable assignmentsByCellId map is also
@@ -698,12 +717,17 @@ export function ProjectWorkspace() {
   // Keep the ref in sync so effects declared earlier in the component can
   // access the resolved username without a hoisting issue.
   currentUsernameRef.current = currentUsername
+  const presenceStore = useMemo(
+    () => createProjectPresenceStore(currentUsername),
+    [currentUsername, project?.id],
+  )
+  const presencePeers = usePresencePeers(presenceStore)
   const jwtRef = useRef<string | null>(null)
   useEffect(() => {
     jwtRef.current = frontierSession?.jwt ?? null
   }, [frontierSession?.jwt])
 
-  // AQU-214 (orchestrator glue): frozen-project state for the workspace banner.
+  // FRO-214 (orchestrator glue): frozen-project state for the workspace banner.
   const { isFrozen, toggle: toggleLifecycle, busy: lifecycleBusy } = useProjectLifecycle(projectId ?? "", project, () => refresh())
 
   const getTokenForFile = useMemo(() => {
@@ -734,7 +758,7 @@ export function ProjectWorkspace() {
           }))
         },
         onUnauthorized: () => {
-          // AQU-159: The stored session JWT was rejected by the auth server (401).
+          // FRO-159: The stored session JWT was rejected by the auth server (401).
           // This happens after a backend migration (e.g. Postgres switch) that
           // invalidates existing tokens. Clear the session so the user is
           // redirected to login rather than silently failing on every file open.
@@ -786,7 +810,7 @@ export function ProjectWorkspace() {
     return () => setCqrsOutboxBridge(null)
   }, [project?.id, activeFileId, currentUsername, project?.syncRole?.level])
 
-  // The outbox drain loop is owned by the app-shell OutboxProvider (AQU-221)
+  // The outbox drain loop is owned by the app-shell OutboxProvider (FRO-221)
   // so the queue drains on every route, not just inside a project. We consume
   // its state here for the status-bar indicator and the stale-edit banners.
   // `getTokenForProjectFile` (local minter) is still used below for the
@@ -808,7 +832,7 @@ export function ProjectWorkspace() {
   // user clicks "View in history" (we navigate them to the conflict — they
   // shouldn't have to dismiss separately).
   const [staleSourceBannerDismissed, setStaleSourceBannerDismissed] = useState(0)
-  // AQU-274: write-failure banner for BT persist failures (outbox enqueue
+  // FRO-274: write-failure banner for BT persist failures (outbox enqueue
   // fails — IndexedDB unavailable, quota exceeded, etc.).
   const [btWriteError, setBtWriteError] = useState<string | null>(null)
   const showStaleSiblingBanner =
@@ -847,6 +871,16 @@ export function ProjectWorkspace() {
   })
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const cellSummaries = useMemo(() => cellStore.getAllSummaries(), [cellStore, cellStoreVersion])
+  const localFileProgress = useMemo(() => cellStore.getFileProgressSnapshot(), [cellStore, cellStoreVersion])
+  useEffect(() => {
+    if (!project?.id || !activeFileId || !localFileProgress) return
+    setLocalFileProgress(
+      project.id,
+      activeFileId,
+      localFileProgress,
+      cellStore.getPendingProgressEventIds(),
+    )
+  }, [activeFileId, cellStore, cellStoreVersion, localFileProgress, project?.id])
   const getActiveCells = useCallback(() => cellStore.getAllCellViews(), [cellStore])
   const getActiveCell = useCallback((cellId: string) => cellStore.getCellView(cellId), [cellStore])
 
@@ -882,6 +916,7 @@ export function ProjectWorkspace() {
   // immediately before emitting the commit event, so this ref is always
   // up-to-date by the time onCellCommitted fires.
   const lastOptimisticEditRef = useRef<{ cellId: string } | null>(null)
+  const pendingTargetCommitHeadsRef = useRef<Map<string, { eventId: string; parentId: string | null }>>(new Map())
 
   // RACE-3/QW-2: per-cell pending event id for the AI completion commit path.
   // Mirrors the per-row pendingTargetEventIdRef in EditorRow. Keyed by cellId
@@ -912,12 +947,50 @@ export function ProjectWorkspace() {
     },
     [applyOptimisticTargetEdit],
   )
+
+  const getPendingTargetEventId = useCallback((cellId: string) => {
+    return pendingTargetCommitHeadsRef.current.get(cellId)?.eventId ?? null
+  }, [])
+
+  const resolveTargetCommitParentId = useCallback((cell: Pick<CellData, "id" | "targetEventId" | "sourceEventId">) => {
+    return (
+      pendingTargetCommitHeadsRef.current.get(cell.id)?.eventId ??
+      pendingCompletionEventIdRef.current.get(cell.id) ??
+      cell.targetEventId ??
+      cell.sourceEventId ??
+      null
+    )
+  }, [])
+
+  const rememberPendingTargetCommit = useCallback((cellId: string, eventId: string, parentId: string | null) => {
+    pendingTargetCommitHeadsRef.current.set(cellId, { eventId, parentId })
+  }, [])
+
+  useEffect(() => {
+    if (pendingTargetCommitHeadsRef.current.size === 0) return
+    for (const summary of cellSummaries) {
+      const pending = pendingTargetCommitHeadsRef.current.get(summary.id)
+      if (!pending) continue
+      const projectedHead = summary.targetEventId ?? null
+      if (projectedHead === pending.eventId) {
+        pendingTargetCommitHeadsRef.current.delete(summary.id)
+        if (pendingCompletionEventIdRef.current.get(summary.id) === pending.eventId) {
+          pendingCompletionEventIdRef.current.delete(summary.id)
+        }
+      } else if (projectedHead && projectedHead !== pending.parentId) {
+        pendingTargetCommitHeadsRef.current.delete(summary.id)
+        if (pendingCompletionEventIdRef.current.get(summary.id) === pending.eventId) {
+          pendingCompletionEventIdRef.current.delete(summary.id)
+        }
+      }
+    }
+  }, [cellSummaries])
   // Phase 5 / AD-9 — Phase 3a-final wiring. Fetch the set of cell ids
   // whose source has advanced since the translator's last commit, so the
   // editor table can decorate stale rows with the AlertTriangle badge.
   // One fetch per (projectId, fileId) — flattened to a boolean per row
   // inside EditorTable.
-  // AQU-477 (§6) — upstreamStaleCellIds surfaces inherited (ancestor-chain)
+  // FRO-477 (§6) — upstreamStaleCellIds surfaces inherited (ancestor-chain)
   // staleness alongside the existing direct staleCellIds; both flatten to
   // per-row booleans inside EditorTable the same way.
   const { staleCellIds, upstreamStaleCellIds, revalidate: revalidateStaleSource, syncNow: syncStaleSourceNow } = useStaleSourceCells({
@@ -926,7 +999,7 @@ export function ProjectWorkspace() {
     getToken: getTokenForFile,
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
   })
-  // AQU-479: the WS connect effect's onMessage closure is created once, before
+  // FRO-479: the WS connect effect's onMessage closure is created once, before
   // staleness state settles — route link.upstream-changed frames through a ref
   // so the handler always reaches the latest revalidate (which piggybacks the
   // fire-and-forget POST /link/sync, single-flighted server-side).
@@ -998,16 +1071,42 @@ export function ProjectWorkspace() {
     const next = findNextUnfinished(currentIndex)
     if (next >= 0) editorRef.current?.focusCellEditorIndex(next)
   }, [findNextUnfinished])
-  const fileMeta = useFileMeta(activeFileId, project?.sourceLanguage, project?.targetLanguage)
+  const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
+  const activeSourceLanguage = activeFile?.sourceLanguage || project?.sourceLanguage
+  const activeTargetLanguage = activeFile?.targetLanguage || project?.targetLanguage
+  const editorProject = useMemo<ProjectRecord | null>(() => {
+    if (!project) return null
+    const sourceLanguage = activeSourceLanguage ?? project.sourceLanguage
+    const targetLanguage = activeTargetLanguage ?? project.targetLanguage
+    if (sourceLanguage === project.sourceLanguage && targetLanguage === project.targetLanguage) {
+      return project
+    }
+    return { ...project, sourceLanguage, targetLanguage }
+  }, [activeSourceLanguage, activeTargetLanguage, project])
+  const fileMeta = useFileMeta(activeFileId, activeSourceLanguage, activeTargetLanguage, {
+    sourceTextDirection: activeFile?.sourceTextDirection,
+    targetTextDirection: activeFile?.targetTextDirection,
+  })
+  const activeFileDirectionSummary = useMemo(() => {
+    function* sourceValues() {
+      for (const summary of cellSummaries) yield summary.originalHtml ?? summary.original
+    }
+    function* targetValues() {
+      for (const summary of cellSummaries) yield summary.translatedHtml ?? summary.translated
+    }
+    return {
+      source: summarizeTextDirections(sourceValues()),
+      target: summarizeTextDirections(targetValues()),
+    }
+  }, [cellSummaries])
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
   const [footnoteViewMode, setFootnoteViewMode] = useFootnotesPreference(projectId!)
   const [visibleFootnotes, setVisibleFootnotes] = useState<VisibleFootnoteEntry[]>([])
   const visibleFootnotesKeyRef = useRef("")
-  // AQU-251: per-file, per-side font sizes — adjusted from the View settings
+  // FRO-251: per-file, per-side font sizes — adjusted from the View settings
   // (eye) menu, rendered by EditorTable.
   const fontSizes = useFileFontSizes(activeFileId)
 
-  const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const isSubtitleFile = activeFile?.type === "vtt" || activeFile?.type === "srt"
 
   const workspaceBreadcrumb = useMemo(() => ({
@@ -1118,15 +1217,17 @@ export function ProjectWorkspace() {
       const cell = cellStore.getCellView(cellId)
       if (!cell) return
       applyOptimisticTargetEdit(cellId, { value })
-      await emitTargetCellCommit({
+      const parentId = resolveTargetCommitParentId(cell)
+      const eventId = await emitTargetCellCommit({
         projectId: project.id,
         fileId: cell.fileId,
         cellId,
-        parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
+        parentId,
         sourceEventId: cell.sourceEventId ?? null,
         value,
         author: currentUsername,
       })
+      rememberPendingTargetCommit(cellId, eventId, parentId)
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       await refreshOutboxPending()
       revalidateCell(cellId)
@@ -1136,6 +1237,8 @@ export function ProjectWorkspace() {
       cellStore,
       applyOptimisticTargetEdit,
       currentUsername,
+      resolveTargetCommitParentId,
+      rememberPendingTargetCommit,
       getTokenForProjectFile,
       refreshOutboxPending,
       revalidateCell,
@@ -1243,14 +1346,14 @@ export function ProjectWorkspace() {
   } = useOrgSettings(
     project?.orgId ?? activeOrg?.id,
     projectOrg?.role?.level ?? null,
-    // AQU-253 WARN fix: compare the project-resolved role (AD-12 max-wins), not
+    // FRO-253 WARN fix: compare the project-resolved role (AD-12 max-wins), not
     // the raw org role. A user with org VIEWER + direct project MAINTAINER grant
     // must pass a floor of MAINTAINER. syncRole.level is the max-wins result
     // written by the sync-token onRole callback above.
     project?.syncRole?.level ?? null,
   )
 
-  // AQU-194: also destructure rule CRUD for RulesSurface (patchSettings is the
+  // FRO-194: also destructure rule CRUD for RulesSurface (patchSettings is the
   // sync function; it matches the PatchSharedFn signature from useProjectSettings).
   const { rules, userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(
     project ?? null,
@@ -1288,7 +1391,7 @@ export function ProjectWorkspace() {
 
   const resolveThread = useCallback(async (cellId: string, threadId: string, msg?: string) => {
     if (!project?.id) return
-    // AQU-252 fix: derive the fileId from the thread's own record, not from
+    // FRO-252 fix: derive the fileId from the thread's own record, not from
     // activeFileId. Using activeFileId caused two bugs:
     //   (a) Resolving with a reply from the /comments shell (no file open) dropped
     //       the reply silently because activeFileId was null.
@@ -1339,7 +1442,7 @@ export function ProjectWorkspace() {
   // the edit/commit path keep live selectors.
   const corpusCells = useDebouncedValue(cellSummaries, 600)
 
-  // AQU-191 (orchestrator glue): existing-cell refs for the eBible "into target
+  // FRO-191 (orchestrator glue): existing-cell refs for the eBible "into target
   // column" import mode. CellData.group carries the canonical ref.
   const importSourceCells = useMemo(() => cellSummaries.map((c) => ({
     cellId: c.id,
@@ -1450,7 +1553,7 @@ export function ProjectWorkspace() {
 
   const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string) => {
     if (!project?.id) return
-    // AQU-365: defense-in-depth — the selection-island Translate button and
+    // FRO-365: defense-in-depth — the selection-island Translate button and
     // the header "Run AI completions"/"Complete all" actions are already
     // hidden below the contributor floor (SelectionBar.tsx, registry.ts), and
     // the server 403s the resulting target.cell.commit regardless. This guard
@@ -1474,7 +1577,7 @@ export function ProjectWorkspace() {
     // This prevents a second rapid completion commit from becoming a sibling
     // of the first (which the server dead-letters) when the read-back hasn't
     // landed yet.
-    const parentId = pendingCompletionEventIdRef.current.get(cell.id) ?? cell.targetEventId ?? cell.sourceEventId ?? null
+    const parentId = resolveTargetCommitParentId(cell)
     const eventId = await emitTargetCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
@@ -1483,12 +1586,13 @@ export function ProjectWorkspace() {
       sourceEventId: cell.sourceEventId ?? null,
       value: text,
       author,
-      // AQU-292: tag AI-generated commits so the server projection can
+      // FRO-292: tag AI-generated commits so the server projection can
       // track ai_drafted on the cell row. A human edit (no aiSuggestion)
       // will clear it on the next commit.
       aiSuggestion: true,
     })
     pendingCompletionEventIdRef.current.set(cell.id, eventId)
+    rememberPendingTargetCommit(cell.id, eventId, parentId)
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
     // Targeted: we just changed exactly one cell. Pull only that row's stats
@@ -1498,7 +1602,7 @@ export function ProjectWorkspace() {
     // confirms; the WS event.applied also pokes the same cell (coalesced).
     revalidateCellStats(cell.id)
     revalidateCell(cell.id)
-  }, [project?.id, applyOptimisticTargetEdit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell])
+  }, [project?.id, applyOptimisticTargetEdit, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
   /**
    * AD-2 sibling promotion: emit a new target-cell commit whose parentId is
@@ -1511,22 +1615,24 @@ export function ProjectWorkspace() {
     const cell = getActiveCell(historyCellId)
     if (!cell) return
     applyOptimisticTargetEdit(cell.id, { value: entry.value })
-    await emitTargetCellCommit({
+    const parentId = resolveTargetCommitParentId(cell)
+    const eventId = await emitTargetCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
       cellId: cell.id,
       // parentId must be the current chain head so AD-2 makes this the winner.
-      parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
+      parentId,
       sourceEventId: cell.sourceEventId ?? null,
       value: entry.value,
       author: currentUsername,
     })
+    rememberPendingTargetCommit(cell.id, eventId, parentId)
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
     // Single-cell promotion — targeted refetch (see commitCompletedCell).
     revalidateCellStats(cell.id)
     revalidateCell(cell.id)
-  }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateCellStats, revalidateCell])
+  }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
   const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, project?.translationBrief?.l1Summary ?? undefined,
@@ -1777,7 +1883,7 @@ export function ProjectWorkspace() {
       author: currentUsername,
     }).catch((err) => {
       console.warn("[bt-persist] outbox emit failed:", err)
-      // AQU-274: surface enqueue failure so the user knows the BT didn't
+      // FRO-274: surface enqueue failure so the user knows the BT didn't
       // persist to the server queue. The in-memory + localStorage copies
       // still exist, but they need to reload to re-queue.
       setBtWriteError("Couldn't save the back-translation locally — copy your text and reload.")
@@ -1870,7 +1976,7 @@ export function ProjectWorkspace() {
     persistBt(cell, btText, polished)
   }, [persistBt])
 
-  // ── AQU-192: assignment data ──────────────────────────────────────────────
+  // ── FRO-192: assignment data ──────────────────────────────────────────────
   // Members list: used by AssignModal for the assignee picker and for building
   // the username→userId reverse map.
   const { members: projectMembers } = useProjectMembers(project?.id ?? null)
@@ -1972,22 +2078,26 @@ export function ProjectWorkspace() {
   const [allFilesProgressSnapshot, setAllFilesProgressSnapshot] = useState<
     Map<string, { translated: number; validated: number; total: number }>
   >(new Map())
+  const progressSnapshotTokenFileId = project?.files[0]?.id ?? null
+  const refreshAllFilesProgress = useCallback(async () => {
+    if (!project?.id || !progressSnapshotTokenFileId) {
+      setAllFilesProgressSnapshot(new Map())
+      return
+    }
+    const token = await getTokenForFile(progressSnapshotTokenFileId)
+    if (!token) throw new Error("project progress token unavailable")
+    const summaries = await fetchProjectFiles(project.id, token)
+    setAllFilesProgressSnapshot(fileSummariesToProgress(summaries))
+  }, [getTokenForFile, progressSnapshotTokenFileId, project?.id])
   useEffect(() => {
-    if (!project?.id || !frontierSession?.jwt) return
-    let cancelled = false
-    fetchProjectFiles(project.id, frontierSession.jwt)
-      .then((summaries) => {
-        if (cancelled) return
-        setAllFilesProgressSnapshot(fileSummariesToProgress(summaries))
-      })
+    void refreshAllFilesProgress()
       .catch(() => {
         // Non-fatal — sidebar rows simply fall back to no progress bar
         // (existing behavior) until the next successful fetch.
       })
-    return () => { cancelled = true }
     // Re-fetch whenever the file count changes (import/delete) so newly
     // added files pick up a snapshot without a full reload.
-  }, [project?.id, project?.files.length, frontierSession?.jwt])
+  }, [project?.files.length, refreshAllFilesProgress])
   const fileProgress = useMemo(
     () => mergeFileProgress(allFilesProgressSnapshot, liveFileProgress),
     [allFilesProgressSnapshot, liveFileProgress],
@@ -2037,10 +2147,42 @@ export function ProjectWorkspace() {
 
   const jumpToCellId = useCallback((cellId: string) => {
     const idx = cellStore.findIndexByCellId(cellId)
-    if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
+    if (idx >= 0) {
+      editorRef.current?.scrollToCellIndex(idx)
+      editorRef.current?.flashCell(cellId, "")
+    }
   }, [cellStore])
 
-  // AQU-192: jump to the first cell matching an assignment's scopeLabel.
+  const pendingPresenceJumpRef = useRef<{ fileId: string; cellId?: string } | null>(null)
+  const handleJumpToPresencePeer = useCallback((peer: ProjectPresencePeer) => {
+    const targetFileId = peer.currentFileId ?? activeFileId
+    if (!targetFileId) return
+    if (targetFileId !== activeFileId) {
+      pendingPresenceJumpRef.current = {
+        fileId: targetFileId,
+        ...(peer.focusedCell ? { cellId: peer.focusedCell } : {}),
+      }
+      workspaceTabs.openFile(targetFileId)
+      return
+    }
+    if (peer.focusedCell) jumpToCellId(peer.focusedCell)
+  }, [activeFileId, jumpToCellId, workspaceTabs])
+
+  useEffect(() => {
+    const pending = pendingPresenceJumpRef.current
+    if (!pending || pending.fileId !== activeFileId) return
+    if (!pending.cellId) {
+      pendingPresenceJumpRef.current = null
+      return
+    }
+    const idx = cellStore.findIndexByCellId(pending.cellId)
+    if (idx < 0) return
+    pendingPresenceJumpRef.current = null
+    editorRef.current?.scrollToCellIndex(idx)
+    editorRef.current?.flashCell(pending.cellId, "")
+  }, [activeFileId, cellStore, cellStoreVersion])
+
+  // FRO-192: jump to the first cell matching an assignment's scopeLabel.
   // Uses the same globalReferences prefix match as assignmentsByCellId build.
   const jumpToScopeLabel = useCallback((scopeLabel: string) => {
     const chapterPart = scopeLabel.split(" in ")[0]?.trim() ?? scopeLabel
@@ -2123,7 +2265,7 @@ export function ProjectWorkspace() {
 
   // Legacy sync status shim. AD-1 live coordination uses the project
   // WebSocket below; this hook only feeds the existing status indicator.
-  const { peers: fileLevelPeers, status: fileSyncStatus } = useFileSync({
+  const { status: fileSyncStatus } = useFileSync({
     doc,
     projectId: project?.id ?? null,
     fileId: activeFileId || null,
@@ -2152,7 +2294,7 @@ export function ProjectWorkspace() {
   // Reactive version of focusedCellIdRef for the agent panel's context wiring.
   const [focusedCellId, setFocusedCellId] = useState<string | null>(null)
 
-  // AQU-179: TN sidebar visibility + canonicalRef of the focused cell.
+  // FRO-179: TN sidebar visibility + canonicalRef of the focused cell.
   // Hidden by default; toggled via the View settings menu.
   const [tnSidebarVisible, setTnSidebarVisible] = useState<boolean>(() =>
     projectId ? readTnSidebarVisible(projectId) : false,
@@ -2189,7 +2331,7 @@ export function ProjectWorkspace() {
     setTrackedCellRef(null)
   }, [activeFileId])
   const reconcilerRef = useRef<import("@/lib/sync/ws-reconciler").WsReconciler | null>(null)
-  // AQU-288: Reactive reconciler state so useFocusLock can access it.
+  // FRO-288: Reactive reconciler state so useFocusLock can access it.
   // reconcilerRef is still the write target (set inside the async connect effect)
   // and is used by the claim/release callbacks declared below.
   const [liveReconciler, setLiveReconciler] = useState<WsReconciler | null>(null)
@@ -2198,6 +2340,29 @@ export function ProjectWorkspace() {
   // large import landing) tears the socket down and recreates it.
   const projectFilesRef = useRef(projectFiles)
   projectFilesRef.current = projectFiles
+  const activeFileIdRef = useRef<string | null>(activeFileId)
+  activeFileIdRef.current = activeFileId
+  const presenceStaleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearPresenceStaleTimer = useCallback(() => {
+    if (presenceStaleTimerRef.current === null) return
+    clearTimeout(presenceStaleTimerRef.current)
+    presenceStaleTimerRef.current = null
+  }, [])
+
+  const clearRemotePresenceState = useCallback(() => {
+    cellLockHoldersRef.current = new Map()
+    setCellLockHolders(new Map())
+    presenceStore.reset()
+  }, [presenceStore])
+
+  const sendPresenceUpdate = useCallback((patch: {
+    currentFileId?: string | null
+    focusedCell?: string | null
+    selection?: TargetPresenceSelection | null
+  }) => {
+    reconcilerRef.current?.send({ t: "presence.update", ...patch })
+  }, [])
 
   useEffect(() => {
     if (!project?.id || !frontierSession?.jwt) return
@@ -2209,7 +2374,7 @@ export function ProjectWorkspace() {
       const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
       if (cancelled || !project?.id) return
       const pid = project.id
-      // AQU-479: link.upstream-changed frames → refetch staleness immediately
+      // FRO-479: link.upstream-changed frames → refetch staleness immediately
       // (cheap GET, reflects the frame as soon as possible), and — debounced —
       // AWAIT the mirror sync, then revalidate BOTH staleness and cells.
       // QA-BUG-2: previously `triggerLinkSync` just re-ran the fire-and-forget
@@ -2246,8 +2411,32 @@ export function ProjectWorkspace() {
           },
         },
         {
+          onOpen() {
+            if (cancelled) return
+            clearPresenceStaleTimer()
+            sendPresenceUpdate({
+              currentFileId: activeFileIdRef.current,
+              selection: null,
+            })
+          },
+          onClose() {
+            if (cancelled) return
+            if (presenceStaleTimerRef.current !== null) return
+            presenceStaleTimerRef.current = setTimeout(() => {
+              presenceStaleTimerRef.current = null
+              clearRemotePresenceState()
+            }, PRESENCE_LOCK_STALE_CLEAR_MS)
+          },
           onMessage(msg) {
             if (msg.t === "event.applied") {
+              if (msg.file && msg.project === pid && (
+                msg.kind?.startsWith('source.cell.') ||
+                msg.kind?.startsWith('target.cell.') ||
+                msg.kind === 'cell.validate' ||
+                msg.kind === 'cell.unvalidate'
+              )) {
+                invalidateFileProgress(pid, msg.file)
+              }
               // File-scoped events (file.create / file.rename) carry no cell;
               // they change the project's file inventory or labels. Re-pull the
               // project so renames + new files surface live and the local
@@ -2256,7 +2445,7 @@ export function ProjectWorkspace() {
                 refresh()
                 return
               }
-              // AQU-228: comment.* events are non-chain-mutating and carry no
+              // FRO-228: comment.* events are non-chain-mutating and carry no
               // cell in the WS frame. Refresh the comments projection so the
               // server-persisted comment surfaces after the outbox flushes —
               // especially important for remote collaborators who never had the
@@ -2275,7 +2464,7 @@ export function ProjectWorkspace() {
               // pulled the authoritative row after its outbox flush, so the
               // echo's refetch is pure duplication (and the in-flight coalescer
               // misses it because the handler's refetch is gated behind the
-              // flush — see isOwnWriteEcho). The AQU-247 shadow keeps the value
+              // flush — see isOwnWriteEcho). The FRO-247 shadow keeps the value
               // visible until the handler's read lands. This is the dominant
               // edit-cycle cost: every commit + validate + auto-BT echo was
               // firing a redundant targeted GET (~5 of 8 per edit cycle).
@@ -2303,14 +2492,52 @@ export function ProjectWorkspace() {
                   return next
                 })
               }
+            } else if (msg.t === "file.progress.updated") {
+              if (msg.project !== pid) return
+              invalidateFileProgress(pid, msg.file)
+              void refreshAllFilesProgress().catch(() => {
+                // The next normal sidebar refresh retries a transient token or
+                // network failure. Do not turn a realtime hint into an
+                // unhandled rejection.
+              })
+              // The first import chunk owns file.create. Refresh the project
+              // inventory so remote users see the new row immediately; later
+              // bulk chunks do not cause an editor-wide reload storm.
+              if (msg.fileCreated) {
+                refresh()
+              } else if (activeFileIdRef.current === msg.file) {
+                // The bulk uploader emits this final frame only after every
+                // concurrent chunk committed, so one full read is enough for
+                // a collaborator who already has that file open.
+                revalidateCellsRef.current()
+              }
+            } else if (msg.t === "project.settings.updated") {
+              if (msg.project !== pid) return
+              window.dispatchEvent(new CustomEvent("aquilla:project-settings-updated", {
+                detail: { projectId: pid, version: msg.version },
+              }))
+              // A validation-threshold change alters every file's derived
+              // validated count without mutating its progress histogram.
+              invalidateProjectFileProgress(pid)
+              void refreshAllFilesProgress().catch(() => {
+                // The next normal sidebar refresh retries a transient token or
+                // network failure.
+              })
+              // Settings projection changes `cells.validated` without adding
+              // cell events, so a `?since=` delta would be empty. Drop the
+              // watermark to make the active editor read one authoritative
+              // snapshot and keep row validation UI in sync.
+              cellStore.setMaxServerSeq(null)
+              revalidateCellsRef.current()
             } else if (msg.t === "link.upstream-changed") {
-              // AQU-479: an upstream live-link project committed lane-relevant
+              // FRO-479: an upstream live-link project committed lane-relevant
               // changes. Refetch staleness immediately; the handler debounces
               // the mirror-sync trigger (push is a lossy accelerator — the
               // lazy pull on file open remains the self-healing floor).
               handleLinkUpstreamChanged(msg)
             } else if (msg.t === "presence") {
-              // AQU-288: forward presence snapshots to the focus-lock hook so
+              presenceStore.applyPresenceFrame(msg.users)
+              // FRO-288: forward presence snapshots to the focus-lock hook so
               // it can update heldBy when another user holds our focused cell.
               focusLockFeedFrameRef.current(msg)
               // B4 fix: applyPresenceFrame always returns a NEW Map, so ref and
@@ -2319,10 +2546,12 @@ export function ProjectWorkspace() {
               // RACE-5: update ref synchronously so checkLockHolder reads
               // the latest state even before the React re-render completes.
               const next = applyPresenceFrame(msg.users, currentUsername)
+              if (sameStringMap(cellLockHoldersRef.current, next)) return
               cellLockHoldersRef.current = next
               setCellLockHolders(next)
             } else if (msg.t === "lock.claimed") {
-              // AQU-288: forward lock.claimed to the hook so it can update
+              presenceStore.applyLockClaimed(msg.cellId, msg.by.userId)
+              // FRO-288: forward lock.claimed to the hook so it can update
               // isHeld / heldBy and stop our renewal timer on takeover.
               focusLockFeedFrameRef.current(msg)
               if (msg.by.userId === currentUsername) return
@@ -2338,7 +2567,8 @@ export function ProjectWorkspace() {
               cellLockHoldersRef.current = next
               setCellLockHolders(next)
             } else if (msg.t === "lock.released") {
-              // AQU-288: forward lock.released so the hook clears heldBy.
+              presenceStore.applyLockReleased(msg.cellId)
+              // FRO-288: forward lock.released so the hook clears heldBy.
               focusLockFeedFrameRef.current(msg)
               // B4 fix: same pattern — new Map from ref, sync ref, direct setState.
               // Prevents the bail-out that left cells visually locked after a
@@ -2362,7 +2592,7 @@ export function ProjectWorkspace() {
                 return next
               }).then(() => refresh())
             } else if (msg.t === "member.removed") {
-              // AQU-346: this user's membership was revoked; the DO closes
+              // FRO-346: this user's membership was revoked; the DO closes
               // the socket right after this frame. Re-fetch the project —
               // the server now 403s, which flips useProject to "forbidden",
               // unmounts the editor (project → null tears this reconciler
@@ -2379,13 +2609,27 @@ export function ProjectWorkspace() {
     })()
     return () => {
       cancelled = true
+      clearPresenceStaleTimer()
       reconcilerRef.current = null
       setLiveReconciler(null)
       reconciler?.close()
     }
-  }, [project?.id, frontierSession?.jwt, getTokenForFile, revalidateCells, revalidateCell, currentUsername, refresh])
+  }, [
+    project?.id,
+    frontierSession?.jwt,
+    getTokenForFile,
+    revalidateCells,
+    revalidateCell,
+    currentUsername,
+    refresh,
+    clearPresenceStaleTimer,
+    clearRemotePresenceState,
+    presenceStore,
+    sendPresenceUpdate,
+    refreshAllFilesProgress,
+  ])
 
-  // AQU-288: workspace-level focus-lock with renewal.
+  // FRO-288: workspace-level focus-lock with renewal.
   // useFocusLock is driven by focusedCellId (the reactive mirror of
   // focusedCellIdRef) and liveReconciler (set once the async WS connect
   // resolves). The hook starts a half-period renewal timer on every claim(),
@@ -2404,17 +2648,21 @@ export function ProjectWorkspace() {
   const writeLocTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleClaimCell = useCallback((cellId: string) => {
     focusedCellIdRef.current = cellId
-    setFocusedCellId(cellId) // AQU-175: reactive for chat panel context
-    // AQU-179: update TN sidebar with the focused cell's canonicalRef.
+    setFocusedCellId(cellId) // FRO-175: reactive for chat panel context
+    // FRO-179: update TN sidebar with the focused cell's canonicalRef.
     const focusedCell = getActiveCell(cellId)
     setFocusedCellCanonicalRef(focusedCell?.group ?? null)
     // Parallel-bibles panel: navigating to a cell is a stronger "looking at"
     // signal than the scroll position — the panel follows whichever moved last.
     if (focusedCell?.group) setTrackedCellRef(focusedCell.group)
-    // AQU-288: focusLockState.claim() replaces the bare focus.claim send.
+    // FRO-288: focusLockState.claim() replaces the bare focus.claim send.
     // The hook sends focus.claim and starts the half-period renewal timer so
     // the 30s DO lease never silently expires mid-edit.
-    focusLockState.claim()
+    sendPresenceUpdate({
+      currentFileId: activeFileIdRef.current,
+      selection: null,
+    })
+    focusLockState.claim(cellId)
     // Debounce last-location cell write (500 ms) so rapid focus events
     // don't hammer localStorage.
     if (writeLocTimerRef.current !== null) clearTimeout(writeLocTimerRef.current)
@@ -2424,23 +2672,44 @@ export function ProjectWorkspace() {
       writeLastLocation(currentUsername, projectId, { fileId: activeFileId, cellId })
     }, 500)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, activeFileId, currentUsername, focusLockState.claim, getActiveCell])
+  }, [projectId, activeFileId, currentUsername, focusLockState.claim, getActiveCell, sendPresenceUpdate])
   const handleReleaseCell = useCallback((cellId: string) => {
     if (focusedCellIdRef.current === cellId) focusedCellIdRef.current = null
     // Deliberately keep focusedCellId / focusedCellCanonicalRef: the chat
     // panel and TN sidebar need the *last* focused cell as context — clicking
     // away (e.g. to open chat) releases the focus lock but shouldn't drop the
     // context the user was just working in. Both reset on file switch below.
-    // AQU-288: hook's release() sends focus.release + stops renewal timer.
+    // FRO-288: hook's release() sends focus.release + stops renewal timer.
     focusLockState.release()
+    sendPresenceUpdate({
+      currentFileId: activeFileIdRef.current,
+      focusedCell: null,
+      selection: null,
+    })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusLockState.release])
+  }, [focusLockState.release, sendPresenceUpdate])
+  const handleTargetPresenceSelection = useCallback((
+    cellId: string,
+    selection: TargetPresenceSelection | null,
+  ) => {
+    if (focusedCellIdRef.current !== cellId) return
+    sendPresenceUpdate({
+      currentFileId: activeFileIdRef.current,
+      selection,
+    })
+  }, [sendPresenceUpdate])
   // Last-focused context is per-file: a cell from the previous file is stale
   // once the user opens another one.
   useEffect(() => {
+    focusedCellIdRef.current = null
     setFocusedCellId(null)
     setFocusedCellCanonicalRef(null)
-  }, [activeFileId])
+    sendPresenceUpdate({
+      currentFileId: activeFileId,
+      focusedCell: null,
+      selection: null,
+    })
+  }, [activeFileId, sendPresenceUpdate])
   const handleAckRemoteChange = useCallback((cellId: string) => {
     setCellsWithRemoteChange((cur) => {
       if (!cur.has(cellId)) return cur
@@ -2520,14 +2789,6 @@ export function ProjectWorkspace() {
     [activeFileId, cellSummaries.length, fileSyncStatus, cellsLoading]
   )
 
-  // Presence visible in the status bar is the file-level set the sync-worker
-  // already broadcasts via awareness. We previously union'd this with a
-  // separate project-wide presence room (over the legacy signaling relay) so
-  // peers on other files showed up too, but the relay is gone and the
-  // sync-worker doesn't fan out cross-file awareness yet — file-level only
-  // for now.
-  const peers = fileLevelPeers
-
   async function handleSearchSelect(result: WorkspaceSearchResult, query: string) {
     const flash = () => {
       const idx = cellStore.findIndexByCellId(result.cellId)
@@ -2552,16 +2813,18 @@ export function ProjectWorkspace() {
     if (!cell) return
 
     applyOptimisticTargetEditWithCapture(cell.id, { value: updatedText, valueHtml: updatedText })
-    await emitTargetCellCommit({
+    const parentId = resolveTargetCommitParentId(cell)
+    const eventId = await emitTargetCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
       cellId: cell.id,
-      parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
+      parentId,
       sourceEventId: cell.sourceEventId ?? null,
       value: updatedText,
       valueHtml: updatedText,
       author: currentUsername,
     })
+    rememberPendingTargetCommit(cell.id, eventId, parentId)
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
     // Single-cell edit — targeted refetch (see commitCompletedCell).
@@ -2573,6 +2836,8 @@ export function ProjectWorkspace() {
     isReadOnly,
     getActiveCell,
     applyOptimisticTargetEditWithCapture,
+    resolveTargetCommitParentId,
+    rememberPendingTargetCommit,
     currentUsername,
     getTokenForProjectFile,
     refreshOutboxPending,
@@ -2627,7 +2892,7 @@ export function ProjectWorkspace() {
   }, [checklistDismissed, dismissChecklist])
 
   const handleProjectUpdated = useCallback(async (updated: ProjectRecord | undefined) => {
-    // AQU-234: When a step component saves (e.g. AiInstructionsStep via
+    // FRO-234: When a step component saves (e.g. AiInstructionsStep via
     // useSaveCompletionSettings), it writes to IDB and hands us the updated
     // record. We must also push the change through patchSettings so that
     // useProjectSettings.local reflects it — that overlay is what
@@ -2651,7 +2916,7 @@ export function ProjectWorkspace() {
       // Empty prompt from a provider-only save — silently skip to avoid clobbering the server.
     } else if (systemPrompt && roleLevel < ROLE.MAINTAINER) {
       console.warn(
-        `[AQU-234] skipping systemPrompt patch — role ${roleLevel} is below server floor ${ROLE.MAINTAINER}. ` +
+        `[FRO-234] skipping systemPrompt patch — role ${roleLevel} is below server floor ${ROLE.MAINTAINER}. ` +
         "A sub-MAINTAINER device cannot write project-wide AI instructions.",
       )
     }
@@ -2687,7 +2952,7 @@ export function ProjectWorkspace() {
   }, [project?.files])
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const [undo, setUndo] = useState<{ chosen: RenameSuggestion[] } | null>(null)
-  // AQU-272: soft-deleted ("Recently deleted") files fetched from the server.
+  // FRO-272: soft-deleted ("Recently deleted") files fetched from the server.
   const [deletedFiles, setDeletedFiles] = useState<FileSummary[]>([])
   const [trashOpen, setTrashOpen] = useState(false)
   // Fetch trash list whenever the section opens or after a delete/restore/purge.
@@ -2748,32 +3013,47 @@ export function ProjectWorkspace() {
     await applyRenames([{ fileId, name: newName.trim() }])
   }, [project, applyRenames])
 
-  // AQU-272: soft-delete via file.delete event. IDB removal is contingent on
+  // FRO-272: soft-delete via file.delete event. IDB removal is contingent on
   // server ack (fixes F-E6 fire-and-forget fork). The file moves to "Recently
   // deleted" in the trash UI; cells and audio are retained. R2 wipe deferred.
   const handleDeleteFile = useCallback(async (fileId: string) => {
     if (!project) return
+
+    // Remove the row in the same interaction frame. Enqueuing is normally
+    // quick, but IndexedDB can be delayed by another transaction; the visible
+    // result of an acknowledged destructive action must not wait on it.
+    setOptimisticDeletes((current) => {
+      const next = new Set(current)
+      next.add(fileId)
+      return next
+    })
+
     try {
       await emitFileDelete({
         projectId: project.id,
         fileId,
         author: currentUsername,
       })
-      // Remove from local IDB only after the event is enqueued (server ack path).
-      await patchProject(project.id, (p) => deleteFile(p, fileId))
     } catch (e) {
       console.error("[delete] file.delete emit failed", e)
-      // Do not remove from local IDB if the event failed to enqueue.
+      // The durable event never entered the outbox, so restore the row.
+      setOptimisticDeletes((current) => {
+        if (!current.has(fileId)) return current
+        const next = new Set(current)
+        next.delete(fileId)
+        return next
+      })
       return
     }
-    // Hide the row immediately — the server read won't reflect file.delete
-    // until the outbox flushes, and refresh() below would otherwise re-fetch
-    // the file straight back into the sidebar.
-    setOptimisticDeletes((current) => {
-      const next = new Set(current)
-      next.add(fileId)
-      return next
-    })
+
+    // The outbox is authoritative. Local project cache cleanup is best-effort
+    // and must not roll back an event that is already queued for the server.
+    try {
+      await patchProject(project.id, (p) => deleteFile(p, fileId))
+    } catch (e) {
+      console.warn("[delete] local project cache cleanup failed", e)
+    }
+
     refresh()
     if (activeFileId === fileId) setActiveFileId(null)
     if (trashOpen) void refreshDeletedFiles()
@@ -2899,7 +3179,7 @@ export function ProjectWorkspace() {
     await updateProject(next)
   }, [project])
 
-  // AQU-177 (orchestrator glue): apply Replace-mode diffs through the standard
+  // FRO-177 (orchestrator glue): apply Replace-mode diffs through the standard
   // target-commit path — optimistic patch first for visible rows (write-clock
   // keeps own writes authoritative), then one outbox flush for the batch.
   const handleReplaceAll = useCallback(async (payload: ReplaceAllPayload) => {
@@ -2909,17 +3189,19 @@ export function ProjectWorkspace() {
       const cell = getActiveCell(diff.cellId)
       if (!cell) continue
       if (cell.fileId === activeFileId) applyOptimisticTargetEdit(cell.id, { value: diff.after })
-      await emitTargetCellCommit({
+      const parentId = resolveTargetCommitParentId(cell)
+      const eventId = await emitTargetCellCommit({
         projectId: project.id,
         fileId: cell.fileId,
         cellId: cell.id,
-        parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
+        parentId,
         sourceEventId: cell.sourceEventId ?? null,
         value: diff.after,
         author: currentUsername,
         searchQuery: payload.findQuery,
         replaceString: payload.replaceQuery,
       })
+      rememberPendingTargetCommit(cell.id, eventId, parentId)
       touched.push(cell.id)
     }
     if (touched.length === 0) return
@@ -2930,7 +3212,7 @@ export function ProjectWorkspace() {
       if (getActiveCell(id)?.fileId === activeFileId) revalidateCell(id)
     }
     rebuildSearchIndex()
-  }, [project?.id, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex])
+  }, [project?.id, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex])
 
   const projectNavItems = useMemo(() => {
     const items = [
@@ -2976,7 +3258,7 @@ export function ProjectWorkspace() {
             returnTo: workspaceReturnPath(projectId, activeFileId),
           }))
         } },
-      // AQU-272: trash moved out of the always-visible files footer into the
+      // FRO-272: trash moved out of the always-visible files footer into the
       // "More" menu — it opens a dialog now (project_lead+ only).
       ...(currentRoleLevel >= ROLE.PROJECT_LEAD
         ? [{ id: "trash", label: "Recently deleted", icon: Trash2,
@@ -3021,7 +3303,7 @@ export function ProjectWorkspace() {
   }, [project])
 
   const openExportFlow = useCallback(() => {
-    // AQU-253 (b fix): do NOT fire the action on an optimistic pre-fetch canExport value.
+    // FRO-253 (b fix): do NOT fire the action on an optimistic pre-fetch canExport value.
     // The button may render optimistically (canExport=true before settings load) but the
     // ACTION must wait until org settings have been fetched so we gate on the real floor.
     if (!orgSettingsFetched) return
@@ -3048,7 +3330,7 @@ export function ProjectWorkspace() {
       completeBatch(untranslated)
     },
     runExport: openExportFlow,
-    // AQU-288: wire batch-validate through the real validation event path.
+    // FRO-288: wire batch-validate through the real validation event path.
     // Called AFTER the user confirms via PrimaryActionButton's confirmation
     // dialog (requiresConfirmation in registry.ts). Role floor is enforced
     // server-side; we mirror-check here to avoid queueing guaranteed-403
@@ -3123,7 +3405,10 @@ export function ProjectWorkspace() {
     [cellStoreVersion, getActiveCells, legacyCellsNeeded],
   )
 
-  const handleCellCommitted = useCallback(async (cellId?: string, _committedEventId?: string) => {
+  const handleCellCommitted = useCallback(async (cellId?: string, committedEventId?: string, parentId?: string | null) => {
+    if (cellId && committedEventId) {
+      rememberPendingTargetCommit(cellId, committedEventId, parentId ?? null)
+    }
     // Capture before async work — another edit could arrive during the flush.
     const pendingEdit = lastOptimisticEditRef.current
     lastOptimisticEditRef.current = null
@@ -3142,7 +3427,7 @@ export function ProjectWorkspace() {
       revalidateAuditStats()
       revalidateCells()
     }
-  }, [getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCellStats, revalidateCell, revalidateCells])
+  }, [getTokenForProjectFile, rememberPendingTargetCommit, refreshOutboxPending, revalidateAuditStats, revalidateCellStats, revalidateCell, revalidateCells])
 
   const workspaceHeaderMenuItems = useMemo((): OverflowMenuItem[] => {
     const diarizeLabel =
@@ -3264,7 +3549,7 @@ export function ProjectWorkspace() {
       </div>
     )
   }
-  // AQU-346: revoked / never-granted access gets its own clean state — the
+  // FRO-346: revoked / never-granted access gets its own clean state — the
   // project exists, so "not found" would be misleading (and after a member
   // removal the removed user must land here on reload, not in the editor).
   if (status === "forbidden") {
@@ -3305,7 +3590,7 @@ export function ProjectWorkspace() {
     inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string; explicit?: boolean },
   ) {
     if (!project) return
-    // AQU-249 fix (Fix 2): serialize the read-modify-write through a module-level
+    // FRO-249 fix (Fix 2): serialize the read-modify-write through a module-level
     // promise chain so concurrent imports don't race on the project.files array.
     // Each call appends to _lastImportWrite; if the previous call fails the chain
     // still proceeds (catch → undefined) so one bad import can't wedge all future ones.
@@ -3338,7 +3623,7 @@ export function ProjectWorkspace() {
       })
     // Await and capture baseProject for the language-seed block below.
     const baseProject = await _lastImportWrite
-    // AQU-249: seed source/target language from import metadata.
+    // FRO-249: seed source/target language from import metadata.
     //
     // Two modes (determined by `inferredLanguages.explicit`):
     //   - EXPLICIT (user confirmed via DirectionPanel): values REPLACE current
@@ -3356,7 +3641,7 @@ export function ProjectWorkspace() {
     //   divergence. We skip the call entirely to avoid that split-brain.
     //   NOTE: EDIT_ROLE_FLOOR in useProjectSettings.ts is PROJECT_LEAD (500) —
     //   that mismatch vs the server's MAINTAINER (600) is a separate issue
-    //   flagged for follow-up (see Linear comment on AQU-249).
+    //   flagged for follow-up (see Linear comment on FRO-249).
     if (inferredLanguages && baseProject) {
       const { explicit, sourceLanguage: inSrc, targetLanguage: inTgt } = inferredLanguages
       // Read from baseProject (fresh) for the emptiness decision (WARN a).
@@ -3399,17 +3684,17 @@ export function ProjectWorkspace() {
           if (roleLevel >= serverFloor) {
             void patchSettings(patch).then((outcome) => {
               if (outcome.kind !== "ok") {
-                console.warn("[AQU-249] language seed returned non-ok:", outcome)
+                console.warn("[FRO-249] language seed returned non-ok:", outcome)
               }
             }).catch((err) => {
-              console.warn("[AQU-249] failed to seed language settings after import:", err)
+              console.warn("[FRO-249] failed to seed language settings after import:", err)
             })
           } else {
-            // AQU-249/AQU-255 fix (Fix 4): surface this to the user — a silent
+            // FRO-249/FRO-255 fix (Fix 4): surface this to the user — a silent
             // console.warn left the dialog implying success. The import itself
             // succeeded; only the project-wide language setting was skipped.
             console.warn(
-              `[AQU-249] skipping language seed — role ${roleLevel} is below server floor ${serverFloor}. ` +
+              `[FRO-249] skipping language seed — role ${roleLevel} is below server floor ${serverFloor}. ` +
               "Mismatch note: EDIT_ROLE_FLOOR in useProjectSettings is PROJECT_LEAD(500) but server requires MAINTAINER(600); tracked for follow-up.",
             )
             setDirectionRoleNotice(
@@ -3446,7 +3731,7 @@ export function ProjectWorkspace() {
     <EditorScrollProvider>
       {/* ScrollToGroupHandler must live inside EditorScrollProvider so it can call useEditorScroll */}
       <ScrollToGroupHandler cellStore={cellStore} storeVersion={cellStoreVersion} editorRef={editorRef} />
-      {/* AQU-308: currentCell for chat panel — derived from focusedCellId */}
+      {/* FRO-308: currentCell for chat panel — derived from focusedCellId */}
       <AppShell
         railCollapsed={dockTab === null}
         logoAccessory={
@@ -3527,7 +3812,7 @@ export function ProjectWorkspace() {
                   glossaryActive={centerSurface === "terminology"}
                 />
                 <SidebarProjectSection items={projectNavItems} />
-                {/* AQU-192: member's per-project assignment pickup panel. */}
+                {/* FRO-192: member's per-project assignment pickup panel. */}
                 {project?.id && jwt && (
                   <ProjectAssignedToMe
                     projectId={project.id}
@@ -3676,24 +3961,28 @@ export function ProjectWorkspace() {
 
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
 
-            {/* AQU-331: hidden trigger — opened from ⋯ menu; keeps RTL hint anchored here. */}
+            {/* FRO-331: hidden trigger — opened from ⋯ menu; keeps RTL hint anchored here. */}
             <ViewSettingsMenu
               ref={viewSettingsRef}
               hideTrigger
               fileOpen={Boolean(activeFileId)}
               lineNumbersEnabled={fileMeta.lineNumbersEnabled}
+              sourceDirectionMode={fileMeta.sourceDirectionMode}
+              targetDirectionMode={fileMeta.targetDirectionMode}
               sourceTextDirection={fileMeta.sourceTextDirection}
               targetTextDirection={fileMeta.targetTextDirection}
+              sourceAutoDirectionSummary={activeFileDirectionSummary.source}
+              targetAutoDirectionSummary={activeFileDirectionSummary.target}
+              directionWarningScope={activeFile?.id ?? null}
               cellLabelsEnabled={cellLabelsEnabled}
               footnoteViewMode={footnoteViewMode}
               onFootnoteViewModeChange={setFootnoteViewMode}
               tnSidebarEnabled={tnSidebarVisible}
-              rtlHintDismissed={fileMeta.rtlHintDismissed}
               sourceFontSize={fontSizes.source}
               targetFontSize={fontSizes.target}
               onLineNumbersChange={fileMeta.setLineNumbersEnabled}
-              onSourceTextDirectionChange={fileMeta.setSourceTextDirection}
-              onTargetTextDirectionChange={fileMeta.setTargetTextDirection}
+              onSourceDirectionModeChange={fileMeta.setSourceDirectionMode}
+              onTargetDirectionModeChange={fileMeta.setTargetDirectionMode}
               onCellLabelsChange={setCellLabelsEnabled}
               onSourceFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { sourceFontSize: v }) }}
               onTargetFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { targetFontSize: v }) }}
@@ -3701,7 +3990,6 @@ export function ProjectWorkspace() {
                 setTnSidebarVisible(v)
                 if (projectId) writeTnSidebarVisible(projectId, v)
               }}
-              onDismissRtlHint={fileMeta.dismissRtlHint}
             />
           </WorkspaceHeader>
         }
@@ -3774,7 +4062,7 @@ export function ProjectWorkspace() {
                 onCustomize={() => setChecklistOpen(true)}
               />
             )}
-            {/* AQU-214 (orchestrator glue): frozen-project banner — surfaces the
+            {/* FRO-214 (orchestrator glue): frozen-project banner — surfaces the
                 reactivate affordance instead of letting edits through. */}
             {isFrozen && project && (
               <InactiveProjectBanner
@@ -3784,9 +4072,9 @@ export function ProjectWorkspace() {
                 onReactivate={() => { const j = jwtRef.current; if (j) void toggleLifecycle(j) }}
               />
             )}
-            {/* AQU-296: offline banner — shown when browser reports no connectivity. */}
+            {/* FRO-296: offline banner — shown when browser reports no connectivity. */}
             <OfflineBanner />
-            {/* AQU-235: AI completion progress + stop control */}
+            {/* FRO-235: AI completion progress + stop control */}
             <div className="px-3 py-1 empty:hidden">
               <CompletionBulkProgressBanner />
             </div>
@@ -3866,7 +4154,7 @@ export function ProjectWorkspace() {
                 </button>
               </div>
             )}
-            {/* AQU-274: BT write-failure banner — shown when the BT persist
+            {/* FRO-274: BT write-failure banner — shown when the BT persist
                 outbox enqueue fails. The user must copy their work before
                 reloading since the in-memory cache won't survive a reload
                 once localStorage quota is hit. */}
@@ -3886,7 +4174,7 @@ export function ProjectWorkspace() {
                 </button>
               </div>
             )}
-            {/* AQU-288: focus-lock takeover banner — shown when another user
+            {/* FRO-288: focus-lock takeover banner — shown when another user
                 claims the cell we are currently editing. The cell becomes
                 read-only via lockHolderLabel; this banner makes the takeover
                 VISIBLE so the user knows their in-flight edit was not saved
@@ -3906,7 +4194,7 @@ export function ProjectWorkspace() {
           </>
         }
         main={centerSurface === "rules" ? (
-          // AQU-194: Rules surface renders inside the shell; shell stays mounted.
+          // FRO-194: Rules surface renders inside the shell; shell stays mounted.
           <RulesSurface
             project={project}
             projectId={projectId!}
@@ -3929,7 +4217,7 @@ export function ProjectWorkspace() {
             setEditingRuleId={setEditingRuleId}
           />
         ) : centerSurface === "comments" ? (
-          // AQU-254: Comments page inside the shell — back button in the page
+          // FRO-254: Comments page inside the shell — back button in the page
           // navigates to /project/:id, which the restore-location effect turns
           // into the user's last open file (including scroll position).
           <div className="h-full overflow-y-auto">
@@ -3938,21 +4226,21 @@ export function ProjectWorkspace() {
             </Suspense>
           </div>
         ) : centerSurface === "memory" ? (
-          // AQU-254: Living Memory page inside the shell.
+          // FRO-254: Living Memory page inside the shell.
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading living memory…</div>}>
               <LivingMemoryPageContent />
             </Suspense>
           </div>
         ) : centerSurface === "terminology" ? (
-          // AQU-254: Terminology page inside the shell.
+          // FRO-254: Terminology page inside the shell.
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading terminology…</div>}>
-              <GlossaryEditorContent />
+              <GlossaryEditorContent files={projectFiles} />
             </Suspense>
           </div>
         ) : centerSurface === "members" ? (
-          // AQU-180: Per-project members management inside the shell.
+          // FRO-180: Per-project members management inside the shell.
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading members…</div>}>
               <ProjectMembersPageContent />
@@ -3983,9 +4271,9 @@ export function ProjectWorkspace() {
             }
           />
         ) : cellAreaState.kind === "ready" ? (
-          // AQU-309: relative wrapper so the search-expanded overlay can cover the editor
+          // FRO-309: relative wrapper so the search-expanded overlay can cover the editor
           <div className="relative flex h-full w-full flex-col">
-            {/* AQU-309: Expanded search results overlay */}
+            {/* FRO-309: Expanded search results overlay */}
             {searchExpandedQuery !== null && (
               <div className="absolute inset-0 z-20 bg-background">
                 <SearchResultsView
@@ -4018,7 +4306,7 @@ export function ProjectWorkspace() {
                   tooltip per control. */}
               <TooltipDelegationBoundary>
               <EditorTable
-            ref={editorRef} project={project} cellStore={cellStore}
+            ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
             showFootnotesInline={footnoteViewMode === "inline"}
             footnotePanelActive={footnoteViewMode !== "off"}
             footnoteViewMode={footnoteViewMode}
@@ -4043,6 +4331,8 @@ export function ProjectWorkspace() {
             onSeekToCue={isSubtitleFile ? handleCueSeek : undefined}
             lineNumbersEnabled={fileMeta.lineNumbersEnabled}
             cellLabelsEnabled={cellLabelsEnabled}
+            sourceDirectionMode={fileMeta.sourceDirectionMode}
+            targetDirectionMode={fileMeta.targetDirectionMode}
             sourceTextDirection={fileMeta.sourceTextDirection}
             targetTextDirection={fileMeta.targetTextDirection}
             isAnonymous={!frontierSession}
@@ -4057,11 +4347,14 @@ export function ProjectWorkspace() {
             onAttachMediaFile={handleAttachMediaFile}
             onAttachMediaUrl={handleAttachMediaUrl}
             onCellCommitted={handleCellCommitted}
+            getPendingTargetEventId={getPendingTargetEventId}
             onOptimisticEdit={applyOptimisticTargetEditWithCapture}
             cellLockHolders={cellLockHolders}
+            presenceStore={presenceStore}
             cellsWithRemoteChange={cellsWithRemoteChange}
             onClaimCell={handleClaimCell}
             onReleaseCell={handleReleaseCell}
+            onTargetPresenceSelection={handleTargetPresenceSelection}
             onAckRemoteChange={handleAckRemoteChange}
             checkLockHolder={checkLockHolder}
             staleCellIds={staleCellIds}
@@ -4108,7 +4401,7 @@ export function ProjectWorkspace() {
                 }}
               />
             )}
-            {/* AQU-179: Translation Notes sidebar — shown when a TN file exists
+            {/* FRO-179: Translation Notes sidebar — shown when a TN file exists
                 and a translation cell with a matching canonicalRef is focused. */}
             <TranslationNotesSidebar
               projectId={projectId!}
@@ -4172,8 +4465,8 @@ export function ProjectWorkspace() {
             )}
             <WorkspaceStatusBar
               left={
-                <div className="flex items-center gap-3">
-                  <PeerPresence peers={peers} />
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <PeerPresence peers={presencePeers} onJumpToPeer={handleJumpToPresencePeer} />
                   <SyncStatusIndicator status={fileSyncStatus} />
                   <OutboxSyncIndicator
                     pendingCount={Math.max(0, outboxPending - outboxFailed)}
@@ -4224,7 +4517,7 @@ export function ProjectWorkspace() {
           onUpdated={handleProjectUpdated}
         />
       )}
-      {/* AQU-192: Assign work modal */}
+      {/* FRO-192: Assign work modal */}
       {project && canAssignWork && (
         <AssignModal
           open={assignModalOpen}
@@ -4276,7 +4569,7 @@ export function ProjectWorkspace() {
         />
       )}
       <Suspense fallback={null}>
-        {/* AQU-287 glue: existingFiles activates the re-import collision guard. */}
+        {/* FRO-287 glue: existingFiles activates the re-import collision guard. */}
         <ImportDialog open={importOpen} onOpenChange={setImportOpen}
           projectId={project.id}
           username={currentUsername}
@@ -4309,7 +4602,7 @@ export function ProjectWorkspace() {
           />
         </Suspense>
       )}
-      {/* AQU-249/AQU-255 fix (Fix 4): transient notice when direction couldn't be saved project-wide */}
+      {/* FRO-249/FRO-255 fix (Fix 4): transient notice when direction couldn't be saved project-wide */}
       {directionRoleNotice && (
         <div
           role="status"
@@ -4370,7 +4663,7 @@ export function ProjectWorkspace() {
         open={videoDialogOpen} onOpenChange={setVideoDialogOpen}
         current={videoAttachment} onSave={saveVideo}
       />
-      {/* AQU-272: soft-delete confirmation — file moves to "Recently deleted" (30-day retention). */}
+      {/* FRO-272: soft-delete confirmation — file moves to "Recently deleted" (30-day retention). */}
       <ConfirmActionDialog
         open={pendingDeleteId !== null}
         onOpenChange={(v) => { if (!v) setPendingDeleteId(null) }}
@@ -4383,7 +4676,7 @@ export function ProjectWorkspace() {
         variant="destructive"
         onConfirm={() => { if (pendingDeleteId) { void handleDeleteFile(pendingDeleteId) } setPendingDeleteId(null) }}
       />
-      {/* AQU-272: "Recently deleted" trash list — opened from the sidebar's
+      {/* FRO-272: "Recently deleted" trash list — opened from the sidebar's
           More menu (project_lead+); was an inline expander in the files panel. */}
       <Dialog open={trashOpen} onOpenChange={setTrashOpen}>
         <DialogContent className="max-w-md">
@@ -4544,7 +4837,7 @@ function ScrollToGroupHandler({ cellStore, storeVersion, editorRef }: ScrollToGr
     if (!pending) return
     const { group: groupId, section: sectionLabel, fileId: targetFileId } = pending
 
-    // AQU-250/254: only consume() when the active store belongs to the requested
+    // FRO-250/254: only consume() when the active store belongs to the requested
     // file. During a file-switch the pending request may already carry the NEW
     // file's id while the store is still clearing/loading; consuming early would
     // jump nowhere and burn the request.

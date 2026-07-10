@@ -1,6 +1,7 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
+import { Glossary } from "../../helpers/page-objects/Glossary"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -25,7 +26,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *   3. "Add to term base" button appears.
  *   4. Clicks it.
  *   5. Navigates to the terminology page.
- *   6. Verifies the new concept appears as a DRAFT (badge label "suggested").
+ *   6. Verifies the new concept appears as an inline pending row.
  *
  * Selecting text: TipTap source editor is read-only (source cells aren't editable
  * in the target lens), so we use the browser's Selection API via keyboard:
@@ -105,24 +106,16 @@ test("selecting source text reveals Add to termbase button and creates draft con
   // Dialog closes and the selection toolbar disappears (selection cleared).
   await expect(confirmBtn).not.toBeVisible({ timeout: 5_000 })
 
-  // Verify the draft concept was created. The write goes through
-  // patchSettings (a server round-trip), so reload-and-retry rather than
-  // asserting against a single page load that may race the write. Draft
-  // concepts surface in the "Review queue" tab — the tab label gains a count
-  // ("Review queue (1)") once the draft lands.
-  await alice.goto(`/project/${projectId}/terminology`)
-  await alice.waitForLoadState("networkidle")
-  const queueTab = alice.getByRole("button", { name: /Review queue \(\d+\)/ })
+  // Draft concepts now live inline in the Glossary rather than in a separate
+  // review queue. Reload-and-retry because patchSettings is a server round-trip.
+  const glossary = new Glossary(alice)
+  await glossary.goto(projectId!)
+  const pending = alice.locator('[data-testid="glossary-row"][data-status="draft"]').first()
   await expect(async () => {
     await alice.reload()
     await alice.waitForLoadState("networkidle")
-    await expect(queueTab).toBeVisible({ timeout: 2_000 })
+    await expect(pending).toBeVisible({ timeout: 2_000 })
   }).toPass({ timeout: 20_000 })
-  await queueTab.click()
-
-  // The queue row renders the concept's sourceTerm with Approve/Reject
-  // actions (TerminologyReviewQueue.tsx — aria-label "Approve concept <term>").
-  await expect(
-    alice.getByRole("button", { name: /^Approve concept/ }).first(),
-  ).toBeVisible({ timeout: 10_000 })
+  await expect(pending.getByRole("button", { name: "Accept term" })).toBeVisible()
+  await expect(pending.getByRole("button", { name: "Dismiss term" })).toBeVisible()
 })

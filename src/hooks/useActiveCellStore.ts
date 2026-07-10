@@ -9,6 +9,7 @@ import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { sortByLens } from "@/lib/timeline/derive"
 import type { OrderedBy } from "@/lib/parsers/types"
+import type { FileProgressResponse, ProgressCounts } from "@/lib/progress/file-progress-resource"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
 const EMPTY_CELL_IDS: readonly string[] = Object.freeze([])
@@ -138,6 +139,7 @@ interface RuntimeContext {
 interface PendingOverlay {
   value: string
   valueHtml?: string
+  eventId?: string
 }
 
 interface OptimisticEdit extends PendingOverlay {
@@ -166,6 +168,7 @@ export class CellStore {
   private sourceById = new Map<string, CellRow>()
   private targetById = new Map<string, CellRow>()
   private pendingOverlay = new Map<string, PendingOverlay>()
+  private pendingProgressEventIds: string[] = []
   private optimisticEdits = new Map<string, OptimisticEdit>()
   private freshnessFloors = new Map<string, number>()
   private cellVersionById = new Map<string, number>()
@@ -178,6 +181,7 @@ export class CellStore {
   private writeSeq = 0
   private maxServerSeq: number | null = null
   private navIndex: CellNavigationEntry[] = []
+  private fileProgressSnapshot: FileProgressResponse | null = null
   private sectionLabelById = new Map<string, string>()
   private footnoteOffsets = new Map<string, { source: number; target: number }>()
   private footnoteCache = new Map<string, {
@@ -207,6 +211,7 @@ export class CellStore {
     this.sourceById = new Map()
     this.targetById = new Map()
     this.pendingOverlay = new Map()
+    this.pendingProgressEventIds = []
     this.optimisticEdits = new Map()
     this.freshnessFloors = new Map()
     this.cellVersionById = new Map()
@@ -249,7 +254,12 @@ export class CellStore {
   getProjectId = (): string | null => this.ctx.projectId
   getCellCount = (): number => this.order.length
   getMaxServerSeq = (): number | null => this.maxServerSeq
-  setMaxServerSeq(seq: number | null): void { this.maxServerSeq = seq }
+  setMaxServerSeq(seq: number | null): void {
+    this.maxServerSeq = seq
+    if (this.fileProgressSnapshot) {
+      this.fileProgressSnapshot = { ...this.fileProgressSnapshot, revision: seq ?? 0 }
+    }
+  }
   getWriteSeq = (): number => this.writeSeq
   getFreshnessFloor = (cellId: string): number | undefined => this.freshnessFloors.get(cellId)
 
@@ -294,6 +304,14 @@ export class CellStore {
 
   getNavigationIndex(): readonly CellNavigationEntry[] {
     return this.navIndex.length === 0 ? EMPTY_NAVIGATION : this.navIndex
+  }
+
+  getFileProgressSnapshot(): FileProgressResponse | null {
+    return this.fileProgressSnapshot
+  }
+
+  getPendingProgressEventIds(): readonly string[] {
+    return this.pendingProgressEventIds
   }
 
   getFootnoteOffsets(cellId: string): { source: number; target: number } {
@@ -598,12 +616,25 @@ export class CellStore {
   }
 
   setPendingOverlay(next: Map<string, PendingOverlay>): void {
-    const changed = symmetricChangedKeys(this.pendingOverlay, next, (a, b) => a.value === b.value && a.valueHtml === b.valueHtml)
+    const changed = symmetricChangedKeys(
+      this.pendingOverlay,
+      next,
+      (a, b) => a.value === b.value && a.valueHtml === b.valueHtml && a.eventId === b.eventId,
+    )
     if (changed.size === 0) return
     this.pendingOverlay = next
     this.bumpCells(changed)
     this.rebuildDerivedIndexes()
     this.emit(changed)
+  }
+
+  setPendingProgressEventIds(next: readonly string[]): void {
+    const unique = [...new Set(next)]
+    if (unique.length === this.pendingProgressEventIds.length
+      && unique.every((eventId, index) => eventId === this.pendingProgressEventIds[index])) return
+    this.pendingProgressEventIds = unique
+    this.fileVersion++
+    this.emitAll()
   }
 
   clearOptimisticIfValue(cellId: string, value: string): boolean {
@@ -758,6 +789,24 @@ export class CellStore {
     const sectionById = new Map<string, string>()
     const footnoteOffsets = new Map<string, { source: number; target: number }>()
     const countsByScope = new Map<string, { source: number; target: number }>()
+    const progressThreshold = Math.min(15, Math.max(1, this.ctx.requiredValidations))
+    const emptyProgressCounts = (): ProgressCounts => ({
+      totalCount: 0,
+      filledCount: 0,
+      validatedCount: 0,
+      validationLevels: new Array(progressThreshold).fill(0),
+    })
+    const fileProgress = emptyProgressCounts()
+    const sectionProgress = new Map<string, ProgressCounts>()
+
+    const addProgress = (counts: ProgressCounts, filled: boolean, endorsements: number, validated: boolean): void => {
+      counts.totalCount++
+      if (filled) counts.filledCount++
+      for (let level = 1; level <= progressThreshold; level++) {
+        if (endorsements >= level) counts.validationLevels[level - 1]++
+      }
+      if (validated) counts.validatedCount++
+    }
 
     for (let index = 0; index < this.order.length; index++) {
       const id = this.order[index]
@@ -777,6 +826,31 @@ export class CellStore {
         if (target?.validated) entry.validated++
       }
 
+      if (source) {
+        const audit = this.ctx.auditStats.get(id)
+        const endorsements = audit
+          ? audit.activeValidators.length
+          : Math.max(0, target?.endorsementCount ?? 0)
+        const targetValue = this.optimisticEdits.get(id)?.value
+          ?? this.pendingOverlay.get(id)?.value
+          ?? target?.value
+          ?? ''
+        const hasAuthoritativeEndorsements = audit !== undefined || target?.endorsementCount !== undefined
+        const validated = hasAuthoritativeEndorsements
+          ? endorsements >= progressThreshold
+          : Boolean(target?.validated)
+        addProgress(fileProgress, targetValue.trim().length > 0, endorsements, validated)
+        const progressSection = source.canonicalRef ? sectionLabelFromCanonical(source.canonicalRef) : ''
+        if (progressSection) {
+          let counts = sectionProgress.get(progressSection)
+          if (!counts) {
+            counts = emptyProgressCounts()
+            sectionProgress.set(progressSection, counts)
+          }
+          addProgress(counts, targetValue.trim().length > 0, endorsements, validated)
+        }
+      }
+
       const scopeKey = footnoteScopeKey(this.ctx.fileId ?? "", canonical, section)
       const counts = countsByScope.get(scopeKey) ?? { source: 0, target: 0 }
       footnoteOffsets.set(id, { source: counts.source, target: counts.target })
@@ -785,6 +859,16 @@ export class CellStore {
       countsByScope.set(scopeKey, counts)
     }
     this.navIndex = Array.from(nav.values())
+    this.fileProgressSnapshot = this.ctx.fileId && this.sourceOrder.length > 0
+      ? {
+          fileId: this.ctx.fileId,
+          revision: this.maxServerSeq ?? 0,
+          validationCount: progressThreshold,
+          file: fileProgress,
+          sections: [...sectionProgress].map(([key, counts]) => ({ key, ...counts })),
+          source: 'projection',
+        }
+      : null
     this.sectionLabelById = sectionById
     this.footnoteOffsets = footnoteOffsets
   }
@@ -1026,6 +1110,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   useEffect(() => {
     if (!enabled || !fileId) {
       store.setPendingOverlay(new Map())
+      store.setPendingProgressEventIds([])
       return
     }
     let cancelled = false
@@ -1034,21 +1119,32 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       if (cancelled) return
       const fid = fileRef.current
       const next = new Map<string, PendingOverlay>()
+      const pendingProgressEventIds: string[] = []
       for (const record of all) {
         if (fid && record.event.fileId !== fid) continue
         const kind = record.event.kind
+        const failed = (record.status ?? "pending") === "failed"
+        if (!failed && (
+          kind.startsWith("source.cell.") ||
+          kind.startsWith("target.cell.") ||
+          kind === "cell.validate" ||
+          kind === "cell.unvalidate"
+        )) {
+          pendingProgressEventIds.push(record.event.id)
+        }
         if (kind !== "target.cell.commit" && kind !== "target.cell.create") continue
         const cellId = record.event.cellId
         if (!cellId) continue
         const payload = record.event.payload as { value?: string; valueHtml?: string }
-        if ((record.status ?? "pending") === "failed") {
+        if (failed) {
           if (typeof payload.value === "string") store.clearOptimisticIfValue(cellId, payload.value)
           continue
         }
         if (typeof payload.value !== "string") continue
-        next.set(cellId, { value: payload.value, valueHtml: payload.valueHtml })
+        next.set(cellId, { value: payload.value, valueHtml: payload.valueHtml, eventId: record.event.id })
       }
       store.setPendingOverlay(next)
+      store.setPendingProgressEventIds(pendingProgressEventIds)
     }
     void refresh()
     const unsub = subscribeToOutbox(refresh)
@@ -1080,6 +1176,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     void doFetch(true)
   }, [doFetch])
 
+  const refreshCellsCacheFromStore = useCallback((maxServerSeq?: number) => {
+    const pid = projectRef.current
+    const fid = fileRef.current
+    if (!pid || !fid) return
+    void writeCellsCache(pid, fid, store.toRows(), maxServerSeq ?? store.getMaxServerSeq() ?? undefined)
+  }, [store])
+
   const revalidateCellRef = useRef<(cellId: string) => void>(() => {})
   const revalidateCell = useCallback((cellId: string) => {
     const pid = projectRef.current
@@ -1110,6 +1213,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
           store.clearConfirmedShadows(rows, startSeq)
           store.markCellFresh(cellId)
           store.replaceRowsForCell(cellId, rows)
+          refreshCellsCacheFromStore()
           return
         }
       } catch {
@@ -1127,7 +1231,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         }
       }
     })()
-  }, [doFetch, store])
+  }, [doFetch, refreshCellsCacheFromStore, store])
   revalidateCellRef.current = revalidateCell
 
   const applyOptimisticTargetEdit = useCallback((cellId: string, patch: { value: string; valueHtml?: string }) => {

@@ -25,7 +25,9 @@ import {
   ROLE,
   LINK_ROLE_OPTIONS,
   PROJECT_ROLE_OPTIONS,
+  roleDisplayText,
 } from "@/lib/frontier/roles"
+import { RoleLabel } from "@/components/RoleLabel"
 
 interface SharePanelProps {
   open: boolean
@@ -268,7 +270,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
             <Select
               items={LINK_ROLE_OPTIONS.map((opt) => ({
                 value: String(opt.level),
-                label: opt.name,
+                label: roleDisplayText(opt.name),
               }))}
               value={String(inviteRole)}
               onValueChange={(v) => setInviteRole(Number(v ?? ""))}
@@ -281,7 +283,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
                 <SelectGroup>
                   {LINK_ROLE_OPTIONS.map((opt) => (
                     <SelectItem key={opt.level} value={String(opt.level)}>
-                      {opt.name}
+                      <RoleLabel name={opt.name} />
                     </SelectItem>
                   ))}
                 </SelectGroup>
@@ -443,7 +445,7 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
                 …{inv.token.slice(-8)}
               </p>
               <p className="text-[10px] text-muted-foreground">
-                {inv.role.name}
+                <RoleLabel name={inv.role.name} />
                 {inv.email ? ` · ${inv.email}` : " · open link"}
                 {" · "}
                 {formatExpiry(inv.expiresAt)}

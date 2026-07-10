@@ -525,7 +525,7 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     expect(result.current.cells[0].translated).toBe("predicted")
   })
 
-  it("keeps a committed value when a targeted refetch confirms it while a stale full refetch is still in flight (AQU-247)", async () => {
+  it("keeps a committed value when a targeted refetch confirms it while a stale full refetch is still in flight (FRO-247)", async () => {
     // The client-demo vanish. Timeline:
     //   1. A full soft refetch is in flight — its target side snapshotted
     //      BEFORE the commit (stale-empty).
@@ -578,7 +578,7 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     expect(result.current.cells[0].status).toBe("validated")
   })
 
-  it("keeps a targeted write-back (validated flag) when a stale full refetch lands after it (AQU-247)", async () => {
+  it("keeps a targeted write-back (validated flag) when a stale full refetch lands after it (FRO-247)", async () => {
     // Validate flow: no value change → no optimistic shadow exists at all.
     // The targeted refetch brings back validated=true; a full refetch whose
     // snapshot predates the validation must not revert it.
@@ -616,7 +616,7 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     expect(result.current.cells[0].status).toBe("validated")
   })
 
-  it("keeps a cell edited mid-flight even when the stale refetch's snapshot lacks its rows entirely (AQU-247)", async () => {
+  it("keeps a cell edited mid-flight even when the stale refetch's snapshot lacks its rows entirely (FRO-247)", async () => {
     // 'Whole row disappears': the stale snapshot predates the cell (or its
     // rows fail to come back), so the buffer swap doesn't just blank the
     // value — it removes the row, and the shadow can't resurrect a cell that
@@ -650,7 +650,7 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     expect(c2?.translated).toBe("nuevo")
   })
 
-  it("revalidateCell replaces the cell's rows in place — the row must not move to the bottom of the file (AQU-247)", async () => {
+  it("revalidateCell replaces the cell's rows in place — the row must not move to the bottom of the file (FRO-247)", async () => {
     // The targeted refetch used to filter-out + append the cell's rows, which
     // re-ordered the cell to the file's tail (cells render in source-row
     // order). Routing every local commit through revalidateCell (ba019e8)
@@ -676,7 +676,36 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     expect(result.current.cells.map((c) => c.id)).toEqual(["a", "b", "c"])
   })
 
-  it("discards a targeted response that predates a mid-flight local edit, then applies the retry (AQU-247)", async () => {
+  it("revalidateCell writes the confirmed row back to the warm-open cache", async () => {
+    streamMeta.maxServerSeq = 12
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "old", eventId: "ev-old" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "p", fileId: "f", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+    await waitFor(() => expect(cacheWrites.length).toBeGreaterThan(0))
+    cacheWrites.length = 0
+
+    fetchByIdsMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "new", eventId: "ev-new" }),
+    ])
+
+    act(() => { result.current.revalidateCell("c1") })
+
+    await waitFor(() => expect(result.current.cells[0].translated).toBe("new"))
+    await waitFor(() => expect(cacheWrites.length).toBeGreaterThan(0))
+    const latest = cacheWrites.at(-1)
+    const cachedTarget = latest?.rows.find((row) => row.cellId === "c1" && row.side === "target")
+    expect(cachedTarget?.value).toBe("new")
+    expect(cachedTarget?.eventId).toBe("ev-new")
+    expect(latest?.maxServerSeq).toBe(12)
+  })
+
+  it("discards a targeted response that predates a mid-flight local edit, then applies the retry (FRO-247)", async () => {
     // A targeted fetch is in flight when a local edit lands. Its response
     // predates the edit (freshness floor > fetch startSeq) and must be
     // discarded — then the bounded retry refetches against the newer state
@@ -718,7 +747,7 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     expect(fetchByIdsMock).toHaveBeenCalledTimes(2)
   })
 
-  it("keeps genuinely empty cells empty and lets an optimistic clear confirm — no stuck shadows (AQU-247)", async () => {
+  it("keeps genuinely empty cells empty and lets an optimistic clear confirm — no stuck shadows (FRO-247)", async () => {
     fetchAllMock.mockResolvedValueOnce([
       makeRow({ cellId: "c1", side: "source", value: "S1" }),
       makeRow({ cellId: "c1", side: "target", value: "x" }),
@@ -759,7 +788,7 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     await waitFor(() => expect(result.current.cells[0].translated).toBe("remote"))
   })
 
-  it("rapid successive commits: a refetch reflecting only the first commit neither clobbers nor confirms the second (AQU-247)", async () => {
+  it("rapid successive commits: a refetch reflecting only the first commit neither clobbers nor confirms the second (FRO-247)", async () => {
     fetchAllMock.mockResolvedValueOnce([
       makeRow({ cellId: "c1", side: "source", value: "src" }),
       makeRow({ cellId: "c1", side: "target", value: "" }),
@@ -988,7 +1017,7 @@ describe("useCells conditional refetch (M2-1)", () => {
     expect(result.current.cells[0].original).toBe("cached-src")
   })
 
-  it("a delta cannot clobber a cell mutated locally after the snapshot began (AQU-247)", async () => {
+  it("a delta cannot clobber a cell mutated locally after the snapshot began (FRO-247)", async () => {
     cacheEntry.value = {
       rows: [
         makeRow({ cellId: "c1", side: "source", value: "src" }),
@@ -1206,9 +1235,9 @@ describe("useCells conditional refetch (M2-1)", () => {
 
 
 // ---------------------------------------------------------------------------
-// AQU-274: quarantined outbox records excluded from overlay; shadow cleared
+// FRO-274: quarantined outbox records excluded from overlay; shadow cleared
 // ---------------------------------------------------------------------------
-describe("AQU-274: quarantined outbox filtering and shadow clear", () => {
+describe("FRO-274: quarantined outbox filtering and shadow clear", () => {
   // Import outbox helpers — they use fake-indexeddb from the global setup.
   // We need to reset IDB state between tests to avoid bleed.
   let enqueue: typeof import("@/lib/sync/outbox").enqueueOutboxEvent
@@ -1275,7 +1304,7 @@ describe("AQU-274: quarantined outbox filtering and shadow clear", () => {
     await waitFor(() => expect(result.current.cells[0].translated).toBe("server-value"))
   })
 
-  it("shadow is cleared on quarantine only for the cell whose event failed (AQU-274 + AQU-247 write-clock preserved)", async () => {
+  it("shadow is cleared on quarantine only for the cell whose event failed (FRO-274 + FRO-247 write-clock preserved)", async () => {
     // Two cells: c1 committed (quarantined), c2 committed (still pending).
     // c2's shadow must not be touched.
     fetchAllMock.mockResolvedValueOnce([

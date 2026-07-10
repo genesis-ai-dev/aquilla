@@ -7,6 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { removeProjectMember } from "@/lib/frontier/members";
 import { useFrontierSession } from "@/hooks/useFrontierSession";
 import type { OrgMemberProject } from "@/lib/frontier/orgs";
+import { RoleLabel } from "@/components/RoleLabel";
 
 interface RemoveOrgMemberDialogProps {
   orgId: number;
@@ -112,7 +113,7 @@ export function RemoveOrgMemberDialog({
                   />
                   <label htmlFor={`rm-${p.id}`} className="flex-1 cursor-pointer">
                     {p.name}{" "}
-                    <span className="text-xs text-muted-foreground">({p.role.name})</span>
+                    <span className="text-xs text-muted-foreground">(<RoleLabel name={p.role.name} />)</span>
                   </label>
                 </li>
               ))}

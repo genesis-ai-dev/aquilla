@@ -24,6 +24,7 @@ import {
   applyFocusClaim,
   applyFocusRelease,
   applyFocusRenew,
+  applyPresenceUpdate,
   parseProjectDoClientMessage,
   PROJECT_DO_DEFAULT_LEASE_MS,
   sweepExpiredLeases,
@@ -347,6 +348,12 @@ export class ProjectSync extends DurableObject<DOEnv> {
       for (const m of result.emit) this.broadcastToAll(m)
       return
     }
+    if (msg.t === "presence.update") {
+      const result = applyPresenceUpdate(this.presence, conn.userId, msg, now)
+      this.presence = result.presence
+      for (const m of result.emit) this.broadcastToAll(m)
+      return
+    }
     if (msg.t === "outbox.event") {
       void this.forwardOutboxEvent(msg.event)
       return
@@ -390,8 +397,9 @@ export class ProjectSync extends DurableObject<DOEnv> {
     if (this.sweepTimer !== null) return
     this.sweepTimer = setInterval(() => {
       const now = Date.now()
-      const result = sweepExpiredLeases(this.locks, now)
+      const result = sweepExpiredLeases(this.locks, this.presence, now)
       this.locks = result.locks
+      this.presence = result.presence
       for (const m of result.emit) this.broadcastToAll(m)
       if (result.emit.length > 0) this.broadcastPresence()
     }, LEASE_SWEEP_INTERVAL_MS)

@@ -20,6 +20,7 @@ import {
   downloadSourceFile,
   SourceExportError,
 } from "@/lib/sync/source-export"
+import { prefetchFileProgress } from "@/lib/progress/file-progress-resource"
 
 const EXPORTABLE_FILE_TYPES: ReadonlySet<FileReference["type"]> = new Set(["usfm"])
 
@@ -69,6 +70,11 @@ export function ExpandableFileList({
   const [editingCorpus, setEditingCorpus] = useState<string | null>(null)
   const [exportToast, setExportToast] = useState<{ msg: string; tone: "ok" | "err" } | null>(null)
   const { requestScrollToSection } = useEditorScroll()
+
+  useEffect(() => {
+    if (activeFileId) prefetchFileProgress(projectId, activeFileId, getTokenForFile)
+    for (const fileId of expanded) prefetchFileProgress(projectId, fileId, getTokenForFile)
+  }, [activeFileId, expanded, getTokenForFile, projectId])
 
   // Auto-dismiss the export toast after a few seconds — mirrors the Dashboard
   // errorToast pattern (no external toast lib in this codebase).
@@ -201,7 +207,11 @@ export function ExpandableFileList({
                       const isExpanded = canExpand && expanded.has(file.id)
                       const isEditing = editingFileId === file.id
                       return (
-                        <div key={file.id}>
+                        <div
+                          key={file.id}
+                          onPointerEnter={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
+                          onFocusCapture={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
+                        >
                           <FileRow
                             file={file}
                             active={file.id === activeFileId}

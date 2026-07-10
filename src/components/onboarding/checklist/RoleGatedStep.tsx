@@ -1,7 +1,7 @@
 import type { ReactNode } from "react"
 import { Lock } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { roleName } from "@/lib/frontier/roles"
+import { roleName, roleDisplayText } from "@/lib/frontier/roles"
 
 /**
  * AQU-334: gates a Project Setup checklist step's body on the caller's
@@ -60,7 +60,7 @@ export function RoleGatedStep({
   const allowed = roleLevel == null || roleLevel >= requiredRole
   if (allowed) return <>{children}</>
 
-  const tooltip = `${actionLabel} is available to ${roleName(requiredRole)}s and above.`
+  const tooltip = `${actionLabel} is available to ${roleDisplayText(roleName(requiredRole))}s and above.`
 
   return (
     <AppTooltip content={tooltip}>

@@ -46,6 +46,8 @@ interface FileSummary {
   eventId: string
   sourceLanguage: string | null
   targetLanguage: string | null
+  sourceTextDirection: 'ltr' | 'rtl' | null
+  targetTextDirection: 'ltr' | 'rtl' | null
   /** Timeline-segment-model order lens, read from meta. Null ⇒ client treats
    *  it as 'sequence'. */
   orderedBy: string | null
@@ -66,6 +68,12 @@ function mapRow(row: FileRowRaw): FileSummary {
   let meta: {
     source_language?: string
     target_language?: string
+    sourceLanguage?: string
+    targetLanguage?: string
+    source_text_direction?: string
+    target_text_direction?: string
+    sourceTextDirection?: string
+    targetTextDirection?: string
     orderedBy?: string
     coreMediaUrl?: string
   } = {}
@@ -82,8 +90,10 @@ function mapRow(row: FileRowRaw): FileSummary {
     role: row.role,
     kind: row.kind,
     eventId: row.event_id,
-    sourceLanguage: meta.source_language ?? null,
-    targetLanguage: meta.target_language ?? null,
+    sourceLanguage: meta.source_language ?? meta.sourceLanguage ?? null,
+    targetLanguage: meta.target_language ?? meta.targetLanguage ?? null,
+    sourceTextDirection: normalizeTextDirection(meta.source_text_direction ?? meta.sourceTextDirection),
+    targetTextDirection: normalizeTextDirection(meta.target_text_direction ?? meta.targetTextDirection),
     orderedBy: meta.orderedBy ?? null,
     coreMediaUrl: meta.coreMediaUrl ?? null,
     cellCount: row.cell_count,
@@ -93,6 +103,10 @@ function mapRow(row: FileRowRaw): FileSummary {
     lastEditAt: row.last_edit_at,
     deletedAt: row.deleted_at ?? null,
   }
+}
+
+function normalizeTextDirection(value: string | undefined): 'ltr' | 'rtl' | null {
+  return value === 'ltr' || value === 'rtl' ? value : null
 }
 
 // Active listing:  GET /api/v1/projects/:projectId/files
@@ -131,14 +145,20 @@ export async function handleFilesReadRequest(
   }
 
   const columns =
-    "id, project_id, name, role, kind, event_id, meta, " +
-    "cell_count, approved_count, filled_count, word_count, last_edit_at, deleted_at"
+    "f.id, f.project_id, f.name, f.role, f.kind, f.event_id, f.meta, " +
+    "COALESCE(p.total_count, f.cell_count) AS cell_count, " +
+    "CASE WHEN p.file_id IS NULL THEN f.approved_count ELSE COALESCE((SELECT SUM((entry.key::integer >= LEAST(15, GREATEST(1, CASE WHEN (ps.settings::jsonb->>'validationCount') ~ '^[0-9]+$' THEN (ps.settings::jsonb->>'validationCount')::integer ELSE 1 END)))::integer * entry.value::integer) FROM jsonb_each_text(p.validator_histogram) entry), 0) END AS approved_count, " +
+    "COALESCE(p.filled_count, f.filled_count) AS filled_count, " +
+    "f.word_count, f.last_edit_at, f.deleted_at"
+  const joins =
+    " LEFT JOIN file_section_progress p ON p.project_id = f.project_id AND p.file_id = f.id AND p.scope = 'file' AND p.section_key = ''" +
+    " LEFT JOIN project_settings ps ON ps.project_id = f.project_id"
 
   // ?trash=1 returns soft-deleted files only; default returns active files only.
   const trash = url.searchParams.get("trash") === "1"
 
   if (fileId) {
-    const sql = `SELECT ${columns} FROM files WHERE project_id = ? AND id = ?`
+    const sql = `SELECT ${columns} FROM files f${joins} WHERE f.project_id = ? AND f.id = ?`
     const row = await env.AQUILLA_PG.prepare(sql)
       .bind(projectId, fileId)
       .first<FileRowRaw>()
@@ -148,8 +168,8 @@ export async function handleFilesReadRequest(
 
   const tombstoneFilter = trash ? "deleted_at IS NOT NULL" : "deleted_at IS NULL"
   const sql =
-    `SELECT ${columns} FROM files WHERE project_id = ? AND ${tombstoneFilter} ` +
-    `ORDER BY last_edit_at DESC NULLS LAST, name ASC`
+    `SELECT ${columns} FROM files f${joins} WHERE f.project_id = ? AND f.${tombstoneFilter} ` +
+    `ORDER BY f.last_edit_at DESC NULLS LAST, f.name ASC`
   const result = await env.AQUILLA_PG.prepare(sql)
     .bind(projectId)
     .all<FileRowRaw>()

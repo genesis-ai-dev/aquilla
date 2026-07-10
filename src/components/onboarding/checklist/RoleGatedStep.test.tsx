@@ -69,7 +69,7 @@ describe("RoleGatedStep", () => {
         <button>Add</button>
       </RoleGatedStep>,
     )
-    expect(screen.getByTestId("tooltip-content")).toHaveTextContent(/project_lead/i)
+    expect(screen.getByTestId("tooltip-content")).toHaveTextContent(/Project Lead/i)
   })
 
   it("blocks a contributor (400) from the project_lead (500) invite floor", () => {

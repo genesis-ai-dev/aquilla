@@ -13,8 +13,13 @@ Before claiming any feature is complete:
 1. **Run the smoke suite.** `npm run test:e2e:smoke` must pass. The pre-push hook enforces this; do not bypass with `--no-verify` unless explicitly told to.
 2. **If your change touches a journey listed in `e2e/JOURNEYS.md`, extend the matching spec OR add a new spec under `e2e/specs/<area>/`.**
 3. **New user-facing journey = new row in `e2e/JOURNEYS.md` AND a new spec.**
-4. **Reuse helpers** in `e2e/helpers/page-objects/`. Do not duplicate selectors. If no page object fits, add one.
-5. Tests run against **local `wrangler dev` instances** of `auth-worker` and `sync-worker`, backed by a Docker-managed local Postgres (container `aquilla-dev-pg`). See `e2e/README.md` for setup.
+4. **Changed behavior means changed tests.** If a feature, UI flow, label, role, selector, route, validation rule, or loading state changes, update the existing smoke spec/page object in the same change. A stale smoke test is a product bug, not something to ignore.
+5. **Do not leave smoke specs testing removed UI.** If the old journey no longer exists, rewrite the spec around the replacement journey or remove it only when `e2e/JOURNEYS.md` is updated to say the journey was intentionally retired.
+6. **Investigate before changing a failing test.** Check the implementation, relevant commits/issues/specs, and the intended user journey before classifying a failure. Fix the product when behavior regressed; update the test only when the intended behavior genuinely changed. Never delete, skip, broaden, or weaken an assertion merely to make CI pass.
+7. **Reuse helpers** in `e2e/helpers/page-objects/`. Do not duplicate selectors. If no page object fits, add one or update the existing one as part of the feature.
+8. Tests run against **local `wrangler dev` instances** of `auth-worker` and `sync-worker`, backed by a Docker-managed local Postgres (container `aquilla-dev-pg`). See `e2e/README.md` for setup.
+
+Smoke tests are production guardrails. Shipping a UI or workflow change with knowingly stale smoke specs is incomplete work, even when the app appears to work manually.
 
 ## Conventions
 

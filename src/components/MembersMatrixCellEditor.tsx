@@ -10,6 +10,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { RoleLabel } from "@/components/RoleLabel"
 import {
   ROLE,
   PROJECT_ROLE_OPTIONS,
@@ -172,9 +173,7 @@ export function MembersMatrixCellEditor({
           }
         >
           <div className="flex items-center justify-between gap-1">
-            <span className="capitalize truncate">
-              {cell.role.name.replace(/_/g, " ")}
-            </span>
+            <RoleLabel name={cell.role.name} className="truncate" />
             <div className="flex items-center gap-0.5 shrink-0">
               {sourceBadge && (
                 <Tooltip>
@@ -212,7 +211,7 @@ export function MembersMatrixCellEditor({
                     <ul className="space-y-0.5">
                       {secondarySources.map((s) => (
                         <li key={s.source} className="text-[10px] capitalize">
-                          {SOURCE_LABEL[s.source]} · {s.name.replace(/_/g, " ")}
+                          {SOURCE_LABEL[s.source]} · <RoleLabel name={s.name} />
                         </li>
                       ))}
                     </ul>
@@ -272,7 +271,7 @@ function RolePickerBody({
               }`}
             >
               <span className="text-xs font-medium capitalize">
-                {opt.name.replace(/_/g, " ")}
+                <RoleLabel name={opt.name} />
                 {isCurrent && (
                   <span className="ml-1.5 text-[9px] text-muted-foreground">current</span>
                 )}
@@ -403,8 +402,8 @@ function ImmutableBody({
               disabled={status === "submitting"}
               className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs hover:bg-muted disabled:opacity-60"
             >
-              <span className="capitalize">{opt.name.replace(/_/g, " ")}</span>
-              <span className="text-[10px] text-muted-foreground">{roleName(opt.level)}</span>
+              <RoleLabel name={opt.name} />
+              <RoleLabel name={roleName(opt.level)} className="text-[10px] text-muted-foreground" />
             </button>
           ))}
         </div>

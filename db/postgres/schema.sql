@@ -382,6 +382,28 @@ CREATE TABLE cells (
     PRIMARY KEY (project_id, file_id, cell_id, side)
 );
 
+-- AQU-517: compact derived progress. One file row plus one row per meaningful
+-- canonical section; validator_histogram keys are exact endorsement counts,
+-- capped at 15 (the 15 key means 15+).
+CREATE TABLE file_section_progress (
+    project_id          TEXT NOT NULL,
+    file_id             TEXT NOT NULL,
+    scope               TEXT NOT NULL CHECK (scope IN ('file', 'section')),
+    section_key         TEXT NOT NULL DEFAULT '',
+    total_count         INTEGER NOT NULL DEFAULT 0 CHECK (total_count >= 0),
+    filled_count        INTEGER NOT NULL DEFAULT 0 CHECK (filled_count >= 0),
+    validator_histogram JSONB NOT NULL DEFAULT '{}'::jsonb,
+    revision            BIGINT NOT NULL DEFAULT 0,
+    updated_at          BIGINT NOT NULL,
+    PRIMARY KEY (project_id, file_id, scope, section_key),
+    CHECK (
+      (scope = 'file' AND section_key = '') OR
+      (scope = 'section' AND section_key <> '')
+    )
+);
+
+CREATE INDEX idx_file_section_progress_file_revision ON file_section_progress(project_id, file_id, revision);
+
 CREATE TABLE cell_validators (
     project_id TEXT NOT NULL,
     file_id    TEXT NOT NULL,

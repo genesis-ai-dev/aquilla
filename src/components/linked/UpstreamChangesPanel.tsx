@@ -308,16 +308,18 @@ export function UpstreamChangesPanel({
                           <span>·</span>
                           <span className="font-mono">{item.cellId}</span>
                           {item.category === "tombstoned" && (
-                            <Badge variant="destructive" className="gap-1">
-                              <Trash2 className="h-3 w-3" /> removed upstream
+                            <Badge variant="destructive">
+                              <Trash2 data-icon="inline-start" />
+                              removed upstream
                             </Badge>
                           )}
                           {!item.target && (
                             <Badge variant="secondary">awaiting upstream translation</Badge>
                           )}
                           {skipped && (
-                            <Badge variant="outline" className="gap-1 text-amber-700 dark:text-amber-400">
-                              <AlertTriangle className="h-3 w-3" /> skipped — retranslated since
+                            <Badge variant="outline">
+                              <AlertTriangle data-icon="inline-start" />
+                              skipped — retranslated since
                             </Badge>
                           )}
                         </div>

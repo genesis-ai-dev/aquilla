@@ -16,6 +16,7 @@ import { notifyProjectDo } from "./archive-broadcast"
 import { handleCorsPreflight, withCors } from "./cors"
 import { handleProjectArchiveRequest } from "./project-archive"
 import { handleMemberRemovedRequest, notifyProjectDoMemberRemoved } from "./member-removed"
+import { handleProjectSettingsChangedRequest } from "./project-settings-notify"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
 import { handleCellHistoryReadRequest } from "./events/cell-history-read-route"
 import { handleMemberActivityReadRequest } from "./events/member-activity-read-route"
@@ -26,6 +27,7 @@ import { handleCellAudioReadRequest } from "./events/cell-audio-read-route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleEventsWriteRequest } from "./events/route"
 import { handleFilesReadRequest } from "./events/files-read-route"
+import { handleProgressReadRequest } from "./events/progress-read-route"
 import { handleBulkImportRequest } from "./events/import-route"
 import { handleBulkMorphImportRequest } from "./events/import-morph-route"
 import { handleMigrateIngestRequest } from "./events/migrate-ingest-route"
@@ -206,6 +208,8 @@ export default {
       notifyProjectDoMemberRemoved,
     )
     if (memberRemovedResponse) return memberRemovedResponse
+    const projectSettingsChangedResponse = await handleProjectSettingsChangedRequest(request, env)
+    if (projectSettingsChangedResponse) return projectSettingsChangedResponse
     const rebuildResponse = await handleRebuildProjectionRequest(request, env)
     if (rebuildResponse) return rebuildResponse
     const rebuildFtsResponse = await handleRebuildFtsRequest(request, env)
@@ -230,6 +234,8 @@ export default {
     if (cellsAuditReadResponse) return withCors(cellsAuditReadResponse, request)
     const filesReadResponse = await handleFilesReadRequest(request, env)
     if (filesReadResponse) return withCors(filesReadResponse, request)
+    const progressReadResponse = await handleProgressReadRequest(request, env)
+    if (progressReadResponse) return withCors(progressReadResponse, request)
     const cellsReadResponse = await handleCellsReadRequest(request, env)
     if (cellsReadResponse) return withCors(cellsReadResponse, request)
     const cellConfidenceResponse = await handleCellConfidenceRequest(request, env)
@@ -263,7 +269,7 @@ export default {
     if (branchingPassagesResponse) return withCors(branchingPassagesResponse, request)
     const branchingSearchResponse = await handleBranchingSearchRequest(request, env)
     if (branchingSearchResponse) return withCors(branchingSearchResponse, request)
-    const bulkImportResponse = await handleBulkImportRequest(request, env)
+    const bulkImportResponse = await handleBulkImportRequest(request, env, ctx)
     if (bulkImportResponse) return bulkImportResponse
     const bulkMorphImportResponse = await handleBulkMorphImportRequest(request, env)
     if (bulkMorphImportResponse) return bulkMorphImportResponse

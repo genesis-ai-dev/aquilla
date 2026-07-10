@@ -5,6 +5,11 @@ import { OrgProvider } from "@/context/OrgContext"
 import { OrgHome, activityStatus } from "./OrgHome"
 import type { PortfolioProject } from "@/lib/frontier/portfolio"
 
+function projectsRollupStat() {
+  const label = screen.getAllByText("Projects").find((el) => el.classList.contains("text-muted-foreground"))!
+  return label.parentElement!
+}
+
 // Default: signed-in. Type-cast to allow null session in signed-out tests.
 type FakeSession = { jwt: string; username: string; createdAt: string } | null
 const mockUseFrontierSession = vi.fn<() => { session: FakeSession; loading: boolean }>(() => ({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false }))
@@ -178,8 +183,8 @@ describe("OrgHome", () => {
   it("shows the project count in the rollup strip", async () => {
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
-    // 2 projects total — rendered as the Projects rollup count
-    expect(screen.getByText("2")).toBeInTheDocument()
+    const projectsStat = projectsRollupStat()
+    expect(within(projectsStat).getByText("2")).toBeInTheDocument()
   })
 
   it("shows the overdue rollup card and an overdue badge", async () => {
@@ -201,8 +206,8 @@ describe("OrgHome", () => {
     expect(screen.getByText("Has Audio")).toBeInTheDocument()
     // …so each project row shows its own audio coverage (both are 50% audio).
     // Scope to the row so the bare "50%" cell isn't confused with a rollup tile.
-    const legacyRow = screen.getByText("Legacy Translation").closest("a")
-    const freshRow = screen.getByText("New Testament").closest("a")
+    const legacyRow = screen.getByText("Legacy Translation").closest("tr")
+    const freshRow = screen.getByText("New Testament").closest("tr")
     expect(legacyRow).not.toBeNull()
     expect(freshRow).not.toBeNull()
     expect(within(legacyRow!).getByText("50%")).toBeInTheDocument()
@@ -254,8 +259,8 @@ describe("OrgHome", () => {
 
     expect(screen.queryByText("Legacy Translation")).not.toBeInTheDocument()
     expect(screen.getByText("New Testament")).toBeInTheDocument()
-    // rollup count still reads the full portfolio of 2, not the filtered 1
-    expect(screen.getByText("2")).toBeInTheDocument()
+    const projectsStat = projectsRollupStat()
+    expect(within(projectsStat).getByText("2")).toBeInTheDocument()
   })
 
   it("filters to stalled projects via the status chip", async () => {
@@ -277,7 +282,7 @@ describe("OrgHome", () => {
       target: { value: "nonexistent-zzz" },
     })
 
-    expect(screen.getByText("No matching projects.")).toBeInTheDocument()
+    expect(screen.getByText("No results.")).toBeInTheDocument()
   })
 
   // AQU-416: the dashboard's "Shared with you" section (bottom of the org

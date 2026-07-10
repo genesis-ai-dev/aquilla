@@ -15,16 +15,16 @@
  *   { t: "event.stale", id, reason }
  *       Server rejected an incoming event as a stale sibling (parent-chain
  *       mismatch). Outbox uses this to dead-letter.
- *   { t: "presence", users: [{ userId, focusedCell?, ts }] }
+ *   { t: "presence", users: [{ userId, focusedCell?, currentFileId?, selection?, ts }] }
  *       Roster snapshot. Sent on connect + on roster change.
  *   { t: "lock.claimed", cellId, by: { userId, ts } }
  *   { t: "lock.released", cellId, by: { userId, ts } }
  *       Focus-lock transitions by another user.
  *   { t: "link.upstream-changed", project, upstream, untilSeq, fileIds, cellIds }
- *       AQU-479 push accelerator: this project's live upstream committed
+ *       FRO-479 push accelerator: this project's live upstream committed
  *       lane-relevant changes. LOSSY — never load-bearing (see
  *       docs/superpowers/specs/2026-07-06-linked-projects-provenance-invalidation-design.md
- *       §8). A missed frame self-heals via the AQU-476 lazy-pull mirror sync
+ *       §8). A missed frame self-heals via the FRO-476 lazy-pull mirror sync
  *       on next file open; this is purely a latency accelerator for
  *       already-connected clients.
  *
@@ -33,16 +33,20 @@
  *   { t: "focus.claim", cellId, leaseMs?: number }
  *   { t: "focus.renew", cellId }
  *   { t: "focus.release", cellId }
+ *   { t: "presence.update", currentFileId?, focusedCell?, selection? }
  *
  * This file is the *client*. The server-side DO ships in
  * `sync-worker/src/project-do.ts`. Both must remain wire-compatible.
  */
 
 import type { OutboxRawEvent, OutboxEventKind } from "./outbox-types"
+import type { TargetPresenceSelection } from "./presence-store"
 
 export interface PresenceUser {
   userId: string
   focusedCell?: string
+  currentFileId?: string
+  selection?: TargetPresenceSelection
   ts: number
 }
 
@@ -62,7 +66,9 @@ export type ProjectWsServerMessage =
   | { t: "lock.claimed"; cellId: string; by: { userId: string; ts: number } }
   | { t: "lock.released"; cellId: string; by: { userId: string; ts: number } }
   | { t: "project.archived"; project: string; archivedAt?: string; deletedBy?: string }
-  /** AQU-346: this user's membership was revoked; the DO closes the socket
+  | { t: "project.settings.updated"; project: string; version: number }
+  | { t: "file.progress.updated"; project: string; file: string; fileCreated: boolean }
+  /** FRO-346: this user's membership was revoked; the DO closes the socket
    *  (code 4403) right after. `userId` is the presence identity (username). */
   | { t: "member.removed"; project: string; userId: string }
   | {
@@ -98,6 +104,12 @@ export type ProjectWsClientMessage =
   | { t: "focus.claim"; cellId: string; leaseMs?: number }
   | { t: "focus.renew"; cellId: string }
   | { t: "focus.release"; cellId: string }
+  | {
+      t: "presence.update"
+      currentFileId?: string | null
+      focusedCell?: string | null
+      selection?: TargetPresenceSelection | null
+    }
 
 export interface WsReconcilerHandlers {
   /** Fires for every parsed server frame. */
@@ -386,6 +398,8 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
         userId: r.userId,
         ts: r.ts,
         ...(typeof r.focusedCell === "string" ? { focusedCell: r.focusedCell } : {}),
+        ...(typeof r.currentFileId === "string" ? { currentFileId: r.currentFileId } : {}),
+        ...(isTargetPresenceSelection(r.selection) ? { selection: r.selection } : {}),
       })
     }
     return { t: "presence", users }
@@ -400,8 +414,22 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
       by: { userId: b.userId, ts: b.ts },
     }
   }
+  if (t === "project.settings.updated") {
+    if (typeof m.project !== "string" || typeof m.version !== "number" || !Number.isInteger(m.version)) {
+      return null
+    }
+    return { t, project: m.project, version: m.version }
+  }
+  if (t === "file.progress.updated") {
+    if (
+      typeof m.project !== "string"
+      || typeof m.file !== "string"
+      || typeof m.fileCreated !== "boolean"
+    ) return null
+    return { t, project: m.project, file: m.file, fileCreated: m.fileCreated }
+  }
   if (t === "member.removed") {
-    // AQU-346: the DO sends this to a removed member's sockets right before
+    // FRO-346: the DO sends this to a removed member's sockets right before
     // closing them; the workspace re-fetches the project (which now 403s)
     // and lands on the "you no longer have access" state.
     if (typeof m.project !== "string" || typeof m.userId !== "string") return null
@@ -429,14 +457,26 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
   return null
 }
 
-// ── AQU-479 push-accelerator client glue ──────────────────────────────────
+function isTargetPresenceSelection(value: unknown): value is TargetPresenceSelection {
+  if (!value || typeof value !== "object") return false
+  const v = value as Record<string, unknown>
+  return (
+    v.side === "target" &&
+    typeof v.anchor === "number" &&
+    Number.isFinite(v.anchor) &&
+    typeof v.head === "number" &&
+    Number.isFinite(v.head)
+  )
+}
+
+// ── FRO-479 push-accelerator client glue ──────────────────────────────────
 //
-// AQU-479 wiring (done by the swarm orchestrator): ProjectWorkspace.tsx builds
+// FRO-479 wiring (done by the swarm orchestrator): ProjectWorkspace.tsx builds
 // `createLinkUpstreamChangedHandler` once per WS connect (revalidate routed
 // through a ref so the once-created onMessage closure always reaches the
 // latest useStaleSourceCells.revalidate, which piggybacks POST /link/sync)
 // and dispatches `link.upstream-changed` frames to it in onMessage.
-// SWARM-TODO(AQU-479) [live-UI verify]: open upstream project A and its live
+// SWARM-TODO(FRO-479) [live-UI verify]: open upstream project A and its live
 // downstream B in two browser windows, edit+commit a source cell in A, and
 // confirm B's stale badge + cell text update within a few seconds, no reload.
 

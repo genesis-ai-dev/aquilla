@@ -21,15 +21,18 @@ export function DataTableColumnHeader<TData, TValue>({
   title,
   className,
 }: DataTableColumnHeaderProps<TData, TValue>) {
+  const alignEnd = className?.includes("justify-end")
+  const rootClass = cn("flex items-center gap-1", alignEnd && "w-full justify-end", className)
+
   if (!column.getCanSort()) {
-    return <div className={cn(className)}>{title}</div>
+    return <div className={rootClass}>{title}</div>
   }
 
   const sorted = column.getIsSorted()
   const SortIcon = sorted === "asc" ? ArrowUp : sorted === "desc" ? ArrowDown : null
 
   return (
-    <div className={cn("flex items-center gap-1", className)}>
+    <div className={rootClass}>
       <button
         type="button"
         className={cn(

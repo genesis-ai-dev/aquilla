@@ -78,6 +78,30 @@ async function makeImportRequest(
 }
 
 describe('POST /import — server_seq is race-safe', () => {
+  it('completion marker emits no events or projection rewrite', async () => {
+    const token = await leadToken()
+    const { db, snapshot } = await makeTestDb()
+    const request = new Request('https://worker/import', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        cells: [],
+        complete: true,
+      }),
+    })
+
+    const response = await handleBulkImportRequest(request, makeEnv(db))
+
+    expect(response?.status).toBe(200)
+    expect(await response?.json()).toEqual({ accepted: 0, fileId: FILE_ID })
+    expect((await snapshot()).events).toHaveLength(0)
+  })
+
   it('two concurrent imports for the same project produce strictly distinct server_seqs', async () => {
     const token = await leadToken()
     const { db, snapshot } = await makeTestDb()

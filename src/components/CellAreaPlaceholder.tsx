@@ -95,7 +95,8 @@ function NoFileEmpty({
   if (!filesLoaded) {
     return (
       <EmptyState
-        className="h-full border-0 bg-transparent p-8"
+        variant="inline"
+        className="h-full p-8"
         icon={FolderOpen}
         title="No file selected"
         description="Pick a file from the sidebar to start translating."
@@ -108,7 +109,8 @@ function NoFileEmpty({
   if (!hasFiles) {
     return (
       <EmptyState
-        className="h-full border-0 bg-transparent p-8"
+        variant="inline"
+        className="h-full p-8"
         icon={Upload}
         title="No files yet"
         description="Import a file to get started."
@@ -125,7 +127,8 @@ function NoFileEmpty({
   }
   return (
     <EmptyState
-      className="h-full border-0 bg-transparent p-8"
+      variant="inline"
+      className="h-full p-8"
       icon={FolderOpen}
       title="No file selected"
       description="Pick a file from the sidebar to start translating."
@@ -142,7 +145,8 @@ function ReadyEmpty({
 }) {
   return (
     <EmptyState
-      className="h-full border-0 bg-transparent p-8"
+      variant="inline"
+      className="h-full p-8"
       icon={FileText}
       title={fileName ? `${fileName} is empty` : "This file has no cells yet"}
       description="Import content, or start typing in the first cell."

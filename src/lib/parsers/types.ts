@@ -476,6 +476,12 @@ export interface FileReference {
    * mutates cell data — it only chooses the sort key. Fully reversible.
    */
   orderedBy?: OrderedBy
+  /** Optional file-level language hints from import metadata. */
+  sourceLanguage?: string
+  targetLanguage?: string
+  /** Optional file-level text direction hints from import metadata. */
+  sourceTextDirection?: "ltr" | "rtl"
+  targetTextDirection?: "ltr" | "rtl"
   /**
    * Timeline editor: core video URL for the preview / master clock. Stored in
    * files.meta JSON (set via the `file.video.set` event). Absent ⇒ no video.

@@ -21,6 +21,11 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { DataTableColumnHeader } from "@/components/ui/data-table-column-header"
+import { cn } from "@/lib/utils"
+
+function columnAlignClass(meta: unknown) {
+  return (meta as { align?: "right" } | undefined)?.align === "right" ? "text-right" : undefined
+}
 
 /**
  * Docs-aligned data table shell — see
@@ -42,8 +47,14 @@ interface DataTableProps<TData, TValue> {
   testId?: string
   /** Optional class on each body row (e.g. `align-top` for dense admin cells). */
   rowClassName?: string | ((row: TData) => string | undefined)
+  /** When set, clicking a body row invokes this handler (e.g. navigate on row). */
+  onRowClick?: (row: TData) => void
   /** Optional detail row rendered under a data row (e.g. expandable tenants). */
   renderSubRow?: (row: TData) => React.ReactNode
+  /** Shown below the toolbar when `data` is empty (lens filters, etc.). Search still renders. */
+  emptyState?: React.ReactNode
+  /** Tighter row/header padding for portfolio-style lists (ReUI DataGrid `dense`). */
+  dense?: boolean
 }
 
 function DataTable<TData, TValue>({
@@ -56,7 +67,10 @@ function DataTable<TData, TValue>({
   toolbar,
   testId,
   rowClassName,
+  onRowClick,
   renderSubRow,
+  emptyState,
+  dense = false,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>(initialSorting)
   const [globalFilter, setGlobalFilter] = React.useState("")
@@ -84,7 +98,7 @@ function DataTable<TData, TValue>({
   const toolbarNode = typeof toolbar === "function" ? toolbar(table) : toolbar
 
   return (
-    <div className="flex w-full flex-col gap-3">
+    <div className={cn("flex w-full flex-col", dense ? "gap-2.5" : "gap-3")}>
       {(searchPlaceholder || toolbarNode) && (
         <div className="flex flex-wrap items-center gap-3">
           {searchPlaceholder ? (
@@ -99,7 +113,10 @@ function DataTable<TData, TValue>({
           {toolbarNode}
         </div>
       )}
-      <div className="overflow-hidden rounded-md border" data-testid={testId}>
+      {data.length === 0 && emptyState ? (
+        emptyState
+      ) : (
+        <div className="overflow-hidden rounded-md border" data-testid={testId}>
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -107,7 +124,11 @@ function DataTable<TData, TValue>({
                 {headerGroup.headers.map((header) => (
                   <TableHead
                     key={header.id}
-                    className={header.column.id === "expand" ? "w-8" : undefined}
+                    className={cn(
+                      dense && "h-9 py-1.5",
+                      header.column.id === "expand" ? "w-8" : undefined,
+                      columnAlignClass(header.column.columnDef.meta),
+                    )}
                   >
                     {header.isPlaceholder
                       ? null
@@ -130,9 +151,16 @@ function DataTable<TData, TValue>({
                           ? rowClassName(row.original)
                           : rowClassName
                       }
+                      onClick={onRowClick ? () => onRowClick(row.original) : undefined}
                     >
                       {row.getVisibleCells().map((cell) => (
-                        <TableCell key={cell.id}>
+                        <TableCell
+                          key={cell.id}
+                          className={cn(
+                            dense && "py-1.5",
+                            columnAlignClass(cell.column.columnDef.meta),
+                          )}
+                        >
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}
                         </TableCell>
                       ))}
@@ -151,6 +179,7 @@ function DataTable<TData, TValue>({
           </TableBody>
         </Table>
       </div>
+      )}
     </div>
   )
 }

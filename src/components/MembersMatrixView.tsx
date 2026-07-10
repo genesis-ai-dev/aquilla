@@ -3,6 +3,7 @@ import { AlertTriangle, HelpCircle, FolderOpen, Users } from "lucide-react"
 import { useProjectsMembersMatrix } from "@/hooks/useProjectsMembersMatrix"
 import { useOrg } from "@/hooks/useOrg"
 import { ROLE } from "@/lib/frontier/roles"
+import { RoleLabel } from "@/components/RoleLabel"
 import { MembersMatrixCellEditor } from "./MembersMatrixCellEditor"
 import { MemberAccessDrillDown } from "./MemberAccessDrillDown"
 import { AccessModelLegend } from "./AccessModelLegend"
@@ -13,13 +14,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
+import { EmptyState } from "@/components/ui/empty"
 import {
   Table,
   TableBody,
@@ -88,21 +83,17 @@ export function MembersMatrixView() {
     const noProjects = matrix?.projects.length === 0
     const Icon = noProjects ? FolderOpen : Users
     return (
-      <Empty className="border-0 bg-muted/30 py-8">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <Icon />
-          </EmptyMedia>
-          <EmptyTitle>
-            {noProjects ? "No projects yet" : "No members beyond yourself"}
-          </EmptyTitle>
-          <EmptyDescription>
-            {noProjects
-              ? "Once you create or sync a project, this view will populate."
-              : "Invite someone from the Roster tab to start."}
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      <EmptyState
+        variant="inline"
+        className="bg-muted/30 py-8"
+        icon={Icon}
+        title={noProjects ? "No projects yet" : "No members beyond yourself"}
+        description={
+          noProjects
+            ? "Once you create or sync a project, this view will populate."
+            : "Invite someone from the Roster tab to start."
+        }
+      />
     )
   }
 
@@ -212,8 +203,8 @@ function ProjectHeaderCell({
           </AppTooltip>
         )}
       </div>
-      <div className="mt-0.5 text-[10px] capitalize text-muted-foreground">
-        {project.role?.name?.replace(/_/g, " ") ?? ""}
+      <div className="mt-0.5 text-[10px] text-muted-foreground">
+        {project.role?.name ? <RoleLabel name={project.role.name} /> : ""}
       </div>
     </TableHead>
   )

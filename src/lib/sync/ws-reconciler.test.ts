@@ -156,12 +156,36 @@ describe("parseProjectWsMessage", () => {
     ).toBeNull()
   })
 
+  it("parses project settings and bulk-import progress invalidations", () => {
+    expect(
+      parseProjectWsMessage(JSON.stringify({
+        t: "project.settings.updated", project: "p1", version: 4,
+      })),
+    ).toEqual({ t: "project.settings.updated", project: "p1", version: 4 })
+    expect(
+      parseProjectWsMessage(JSON.stringify({
+        t: "file.progress.updated", project: "p1", file: "f1", fileCreated: true,
+      })),
+    ).toEqual({ t: "file.progress.updated", project: "p1", file: "f1", fileCreated: true })
+    expect(
+      parseProjectWsMessage(JSON.stringify({
+        t: "file.progress.updated", project: "p1", file: "f1",
+      })),
+    ).toBeNull()
+  })
+
   it("parses presence", () => {
     const msg = parseProjectWsMessage(
       JSON.stringify({
         t: "presence",
         users: [
-          { userId: "alice", focusedCell: "c1", ts: 100 },
+          {
+            userId: "alice",
+            focusedCell: "c1",
+            currentFileId: "file-1",
+            selection: { side: "target", anchor: 2, head: 5 },
+            ts: 100,
+          },
           { userId: "bob", ts: 200 },
         ],
       }),
@@ -170,6 +194,8 @@ describe("parseProjectWsMessage", () => {
     if (msg?.t === "presence") {
       expect(msg.users).toHaveLength(2)
       expect(msg.users[0].focusedCell).toBe("c1")
+      expect(msg.users[0].currentFileId).toBe("file-1")
+      expect(msg.users[0].selection).toEqual({ side: "target", anchor: 2, head: 5 })
       expect(msg.users[1].focusedCell).toBeUndefined()
     }
   })

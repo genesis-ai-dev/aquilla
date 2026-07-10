@@ -22,6 +22,8 @@ export interface FileSummary {
   fileType: string
   sourceLanguage: string | null
   targetLanguage: string | null
+  sourceTextDirection?: "ltr" | "rtl" | null
+  targetTextDirection?: "ltr" | "rtl" | null
   cellCount: number
   approvedCount: number
   /** Target cells with content (TRIM(value) != ''): the "translated" count,

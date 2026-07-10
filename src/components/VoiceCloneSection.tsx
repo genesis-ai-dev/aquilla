@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Mic, Pause, Play, Sparkles, Square, Trash2, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import type { Voice } from "@/lib/parsers/types"
@@ -129,11 +130,7 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
     >
       <div className="mb-1 flex items-center gap-2 text-sm font-medium">
         <Sparkles className="h-3.5 w-3.5 text-muted-foreground" /> Voice profile (clone)
-        {voice.referenceAudioId && (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground dark:text-muted-foreground">
-            Active
-          </span>
-        )}
+        {voice.referenceAudioId && <Badge variant="secondary">Active</Badge>}
       </div>
       <p className="mb-3 text-xs text-muted-foreground">
         Record or upload a short reference clip (5–15s of one clear speaker). This voice's

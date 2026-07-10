@@ -20,9 +20,16 @@ import { AssignWork } from "./AssignWork"
 import { MembersTab } from "@/components/ProjectMembersPage"
 import { MemberActivityPanel } from "./MemberActivityPanel"
 import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
-import { fetchProjectFiles, fetchAllFileCells, type FileSummary } from "@/lib/sync/cells-read"
+import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
-import { buildCanonicalRollup, type BookRollup, type ChapterRollup } from "@/lib/progress/canonical-rollup"
+import {
+  progressToCanonicalRollup,
+  sectionProgressToVerseRollup,
+  type BookRollup,
+  type ChapterRollup,
+  type VerseRollup,
+} from "@/lib/progress/canonical-rollup"
+import { getFileProgress, getFileSectionProgress } from "@/lib/progress/file-progress-resource"
 import { sortFiles, filterFilesByName, FILE_SORT_MODES, type FileSortMode } from "@/lib/progress/file-sort"
 import { progressRowsToCsv, progressCsvFilename } from "@/lib/progress/progress-csv"
 import { downloadBlob } from "@/lib/export/export-service"
@@ -35,6 +42,7 @@ import {
   sectionTintClass,
 } from "./SectionVisibilityBadge"
 import { Badge } from "@/components/ui/badge"
+import { ProjectDeadlineStatuses, ProjectStatusChip } from "@/components/ProjectStatus"
 import {
   Dialog,
   DialogContent,
@@ -128,30 +136,16 @@ export function deriveProjectStatus(
 }
 
 function StatusChip({ status }: { status: ProjectStatus }) {
-  if (status === "no-deadline") return null
-  const map: Record<Exclude<ProjectStatus, "no-deadline">, { label: string; cls: string }> = {
-    "on-track": { label: "On track", cls: "border-transparent bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" },
-    "due-soon": { label: "Due soon", cls: "border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300" },
-    "overdue":  { label: "Overdue",  cls: "border-transparent bg-destructive/10 text-destructive" },
-  }
-  const { label, cls } = map[status as Exclude<ProjectStatus, "no-deadline">]
-  return (
-    <Badge className={cls} data-testid="status-chip">
-      {label}
-    </Badge>
-  )
+  // Overdue / due-soon live only on the Deadline card — avoid duplicating them in the header.
+  if (status === "no-deadline" || status === "overdue" || status === "due-soon") return null
+  return <ProjectStatusChip kind="on-track" testId="status-chip" />
 }
 
 // ── Deadline chip ─────────────────────────────────────────────────────────────
 
 function DeadlineChip({ status }: { status: "overdue" | "soon" | "ok" | null }) {
-  if (!status) return null
-  const map = {
-    ok:      { cls: "border-transparent bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" },
-    soon:    { cls: "border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300" },
-    overdue: { cls: "border-transparent bg-destructive/10 text-destructive" },
-  }
-  return <Badge className={map[status].cls}>{status === "overdue" ? "Overdue" : status === "soon" ? "Due soon" : "On track"}</Badge>
+  if (status === "ok") return <ProjectStatusChip kind="on-track" />
+  return <ProjectDeadlineStatuses deadline={status} testId="status-chip" />
 }
 
 // ── Stat tiles (big %) ────────────────────────────────────────────────────────
@@ -234,15 +228,44 @@ function MiniRollupBar({ filledPct, approvedPct }: { filledPct: number; approved
   )
 }
 
-function ChapterRow({ chapter }: { chapter: ChapterRollup }) {
+function ChapterRow({
+  chapter,
+  loadVerses,
+}: {
+  chapter: ChapterRollup
+  loadVerses: (sectionKey: string) => Promise<VerseRollup[]>
+}) {
   const [open, setOpen] = useState(false)
+  const [verses, setVerses] = useState<VerseRollup[] | null>(chapter.verses.length > 0 ? chapter.verses : null)
+  const [loading, setLoading] = useState(false)
+  const [failed, setFailed] = useState(false)
+
+  const load = useCallback(async () => {
+    if (verses != null || loading) return
+    setLoading(true)
+    setFailed(false)
+    try {
+      setVerses(await loadVerses(chapter.chapter))
+    } catch {
+      setFailed(true)
+    } finally {
+      setLoading(false)
+    }
+  }, [chapter.chapter, loadVerses, loading, verses])
+
+  const toggle = useCallback(() => {
+    const nextOpen = !open
+    setOpen(nextOpen)
+    if (nextOpen) void load()
+  }, [load, open])
+
   return (
     <li>
       <button
         type="button"
         data-testid="chapter-row"
-        className="flex w-full items-center gap-2 py-0.5 text-left text-xs hover:text-foreground"
-        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 rounded-sm py-0.5 text-left text-xs hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={toggle}
         aria-expanded={open}
       >
         <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
@@ -252,21 +275,27 @@ function ChapterRow({ chapter }: { chapter: ChapterRollup }) {
           {chapter.filledCount}/{chapter.approvedCount}/{chapter.cellCount}
         </span>
       </button>
-      {open && (
+      {open && loading && <p className="ml-5 py-1 text-[10px] text-muted-foreground">Loading verses…</p>}
+      {open && failed && (
+        <button type="button" className="ml-5 py-1 text-[10px] text-destructive underline" onClick={() => void load()}>
+          Verse progress unavailable. Retry
+        </button>
+      )}
+      {open && verses != null && (
         <ul className="ml-5 mt-0.5 mb-1 grid grid-cols-[repeat(auto-fill,minmax(2.5rem,1fr))] gap-1" aria-label={`${chapter.chapter} verses`}>
-          {chapter.verses.map((v) => (
+          {verses.map((verse, index) => (
             <li
-              key={v.ref}
+              key={`${verse.ref}:${index}`}
               data-testid="verse-cell"
-              title={v.ref}
+              title={verse.ref}
               className={cn(
                 "rounded px-1.5 py-0.5 text-center text-[10px] tabular-nums",
-                v.approved ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
-                  : v.filled ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                verse.approved ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                  : verse.filled ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
                   : "bg-muted text-muted-foreground",
               )}
             >
-              {v.verseLabel}
+              {verse.verseLabel}
             </li>
           ))}
         </ul>
@@ -275,7 +304,13 @@ function ChapterRow({ chapter }: { chapter: ChapterRollup }) {
   )
 }
 
-function BookRow({ book }: { book: BookRollup }) {
+function BookRow({
+  book,
+  loadVerses,
+}: {
+  book: BookRollup
+  loadVerses: (sectionKey: string) => Promise<VerseRollup[]>
+}) {
   const [open, setOpen] = useState(false)
   return (
     <li>
@@ -296,7 +331,7 @@ function BookRow({ book }: { book: BookRollup }) {
       {open && (
         <ul className="ml-5 mt-0.5" aria-label={`${book.book} chapters`}>
           {book.chapters.map((c) => (
-            <ChapterRow key={c.chapter} chapter={c} />
+            <ChapterRow key={c.chapter} chapter={c} loadVerses={loadVerses} />
           ))}
         </ul>
       )}
@@ -305,33 +340,49 @@ function BookRow({ book }: { book: BookRollup }) {
 }
 
 /**
- * Nested book › chapter › verse progress rollup shown under a file row once
- * expanded. `books === null` means the file's cells carry no parseable
+ * Nested book › chapter progress rollup shown under a file row once expanded.
+ * Verse progress is fetched separately only when a chapter opens.
+ * `books === null` means the file's cells carry no parseable
  * canonical reference (AQU-493 detection is generic — see
  * lib/progress/canonical-rollup.ts) — render an explanatory note instead of
  * an empty tree, per the acceptance criteria.
  *
- * SWARM-TODO(AQU-493): verify live — open a Scripture project overview,
- * click a file row's chevron to expand it, confirm chapter rows appear and
- * their filled/approved counts sum to the file row's totals, then drill
- * into a chapter to see the per-verse grid.
  */
-function FileCanonicalRollup({ books, loading }: { books: BookRollup[] | null | undefined; loading: boolean }) {
+function FileCanonicalRollup({
+  books,
+  loading,
+  error,
+  onRetry,
+  loadVerses,
+}: {
+  books: BookRollup[] | null | undefined
+  loading: boolean
+  error: boolean
+  onRetry: () => void
+  loadVerses: (sectionKey: string) => Promise<VerseRollup[]>
+}) {
   if (loading) {
-    return <p className="ml-7 mt-1 text-xs text-muted-foreground">Loading chapter/verse breakdown…</p>
+    return <p className="ml-7 mt-1 text-xs text-muted-foreground">Loading chapter breakdown…</p>
+  }
+  if (error) {
+    return (
+      <button type="button" className="ml-7 mt-1 text-xs text-destructive underline" onClick={onRetry}>
+        Chapter progress unavailable. Retry
+      </button>
+    )
   }
   if (books === null) {
     return (
       <p className="ml-7 mt-1 text-xs text-muted-foreground">
-        No chapter/verse structure detected for this file.
+        No chapter structure detected for this file.
       </p>
     )
   }
   if (books === undefined || books.length === 0) return null
   return (
-    <ul className="ml-7 mt-1 border-l pl-3" data-testid="canonical-rollup-books" aria-label="Chapter/verse breakdown">
+    <ul className="ml-7 mt-1 border-l pl-3" data-testid="canonical-rollup-books" aria-label="Chapter breakdown">
       {books.map((b) => (
-        <BookRow key={b.book} book={b} />
+        <BookRow key={b.book} book={b} loadVerses={loadVerses} />
       ))}
     </ul>
   )
@@ -443,6 +494,8 @@ export function ProjectOverview() {
   const [expandedFileId, setExpandedFileId] = useState<string | null>(null)
   const [rollups, setRollups] = useState<Record<string, BookRollup[] | null>>({})
   const [rollupLoading, setRollupLoading] = useState<Record<string, boolean>>({})
+  const [rollupErrors, setRollupErrors] = useState<Record<string, boolean>>({})
+  const chapterVerseRequests = useRef(new Map<string, Promise<VerseRollup[]>>())
 
   // AQU-474: project-only invitees (direct project_members grant, no org
   // membership) have `activeOrgId == null` or an org that doesn't include this
@@ -538,29 +591,49 @@ export function ProjectOverview() {
     }
   }, [jwt, id, firstFileId, project?.name])
 
-  // AQU-493: expand/collapse a file row's chapter/verse rollup. Fetches the
-  // file's full cell set (paired source+target) once per file, on demand —
-  // the aggregate `/files` rollup used above has no per-cell reference data,
-  // so this is a separate lazy fetch scoped to whichever file is expanded.
-  const toggleFileRollup = useCallback(async (file: FileSummary) => {
+  // AQU-517: expand/collapse a file row's compact server progress. This never
+  // downloads cell text or rich HTML.
+  const loadFileRollup = useCallback(async (file: FileSummary) => {
+    if (!jwt) return
+    setRollupLoading((s) => ({ ...s, [file.fileId]: true }))
+    setRollupErrors((s) => ({ ...s, [file.fileId]: false }))
+    try {
+      const tok = await fetchSyncToken(jwt, id, file.fileId, { projectName: project?.name })
+      const progress = await getFileProgress(id, file.fileId, async () => tok.token)
+      setRollups((r) => ({ ...r, [file.fileId]: progressToCanonicalRollup(progress) }))
+    } catch (e) {
+      console.warn("[ProjectOverview] chapter/verse rollup fetch failed:", e)
+      setRollupErrors((s) => ({ ...s, [file.fileId]: true }))
+    } finally {
+      setRollupLoading((s) => ({ ...s, [file.fileId]: false }))
+    }
+  }, [jwt, id, project?.name])
+
+  const toggleFileRollup = useCallback((file: FileSummary) => {
     if (expandedFileId === file.fileId) {
       setExpandedFileId(null)
       return
     }
     setExpandedFileId(file.fileId)
-    if (file.fileId in rollups || !jwt) return
-    setRollupLoading((s) => ({ ...s, [file.fileId]: true }))
-    try {
-      const tok = await fetchSyncToken(jwt, id, file.fileId, { projectName: project?.name })
-      const rows = await fetchAllFileCells(id, file.fileId, tok.token)
-      setRollups((r) => ({ ...r, [file.fileId]: buildCanonicalRollup(rows) }))
-    } catch (e) {
-      console.warn("[ProjectOverview] chapter/verse rollup fetch failed:", e)
-      setRollups((r) => ({ ...r, [file.fileId]: null }))
-    } finally {
-      setRollupLoading((s) => ({ ...s, [file.fileId]: false }))
-    }
-  }, [expandedFileId, rollups, jwt, id, project?.name])
+    if (!(file.fileId in rollups)) void loadFileRollup(file)
+  }, [expandedFileId, loadFileRollup, rollups])
+
+  const loadChapterVerses = useCallback((fileId: string, sectionKey: string): Promise<VerseRollup[]> => {
+    const cacheKey = `${fileId}:${sectionKey}`
+    const existing = chapterVerseRequests.current.get(cacheKey)
+    if (existing) return existing
+    const request = (async () => {
+      if (!jwt) throw new Error("session unavailable")
+      const tok = await fetchSyncToken(jwt, id, fileId, { projectName: project?.name })
+      const detail = await getFileSectionProgress(id, fileId, sectionKey, async () => tok.token)
+      return sectionProgressToVerseRollup(detail)
+    })().catch((error) => {
+      chapterVerseRequests.current.delete(cacheKey)
+      throw error
+    })
+    chapterVerseRequests.current.set(cacheKey, request)
+    return request
+  }, [id, jwt, project?.name])
 
   const isOwner = (project?.syncRole?.level ?? 0) >= 700
   const canManage = (project?.syncRole?.level ?? 0) >= 600
@@ -719,9 +792,7 @@ export function ProjectOverview() {
                       <h1 className="text-xl font-semibold leading-tight truncate">{project?.name}</h1>
                       {/* Compact status chip next to the title */}
                       <StatusChip status={projectStatus} />
-                      {isArchived && (
-                        <Badge variant="secondary" className="shrink-0">Archived</Badge>
-                      )}
+                      {isArchived && <ProjectStatusChip kind="archived" className="shrink-0" />}
                       {!isArchived && isFrozen && (
                         <Badge
                           className="shrink-0 border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
@@ -1095,7 +1166,10 @@ export function ProjectOverview() {
                                 </AppTooltip>
                                 <FileProgressBars tPct={tPct} vPct={vPct} />
                                 <AppTooltip content="Cells filled / cells approved / total cells · word count">
-                                  <span className="flex shrink-0 items-center gap-4 text-xs tabular-nums text-muted-foreground">
+                                  <span
+                                    className="flex shrink-0 items-center gap-4 text-xs tabular-nums text-muted-foreground"
+                                    aria-label={`${f.filledCount} filled, ${f.approvedCount} approved, ${f.cellCount} total cells, ${f.wordCount} words`}
+                                  >
                                     <span className="w-10 text-right">{f.filledCount}</span>
                                     <span className="w-14 text-right">{f.approvedCount}</span>
                                     <span className="w-10 text-right">{f.cellCount}</span>
@@ -1104,7 +1178,13 @@ export function ProjectOverview() {
                                 </AppTooltip>
                               </div>
                               {isExpanded && (
-                                <FileCanonicalRollup books={rollups[f.fileId]} loading={rollupLoading[f.fileId] ?? false} />
+                                <FileCanonicalRollup
+                                  books={rollups[f.fileId]}
+                                  loading={rollupLoading[f.fileId] ?? false}
+                                  error={rollupErrors[f.fileId] ?? false}
+                                  onRetry={() => void loadFileRollup(f)}
+                                  loadVerses={(sectionKey) => loadChapterVerses(f.fileId, sectionKey)}
+                                />
                               )}
                             </li>
                           )

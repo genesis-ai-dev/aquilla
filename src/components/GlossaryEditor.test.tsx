@@ -11,8 +11,12 @@ vi.mock("react-router-dom", async (orig) => ({
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { username: "tester" }, loading: false }),
 }))
+let projectCellsEnabled = false
 vi.mock("@/hooks/useProjectCells", () => ({
-  useProjectCells: () => ({ files: [], isTruncated: false }),
+  useProjectCells: ({ enabled }: { enabled?: boolean }) => {
+    projectCellsEnabled = Boolean(enabled)
+    return { files: [], isLoading: false, isTruncated: false }
+  },
 }))
 
 const patchSettings = vi.fn().mockResolvedValue({ kind: "ok" })
@@ -36,6 +40,7 @@ function concept(p: Partial<Concept>): Concept {
 
 beforeEach(() => {
   patchSettings.mockClear()
+  projectCellsEnabled = false
   mockProject = {
     id: "p1",
     name: "P",
@@ -88,5 +93,49 @@ describe("GlossaryEditor", () => {
     const added = arg.terminology.find((c) => c.sourceTerm === "mercy")
     expect(added?.status).toBe("active")
     expect(added?.renderings).toEqual([{ rendering: "misericordia", status: "preferred" }])
+  })
+
+  it("requires both a source and rendering before adding an active term", () => {
+    renderEditor()
+    const add = screen.getByRole("button", { name: /add term/i })
+    expect(add).toBeDisabled()
+    fireEvent.change(screen.getByPlaceholderText(/new source term/i), {
+      target: { value: "mercy" },
+    })
+    expect(add).toBeDisabled()
+    fireEvent.change(screen.getByPlaceholderText(/^rendering$/i), {
+      target: { value: "misericordia" },
+    })
+    expect(add).toBeEnabled()
+  })
+
+  it("defers project cell loading until a cell-backed surface is requested", () => {
+    mockProject.files = [{ id: "f1", name: "sample.md", type: "md", createdAt: "", cellCount: 1 }]
+    renderEditor()
+    expect(projectCellsEnabled).toBe(false)
+
+    fireEvent.click(screen.getByRole("button", { name: "Violations" }))
+    expect(projectCellsEnabled).toBe(true)
+  })
+
+  it("derives rapid rendering mutations from the latest optimistic glossary", async () => {
+    renderEditor()
+    fireEvent.click(screen.getByRole("button", { name: "Expand renderings" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add rendering" }))
+
+    const second = await screen.findByRole("textbox", { name: "Rendering 2 text" })
+    fireEvent.change(second, { target: { value: "alternate" } })
+    fireEvent.blur(second)
+    fireEvent.click(screen.getByRole("button", { name: "Remove rendering 1" }))
+
+    await waitFor(() => expect(patchSettings).toHaveBeenCalledTimes(3))
+    const last = patchSettings.mock.calls.at(-1)?.[0] as { terminology: Concept[] }
+    expect(last.terminology[0].renderings).toEqual([
+      { rendering: "alternate", status: "admitted" },
+    ])
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Rendering 1 text" })).toHaveValue("alternate")
+    })
+    expect(screen.queryByRole("textbox", { name: "Rendering 2 text" })).not.toBeInTheDocument()
   })
 })

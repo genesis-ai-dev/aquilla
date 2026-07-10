@@ -48,13 +48,14 @@ describe("bulkUploadSource", () => {
       fetchImpl: fetchMock,
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
     const body = bodies[0] as Record<string, unknown>
     expect(body.projectId).toBe("p1")
     expect(body.fileId).toBe("f1")
     expect((body.cells as unknown[]).length).toBe(3)
     // file meta included on first (only) chunk
     expect(body.file).toBeDefined()
+    expect((bodies[1] as Record<string, unknown>).complete).toBe(true)
   })
 
   it("sends multiple chunks for > 1500 cells", async () => {
@@ -74,8 +75,8 @@ describe("bulkUploadSource", () => {
       fetchImpl: fetchMock,
     })
 
-    // 3200 cells / 1500 per chunk → 3 requests (1500 + 1500 + 200)
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    // 3200 cells / 1500 per chunk → 3 data requests, then one completion hint.
+    expect(fetchMock).toHaveBeenCalledTimes(4)
     // file meta only on first chunk
     expect((bodies[0] as Record<string, unknown>).file).toBeDefined()
     expect((bodies[1] as Record<string, unknown>).file).toBeUndefined()
@@ -128,7 +129,8 @@ describe("bulkUploadSource", () => {
       )
     }) as typeof fetch
 
-    // 6500 cells / 1500 per chunk → 5 chunks (1 first + 4 that can overlap).
+    // 6500 cells / 1500 per chunk → 5 chunks (1 first + 4 that can overlap),
+    // followed by one completion hint after they have all settled.
     const cells = Array.from({ length: 6500 }, (_, i) => makeCell(i))
     await bulkUploadSource({
       projectId: "p1",
@@ -139,7 +141,7 @@ describe("bulkUploadSource", () => {
       fetchImpl: fetchMock,
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(5)
+    expect(fetchMock).toHaveBeenCalledTimes(6)
     // Ordering invariant: the file.create chunk completes before any other starts.
     expect(nonFirstStartedBeforeFirstResolved).toBe(false)
     // Concurrency: the 4 trailing chunks overlap instead of running one-at-a-time.

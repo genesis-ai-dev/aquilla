@@ -14,6 +14,24 @@ describe("end-punctuation-mismatch", () => {
     expect(runCheck("Where are you?", "Donde estas.")).not.toBeNull()
   })
 
+  it("marks missing target punctuation as a zero-width issue at the end", () => {
+    expect(runCheck("Where are you?", "Donde estas")).toEqual([{
+      side: "target",
+      start: 11,
+      end: 11,
+      matchedText: "",
+    }])
+  })
+
+  it("underlines the actual target punctuation when the punctuation class is wrong", () => {
+    expect(runCheck("Where are you?", "Donde estas.")).toEqual([{
+      side: "target",
+      start: 11,
+      end: 12,
+      matchedText: ".",
+    }])
+  })
+
   it("flags target adds ! when source has .", () => {
     expect(runCheck("He went home.", "Il est rentré!")).not.toBeNull()
   })

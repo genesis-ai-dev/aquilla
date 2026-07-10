@@ -296,6 +296,8 @@ export interface EventPayloads {
     /** ISO codes; null/undefined when unknown at import time. */
     sourceLanguage?: string
     targetLanguage?: string
+    sourceTextDirection?: 'ltr' | 'rtl'
+    targetTextDirection?: 'ltr' | 'rtl'
     /** Timeline-segment-model: order lens — 'time' | 'sequence'. Stored in
      *  files.meta (JSON). Absent ⇒ client treats as 'sequence'. */
     orderedBy?: string

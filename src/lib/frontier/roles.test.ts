@@ -6,6 +6,9 @@ import {
   PROJECT_ROLE_PICKER,
   ORG_ROLE_PICKER,
   roleName,
+  formatRoleDisplay,
+  roleDisplayText,
+  roleDisplayLabel,
   roleDescription,
   PROJECT_ROLE_OPTIONS,
   ORG_ROLE_OPTIONS,
@@ -118,5 +121,22 @@ describe("VALIDATION_FLOOR_ROLE_OPTIONS (AQU-352)", () => {
     for (const opt of VALIDATION_FLOOR_ROLE_OPTIONS) {
       expect(projectNames.has(opt.name)).toBe(true)
     }
+  })
+})
+
+describe("role display helpers", () => {
+  it("formatRoleDisplay replaces underscores with spaces", () => {
+    expect(formatRoleDisplay("project_lead")).toBe("project lead")
+    expect(formatRoleDisplay("owner")).toBe("owner")
+  })
+
+  it("roleDisplayText title-cases each word", () => {
+    expect(roleDisplayText("project_lead")).toBe("Project Lead")
+    expect(roleDisplayText("owner")).toBe("Owner")
+  })
+
+  it("roleDisplayLabel maps levels to title-cased labels", () => {
+    expect(roleDisplayLabel(500)).toBe("Project Lead")
+    expect(roleDisplayLabel(700)).toBe("Owner")
   })
 })

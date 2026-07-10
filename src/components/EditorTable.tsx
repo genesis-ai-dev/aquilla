@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
+import React, { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
 import {
   LegendList,
   type LegendListRef,
@@ -45,6 +45,7 @@ import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
+import { useRailIdleHide } from "@/hooks/useRailIdleHide"
 import { CellExpansion } from "./CellExpansion"
 import { tokenizeWords } from "@/lib/audio/timings"
 import { useCellAudio } from "@/hooks/useCellAudio"
@@ -71,7 +72,7 @@ import { CellNumberPill } from "./cell/CellNumberPill"
 import { InterlinearAlignmentPanel } from "./InterlinearAlignmentPanel"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
-// popover (AQU-237). The component itself is no longer in the overflow popover.
+// popover (FRO-237). The component itself is no longer in the overflow popover.
 import { getUnsupportedReason } from "./CellAudioRecordButton"
 // AQU-513: plain file-picker upload next to the mic — works on mobile too.
 import { CellAudioUploadButton } from "./CellAudioUploadButton"
@@ -81,6 +82,11 @@ import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { looksLikeUuid } from "@/lib/uuid"
 import { isPerfLogEnabled } from "@/lib/perf-log"
+import {
+  type DirectionMode,
+  type TextDirection,
+  resolveTextDirection,
+} from "@/lib/text-direction"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { ViolationPopover, type ViolationAnchor } from "./ViolationPopover"
 import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
@@ -113,6 +119,12 @@ import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { hasMeaningfulRichText, prepareReadOnlyRichTextHtml } from "@/lib/richtext/editor-content"
 import { findTermMatches } from "@/lib/richtext/terminology-chip-plugin"
+import {
+  useCellPresence,
+  type CellPresencePeer,
+  type ProjectPresenceStore,
+  type TargetPresenceSelection,
+} from "@/lib/sync/presence-store"
 
 // Per-row render counter. Always accumulated when perf logging is on (cheap)
 // but NOT auto-logged — render logs would flood the console and push the
@@ -124,6 +136,7 @@ import { findTermMatches } from "@/lib/richtext/terminology-chip-plugin"
 const rowRenders = new Map<string, number>()
 const ESTIMATED_ROW_HEIGHT_PX = 140
 const LEGEND_LIST_DRAW_DISTANCE_PX = 240
+const EMPTY_CONCEPTS: Concept[] = []
 
 function clampIndex(index: number, length: number): number {
   if (length <= 0) return 0
@@ -481,7 +494,8 @@ interface EditorTableProps {
    *  refetches the cells projection. `committedEventId` is the event id the
    *  commit was assigned (known only here, before the projection round-trip);
    *  the parent's auto-BT pins to it so the BT isn't instantly stale. */
-  onCellCommitted?: (cellId: string, committedEventId?: string) => void | Promise<void>
+  onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void | Promise<void>
+  getPendingTargetEventId?: (cellId: string) => string | null
   /** Optimistic local patch fired BEFORE the outbox enqueue so the editor's
    *  rule infractions + per-cell UI re-derive instantly without waiting for
    *  the projection round-trip. The follow-up `onCellCommitted` -> revalidate
@@ -490,12 +504,16 @@ interface EditorTableProps {
   /** Map of cellId → presence holder label. When present, the cell editor
    *  goes read-only with an "Alice is editing" banner. */
   cellLockHolders?: ReadonlyMap<string, string>
+  /** Project-wide presence store fed by the existing ProjectSync DO. Rows
+   *  subscribe per-cell so target cursor motion does not rerender the table. */
+  presenceStore?: ProjectPresenceStore | null
   /** Cell ids whose remote value changed while this client held the focus
    *  lock — surfaces the discard-and-reload banner. */
   cellsWithRemoteChange?: ReadonlySet<string>
   /** Parent-managed focus claim/release (per-cell). */
   onClaimCell?: (cellId: string) => void
   onReleaseCell?: (cellId: string) => void
+  onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
   /** Drop the "remote-changed-while-editing" flag for a cell. */
   onAckRemoteChange?: (cellId: string) => void
   isCompletionConfigured: boolean
@@ -534,8 +552,10 @@ interface EditorTableProps {
   onSeekToCue?: (cellId: string) => void
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
-  sourceTextDirection: "ltr" | "rtl"
-  targetTextDirection: "ltr" | "rtl"
+  sourceDirectionMode?: DirectionMode
+  targetDirectionMode?: DirectionMode
+  sourceTextDirection: TextDirection
+  targetTextDirection: TextDirection
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
   // onAiSetupNeeded/onOpenRecording moved to EditorActionsContext (FRO perf
@@ -553,7 +573,7 @@ interface EditorTableProps {
    *  StaleSourceIndicator badge next to its validation status. Parent fetches
    *  once per file via `useStaleSourceCells` so we don't issue N requests. */
   staleCellIds?: ReadonlySet<string>
-  /** AQU-477 (§6) — set of cell ids whose ANCESTRY is stale (inherited, a
+  /** FRO-477 (§6) — set of cell ids whose ANCESTRY is stale (inherited, a
    *  further-upstream chain hop changed). Renders the violet/dotted second
    *  tone on `StaleSourceIndicator`, layered onto the same prop path as
    *  `staleCellIds` above. */
@@ -561,14 +581,14 @@ interface EditorTableProps {
   /** Token fetcher for project-scoped sync reads. Required for the inline
    *  History tab to query the D1 event log on demand. */
   getTokenForFile?: (fileId: string) => Promise<string | null>
-  /** AQU-207: Lazily returns the interlinear alignment model for source↔target
+  /** FRO-207: Lazily returns the interlinear alignment model for source↔target
    *  token alignment in the BT expansion tab. Built by ProjectWorkspace from
    *  all project cell pairs + persisted seeds only when the panel opens. */
   getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
-  /** AQU-207: Called when the user confirms or invalidates an alignment seed.
+  /** FRO-207: Called when the user confirms or invalidates an alignment seed.
    *  Parent persists via project-settings and rebuilds the model. */
   onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
-  /** AQU-192: Map of cellId → {username, scopeLabel} for cells that have an
+  /** FRO-192: Map of cellId → {username, scopeLabel} for cells that have an
    *  active assignment. The map is built in ProjectWorkspace from getMyAssignments
    *  (member's own inbox) and getProjectAssignments (manager workload). */
   assignmentsByCellId?: ReadonlyMap<string, { username: string; scopeLabel: string }>
@@ -585,7 +605,7 @@ interface EditorTableProps {
    */
   checkLockHolder?: (cellId: string) => string | null
   /**
-   * AQU-317: when true, USFM \f...\f* footnotes render as a distinct panel
+   * FRO-317: when true, USFM \f...\f* footnotes render as a distinct panel
    * immediately below each cell row. Editing is safe only for USFM files.
    */
   showFootnotesInline?: boolean
@@ -609,17 +629,19 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onSaveBacktranslation, getStatisticalBt,
   cellOpenCommentCount,
   activeCueIndex, onSeekToCue,
-  lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
+  lineNumbersEnabled, cellLabelsEnabled, sourceDirectionMode = "auto", targetDirectionMode = "auto", sourceTextDirection, targetTextDirection,
   isAnonymous, onJumpToCell,
   audioLens, onOpenAudioSetup,
   onAttachMediaFile, onAttachMediaUrl,
   orderedBy,
   onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
   onCellCommitted,
+  getPendingTargetEventId,
   onOptimisticEdit,
   cellLockHolders,
+  presenceStore,
   cellsWithRemoteChange,
-  onClaimCell, onReleaseCell, onAckRemoteChange,
+  onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   staleCellIds,
   upstreamStaleCellIds,
   getTokenForFile,
@@ -716,7 +738,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const ruleMap = useMemo(() => new Map(rules.map((r) => [r.id, r])), [rules])
 
-  // AQU-251: per-file, per-side font size. Persisted in localStorage keyed by
+  // FRO-251: per-file, per-side font size. Persisted in localStorage keyed by
   // fileId; adjusted from the View settings (eye) menu in the header.
   const editorFileId = audioFileId
   const { source: sourceFontSize, target: targetFontSize } = useFileFontSizes(editorFileId)
@@ -807,7 +829,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     },
   }), [displayCellIds.length, focusCellEditorByIndex, getListQueryRoot])
 
-  // AQU-297: Focus the grid-row wrapper div (not TipTap) at `index`.
+  // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.
   // The wrapper div has tabIndex={0} so it can receive programmatic focus.
   const focusGridRowByIndex = useCallback((index: number) => {
@@ -846,14 +868,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     focusCellEditorByIndex(direction === "next" ? idx + 1 : idx - 1)
   }, [focusCellEditorByIndex])
 
-  // AQU-297: Esc from a cell editor — commit-and-return to grid row focus.
+  // FRO-297: Esc from a cell editor — commit-and-return to grid row focus.
   const handleEscapeToGrid = useCallback((cellId: string) => {
     const idx = displayCellIdsRef.current.indexOf(cellId)
     if (idx < 0) return
     focusGridRowByIndex(idx)
   }, [focusGridRowByIndex])
 
-  // AQU-297: Arrow-key (or j/k) navigation within the grid (row focused, not TipTap).
+  // FRO-297: Arrow-key (or j/k) navigation within the grid (row focused, not TipTap).
   // This is called from the row's own keydown when focus is on the grid row wrapper.
   const handleGridRowKeyNav = useCallback((cellId: string, direction: "prev" | "next") => {
     const idx = displayCellIdsRef.current.indexOf(cellId)
@@ -1028,7 +1050,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const ids = displayCellIdsRef.current
     const anchorId = getSelectionAnchorId()
     const anchorIndex = anchorId ? ids.indexOf(anchorId) : -1
-    // AQU-348: range-select must be an explicit Shift-click. Previously a
+    // FRO-348: range-select must be an explicit Shift-click. Previously a
     // plain click on any unselected cell silently extended the range from
     // the old anchor whenever *something* was already selected — no
     // modifier, no visual preview. Under concurrent editing the anchor's
@@ -1237,11 +1259,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           canValidate={canValidate}
           canEditSource={canEditSource}
           onCellCommitted={onCellCommitted}
+          getPendingTargetEventId={getPendingTargetEventId}
           onOptimisticEdit={onOptimisticEdit}
           lockHolderLabel={cellLockHolders?.get(cell.id) ?? null}
+          presenceStore={presenceStore}
           remoteChangedWhileFocused={cellsWithRemoteChange?.has(cell.id) ?? false}
           onClaimCell={onClaimCell}
           onReleaseCell={onReleaseCell}
+          onTargetPresenceSelection={onTargetPresenceSelection}
           onAckRemoteChange={onAckRemoteChange}
           isCompletionConfigured={isCompletionConfigured}
           isCompletionAvailable={isCompletionAvailable}
@@ -1266,6 +1291,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           rowIndex={index}
           lineNumbersEnabled={lineNumbersEnabled}
           cellLabelsEnabled={cellLabelsEnabled}
+          sourceDirectionMode={sourceDirectionMode}
+          targetDirectionMode={targetDirectionMode}
           sourceTextDirection={sourceTextDirection}
           targetTextDirection={targetTextDirection}
           gridCols={gridCols}
@@ -1361,6 +1388,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onFootnoteCreated,
     onJumpToCell,
     onOpenAudioSetup,
+    getPendingTargetEventId,
     onOptimisticEdit,
     onProjectChanged,
     onReleaseCell,
@@ -1372,18 +1400,24 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     ruleMap,
     showFootnotesInline,
     sourceFontSize,
+    sourceDirectionMode,
     sourceTextDirection,
     staleCellIds,
     upstreamStaleCellIds,
     targetFontSize,
+    targetDirectionMode,
     targetTextDirection,
     username,
   ])
+  const listExtraData = useMemo(
+    () => ({ cellStoreVersion, renderListItem }),
+    [cellStoreVersion, renderListItem],
+  )
 
   return (
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
       <div className="shrink-0 bg-background">
-        {/* AQU-273: role badge — shown for read-only roles (viewer/commenter/reviewer) */}
+        {/* FRO-273: role badge — shown for read-only roles (viewer/commenter/reviewer) */}
         {readOnlyLabel && (
           <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 flex-shrink-0"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
@@ -1391,7 +1425,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </div>
         )}
         <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
-          {/* AQU-250: sticky chapter label — left gutter, does not shift Source */}
+          {/* FRO-250: sticky chapter label — left gutter, does not shift Source */}
           <div className="flex w-full items-center justify-center overflow-visible">
             {currentSectionLabel && !looksLikeUuid(currentSectionLabel) && (
               <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
@@ -1426,8 +1460,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             ref={listRef}
             refScrollView={setListScrollElement}
             data={displayCellIds}
+            dataVersion={cellStoreVersion}
             renderItem={renderListItem}
-            extraData={renderListItem}
+            extraData={listExtraData}
             keyExtractor={(cellId) => cellId}
             estimatedItemSize={ESTIMATED_ROW_HEIGHT_PX}
             drawDistance={LEGEND_LIST_DRAW_DISTANCE_PX}
@@ -1448,7 +1483,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         ) : (
           <div className="flex-1">
             <EmptyState
-              className="h-full border-0 bg-transparent py-10"
+              variant="inline"
+              className="h-full py-10"
               icon={audioLens ? Music : FileText}
               title={audioLens ? "No media segments yet" : "No text segments in this file"}
               description={
@@ -1513,7 +1549,7 @@ interface MemoizedRowProps {
   onDeactivateEditor: (cellId: string) => void
   username: string
   editable: boolean
-  /** AQU-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
+  /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
   canValidate: boolean
   /** True when the user may edit SOURCE text (source.cell.commit): cloud
    *  project_lead+ (500) on a non-live-linked project. See canEditSource. */
@@ -1522,16 +1558,19 @@ interface MemoizedRowProps {
    *  Resolved once per file by the parent (membership look-up) so this prop
    *  is just a stable boolean — preserves the row's React.memo invariant. */
   isStaleSource: boolean
-  /** AQU-477 (§6): this cell's ANCESTRY is stale (a further-upstream chain
+  /** FRO-477 (§6): this cell's ANCESTRY is stale (a further-upstream chain
    *  hop changed). Same "stable boolean, resolved by the parent" shape as
    *  `isStaleSource` above. */
   isUpstreamStaleSource: boolean
-  onCellCommitted?: (cellId: string, committedEventId?: string) => void | Promise<void>
+  onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void | Promise<void>
+  getPendingTargetEventId?: (cellId: string) => string | null
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
+  presenceStore?: ProjectPresenceStore | null
   remoteChangedWhileFocused: boolean
   onClaimCell?: (cellId: string) => void
   onReleaseCell?: (cellId: string) => void
+  onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
   onAckRemoteChange?: (cellId: string) => void
   isCompletionConfigured: boolean
   isCompletionAvailable: boolean
@@ -1556,8 +1595,10 @@ interface MemoizedRowProps {
   rowIndex: number
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
-  sourceTextDirection: "ltr" | "rtl"
-  targetTextDirection: "ltr" | "rtl"
+  sourceDirectionMode: DirectionMode
+  targetDirectionMode: DirectionMode
+  sourceTextDirection: TextDirection
+  targetTextDirection: TextDirection
   gridCols: "grid-cols-[44px_1fr_1fr]"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
@@ -1577,27 +1618,27 @@ interface MemoizedRowProps {
     e: React.PointerEvent<HTMLButtonElement>,
   ) => void
   onNavigateCell: (cellId: string, direction: "prev" | "next") => void
-  /** AQU-297: Called when Esc is pressed inside a cell editor — returns focus to the grid row. */
+  /** FRO-297: Called when Esc is pressed inside a cell editor — returns focus to the grid row. */
   onEscapeToGrid: (cellId: string) => void
-  /** AQU-297: Arrow-key navigation while grid-row (not TipTap) is focused. */
+  /** FRO-297: Arrow-key navigation while grid-row (not TipTap) is focused. */
   onGridRowKeyNav: (cellId: string, direction: "prev" | "next") => void
   getVoiceTakeCells: (startIndex: number, count: number) => CellData[]
   getTokenForFile?: (fileId: string) => Promise<string | null>
-  /** AQU-207: Lazily returns the interlinear alignment model. */
+  /** FRO-207: Lazily returns the interlinear alignment model. */
   getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
-  /** AQU-207: Called when user confirms/invalidates an alignment. */
+  /** FRO-207: Called when user confirms/invalidates an alignment. */
   onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
-  /** AQU-251: per-file source-column font size in px. Defaults to 14 when absent. */
+  /** FRO-251: per-file source-column font size in px. Defaults to 14 when absent. */
   sourceFontSize?: number
-  /** AQU-251: per-file target-column font size in px. Defaults to 14 when absent. */
+  /** FRO-251: per-file target-column font size in px. Defaults to 14 when absent. */
   targetFontSize?: number
-  /** AQU-192: username of the assignee for this cell. Null = no assignment. */
+  /** FRO-192: username of the assignee for this cell. Null = no assignment. */
   assigneeLabel?: string | null
-  /** AQU-192: scope label for the assignment tooltip. */
+  /** FRO-192: scope label for the assignment tooltip. */
   assigneeNote?: string | null
   /** RACE-5: ref-backed live lock check — see EditorTableProps.checkLockHolder. */
   checkLockHolder?: (cellId: string) => string | null
-  /** AQU-317: when true, USFM \f...\f* footnotes render below each cell. */
+  /** FRO-317: when true, USFM \f...\f* footnotes render below each cell. */
   showFootnotesInline?: boolean
   /** True when inline/tray footnote detail is already visible elsewhere. */
   footnotePanelActive?: boolean
@@ -1635,11 +1676,11 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
     getFootnoteDetails,
     onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
-    sourceTextDirection, targetTextDirection, isAnonymous,
+    sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
-    onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
-    onClaimCell, onReleaseCell, onAckRemoteChange,
+    onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+    onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
     isStaleSource,
     isUpstreamStaleSource,
     assigneeLabel,
@@ -1756,6 +1797,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         rowIndex={rowIndex}
         lineNumbersEnabled={lineNumbersEnabled}
         cellLabelsEnabled={cellLabelsEnabled}
+        sourceDirectionMode={sourceDirectionMode}
+        targetDirectionMode={targetDirectionMode}
         sourceTextDirection={sourceTextDirection}
         targetTextDirection={targetTextDirection}
         gridCols={gridCols}
@@ -1779,11 +1822,14 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         getAlignmentModel={getAlignmentModel}
         onAlignmentSeedChange={onAlignmentSeedChange}
         onCellCommitted={onCellCommitted}
+        getPendingTargetEventId={getPendingTargetEventId}
         onOptimisticEdit={onOptimisticEdit}
         lockHolderLabel={lockHolderLabel}
+        presenceStore={presenceStore}
         remoteChangedWhileFocused={remoteChangedWhileFocused}
         onClaimCell={onClaimCell}
         onReleaseCell={onReleaseCell}
+        onTargetPresenceSelection={onTargetPresenceSelection}
         onAckRemoteChange={onAckRemoteChange}
         sourceFontSize={sourceFontSize}
         targetFontSize={targetFontSize}
@@ -1810,7 +1856,7 @@ interface EditorRowProps {
   onDeactivateEditor: (cellId: string) => void
   username: string
   editable: boolean
-  /** AQU-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
+  /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
   canValidate: boolean
   /** True when the user may edit SOURCE text (source.cell.commit): cloud
    *  project_lead+ (500) on a non-live-linked project. Surfaces the per-cell
@@ -1820,16 +1866,19 @@ interface EditorRowProps {
    *  target commit. Renders a small warning badge next to the validation
    *  status. Computed once-per-file by the parent. */
   isStaleSource: boolean
-  /** AQU-477 (§6) — true when this cell's ANCESTRY is stale (a further-
+  /** FRO-477 (§6) — true when this cell's ANCESTRY is stale (a further-
    *  upstream chain hop changed). Renders the violet/dotted second tone.
    *  Same once-per-file computation shape as `isStaleSource`. */
   isUpstreamStaleSource: boolean
-  onCellCommitted?: (cellId: string, committedEventId?: string) => void
+  onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void
+  getPendingTargetEventId?: (cellId: string) => string | null
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
+  presenceStore?: ProjectPresenceStore | null
   remoteChangedWhileFocused: boolean
   onClaimCell?: (cellId: string) => void
   onReleaseCell?: (cellId: string) => void
+  onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
   onAckRemoteChange?: (cellId: string) => void
   isCompletionConfigured: boolean
   isCompletionAvailable: boolean
@@ -1856,9 +1905,9 @@ interface EditorRowProps {
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   getStatisticalBt?: (translatedText: string) => string
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
-  /** AQU-207: Lazily returns the interlinear alignment model. */
+  /** FRO-207: Lazily returns the interlinear alignment model. */
   getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
-  /** AQU-207: Called when user confirms/invalidates an alignment. */
+  /** FRO-207: Called when user confirms/invalidates an alignment. */
   onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
   openCommentCount: number
   isActiveCue?: boolean
@@ -1867,16 +1916,18 @@ interface EditorRowProps {
   onDragEnter: () => void
   onSelectionPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => void
   onNavigateCell: (direction: "prev" | "next") => void
-  /** AQU-297: Esc inside TipTap — commit + return focus to the grid row wrapper. */
+  /** FRO-297: Esc inside TipTap — commit + return focus to the grid row wrapper. */
   onEscapeToGrid: () => void
-  /** AQU-297: Arrow/j/k navigation while grid row wrapper is focused (not TipTap). */
+  /** FRO-297: Arrow/j/k navigation while grid row wrapper is focused (not TipTap). */
   onGridRowKeyNav: (direction: "prev" | "next") => void
   getVoiceTakeCells: (startIndex: number, count: number) => CellData[]
   rowIndex: number
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
-  sourceTextDirection: "ltr" | "rtl"
-  targetTextDirection: "ltr" | "rtl"
+  sourceDirectionMode: DirectionMode
+  targetDirectionMode: DirectionMode
+  sourceTextDirection: TextDirection
+  targetTextDirection: TextDirection
   gridCols: "grid-cols-[44px_1fr_1fr]"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
@@ -1889,17 +1940,17 @@ interface EditorRowProps {
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
-  /** AQU-251: per-file source-column font size in px. Defaults to 14 when absent. */
+  /** FRO-251: per-file source-column font size in px. Defaults to 14 when absent. */
   sourceFontSize?: number
-  /** AQU-251: per-file target-column font size in px. Defaults to 14 when absent. */
+  /** FRO-251: per-file target-column font size in px. Defaults to 14 when absent. */
   targetFontSize?: number
-  /** AQU-192: username of the assignee for this cell. Null = no assignment. */
+  /** FRO-192: username of the assignee for this cell. Null = no assignment. */
   assigneeLabel?: string | null
-  /** AQU-192: scope label for the assignment tooltip. */
+  /** FRO-192: scope label for the assignment tooltip. */
   assigneeNote?: string | null
   /** RACE-5: ref-backed live lock check — see EditorTableProps.checkLockHolder. */
   checkLockHolder?: (cellId: string) => string | null
-  /** AQU-317: when true, USFM \f...\f* footnotes render below the cell row. */
+  /** FRO-317: when true, USFM \f...\f* footnotes render below the cell row. */
   showFootnotesInline?: boolean
   /** True when inline/tray footnote detail is already visible elsewhere. */
   footnotePanelActive?: boolean
@@ -2038,7 +2089,7 @@ function SourceWithTermLookup({
 }
 
 // ---------------------------------------------------------------------------
-// USFM display rendering (AQU-317 follow-up)
+// USFM display rendering (FRO-317 follow-up)
 // ---------------------------------------------------------------------------
 // Cell text stores intra-verse USFM markers verbatim (lossless round-trip),
 // but the editor must never show raw `\f + \fr 2:1 \ft …\f*` / `\w …\w*` to a
@@ -2119,11 +2170,11 @@ function humanFootnoteCellRef(cell: CellData): string {
 }
 
 function footnoteMarkerOptions(
-  cell: CellData,
+  targetText: string,
   anchor: FootnoteInsertionAnchor | null,
   numberOffset: number,
 ): Record<FootnoteMarkerStyle, AddFootnoteMarkerOption> {
-  const targetFootnotes = extractUsfmFootnotes(cell.translated ?? "")
+  const targetFootnotes = extractUsfmFootnotes(targetText)
   const insertionIndex = anchor?.plainPosition ?? Number.POSITIVE_INFINITY
   const targetFootnotesBeforeInsertion = targetFootnotes.filter((footnote) => footnote.index < insertionIndex)
   const numberedPreview = numberOffset + targetFootnotesBeforeInsertion.length + 1
@@ -2262,6 +2313,194 @@ function SanitizedRichHtml({ html }: { html: string }) {
       dangerouslySetInnerHTML={innerHtml}
     />
   )
+}
+
+interface RemotePresenceOverlayItem {
+  key: string
+  kind: "selection" | "caret" | "label"
+  username: string
+  color: string
+  style: React.CSSProperties
+}
+
+function RemoteTargetPresenceOverlay({
+  contentRef,
+  peers,
+}: {
+  contentRef: React.RefObject<HTMLElement | null>
+  peers: CellPresencePeer[]
+}) {
+  const [items, setItems] = useState<RemotePresenceOverlayItem[]>([])
+
+  useLayoutEffect(() => {
+    const root = contentRef.current
+    const container = root?.parentElement
+    if (!root || !container || peers.length === 0) {
+      setItems((current) => current.length === 0 ? current : [])
+      return
+    }
+
+    const next: RemotePresenceOverlayItem[] = []
+    const containerRect = container.getBoundingClientRect()
+    for (const peer of peers) {
+      const selection = peer.selection
+      if (!selection || selection.side !== "target") continue
+      const anchor = Math.max(0, selection.anchor)
+      const head = Math.max(0, selection.head)
+      const start = Math.min(anchor, head)
+      const end = Math.max(anchor, head)
+      const caretRect = rectForCaretOffset(root, end)
+      if (start !== end) {
+        const range = rangeForPlainOffsets(root, start, end)
+        if (range) {
+          Array.from(range.getClientRects()).forEach((rect, index) => {
+            if (rect.width <= 0 || rect.height <= 0) return
+            next.push({
+              key: `${peer.peerId}-selection-${index}`,
+              kind: "selection",
+              username: peer.username,
+              color: peer.color,
+              style: {
+                left: rect.left - containerRect.left,
+                top: rect.top - containerRect.top,
+                width: rect.width,
+                height: rect.height,
+                backgroundColor: peer.color,
+              },
+            })
+          })
+        }
+      }
+      if (caretRect) {
+        const left = caretRect.left - containerRect.left
+        const top = caretRect.top - containerRect.top
+        const height = Math.max(16, caretRect.height)
+        next.push({
+          key: `${peer.peerId}-caret`,
+          kind: "caret",
+          username: peer.username,
+          color: peer.color,
+          style: {
+            left,
+            top,
+            height,
+            backgroundColor: peer.color,
+          },
+        })
+        next.push({
+          key: `${peer.peerId}-label`,
+          kind: "label",
+          username: peer.username,
+          color: peer.color,
+          style: {
+            left: left + 3,
+            top: Math.max(0, top - 18),
+            backgroundColor: peer.color,
+          },
+        })
+      }
+    }
+    setItems(next)
+  }, [contentRef, peers])
+
+  if (items.length === 0) return null
+
+  return (
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
+      {items.map((item) => {
+        if (item.kind === "selection") {
+          return (
+            <span
+              key={item.key}
+              className="absolute rounded-[2px] opacity-20"
+              style={item.style}
+            />
+          )
+        }
+        if (item.kind === "caret") {
+          return (
+            <span
+              key={item.key}
+              className="absolute w-0.5 rounded-full"
+              style={item.style}
+            />
+          )
+        }
+        return (
+          <span
+            key={item.key}
+            className="absolute max-w-28 truncate rounded px-1 py-px text-[10px] font-medium leading-4 text-white shadow-sm"
+            style={item.style}
+          >
+            {item.username}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+function rangeForPlainOffsets(root: HTMLElement, start: number, end: number): Range | null {
+  const startPos = textNodePositionForOffset(root, start)
+  const endPos = textNodePositionForOffset(root, end)
+  if (!startPos || !endPos) return null
+  const range = document.createRange()
+  range.setStart(startPos.node, startPos.offset)
+  range.setEnd(endPos.node, endPos.offset)
+  return range
+}
+
+function rectForCaretOffset(root: HTMLElement, offset: number): DOMRect | null {
+  const collapsed = rangeForPlainOffsets(root, offset, offset)
+  const collapsedRect = firstUsableRect(collapsed)
+  if (collapsedRect) return collapsedRect
+
+  const before = offset > 0 ? rangeForPlainOffsets(root, offset - 1, offset) : null
+  const beforeRect = firstUsableRect(before)
+  if (beforeRect) {
+    return new DOMRect(beforeRect.right, beforeRect.top, 0, beforeRect.height)
+  }
+
+  const after = rangeForPlainOffsets(root, offset, offset + 1)
+  const afterRect = firstUsableRect(after)
+  if (afterRect) {
+    return new DOMRect(afterRect.left, afterRect.top, 0, afterRect.height)
+  }
+
+  return null
+}
+
+function firstUsableRect(range: Range | null): DOMRect | null {
+  if (!range) return null
+  for (const rect of Array.from(range.getClientRects())) {
+    if (rect.height > 0) return rect
+  }
+  const rect = range.getBoundingClientRect()
+  return rect.height > 0 ? rect : null
+}
+
+function textNodePositionForOffset(
+  root: HTMLElement,
+  targetOffset: number,
+): { node: Text; offset: number } | null {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement
+      if (parent?.closest("[data-presence-ignore]")) return NodeFilter.FILTER_REJECT
+      return NodeFilter.FILTER_ACCEPT
+    },
+  })
+  let remaining = Math.max(0, targetOffset)
+  let lastText: Text | null = null
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text
+    lastText = node
+    const length = node.data.length
+    if (remaining <= length) return { node, offset: remaining }
+    remaining -= length
+  }
+  if (lastText) return { node: lastText, offset: lastText.data.length }
+  return null
 }
 
 function TargetRichHtml({
@@ -2549,11 +2788,11 @@ function EditorRow({
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
-  rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
+  rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, micDenied,
   audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, onAskAiFromSelection,
-  onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
-  onClaimCell, onReleaseCell, onAckRemoteChange,
+  onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+  onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
   isUpstreamStaleSource,
   getTokenForFile,
@@ -2576,12 +2815,11 @@ function EditorRow({
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
   const { onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording } = useEditorActions()
-  const hasTranslatedText = Boolean(cell.translated?.trim())
-  const showCompletionOverlay = isLoading && !hasTranslatedText
+  const remoteCellPresence = useCellPresence(presenceStore, cell.id)
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<ViolationAnchor | null>(null)
   const [examplesExpanded, setExamplesExpanded] = useState(false)
-  // AQU-204: chip click state for TermLookupPopover on target editor chips.
+  // FRO-204: chip click state for TermLookupPopover on target editor chips.
   const [termChipState, setTermChipState] = useState<{ term: string; anchor: HTMLElement } | null>(null)
   // Track whether the target editor has a non-empty text selection when a chip is clicked.
   const targetHasSelectionRef = useRef(false)
@@ -2591,13 +2829,13 @@ function EditorRow({
   // Add-from-selection (Slice 5): the source-side text the user has selected,
   // surfaced as an "Add to termbase" affordance. Null when nothing selected.
   const [sourceSelection, setSourceSelection] = useState<string | null>(null)
-  // AQU-260: ref mirror of sourceSelection so onClick handlers can read the
+  // FRO-260: ref mirror of sourceSelection so onClick handlers can read the
   // captured text even if a selectionchange event already cleared the React
   // state (the mousedown-before-click race that collapses the browser selection
   // before the click callback fires).
   const capturedSelectionRef = useRef<string | null>(null)
-  // AQU-260: set to true while the user is pressing down on a SelectionTermActions
-  // toolbar button, so the AQU-248 selectionchange guard doesn't clear
+  // FRO-260: set to true while the user is pressing down on a SelectionTermActions
+  // toolbar button, so the FRO-248 selectionchange guard doesn't clear
   // sourceSelection before onClick fires.
   const toolbarMouseDownRef = useRef(false)
   // Controls the confirm dialog shown before creating the draft concept.
@@ -2616,19 +2854,20 @@ function EditorRow({
   // Surfaces a compact inline message below the editor instead of swallowing.
   /** voice-chip drag-over state: the voiceId being dragged over this cell's audio area */
   const [dragOverVoiceId, setDragOverVoiceId] = useState<string | null>(null)
-  // AQU-237: mic-denied help popover state — rendered as an inline popover so
+  // FRO-237: mic-denied help popover state — rendered as an inline popover so
   // the rail button stays ENABLED when mic is blocked and routes click here.
   const [showMicDeniedHelp, setShowMicDeniedHelp] = useState(false)
-  // AQU-274: write-failure banner state. Set when any outbox enqueue fails
+  // FRO-274: write-failure banner state. Set when any outbox enqueue fails
   // (cell commit, validate, waive). The message persists until dismissed so
   // the user has time to copy their text before reloading.
   const [writeError, setWriteError] = useState<string | null>(null)
-  // AQU-278: confirm dialog shown when Generate is triggered on a non-empty
+  // FRO-278: confirm dialog shown when Generate is triggered on a non-empty
   // cell. True = dialog is open; clicking Confirm calls onCompleteSingle,
   // clicking Cancel discards the pending action (nothing committed).
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false)
   const rowRef = useRef<HTMLDivElement | null>(null)
   const translatedEditorRef = useRef<TranslatedEditorHandle | null>(null)
+  const targetReadContentRef = useRef<HTMLDivElement | null>(null)
   const pendingFootnoteAnchorRef = useRef<FootnoteInsertionAnchor | null>(null)
   const [activeFootnoteIndex, setActiveFootnoteIndex] = useState<number | null>(null)
   const [addFootnoteOpen, setAddFootnoteOpen] = useState(false)
@@ -2637,11 +2876,28 @@ function EditorRow({
     ref: "",
     text: "",
   })
+  const [localTargetDraft, setLocalTargetDraft] = useState<{ value: string; valueHtml?: string } | null>(null)
   const [expanded, setExpanded] = useState(false)
   const [expansionTab, setExpansionTab] = useState<string>("backtranslation")
   const [btAlignmentOpen, setBtAlignmentOpen] = useState(false)
   const hasSourceFootnoteMarker = (cell.original ?? "").includes("\\f")
-  const hasTargetFootnoteMarker = (cell.translated ?? "").includes("\\f")
+  const visibleTranslated = localTargetDraft?.value ?? cell.translated
+  const visibleTranslatedHtml = localTargetDraft?.valueHtml ?? cell.translatedHtml
+  const hasTranslatedText = Boolean(visibleTranslated?.trim())
+  const showCompletionOverlay = isLoading && !hasTranslatedText
+  const sourceCellDirection = useMemo(
+    () => resolveTextDirection(sourceDirectionMode, cell.originalHtml ?? cell.original, sourceTextDirection),
+    [sourceDirectionMode, sourceTextDirection, cell.originalHtml, cell.original],
+  )
+  const targetCellDirection = useMemo(
+    () => resolveTextDirection(
+      targetDirectionMode,
+      showCompletionOverlay ? (completionPreview ?? "") : (visibleTranslatedHtml ?? visibleTranslated),
+      targetTextDirection,
+    ),
+    [targetDirectionMode, targetTextDirection, showCompletionOverlay, completionPreview, visibleTranslatedHtml, visibleTranslated],
+  )
+  const hasTargetFootnoteMarker = (visibleTranslated ?? "").includes("\\f")
   const mayHaveFootnotes = hasSourceFootnoteMarker || hasTargetFootnoteMarker
   const showFootnotesInExpansion = footnoteViewMode === "off" && mayHaveFootnotes
   const shouldHydrateFootnotes =
@@ -2649,7 +2905,7 @@ function EditorRow({
     (expanded && expansionTab === "footnotes" && showFootnotesInExpansion)
   const allFootnotes = useMemo(
     () => shouldHydrateFootnotes ? getFootnoteDetails(cell.id) : EMPTY_CELL_FOOTNOTE_DETAILS,
-    [cell.id, cell.original, cell.translated, getFootnoteDetails, shouldHydrateFootnotes],
+    [cell.id, cell.original, visibleTranslated, getFootnoteDetails, shouldHydrateFootnotes],
   )
   const sourceDisplayFootnotes = useMemo(() => {
     if (!shouldHydrateFootnotes || !hasSourceFootnoteMarker) return EMPTY_EXTRACTED_FOOTNOTES
@@ -2672,6 +2928,13 @@ function EditorRow({
   const targetFootnotes = showFootnotesInline ? allFootnotes.targetFootnotes : EMPTY_EXTRACTED_FOOTNOTES
   const hasInlineFootnotes = sourceFootnotes.length > 0 || targetFootnotes.length > 0
   const isDocxFile = (cell.fileId ?? "").endsWith(".docx")
+  const terminologyConcepts = project.terminology ?? EMPTY_CONCEPTS
+
+  useEffect(() => {
+    if (!localTargetDraft) return
+    if ((cell.translated ?? "") !== localTargetDraft.value) return
+    setLocalTargetDraft(null)
+  }, [cell.translated, localTargetDraft])
 
   useEffect(() => {
     if (cell.targetEventId) pendingTargetEventIdRef.current = cell.targetEventId
@@ -2714,7 +2977,7 @@ function EditorRow({
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.warn("[waive] emit failed:", err)
-      // AQU-274: surface enqueue failure to the user so they know the waive
+      // FRO-274: surface enqueue failure to the user so they know the waive
       // didn't persist locally — silent failure is the worst failure mode.
       setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
@@ -2733,7 +2996,7 @@ function EditorRow({
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.warn("[unwaive] emit failed:", err)
-      // AQU-274: surface enqueue failure inline.
+      // FRO-274: surface enqueue failure inline.
       setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
   }, [project.id, cell.fileId, cell.id, username, onCellCommitted])
@@ -2771,7 +3034,7 @@ function EditorRow({
     }
     return out
   }, [cellInfractions, waivedInfractions, waivedRuleIds, ruleSeverity])
-  const targetHasRichFormatting = hasMeaningfulRichText(cell.translatedHtml)
+  const targetHasRichFormatting = hasMeaningfulRichText(visibleTranslatedHtml)
 
   // Editor commit path. The plain TipTap editor (TranslatedEditor) calls
   // this on idle/blur/release with the current `{value, valueHtml}` snapshot.
@@ -2781,7 +3044,7 @@ function EditorRow({
   const handleEditorCommit = useCallback(({ value, valueHtml }: { value: string; valueHtml: string }) => {
     if (!editable) return
     if (!project.id) return
-    // AQU-273: belt-and-suspenders role-mirror check. `editable` is already
+    // FRO-273: belt-and-suspenders role-mirror check. `editable` is already
     // false for roles < CONTRIBUTOR, so this guard only fires in the unlikely
     // race where `editable` hasn't updated yet after a role downgrade — it
     // prevents a guaranteed-403 event from entering the durable outbox.
@@ -2807,16 +3070,19 @@ function EditorRow({
     // `checkRulesForCell` for this one cell on the next render — no other
     // cell's cached infractions are invalidated. The server projection
     // arrives via `onCellCommitted` -> revalidate and overwrites this.
+    setLocalTargetDraft({ value, valueHtml })
     onOptimisticEdit?.(cell.id, { value, valueHtml })
     setWriteError(null)
-    // RACE-3/QW-2: use the pending event id (the last event WE enqueued for this
-    // cell) as parentId rather than the projection value. The projection row may
-    // lag by a round-trip when a second idle-commit fires before the read-back
-    // confirms; chaining from the projection value would make it a sibling of
-    // our own earlier event and dead-letter it. pendingTargetEventIdRef is
-    // updated from cell.targetEventId whenever the projection confirms (effect
-    // at line ~1621), so it stays correct once the server catches up.
-    const parentId = pendingTargetEventIdRef.current ?? cell.sourceEventId ?? null
+    // RACE-3/QW-2: use the last event id we enqueued for this cell as parentId
+    // rather than the lagging projection value. The workspace-level getter
+    // survives Legend List row remounts; the row-local ref covers repeated
+    // commits while this exact row instance remains mounted.
+    const parentId =
+      getPendingTargetEventId?.(cell.id) ??
+      pendingTargetEventIdRef.current ??
+      cell.targetEventId ??
+      cell.sourceEventId ??
+      null
     emitTargetCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
@@ -2830,7 +3096,7 @@ function EditorRow({
       pendingTargetEventIdRef.current = eventId
       // Pass the just-assigned event id: the auto-BT in the parent pins to it
       // so the BT describes THIS commit, not the lagging projection head.
-      void onCellCommitted?.(cell.id, eventId)
+      void onCellCommitted?.(cell.id, eventId, parentId)
     }).catch((err) => {
       // RES-4/M1-3: enqueue failure (IDB quota, private-mode, InsufficientRoleError)
       // must be loud. Revert the optimistic patch so the cell doesn't show
@@ -2838,13 +3104,14 @@ function EditorRow({
       console.error("[editor-commit] enqueue failed:", err)
       const msg = err instanceof Error ? err.message : "Could not save — please try again"
       setWriteError(msg)
+      setLocalTargetDraft(null)
       // Revert the optimistic patch to the last confirmed projection value.
       onOptimisticEdit?.(cell.id, {
         value: cell.translated ?? "",
         valueHtml: cell.translatedHtml ?? "",
       })
     })
-  }, [editable, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.translated, cell.translatedHtml, cell.sourceEventId, username, onCellCommitted, onOptimisticEdit, lockHolderLabel, checkLockHolder])
+  }, [editable, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder])
 
   // Source-edit commit path. The inline source editor (a plain TranslatedEditor)
   // calls this on idle/blur with the current source `{value, valueHtml}`. We emit
@@ -2923,7 +3190,7 @@ function EditorRow({
   // there is no selection (defensive fallback), we append so the translator
   // can still chain multiple terms. Uses the same commit path as keyboard edits.
   const handleTermApply = useCallback((rendering: string) => {
-    const existing = cell.translated ?? ""
+    const existing = visibleTranslated ?? ""
     const selected = targetSelectionTextRef.current
     let next: string
     if (selected && existing.includes(selected)) {
@@ -2933,7 +3200,7 @@ function EditorRow({
       next = trimmed ? `${trimmed} ${rendering}` : rendering
     }
     handleEditorCommit({ value: next, valueHtml: next })
-  }, [cell.translated, handleEditorCommit])
+  }, [visibleTranslated, handleEditorCommit])
 
   const captureFootnoteAnchor = useCallback(() => {
     pendingFootnoteAnchorRef.current = translatedEditorRef.current?.getFootnoteInsertionAnchor() ?? null
@@ -2942,7 +3209,7 @@ function EditorRow({
   const openAddFootnoteDialog = useCallback((defaults?: AddFootnoteDialogDefaults) => {
     if (!pendingFootnoteAnchorRef.current) captureFootnoteAnchor()
     const anchor = pendingFootnoteAnchorRef.current
-    const markerOptions = footnoteMarkerOptions(cell, anchor, targetFootnoteNumberOffset)
+    const markerOptions = footnoteMarkerOptions(visibleTranslated ?? "", anchor, targetFootnoteNumberOffset)
     const markerStyle = defaults?.markerStyle ?? footnoteMarkerStyleFromCaller(defaults?.caller)
     setAddFootnoteDefaults({
       caller: defaults?.caller ?? "+",
@@ -2959,7 +3226,7 @@ function EditorRow({
       markerOptions,
     })
     setAddFootnoteOpen(true)
-  }, [captureFootnoteAnchor, cell, targetFootnoteNumberOffset])
+  }, [captureFootnoteAnchor, cell, visibleTranslated, targetFootnoteNumberOffset])
 
   const handleAddFootnote = useCallback((value: AddFootnoteDialogValue) => {
     const marker = createUsfmFootnoteMarker(value)
@@ -2969,14 +3236,14 @@ function EditorRow({
     ) ?? false
 
     if (!inserted) {
-      const next = `${cell.translated ?? ""}${marker}`
+      const next = `${visibleTranslated ?? ""}${marker}`
       handleEditorCommit({ value: next, valueHtml: next })
     }
 
     pendingFootnoteAnchorRef.current = null
     onFootnoteCreated?.()
     setAddFootnoteOpen(false)
-  }, [cell.translated, handleEditorCommit, onFootnoteCreated])
+  }, [visibleTranslated, handleEditorCommit, onFootnoteCreated])
 
   const handleCreateTargetFootnote = useCallback((sourceFootnote: ExtractedFootnote) => {
     pendingFootnoteAnchorRef.current = null
@@ -2995,14 +3262,14 @@ function EditorRow({
     const sel = window.getSelection()
     const text = sel && !sel.isCollapsed ? sel.toString().trim() : ""
     const captured = text.length > 0 ? text : null
-    // AQU-260: keep the ref in sync with state so onClick handlers can read
+    // FRO-260: keep the ref in sync with state so onClick handlers can read
     // the captured text even after the selectionchange race clears the state.
     capturedSelectionRef.current = captured
     setSourceSelection(captured)
   }, [onAddConceptFromSelection, onAskAiFromSelection])
 
   // Opens the confirm dialog — actual creation happens in handleAddConceptConfirm.
-  // AQU-260: read from capturedSelectionRef (not sourceSelection state) so the
+  // FRO-260: read from capturedSelectionRef (not sourceSelection state) so the
   // dialog opens even when the selectionchange event already cleared the state
   // before this onClick fires (the mousedown-blur race).
   const handleAddSelectionToTermbase = useCallback(() => {
@@ -3026,9 +3293,9 @@ function EditorRow({
     setShowAddConceptDialog(false)
   }, [])
 
-  // AQU-260: toolbar mouse-down/up guards used by the selectionchange handler.
+  // FRO-260: toolbar mouse-down/up guards used by the selectionchange handler.
   // Set when the user presses down on a SelectionTermActions button so the
-  // AQU-248 selectionchange guard knows not to clear sourceSelection before the
+  // FRO-248 selectionchange guard knows not to clear sourceSelection before the
   // click callback fires. Cleared on mouseup or mouseleave.
   const handleToolbarMouseDown = useCallback(() => {
     toolbarMouseDownRef.current = true
@@ -3038,7 +3305,7 @@ function EditorRow({
   }, [])
 
   // Promote the current source selection into the AI agent as a context chip.
-  // AQU-260: read capturedSelectionRef (not state) for the same mousedown-race reason.
+  // FRO-260: read capturedSelectionRef (not state) for the same mousedown-race reason.
   const handleAskAiFromSelection = useCallback(() => {
     const text = capturedSelectionRef.current
     if (!text || !onAskAiFromSelection) return
@@ -3057,10 +3324,10 @@ function EditorRow({
     window.getSelection()?.removeAllRanges()
   }, [onAskAiFromSelection, cell.fileId, cell.id, cell.context, cell.group])
 
-  // AQU-248: clear source selection when the browser selection collapses (user
+  // FRO-248: clear source selection when the browser selection collapses (user
   // clicked elsewhere or selected text in a different row). This prevents the
   // "Add to termbase" toolbar from floating over a different row's content.
-  // AQU-260: guard — do NOT clear when the user is pressing down on a toolbar
+  // FRO-260: guard — do NOT clear when the user is pressing down on a toolbar
   // button (toolbarMouseDownRef=true). The selectionchange fires before onClick
   // in the mousedown-click sequence; clearing here would make onClick see null.
   useEffect(() => {
@@ -3089,16 +3356,16 @@ function EditorRow({
   // Recomputes naturally as the preview streams in and as the committed text /
   // BT verdict changes on later renders.
   const preAcceptanceWarnings = useMemo(() => {
-    const completionText = isLoading ? (completionPreview ?? "") : (cell.translated ?? "")
+    const completionText = isLoading ? (completionPreview ?? "") : (visibleTranslated ?? "")
     if (!completionText.trim()) return []
     return detectPreAcceptanceWarnings(
       completionText,
       cell.original ?? "",
-      project.terminology ?? [],
+      terminologyConcepts,
     )
-  }, [isLoading, completionPreview, cell.translated, cell.original, project.terminology])
+  }, [isLoading, completionPreview, visibleTranslated, cell.original, terminologyConcepts])
 
-  // AQU-204: Chip click handler for terminology chips in the target (TranslatedEditor).
+  // FRO-204: Chip click handler for terminology chips in the target (TranslatedEditor).
   // Records whether the target editor had a non-empty text selection at click time
   // so we can conditionally surface the Apply affordance in the popover.
   const handleTermChipClick = useCallback((term: string, anchor: HTMLElement) => {
@@ -3110,7 +3377,7 @@ function EditorRow({
   }, [])
 
   const emitValidationChange = useCallback((validated: boolean) => {
-    // AQU-273: role-mirror guard — viewer/commenter should never reach here
+    // FRO-273: role-mirror guard — viewer/commenter should never reach here
     // (canValidate=false disables the button) but guard defensively so a
     // guaranteed-403 never enters the outbox.
     if (!canPerform(validated ? "cell.validate" : "cell.unvalidate", project.syncRole?.level ?? null)) {
@@ -3130,16 +3397,20 @@ function EditorRow({
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.warn(`[${validated ? "validate" : "unvalidate"}] emit failed:`, err)
-      // AQU-274: surface enqueue failure inline.
+      // FRO-274: surface enqueue failure inline.
       setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
   }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, onCellCommitted])
 
   const editorFocusedRef = useRef(false)
   const requestTargetEdit = useCallback(() => {
-    if (!editable || isLoading) return
+    if (!editable || isLoading || lockHolderLabel) return
     onActivateEditor(cell.id)
-  }, [editable, isLoading, onActivateEditor, cell.id])
+  }, [editable, isLoading, lockHolderLabel, onActivateEditor, cell.id])
+
+  const handleTargetPresenceSelection = useCallback((selection: TargetPresenceSelection | null) => {
+    onTargetPresenceSelection?.(cell.id, selection)
+  }, [cell.id, onTargetPresenceSelection])
 
   const handleEditorFocus = useCallback(() => {
     editorFocusedRef.current = true
@@ -3198,10 +3469,10 @@ function EditorRow({
 
   // Detect formatting loss: source has inline style marks that the target doesn't.
   const sourceHasFormatting = Boolean(cell.originalHtml && /<(b|strong|i|em|u|s|strike|del|code)\b/i.test(cell.originalHtml))
-  const targetHtml = cell.translatedHtml ?? ""
+  const targetHtml = visibleTranslatedHtml ?? ""
   const targetHasFormatting = /<(b|strong|i|em|u|s|strike|del|code)\b/i.test(targetHtml)
   const showFormattingLossWarning =
-    sourceHasFormatting && !targetHasFormatting && cell.translated.trim().length > 0
+    sourceHasFormatting && !targetHasFormatting && visibleTranslated.trim().length > 0
 
   const healthValue = health ?? (cell.status === "validated" ? 100 : 0)
 
@@ -3322,7 +3593,7 @@ function EditorRow({
     vs === "others" ? "text-muted-foreground/60" :
     "text-muted-foreground/30"
 
-  const hasContent = Boolean(cell.translated && cell.translated.trim())
+  const hasContent = Boolean(visibleTranslated && visibleTranslated.trim())
 
   // AD-14 amendment 2026-06-04: use server-derived confidence score from
   // healthMap when available (set by the confidence overlay in ProjectWorkspace
@@ -3381,13 +3652,16 @@ function EditorRow({
   const [hasFocusWithin, setHasFocusWithin] = useState(false)
   const [isTapSelected, setIsTapSelected] = useState(false)
   const hoverLeaveTimerRef = useRef<number | null>(null)
+  // AQU-354: does a rail control specifically hold focus? Used to pin the rail
+  // open (an in-progress interaction must never be idle-collapsed).
+  const [railHasFocus, setRailHasFocus] = useState(false)
 
   // ── Expansion state ───────────────────────────────────────────────────────
   const alignmentModelForExpansion = useMemo(() => {
     if (!btAlignmentOpen || !expanded || expansionTab !== "backtranslation") return null
-    if (!cell.original.trim() || !cell.translated.trim()) return null
+    if (!cell.original.trim() || !visibleTranslated.trim()) return null
     return getAlignmentModel?.() ?? null
-  }, [btAlignmentOpen, cell.original, cell.translated, expanded, expansionTab, getAlignmentModel])
+  }, [btAlignmentOpen, cell.original, visibleTranslated, expanded, expansionTab, getAlignmentModel])
 
   // History tab: fetch the D1 event log on demand only when the History tab is
   // visible. `cell.history` from useCells is intentionally empty (EMPTY_HISTORY)
@@ -3409,7 +3683,7 @@ function EditorRow({
 
   // ── Compute attention signals for chevron + tab dots ──────────────────────
   const isBtStale = Boolean(
-    cell.backtranslation && cell.backtranslationForText !== cell.translated,
+    cell.backtranslation && cell.backtranslationForText !== visibleTranslated,
   )
   const transcriptText = useMemo(() => {
     if (!cellAudioTimings || cellAudioTimings.length === 0) return ""
@@ -3419,8 +3693,8 @@ function EditorRow({
     if (!hasAudio || !transcriptText) return true
     const norm = (s: string) =>
       s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").trim().replace(/\s+/g, " ")
-    return norm(transcriptText) === norm(cell.translated)
-  }, [hasAudio, transcriptText, cell.translated])
+    return norm(transcriptText) === norm(visibleTranslated)
+  }, [hasAudio, transcriptText, visibleTranslated])
   const transcriptNeedsAttention =
     hasAudio &&
     Boolean(cellAudioTimings && cellAudioTimings.length > 0) &&
@@ -3463,7 +3737,17 @@ function EditorRow({
     if (!expanded || expansionTab !== "backtranslation") setBtAlignmentOpen(false)
   }, [expanded, expansionTab])
 
-  const railRevealed = isHovering || hasFocusWithin || isTapSelected || expanded
+  // AQU-354: reveal the rail on the ephemeral triggers, but idle-collapse it
+  // after a short pause so it stops covering the "changed elsewhere while you
+  // were editing" conflict banner (whose Discard button sits under the rail).
+  // Pins (expansion open, a rail control focused, a rail popover open) keep the
+  // rail visible so an in-progress interaction is never yanked away.
+  const railRevealTriggered = isHovering || hasFocusWithin || isTapSelected
+  const railPinned = expanded || railHasFocus || showMicDeniedHelp || showGenerateConfirm
+  const { revealed: railRevealed, registerActivity: registerRailActivity } = useRailIdleHide({
+    revealTriggered: railRevealTriggered,
+    pinned: railPinned,
+  })
 
   // ── BT tab edit state ─────────────────────────────────────────────────────
   const [btEditing, setBtEditing] = useState(false)
@@ -3474,9 +3758,9 @@ function EditorRow({
   // persisted as the cell's back-translation.
   const [btStatsOpen, setBtStatsOpen] = useState(false)
   const statisticalGloss = useMemo(() => {
-    if (!btStatsOpen || !cell.translated.trim()) return ""
-    return getStatisticalBt?.(cell.translated) ?? ""
-  }, [btStatsOpen, cell.translated, getStatisticalBt])
+    if (!btStatsOpen || !visibleTranslated.trim()) return ""
+    return getStatisticalBt?.(visibleTranslated) ?? ""
+  }, [btStatsOpen, visibleTranslated, getStatisticalBt])
 
   // When editing starts, seed the input with the current BT text.
   const handleBtEditStart = useCallback(() => {
@@ -3512,6 +3796,8 @@ function EditorRow({
       hoverLeaveTimerRef.current = null
     }
     setIsHovering(true)
+    // AQU-354: a fresh hover re-summons the rail if it had idle-collapsed.
+    registerRailActivity()
   }
   const handleRowMouseLeave = () => {
     if (hoverLeaveTimerRef.current !== null) window.clearTimeout(hoverLeaveTimerRef.current)
@@ -3520,12 +3806,16 @@ function EditorRow({
       hoverLeaveTimerRef.current = null
     }, 120)
   }
-  const handleRowFocusCapture = () => setHasFocusWithin(true)
+  const handleRowFocusCapture = () => {
+    setHasFocusWithin(true)
+    // AQU-354: focusing anything in the row re-summons an idle-collapsed rail.
+    registerRailActivity()
+  }
   const handleRowBlurCapture = (e: React.FocusEvent) => {
     const next = e.relatedTarget as Node | null
     if (next && rowRef.current?.contains(next)) return
     setHasFocusWithin(false)
-    // AQU-248: clear source-text selection when focus leaves this row so the
+    // FRO-248: clear source-text selection when focus leaves this row so the
     // "Add to termbase" toolbar never floats over a different row's content.
     capturedSelectionRef.current = null
     setSourceSelection(null)
@@ -3544,6 +3834,8 @@ function EditorRow({
     // doesn't surprise the user with a stale bulk action target.
     clearSelection()
     setIsTapSelected((p) => !p)
+    // AQU-354: a tap re-summons the rail if it had idle-collapsed.
+    registerRailActivity()
   }
 
   /**
@@ -3578,7 +3870,7 @@ function EditorRow({
   const isSynthBusy = synthStatus.kind === "loading" || synthStatus.kind === "synthesizing"
   const isSynthError = synthStatus.kind === "error"
 
-  // AQU-297: Accessible label for the target editor textbox.
+  // FRO-297: Accessible label for the target editor textbox.
   // Format: "<ref> — <state>" so screen readers announce context on focus.
   // Uses cell.context (the canonical reference like "GEN 1:1") when available,
   // falls back to globalReferences[0], then rowIndex+1.
@@ -3593,7 +3885,7 @@ function EditorRow({
     <button
       type="button"
       data-showcase="cell.health"
-      // AQU-297: button role + aria-pressed so screen readers announce the
+      // FRO-297: button role + aria-pressed so screen readers announce the
       // validated/unvalidated toggle state. aria-label provides full context.
       aria-pressed={isSelfValidated}
       aria-label={
@@ -3647,7 +3939,7 @@ function EditorRow({
     "unvalidated"
   const editorAriaLabel = `${cellRef} — ${cellStateLabel}`
 
-  // AQU-297: Grid-row keydown handler. Fires when the row wrapper div has
+  // FRO-297: Grid-row keydown handler. Fires when the row wrapper div has
   // focus (not TipTap). Arrow keys / j / k navigate between rows; Enter
   // moves focus into the cell's TipTap editor (entering edit mode).
   const handleGridRowKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -3674,7 +3966,7 @@ function EditorRow({
     <div>
       <div
         ref={rowRef}
-        // AQU-297: tabIndex={0} makes the row wrapper a focus stop for
+        // FRO-297: tabIndex={0} makes the row wrapper a focus stop for
         // grid-level keyboard navigation (ArrowUp/Down, j/k, Enter).
         // focus-visible:outline shows a subtle ring when navigating by
         // keyboard so the focused row is clear to sighted keyboard users.
@@ -3802,7 +4094,7 @@ function EditorRow({
           {(isSynthBusy || isSynthError) && (
             <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
           )}
-          {/* AQU-192: assignee avatar chip — shows initials of the member
+          {/* FRO-192: assignee avatar chip — shows initials of the member
               this cell is assigned to. Tooltip = username + scope label. */}
           {assigneeLabel && (
             <AppTooltip content={assigneeNote ? `Assigned to ${assigneeLabel} (${assigneeNote})` : `Assigned to ${assigneeLabel}`}>
@@ -3855,7 +4147,7 @@ function EditorRow({
               "relative flex flex-col transition-opacity",
               isSynthBusy && "opacity-70",
             )}
-            dir={sourceTextDirection}
+            dir={sourceCellDirection}
             aria-label="Source text"
             data-cell-type="source"
             style={{ fontSize: `${sourceFontSize}px`, lineHeight: "1.6" }}
@@ -3868,7 +4160,7 @@ function EditorRow({
             {sourceSelection && (
               <SourceSelectionToolbar
                 sourceSelection={sourceSelection}
-                concepts={project.terminology ?? []}
+                concepts={terminologyConcepts}
                 onAskAi={handleAskAiFromSelection}
                 onAddToTermbase={onAddConceptFromSelection ? handleAddSelectionToTermbase : undefined}
                 onTermApply={handleTermApply}
@@ -3930,7 +4222,7 @@ function EditorRow({
                 ranges={sourceRanges}
                 showEvidence={examplesExpanded}
                 onRangeClick={openInlineRule}
-                concepts={project.terminology ?? []}
+                concepts={terminologyConcepts}
                 onTermApply={handleTermApply}
                 footnotePanelActive={footnotePanelActive}
                 footnoteNumberOffset={sourceFootnoteNumberOffset}
@@ -3956,7 +4248,7 @@ function EditorRow({
             "relative flex flex-col pl-3 pr-9 transition-opacity",
             isSynthBusy && "opacity-70",
           )}
-          dir={targetTextDirection}
+          dir="ltr"
           style={{ fontSize: `${targetFontSize}px`, lineHeight: "1.6" }}
         >
           {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
@@ -4021,18 +4313,22 @@ function EditorRow({
                 "relative flex min-h-[40px] flex-1 flex-col rounded-lg px-2 py-1.5 transition-colors",
                 hasInlineFootnotes && "min-h-0 py-0.5",
                 "hover:bg-muted/60 focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
-                !cell.translated?.trim() && "bg-muted/40",
+                !visibleTranslated?.trim() && "bg-muted/40",
               )}
             >
                 {isEditorActive ? (
                   <TranslatedEditor
                     ref={translatedEditorRef}
                     cellId={cell.id}
-                    initialPlain={cell.translated}
-                    initialHtml={cell.translatedHtml}
+                    initialPlain={visibleTranslated}
+                    initialHtml={visibleTranslatedHtml}
                     onCommit={handleEditorCommit}
                     onFocus={handleEditorFocus}
                     onBlur={handleEditorBlurOuter}
+                    onSelectionChange={handleTargetPresenceSelection}
+                    textDirection={targetCellDirection}
+                    directionMode={targetDirectionMode}
+                    lang={project.targetLanguage || undefined}
                     className={cn(
                       "w-full",
                       showCompletionOverlay && "opacity-30 transition-opacity",
@@ -4050,7 +4346,7 @@ function EditorRow({
                     remoteChangedDuringEdit={remoteChangedWhileFocused}
                     onDiscardLocal={handleDiscardLocalAndReload}
                     onNavigateCell={onNavigateCell}
-                    terminologyConcepts={project.terminology ?? []}
+                    terminologyConcepts={terminologyConcepts}
                     onTermChipClick={handleTermChipClick}
                     footnoteNumberOffset={targetFootnoteNumberOffset}
                     showFootnoteTooltips={!footnotePanelActive}
@@ -4068,12 +4364,14 @@ function EditorRow({
                     aria-readonly={!editable || isLoading || Boolean(lockHolderLabel)}
                     aria-label={editorAriaLabel}
                     data-target-read-view
-                    tabIndex={editable && !isLoading ? 0 : undefined}
+                    dir={targetCellDirection}
+                    lang={project.targetLanguage || undefined}
+                    tabIndex={editable && !isLoading && !lockHolderLabel ? 0 : undefined}
                     className={cn(
-                      "min-h-[40px] w-full whitespace-pre-wrap rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
+                      "relative min-h-[40px] w-full whitespace-pre-wrap rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
                       "focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-1",
                       showCompletionOverlay && "opacity-30 transition-opacity",
-                      !cell.translated?.trim() && "text-muted-foreground/60",
+                      !visibleTranslated?.trim() && "text-muted-foreground/60",
                     )}
                     onClick={(event) => {
                       event.stopPropagation()
@@ -4089,33 +4387,40 @@ function EditorRow({
                     {lockHolderLabel && (
                       <div
                         aria-live="polite"
+                        data-presence-ignore
                         className="pointer-events-none absolute right-1 top-1 z-10 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400"
                       >
                         {lockHolderLabel} is editing
                       </div>
                     )}
-                    {targetHasRichFormatting && cell.translatedHtml ? (
-                      <TargetRichHtml
-                        html={cell.translatedHtml}
-                        footnotePanelActive={footnotePanelActive}
-                        footnoteNumberOffset={targetFootnoteNumberOffset}
-                      />
-                    ) : cell.translated?.trim() ? (
-                      <TargetReadText
-                        text={cell.translated}
-                        ranges={targetRanges}
-                        concepts={project.terminology ?? []}
-                        onRangeClick={openInlineRule}
-                        onTermChipClick={handleTermChipClick}
-                        footnotePanelActive={footnotePanelActive}
-                        footnoteNumberOffset={targetFootnoteNumberOffset}
-                      />
-                    ) : (
-                      <span aria-hidden="true" className="block min-h-[1.6em]" />
-                    )}
+                    <div ref={targetReadContentRef}>
+                      {targetHasRichFormatting && visibleTranslatedHtml ? (
+                        <TargetRichHtml
+                          html={visibleTranslatedHtml}
+                          footnotePanelActive={footnotePanelActive}
+                          footnoteNumberOffset={targetFootnoteNumberOffset}
+                        />
+                      ) : visibleTranslated?.trim() ? (
+                        <TargetReadText
+                          text={visibleTranslated}
+                          ranges={targetRanges}
+                          concepts={terminologyConcepts}
+                          onRangeClick={openInlineRule}
+                          onTermChipClick={handleTermChipClick}
+                          footnotePanelActive={footnotePanelActive}
+                          footnoteNumberOffset={targetFootnoteNumberOffset}
+                        />
+                      ) : (
+                        <span aria-hidden="true" className="block min-h-[1.6em]" />
+                      )}
+                    </div>
+                    <RemoteTargetPresenceOverlay
+                      contentRef={targetReadContentRef}
+                      peers={remoteCellPresence}
+                    />
                   </div>
                 )}
-              {/* AQU-204: Terminology chip popover — controlled via termChipState.
+              {/* FRO-204: Terminology chip popover — controlled via termChipState.
                   Anchored to the chip DOM element that was clicked. Apply is
                   offered only when the target had a non-empty text selection
                   at click time (per spec).
@@ -4123,7 +4428,7 @@ function EditorRow({
                   the popover body; the BaseUI Popover controlled-open + external
                   anchor positions it on the clicked chip. */}
               {termChipState && (() => {
-                const concepts = project.terminology ?? []
+                const concepts = terminologyConcepts
                 const onApply = targetHasSelectionRef.current
                   ? (rendering: string) => { handleTermApply(rendering); setTermChipState(null) }
                   : undefined
@@ -4154,7 +4459,7 @@ function EditorRow({
                     /* Streaming preview flows top-down like normal cell
                        text — same metrics as TipTap underneath so the
                        handoff at isLoading=false has no visible jump. */
-                    <p className="whitespace-pre-wrap px-2 py-1 leading-relaxed text-foreground/90">
+                    <p className="whitespace-pre-wrap px-2 py-1 leading-relaxed text-foreground/90" dir={targetCellDirection}>
                       {completionPreview}
                       <span
                         aria-hidden
@@ -4184,11 +4489,11 @@ function EditorRow({
                 editable={editable}
                 isDocx={isDocxFile}
                 onSave={(footnoteIndex, newText) => {
-                  const updated = spliceFootnoteText(cell.translated ?? "", footnoteIndex, newText)
+                  const updated = spliceFootnoteText(visibleTranslated ?? "", footnoteIndex, newText)
                   handleEditorCommit({ value: updated, valueHtml: updated })
                 }}
                 onDelete={(footnoteIndex) => {
-                  const updated = deleteFootnote(cell.translated ?? "", footnoteIndex)
+                  const updated = deleteFootnote(visibleTranslated ?? "", footnoteIndex)
                   handleEditorCommit({ value: updated, valueHtml: updated })
                 }}
                 onCreateTarget={handleCreateTargetFootnote}
@@ -4202,8 +4507,8 @@ function EditorRow({
                 blocks accept/commit. */}
             <PreAcceptanceWarningBand warnings={preAcceptanceWarnings} className="mt-1" />
             {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
-            {/* AQU-297: polite live region for transient inline feedback that
-                is NOT already assertive (AQU-274 write-failure banners use
+            {/* FRO-297: polite live region for transient inline feedback that
+                is NOT already assertive (FRO-274 write-failure banners use
                 role="alert" aria-live="assertive" — don't double-announce those).
                 This region announces completion-phase transitions ("Generating…")
                 and other non-critical status changes to screen readers. */}
@@ -4220,7 +4525,7 @@ function EditorRow({
                   ? `${cellRef}: Translation preview available`
                   : null}
             </div>
-            {/* AQU-274: write-failure banner — shown when an outbox enqueue
+            {/* FRO-274: write-failure banner — shown when an outbox enqueue
                 fails (IndexedDB unavailable, quota exceeded, etc.). The user
                 must be told immediately so they can copy their text before
                 reloading rather than silently losing it. */}
@@ -4254,7 +4559,17 @@ function EditorRow({
             are position:relative with auto z-index, so the row's local z-10
             doesn't escape the sticky header's z-10 context). */}
         <div className="pointer-events-none absolute right-2 top-0.5 z-20 flex">
-          <div className="pointer-events-auto">
+          <div
+            className="pointer-events-auto"
+            // AQU-354: track focus landing on / leaving a rail control so the
+            // idle auto-hide never collapses the rail while it is being used.
+            onFocusCapture={() => setRailHasFocus(true)}
+            onBlurCapture={(e) => {
+              const next = e.relatedTarget as Node | null
+              if (next && e.currentTarget.contains(next)) return
+              setRailHasFocus(false)
+            }}
+          >
             <CellActionRail
               revealed={railRevealed}
               expanded={expanded}
@@ -4290,10 +4605,10 @@ function EditorRow({
                     editable &&
                     !isAnonymous
                   ) {
-                    // AQU-278: if the cell already has human text, confirm
+                    // FRO-278: if the cell already has human text, confirm
                     // before letting the AI overwrite it. Empty cells proceed
                     // immediately (byte-identical to previous behavior).
-                    if (cell.translated.trim()) {
+                    if (visibleTranslated.trim()) {
                       setShowGenerateConfirm(true)
                     } else {
                       onCompleteSingle(cell)
@@ -4312,10 +4627,10 @@ function EditorRow({
                 onMouseEnter={onDragEnter}
               />
 
-              {/* AQU-237: Direct mic button on the rail when no audio — one-click
+              {/* FRO-237: Direct mic button on the rail when no audio — one-click
                   action without needing to open a popover ("just hit the record
                   mic — quick action"). Replaces the redundant Record item inside
-                  the ⋯ popover. When audio IS present, AQU-236's Play icon on
+                  the ⋯ popover. When audio IS present, FRO-236's Play icon on
                   the overflow button already gives a direct play affordance.
                   WARN fix: the button must NOT be disabled when micDenied —
                   disabled elements receive no mouse events, so the "click for
@@ -4412,10 +4727,10 @@ function EditorRow({
                 />
               )}
 
-              {cell.translated.trim().length > 0 && (
+              {visibleTranslated.trim().length > 0 && (
                 <CellTtsButton
                   cellId={cell.id}
-                  text={cell.translated}
+                  text={visibleTranslated}
                   original={cell.original}
                   context={cell.context}
                   cellLabel={cell.cellLabel}
@@ -4573,7 +4888,7 @@ function EditorRow({
                   </div>
 
                   {/* ── Body ────────────────────────────────────────────────── */}
-                  {cell.translated.trim().length === 0 ? (
+                  {visibleTranslated.trim().length === 0 ? (
                     <div className="flex flex-col items-center gap-1.5 rounded-xl bg-muted/40 px-3 py-6 text-center">
                       <FileText className="h-4 w-4 text-muted-foreground/40" />
                       <p className="text-xs text-muted-foreground">Translate this cell to read it back.</p>
@@ -4592,7 +4907,7 @@ function EditorRow({
                             <button
                               type="button"
                               onClick={() => onBacktranslate?.(cell, "refresh")}
-                              disabled={!isBacktranslationConfigured || isBacktranslating || cell.translated.trim().length === 0}
+                              disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
                               className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 transition-colors hover:bg-amber-500/25 dark:text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
@@ -4658,7 +4973,7 @@ function EditorRow({
                           <button
                             type="button"
                             onClick={() => onBacktranslate?.(cell, "read-back")}
-                            disabled={!isBacktranslationConfigured || isBacktranslating || cell.translated.trim().length === 0}
+                            disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
                             className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             {isBacktranslating ? (
@@ -4683,7 +4998,7 @@ function EditorRow({
                   {/* ── Statistical reference — collapsed by default. A rough
                       corpus-derived gloss kept as a cross-check on the AI
                       reading; local-only, never saved as the cell's BT. ──── */}
-                  {cell.translated.trim().length > 0 && getStatisticalBt && !btEditing && (
+                  {visibleTranslated.trim().length > 0 && getStatisticalBt && !btEditing && (
                     <div className="rounded-lg border border-border/60">
                       <button
                         type="button"
@@ -4713,8 +5028,8 @@ function EditorRow({
                       )}
                     </div>
                   )}
-                  {/* ── AQU-207: Interlinear alignment panel ──────────────── */}
-                  {cell.original.trim() && cell.translated.trim() && getAlignmentModel && !btEditing && (
+                  {/* ── FRO-207: Interlinear alignment panel ──────────────── */}
+                  {cell.original.trim() && visibleTranslated.trim() && getAlignmentModel && !btEditing && (
                     <div className="rounded-lg border border-border/60">
                       <button
                         type="button"
@@ -4730,7 +5045,7 @@ function EditorRow({
                         <div data-aquilla-alignment-panel className="px-2.5 pb-2.5">
                           <InterlinearAlignmentPanel
                             sourceText={cell.original}
-                            targetText={cell.translated}
+                            targetText={visibleTranslated}
                             alignmentModel={alignmentModelForExpansion}
                             confirmedSeeds={project.alignmentSeeds ?? []}
                             onSeedChange={onAlignmentSeedChange ?? (() => undefined)}
@@ -4756,11 +5071,11 @@ function EditorRow({
                   editable={editable}
                   isDocx={isDocxFile}
                   onSave={(footnoteIndex, newText) => {
-                    const updated = spliceFootnoteText(cell.translated ?? "", footnoteIndex, newText)
+                    const updated = spliceFootnoteText(visibleTranslated ?? "", footnoteIndex, newText)
                     handleEditorCommit({ value: updated, valueHtml: updated })
                   }}
                   onDelete={(footnoteIndex) => {
-                    const updated = deleteFootnote(cell.translated ?? "", footnoteIndex)
+                    const updated = deleteFootnote(visibleTranslated ?? "", footnoteIndex)
                     handleEditorCommit({ value: updated, valueHtml: updated })
                   }}
                   onCreateTarget={handleCreateTargetFootnote}
@@ -4827,10 +5142,10 @@ function EditorRow({
                         <CellTranscriptPreview
                           ref={transcriptPreviewRef}
                           timings={cellAudioTimings}
-                          cellText={cell.translated}
+                          cellText={visibleTranslated}
                           cellId={cell.id}
                           alignedToCellText={
-                            tokenizeWords(cell.translated).length === cellAudioTimings.length
+                            tokenizeWords(visibleTranslated).length === cellAudioTimings.length
                           }
                           editable={editable}
                           onRetranscribe={handleTranscribe}
@@ -4903,10 +5218,10 @@ function EditorRow({
                       {generatedVoiceTimings && generatedVoiceTimings.length > 0 && (
                         <CellTranscriptPreview
                           timings={generatedVoiceTimings}
-                          cellText={cell.translated}
+                          cellText={visibleTranslated}
                           cellId={cell.id}
                           alignedToCellText={
-                            tokenizeWords(cell.translated).length === generatedVoiceTimings.length
+                            tokenizeWords(visibleTranslated).length === generatedVoiceTimings.length
                           }
                           editable={editable}
                           onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
@@ -5119,7 +5434,7 @@ function EditorRow({
         )
       })()}
 
-      {/* Add-from-selection confirm dialog (AQU-260). Mounted per-row so it
+      {/* Add-from-selection confirm dialog (FRO-260). Mounted per-row so it
           is scoped to the cell whose selection triggered it. */}
       {onAddConceptFromSelection && (
         <AddConceptDialog
@@ -5130,7 +5445,7 @@ function EditorRow({
         />
       )}
 
-      {/* AQU-278: confirm before AI Generate overwrites non-empty cell. */}
+      {/* FRO-278: confirm before AI Generate overwrites non-empty cell. */}
       <GenerateOverwriteDialog
         open={showGenerateConfirm}
         isValidated={cell.status === "validated"}
@@ -5156,7 +5471,7 @@ function EditorRow({
 }
 
 // ---------------------------------------------------------------------------
-// AQU-278 — GenerateOverwriteDialog
+// FRO-278 — GenerateOverwriteDialog
 // ---------------------------------------------------------------------------
 // Lightweight confirm dialog shown when the user clicks AI Generate on a cell
 // that already contains human-authored text. The copy is escalated when the

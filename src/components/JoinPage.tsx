@@ -20,6 +20,7 @@ import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
 import posthog from "@/lib/posthog"
 import { INVITE_REDEEMED } from "@/lib/event-names"
+import { RoleLabel } from "@/components/RoleLabel"
 
 type Phase = "initial" | "redeeming" | "error"
 type AuthMode = "login" | "signup" | "forgot"
@@ -428,7 +429,7 @@ export function InviteSummary({
   roleName: string
   email?: string | null
 }) {
-  const role = <span className="capitalize">{roleName.replace(/_/g, " ")}</span>
+  const role = <RoleLabel name={roleName} />
   const emailSuffix = email ? (
     <>
       {" "}— invitation sent to <span className="font-mono">{email}</span>

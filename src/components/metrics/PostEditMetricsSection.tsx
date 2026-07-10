@@ -20,13 +20,7 @@
 import { useMemo, useState } from "react"
 import { AlertTriangle, Cloud, Sparkles } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
+import { EmptyState } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -176,17 +170,15 @@ function MetricsEmptyState({ reason }: { reason: "no-data" | "error" | "no-cloud
       description: "Metrics require a cloud-synced project. Sync this project to see AI post-edit statistics.",
     },
   }
-  const { icon: Icon, title, description } = config[reason]
+  const { icon, title, description } = config[reason]
   return (
-    <Empty className="mt-3 border-0 py-4">
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <Icon />
-        </EmptyMedia>
-        <EmptyTitle>{title}</EmptyTitle>
-        <EmptyDescription>{description}</EmptyDescription>
-      </EmptyHeader>
-    </Empty>
+    <EmptyState
+      variant="inline"
+      className="mt-3 py-4"
+      icon={icon}
+      title={title}
+      description={description}
+    />
   )
 }
 

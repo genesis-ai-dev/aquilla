@@ -9,6 +9,10 @@ import { fileURLToPath } from "node:url"
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
 /**
  * SharePanel (Members tab) — change a member's project role.
  *
@@ -88,7 +92,7 @@ test("share panel members tab role select changes member's role", async ({ alice
   const newRole = (await otherOption.textContent())?.trim() ?? ""
   await otherOption.click()
   await expect(listbox).toBeHidden({ timeout: 3_000 })
-  await expect(roleSelect).toContainText(newRole, { timeout: 3_000 })
+  await expect(roleSelect).toContainText(new RegExp(escapeRegExp(newRole), "i"), { timeout: 3_000 })
 
   // Dismiss.
   await alice.keyboard.press("Escape")

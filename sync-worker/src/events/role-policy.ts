@@ -59,6 +59,10 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'cell.audio.attach': ROLE.CONTRIBUTOR,
   'cell.audio.select': ROLE.CONTRIBUTOR,
   'cell.audio.remove': ROLE.CONTRIBUTOR,
+  // AQU-508: approving/withdrawing approval of a cell's audio is a review
+  // action — reviewer(300)+, mirroring the text-side cell.validate gate.
+  'cell.audio.validate': ROLE.REVIEWER,
+  'cell.audio.unvalidate': ROLE.REVIEWER,
 
   // file.create is a structural change.
   'file.create': ROLE.PROJECT_LEAD,

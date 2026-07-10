@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
+import { canSubmitAssignment } from "@/lib/sync/role-policy"
 import { Button } from "@/components/ui/button"
 import {
   DatePicker,
@@ -8,6 +9,7 @@ import {
 } from "@/components/ui/date-picker"
 import {
   Field,
+  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
@@ -36,21 +38,40 @@ export interface AssignWorkProps {
   jwt: string
   /** Manager's username — stamped as the event author (server re-verifies). */
   author: string
+  /** Caller authority used by the optional self-assignment carve-out. */
+  roleLevel?: number
+  allowSelfAssignment?: boolean
+  /** Caller identity used to guarantee below-lead assignments target self. */
+  callerUserId?: number | null
   /** Called after a successful assign so the parent can refresh rollups. */
   onAssigned?: () => void
 }
 
-export function AssignWork({ projectId, files, orgId, jwt, author, onAssigned }: AssignWorkProps) {
+const DEFAULT_ROLE_LEVEL = 500
+
+export function AssignWork({
+  projectId,
+  files,
+  orgId,
+  jwt,
+  author,
+  roleLevel = DEFAULT_ROLE_LEVEL,
+  allowSelfAssignment = false,
+  callerUserId = null,
+  onAssigned,
+}: AssignWorkProps) {
+  const isSelfAssignMode = roleLevel < DEFAULT_ROLE_LEVEL
   const [open, setOpen] = useState(false)
   const [members, setMembers] = useState<OrgMember[]>([])
-  const [assigneeId, setAssigneeId] = useState<number | "">("")
+  const [assigneeId, setAssigneeId] = useState<number | "">(
+    isSelfAssignMode && callerUserId != null ? callerUserId : "",
+  )
   const [fileId, setFileId] = useState(files[0]?.id ?? "")
   const [chapter, setChapter] = useState("")
   const [chapters, setChapters] = useState<string[]>([])
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [done, setDone] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -74,7 +95,18 @@ export function AssignWork({ projectId, files, orgId, jwt, author, onAssigned }:
   }, [open, fileId, jwt, projectId])
 
   async function submit() {
-    if (assigneeId === "" || !fileId) return
+    if (assigneeId === "") {
+      setError("Choose an assignee.")
+      return
+    }
+    if (!fileId) {
+      setError("Choose a file.")
+      return
+    }
+    if (!canSubmitAssignment(roleLevel, allowSelfAssignment, callerUserId, Number(assigneeId))) {
+      setError("You can only assign work to yourself.")
+      return
+    }
     const fileName = files.find((f) => f.id === fileId)?.name ?? "file"
     const chap = chapter.trim()
     const scopeKind = chap ? "chapters" : "books"
@@ -83,7 +115,6 @@ export function AssignWork({ projectId, files, orgId, jwt, author, onAssigned }:
     const deadline = deadlineDate ? dateToDeadlineString(deadlineDate) : ""
     setBusy(true)
     setError(null)
-    setDone(null)
     try {
       await createAssignment({
         jwt,
@@ -96,10 +127,9 @@ export function AssignWork({ projectId, files, orgId, jwt, author, onAssigned }:
         scopeLabel,
         deadline: deadline || null,
       })
-      const name = members.find((m) => m.userId === Number(assigneeId))?.username ?? "member"
-      setDone(`Assigned ${scopeLabel} to ${name}.`)
       setChapter("")
       setDeadlineDate(undefined)
+      setOpen(false)
       onAssigned?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -123,26 +153,47 @@ export function AssignWork({ projectId, files, orgId, jwt, author, onAssigned }:
           <Field>
             <FieldLabel htmlFor="assign-work-assignee">Assignee</FieldLabel>
             <Select
-              items={[
-                { value: "", label: "Select member…" },
-                ...members.map((m) => ({ value: String(m.userId), label: m.username })),
-              ]}
+              items={
+                isSelfAssignMode
+                  ? members
+                      .filter((m) => m.userId === callerUserId)
+                      .map((m) => ({ value: String(m.userId), label: `${m.username} (you)` }))
+                  : [
+                      { value: "", label: "Select member…" },
+                      ...members.map((m) => ({ value: String(m.userId), label: m.username })),
+                    ]
+              }
               value={assigneeId === "" ? "" : String(assigneeId)}
               onValueChange={(v) => setAssigneeId(v == null || v === "" ? "" : Number(v))}
-              disabled={busy}
+              disabled={busy || isSelfAssignMode}
             >
               <SelectTrigger id="assign-work-assignee" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  <SelectItem value="">Select member…</SelectItem>
-                  {members.map((m) => (
-                    <SelectItem key={m.userId} value={String(m.userId)}>{m.username}</SelectItem>
-                  ))}
+                  {isSelfAssignMode ? (
+                    members
+                      .filter((m) => m.userId === callerUserId)
+                      .map((m) => (
+                        <SelectItem key={m.userId} value={String(m.userId)}>{m.username} (you)</SelectItem>
+                      ))
+                  ) : (
+                    <>
+                      <SelectItem value="">Select member…</SelectItem>
+                      {members.map((m) => (
+                        <SelectItem key={m.userId} value={String(m.userId)}>{m.username}</SelectItem>
+                      ))}
+                    </>
+                  )}
                 </SelectGroup>
               </SelectContent>
             </Select>
+            {isSelfAssignMode && (
+              <FieldDescription>
+                Self-assignment is on — you can claim this work for yourself.
+              </FieldDescription>
+            )}
           </Field>
           <Field>
             <FieldLabel htmlFor="assign-work-book">Book</FieldLabel>
@@ -203,7 +254,7 @@ export function AssignWork({ projectId, files, orgId, jwt, author, onAssigned }:
             type="button"
             size="sm"
             onClick={() => void submit()}
-            disabled={busy || assigneeId === "" || !fileId}
+            disabled={busy}
           >
             Assign
           </Button>
@@ -211,14 +262,13 @@ export function AssignWork({ projectId, files, orgId, jwt, author, onAssigned }:
             type="button"
             size="sm"
             variant="outline"
-            onClick={() => { setOpen(false); setError(null); setDone(null) }}
+            onClick={() => { setOpen(false); setError(null) }}
             disabled={busy}
           >
             Cancel
           </Button>
         </div>
         {error && <FieldError>{error}</FieldError>}
-        {done && <p className="text-sm text-foreground">{done}</p>}
       </FieldGroup>
     </div>
   )

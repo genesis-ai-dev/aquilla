@@ -5,6 +5,11 @@ import { OrgProvider } from "@/context/OrgContext"
 import { OrgHome, activityStatus } from "./OrgHome"
 import type { PortfolioProject } from "@/lib/frontier/portfolio"
 
+function projectsRollupStat() {
+  const label = screen.getAllByText("Projects").find((el) => el.classList.contains("text-muted-foreground"))!
+  return label.parentElement!
+}
+
 // Default: signed-in. Type-cast to allow null session in signed-out tests.
 type FakeSession = { jwt: string; username: string; createdAt: string } | null
 const mockUseFrontierSession = vi.fn<() => { session: FakeSession; loading: boolean }>(() => ({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false }))
@@ -88,6 +93,8 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   rosterViewMinRole: 600,
   canViewMemberProgress: true,
   memberProgressViewMinRole: 600,
+  // AQU-496: default leads-only (matches the server's safe default).
+  allowSelfAssignment: false,
   refresh: vi.fn(async () => null),
   patch: vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })),
   requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
@@ -176,8 +183,8 @@ describe("OrgHome", () => {
   it("shows the project count in the rollup strip", async () => {
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
-    // 2 projects total — rendered as the Projects rollup count
-    expect(screen.getByText("2")).toBeInTheDocument()
+    const projectsStat = projectsRollupStat()
+    expect(within(projectsStat).getByText("2")).toBeInTheDocument()
   })
 
   it("shows the overdue rollup card and an overdue badge", async () => {
@@ -192,16 +199,36 @@ describe("OrgHome", () => {
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
     // Rollup average is still surfaced…
     expect(screen.getByText("Avg audio")).toBeInTheDocument()
-    // …and the project list is a table with a dedicated Audio column…
-    expect(screen.getByText("Audio")).toBeInTheDocument()
+    // …and the project list is a table with a dedicated Has Audio column
+    // (AQU-489: visible header label, no hover required; "Has Audio" mirrors
+    // the ProjectOverview.tsx relabel from AQU-490 for cross-surface
+    // consistency)…
+    expect(screen.getByText("Has Audio")).toBeInTheDocument()
     // …so each project row shows its own audio coverage (both are 50% audio).
     // Scope to the row so the bare "50%" cell isn't confused with a rollup tile.
-    const legacyRow = screen.getByText("Legacy Translation").closest("a")
-    const freshRow = screen.getByText("New Testament").closest("a")
+    const legacyRow = screen.getByText("Legacy Translation").closest("tr")
+    const freshRow = screen.getByText("New Testament").closest("tr")
     expect(legacyRow).not.toBeNull()
     expect(freshRow).not.toBeNull()
     expect(within(legacyRow!).getByText("50%")).toBeInTheDocument()
     expect(within(freshRow!).getByText("50%")).toBeInTheDocument()
+  })
+
+  // AQU-489: a PM must be able to name what each progress-table number means
+  // without hovering — the column header is the (always-rendered) visible
+  // label; a title/hover explanation is optional extra detail, never the
+  // only source of meaning. Assert the three metric headers render as plain
+  // text nodes (not e.g. only inside a `title` attribute that needs a hover
+  // to surface).
+  it("labels every progress-table column visibly, without requiring hover (AQU-489)", async () => {
+    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
+    for (const header of ["Translated", "Validated", "Has Audio"]) {
+      const el = screen.getByText(header)
+      expect(el).toBeInTheDocument()
+      // Visible text content, not a title-only attribute — no hover needed.
+      expect(el.textContent).toBe(header)
+    }
   })
 
   it("renders the stalled project before the fresh project (attention rank order)", async () => {
@@ -232,8 +259,8 @@ describe("OrgHome", () => {
 
     expect(screen.queryByText("Legacy Translation")).not.toBeInTheDocument()
     expect(screen.getByText("New Testament")).toBeInTheDocument()
-    // rollup count still reads the full portfolio of 2, not the filtered 1
-    expect(screen.getByText("2")).toBeInTheDocument()
+    const projectsStat = projectsRollupStat()
+    expect(within(projectsStat).getByText("2")).toBeInTheDocument()
   })
 
   it("filters to stalled projects via the status chip", async () => {
@@ -255,7 +282,7 @@ describe("OrgHome", () => {
       target: { value: "nonexistent-zzz" },
     })
 
-    expect(screen.getByText("No matching projects.")).toBeInTheDocument()
+    expect(screen.getByText("No results.")).toBeInTheDocument()
   })
 
   // FRO-416: the dashboard's "Shared with you" section (bottom of the org
@@ -381,7 +408,7 @@ describe("activityStatus", () => {
   const now = Date.now()
   const base: PortfolioProject = {
     id: "p", name: "P", totalCells: 100, validatedCells: 0, filledCells: 0, aiDraftedCells: 0,
-    lastEditAt: null, audioCells: 0, recordedMs: 0, deadlineAt: null,
+    lastEditAt: null, audioCells: 0, validatedAudioCells: 0, recordedMs: 0, deadlineAt: null,
   }
 
   it("treats a never-edited, never-translated project as not-started, not stalled", () => {

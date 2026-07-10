@@ -382,6 +382,28 @@ CREATE TABLE cells (
     PRIMARY KEY (project_id, file_id, cell_id, side)
 );
 
+-- AQU-517: compact derived progress. One file row plus one row per meaningful
+-- canonical section; validator_histogram keys are exact endorsement counts,
+-- capped at 15 (the 15 key means 15+).
+CREATE TABLE file_section_progress (
+    project_id          TEXT NOT NULL,
+    file_id             TEXT NOT NULL,
+    scope               TEXT NOT NULL CHECK (scope IN ('file', 'section')),
+    section_key         TEXT NOT NULL DEFAULT '',
+    total_count         INTEGER NOT NULL DEFAULT 0 CHECK (total_count >= 0),
+    filled_count        INTEGER NOT NULL DEFAULT 0 CHECK (filled_count >= 0),
+    validator_histogram JSONB NOT NULL DEFAULT '{}'::jsonb,
+    revision            BIGINT NOT NULL DEFAULT 0,
+    updated_at          BIGINT NOT NULL,
+    PRIMARY KEY (project_id, file_id, scope, section_key),
+    CHECK (
+      (scope = 'file' AND section_key = '') OR
+      (scope = 'section' AND section_key <> '')
+    )
+);
+
+CREATE INDEX idx_file_section_progress_file_revision ON file_section_progress(project_id, file_id, revision);
+
 CREATE TABLE cell_validators (
     project_id TEXT NOT NULL,
     file_id    TEXT NOT NULL,
@@ -421,6 +443,15 @@ CREATE TABLE cell_audio (
     created_ts         BIGINT NOT NULL,
     trim_start_ms      BIGINT,
     trim_end_ms        BIGINT,
+    -- AQU-508: audio validation, distinct from text validation (cells.validated).
+    -- A reviewer approves the *selected* clip of a cell via cell.audio.validate;
+    -- cell.audio.unvalidate clears it. The audio-validated rollup counts cells
+    -- whose selected, live clip is approved (deleted = 0 AND selected = 1 AND
+    -- approved = 1) — so re-recording (which selects a new clip) drops the cell
+    -- back to "needs re-validation" until the new take is approved.
+    approved           INTEGER NOT NULL DEFAULT 0,
+    approved_by        TEXT,
+    approved_ts        BIGINT,
     PRIMARY KEY (project_id, file_id, cell_id, audio_id)
 );
 

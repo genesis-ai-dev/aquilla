@@ -780,7 +780,7 @@ export async function detachGroupProject(env: Env, groupId: number, projectId: s
   await env.AQUILLA_PG.prepare("DELETE FROM group_project_grants WHERE group_id = ? AND project_id = ?").bind(groupId, projectId).run()
 }
 
-export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number }
+export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number }
 export interface OrgPortfolioRow extends PortfolioRow { orgId: number }
 
 interface PortfolioDbRow {
@@ -794,6 +794,7 @@ interface PortfolioDbRow {
   ai_drafted_cells: number
   last_edit_at: number | null
   audio_cells: number
+  validated_audio_cells: number
   recorded_ms: number
 }
 
@@ -807,6 +808,7 @@ function mapPortfolioRow(r: PortfolioDbRow): PortfolioRow {
     aiDraftedCells: r.ai_drafted_cells,
     lastEditAt: r.last_edit_at,
     audioCells: r.audio_cells,
+    validatedAudioCells: r.validated_audio_cells,
     recordedMs: r.recorded_ms,
     deadlineAt: r.deadline_at,
   }
@@ -823,6 +825,9 @@ export async function getOrgPortfolio(env: Env, orgId: number): Promise<Portfoli
             MAX(f.last_edit_at)                     AS last_edit_at,
             (SELECT COUNT(DISTINCT ca.cell_id) FROM cell_audio ca
               WHERE ca.project_id = p.id AND ca.deleted = 0)                    AS audio_cells,
+            (SELECT COUNT(DISTINCT ca.cell_id) FROM cell_audio ca
+              WHERE ca.project_id = p.id AND ca.deleted = 0 AND ca.selected = 1
+                AND ca.approved = 1)                                            AS validated_audio_cells,
             (SELECT COALESCE(SUM(ca.duration_ms), 0) FROM cell_audio ca
               WHERE ca.project_id = p.id AND ca.deleted = 0 AND ca.selected = 1) AS recorded_ms
        FROM projects p
@@ -848,6 +853,9 @@ export async function getOrgPortfolios(env: Env, orgIds: number[]): Promise<OrgP
             MAX(f.last_edit_at)                     AS last_edit_at,
             (SELECT COUNT(DISTINCT ca.cell_id) FROM cell_audio ca
               WHERE ca.project_id = p.id AND ca.deleted = 0)                    AS audio_cells,
+            (SELECT COUNT(DISTINCT ca.cell_id) FROM cell_audio ca
+              WHERE ca.project_id = p.id AND ca.deleted = 0 AND ca.selected = 1
+                AND ca.approved = 1)                                            AS validated_audio_cells,
             (SELECT COALESCE(SUM(ca.duration_ms), 0) FROM cell_audio ca
               WHERE ca.project_id = p.id AND ca.deleted = 0 AND ca.selected = 1) AS recorded_ms
        FROM projects p
@@ -1127,10 +1135,14 @@ export function canViewRoster(callerRoleLevel: number | null, rosterMinRole: num
  * True when `callerRoleLevel` meets or exceeds the org's configured
  * member-progress floor.
  *
- * SWARM-TODO(AQU-498): this helper is defined and enforced-ready now, but
- * there is no dedicated per-member progress view yet to gate with it. The
- * future productivity view should call this (server-side) before returning
- * any per-member progress/productivity data.
+ * SWARM-TODO(AQU-498): still unconsumed by any auth-worker route — the
+ * per-member activity view AQU-498 shipped reads straight from sync-worker
+ * (GET /api/v1/projects/:projectId/members/:author/activity, gated by its
+ * own resolveMemberProgressFloor in member-progress-floor.ts, since
+ * sync-worker doesn't depend on auth-worker). If a future auth-worker route
+ * needs the same floor (e.g. a member-progress summary folded into
+ * /projects/:projectId/members), it should call this helper rather than
+ * re-deriving the comparison.
  */
 export function canViewMemberProgress(callerRoleLevel: number | null, progressMinRole: number): boolean {
   if (callerRoleLevel == null) return false

@@ -133,3 +133,49 @@ describe("resolveEditorCapabilities — cloud projects (syncRole present)", () =
     expect(caps.readOnlyLabel).toBe("Viewing as viewer — read only");
   });
 });
+
+describe("resolveEditorCapabilities — canEditSource (source.cell.commit gate)", () => {
+  // Source editing matches the sync-worker source.cell.commit role floor
+  // (PROJECT_LEAD, 500) and must be suppressed on live-linked downstreams,
+  // whose mirrored source lane is read-only (server-enforced).
+  function withLink(level: number, mode: "clone" | "live" | null): ProjectRecord {
+    return { ...withRole(level), sourceLinkMode: mode };
+  }
+
+  it("project_lead (500) on a self-contained project can edit source", () => {
+    expect(resolveEditorCapabilities(withRole(ROLE.PROJECT_LEAD)).canEditSource).toBe(true);
+  });
+
+  it("owner (700) can edit source", () => {
+    expect(resolveEditorCapabilities(withRole(ROLE.OWNER)).canEditSource).toBe(true);
+  });
+
+  it("contributor (400) cannot edit source — below the 500 floor", () => {
+    expect(resolveEditorCapabilities(withRole(ROLE.CONTRIBUTOR)).canEditSource).toBe(false);
+  });
+
+  it("reviewer (300) cannot edit source", () => {
+    expect(resolveEditorCapabilities(withRole(ROLE.REVIEWER)).canEditSource).toBe(false);
+  });
+
+  it("project_lead on a CLONE-linked project can edit source (clone is independent)", () => {
+    expect(resolveEditorCapabilities(withLink(ROLE.PROJECT_LEAD, "clone")).canEditSource).toBe(true);
+  });
+
+  it("project_lead on a LIVE-linked downstream cannot edit source (mirrored lane is locked)", () => {
+    expect(resolveEditorCapabilities(withLink(ROLE.PROJECT_LEAD, "live")).canEditSource).toBe(false);
+  });
+
+  it("owner on a LIVE-linked downstream still cannot edit source", () => {
+    expect(resolveEditorCapabilities(withLink(ROLE.OWNER, "live")).canEditSource).toBe(false);
+  });
+
+  it("local project (no syncRole) cannot edit source — feature targets cloud projects", () => {
+    expect(resolveEditorCapabilities(localProject()).canEditSource).toBe(false);
+  });
+
+  it("null/undefined project cannot edit source", () => {
+    expect(resolveEditorCapabilities(null).canEditSource).toBe(false);
+    expect(resolveEditorCapabilities(undefined).canEditSource).toBe(false);
+  });
+});

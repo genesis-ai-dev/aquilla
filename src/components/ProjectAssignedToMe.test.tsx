@@ -91,6 +91,10 @@ describe("ProjectAssignedToMe", () => {
     expect(screen.getByText("Genesis")).toBeTruthy()
   })
 
+  // AQU-495 regression: this is the mechanism that makes the sidebar "My
+  // assignments" panel update live after a create — ProjectWorkspace.tsx
+  // increments `assignmentsRefreshKey` from AssignModal's `onAssigned`
+  // callback, which flows into this `refreshKey` prop.
   it("re-fetches when refreshKey increments", async () => {
     mockGetMyAssignments.mockResolvedValue([makeAssignment()])
     const { rerender } = render(

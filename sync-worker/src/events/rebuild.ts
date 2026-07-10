@@ -29,6 +29,7 @@ import {
   type PersistedEvent,
 } from './event-projection'
 import type { EventKind } from './types'
+import { fullProgressRecomputeStmts } from './progress-projection'
 
 const BATCH_LIMIT = 100
 
@@ -84,6 +85,7 @@ export async function handleRebuildProjectionRequest(
 
   // 1. Wipe the projection for this project.
   const deleteStmts: AquillaStatement[] = [
+    db.prepare('DELETE FROM file_section_progress WHERE project_id = ?').bind(projectId),
     db.prepare('DELETE FROM cell_validators WHERE project_id = ?').bind(projectId),
     db.prepare('DELETE FROM cells WHERE project_id = ?').bind(projectId),
   ]
@@ -229,6 +231,14 @@ export async function handleRebuildProjectionRequest(
     .bind(projectId, projectId)
     .first<number | string | bigint>('last_seq')
   const rebuiltSeq = Number(rebuiltSeqRaw ?? 0)
+
+  const { results: files } = await db
+    .prepare('SELECT id FROM files WHERE project_id = ?')
+    .bind(projectId)
+    .all<{ id: string }>()
+  for (const file of files) {
+    await db.batch(fullProgressRecomputeStmts(db, projectId, file.id, Date.now()))
+  }
 
   // 6. Counts.
   const [cellsResult, validatorsResult] = await Promise.all([

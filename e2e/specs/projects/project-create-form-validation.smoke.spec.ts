@@ -2,46 +2,35 @@ import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
- * ProjectCreateDialog — form validation (Create button disabled until name + source filled).
+ * ProjectCreateDialog — form validation on submit (Create stays enabled).
  *
- * ProjectCreateDialog.tsx `canSubmit()` returns false if:
- *   - name.trim() is empty, OR
- *   - sourceLanguage.trim() is empty
- *
- * The "Create" button is disabled when canSubmit() is false.
- *
- * This spec: open "+ New Project" dialog → verify "Create" is disabled →
- * fill project name only → still disabled (no source) → fill source language →
- * "Create" becomes enabled.
+ * Clicking Create with missing fields shows inline validation errors.
  */
-test("project create dialog Create button requires name and source language", async ({ alice }) => {
+test("project create dialog shows validation errors when required fields are missing", async ({
+  alice,
+}) => {
   const dash = new Dashboard(alice)
   await dash.goto()
 
   const dialog = await dash.openCreateProjectDialog()
 
-  // "Create Project" button is initially disabled (empty name + source).
   const createBtn = dialog.getByRole("button", { name: /^Create Project$/i })
-  await expect(createBtn).toBeDisabled({ timeout: 3_000 })
+  await expect(createBtn).toBeEnabled({ timeout: 3_000 })
 
-  // Fill project name only — still disabled (source is empty by default).
+  await createBtn.click()
+  await expect(dialog.getByText(/project name is required/i)).toBeVisible({ timeout: 2_000 })
+  await expect(dialog.getByText(/source language is required/i)).toBeVisible({ timeout: 2_000 })
+  await expect(dialog.getByText(/target language is required/i)).toBeVisible({ timeout: 2_000 })
+
   const nameInput = dialog.locator("#name")
   await nameInput.fill("My Test Project")
-  // Source might auto-populate; clear it to test the disabled state.
-  const sourceInput = dialog.locator("#source")
-  await sourceInput.fill("")
-  await expect(createBtn).toBeDisabled({ timeout: 2_000 })
+  await dialog.locator("#source").fill("en")
+  await createBtn.click()
+  await expect(dialog.getByText(/target language is required/i)).toBeVisible({ timeout: 2_000 })
 
-  // Fill source language — still disabled: the default (bilingual) project
-  // shape also requires a target language (canSubmit in
-  // ProjectCreateDialog.tsx; only the "source-only" shape waives it).
-  await sourceInput.fill("en")
-  await expect(createBtn).toBeDisabled({ timeout: 2_000 })
-
-  // Fill target language — Create becomes enabled.
   await dialog.locator("#target").fill("fr")
   await expect(createBtn).toBeEnabled({ timeout: 2_000 })
+  await expect(dialog.getByText(/target language is required/i)).toHaveCount(0)
 
-  // Close dialog without submitting.
   await alice.keyboard.press("Escape")
 })

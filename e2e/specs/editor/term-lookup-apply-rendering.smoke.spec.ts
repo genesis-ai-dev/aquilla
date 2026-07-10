@@ -1,7 +1,7 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
-import { pickSelectOption } from "../../helpers/base-ui"
+import { Glossary } from "../../helpers/page-objects/Glossary"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -42,21 +42,9 @@ test("term lookup Apply rendering inserts the rendering into target cell", async
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  // Add terminology concept: "content" → "échantillon"
-  await alice.goto(`/project/${projectId}/terminology`)
-  await alice.waitForLoadState("networkidle")
-
-  await alice.getByRole("button", { name: /Add concept/i }).first().click()
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
-  await dialog.locator("#concept-source-term").fill("content")
-  await dialog.locator('input[placeholder="rendering"]').first().fill("échantillon")
-  // New concepts default to "suggested" (draft); the editor only decorates
-  // source tokens for ACTIVE concepts (SourceWithTermLookup filters on
-  // status === "active"), so mark it "approved" before saving.
-  await pickSelectOption(alice, dialog.locator("#concept-status"), "approved")
-  await dialog.getByRole("button", { name: /^Add concept$/i }).click()
-  await expect(dialog).not.toBeVisible({ timeout: 5_000 })
+  const glossary = new Glossary(alice)
+  await glossary.goto(projectId!)
+  await glossary.addTerm("content", "échantillon")
 
   // Open workspace and import file.
   await alice.goto(`/project/${projectId}`)

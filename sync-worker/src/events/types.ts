@@ -42,6 +42,11 @@ export type EventKind =
   | 'cell.audio.attach'
   | 'cell.audio.select'
   | 'cell.audio.remove'
+  // Audio validation (reviewer-level). Non-chain-mutating — approves/withdraws
+  // approval of a cell's selected clip; does not move cells.event_id. Distinct
+  // from cell.validate, which is text-side (cells.validated / cell_validators).
+  | 'cell.audio.validate'
+  | 'cell.audio.unvalidate'
   // File lifecycle.
   | 'file.create'
   // File label rename (contributor-level). Non-chain-mutating — updates the
@@ -272,6 +277,15 @@ export interface EventPayloads {
   'cell.audio.remove': {
     audioId: string
   }
+  // AQU-508: reviewer approves the given clip (the cell's selected take). The
+  // audio-validated rollup counts a cell iff its selected, live clip is
+  // approved, so validating the active take marks the cell audio-validated.
+  'cell.audio.validate': {
+    audioId: string
+  }
+  'cell.audio.unvalidate': {
+    audioId: string
+  }
 
   // ── File lifecycle ─────────────────────────────────────────────────────
   'file.create': {
@@ -282,6 +296,8 @@ export interface EventPayloads {
     /** ISO codes; null/undefined when unknown at import time. */
     sourceLanguage?: string
     targetLanguage?: string
+    sourceTextDirection?: 'ltr' | 'rtl'
+    targetTextDirection?: 'ltr' | 'rtl'
     /** Timeline-segment-model: order lens — 'time' | 'sequence'. Stored in
      *  files.meta (JSON). Absent ⇒ client treats as 'sequence'. */
     orderedBy?: string

@@ -47,7 +47,7 @@ test("Demo · Create an organization and change its settings", async ({ page }) 
   const NAME_INPUT = 'input[aria-label="New org name"]'
   const CREATE_BTN = 'input[aria-label="New org name"] + button'
   const SETTINGS_LINK = 'a[href="/settings"]'
-  const RENAME_BTN = 'button:has-text("Rename")'
+  const RENAME_BTN = '[aria-label="Rename organization"]'
   const SAVE_BTN = 'button:has-text("Save")'
 
   let verified = false
@@ -92,8 +92,13 @@ test("Demo · Create an organization and change its settings", async ({ page }) 
     await expect(page.getByRole("heading", { name: /Organization settings/i })).toBeVisible({ timeout: 15_000 })
     await show.beat(400)
 
+    await show.caption("Open Identity to manage the organization name.")
+    await show.click('a[href="/settings/identity"]')
+    await expect(page.getByRole("heading", { name: /^Identity$/i })).toBeVisible({ timeout: 15_000 })
+    await show.beat(300)
+
     await show.zoomTo(RENAME_BTN, { scale: 1.5 })
-    await show.caption("In the Identity card, click Rename.")
+    await show.caption("Click the pencil icon to edit the organization name.")
     await show.click(RENAME_BTN)
     await show.zoomReset() // back to 1× so the edit form + Save are actionable
     await page.locator("#org-name").waitFor({ state: "visible", timeout: 10_000 })

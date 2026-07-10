@@ -23,6 +23,7 @@ export function buildViolationDecorationSet(
   for (const inf of infractions) {
     for (const span of inf.spans) {
       if (span.side !== "target") continue
+      if (span.start >= span.end) continue
       const from = plainToPm[span.start]
       const to = plainToPm[span.end]
       if (from === undefined || to === undefined) continue

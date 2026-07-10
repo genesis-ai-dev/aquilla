@@ -4,6 +4,7 @@ import {
   applyFocusClaim,
   applyFocusRelease,
   applyFocusRenew,
+  applyPresenceUpdate,
   parseProjectDoClientMessage,
   PROJECT_DO_DEFAULT_LEASE_MS,
   sweepExpiredLeases,
@@ -35,6 +36,20 @@ describe("parseProjectDoClientMessage", () => {
     expect(
       parseProjectDoClientMessage(JSON.stringify({ t: "focus.release", cellId: "c" })),
     ).toEqual({ t: "focus.release", cellId: "c" })
+  })
+  it("parses presence.update with file, focus, and target selection", () => {
+    const m = parseProjectDoClientMessage(JSON.stringify({
+      t: "presence.update",
+      currentFileId: "file-1",
+      focusedCell: "cell-1",
+      selection: { side: "target", anchor: 2, head: 5 },
+    }))
+    expect(m).toEqual({
+      t: "presence.update",
+      currentFileId: "file-1",
+      focusedCell: "cell-1",
+      selection: { side: "target", anchor: 2, head: 5 },
+    })
   })
   it("parses outbox.event", () => {
     const ev: OutboxRawEvent = {
@@ -135,6 +150,70 @@ describe("applyFocusClaim", () => {
       0,
     )
     expect(r.locks.get("c")?.expiresAt).toBe(PROJECT_DO_DEFAULT_LEASE_MS)
+  })
+})
+
+describe("applyPresenceUpdate", () => {
+  it("merges current file and target selection into an already-focused presence", () => {
+    const presence = new Map<string, PresenceState>([
+      ["alice", { userId: "alice", focusedCell: "cell-1", ts: 1 }],
+    ])
+    const r = applyPresenceUpdate(
+      presence,
+      "alice",
+      {
+        t: "presence.update",
+        currentFileId: "file-1",
+        selection: { side: "target", anchor: 1, head: 4 },
+      },
+      1_000,
+    )
+    expect(r.presence.get("alice")).toEqual({
+      userId: "alice",
+      currentFileId: "file-1",
+      focusedCell: "cell-1",
+      selection: { side: "target", anchor: 1, head: 4 },
+      ts: 1_000,
+    })
+    expect(r.emit).toHaveLength(1)
+    expect(r.emit[0]?.t).toBe("presence")
+  })
+
+  it("does not grant focus from presence.update alone", () => {
+    const r = applyPresenceUpdate(
+      emptyPresence(),
+      "alice",
+      { t: "presence.update", currentFileId: "file-1", focusedCell: "cell-1" },
+      1_000,
+    )
+    expect(r.presence.get("alice")).toEqual({
+      userId: "alice",
+      currentFileId: "file-1",
+      ts: 1_000,
+    })
+  })
+
+  it("clears focus and selection while preserving current file", () => {
+    const presence = new Map<string, PresenceState>([
+      ["alice", {
+        userId: "alice",
+        currentFileId: "file-1",
+        focusedCell: "cell-1",
+        selection: { side: "target", anchor: 1, head: 4 },
+        ts: 1,
+      }],
+    ])
+    const r = applyPresenceUpdate(
+      presence,
+      "alice",
+      { t: "presence.update", focusedCell: null, selection: null },
+      2_000,
+    )
+    expect(r.presence.get("alice")).toEqual({
+      userId: "alice",
+      currentFileId: "file-1",
+      ts: 2_000,
+    })
   })
 })
 
@@ -282,10 +361,32 @@ describe("sweepExpiredLeases", () => {
       ["b", { cellId: "b", userId: "bob", expiresAt: 100 }],
       ["c", { cellId: "c", userId: "carol", expiresAt: 9_999 }],
     ])
-    const r = sweepExpiredLeases(locks, 5_000)
+    const presence = new Map<string, PresenceState>([
+      ["alice", { userId: "alice", focusedCell: "a", currentFileId: "file-1", ts: 1 }],
+      ["bob", {
+        userId: "bob",
+        focusedCell: "b",
+        currentFileId: "file-1",
+        selection: { side: "target", anchor: 0, head: 2 },
+        ts: 1,
+      }],
+      ["carol", { userId: "carol", focusedCell: "c", currentFileId: "file-2", ts: 1 }],
+    ])
+    const r = sweepExpiredLeases(locks, presence, 5_000)
     expect(r.locks.has("a")).toBe(false)
     expect(r.locks.has("b")).toBe(false)
     expect(r.locks.has("c")).toBe(true)
+    expect(r.presence.get("alice")).toEqual({
+      userId: "alice",
+      currentFileId: "file-1",
+      ts: 5_000,
+    })
+    expect(r.presence.get("bob")).toEqual({
+      userId: "bob",
+      currentFileId: "file-1",
+      ts: 5_000,
+    })
+    expect(r.presence.get("carol")?.focusedCell).toBe("c")
     expect(r.emit).toHaveLength(2)
   })
 })

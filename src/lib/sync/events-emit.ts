@@ -712,6 +712,52 @@ export async function emitSourceCellDelete(input: SourceCellDeleteInput): Promis
   return eventId
 }
 
+export interface SourceCellCommitInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** Current chain-head event_id for this source cell row (the parent this
+   *  commit chains on — from `cells.event_id`). */
+  parentId: string | null
+  value: string
+  valueHtml?: string
+  /** Pre-generated event id (deterministic uuidv5 for the DCS delta path so a
+   *  re-run dedupes idempotently). Defaults to a fresh UUIDv7. */
+  id?: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `source.cell.commit` — advances the SOURCE-side chain head with new
+ * upstream content, chained on the cell's current head (`parentId`). Symmetric
+ * with `emitSourceCellDelete`; the mirror of `emitTargetCellCommit` on the
+ * source lane.
+ *
+ * The DCS delta importer (Slice C) is the primary caller: when an adapter
+ * project is re-pinned to a newer Door43 release, each content-changed source
+ * cell emits one of these so `cells.source event_id` advances — which is what
+ * flags downstream linked targets stale (AD-9 / linked-projects invalidation
+ * is inherited, not rebuilt here).
+ */
+export async function emitSourceCellCommit(input: SourceCellCommitInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "source.cell.commit",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: input.parentId ?? null,
+    author: input.author,
+    payload: {
+      value: input.value,
+      ...(input.valueHtml !== undefined ? { valueHtml: input.valueHtml } : {}),
+    },
+    ...(input.id !== undefined ? { id: input.id } : {}),
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface FileCreateInput {
   projectId: string
   fileId: string
@@ -719,6 +765,8 @@ export interface FileCreateInput {
   fileType: string
   sourceLanguage?: string
   targetLanguage?: string
+  sourceTextDirection?: "ltr" | "rtl"
+  targetTextDirection?: "ltr" | "rtl"
   /** Timeline-segment-model order lens: 'time' | 'sequence'. */
   orderedBy?: string
   author: string
@@ -741,6 +789,8 @@ export async function emitFileCreate(input: FileCreateInput): Promise<string> {
       fileType: input.fileType,
       ...(input.sourceLanguage !== undefined ? { sourceLanguage: input.sourceLanguage } : {}),
       ...(input.targetLanguage !== undefined ? { targetLanguage: input.targetLanguage } : {}),
+      ...(input.sourceTextDirection !== undefined ? { sourceTextDirection: input.sourceTextDirection } : {}),
+      ...(input.targetTextDirection !== undefined ? { targetTextDirection: input.targetTextDirection } : {}),
       ...(input.orderedBy !== undefined ? { orderedBy: input.orderedBy } : {}),
     },
     clientTs: input.clientTs,

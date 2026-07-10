@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor, fireEvent } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { Login } from "./Login"
 
@@ -53,6 +53,21 @@ vi.mock("react-router-dom", async (importOriginal) => ({
 // Helpers
 // ---------------------------------------------------------------------------
 
+function fillLogin(username: string, password: string) {
+  fireEvent.change(screen.getByLabelText(/username or email/i), {
+    target: { value: username },
+  })
+  fireEvent.change(document.getElementById("login-pass")!, {
+    target: { value: password },
+  })
+}
+
+function submitLogin() {
+  return act(async () => {
+    fireEvent.submit(document.getElementById("login-form")!)
+  })
+}
+
 function renderLogin() {
   return render(
     <MemoryRouter initialEntries={["/login"]}>
@@ -80,9 +95,14 @@ describe("Login page — rendering", () => {
     expect(screen.getByLabelText("Password")).toBeInTheDocument()
   })
 
-  it("renders a Sign in button (disabled when fields are empty)", () => {
+  it("renders a Sign in button that stays enabled and validates on submit", async () => {
     renderLogin()
-    expect(screen.getByRole("button", { name: /^sign in$/i })).toBeDisabled()
+    const btn = screen.getByRole("button", { name: /^sign in$/i })
+    expect(btn).toBeEnabled()
+    await submitLogin()
+    await waitFor(() => {
+      expect(screen.getByText(/username or email is required/i)).toBeInTheDocument()
+    })
   })
 
   it("renders a 'Create an account' link pointing to /onboarding", () => {
@@ -97,16 +117,8 @@ describe("Login page — success path", () => {
     mockLogin.mockResolvedValue({ username: "alice", jwt: "tok" })
     renderLogin()
 
-    fireEvent.change(screen.getByLabelText(/username or email/i), {
-      target: { value: "alice" },
-    })
-    fireEvent.change(screen.getByLabelText("Password"), {
-      target: { value: "secret" },
-    })
-
-    const btn = screen.getByRole("button", { name: /^sign in$/i })
-    expect(btn).not.toBeDisabled()
-    fireEvent.click(btn)
+    fillLogin("alice", "secret")
+    await submitLogin()
 
     await waitFor(() => {
       expect(mockLogin).toHaveBeenCalledWith("alice", "secret")
@@ -121,13 +133,8 @@ describe("Login page — error handling", () => {
     mockLogin.mockRejectedValue(new FrontierAuthError("Invalid credentials", 401))
     renderLogin()
 
-    fireEvent.change(screen.getByLabelText(/username or email/i), {
-      target: { value: "alice" },
-    })
-    fireEvent.change(screen.getByLabelText("Password"), {
-      target: { value: "wrong" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }))
+    fillLogin("alice", "wrong")
+    await submitLogin()
 
     await waitFor(() => {
       expect(screen.getByText("Invalid credentials")).toBeInTheDocument()
@@ -180,13 +187,8 @@ describe("Login page — next param", () => {
       </MemoryRouter>,
     )
 
-    fireEvent.change(screen.getByLabelText(/username or email/i), {
-      target: { value: "alice" },
-    })
-    fireEvent.change(screen.getByLabelText("Password"), {
-      target: { value: "secret" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }))
+    fillLogin("alice", "secret")
+    await submitLogin()
 
     await waitFor(() => expect(mockLogin).toHaveBeenCalledWith("alice", "secret"))
     // Should navigate to /projects (the decoded ?next= value)
@@ -197,13 +199,8 @@ describe("Login page — next param", () => {
     mockLogin.mockResolvedValue({ username: "alice", jwt: "tok" })
     renderLogin() // uses /login with no search params
 
-    fireEvent.change(screen.getByLabelText(/username or email/i), {
-      target: { value: "alice" },
-    })
-    fireEvent.change(screen.getByLabelText("Password"), {
-      target: { value: "secret" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }))
+    fillLogin("alice", "secret")
+    await submitLogin()
 
     await waitFor(() => expect(mockLogin).toHaveBeenCalledWith("alice", "secret"))
     expect(navigate).toHaveBeenCalledWith("/", { replace: true })
@@ -220,13 +217,8 @@ describe("Login page — next param", () => {
       </MemoryRouter>,
     )
 
-    fireEvent.change(screen.getByLabelText(/username or email/i), {
-      target: { value: "alice" },
-    })
-    fireEvent.change(screen.getByLabelText("Password"), {
-      target: { value: "secret" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }))
+    fillLogin("alice", "secret")
+    await submitLogin()
 
     await waitFor(() => expect(mockLogin).toHaveBeenCalledWith("alice", "secret"))
     // Must NOT navigate to the external URL — falls back to /

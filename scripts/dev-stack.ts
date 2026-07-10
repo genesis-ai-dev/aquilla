@@ -13,15 +13,12 @@
 //   * sync-worker   on 127.0.0.1:8789       (always)
 //   * Vite dev      on :5173                (the existing `vite` command)
 //
-// Wrangler's local D1 / R2 / DO state is persisted to a single shared
-// `<repo>/.wrangler-dev-state/` directory so auth-worker (writer for users
-// /orgs/projects) and sync-worker (writer for files/cells/events) see the
-// same `aquilla-db` rows — without `--persist-to`, each cwd gets its own
-// isolated sqlite and the two Workers drift apart immediately.
+// Wrangler's local R2 / DO state is persisted to a single shared
+// `<repo>/.wrangler-dev-state/` directory. Application data lives in the
+// local Postgres instance below; D1 is no longer part of the runtime stack.
 //
 // First-run side effects (idempotent):
 //   * Copies each backend's `.dev.vars.example` → `.dev.vars` if missing.
-//   * Applies auth-worker's D1 migrations to the local sqlite.
 //   * Loads db/postgres/schema.sql into the local Postgres on first create,
 //     and on every later boot reconciles drift additively (CREATE TABLE /
 //     ADD COLUMN IF NOT EXISTS for anything schema.sql has that the live
@@ -209,42 +206,6 @@ async function freePort(port: number): Promise<void> {
   }
 }
 
-function applyIdentityMigrations(): void {
-  // `wrangler d1 migrations apply` is idempotent — it tracks applied
-  // migrations in a `d1_migrations` row and skips already-applied files.
-  // Running it on every boot keeps the local sqlite in sync when the
-  // user pulls new migration files.
-  console.log("[dev-stack] applying identity migrations to local D1…")
-  const res = spawnSync(
-    "npx",
-    [
-      "wrangler",
-      "d1",
-      "migrations",
-      "apply",
-      "aquilla-db",
-      "--local",
-      "--persist-to",
-      PERSIST_DIR,
-    ],
-    {
-      cwd: IDENTITY_DIR,
-      stdio: VERBOSE ? "inherit" : ["ignore", "pipe", "pipe"],
-      encoding: "utf8",
-    },
-  )
-  if (res.status !== 0) {
-    if (!VERBOSE) {
-      process.stderr.write(res.stdout || "")
-      process.stderr.write(res.stderr || "")
-    }
-    // Don't throw — migrations may fail if auth-worker/migrations/ is still
-    // empty (Phase E not yet landed). Warn and continue so the rest of the
-    // dev stack still boots.
-    console.warn("[dev-stack] migration apply exited non-zero — continuing (Phase E may not be landed yet)")
-  }
-}
-
 /**
  * Make a local Postgres reachable at PG_URL with the schema loaded, so the
  * HYPERDRIVE-bound workers can boot. When MANAGE_PG_CONTAINER, start (or run) a
@@ -350,10 +311,54 @@ async function ensurePgSchema(url: string): Promise<void> {
   }
 }
 
+function backfillMissingLocalProgress(): void {
+  const result = spawnSync(
+    "npx",
+    ["tsx", "scripts/neon-backfill-progress.ts", "--missing-only"],
+    {
+      cwd: REPO_ROOT,
+      env: { ...process.env, AQUILLA_DATABASE_URL: PG_URL },
+      encoding: "utf8",
+      stdio: VERBOSE ? "inherit" : ["ignore", "pipe", "pipe"],
+    },
+  )
+  if (result.status !== 0) {
+    throw new Error(
+      `[dev-stack] local progress backfill failed:\n${result.stderr || result.stdout}`,
+    )
+  }
+  const output = result.stdout?.trim()
+  if (output) console.log(`[dev-stack] ${output.replace(/\n/g, "\n[dev-stack] ")}`)
+}
+
 type SchemaTable = {
   /** Full CREATE TABLE block, with IF NOT EXISTS forced in. */
   createSql: string
   columns: Array<{ name: string; def: string }>
+}
+
+function sqlParenthesisDelta(line: string): number {
+  let delta = 0
+  let inSingleQuote = false
+  let inDoubleQuote = false
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i]
+    if (inSingleQuote) {
+      if (char === "'" && line[i + 1] === "'") i++
+      else if (char === "'") inSingleQuote = false
+      continue
+    }
+    if (inDoubleQuote) {
+      if (char === '"' && line[i + 1] === '"') i++
+      else if (char === '"') inDoubleQuote = false
+      continue
+    }
+    if (char === "'") inSingleQuote = true
+    else if (char === '"') inDoubleQuote = true
+    else if (char === "(") delta++
+    else if (char === ")") delta--
+  }
+  return delta
 }
 
 /**
@@ -371,6 +376,7 @@ function parsePgSchema(sql: string): {
   const indexesByTable = new Map<string, string[]>()
   let current: SchemaTable | null = null
   let block: string[] = []
+  let tableDepth = 0
   for (const raw of sql.split("\n")) {
     const line = raw.replace(/--.*$/, "").trimEnd()
     const trimmed = line.trim()
@@ -381,6 +387,7 @@ function parsePgSchema(sql: string): {
       if (table) {
         current = { createSql: "", columns: [] }
         block = [`CREATE TABLE IF NOT EXISTS ${table[1]} (`]
+        tableDepth = 1
         tables.set(table[1].toLowerCase(), current)
         continue
       }
@@ -401,11 +408,16 @@ function parsePgSchema(sql: string): {
       continue
     }
     block.push(line)
-    if (trimmed.startsWith(")")) {
+    const depthBeforeLine = tableDepth
+    tableDepth += sqlParenthesisDelta(line)
+    if (tableDepth === 0) {
       current.createSql = block.join("\n")
       current = null
       continue
     }
+    // Only top-level entries are columns. Lines nested inside multiline
+    // CHECK/CONSTRAINT clauses must never become additive ALTER statements.
+    if (depthBeforeLine !== 1) continue
     const first = trimmed.split(/[\s(,]/)[0]
     if (!first) continue
     if (/^(PRIMARY|UNIQUE|CHECK|CONSTRAINT|FOREIGN|EXCLUDE)$/i.test(first)) continue
@@ -523,8 +535,8 @@ async function main(): Promise<void> {
   if (!WITHOUT_SYNC) await freePort(SYNC_PORT)
   await freePort(VITE_PORT)
 
-  applyIdentityMigrations()
   await ensureLocalPostgres()
+  backfillMissingLocalProgress()
 
   // Without a real OpenRouter key, boot the scripted mock so the agent and
   // chat paths work end-to-end (deterministic model, zero cost). A real key
@@ -684,7 +696,7 @@ async function main(): Promise<void> {
     useMockLlm
       ? `         llm      -> http://127.0.0.1:${MOCK_LLM_PORT}/  (scripted mock — set OPENROUTER_API_KEY in auth-worker/.dev.vars for a real model)`
       : `         llm      -> OpenRouter (real key from auth-worker/.dev.vars)`,
-    `         state    -> ${path.relative(REPO_ROOT, PERSIST_DIR)}/  (delete to reset local D1)`,
+    `         state    -> ${path.relative(REPO_ROOT, PERSIST_DIR)}/  (delete to reset local Wrangler state)`,
     "[dev-stack] press Ctrl+C to stop",
     "",
   ]

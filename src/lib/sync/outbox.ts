@@ -274,6 +274,35 @@ export async function peekOutboxBatch(limit: number): Promise<OutboxRecord[]> {
   }
 }
 
+/**
+ * Resolve a small known set of records by id. Callers that persisted a local
+ * overlay use this to prove that its events are still actually pending after
+ * a tab restart, without scanning the entire outbox.
+ */
+export async function getOutboxRecords(ids: readonly string[]): Promise<OutboxRecord[]> {
+  const uniqueIds = [...new Set(ids.filter(Boolean))]
+  if (uniqueIds.length === 0) return []
+  try {
+    const db = await openDb()
+    return await new Promise((resolve, reject) => {
+      const records: OutboxRecord[] = []
+      const tx = db.transaction(STORE, "readonly")
+      tx.onerror = () => reject(tx.error ?? new Error("outbox lookup failed"))
+      tx.oncomplete = () => resolve(records)
+      const store = tx.objectStore(STORE)
+      for (const id of uniqueIds) {
+        const request = store.get(id)
+        request.onsuccess = () => {
+          const record = request.result as OutboxRecord | undefined
+          if (record?.id && record.event) records.push(record)
+        }
+      }
+    })
+  } catch {
+    return []
+  }
+}
+
 /** Oldest-first rows with status `pending` only, at most `limit`. Used by the flusher. */
 export async function peekPendingOutboxBatch(limit: number): Promise<OutboxRecord[]> {
   const all = await peekOutboxBatch(limit + 50) // fetch extra to filter

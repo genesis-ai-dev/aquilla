@@ -277,3 +277,41 @@ describe("RulesPage rule delete confirm (FRO-291)", () => {
     expect(deleteRuleMock).toHaveBeenCalledWith("rule-1")
   })
 })
+
+// ── AQU-480: rule management is gated at MAINTAINER (600) ────────────────────
+
+describe("RulesPage rule-management gating (AQU-480)", () => {
+  beforeEach(() => {
+    cellsStub = []
+    userRulesStub = []
+    deleteRuleMock.mockReset()
+  })
+
+  async function renderAtRole(level: number) {
+    const { getProject } = await import("@/lib/store/project-index")
+    vi.mocked(getProject).mockResolvedValue(
+      makeProject({ syncRole: { level, source: "creator" } } as Partial<ProjectRecord>),
+    )
+    userRulesStub = [makeUserRule()]
+    renderRulesPage()
+    await new Promise((r) => setTimeout(r, 0))
+  }
+
+  it("shows a read-only banner and disables the delete control for a contributor (400)", async () => {
+    await renderAtRole(400)
+    expect(
+      screen.getByText(/Only maintainers and owners can add or change translation rules/i),
+    ).toBeInTheDocument()
+    const deleteBtn = await screen.findByRole("button", { name: /Delete rule Test rule/i })
+    expect(deleteBtn).toBeDisabled()
+  })
+
+  it("shows no banner and leaves the delete control enabled for an owner (700)", async () => {
+    await renderAtRole(700)
+    expect(
+      screen.queryByText(/Only maintainers and owners can add or change translation rules/i),
+    ).toBeNull()
+    const deleteBtn = await screen.findByRole("button", { name: /Delete rule Test rule/i })
+    expect(deleteBtn).not.toBeDisabled()
+  })
+})

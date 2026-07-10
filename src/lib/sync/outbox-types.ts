@@ -240,6 +240,8 @@ export interface OutboxEventPayloads {
     fileType: string
     sourceLanguage?: string
     targetLanguage?: string
+    sourceTextDirection?: "ltr" | "rtl"
+    targetTextDirection?: "ltr" | "rtl"
     /** Timeline-segment-model order lens: 'time' | 'sequence'. */
     orderedBy?: string
   }

@@ -1,0 +1,91 @@
+// AQU-496: org-level "who can self-assign" control.
+//
+// Generalizes the AQU-485 permission-policy pattern (RosterProgressSection,
+// exportMinRole) to a boolean setting: whether members below project_lead may
+// claim `assignment.create` for THEMSELVES (never for anyone else). Default
+// (unset) is OFF — leads/maintainers-only, the pre-AQU-496 behavior.
+// Leads/maintainers can always assign regardless of this setting.
+//
+// Editable only by org owners (OWNER-only write gate — see
+// EXPORT_FLOOR_WRITE_MIN_ROLE / ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE), same
+// rationale as the other permission-policy keys: a maintainer must not be
+// able to unilaterally loosen who can assign work. Enforced server-side in
+// sync-worker (authorize.ts self-assign carve-out); this UI is the
+// affordance only.
+
+import { useEffect, useState } from "react"
+import { Check } from "lucide-react"
+import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
+import { Section } from "@/components/ui/page"
+import { Switch } from "@/components/ui/switch"
+import type { UseOrgSettings } from "@/hooks/useOrgSettings"
+
+interface AssignmentAuthoritySectionProps {
+  orgSettings: UseOrgSettings
+  /** True when the caller's org role meets the OWNER-only write gate. */
+  canEdit: boolean
+}
+
+export function AssignmentAuthoritySection({ orgSettings, canEdit }: AssignmentAuthoritySectionProps) {
+  const { allowSelfAssignment, patch } = orgSettings
+
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    if (!saved) return
+    const t = setTimeout(() => setSaved(false), 2500)
+    return () => clearTimeout(t)
+  }, [saved])
+
+  async function handleChange(next: boolean) {
+    setBusy(true)
+    setError(null)
+    setSaved(false)
+    const result = await patch({ allowSelfAssignment: next })
+    if (result.kind === "error") {
+      setError(result.message ?? "Save failed")
+    } else if (result.kind === "blocked") {
+      setError("Only org owners can change the assignment authority policy.")
+    } else {
+      setSaved(true)
+    }
+    setBusy(false)
+  }
+
+  return (
+    <Section
+      title="Who can assign work"
+      description="By default, only project leads and maintainers can assign a book, chapter, or take to a member. Turn this on for teams that work collaboratively — it lets any contributor claim open work for themselves, though leads and maintainers can still assign to anyone, always."
+    >
+      <Field orientation="horizontal">
+        <div className="flex-1">
+          <FieldLabel htmlFor="allow-self-assignment" className="text-sm font-medium">
+            Allow self-assignment
+          </FieldLabel>
+          <FieldDescription>
+            When on, a member (contributor and above) can claim a book/chapter/take for THEMSELVES
+            from the assign-work picker — they still can't assign work to anyone else. Leads and
+            maintainers can always assign, to anyone, regardless of this setting.
+          </FieldDescription>
+        </div>
+        <Switch
+          id="allow-self-assignment"
+          checked={allowSelfAssignment}
+          onCheckedChange={(checked) => void handleChange(checked)}
+          disabled={!canEdit || busy}
+        />
+      </Field>
+      {!canEdit && (
+        <FieldDescription>Only org owners can change the assignment authority policy.</FieldDescription>
+      )}
+      {error && <FieldError className="text-xs">{error}</FieldError>}
+      {saved && (
+        <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400" role="status" data-testid="assignment-authority-saved">
+          <Check className="size-3.5" /> Saved
+        </p>
+      )}
+    </Section>
+  )
+}

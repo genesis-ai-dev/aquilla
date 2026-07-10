@@ -1,21 +1,7 @@
-/**
- * FRO-270: ResetPassword page tests
- *
- * Covers:
- *  - Form renders token + username from query string params
- *  - Success path calls verifyResetToken + resetPassword + login, then navigates to /
- *  - Invalid/expired token shows recovery copy (TokenExpiredView)
- *  - TokenExpiredView submits to requestPasswordReset
- */
-
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { ResetPassword } from "./ResetPassword"
-
-// ---------------------------------------------------------------------------
-// Module mocks
-// ---------------------------------------------------------------------------
 
 const mockVerifyResetToken = vi.fn()
 const mockResetPassword = vi.fn()
@@ -34,7 +20,6 @@ vi.mock("@/lib/frontier/auth", () => ({
   },
 }))
 
-// checkPasswordRequirements + passwordStrength are pure functions — keep real.
 vi.mock("@/components/git-import/FrontierSignupForm", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/components/git-import/FrontierSignupForm")>()
   return mod
@@ -51,10 +36,6 @@ vi.mock("react-router-dom", async (importOriginal) => ({
   useNavigate: () => navigate,
 }))
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function renderReset(search = "?token=tok123&username=alice") {
   return render(
     <MemoryRouter initialEntries={[`/reset-password${search}`]}>
@@ -69,10 +50,6 @@ beforeEach(() => {
   vi.clearAllMocks()
   navigate.mockReset()
 })
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 describe("ResetPassword — token verification", () => {
   it("shows loading state immediately, then valid form after token verified", async () => {
@@ -96,15 +73,12 @@ describe("ResetPassword — token verification", () => {
     await waitFor(() => {
       expect(screen.getByText(/expired or is invalid/i)).toBeInTheDocument()
     })
-    // username should appear in the recovery copy (also in the heading, so use getAllBy)
     expect(screen.getAllByText("alice").length).toBeGreaterThan(0)
-    // Recovery form should have a send button
     expect(screen.getByRole("button", { name: /request a new link/i })).toBeInTheDocument()
   })
 
   it("shows recovery view when token + username are missing from URL", async () => {
-    // No search params at all → invalid immediately
-    mockVerifyResetToken.mockResolvedValue(undefined) // should not be called
+    mockVerifyResetToken.mockResolvedValue(undefined)
     renderReset("")
 
     await waitFor(() => {
@@ -122,16 +96,14 @@ describe("ResetPassword — success path", () => {
 
     renderReset()
 
-    // Wait for the form to appear
     await waitFor(() => {
       expect(screen.getByLabelText("New password")).toBeInTheDocument()
     })
 
-    const input = screen.getByLabelText("New password")
-    fireEvent.change(input, { target: { value: "NewSecret99!" } })
-
-    const submit = screen.getByRole("button", { name: /set new password/i })
-    fireEvent.click(submit)
+    fireEvent.change(document.getElementById("rp-new-password")!, {
+      target: { value: "NewSecret99!" },
+    })
+    fireEvent.submit(document.getElementById("reset-password-form")!)
 
     await waitFor(() => {
       expect(mockResetPassword).toHaveBeenCalledWith("tok123", "alice", "NewSecret99!")
@@ -151,10 +123,10 @@ describe("ResetPassword — success path", () => {
       expect(screen.getByLabelText("New password")).toBeInTheDocument()
     })
 
-    fireEvent.change(screen.getByLabelText("New password"), {
+    fireEvent.change(document.getElementById("rp-new-password")!, {
       target: { value: "ValidPass1!" },
     })
-    fireEvent.click(screen.getByRole("button", { name: /set new password/i }))
+    fireEvent.submit(document.getElementById("reset-password-form")!)
 
     await waitFor(() => {
       expect(screen.getByText("Token expired")).toBeInTheDocument()
@@ -162,7 +134,7 @@ describe("ResetPassword — success path", () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
-  it("disables submit button when password is too short", async () => {
+  it("shows validation error when password is too short", async () => {
     mockVerifyResetToken.mockResolvedValue(undefined)
     renderReset()
 
@@ -170,12 +142,15 @@ describe("ResetPassword — success path", () => {
       expect(screen.getByLabelText("New password")).toBeInTheDocument()
     })
 
-    fireEvent.change(screen.getByLabelText("New password"), {
+    fireEvent.change(document.getElementById("rp-new-password")!, {
       target: { value: "short" },
     })
+    fireEvent.submit(document.getElementById("reset-password-form")!)
 
-    const submit = screen.getByRole("button", { name: /set new password/i })
-    expect(submit).toBeDisabled()
+    await waitFor(() => {
+      expect(screen.getByText(/at least 8 characters/i)).toBeInTheDocument()
+    })
+    expect(mockResetPassword).not.toHaveBeenCalled()
   })
 })
 
@@ -194,7 +169,7 @@ describe("ResetPassword — recovery (TokenExpiredView) form", () => {
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "alice@example.com" },
     })
-    fireEvent.click(screen.getByRole("button", { name: /request a new link/i }))
+    fireEvent.submit(document.getElementById("token-expired-form")!)
 
     await waitFor(() => {
       expect(mockRequestPasswordReset).toHaveBeenCalledWith("alice@example.com")

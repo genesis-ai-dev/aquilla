@@ -691,9 +691,11 @@ export function ProjectWorkspace() {
   // page where the Gemini API key can be set. The old implementation called
   // setLens("audio") which is a no-op when already in audio mode. Navigate to
   // project settings instead so the key field is always reachable.
+  // AQU-522: deep-link with `?q=gemini` so settings opens filtered to the Voice
+  // card — the Gemini/TTS key entry is then visible without scrolling to find it.
   const openAudioSetup = useCallback(() => {
     if (!projectId) return
-    navigate(`/project/${projectId}/settings`)
+    navigate(`/project/${projectId}/settings?q=gemini`)
   }, [navigate, projectId])
   const editorRef = useRef<EditorTableHandle>(null)
   const viewSettingsRef = useRef<ViewSettingsMenuHandle>(null)

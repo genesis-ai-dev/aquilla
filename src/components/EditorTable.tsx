@@ -245,8 +245,10 @@ function SynthStatusBadge({
   // A2: "Open audio setup" must DO something. When the callback is provided we
   // call it (host may already be in audio mode); otherwise we navigate directly
   // to the project settings page which contains the Gemini API key section.
+  // AQU-522: deep-link with `?q=gemini` so the settings search filters to the
+  // Voice card and the key entry is visible immediately (no scrolling/hunting).
   const openVoiceSetup = () =>
-    onOpenAudioSetup ? onOpenAudioSetup() : navigate(`/project/${projectId}/settings`)
+    onOpenAudioSetup ? onOpenAudioSetup() : navigate(`/project/${projectId}/settings?q=gemini`)
   // A4: track whether the user dismissed the popover without fixing the error.
   // Dismissed = popover hidden but cell is still unvoiced — show a muted badge
   // so the row doesn't look falsely clean.

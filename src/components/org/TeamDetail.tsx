@@ -457,6 +457,7 @@ export function TeamDetail() {
 
                   {team.members.length === 0 ? (
                     <EmptyState
+                      variant="inline"
                       icon={Users}
                       title="No members."
                       description={isAdmin ? "Add org members to this team to grant them shared project access." : undefined}
@@ -602,6 +603,7 @@ export function TeamDetail() {
 
                     {(team?.projects ?? []).length === 0 && !loading ? (
                       <EmptyState
+                        variant="inline"
                         icon={FolderGit2}
                         title="No projects."
                         description={isAdmin ? "Attach a project to grant this team access at a chosen role." : undefined}

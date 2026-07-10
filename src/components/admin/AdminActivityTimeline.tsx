@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Activity as ActivityIcon } from "lucide-react"
-import { EmptyState } from "@/components/ui/page"
+import { EmptyState } from "@/components/ui/empty"
 import { Badge } from "@/components/ui/badge"
 import { formatRelativeTime } from "@/lib/time/relative"
 import type { AdminActivity } from "@/lib/frontier/admin"
@@ -26,6 +26,7 @@ export function AdminActivityTimeline({
   if (activity.length === 0) {
     return (
       <EmptyState
+        variant="inline"
         icon={ActivityIcon}
         title="No activity yet"
         description="Cross-tenant events appear here as people work."

@@ -3,13 +3,7 @@ import { type ColumnDef } from "@tanstack/react-table"
 import { AlertTriangle, ShieldCheck, Users } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
+import { EmptyState } from "@/components/ui/empty"
 import { fmtDate } from "@/lib/admin/format"
 import type { AdminUser, AdminAdmin } from "@/lib/frontier/admin"
 
@@ -88,15 +82,12 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
 
   if (users.length === 0) {
     return (
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <Users />
-          </EmptyMedia>
-          <EmptyTitle>No users yet</EmptyTitle>
-          <EmptyDescription>People appear here once they register.</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      <EmptyState
+        variant="panel"
+        icon={Users}
+        title="No users yet"
+        description="People appear here once they register."
+      />
     )
   }
 

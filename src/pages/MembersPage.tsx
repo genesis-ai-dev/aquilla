@@ -206,6 +206,7 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
           // an empty roster, which would falsely imply zero members.
           <Section title="Roster">
             <EmptyState
+              variant="inline"
               icon={Lock}
               title="Roster hidden"
               description="This organization has restricted who can view the member list. Ask an owner or maintainer if you need access."

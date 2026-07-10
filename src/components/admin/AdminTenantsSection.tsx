@@ -3,13 +3,7 @@ import { type ColumnDef } from "@tanstack/react-table"
 import { Building2, ChevronRight, ExternalLink, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
+import { EmptyState } from "@/components/ui/empty"
 import { TableCell, TableRow } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 import { fmtDate } from "@/lib/admin/format"
@@ -159,15 +153,12 @@ export function AdminTenantsSection({
 
   if (orgs.length === 0) {
     return (
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <Building2 />
-          </EmptyMedia>
-          <EmptyTitle>No organizations yet</EmptyTitle>
-          <EmptyDescription>Tenants appear here as orgs are created.</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      <EmptyState
+        variant="panel"
+        icon={Building2}
+        title="No organizations yet"
+        description="Tenants appear here as orgs are created."
+      />
     )
   }
 

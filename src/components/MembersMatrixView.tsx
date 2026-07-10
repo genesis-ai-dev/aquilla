@@ -13,13 +13,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
+import { EmptyState } from "@/components/ui/empty"
 import {
   Table,
   TableBody,
@@ -88,21 +82,17 @@ export function MembersMatrixView() {
     const noProjects = matrix?.projects.length === 0
     const Icon = noProjects ? FolderOpen : Users
     return (
-      <Empty className="border-0 bg-muted/30 py-8">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <Icon />
-          </EmptyMedia>
-          <EmptyTitle>
-            {noProjects ? "No projects yet" : "No members beyond yourself"}
-          </EmptyTitle>
-          <EmptyDescription>
-            {noProjects
-              ? "Once you create or sync a project, this view will populate."
-              : "Invite someone from the Roster tab to start."}
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      <EmptyState
+        variant="inline"
+        className="bg-muted/30 py-8"
+        icon={Icon}
+        title={noProjects ? "No projects yet" : "No members beyond yourself"}
+        description={
+          noProjects
+            ? "Once you create or sync a project, this view will populate."
+            : "Invite someone from the Roster tab to start."
+        }
+      />
     )
   }
 

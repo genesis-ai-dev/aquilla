@@ -454,7 +454,8 @@ export function ProjectsList() {
 
                 {filtered.length === 0 ? (
                   <EmptyState
-                    className="border-0 bg-transparent py-10"
+                    variant="inline"
+                    className="py-10"
                     icon={filter ? Search : FolderOpen}
                     title={
                       filter

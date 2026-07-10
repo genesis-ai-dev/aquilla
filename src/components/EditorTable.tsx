@@ -1448,7 +1448,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         ) : (
           <div className="flex-1">
             <EmptyState
-              className="h-full border-0 bg-transparent py-10"
+              variant="inline"
+              className="h-full py-10"
               icon={audioLens ? Music : FileText}
               title={audioLens ? "No media segments yet" : "No text segments in this file"}
               description={

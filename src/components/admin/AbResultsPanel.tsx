@@ -4,13 +4,7 @@ import { FlaskConical, RefreshCw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DataTable } from "@/components/ui/data-table"
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
+import { EmptyState } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { getAbResults, type AbResultRow } from "@/lib/frontier/admin"
 import { cn } from "@/lib/utils"
@@ -174,17 +168,12 @@ export function AbResultsPanel({ jwt }: { jwt: string }) {
   if (error) return <p className="text-xs text-destructive">{error}</p>
   if (!rows || rows.length === 0) {
     return (
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <FlaskConical />
-          </EmptyMedia>
-          <EmptyTitle>No experiment data yet</EmptyTitle>
-          <EmptyDescription>
-            Rows appear as default-model requests are served while an experiment is enabled.
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      <EmptyState
+        variant="panel"
+        icon={FlaskConical}
+        title="No experiment data yet"
+        description="Rows appear as default-model requests are served while an experiment is enabled."
+      />
     )
   }
 

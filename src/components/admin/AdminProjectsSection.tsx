@@ -5,13 +5,7 @@ import { FolderOpen } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
+import { EmptyState } from "@/components/ui/empty"
 import { AttentionBadges, ValidatedBar } from "./shared"
 import { fmtDate } from "@/lib/admin/format"
 import { attentionReasons, attentionScore, validatedFraction } from "@/lib/admin/insights"
@@ -144,19 +138,16 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
       </div>
 
       {data.length === 0 ? (
-        <Empty>
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <FolderOpen />
-            </EmptyMedia>
-            <EmptyTitle>{lens === "at-risk" ? "Nothing at risk" : "No projects"}</EmptyTitle>
-            <EmptyDescription>
-              {lens === "at-risk"
-                ? "No active project is overdue, due soon, or stalled."
-                : "Projects appear here as they're created."}
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
+        <EmptyState
+          variant="panel"
+          icon={FolderOpen}
+          title={lens === "at-risk" ? "Nothing at risk" : "No projects"}
+          description={
+            lens === "at-risk"
+              ? "No active project is overdue, due soon, or stalled."
+              : "Projects appear here as they're created."
+          }
+        />
       ) : (
         <DataTable
           columns={columns}

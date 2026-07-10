@@ -70,7 +70,8 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
             {/* Project list */}
             {state.data.projects.length === 0 ? (
               <EmptyState
-                className="border-0 bg-muted/30 py-8"
+                variant="inline"
+                className="bg-muted/30 py-8"
                 icon={FolderX}
                 title={`${username} has no access to any project in this org.`}
               />

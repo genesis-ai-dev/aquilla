@@ -2,13 +2,7 @@ import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { ArrowRight, Building2, ShieldAlert } from "lucide-react"
 import { Section, StatTile } from "@/components/ui/page"
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
+import { EmptyState } from "@/components/ui/empty"
 import { AttentionBadges, ValidatedBar } from "./shared"
 import { AdminActivityTimeline } from "./AdminActivityTimeline"
 import {
@@ -98,17 +92,13 @@ export function AdminOverviewHome({
         }
       >
         {atRisk.length === 0 ? (
-          <Empty className="border-0 bg-transparent py-6">
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <ShieldAlert />
-              </EmptyMedia>
-              <EmptyTitle>All clear</EmptyTitle>
-              <EmptyDescription>
-                No active project is overdue, due soon, or stalled right now.
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
+          <EmptyState
+            variant="inline"
+            className="py-6"
+            icon={ShieldAlert}
+            title="All clear"
+            description="No active project is overdue, due soon, or stalled right now."
+          />
         ) : (
           <ul className="divide-y">
             {atRisk.map(({ project, reasons }) => (
@@ -132,14 +122,12 @@ export function AdminOverviewHome({
       <div className="grid gap-6 lg:grid-cols-2">
         <Section title="Most active organizations" description="Busiest tenants by project count.">
           {topOrgs.length === 0 ? (
-            <Empty className="border-0 bg-transparent py-6">
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <Building2 />
-                </EmptyMedia>
-                <EmptyTitle>No organizations yet</EmptyTitle>
-              </EmptyHeader>
-            </Empty>
+            <EmptyState
+              variant="inline"
+              className="py-6"
+              icon={Building2}
+              title="No organizations yet"
+            />
           ) : (
             <ul className="divide-y">
               {topOrgs.map((o) => (

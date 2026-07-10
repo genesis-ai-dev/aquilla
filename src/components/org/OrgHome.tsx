@@ -765,13 +765,15 @@ export function OrgHome() {
 
                       {orgSummaries.length === 0 ? (
                         <EmptyState
-                          className="border-0 bg-transparent py-10"
+                          variant="inline"
+                          className="py-10"
                           icon={Building2}
                           title="No organizations yet."
                         />
                       ) : visibleOrgSummaries.length === 0 ? (
                         <EmptyState
-                          className="border-0 bg-transparent py-10"
+                          variant="inline"
+                          className="py-10"
                           icon={Search}
                           title="No matching organizations."
                         />
@@ -888,13 +890,15 @@ export function OrgHome() {
 
                       {projects.length === 0 ? (
                         <EmptyState
-                          className="border-0 bg-transparent py-10"
+                          variant="inline"
+                          className="py-10"
                           icon={FolderPlus}
                           title="No projects yet."
                         />
                       ) : visible.length === 0 ? (
                         <EmptyState
-                          className="border-0 bg-transparent py-10"
+                          variant="inline"
+                          className="py-10"
                           icon={Search}
                           title={projectQuery ? "No matching projects." : currentProjectLens.empty}
                         />
@@ -1029,7 +1033,8 @@ export function OrgHome() {
                     />
                   ) : visible.length === 0 ? (
                     <EmptyState
-                      className="border-0 bg-transparent py-6"
+                      variant="inline"
+                      className="py-6"
                       icon={Search}
                       title="No matching projects."
                     />

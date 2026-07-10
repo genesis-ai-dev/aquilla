@@ -1,13 +1,6 @@
 import * as React from "react"
 
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
+import { EmptyState } from "@/components/ui/empty"
 import { cn } from "@/lib/utils"
 
 /**
@@ -174,47 +167,6 @@ function StatTile({
       <div className="mt-1.5 text-sm text-muted-foreground">{label}</div>
       {hint ? <div className="mt-1 text-xs text-muted-foreground">{hint}</div> : null}
     </div>
-  )
-}
-
-/**
- * A composed empty state — a beat of guidance instead of a blank panel.
- * Dashed border distinguishes "nothing here yet" from a populated Section.
- * Wraps the shadcn `Empty` primitives so org/account/admin surfaces share one API.
- */
-function EmptyState({
-  icon: Icon,
-  title,
-  description,
-  action,
-  className,
-}: {
-  icon?: React.ComponentType<{ className?: string }>
-  title: React.ReactNode
-  description?: React.ReactNode
-  action?: React.ReactNode
-  className?: string
-}) {
-  return (
-    <Empty
-      className={cn(
-        "rounded-2xl border bg-card/40 px-6 py-12",
-        className,
-      )}
-    >
-      <EmptyHeader>
-        {Icon ? (
-          <EmptyMedia variant="icon">
-            <Icon />
-          </EmptyMedia>
-        ) : null}
-        <EmptyTitle className="text-foreground">{title}</EmptyTitle>
-        {description ? (
-          <EmptyDescription className="max-w-sm">{description}</EmptyDescription>
-        ) : null}
-      </EmptyHeader>
-      {action ? <EmptyContent>{action}</EmptyContent> : null}
-    </Empty>
   )
 }
 

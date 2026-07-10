@@ -17,10 +17,10 @@
 // and passes `heldByLabel` here. When that's set the editor is read-only
 // and shows the "Alice is editing" affordance.
 
-import { useEditor, EditorContent } from "@tiptap/react"
+import { useEditor, EditorContent, type Editor as TiptapEditor } from "@tiptap/react"
 import { BubbleMenu } from "@tiptap/react/menus"
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
-import { TextSelection } from "@tiptap/pm/state"
+import { TextSelection, type Transaction } from "@tiptap/pm/state"
 import type { EditorView } from "@tiptap/pm/view"
 import StarterKit from "@tiptap/starter-kit"
 import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code } from "lucide-react"
@@ -44,9 +44,16 @@ import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
 import type { Concept } from "@/lib/terminology/types"
 import { findActiveTimingIndex } from "@/lib/audio/timings"
 import type { WordTiming } from "@/lib/codex-editor/types"
+import type { TargetPresenceSelection } from "@/lib/sync/presence-store"
+import {
+  detectStrongTextDirection,
+  type DirectionMode,
+  type TextDirection,
+} from "@/lib/text-direction"
 
 /** Window before a quiet keystroke pause counts as a commit-worthy idle. */
 export const COMMIT_IDLE_MS = 1_200
+const PRESENCE_SELECTION_THROTTLE_MS = 120
 
 export interface TranslatedEditorCommit {
   /** Plain-text value derived from editor content. */
@@ -85,10 +92,14 @@ interface TranslatedEditorProps {
   onCommit: (snapshot: TranslatedEditorCommit) => void
   onFocus?: () => void
   onBlur?: () => void
+  onSelectionChange?: (selection: TargetPresenceSelection | null) => void
   placeholder?: string
   className?: string
   compactHeight?: boolean
   editable?: boolean
+  textDirection?: TextDirection
+  directionMode?: DirectionMode
+  lang?: string
   /** "Alice is editing" — when present, the editor is read-only and the banner shows. */
   heldByLabel?: string | null
   infractions?: RuleInfraction[]
@@ -154,10 +165,14 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   onCommit,
   onFocus,
   onBlur,
+  onSelectionChange,
   placeholder,
   className,
   compactHeight = false,
   editable = true,
+  textDirection = "ltr",
+  directionMode = "ltr",
+  lang,
   heldByLabel,
   infractions,
   ruleSeverity,
@@ -183,6 +198,12 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => { onNavigateCellRef.current = onNavigateCell }, [onNavigateCell])
   const onEscapeToGridRef = useRef(onEscapeToGrid)
   useEffect(() => { onEscapeToGridRef.current = onEscapeToGrid }, [onEscapeToGrid])
+  const onSelectionChangeRef = useRef(onSelectionChange)
+  useEffect(() => { onSelectionChangeRef.current = onSelectionChange }, [onSelectionChange])
+  const textDirectionRef = useRef<TextDirection>(textDirection)
+  useEffect(() => { textDirectionRef.current = textDirection }, [textDirection])
+  const directionModeRef = useRef<DirectionMode>(directionMode)
+  useEffect(() => { directionModeRef.current = directionMode }, [directionMode])
   const footnoteNumberOffsetRef = useRef(footnoteNumberOffset)
   useEffect(() => { footnoteNumberOffsetRef.current = footnoteNumberOffset }, [footnoteNumberOffset])
   const showFootnoteTooltipsRef = useRef(showFootnoteTooltips)
@@ -218,8 +239,12 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   )
 
   const isReadOnly = !editable || Boolean(heldByLabel)
+  const isReadOnlyRef = useRef(isReadOnly)
+  useEffect(() => { isReadOnlyRef.current = isReadOnly }, [isReadOnly])
 
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastSelectionKeyRef = useRef<string | null>(null)
   const lastCommittedRef = useRef<string>(initialPlain)
   // Latest typed-but-not-yet-committed snapshot. Held so the unmount cleanup
   // can flush it (navigate-away / reload during the idle window must not drop
@@ -229,6 +254,34 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => { onCommitRef.current = onCommit }, [onCommit])
 
   const commitEditorSnapshot = useRef<(reason?: string) => void>(() => undefined)
+  const applyEditorDirection = useCallback((editorInstance: TiptapEditor | null) => {
+    if (!editorInstance) return
+    const next = directionModeRef.current === "auto"
+      ? detectStrongTextDirection(editorInstance.getText()) ?? textDirectionRef.current
+      : textDirectionRef.current
+    editorInstance.view.dom.setAttribute("dir", next)
+    if (lang) editorInstance.view.dom.setAttribute("lang", lang)
+    else editorInstance.view.dom.removeAttribute("lang")
+  }, [lang])
+  const publishSelection = useCallback((editorInstance: TiptapEditor | null) => {
+    if (!editorInstance || isReadOnlyRef.current) return
+    const { selection, doc } = editorInstance.state
+    const anchor = pmPositionToPlainPosition(doc, selection.anchor)
+    const head = pmPositionToPlainPosition(doc, selection.head)
+    const next: TargetPresenceSelection = { side: "target", anchor, head }
+    const key = `${next.side}:${next.anchor}:${next.head}`
+    if (key === lastSelectionKeyRef.current) return
+    lastSelectionKeyRef.current = key
+    onSelectionChangeRef.current?.(next)
+  }, [])
+  const scheduleSelectionPublish = useCallback((editorInstance: TiptapEditor | null) => {
+    if (!editorInstance || isReadOnlyRef.current) return
+    if (selectionTimerRef.current !== null) return
+    selectionTimerRef.current = setTimeout(() => {
+      selectionTimerRef.current = null
+      publishSelection(editorInstance)
+    }, PRESENCE_SELECTION_THROTTLE_MS)
+  }, [publishSelection])
 
   const editor = useEditor({
     editable: !isReadOnly,
@@ -266,6 +319,8 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         role: "textbox",
         "aria-multiline": "true",
         ...(ariaLabel ? { "aria-label": ariaLabel } : {}),
+        dir: textDirection,
+        ...(lang ? { lang } : {}),
         class: cn(
           // The surrounding bg-muted well in EditorTable already reads as an
           // input, so the editor surface itself stays transparent — no flat
@@ -415,6 +470,8 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       },
     },
     onUpdate({ editor }) {
+      applyEditorDirection(editor)
+      scheduleSelectionPublish(editor)
       // Reset idle timer on every keystroke; commit when the user pauses.
       if (idleTimerRef.current !== null) clearTimeout(idleTimerRef.current)
       const text = editor.getText()
@@ -427,10 +484,21 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         onCommitRef.current({ value: text, valueHtml: html })
       }, COMMIT_IDLE_MS)
     },
-    onFocus() {
+    onSelectionUpdate({ editor }) {
+      scheduleSelectionPublish(editor)
+    },
+    onFocus({ editor }) {
+      applyEditorDirection(editor)
       onFocus?.()
+      publishSelection(editor)
     },
     onBlur({ editor }) {
+      if (selectionTimerRef.current !== null) {
+        clearTimeout(selectionTimerRef.current)
+        selectionTimerRef.current = null
+      }
+      lastSelectionKeyRef.current = null
+      onSelectionChangeRef.current?.(null)
       if (idleTimerRef.current !== null) {
         clearTimeout(idleTimerRef.current)
         idleTimerRef.current = null
@@ -445,6 +513,21 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       onBlur?.()
     },
   }, [cellId])
+
+  useEffect(() => {
+    applyEditorDirection(editor)
+  }, [applyEditorDirection, editor, textDirection, directionMode])
+
+  useEffect(() => {
+    return () => {
+      if (selectionTimerRef.current !== null) {
+        clearTimeout(selectionTimerRef.current)
+        selectionTimerRef.current = null
+      }
+      lastSelectionKeyRef.current = null
+      onSelectionChangeRef.current?.(null)
+    }
+  }, [])
 
   commitEditorSnapshot.current = () => {
     if (!editor) return
@@ -582,7 +665,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const [, forceEditorStateUpdate] = useState(0)
   useEffect(() => {
     if (!editor) return
-    const refresh = () => forceEditorStateUpdate((n) => (n + 1) % 1_000_000)
+    const refresh = ({ transaction }: { transaction?: Transaction } = {}) => {
+      if (transaction && !transaction.docChanged && !transaction.selectionSet) return
+      forceEditorStateUpdate((n) => (n + 1) % 1_000_000)
+    }
     editor.on("transaction", refresh)
     editor.on("selectionUpdate", refresh)
     return () => {

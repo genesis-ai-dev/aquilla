@@ -2,6 +2,7 @@ import { test, expect } from "../../helpers/multi-user"
 import { pickSelectOption } from "../../helpers/base-ui"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
+import { Glossary } from "../../helpers/page-objects/Glossary"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -41,31 +42,12 @@ test("pre-acceptance warning band appears when forbidden rendering is typed", as
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  // Add a concept with source term "sample" and a forbidden rendering "verboten".
-  await alice.goto(`/project/${projectId}/terminology`)
-  await alice.waitForLoadState("networkidle")
-
-  const addBtn = alice.getByRole("button", { name: /Add concept/i })
-  await expect(addBtn).toBeVisible({ timeout: 10_000 })
-  await addBtn.click()
-
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
-  await dialog.locator("#concept-source-term").fill("sample")
-  // Add a rendering and set it to forbidden.
-  await dialog.locator('input[placeholder="rendering"]').fill("verboten")
-  // Set status to "forbidden" via the status select (Base UI combobox trigger
-  // keeps the aria-label; the option label is "forbidden").
-  const statusSelect = dialog.locator('[aria-label="Rendering 1 status"]')
-  await expect(statusSelect).toBeVisible({ timeout: 3_000 })
+  const glossary = new Glossary(alice)
+  await glossary.goto(projectId!)
+  await glossary.addTerm("sample", "verboten")
+  const row = await glossary.expandTerm("sample")
+  const statusSelect = row.getByRole("combobox", { name: "Rendering 1 status" })
   await pickSelectOption(alice, statusSelect, "forbidden")
-  // New concepts default to "suggested" (draft) and detectPreAcceptanceWarnings
-  // only considers active concepts — set the concept status to "approved".
-  const conceptStatus = dialog.locator("#concept-status")
-  await expect(conceptStatus).toBeVisible({ timeout: 3_000 })
-  await pickSelectOption(alice, conceptStatus, "approved")
-  await dialog.getByRole("button", { name: /Add concept/i }).click()
-  await expect(dialog).not.toBeVisible({ timeout: 5_000 })
 
   // Import sample.md and open the editor.
   await alice.goto(`/project/${projectId}`)

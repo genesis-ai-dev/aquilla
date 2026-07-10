@@ -71,6 +71,10 @@ interface FileProjection {
   /** Timeline-segment-model order lens, read from files.meta. Omitted when
    *  unset → client treats as 'sequence'. */
   orderedBy?: string
+  sourceLanguage?: string
+  targetLanguage?: string
+  sourceTextDirection?: "ltr" | "rtl"
+  targetTextDirection?: "ltr" | "rtl"
 }
 
 /**
@@ -106,10 +110,28 @@ async function loadFilesByProject(
     const list = byProject.get(f.project_id) ?? []
     // Timeline-segment-model: order lens lives in meta (JSON), same as langs.
     let orderedBy: string | undefined
+    let sourceLanguage: string | undefined
+    let targetLanguage: string | undefined
+    let sourceTextDirection: "ltr" | "rtl" | undefined
+    let targetTextDirection: "ltr" | "rtl" | undefined
     if (f.meta) {
       try {
-        const m = JSON.parse(f.meta) as { orderedBy?: string }
+        const m = JSON.parse(f.meta) as {
+          orderedBy?: string
+          source_language?: string
+          target_language?: string
+          sourceLanguage?: string
+          targetLanguage?: string
+          source_text_direction?: string
+          target_text_direction?: string
+          sourceTextDirection?: string
+          targetTextDirection?: string
+        }
         if (m.orderedBy) orderedBy = m.orderedBy
+        sourceLanguage = normalizeLanguage(m.source_language ?? m.sourceLanguage)
+        targetLanguage = normalizeLanguage(m.target_language ?? m.targetLanguage)
+        sourceTextDirection = normalizeTextDirection(m.source_text_direction ?? m.sourceTextDirection)
+        targetTextDirection = normalizeTextDirection(m.target_text_direction ?? m.targetTextDirection)
       } catch {
         // malformed meta → leave orderedBy unset (client defaults to sequence)
       }
@@ -121,10 +143,23 @@ async function loadFilesByProject(
       type: f.kind ?? f.role ?? "codex",
       cellCount: f.cell_count ?? 0,
       ...(orderedBy ? { orderedBy } : {}),
+      ...(sourceLanguage ? { sourceLanguage } : {}),
+      ...(targetLanguage ? { targetLanguage } : {}),
+      ...(sourceTextDirection ? { sourceTextDirection } : {}),
+      ...(targetTextDirection ? { targetTextDirection } : {}),
     })
     byProject.set(f.project_id, list)
   }
   return byProject
+}
+
+function normalizeTextDirection(value: string | undefined): "ltr" | "rtl" | undefined {
+  return value === "ltr" || value === "rtl" ? value : undefined
+}
+
+function normalizeLanguage(value: string | undefined): string | undefined {
+  const trimmed = value?.trim()
+  return trimmed || undefined
 }
 
 /** Best-effort notify aquilla-sync-worker that a project was (un)archived. */

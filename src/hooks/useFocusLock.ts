@@ -62,7 +62,7 @@ export interface UseFocusLockResult {
   /** Present iff another client holds the lock for this cell. */
   heldBy: LockHolder | null
   /** Request the lock + start renewal. Safe to call repeatedly. */
-  claim(): void
+  claim(cellIdOverride?: string): void
   /** Release the lock + stop renewal. Safe to call repeatedly. */
   release(): void
 }
@@ -105,11 +105,12 @@ export function useFocusLock(
     }
   }, [])
 
-  const claim = useCallback(() => {
-    if (!reconciler || !cellId) return
-    claimedCellRef.current = cellId
+  const claim = useCallback((cellIdOverride?: string) => {
+    const targetCellId = cellIdOverride ?? cellId
+    if (!reconciler || !targetCellId) return
+    claimedCellRef.current = targetCellId
     setIsHeld(true)
-    reconciler.send({ t: "focus.claim", cellId, leaseMs })
+    reconciler.send({ t: "focus.claim", cellId: targetCellId, leaseMs })
     stopRenewal()
     // Half-period renewal — a single dropped frame shouldn't expire the lease.
     renewTimerRef.current = setInterval(() => {

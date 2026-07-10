@@ -676,6 +676,35 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     expect(result.current.cells.map((c) => c.id)).toEqual(["a", "b", "c"])
   })
 
+  it("revalidateCell writes the confirmed row back to the warm-open cache", async () => {
+    streamMeta.maxServerSeq = 12
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "old", eventId: "ev-old" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "p", fileId: "f", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+    await waitFor(() => expect(cacheWrites.length).toBeGreaterThan(0))
+    cacheWrites.length = 0
+
+    fetchByIdsMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "new", eventId: "ev-new" }),
+    ])
+
+    act(() => { result.current.revalidateCell("c1") })
+
+    await waitFor(() => expect(result.current.cells[0].translated).toBe("new"))
+    await waitFor(() => expect(cacheWrites.length).toBeGreaterThan(0))
+    const latest = cacheWrites.at(-1)
+    const cachedTarget = latest?.rows.find((row) => row.cellId === "c1" && row.side === "target")
+    expect(cachedTarget?.value).toBe("new")
+    expect(cachedTarget?.eventId).toBe("ev-new")
+    expect(latest?.maxServerSeq).toBe(12)
+  })
+
   it("discards a targeted response that predates a mid-flight local edit, then applies the retry (FRO-247)", async () => {
     // A targeted fetch is in flight when a local edit lands. Its response
     // predates the edit (freshness floor > fetch startSeq) and must be

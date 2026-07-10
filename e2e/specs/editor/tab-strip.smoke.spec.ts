@@ -1,11 +1,26 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
+import type { Page } from "@playwright/test"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+
+async function openWorkspaceWithSample(page: Page, namePrefix: string): Promise<Workspace> {
+  const dash = new Dashboard(page)
+  await dash.goto()
+  const name = `${namePrefix} ${Date.now()}`
+  await dash.createProject({ name, source: "en", target: "fr" })
+  await dash.openProject(name)
+
+  const ws = new Workspace(page)
+  await ws.importFile(SAMPLE_MD)
+  await ws.openFileBySubstring("sample")
+  await ws.waitForEditor()
+  return ws
+}
 
 /**
  * TabStrip — open and close file tabs.
@@ -20,16 +35,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * This spec: import one file → tab appears → close it → tablist empties.
  */
 test("TabStrip shows file tab and close button removes it", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `TabStrip ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  await openWorkspaceWithSample(alice, "TabStrip")
 
   // TabStrip becomes visible with one tab.
   const tabList = alice.getByRole("tablist", { name: /Open files/i })
@@ -50,4 +56,23 @@ test("TabStrip shows file tab and close button removes it", async ({ alice }) =>
   // the last tab is allowed now (commit 2af182924) and the empty strip
   // remains — so assert on the tabs, not the tablist.
   await expect(tabs).toHaveCount(0, { timeout: 5_000 })
+})
+
+test("TabStrip keeps the active file tab visible after page refresh", async ({ alice }) => {
+  const ws = await openWorkspaceWithSample(alice, "TabStrip refresh")
+
+  await alice.reload({ waitUntil: "domcontentloaded" })
+  await ws.waitForEditor()
+
+  const tabList = alice.getByRole("tablist", { name: /Open files/i })
+  await expect(tabList).toBeVisible({ timeout: 5_000 })
+
+  const sampleTab = tabList.getByRole("tab", { name: /sample\.md/i })
+  await expect(sampleTab).toBeVisible({ timeout: 5_000 })
+
+  await sampleTab.hover()
+  const closeBtn = tabList.getByRole("button", { name: /^Close sample\.md$/i })
+  await expect(closeBtn).toBeVisible({ timeout: 3_000 })
+  await closeBtn.click()
+  await expect(sampleTab).toHaveCount(0, { timeout: 5_000 })
 })

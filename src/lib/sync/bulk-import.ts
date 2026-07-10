@@ -57,6 +57,8 @@ export interface BulkImportFileMeta {
   parserVersion?: string
   sourceLanguage?: string
   targetLanguage?: string
+  sourceTextDirection?: "ltr" | "rtl"
+  targetTextDirection?: "ltr" | "rtl"
   /** USFM book code (\id) — lets the server projection group/order by book. */
   bookCode?: string
   /** Timeline-segment-model order lens ('time' | 'sequence'). Stored in
@@ -171,6 +173,31 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
     }
   }
   await Promise.all(Array.from({ length: Math.min(POOL, rest.length) }, () => worker()))
+
+  // Tell the server every source chunk has landed. The completion request is
+  // deliberately tiny and does not rewrite cells; it lets the project DO send
+  // one accurate progress invalidation after concurrent chunks settle.
+  try {
+    const response = await fetchFn(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: args.projectId,
+        fileId: args.fileId,
+        cells: [],
+        complete: true,
+        clientTs: Date.now(),
+      }),
+      signal: args.signal,
+    })
+    if (!response.ok) {
+      console.warn(`[bulk-import] completion notification failed for ${args.fileId}: HTTP ${response.status}`)
+    }
+  } catch (err) {
+    // Content is already committed. A missed realtime hint must never make a
+    // completed import look failed or tempt the user to re-import the file.
+    console.warn(`[bulk-import] completion notification failed for ${args.fileId}:`, err)
+  }
 }
 
 // ---------------------------------------------------------------------------

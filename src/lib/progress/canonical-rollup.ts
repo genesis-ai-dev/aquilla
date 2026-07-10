@@ -1,7 +1,7 @@
 // AQU-493: chapter/verse progress rollup (nested book › chapter › verse).
 //
-// Builds a book → chapter → verse progress tree from a file's raw
-// source+target CellRow pairs (see `fetchAllFileCells` in cells-read.ts).
+// Builds book → chapter → verse progress trees from either legacy raw
+// source+target CellRow pairs or the compact persisted progress API.
 // Detection is purely shape-based — a cell "has a canonical reference" when
 // its `canonicalRef` matches "TOKEN CHAPTER:VERSE" (e.g. "GEN 1:1", but
 // equally "OBS 1:3" or any project-defined non-canonical book code). We
@@ -10,6 +10,7 @@
 // (or correctly get none, if their refs don't carry chapter:verse shape).
 
 import type { CellRow } from "@/lib/sync/cells-read-types"
+import type { FileProgressResponse, SectionProgressDetailResponse } from "./file-progress-resource"
 
 export interface VerseRollup {
   ref: string // e.g. "GEN 1:1"
@@ -182,6 +183,59 @@ export function buildCanonicalRollup(rows: CellRow[]): BookRollup[] | null {
       filledPct: pct(filledCount, cellCount),
       approvedPct: pct(approvedCount, cellCount),
       chapters: chapterRollups,
+    }
+  })
+}
+
+/** Build the manager overview's book/chapter tree from compact server rollups. */
+export function progressToCanonicalRollup(progress: FileProgressResponse): BookRollup[] | null {
+  const byBook = new Map<string, ChapterRollup[]>()
+  for (const section of progress.sections) {
+    const match = /^(\S+)\s+(\d+)$/.exec(section.key.trim())
+    if (!match) continue
+    const [, book, chapterLabel] = match
+    const chapter: ChapterRollup = {
+      chapter: section.key,
+      chapterLabel,
+      cellCount: section.totalCount,
+      filledCount: section.filledCount,
+      approvedCount: section.validatedCount,
+      filledPct: pct(section.filledCount, section.totalCount),
+      approvedPct: pct(section.validatedCount, section.totalCount),
+      // File expansion intentionally returns no cell ids or verse rows.
+      // Verse badges hydrate from the separate chapter-scoped endpoint.
+      verses: [],
+    }
+    const chapters = byBook.get(book)
+    if (chapters) chapters.push(chapter)
+    else byBook.set(book, [chapter])
+  }
+  if (byBook.size === 0) return null
+  return [...byBook].map(([book, chapters]) => {
+    const cellCount = chapters.reduce((sum, chapter) => sum + chapter.cellCount, 0)
+    const filledCount = chapters.reduce((sum, chapter) => sum + chapter.filledCount, 0)
+    const approvedCount = chapters.reduce((sum, chapter) => sum + chapter.approvedCount, 0)
+    return {
+      book,
+      cellCount,
+      filledCount,
+      approvedCount,
+      filledPct: pct(filledCount, cellCount),
+      approvedPct: pct(approvedCount, cellCount),
+      chapters,
+    }
+  })
+}
+
+/** Convert a compact, explicitly requested chapter detail into verse badges. */
+export function sectionProgressToVerseRollup(detail: SectionProgressDetailResponse): VerseRollup[] {
+  return detail.verses.map((verse) => {
+    const parsed = parseCanonicalRef(verse.ref)
+    return {
+      ref: verse.ref,
+      verseLabel: parsed?.verse ?? verse.ref,
+      filled: verse.filled,
+      approved: verse.validated,
     }
   })
 }

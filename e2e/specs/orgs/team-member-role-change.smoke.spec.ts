@@ -60,5 +60,5 @@ test("team member role select changes member role", async ({ alice }) => {
 
   // Change bob's role to maintainer (600) — the trigger shows the label.
   await pickSelectOption(alice, roleSelect, "maintainer")
-  await expectSelectValue(roleSelect, "maintainer")
+  await expectSelectValue(roleSelect, /Maintainer/i)
 })

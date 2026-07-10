@@ -304,6 +304,20 @@ export function useProjectSettings(
     if (isOnline && projectId && jwt) void refresh()
   }, [isOnline, projectId, jwt, refresh])
 
+  // Project settings are written by identity, while the editor's live channel
+  // is the project Durable Object. ProjectWorkspace relays the additive DO
+  // frame here so every mounted settings consumer converges without polling.
+  useEffect(() => {
+    if (!projectId || typeof window === "undefined") return
+    const onSettingsUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId?: unknown }>).detail
+      if (detail?.projectId !== projectId) return
+      void refresh()
+    }
+    window.addEventListener("aquilla:project-settings-updated", onSettingsUpdated)
+    return () => window.removeEventListener("aquilla:project-settings-updated", onSettingsUpdated)
+  }, [projectId, refresh])
+
   // Server values overlay local for keys the server has set (non-empty row).
   const settings: ProjectWideSettings = useMemo(
     () => server && server.version > 0

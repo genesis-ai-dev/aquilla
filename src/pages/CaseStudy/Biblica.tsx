@@ -253,8 +253,8 @@ export function BiblicaCaseStudy() {
             <h2 className="aq-display">Scale your translation, <span className="aq-gold-text aq-display-italic">not your team.</span></h2>
             <p>Whether you're chasing a print-ready output or a faster path into last-mile languages, Aquilla gives one expert maximum leverage. It's free, and it's live today.</p>
             <div className="aq-cta-actions">
-              <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-lg">Start translating free</a>
-              <a href="/homepage" className="aq-btn aq-btn-ghost aq-btn-lg">Back to homepage</a>
+              <a href="https://calendar.app.google/etybAvBtu7Vm6BDb8" target="_blank" rel="noopener noreferrer" className="aq-btn aq-btn-gold aq-btn-lg">Book a call with our team</a>
+              <a href="/onboarding" className="aq-btn aq-btn-ghost aq-btn-lg">Or start free today</a>
             </div>
           </div>
         </section>

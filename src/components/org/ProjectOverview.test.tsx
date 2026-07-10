@@ -346,7 +346,6 @@ describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
     })
     getPortfolio.mockResolvedValue([{
       id: "p1", name: "John", totalCells: 100, filledCells: 80, validatedCells: 50,
-      validatedAudioCells: 0,
       aiDraftedCells: 0,
       audioCells: 60,
       validatedAudioCells: 0,

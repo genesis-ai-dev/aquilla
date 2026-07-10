@@ -3,6 +3,8 @@ import {
   flattenHelloaoContent,
   parseHelloaoChapterStrings,
   parseHelloaoComplete,
+  HelloaoHttpError,
+  isHelloaoNotFound,
   type HelloaoChapter,
   type HelloaoComplete,
 } from "./helloao"
@@ -122,5 +124,26 @@ describe("parseCanonicalRef", () => {
   it("returns null for non-scripture groups (uuid groups from prose files)", () => {
     expect(parseCanonicalRef("3f9c2a10-aaaa-bbbb-cccc-000000000000")).toBeNull()
     expect(parseCanonicalRef("")).toBeNull()
+  })
+})
+
+describe("isHelloaoNotFound", () => {
+  // AQU-518: the sidebar must render a graceful "no content for this
+  // reference" empty state for a 404 (a translation that doesn't cover the
+  // chapter, e.g. Hebrew OT on a NT passage) rather than a raw error, while
+  // still surfacing genuine failures (network/5xx) as errors.
+  it("is true only for a 404 HelloaoHttpError", () => {
+    expect(isHelloaoNotFound(new HelloaoHttpError("Failed to fetch HBO/MAT/1 (404)", 404))).toBe(true)
+  })
+
+  it("is false for other HTTP statuses (server errors are real errors)", () => {
+    expect(isHelloaoNotFound(new HelloaoHttpError("Failed to fetch BSB/GEN/1 (500)", 500))).toBe(false)
+    expect(isHelloaoNotFound(new HelloaoHttpError("gone (410)", 410))).toBe(false)
+  })
+
+  it("is false for a plain Error (transport failure) or non-error value", () => {
+    expect(isHelloaoNotFound(new Error("NetworkError when attempting to fetch resource."))).toBe(false)
+    expect(isHelloaoNotFound("404")).toBe(false)
+    expect(isHelloaoNotFound(null)).toBe(false)
   })
 })

@@ -9,6 +9,31 @@ import type { TranslatableString } from "./types"
 //      (translation, book, chapter) so scrolling within a chapter is free.
 const API_BASE = "https://bible.helloao.org/api"
 
+/**
+ * Thrown when a Free Use Bible API request returns a non-OK HTTP status.
+ * Carries the numeric `status` so callers can distinguish an expected
+ * "this translation doesn't cover that reference" 404 (a graceful empty
+ * state) from a genuine failure (network/5xx — a real error to surface).
+ */
+export class HelloaoHttpError extends Error {
+  readonly status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = "HelloaoHttpError"
+    this.status = status
+  }
+}
+
+/**
+ * True when the error means the requested reference simply has no content in
+ * this translation (e.g. a Hebrew OT resource asked for a NT chapter → 404),
+ * as opposed to a transport/server error. Drives the sidebar's "no content
+ * for this reference" empty state instead of a raw error message (AQU-518).
+ */
+export function isHelloaoNotFound(err: unknown): boolean {
+  return err instanceof HelloaoHttpError && err.status === 404
+}
+
 export interface HelloaoTranslation {
   id: string // e.g. "BSB"
   name: string
@@ -153,7 +178,7 @@ export function fetchHelloaoChapter(
   const promise = (async () => {
     const res = await fetch(`${API_BASE}/${translationId}/${book}/${chapter}.json`, { signal })
     if (!res.ok) {
-      throw new Error(`Failed to fetch ${key} (${res.status})`)
+      throw new HelloaoHttpError(`Failed to fetch ${key} (${res.status})`, res.status)
     }
     return (await res.json()) as HelloaoChapterResponse
   })()

@@ -16,6 +16,7 @@ import {
   fetchHelloaoChapter,
   fetchHelloaoTranslations,
   flattenHelloaoContent,
+  isHelloaoNotFound,
   type HelloaoTranslation,
 } from "@/lib/parsers/helloao"
 import { cn } from "@/lib/utils"
@@ -95,6 +96,8 @@ interface VersionVerses {
   /** verse number → flattened text for the loaded chapter */
   verses: Map<number, string>
   error?: string
+  /** The translation has no content for this reference (404), not a failure. */
+  notFound?: boolean
 }
 
 export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }: ParallelBiblesSidebarProps) {
@@ -168,10 +171,12 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
           if (cancelled) return
           setChapterData((prev) => {
             const next = new Map(prev)
-            next.set(`${versionId}/${book}/${chapter}`, {
-              verses: new Map(),
-              error: err instanceof Error ? err.message : String(err),
-            })
+            // A 404 means this translation simply doesn't cover the reference
+            // (e.g. a Hebrew OT resource on a NT chapter) — a graceful empty
+            // state, not the raw-error render that looked broken (AQU-518).
+            next.set(`${versionId}/${book}/${chapter}`, isHelloaoNotFound(err)
+              ? { verses: new Map(), notFound: true }
+              : { verses: new Map(), error: err instanceof Error ? err.message : String(err) })
             return next
           })
         })
@@ -305,6 +310,10 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
                   </div>
                   {data?.error ? (
                     <p className="mt-1 text-xs text-destructive">{data.error}</p>
+                  ) : data?.notFound ? (
+                    <p className="mt-1 text-xs italic text-muted-foreground">
+                      No content available for {trackedLabel} in this version.
+                    </p>
                   ) : !data ? (
                     <p className="mt-1 text-xs text-muted-foreground">Loading…</p>
                   ) : tracked.verse === null ? (

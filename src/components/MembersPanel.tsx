@@ -135,7 +135,9 @@ export function MembersPanel({
                     <SelectContent>
                       <SelectGroup>
                         {grantableRoles.map((r) => (
-                          <SelectItem key={r.level} value={String(r.level)}>{r.name}</SelectItem>
+                          <SelectItem key={r.level} value={String(r.level)}>
+                            <RoleLabel name={r.name} />
+                          </SelectItem>
                         ))}
                       </SelectGroup>
                     </SelectContent>
@@ -188,7 +190,9 @@ export function MembersPanel({
             <SelectContent>
               <SelectGroup>
                 {grantableRoles.map((r) => (
-                  <SelectItem key={r.level} value={String(r.level)}>{r.name}</SelectItem>
+                  <SelectItem key={r.level} value={String(r.level)}>
+                    <RoleLabel name={r.name} />
+                  </SelectItem>
                 ))}
               </SelectGroup>
             </SelectContent>

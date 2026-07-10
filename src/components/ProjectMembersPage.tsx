@@ -241,7 +241,7 @@ export function MembersTab({
                 <SelectGroup>
                   {grantableRoles.map((r) => (
                     <SelectItem key={r.level} value={String(r.level)}>
-                      {r.name}
+                      <RoleLabel name={r.name} />
                     </SelectItem>
                   ))}
                 </SelectGroup>
@@ -424,7 +424,7 @@ export function MembersTab({
               <SelectGroup>
                 {grantableRoles.map((r) => (
                   <SelectItem key={r.level} value={String(r.level)}>
-                    {r.name}
+                    <RoleLabel name={r.name} />
                   </SelectItem>
                 ))}
               </SelectGroup>

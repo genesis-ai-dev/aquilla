@@ -55,11 +55,18 @@ interface GroupIdRow {
   id: number
 }
 
-/** ISO date N calendar days from today — matches e2e deadline helpers. */
+/** ISO date N calendar days from today (UTC) — matches e2e deadline helpers. */
 function isoDateOffset(days: number): string {
   const date = new Date()
-  date.setDate(date.getDate() + days)
+  date.setUTCDate(date.getUTCDate() + days)
   return date.toISOString().slice(0, 10)
+}
+
+/** UTC ISO timestamp N calendar days from now — for created_at / activity demos. */
+function isoTimestampOffset(days: number): string {
+  const date = new Date()
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString()
 }
 
 /** Upsert a user by username (password "dev"), returning its id. */
@@ -280,7 +287,65 @@ async function seedDev(db: AquillaDb): Promise<{
     .bind(groupId, EXODUS_PROJECT_ID, ROLE.REVIEWER, userId)
     .run()
 
+  await applyDemoTimestamps(db, { userId, aliceId, bobId, orgId })
+
   return { userId, orgId, projectId: DEV_PROJECT_ID }
+}
+
+/** Backdate seeded rows so date formatting shows both recent and >1y labels. */
+async function applyDemoTimestamps(
+  db: AquillaDb,
+  ids: { userId: number; aliceId: number; bobId: number; orgId: number },
+): Promise<void> {
+  const { userId, aliceId, bobId, orgId } = ids
+
+  // Users — Admin People "Joined": mix of "May 25" vs "Jun 2025" short labels.
+  await db
+    .prepare("UPDATE users SET created_at = ?, updated_at = ? WHERE id = ?")
+    .bind(isoTimestampOffset(-90), isoTimestampOffset(-2), userId)
+    .run()
+  await db
+    .prepare("UPDATE users SET created_at = ?, updated_at = ? WHERE id = ?")
+    .bind(isoTimestampOffset(-420), isoTimestampOffset(-420), aliceId)
+    .run()
+  await db
+    .prepare("UPDATE users SET created_at = ?, updated_at = ? WHERE id = ?")
+    .bind(isoTimestampOffset(-45), isoTimestampOffset(-45), bobId)
+    .run()
+
+  await db
+    .prepare("UPDATE organizations SET created_at = ?, updated_at = ? WHERE id = ?")
+    .bind(isoTimestampOffset(-480), isoTimestampOffset(-480), orgId)
+    .run()
+
+  const projectAges: Array<[string, number]> = [
+    [DEV_PROJECT_ID, -380],
+    [GENESIS_PROJECT_ID, -70],
+    [EXODUS_PROJECT_ID, -25],
+    [LEVITICUS_PROJECT_ID, -200],
+    [NUMBERS_PROJECT_ID, -14],
+  ]
+  for (const [projectId, days] of projectAges) {
+    const ts = isoTimestampOffset(days)
+    await db
+      .prepare("UPDATE projects SET created_at = ?, updated_at = ? WHERE id = ?")
+      .bind(ts, ts, projectId)
+      .run()
+  }
+
+  // Org member activity — Admin People "Last active".
+  await db
+    .prepare(
+      "UPDATE org_members SET granted_at = ?, last_active_at = ? WHERE org_id = ? AND user_id = ?",
+    )
+    .bind(isoTimestampOffset(-400), isoTimestampOffset(-3), orgId, userId)
+    .run()
+  await db
+    .prepare(
+      "UPDATE org_members SET granted_at = ?, last_active_at = ? WHERE org_id = ? AND user_id = ?",
+    )
+    .bind(isoTimestampOffset(-200), isoTimestampOffset(-45), orgId, aliceId)
+    .run()
 }
 
 devSeed.post("/seed", async (c) => {

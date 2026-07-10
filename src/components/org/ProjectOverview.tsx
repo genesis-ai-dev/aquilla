@@ -35,6 +35,7 @@ import {
   sectionTintClass,
 } from "./SectionVisibilityBadge"
 import { Badge } from "@/components/ui/badge"
+import { ProjectDeadlineStatuses, ProjectStatusChip } from "@/components/ProjectStatus"
 import {
   Dialog,
   DialogContent,
@@ -128,30 +129,16 @@ export function deriveProjectStatus(
 }
 
 function StatusChip({ status }: { status: ProjectStatus }) {
-  if (status === "no-deadline") return null
-  const map: Record<Exclude<ProjectStatus, "no-deadline">, { label: string; variant: "outline" | "destructive" }> = {
-    "on-track": { label: "On track", variant: "outline" },
-    "due-soon": { label: "Due soon", variant: "outline" },
-    overdue: { label: "Overdue", variant: "destructive" },
-  }
-  const { label, variant } = map[status as Exclude<ProjectStatus, "no-deadline">]
-  return (
-    <Badge variant={variant} data-testid="status-chip">
-      {label}
-    </Badge>
-  )
+  // Overdue / due-soon live only on the Deadline card — avoid duplicating them in the header.
+  if (status === "no-deadline" || status === "overdue" || status === "due-soon") return null
+  return <ProjectStatusChip kind="on-track" testId="status-chip" />
 }
 
 // ── Deadline chip ─────────────────────────────────────────────────────────────
 
 function DeadlineChip({ status }: { status: "overdue" | "soon" | "ok" | null }) {
-  if (!status) return null
-  const variant = status === "overdue" ? "destructive" : "outline"
-  return (
-    <Badge variant={variant}>
-      {status === "overdue" ? "Overdue" : status === "soon" ? "Due soon" : "On track"}
-    </Badge>
-  )
+  if (status === "ok") return <ProjectStatusChip kind="on-track" />
+  return <ProjectDeadlineStatuses deadline={status} testId="status-chip" />
 }
 
 // ── Stat tiles (big %) ────────────────────────────────────────────────────────
@@ -719,9 +706,7 @@ export function ProjectOverview() {
                       <h1 className="text-xl font-semibold leading-tight truncate">{project?.name}</h1>
                       {/* Compact status chip next to the title */}
                       <StatusChip status={projectStatus} />
-                      {isArchived && (
-                        <Badge variant="secondary" className="shrink-0">Archived</Badge>
-                      )}
+                      {isArchived && <ProjectStatusChip kind="archived" className="shrink-0" />}
                       {!isArchived && isFrozen && (
                         <Badge
                           className="shrink-0 border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"

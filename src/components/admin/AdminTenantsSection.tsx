@@ -3,10 +3,10 @@ import { type ColumnDef } from "@tanstack/react-table"
 import { Building2, ChevronRight, ExternalLink, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import { EmptyState } from "@/components/ui/empty"
 import { TableCell, TableRow } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
-import { fmtDate } from "@/lib/admin/format"
 import type { AdminOrg, AdminTeam } from "@/lib/frontier/admin"
 
 /**
@@ -127,7 +127,11 @@ export function AdminTenantsSection({
         accessorFn: (o) => o.createdAt,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Created" />,
         cell: ({ row }) => (
-          <span className="text-muted-foreground">{fmtDate(row.original.createdAt)}</span>
+          <DateTooltip
+            value={row.original.createdAt}
+            label="Created"
+            className="text-muted-foreground"
+          />
         ),
       },
       {

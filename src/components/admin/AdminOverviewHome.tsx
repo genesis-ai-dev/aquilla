@@ -3,7 +3,8 @@ import { Link } from "react-router-dom"
 import { ArrowRight, Building2, ShieldAlert } from "lucide-react"
 import { Section, StatTile } from "@/components/ui/page"
 import { EmptyState } from "@/components/ui/empty"
-import { AttentionBadges, ValidatedBar } from "./shared"
+import { ProjectStatus } from "@/components/ProjectStatus"
+import { ValidatedBar } from "./ValidatedBar"
 import { AdminActivityTimeline } from "./AdminActivityTimeline"
 import {
   projectsNeedingAttention,
@@ -111,7 +112,7 @@ export function AdminOverviewHome({
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
                   <ValidatedBar fraction={validatedFraction(project)} />
-                  <AttentionBadges reasons={reasons} />
+                  <ProjectStatus archived={false} reasons={reasons} />
                 </div>
               </li>
             ))}

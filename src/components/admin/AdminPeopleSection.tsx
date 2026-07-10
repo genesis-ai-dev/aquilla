@@ -3,8 +3,8 @@ import { type ColumnDef } from "@tanstack/react-table"
 import { AlertTriangle, ShieldCheck, Users } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import { EmptyState } from "@/components/ui/empty"
-import { fmtDate } from "@/lib/admin/format"
 import type { AdminUser, AdminAdmin } from "@/lib/frontier/admin"
 
 /**
@@ -68,13 +68,17 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
           if (bv == null) return -1
           return av - bv
         },
-        cell: ({ row }) => fmtDate(row.original.lastActiveAt),
+        cell: ({ row }) => (
+          <DateTooltip value={row.original.lastActiveAt} label="Last active" />
+        ),
       },
       {
         id: "joined",
         accessorFn: (u) => Date.parse(u.createdAt) || 0,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Joined" />,
-        cell: ({ row }) => fmtDate(row.original.createdAt),
+        cell: ({ row }) => (
+          <DateTooltip value={row.original.createdAt} label="Joined" />
+        ),
       },
     ],
     [adminEmails],

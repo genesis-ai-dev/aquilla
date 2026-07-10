@@ -1,37 +1,38 @@
 import { useMemo, useState } from "react"
-import { Link } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
 import { FolderOpen } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { EmptyState } from "@/components/ui/empty"
-import { AttentionBadges, ValidatedBar } from "./shared"
-import { fmtDate } from "@/lib/admin/format"
+import { ProjectStatus } from "@/components/ProjectStatus"
+import { ValidatedBar } from "./ValidatedBar"
 import { attentionReasons, attentionScore, validatedFraction } from "@/lib/admin/insights"
 import type { AdminProject } from "@/lib/frontier/admin"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 
-type Lens = "all" | "at-risk" | "active" | "archived"
+type Lens = "all" | "needs-attention" | "active" | "archived"
 const LENSES: { value: Lens; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "at-risk", label: "At risk" },
+  { value: "needs-attention", label: "Needs attention" },
   { value: "active", label: "Active" },
   { value: "archived", label: "Archived" },
 ]
 
 /**
- * Projects — searchable, sortable, and filterable by a lens (all / at-risk /
+ * Projects — searchable, sortable, and filterable by a lens (all / needs-attention /
  * active / archived). The Status column shows why a project needs attention
  * (overdue / due-soon / stalled) instead of a bare "Active", turning the old
  * flat table into something an operator can triage from.
  */
 export function AdminProjectsSection({ projects }: { projects: AdminProject[] }) {
+  const navigate = useNavigate()
   const [now] = useState(() => Date.now())
   const [lens, setLens] = useState<Lens>("all")
 
   const data = useMemo(() => {
     switch (lens) {
-      case "at-risk":
+      case "needs-attention":
         return projects.filter((p) => !p.archived && attentionReasons(p, now).length > 0)
       case "active":
         return projects.filter((p) => !p.archived)
@@ -49,12 +50,10 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
         header: ({ column }) => <DataTableColumnHeader column={column} title="Project" />,
         cell: ({ row }) => {
           const p = row.original
-          return p.archived ? (
-            <span className="text-muted-foreground">{p.name}</span>
-          ) : (
-            <Link to={`/projects/${p.id}`} className="font-medium text-primary hover:underline">
+          return (
+            <span className={p.archived ? "text-muted-foreground" : "font-medium text-foreground"}>
               {p.name}
-            </Link>
+            </span>
           )
         },
       },
@@ -97,10 +96,13 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
           if (bv == null) return -1
           return av < bv ? -1 : av > bv ? 1 : 0
         },
-        cell: ({ row }) =>
-          row.original.lastEditAt
-            ? fmtDate(new Date(row.original.lastEditAt).toISOString())
-            : "—",
+        cell: ({ row }) => (
+          <DateTooltip
+            value={row.original.lastEditAt}
+            label="Edited"
+            className="text-muted-foreground"
+          />
+        ),
       },
       {
         id: "status",
@@ -108,17 +110,53 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
         header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
         cell: ({ row }) => {
           const p = row.original
-          if (p.archived) return <Badge variant="secondary">Archived</Badge>
-          const reasons = attentionReasons(p, now)
-          return reasons.length > 0 ? (
-            <AttentionBadges reasons={reasons} />
-          ) : (
-            <Badge variant="outline">On track</Badge>
+          return (
+            <ProjectStatus archived={p.archived} reasons={attentionReasons(p, now)} />
           )
         },
       },
     ],
     [now],
+  )
+
+  const emptyCopy = useMemo(() => {
+    switch (lens) {
+      case "needs-attention":
+        return {
+          title: "Nothing needs attention",
+          description: "No active project is overdue, due soon, or stalled.",
+        }
+      case "active":
+        return {
+          title: "No active projects",
+          description: "Active projects appear here.",
+        }
+      case "archived":
+        return {
+          title: "No archived projects",
+          description: "Archived projects appear here.",
+        }
+      default:
+        return {
+          title: "No projects",
+          description: "Projects appear here as they're created.",
+        }
+    }
+  }, [lens])
+
+  const emptyState = (
+    <div
+      className="w-full overflow-hidden rounded-md border border-dashed"
+      data-testid="admin-projects-empty"
+    >
+      <EmptyState
+        variant="inline"
+        className="flex-none py-12"
+        icon={FolderOpen}
+        title={emptyCopy.title}
+        description={emptyCopy.description}
+      />
+    </div>
   )
 
   return (
@@ -137,42 +175,35 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
         ))}
       </div>
 
-      {data.length === 0 ? (
-        <EmptyState
-          variant="panel"
-          icon={FolderOpen}
-          title={lens === "at-risk" ? "Nothing at risk" : "No projects"}
-          description={
-            lens === "at-risk"
-              ? "No active project is overdue, due soon, or stalled."
-              : "Projects appear here as they're created."
-          }
-        />
-      ) : (
-        <DataTable
-          columns={columns}
-          data={data}
-          getRowId={(p) => p.id}
-          initialSorting={[{ id: "status", desc: true }]}
-          searchPlaceholder="Search projects…"
-          globalFilterFn={(row, _columnId, filterValue) => {
-            const q = String(filterValue).trim().toLowerCase()
-            if (!q) return true
-            const p = row.original
-            return `${p.name} ${p.orgName ?? ""} ${p.creatorUsername ?? ""}`
-              .toLowerCase()
-              .includes(q)
-          }}
-          toolbar={(table) => (
-            <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-              {table.getFilteredRowModel().rows.length === data.length
-                ? `${data.length}`
-                : `${table.getFilteredRowModel().rows.length} of ${data.length}`}
-            </span>
-          )}
-          testId="admin-projects-table"
-        />
-      )}
+      <DataTable
+        columns={columns}
+        data={data}
+        getRowId={(p) => p.id}
+        onRowClick={(p) => {
+          if (!p.archived) navigate(`/projects/${p.id}`)
+        }}
+        rowClassName={(p) => (p.archived ? undefined : "cursor-pointer")}
+        initialSorting={[{ id: "status", desc: true }]}
+        searchPlaceholder="Search projects…"
+        globalFilterFn={(row, _columnId, filterValue) => {
+          const q = String(filterValue).trim().toLowerCase()
+          if (!q) return true
+          const p = row.original
+          return `${p.name} ${p.orgName ?? ""} ${p.creatorUsername ?? ""}`
+            .toLowerCase()
+            .includes(q)
+        }}
+        toolbar={(table) => (
+          <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+            {table.getFilteredRowModel().rows.length === data.length
+              ? `${data.length}`
+              : `${table.getFilteredRowModel().rows.length} of ${data.length}`}
+          </span>
+        )}
+        emptyState={emptyState}
+        testId="admin-projects-table"
+        dense
+      />
     </div>
   )
 }

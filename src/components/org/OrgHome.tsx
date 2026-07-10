@@ -7,6 +7,8 @@ import { useActiveOrg } from "@/context/OrgContext"
 import type { OrgSummary } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { portfolioActivityStatus } from "@/lib/project-status"
+import { ProjectDeadlineStatuses } from "@/components/ProjectStatus"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
@@ -24,6 +26,7 @@ import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import { OrgSetupChecklist } from "./OrgSetupChecklist"
+import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import {
   Select,
@@ -108,9 +111,13 @@ function OrgHomeSkeleton({ isAllOrgs }: { isAllOrgs: boolean }) {
   )
 }
 
-const STALE_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000
 
 type ActivityStatus = "not-started" | "stalled" | "active"
+
+/** @deprecated Import portfolioActivityStatus from @/lib/project-status */
+export function activityStatus(p: PortfolioProject, now: number): ActivityStatus {
+  return portfolioActivityStatus(p, now)
+}
 
 type StatusFilter = "all" | "stalled" | "overdue"
 
@@ -192,17 +199,6 @@ function writeProjectLens(lens: ProjectLens) {
 
 function isProjectLens(value: string | null | undefined): value is ProjectLens {
   return PROJECT_LENS_VALUES.includes(value as ProjectLens)
-}
-
-/**
- * A project that has never been edited and has no translated cells hasn't
- * stalled — it just hasn't started yet. "Stalled" is reserved for projects
- * that had activity and then went quiet for 14+ days.
- */
-export function activityStatus(p: PortfolioProject, now: number): ActivityStatus {
-  if (p.lastEditAt == null && p.filledCells === 0) return "not-started"
-  if (p.lastEditAt == null || now - p.lastEditAt > STALE_THRESHOLD_MS) return "stalled"
-  return "active"
 }
 
 function averagePct(projects: PortfolioProjectRow[], readPct: (project: PortfolioProjectRow) => number): number {
@@ -321,16 +317,7 @@ function ProjectTable({
                       {p.orgName}
                     </Badge>
                   )}
-                  {dstatus === "overdue" && (
-                    <Badge variant="destructive" className="shrink-0">
-                      Overdue
-                    </Badge>
-                  )}
-                  {dstatus === "soon" && (
-                    <Badge variant="outline" className="shrink-0">
-                      Due soon
-                    </Badge>
-                  )}
+                  <ProjectDeadlineStatuses deadline={dstatus} className="shrink-0" />
                 </span>
 
                 <span className="text-right font-medium tabular-nums text-foreground" aria-label={`${tpct}% translated`}>
@@ -659,6 +646,17 @@ export function OrgHome() {
   })
   const visible = sortProjectsByLens(filteredProjects, projectLens, now)
 
+  const statusFilteredProjects = projects.filter((p) => {
+    switch (statusFilter) {
+      case "stalled":
+        return activityStatus(p, now) === "stalled"
+      case "overdue":
+        return deadlineStatus(p, now) === "overdue"
+      default:
+        return true
+    }
+  })
+
   return (
     <AppShell
       sidebar={<OrgSidebar />}
@@ -937,84 +935,7 @@ export function OrgHome() {
                     />
                   </div>
 
-                  {/* Filter bar */}
-                  {projects.length > 0 && (
-                    <div className="flex w-full flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden">
-                      <InputGroup className="h-9 min-w-[12rem] flex-[1_1_13rem] max-w-52">
-                        <InputGroupAddon>
-                          <Search />
-                        </InputGroupAddon>
-                        <InputGroupInput
-                          type="text"
-                          value={projectQuery}
-                          onChange={(e) => setProjectQuery(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Escape") e.currentTarget.blur()
-                          }}
-                          placeholder="Filter projects…"
-                          aria-label="Filter projects by name"
-                          autoCorrect="off"
-                          autoCapitalize="none"
-                          spellCheck={false}
-                        />
-                        {projectQuery && (
-                          <InputGroupAddon align="inline-end">
-                            <InputGroupButton
-                              type="button"
-                              size="icon-xs"
-                              aria-label="Clear project filter"
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => setProjectQuery("")}
-                            >
-                              <X />
-                            </InputGroupButton>
-                          </InputGroupAddon>
-                        )}
-                      </InputGroup>
-                      <div className={projectControlGroupClassName}>
-                        <div className="flex items-center gap-2" aria-label="Project status filter">
-                          <span className="text-xs font-medium text-muted-foreground">Status</span>
-                          <div className="flex items-center gap-1">
-                            {STATUS_FILTERS.map((f) => (
-                              <Button
-                                key={f.value}
-                                type="button"
-                                size="xs"
-                                variant={statusFilter === f.value ? "default" : "secondary"}
-                                onClick={() => setStatusFilter(f.value)}
-                                aria-pressed={statusFilter === f.value}
-                              >
-                                {f.label}
-                              </Button>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2" aria-label="Project sort">
-                          <span className="text-xs font-medium text-muted-foreground">Sort by</span>
-                          <Select
-                            items={PROJECT_LENSES.map((lens) => ({ value: lens.value, label: lens.label }))}
-                            value={projectLens}
-                            onValueChange={handleProjectLensChange}
-                          >
-                            <SelectTrigger aria-label="Sort projects" size="sm" className="min-w-40 bg-background">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectGroup>
-                                {PROJECT_LENSES.map((lens) => (
-                                  <SelectItem key={lens.value} value={lens.value}>
-                                    {lens.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectGroup>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Project directory */}
+                  {/* Status filter + admin-style project table */}
                   {projects.length === 0 ? (
                     <EmptyState
                       icon={FolderPlus}
@@ -1031,16 +952,36 @@ export function OrgHome() {
                         </div>
                       }
                     />
-                  ) : visible.length === 0 ? (
-                    <EmptyState
-                      variant="inline"
-                      className="py-6"
-                      icon={Search}
-                      title="No matching projects."
-                    />
                   ) : (
-                    <div className="overflow-hidden rounded-2xl border bg-card">
-                      <ProjectTable projects={visible} now={now} showOrg={false} roleByProjectId={roleByProjectId} />
+                    <div className="flex flex-col gap-3">
+                      <div className="flex flex-wrap items-center gap-1" aria-label="Project status filter">
+                        {STATUS_FILTERS.map((f) => (
+                          <Button
+                            key={f.value}
+                            type="button"
+                            size="xs"
+                            variant={statusFilter === f.value ? "default" : "secondary"}
+                            onClick={() => setStatusFilter(f.value)}
+                            aria-pressed={statusFilter === f.value}
+                          >
+                            {f.label}
+                          </Button>
+                        ))}
+                      </div>
+
+                      <OrgProjectsDataTable
+                        projects={statusFilteredProjects}
+                        now={now}
+                        roleByProjectId={roleByProjectId}
+                        initialLens={projectLens}
+                        emptyTitle={
+                          statusFilter === "stalled"
+                            ? "No stalled projects."
+                            : statusFilter === "overdue"
+                              ? "No overdue projects."
+                              : "No projects yet."
+                        }
+                      />
                     </div>
                   )}
 

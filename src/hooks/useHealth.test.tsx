@@ -66,8 +66,8 @@ describe("useHealth — AD-14 decay", () => {
   })
 })
 
-// FRO-181: serverRollup override — AD-14 amendment 2026-06-04.
-describe("useHealth — serverRollup override (FRO-181)", () => {
+// AQU-181: serverRollup override — AD-14 amendment 2026-06-04.
+describe("useHealth — serverRollup override (AQU-181)", () => {
   it("uses server projectHealth when serverRollup is provided", async () => {
     const fileCells = new Map([["f", [cell("a", "bonjour", 0)]]])
     // endorsement-count path gives 0; server says 75.

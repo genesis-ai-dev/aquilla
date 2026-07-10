@@ -210,7 +210,7 @@ export function ProjectsList() {
     let cancelled = false
     setLoading(true)
     setUnreachable(false)
-    // FRO-335: fetch UNfiltered — the server returns every project the caller
+    // AQU-335: fetch UNfiltered — the server returns every project the caller
     // can access across all grant paths. We partition client-side so projects
     // shared from orgs the caller doesn't belong to (magic-link invite,
     // bulk-add) still surface instead of being org-filtered into oblivion.
@@ -223,7 +223,7 @@ export function ProjectsList() {
         } else {
           setProjects([])
           setUnreachable(result.reason === "unreachable")
-          // FRO-293: 401/403 from the projects fetch means the session is no
+          // AQU-293: 401/403 from the projects fetch means the session is no
           // longer valid — raise the global session-expired banner.
           if (result.reason === "unauthorized") notifySessionExpired()
         }
@@ -279,7 +279,7 @@ export function ProjectsList() {
     writeProjectLens(lens)
   }
 
-  // FRO-335: projects in orgs the caller is not a member of (invite-link /
+  // AQU-335: projects in orgs the caller is not a member of (invite-link /
   // bulk-add grants) render in their own "Shared with you" section — they
   // belong to no org the switcher can reach.
   const { inActiveOrg, sharedWithMe } = useMemo(
@@ -364,11 +364,11 @@ export function ProjectsList() {
       }
       statusBar={null}
       main={
-        // FRO-366: the AppShell `main` slot is height-constrained by the shell's
+        // AQU-366: the AppShell `main` slot is height-constrained by the shell's
         // flex chain (h-screen -> min-h-0/flex-1/overflow-hidden all the way
         // down), so `h-full` here resolves against a definite height and
         // `overflow-y-auto` is the intended (and only) scroll surface for this
-        // list — see FRO-164 for the sibling "one primary scroll" rule.
+        // list — see AQU-164 for the sibling "one primary scroll" rule.
         // `overscroll-contain` stops wheel/trackpad momentum from chaining to
         // (and getting swallowed by) an ancestor once this list's own scroll
         // is exhausted, which otherwise reads as "scrolling does nothing".
@@ -479,7 +479,7 @@ export function ProjectsList() {
                 )}
               </section>
 
-              {/* FRO-335: projects shared from orgs the caller doesn't belong
+              {/* AQU-335: projects shared from orgs the caller doesn't belong
                   to (magic-link invite, bulk-add by username). Without this
                   section they're URL-accessible but unreachable from any nav. */}
               {filteredShared.length > 0 && (

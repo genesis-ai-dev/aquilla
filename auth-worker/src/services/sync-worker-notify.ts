@@ -1,4 +1,4 @@
-// FRO-346: best-effort notification to aquilla-sync-worker when a project
+// AQU-346: best-effort notification to aquilla-sync-worker when a project
 // member is removed, so the per-project ProjectSync DO can eject the removed
 // user's live WebSocket sessions and denylist their still-valid (≤15 min)
 // sync tokens.

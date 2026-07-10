@@ -56,7 +56,7 @@ describe("JoinPage inline auth", () => {
     expect(navigate).not.toHaveBeenCalledWith("/")
   })
 
-  // FRO-335: signed-in users must NOT be auto-joined on link-open — access is
+  // AQU-335: signed-in users must NOT be auto-joined on link-open — access is
   // granted only on an explicit "Accept invitation" click, so there's always
   // a user-facing signal that membership just changed (spec
   // join-via-invite-link Step 2 confirmation).
@@ -180,7 +180,7 @@ describe("JoinPage expired session", () => {
   })
 })
 
-// FRO-364: "Magic-link invite is instantly invalid on accept."
+// AQU-364: "Magic-link invite is instantly invalid on accept."
 //
 // Root cause: redeem() collapsed every accept failure into one generic
 // "this invite link is no longer valid" message. A JWT that looks valid
@@ -190,7 +190,7 @@ describe("JoinPage expired session", () => {
 // dead. Before the fix, isJwtExpired(jwt) returned false for such a token
 // (it isn't expired, just rejected), so the code fell through to the
 // dead-invite message even though the invite was perfectly valid.
-describe("JoinPage FRO-364: accept-time failures are classified honestly", () => {
+describe("JoinPage AQU-364: accept-time failures are classified honestly", () => {
   it("re-prompts sign-in (not a dead-invite error) when accept returns 401 for a client-side-valid JWT", async () => {
     sessionValue = { session: { jwt: fakeJwt(3600) }, loading: false } // not expired client-side
     vi.mocked(acceptMultiInvite).mockResolvedValueOnce({ ok: false, reason: "unauthorized" })
@@ -269,7 +269,7 @@ describe("JoinPage preview error states (signed-out)", () => {
     expect(screen.queryByText("This invite link is no longer valid")).not.toBeInTheDocument()
   })
 
-  // FRO-429: distinguish "already used" from "time expired" in the UI
+  // AQU-429: distinguish "already used" from "time expired" in the UI
   it("shows 'already been used' message with next-step hint when reason is 'used'", async () => {
     vi.mocked(previewMultiInvite).mockResolvedValueOnce({ ok: false, reason: "used" })
     vi.mocked(previewServerInvite).mockResolvedValueOnce({ ok: false, reason: "used" })

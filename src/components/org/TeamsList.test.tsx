@@ -89,11 +89,11 @@ describe("TeamsList admin create", () => {
 
 describe("TeamsList — AQU-333: internal/public visibility toggle", () => {
   /**
-   * WHY: AQU-333 (re-scoping FRO-142) reintroduces a three-position
+   * WHY: AQU-333 (re-scoping AQU-142) reintroduces a three-position
    * All / Internal only / Public only filter, defaulting to "Internal only"
    * to preserve the historical "shows internal groups only" default render.
    *
-   * The FRO-158/FRO-165 regression guarantee — public teams (isInternal ===
+   * The AQU-158/AQU-165 regression guarantee — public teams (isInternal ===
    * false) must NOT be silently dropped — is preserved and re-expressed here
    * *through the toggle*: public teams are always reachable via "All" and
    * "Public only". The earlier unconditional "show all by default" assertion
@@ -115,7 +115,7 @@ describe("TeamsList — AQU-333: internal/public visibility toggle", () => {
     expect(screen.queryByText("Public Team")).toBeNull()
   })
 
-  it("FRO-158 guard: public teams stay reachable via All and Public only", async () => {
+  it("AQU-158 guard: public teams stay reachable via All and Public only", async () => {
     listTeams.mockResolvedValue([internalTeam, publicTeam])
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Internal Team")).toBeInTheDocument())
@@ -156,7 +156,7 @@ describe("TeamsList — AQU-333: internal/public visibility toggle", () => {
   })
 })
 
-describe("TeamsList — FRO-166: search + sort", () => {
+describe("TeamsList — AQU-166: search + sort", () => {
   const teams = [
     makeTeam({ id: 1, name: "Alpha", memberCount: 5, projectCount: 2 }),
     makeTeam({ id: 2, name: "beta", memberCount: 10, projectCount: 1 }),

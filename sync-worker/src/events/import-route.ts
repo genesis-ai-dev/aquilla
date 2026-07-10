@@ -294,7 +294,7 @@ export async function handleBulkImportRequest(
     }
 
     // Cells projection, multi-row. File counters are deferred to one trailing
-    // recompute (FRO-135) — per-cell recomputes were O(cells²).
+    // recompute (AQU-135) — per-cell recomputes were O(cells²).
     for (let i = 0; i < cellEvents.length; i += BULK_ROWS) {
       stmts.push(buildBulkSourceCellCreateStmt(db, cellEvents.slice(i, i + BULK_ROWS)))
     }

@@ -10,7 +10,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 /**
  * ViewSettingsMenu — text direction toggle.
  *
- * The menu (opened via header ⋯ → "View settings", FRO-331) has two menu items:
+ * The menu (opened via header ⋯ → "View settings", AQU-331) has two menu items:
  *   - "Source" — toggles source text direction LTR ↔ RTL
  *   - "Target" — toggles target text direction LTR ↔ RTL
  * Each shows a DirPill badge with the current direction text ("LTR" or "RTL").
@@ -30,7 +30,7 @@ test("view settings text direction Source toggle switches LTR to RTL", async ({ 
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Open the view settings menu from the header overflow menu (FRO-331).
+  // Open the view settings menu from the header overflow menu (AQU-331).
   await ws.openViewSettingsMenu()
 
   // "Source" menu item is visible showing "LTR".

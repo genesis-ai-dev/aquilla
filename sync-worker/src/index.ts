@@ -198,7 +198,7 @@ export default {
 
     const projectArchiveResponse = await handleProjectArchiveRequest(request, env, notifyProjectDo)
     if (projectArchiveResponse) return projectArchiveResponse
-    // FRO-346: eject a removed member's live WS sessions + denylist their
+    // AQU-346: eject a removed member's live WS sessions + denylist their
     // still-valid tokens on the per-project DO.
     const memberRemovedResponse = await handleMemberRemovedRequest(
       request,

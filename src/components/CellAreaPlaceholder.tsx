@@ -16,7 +16,7 @@ interface CellAreaPlaceholderProps {
   fileName?: string
   /** True when the project has no files at all (not just none selected). */
   hasFiles?: boolean
-  /** FRO-149: true once the file list has been fetched from the server.
+  /** AQU-149: true once the file list has been fetched from the server.
    *  Until this is true, we must NOT show the "No files yet — Import a file"
    *  CTA because projectFiles is transiently empty even on populated projects
    *  (the server fetch hasn't resolved yet). Showing the CTA too early risks a
@@ -86,7 +86,7 @@ function NoFileEmpty({
   filesLoaded?: boolean
   onImportClick?: () => void
 }) {
-  // FRO-149: while the file list hasn't loaded yet, show the neutral "No file
+  // AQU-149: while the file list hasn't loaded yet, show the neutral "No file
   // selected" copy. We must NOT show "No files yet — Import a file" here because
   // projectFiles is transiently empty (server fetch still in flight) even on
   // projects that already have files — showing the CTA would risk a spurious

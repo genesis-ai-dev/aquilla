@@ -1,8 +1,8 @@
 /**
- * RuleImportReview — FRO-196
+ * RuleImportReview — AQU-196
  *
  * Generic review screen for a list of RuleSuggestion drafts.
- * Designed to be reusable by FRO-198 and future import flows.
+ * Designed to be reusable by AQU-198 and future import flows.
  *
  * Props:
  *   drafts    — structured rule suggestions to review
@@ -37,7 +37,7 @@ export function RuleImportReview({
     () => new Set(drafts.map((_, i) => i)),
   )
   // Minimal inline edit: name override per draft
-  // SWARM-TODO(FRO-195): use shared RuleEditor for richer editing
+  // SWARM-TODO(AQU-195): use shared RuleEditor for richer editing
   const [nameOverrides, setNameOverrides] = useState<Record<number, string>>({})
 
   function toggleAccept(i: number) {

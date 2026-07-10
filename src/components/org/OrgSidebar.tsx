@@ -21,10 +21,10 @@ export function OrgSidebar() {
   const { isAdmin: isPlatformAdmin } = usePlatformAdmin()
   const { openTour } = useProductTourContext()
 
-  // FRO-474: project-only invitees (direct project_members grant, no org
+  // AQU-474: project-only invitees (direct project_members grant, no org
   // membership for that project) have no org-scoped nav surface to reach
   // their project. List those projects here — same "Shared with you" partition
-  // used on the dashboard (FRO-335/FRO-428) — so they always have a way in.
+  // used on the dashboard (AQU-335/AQU-428) — so they always have a way in.
   const { projects: accessibleProjects } = useProjectsForNavigation()
   const sharedProjects = partitionSharedProjects(accessibleProjects, orgs, activeOrgId).sharedWithMe
 
@@ -39,7 +39,7 @@ export function OrgSidebar() {
         <OrgSwitcher />
       </div>
       <nav className="mt-2 flex flex-1 flex-col gap-0.5">
-        {/* FRO-243: data-tour anchors for product tour steps */}
+        {/* AQU-243: data-tour anchors for product tour steps */}
         <NavLink
           to={{ pathname: "/", search: isAllOrgs ? "?org=all" : activeOrgId != null ? `?org=${activeOrgId}` : "" }}
           end
@@ -82,7 +82,7 @@ export function OrgSidebar() {
         )}
       </nav>
       <div className="mt-auto pt-2 flex flex-col gap-1">
-        {/* FRO-243: Re-launch product tour */}
+        {/* AQU-243: Re-launch product tour */}
         <AppTooltip content="Take the product tour">
           <button
             type="button"

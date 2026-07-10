@@ -8,7 +8,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * src/components/Dashboard.tsx is no longer routed, and project soft-delete
  * is now the unconfirmed "Archive" action on ProjectOverview. RulesPage's
  * delete-rule dialog is also unreachable (RulesPage.tsx isn't routed; the
- * /rules surface deletes inline without confirmation). The live FRO-291
+ * /rules surface deletes inline without confirmation). The live AQU-291
  * vehicle is the terminology concept delete (TerminologyPage.tsx):
  *   <ConfirmActionDialog
  *     title="Delete concept"
@@ -49,7 +49,7 @@ test("confirm action dialog confirm button enabled only after checking checkbox"
   await addDialog.getByRole("button", { name: /^Add concept$/i }).click()
   await expect(addDialog).not.toBeVisible({ timeout: 5_000 })
 
-  // Click "Delete concept <term>" — opens the ConfirmActionDialog (FRO-291).
+  // Click "Delete concept <term>" — opens the ConfirmActionDialog (AQU-291).
   await alice.getByRole("button", { name: `Delete concept ${term}` }).click()
 
   // The ConfirmActionDialog opens.

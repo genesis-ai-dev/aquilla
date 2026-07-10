@@ -22,7 +22,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  */
 test("share panel members tab role select changes member's role", async ({ alice }) => {
   const aliceSession = await ensureAuthState("alice")
-  // Seed bob into a different alice-owned org. That keeps FRO-321 scoped user
+  // Seed bob into a different alice-owned org. That keeps AQU-321 scoped user
   // search meaningful without making bob an existing member of this project's
   // Members panel.
   const searchScopeOrg = await createOrg(aliceSession.jwt, `Z Role Change Search Scope ${Date.now()}`)

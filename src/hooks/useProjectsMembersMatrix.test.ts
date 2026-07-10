@@ -1,8 +1,8 @@
 /**
- * FRO-137: Guards the matrix aggregation logic — the pure data-building pass
+ * AQU-137: Guards the matrix aggregation logic — the pure data-building pass
  * that is exercised on every refresh().
  *
- * Performance rationale: before FRO-137 the `projects` and `orgMembers` arrays
+ * Performance rationale: before AQU-137 the `projects` and `orgMembers` arrays
  * (both plain useState values) were used directly in useCallback deps, causing
  * a new `refresh` function to be created and the fetch effect to re-run on
  * every render even when the project/member sets hadn't changed.  The fix
@@ -84,7 +84,7 @@ function buildMatrix(
 
 // ---------------------------------------------------------------------------
 
-describe("buildMatrix aggregation (FRO-137)", () => {
+describe("buildMatrix aggregation (AQU-137)", () => {
   it("produces a sparse cells map with the correct role at each intersection", () => {
     const { cells } = buildMatrix(
       [

@@ -9,7 +9,7 @@
  * All other markers (\fr, \fq, caller, structural markers) are preserved.
  * Round-trip safety: the serializer sees the same \f...\f* structure.
  *
- * FRO-317
+ * AQU-317
  */
 
 import { extractUsfmFootnotes } from "./extract"

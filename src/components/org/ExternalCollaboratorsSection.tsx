@@ -13,7 +13,7 @@ import {
 import { toUserFacingError } from "@/lib/errors/user-error"
 
 /**
- * FRO-326: org-level governance view of everyone who reaches this org's
+ * AQU-326: org-level governance view of everyone who reaches this org's
  * projects WITHOUT being an org member (invite-link redeem, bulk-add,
  * group). Derived on read from the members matrix — see
  * lib/frontier/external-collaborators.ts for why this is never a stored

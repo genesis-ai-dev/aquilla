@@ -1,5 +1,5 @@
 /**
- * FRO-274: usePendingOutboxRecords filters quarantined (failed) records from
+ * AQU-274: usePendingOutboxRecords filters quarantined (failed) records from
  * the overlay view so rejected events don't surface as pending validation/commit
  * state in cell overlays.
  *
@@ -43,7 +43,7 @@ beforeEach(async () => {
   })
 })
 
-describe("usePendingOutboxRecords (FRO-274: overlay excludes failed records)", () => {
+describe("usePendingOutboxRecords (AQU-274: overlay excludes failed records)", () => {
   it("returns pending records for the file", async () => {
     await enqueueOutboxEvent(makeEvent("ev1"))
     const { result } = renderHook(() =>

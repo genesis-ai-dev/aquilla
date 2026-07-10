@@ -15,9 +15,9 @@ export interface SourceSelectionToolbarProps {
   onAskAi: () => void
   onAddToTermbase?: () => void
   onTermApply: (rendering: string) => void
-  /** FRO-260: called on mousedown so the parent suppresses selectionchange clearing. */
+  /** AQU-260: called on mousedown so the parent suppresses selectionchange clearing. */
   onToolbarMouseDown?: () => void
-  /** FRO-260: called on mouseup/mouseleave so the parent resets the guard. */
+  /** AQU-260: called on mouseup/mouseleave so the parent resets the guard. */
   onToolbarMouseUp?: () => void
 }
 
@@ -41,7 +41,7 @@ export function SourceSelectionToolbar({
     [activeConcepts, sourceSelection],
   )
 
-  // FRO-260: preserve the browser selection + suppress the selectionchange guard.
+  // AQU-260: preserve the browser selection + suppress the selectionchange guard.
   const handleButtonMouseDown = (e: React.MouseEvent) => {
     e.preventDefault()
     onToolbarMouseDown?.()

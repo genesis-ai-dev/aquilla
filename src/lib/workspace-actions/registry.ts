@@ -4,7 +4,7 @@ import type {
 } from "./types"
 import { canPerform } from "@/lib/sync/role-policy"
 
-// FRO-365: viewers (and any role below the action's server floor) must not
+// AQU-365: viewers (and any role below the action's server floor) must not
 // see these buttons at all — clicking them either persists a write server
 // can't refuse in time to avoid a confusing UX, or (pre-fix) looked like a
 // silent no-op. canPerform fails OPEN when the role is unknown (local/legacy

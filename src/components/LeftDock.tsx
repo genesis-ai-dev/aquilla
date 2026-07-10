@@ -1,10 +1,10 @@
 /**
- * LeftDock.tsx — FRO-308 + FRO-320
+ * LeftDock.tsx — AQU-308 + AQU-320
  *
  * Collapsible, resizable left dock that replaces the fixed-width sidebar.
  * Hosts multiple surfaces as icon-tab switchers (like Claude's sidebar):
  *   - files   : project file list (was the old sidebar content)
- *   - agent   : AI agent (was a right-side Sheet drawer — FRO-320)
+ *   - agent   : AI agent (was a right-side Sheet drawer — AQU-320)
  *   - search  : search / parallel passages / find-replace panel
  *
  * Collapsed: renders a narrow rail of icon buttons only (no labels).

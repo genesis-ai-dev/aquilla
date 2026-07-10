@@ -2,7 +2,7 @@ import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
- * FRO-335 — magic-link invite accept must leave the project REACHABLE.
+ * AQU-335 — magic-link invite accept must leave the project REACHABLE.
  *
  * The failure mode this guards against: bob redeems alice's invite link,
  * lands in the workspace, then closes the tab — and the project never

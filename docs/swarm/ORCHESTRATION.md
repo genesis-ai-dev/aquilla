@@ -4,15 +4,15 @@
 
 # 🆕🆕🆕🆕🆕🆕🆕 CURRENT GOAL (2026-07-01) — Drain "Prototype Debugging" (Biblica demo bugs)
 
-> **✅ CONVERGED 2026-07-01** — all 4 issues (FRO-455/457/458/460) Fixed + live-verified + promoted to local main `1bb9b6a5d` (ff-only, NOT pushed/deployed). See §M. (Was the ACTIVE goal.) Everything below (incl. the 2026-06-19 block) is reference-only from prior swarms.
+> **✅ CONVERGED 2026-07-01** — all 4 issues (AQU-455/457/458/460) Fixed + live-verified + promoted to local main `1bb9b6a5d` (ff-only, NOT pushed/deployed). See §M. (Was the ACTIVE goal.) Everything below (incl. the 2026-06-19 block) is reference-only from prior swarms.
 > Driver: user `/swarm`. Project: **Prototype Debugging** (`215cff7b-1a95-443d-9343-1f1528754462`), team FrontierR&D.
-> Scope = 4 Biblica-labelled issues from the 2026-06-30 Kilisusu demo call: FRO-455, FRO-457, FRO-458, FRO-460.
+> Scope = 4 Biblica-labelled issues from the 2026-06-30 Kilisusu demo call: AQU-455, AQU-457, AQU-458, AQU-460.
 > Base: main tip `77cd6abb7` (main is LIVE/moving — re-verify tip before every promotion). Integration branch: `swarm/proto-debug-integration` at `.worktrees/proto-debug-integration`.
 
 ## §0 STOP checklist (the goal)
 - [ ] Every eligible issue at **Fixed** (verified) or honestly blocked with a Linear note.
 - [ ] Integration green: `npx tsc -b --noEmit` + `npx vitest run`; `npm run build` before each promotion.
-- [ ] `cd auth-worker && npx tsc --noEmit && npm test` green (FRO-457 touches it).
+- [ ] `cd auth-worker && npx tsc --noEmit && npm test` green (AQU-457 touches it).
 - [ ] Each fix verified on the real dev stack (live UI) before → Fixed; spec reconciled per `/issue` Step 2.5.
 - [ ] Promoted to main only with main clean apart from recorded protected files (never clobbered).
 - [ ] Every remaining gap traced in `docs/swarm/TRACES.md`.
@@ -24,40 +24,40 @@
 ## §1 Operating model
 - Orchestrator (me) is the ONLY merger to main. Subagents never push/deploy/promote/run the shared dev stack.
 - Per-issue agents run the `.claude/commands/issue.md` lifecycle in a manual worktree off the LIVE integration tip.
-- `ProjectWorkspace.tsx` is a shared mega-file → at most ONE wave member may edit it; FRO-455 is forbidden from it (fix in `useRules.ts`), FRO-460 (Wave 2) may.
-- `src/components/ui/**` primitives are shared → reuse, don't modify (FRO-458 uses existing `DialogBody`).
+- `ProjectWorkspace.tsx` is a shared mega-file → at most ONE wave member may edit it; AQU-455 is forbidden from it (fix in `useRules.ts`), AQU-460 (Wave 2) may.
+- `src/components/ui/**` primitives are shared → reuse, don't modify (AQU-458 uses existing `DialogBody`).
 
 ## §3 Workstream registry + wave plan
 | WS | Issue | Pri | Wave | Owned surface | Branch | Agent | Status |
 |----|-------|-----|------|---------------|--------|-------|--------|
-| A | FRO-455 Rules add-all | Med | 1 | `src/hooks/useRules.ts` (latestRulesRef accumulation), `src/hooks/useRules.test.ts` | `swarm/fro-455` | a53b2ee4 | **Fixed+RE-QA PASS** `fbd362c00` (AD-3 root cause; server proof 2→5 rules after reload) |
-| B | FRO-457 username-assign | Med | 1 | `auth-worker/src/services/user-lookup.ts`, `auth-worker/src/routes/users.ts` (+test) — client already trimmed | `swarm/fro-457` | aebd06ec | **Fixed** `4e28d7a47`, merged→int, UI-QA pending |
-| C | FRO-458 export scroll | Low | 1 | `src/components/ExportDialog.tsx` (+test) | `swarm/fro-458` | a78dcf9e | **Fixed** `4a1081d63`, merged→int, UI-QA pending |
-| D | FRO-460 Bible resources default | Low | 2 (REDESIGN) | `parsers/types.ts` (resolveBibleResourcesEnabled), `SearchDock`/`ProjectWorkspace.tsx`, `ProjectSettings.tsx`, `auth-worker/src/lib/aquifer/gate.ts` (files.kind scripture query), `sync/project-settings.ts` | `swarm/fro-460-derive` | aea69ff0 | **DERIVE-ON-READ** `c9e020096` (no write-on-load → race gone by construction); gate ✅ tsc/vitest 3225/auth 492/build; adversarial wf + independent live-QA running |
+| A | AQU-455 Rules add-all | Med | 1 | `src/hooks/useRules.ts` (latestRulesRef accumulation), `src/hooks/useRules.test.ts` | `swarm/fro-455` | a53b2ee4 | **Fixed+RE-QA PASS** `fbd362c00` (AD-3 root cause; server proof 2→5 rules after reload) |
+| B | AQU-457 username-assign | Med | 1 | `auth-worker/src/services/user-lookup.ts`, `auth-worker/src/routes/users.ts` (+test) — client already trimmed | `swarm/fro-457` | aebd06ec | **Fixed** `4e28d7a47`, merged→int, UI-QA pending |
+| C | AQU-458 export scroll | Low | 1 | `src/components/ExportDialog.tsx` (+test) | `swarm/fro-458` | a78dcf9e | **Fixed** `4a1081d63`, merged→int, UI-QA pending |
+| D | AQU-460 Bible resources default | Low | 2 (REDESIGN) | `parsers/types.ts` (resolveBibleResourcesEnabled), `SearchDock`/`ProjectWorkspace.tsx`, `ProjectSettings.tsx`, `auth-worker/src/lib/aquifer/gate.ts` (files.kind scripture query), `sync/project-settings.ts` | `swarm/fro-460-derive` | aea69ff0 | **DERIVE-ON-READ** `c9e020096` (no write-on-load → race gone by construction); gate ✅ tsc/vitest 3225/auth 492/build; adversarial wf + independent live-QA running |
 
 Root-cause notes:
-- **FRO-455**: `useRules.ts:69` `addRule` — sequential `handleCommit` loop (`RuleSuggestFromEditsDialog.tsx:137-142`) calls `addRule` per accepted rule, but each call closes over render-time `project`, so appends clobber (only last persists). Fix: batch-append (single `patchProject`) or read fresh state per append. Contain to `useRules.ts` + dialog.
-- **FRO-457**: `auth-worker/src/routes/users.ts:33` passes UNTRIMMED username to `lookupUserByUsername` (validation at :30 only checks trimmed-empty); `user-lookup.ts:22` `WHERE username = ?` is whitespace/case-sensitive (Neon). Trailing space → false 404. Fix: trim (and consider case-insensitive) server-side; add whitespace test.
-- **FRO-458**: `ExportDialog.tsx:501` RadioGroup `max-h-64` inside `DialogContent overflow-hidden` with no `DialogBody` scroll region → lower options clipped. Fix: adopt the existing `DialogBody` (`ui/dialog.tsx:102`, `min-h-0 flex-1 overflow-y-auto`) pattern; do NOT modify the shared primitive.
-- **FRO-460**: default lives at `ProjectSettings.tsx:163/271` (`?? false`) + `useProject.ts:49`; server gate `auth-worker/src/lib/aquifer/gate.ts` (default off). Consumed at `SearchDockPanel.tsx:156`, agent schema-card. Needs design (brainstorming): default-on for scripture projects vs. surface toggle on Bible-file detection.
+- **AQU-455**: `useRules.ts:69` `addRule` — sequential `handleCommit` loop (`RuleSuggestFromEditsDialog.tsx:137-142`) calls `addRule` per accepted rule, but each call closes over render-time `project`, so appends clobber (only last persists). Fix: batch-append (single `patchProject`) or read fresh state per append. Contain to `useRules.ts` + dialog.
+- **AQU-457**: `auth-worker/src/routes/users.ts:33` passes UNTRIMMED username to `lookupUserByUsername` (validation at :30 only checks trimmed-empty); `user-lookup.ts:22` `WHERE username = ?` is whitespace/case-sensitive (Neon). Trailing space → false 404. Fix: trim (and consider case-insensitive) server-side; add whitespace test.
+- **AQU-458**: `ExportDialog.tsx:501` RadioGroup `max-h-64` inside `DialogContent overflow-hidden` with no `DialogBody` scroll region → lower options clipped. Fix: adopt the existing `DialogBody` (`ui/dialog.tsx:102`, `min-h-0 flex-1 overflow-y-auto`) pattern; do NOT modify the shared primitive.
+- **AQU-460**: default lives at `ProjectSettings.tsx:163/271` (`?? false`) + `useProject.ts:49`; server gate `auth-worker/src/lib/aquifer/gate.ts` (default off). Consumed at `SearchDockPanel.tsx:156`, agent schema-card. Needs design (brainstorming): default-on for scripture projects vs. surface toggle on Bible-file detection.
 
 ## §M Merge log
-- 2026-07-01 · **🎉 PROMOTED FRO-460 (derive-on-read) → local main** `c251b54f3`→`1bb9b6a5d` (ff-only; swarm docs stashed/restored around ff). Gate: root tsc ✅ · vitest 393/3226 ×2 ✅ · auth-worker tsc ✅ + 492 ✅ · build ✅. Adversarial wf = PROMOTE; independent live-QA 4/4 (explicit-OFF respected ×2, no writes); display-race fixed+re-verified. **★ ALL 4 ISSUES CONVERGED ON MAIN.**
-- 2026-07-01 · **🎉 PROMOTED FRO-455+457+458 → local main** `4fb6e6dde`→`c251b54f3` (ff-only). Built fresh on live main tip (user cleaned their branding work first), merged the 3 verified branches, gate: root tsc ✅ · vitest 391/3213 ✅ · auth-worker tsc ✅ + 483 ✅ · build ✅ (8.63s). Main clean before+after. NOT pushed/deployed (no --deploy). FRO-460 EXCLUDED (broken persist-on-load race) → redesigning derive-on-read.
-- 2026-07-01 · WS C · FRO-458 · `swarm/fro-458` → integration `4a1081d63` (ff) · tsc ✅ · vitest deferred to combined gate · UI-QA pending · not yet on main
-- 2026-07-01 · WS B · FRO-457 · `swarm/fro-457` → integration (merge) · root tsc ✅ · auth-worker tsc ✅ + `npm test` 481/481 ✅ (incl 5 new) · service-layer fix also covers projects.ts/orgs.ts callers · UI-QA pending · not yet on main
-- 2026-07-01 · WS A · FRO-455 · `swarm/fro-455` → integration (merge) · root tsc ✅ · fix = await patchShared serializes D1 writes (agent disproved closure-clobber hunch) · UI-QA pending · not yet on main
+- 2026-07-01 · **🎉 PROMOTED AQU-460 (derive-on-read) → local main** `c251b54f3`→`1bb9b6a5d` (ff-only; swarm docs stashed/restored around ff). Gate: root tsc ✅ · vitest 393/3226 ×2 ✅ · auth-worker tsc ✅ + 492 ✅ · build ✅. Adversarial wf = PROMOTE; independent live-QA 4/4 (explicit-OFF respected ×2, no writes); display-race fixed+re-verified. **★ ALL 4 ISSUES CONVERGED ON MAIN.**
+- 2026-07-01 · **🎉 PROMOTED AQU-455+457+458 → local main** `4fb6e6dde`→`c251b54f3` (ff-only). Built fresh on live main tip (user cleaned their branding work first), merged the 3 verified branches, gate: root tsc ✅ · vitest 391/3213 ✅ · auth-worker tsc ✅ + 483 ✅ · build ✅ (8.63s). Main clean before+after. NOT pushed/deployed (no --deploy). AQU-460 EXCLUDED (broken persist-on-load race) → redesigning derive-on-read.
+- 2026-07-01 · WS C · AQU-458 · `swarm/fro-458` → integration `4a1081d63` (ff) · tsc ✅ · vitest deferred to combined gate · UI-QA pending · not yet on main
+- 2026-07-01 · WS B · AQU-457 · `swarm/fro-457` → integration (merge) · root tsc ✅ · auth-worker tsc ✅ + `npm test` 481/481 ✅ (incl 5 new) · service-layer fix also covers projects.ts/orgs.ts callers · UI-QA pending · not yet on main
+- 2026-07-01 · WS A · AQU-455 · `swarm/fro-455` → integration (merge) · root tsc ✅ · fix = await patchShared serializes D1 writes (agent disproved closure-clobber hunch) · UI-QA pending · not yet on main
 - 2026-07-01 · **COMBINED GATE on integration (all 3 wave-1)**: root `tsc -b` ✅ · root `vitest run` 391 files / 3211 tests ✅ · auth-worker tsc ✅ + 481 ✅ · `npm run build` ✅ (✓ built 8.82s).
-- 2026-07-01 · **ADVERSARIAL VERIFY** (wf 7 agents, no REFUTED): FRO-455 fix CONFIRMED correct but one new test VACUOUS (Rule 9) → finisher ab3e7f83 hardening test-only. FRO-457 fix correct but MEDIUM footgun: `LOWER(username) ORDER BY id LIMIT 1` can silently resolve WRONG account on case-collision (auth path) → finisher a52355d4 (exact-match-first, ambiguous→not-found, no migration). FRO-458 CONFIRMED both lenses → UI-QA only. **Fast-follow noted:** functional index `users(LOWER(username))` + optional `UNIQUE(LOWER(username))` (needs migration) — candidate new ticket, NOT this run.
-- 2026-07-01 · Hardening finishers dispatched into existing worktrees (fro-455, fro-457); re-gate + re-merge pending, then FRO-458 short-viewport UI-QA, then promote.
-- 2026-07-01 · WS B hardening · FRO-457 `a94b72281` → int (merge) · exact-first + ambiguous→404 · auth-worker tsc ✅ + 483 ✅ (2 new red-on-old). Spec edit STAGED-not-committed in aquilla-specs (reconcile at convergence).
-- 2026-07-01 · WS A hardening · FRO-455 `71444559c` → int (merge) · TEST-ONLY (useRules.ts byte-identical to fix) · new out-of-order-server outcome test red-on-old/green-on-fix; vacuous test renamed honestly.
+- 2026-07-01 · **ADVERSARIAL VERIFY** (wf 7 agents, no REFUTED): AQU-455 fix CONFIRMED correct but one new test VACUOUS (Rule 9) → finisher ab3e7f83 hardening test-only. AQU-457 fix correct but MEDIUM footgun: `LOWER(username) ORDER BY id LIMIT 1` can silently resolve WRONG account on case-collision (auth path) → finisher a52355d4 (exact-match-first, ambiguous→not-found, no migration). AQU-458 CONFIRMED both lenses → UI-QA only. **Fast-follow noted:** functional index `users(LOWER(username))` + optional `UNIQUE(LOWER(username))` (needs migration) — candidate new ticket, NOT this run.
+- 2026-07-01 · Hardening finishers dispatched into existing worktrees (fro-455, fro-457); re-gate + re-merge pending, then AQU-458 short-viewport UI-QA, then promote.
+- 2026-07-01 · WS B hardening · AQU-457 `a94b72281` → int (merge) · exact-first + ambiguous→404 · auth-worker tsc ✅ + 483 ✅ (2 new red-on-old). Spec edit STAGED-not-committed in aquilla-specs (reconcile at convergence).
+- 2026-07-01 · WS A hardening · AQU-455 `71444559c` → int (merge) · TEST-ONLY (useRules.ts byte-identical to fix) · new out-of-order-server outcome test red-on-old/green-on-fix; vacuous test renamed honestly.
 - 2026-07-01 · **FINAL COMBINED GATE on integration**: diff = 7 expected files only · root tsc ✅ · root vitest 391f/**3212** ✅ · auth-worker tsc ✅ + 483 ✅ · SPA build valid (only useRules.ts+ExportDialog.tsx are prod changes, covered by prior ✓ built). Remaining: live-UI QA singleton → rebuild → promote.
-- 2026-07-01 · **LIVE-UI QA (singleton, real dev stack @ isolated ports 5273/8888/8889)**: FRO-458 **PASS** (short/tablet/tall viewports; footer pinned; audio-by-character reachable; single scrollbar). FRO-457 **PASS** (`"bob "` + `"BOB"` resolve & add; nonexistent still rejected). FRO-455 **FAIL** — reproduced on real Postgres: accepted 3, server `settings.rules` kept only 2 after reload (pre-existing + last); 3 serialized PATCH 200s confirmed → payload not cumulative (stale-`project` fallback overwrites). Mock unit test gave FALSE GREEN. → FRO-455 reverted to Dispatched; re-fix agent a53b2ee4 dispatched with MANDATORY live-server proof (GET /settings shows all N after reload).
-- 2026-07-01 · **PROMOTION HELD**: main still @ base `77cd6abb7` but its WORKING TREE is DIRTY with the USER's active branding work (homepage/beta/case-study/index.html, vite-html-branding.ts, src/branding/*, new og/favicon PNGs) — disjoint from swarm changes but I will NOT merge into the user's dirty checkout (field rule: never touch their working changes). FRO-457+458 verified & ready; promote once main is clean (user commits/stashes) or user authorizes disjoint merge. Plan: promote all 3 together after FRO-455 re-fix passes.
-  - LESSON (memory-worthy): unit tests + adversarial code-review BOTH passed FRO-455 while the REAL stack failed — the mock didn't model patchProject/patch server-merge semantics. The "always drive the real UI" gate is what caught it.
-- 2026-07-01 · **FRO-455 RE-FIX + INDEPENDENT RE-QA PASS**: real root cause = AD-3 thin-client never persists project to IDB, so `patchProject`→undefined EVERY call → stale-`project` fallback overwrote. Fix = `latestRulesRef` in useRules.ts (no ProjectWorkspace touch). Merged `fbd362c00` → integration `ba342f6`. Independent re-QA: server `settings.rules` 2→5 after accepting 3 + reload, version 35→38, none dropped. Root tsc ✅ · vitest 391f/3213 ✅. **All 3 wave-1 fixes now independently live-verified (455/457/458).**
-- 2026-07-01 · Wave 2 FRO-460 dispatched EARLY (a6c85327) — now file-disjoint from wave-1 (455 stayed in useRules). Awaiting its landing + a final centralized UI-QA, then promote all 4 together (pending clean main).
+- 2026-07-01 · **LIVE-UI QA (singleton, real dev stack @ isolated ports 5273/8888/8889)**: AQU-458 **PASS** (short/tablet/tall viewports; footer pinned; audio-by-character reachable; single scrollbar). AQU-457 **PASS** (`"bob "` + `"BOB"` resolve & add; nonexistent still rejected). AQU-455 **FAIL** — reproduced on real Postgres: accepted 3, server `settings.rules` kept only 2 after reload (pre-existing + last); 3 serialized PATCH 200s confirmed → payload not cumulative (stale-`project` fallback overwrites). Mock unit test gave FALSE GREEN. → AQU-455 reverted to Dispatched; re-fix agent a53b2ee4 dispatched with MANDATORY live-server proof (GET /settings shows all N after reload).
+- 2026-07-01 · **PROMOTION HELD**: main still @ base `77cd6abb7` but its WORKING TREE is DIRTY with the USER's active branding work (homepage/beta/case-study/index.html, vite-html-branding.ts, src/branding/*, new og/favicon PNGs) — disjoint from swarm changes but I will NOT merge into the user's dirty checkout (field rule: never touch their working changes). AQU-457+458 verified & ready; promote once main is clean (user commits/stashes) or user authorizes disjoint merge. Plan: promote all 3 together after AQU-455 re-fix passes.
+  - LESSON (memory-worthy): unit tests + adversarial code-review BOTH passed AQU-455 while the REAL stack failed — the mock didn't model patchProject/patch server-merge semantics. The "always drive the real UI" gate is what caught it.
+- 2026-07-01 · **AQU-455 RE-FIX + INDEPENDENT RE-QA PASS**: real root cause = AD-3 thin-client never persists project to IDB, so `patchProject`→undefined EVERY call → stale-`project` fallback overwrote. Fix = `latestRulesRef` in useRules.ts (no ProjectWorkspace touch). Merged `fbd362c00` → integration `ba342f6`. Independent re-QA: server `settings.rules` 2→5 after accepting 3 + reload, version 35→38, none dropped. Root tsc ✅ · vitest 391f/3213 ✅. **All 3 wave-1 fixes now independently live-verified (455/457/458).**
+- 2026-07-01 · Wave 2 AQU-460 dispatched EARLY (a6c85327) — now file-disjoint from wave-1 (455 stayed in useRules). Awaiting its landing + a final centralized UI-QA, then promote all 4 together (pending clean main).
 
 ---
 
@@ -168,7 +168,7 @@ Status: `in-flight | review | merged-integration | merged-main | blocked`
 > **This block is the active goal.** Everything below is reference-only from prior swarms.
 > Spec (read first): `docs/superpowers/specs/2026-06-13-omnivoice-tts-design.md`.
 > Driver: user approved the design, then `/loop 5m` + `/swarm-orchestration`.
-> Note: this work plausibly unblocks the parked TTS-demo items (FRO-173 cell_audio empty, FRO-246 TTS demo asset).
+> Note: this work plausibly unblocks the parked TTS-demo items (AQU-173 cell_audio empty, AQU-246 TTS demo asset).
 
 ## §0 STOP checklist
 - [ ] `infra/modal/omnivoice.py` authored (FastAPI `/synthesize` + `/health`, `X-Auth-Token`, `X-Audio-Duration-Seconds` header; mirrors `seed_vc.py`)
@@ -231,11 +231,11 @@ Status: `in-flight | review | merged-integration | merged-main | blocked`
 - [ ] Gaps traced in `docs/swarm/TRACES.md`.
 
 ## §EXCLUDED (PD7)
-- 14 issues already merged-on-main, reconciled → Dev Verification Needed in Linear: FRO-324/305/300/301/302/306/257/258/304/312/221/218/169/179.
-- FRO-173 — real data gap (cell_audio empty), not a code bug; investigation on main d675e63. Linear-commented, left Todo for human.
-- FRO-246 — needs a new TTS demo asset (content decision). Linear-commented.
-- FRO-227/224 — Dispatched homepage-claims verification owned by a prior dispatch; not reclaimed.
-- FRO-209 — likely fixed by FRO-270 (/reset-password shipped in UX-audit swarm); UI-QA agent verifies, then dup/close.
+- 14 issues already merged-on-main, reconciled → Dev Verification Needed in Linear: AQU-324/305/300/301/302/306/257/258/304/312/221/218/169/179.
+- AQU-173 — real data gap (cell_audio empty), not a code bug; investigation on main d675e63. Linear-commented, left Todo for human.
+- AQU-246 — needs a new TTS demo asset (content decision). Linear-commented.
+- AQU-227/224 — Dispatched homepage-claims verification owned by a prior dispatch; not reclaimed.
+- AQU-209 — likely fixed by AQU-270 (/reset-password shipped in UX-audit swarm); UI-QA agent verifies, then dup/close.
 
 ## §1 Operating model (PD7)
 - Integration `swarm/pd7-integration` (worktree `.worktrees/pd7-integration`, off main `412f800`, node_modules ×3 symlinked).
@@ -262,29 +262,29 @@ Status: `in-flight | review | merged-integration | merged-main | blocked`
 | O | 183 | Terminology spec gaps (scope: decompose first) | Med | — | — | 3 | needs decomposition |
 
 ## §M Merge log (PD7)
-- 2026-06-10 · integration `swarm/pd7-integration` created off main `412f800`. Reconciliation DONE: 14 issues → Dev Verification Needed w/ commit-ref comments (FRO-257 comment failed — issue archived; status updated). FRO-173/246 commented, left Todo.
+- 2026-06-10 · integration `swarm/pd7-integration` created off main `412f800`. Reconciliation DONE: 14 issues → Dev Verification Needed w/ commit-ref comments (AQU-257 comment failed — issue archived; status updated). AQU-173/246 commented, left Todo.
 - 2026-06-10 · Wave 1 CLAIMED (→Dispatched) + dispatched, 6 sonnet agents on manual worktrees off integration tip 412f800: A invites(323+321+322), B sidebar+chat(308+320), C import-preview(310), D footnotes(317), E audio-takes(319), F txt-export(313).
-- 2026-06-10 · **E (FRO-319) MERGED** → integration 5b8efbe (orchestrator fixed 1 unused-var tsc error in test). tsc 0 · full vitest GREEN · FRO-319 Fixed by agent.
-- 2026-06-10 · ⚠️ API-522 outage killed agents A/B/C/D/F mid-flight. F had committed 9d1c0ab — orchestrator verified (tsc 0, export tests 68/68), **F (FRO-313) MERGED** → integration, FRO-313 → Fixed + comment. A/B/C/D respawned as FINISHERS into the same worktrees (A effectively fresh).
-- 2026-06-10 · **C (FRO-310) MERGED** → integration (finisher completed; FRO-310 Fixed by agent). Orchestrator fixed 3 FRO-287 collision tests broken by the new preview step (mock parseFile + walk preview-confirm) @ 5e087d7+amend.
-- 2026-06-10 · **B (FRO-308+320) MERGED** → integration 2eba17a (finisher; AppShell back-compat `sidebar` alias). FRO-308/320 → Fixed by orchestrator (320's comment blocked by permission classifier — status set, no comment).
+- 2026-06-10 · **E (AQU-319) MERGED** → integration 5b8efbe (orchestrator fixed 1 unused-var tsc error in test). tsc 0 · full vitest GREEN · AQU-319 Fixed by agent.
+- 2026-06-10 · ⚠️ API-522 outage killed agents A/B/C/D/F mid-flight. F had committed 9d1c0ab — orchestrator verified (tsc 0, export tests 68/68), **F (AQU-313) MERGED** → integration, AQU-313 → Fixed + comment. A/B/C/D respawned as FINISHERS into the same worktrees (A effectively fresh).
+- 2026-06-10 · **C (AQU-310) MERGED** → integration (finisher completed; AQU-310 Fixed by agent). Orchestrator fixed 3 AQU-287 collision tests broken by the new preview step (mock parseFile + walk preview-confirm) @ 5e087d7+amend.
+- 2026-06-10 · **B (AQU-308+320) MERGED** → integration 2eba17a (finisher; AppShell back-compat `sidebar` alias). AQU-308/320 → Fixed by orchestrator (320's comment blocked by permission classifier — status set, no comment).
 - 2026-06-10 · **★ INTEGRATION GREEN post-wave-1-partial: tsc 0 · vitest 2658/2658.** Footnotes finisher died 2× more (API flaky) — finisher #3 dispatched with commit-early discipline. Invites agent still in flight.
 - 2026-06-10 · **Wave 2 dispatched** (5 sonnet agents, worktrees off live integration tip): G chat(303), H importers(316+314+315), J search(309), K metrics(311). L report-problem(307) deferred until a slot frees. In-flight total 6.
-- 2026-06-10 · **G (FRO-303) MERGED** (streaming pre-existed; thread history via localStorage; cell context confirmed) — Fixed by agent. **L (FRO-307) dispatched** into freed slot.
-- 2026-06-10 · **D (FRO-317) MERGED** (finisher #3 16c9d76; orchestrator did the ProjectWorkspace wiring: useFootnotesPreference → ViewSettingsMenu + EditorTable). USFM edit-safe; DOCX read-only.
-- 2026-06-10 · **J (FRO-309) MERGED** 6203563 (click-to-jump + SearchResultsView expand-all) — Fixed by agent.
-- 2026-06-10 · **A (FRO-323+321+322) MERGED** 0f03b8b. 323: server path proven correct w/ round-trip test, real-world cause = role-floor/stale-hook, "park" typo absent; 321: scoped /users/search?scoped=1 + /projects?minRole=600; 322: mode toggle + honest "Add to projects" label (full email-batch unification traced). Spec updated in aquilla-specs. All three Fixed by agent.
+- 2026-06-10 · **G (AQU-303) MERGED** (streaming pre-existed; thread history via localStorage; cell context confirmed) — Fixed by agent. **L (AQU-307) dispatched** into freed slot.
+- 2026-06-10 · **D (AQU-317) MERGED** (finisher #3 16c9d76; orchestrator did the ProjectWorkspace wiring: useFootnotesPreference → ViewSettingsMenu + EditorTable). USFM edit-safe; DOCX read-only.
+- 2026-06-10 · **J (AQU-309) MERGED** 6203563 (click-to-jump + SearchResultsView expand-all) — Fixed by agent.
+- 2026-06-10 · **A (AQU-323+321+322) MERGED** 0f03b8b. 323: server path proven correct w/ round-trip test, real-world cause = role-floor/stale-hook, "park" typo absent; 321: scoped /users/search?scoped=1 + /projects?minRole=600; 322: mode toggle + honest "Add to projects" label (full email-batch unification traced). Spec updated in aquilla-specs. All three Fixed by agent.
 - 2026-06-10 · **★ GATE GREEN: tsc 0 · vitest 2685/2685 · auth-worker tsc 0 + 266/266.**
 - 2026-06-10 · **Wave 3 dispatched:** M /projects-refactor(259), N detach-AD9(193). In flight: H importers, K metrics, L report, M, N (5).
-- 2026-06-10 · **K (FRO-311) MERGED** 0e5e301 (NED post-edit metrics, derive-on-read off target.cell.commit ai_suggestion provenance; Settings → AI Metrics). **L (FRO-307) MERGED** 89fa42f (Report-a-problem → PostHog + replay URL; consent-off honest copy path; "anonymous usage data"→"usage data").
-- 2026-06-10 · **H (FRO-316+314+315) MERGED** 78a610d. ⚠️ ORCHESTRATOR INTERVENTION: FRO-314's apply path wrote cast names into TARGET TEXT via real commits (corruption). Disabled at e073ab7 (template+preview kept); **FRO-314 reopened → Todo** w/ unblocker comment (needs cell.label.set-style event). 316/315 sound (zero-dep XLSX via DecompressionStream; paired import reuses FRO-191 matcher).
-- 2026-06-10 · **M (FRO-259) MERGED** 34396d6 (Linear-style /projects rows + filter/sort; created/updated cols traced — list endpoint lacks fields). TeamDetail "pre-existing fail" claim NOT reproduced on integration (suite green).
-- 2026-06-10 · **FRO-183 DECOMPOSED** → children FRO-327/328/329 (v1 trio, agent dispatched on swarm/pd7-terminology) + FRO-330 (data-model DECISION for Ryder, Todo). Deferred: verdict pipeline, dictionaries, org subscriptions.
-- 2026-06-10 · **N (FRO-193) MERGED** 7b5ba29 (SourceLinkSection + typed-DETACH confirm; project.link-source event added additively to sync-worker; snapshot burst via pre-existing auth-worker snapshotSourceCells; markers clear by pointer-match). Gates: tsc 0 · sync-worker 585/585 · auth-worker 266/266.
+- 2026-06-10 · **K (AQU-311) MERGED** 0e5e301 (NED post-edit metrics, derive-on-read off target.cell.commit ai_suggestion provenance; Settings → AI Metrics). **L (AQU-307) MERGED** 89fa42f (Report-a-problem → PostHog + replay URL; consent-off honest copy path; "anonymous usage data"→"usage data").
+- 2026-06-10 · **H (AQU-316+314+315) MERGED** 78a610d. ⚠️ ORCHESTRATOR INTERVENTION: AQU-314's apply path wrote cast names into TARGET TEXT via real commits (corruption). Disabled at e073ab7 (template+preview kept); **AQU-314 reopened → Todo** w/ unblocker comment (needs cell.label.set-style event). 316/315 sound (zero-dep XLSX via DecompressionStream; paired import reuses AQU-191 matcher).
+- 2026-06-10 · **M (AQU-259) MERGED** 34396d6 (Linear-style /projects rows + filter/sort; created/updated cols traced — list endpoint lacks fields). TeamDetail "pre-existing fail" claim NOT reproduced on integration (suite green).
+- 2026-06-10 · **AQU-183 DECOMPOSED** → children AQU-327/328/329 (v1 trio, agent dispatched on swarm/pd7-terminology) + AQU-330 (data-model DECISION for Ryder, Todo). Deferred: verdict pipeline, dictionaries, org subscriptions.
+- 2026-06-10 · **N (AQU-193) MERGED** 7b5ba29 (SourceLinkSection + typed-DETACH confirm; project.link-source event added additively to sync-worker; snapshot burst via pre-existing auth-worker snapshotSourceCells; markers clear by pointer-match). Gates: tsc 0 · sync-worker 585/585 · auth-worker 266/266.
 - 2026-06-10 · **★ npm run build PASS** on integration (pre-detach tip).
-- 2026-06-10 · **O (FRO-327/328/329)**: agent found all three ALREADY implemented on the branch base (prior swarm work) — verified green, issues → Fixed. NOTE: review-queue role gate is project_lead(500) vs spec's maintainer(600); FRO-330 = data-model decision for Ryder.
-- 2026-06-10 · **Live-UI QA (singleton, 2 attempts — first killed): ALL 17 CHECKS PASS** → UI-QA-PUNCHLIST.md §PD7. Env-only caveats: local sync-worker CORS/import-500, chat needs OPENROUTER key, footnote render needs a \f-bearing USFM. FRO-209 verified: /reset-password renders (fixed by FRO-270).
-- 2026-06-10 · **★★ PROMOTED TO MAIN (ff-only): 412f800 → 5dea6c6** (+6845/−229, 68 files). Gates at promotion: tsc 0 · vitest 2736/2736 · sync-worker 585/585 · auth-worker 266/266 · build PASS · UI-QA GO. **PD7 SWARM CONVERGED.** Open remainders: FRO-314 (reopened, needs cell-label event), FRO-330 (decision), FRO-183 umbrella, FRO-173/246 (human), FRO-227/224 (prior dispatch).
+- 2026-06-10 · **O (AQU-327/328/329)**: agent found all three ALREADY implemented on the branch base (prior swarm work) — verified green, issues → Fixed. NOTE: review-queue role gate is project_lead(500) vs spec's maintainer(600); AQU-330 = data-model decision for Ryder.
+- 2026-06-10 · **Live-UI QA (singleton, 2 attempts — first killed): ALL 17 CHECKS PASS** → UI-QA-PUNCHLIST.md §PD7. Env-only caveats: local sync-worker CORS/import-500, chat needs OPENROUTER key, footnote render needs a \f-bearing USFM. AQU-209 verified: /reset-password renders (fixed by AQU-270).
+- 2026-06-10 · **★★ PROMOTED TO MAIN (ff-only): 412f800 → 5dea6c6** (+6845/−229, 68 files). Gates at promotion: tsc 0 · vitest 2736/2736 · sync-worker 585/585 · auth-worker 266/266 · build PASS · UI-QA GO. **PD7 SWARM CONVERGED.** Open remainders: AQU-314 (reopened, needs cell-label event), AQU-330 (decision), AQU-183 umbrella, AQU-173/246 (human), AQU-227/224 (prior dispatch).
 
 ---
 
@@ -300,8 +300,8 @@ Status: `in-flight | review | merged-integration | merged-main | blocked`
 - [ ] Remaining gaps traced in `docs/swarm/TRACES.md`.
 
 ## §EXCLUDED
-- FRO-257/FRO-258 — wave 2 (file overlap with wave 1; combined into one agent)
-- FRO-304/FRO-312 — wave 2 (file overlap with FRO-305 on ProjectSettings.tsx; combined into one agent)
+- AQU-257/AQU-258 — wave 2 (file overlap with wave 1; combined into one agent)
+- AQU-304/AQU-312 — wave 2 (file overlap with AQU-305 on ProjectSettings.tsx; combined into one agent)
 
 ## §1 Operating model
 - Integration `swarm/qol-integration` (worktree `.worktrees/qol-integration`, off main `89e87e1`, node_modules symlinked).
@@ -324,7 +324,7 @@ Status: `in-flight | review | merged-integration | merged-main | blocked`
 
 ## §M Merge log
 - 2026-06-11 · integration `swarm/qol-integration` created off main `89e87e1`. Wave 1 (6 agents) dispatched.
-- 2026-06-11 · **Wave 1 ALL MERGED** → integration. FRO-324 (FF), FRO-305, FRO-300, FRO-301 (orchestrator finished commit after agent timeout), FRO-302 (new ImportFilesStep), FRO-306. **Gate: tsc 0 · vitest 2640/2640 · all green.** Wave 2 dispatched: FRO-257+258 (modal overflow), FRO-304+312 (AI config consolidation).
+- 2026-06-11 · **Wave 1 ALL MERGED** → integration. AQU-324 (FF), AQU-305, AQU-300, AQU-301 (orchestrator finished commit after agent timeout), AQU-302 (new ImportFilesStep), AQU-306. **Gate: tsc 0 · vitest 2640/2640 · all green.** Wave 2 dispatched: AQU-257+258 (modal overflow), AQU-304+312 (AI config consolidation).
 
 ---
 
@@ -340,14 +340,14 @@ Status: `in-flight | review | merged-integration | merged-main | blocked`
 - [ ] Each fix live-verified on the real dev stack before its issue moves to Fixed; spec reconciled.
 - [ ] Remaining gaps traced in `docs/swarm/TRACES.md`.
 
-## §EXCLUDED — FRO-147 (`ProjectCreateDialog.tsx` DIRTY in main — forbidden path), FRO-146 (staging, user), FRO-145 (archived junk).
+## §EXCLUDED — AQU-147 (`ProjectCreateDialog.tsx` DIRTY in main — forbidden path), AQU-146 (staging, user), AQU-145 (archived junk).
 
 ## §1 Operating model
 - Integration `swarm/issue-integration` (worktree `.worktrees/issue-integration`, off main `bfacb67`, node_modules + auth-worker/node_modules + sync-worker/node_modules symlinked).
 - Each agent → **manual** worktree off the live integration tip (NOT isolation:worktree — stale-base trap). sonnet. Commits its branch referencing FRO-###, does own Linear (assign me + fix comment), spec reconcile, **NEVER pushes/deploys/changes issue status**. Worker-touching worktrees MUST symlink auth-worker + sync-worker node_modules.
 - **Live-UI verification centralized** (one dev stack :5173): agents leave SWARM-TODO; a single UI-QA agent confirms each batch, then orchestrator moves the issue → Fixed.
 - Merge: branch → integration → verify → log §M. Promote integration → main (ff) only when green AND main clean apart from the protected file.
-- ⚠️ Migrations: 0028 CLAIMED (FRO-142). Next free = **0029**.
+- ⚠️ Migrations: 0028 CLAIMED (AQU-142). Next free = **0029**.
 - ⚠️ BASELINE RED (pre-existing, NOT swarm): `src/components/org/AssignedToMe.test.tsx` 2 fails (mock-export). Present at `bfacb67`. Don't attribute/block on it.
 
 ## §3 Workstream registry
@@ -367,24 +367,24 @@ Status: `in-flight | review | merged-integration | merged-main | blocked`
 | 144 | E2E org-level business logic tests | High | swarm/fro-144 | in-flight (a4d5758a0357baa03) |
 
 **Queue status: ENTIRE Todo queue dispatched.** Done/merged: 135,140,141,136,142,134,137,138. In-flight: 139,144. Held: 143. Excluded (done by other actor): 147,146; junk: 145.
-**PENDING ORCHESTRATOR STEPS:** (1) ~~merge 139+144~~ DONE; (2) live-UI QA via Postgres dev stack for the batch SWARM-TODOs; (3) promote integration → `main` branch (clean ff off `bfacb67`; other actor's `ryder/fro-146-staging-subdomain`@883ff20 lands separately, no overlap); (4) move live-verified issues → Fixed; (5) surface FRO-143 decision + FRO-138 OPQs to user.
+**PENDING ORCHESTRATOR STEPS:** (1) ~~merge 139+144~~ DONE; (2) live-UI QA via Postgres dev stack for the batch SWARM-TODOs; (3) promote integration → `main` branch (clean ff off `bfacb67`; other actor's `ryder/fro-146-staging-subdomain`@883ff20 lands separately, no overlap); (4) move live-verified issues → Fixed; (5) surface AQU-143 decision + AQU-138 OPQs to user.
 
 ## §FINAL IN-SESSION STATE (2026-06-04 ~17:25)
-- **ALL 10 swarm issues merged green → `swarm/issue-integration`** (135,140,141,136,142,134,137,138,139,144). FRO-143 held (premise false). Final gate: root tsc 0 · vitest 1514/1516 (2 baseline AssignedToMe reds) · auth-worker tsc 0 + 122/122 · sync-worker 400/400 · build PASS (e2e specs tsc-clean + discovered by `--list`, NOT run).
+- **ALL 10 swarm issues merged green → `swarm/issue-integration`** (135,140,141,136,142,134,137,138,139,144). AQU-143 held (premise false). Final gate: root tsc 0 · vitest 1514/1516 (2 baseline AssignedToMe reds) · auth-worker tsc 0 + 122/122 · sync-worker 400/400 · build PASS (e2e specs tsc-clean + discovered by `--list`, NOT run).
 - **`swarm/issue-integration` is a real branch — it persists after session close.** All work is recoverable from it; NOT stranded in worktrees.
-- Per user `/loop` instruction: **all 11 dispatched issues moved Todo→`Dispatched` in Linear** (134,135,136,137,138,139,140,141,142,143,144) so the recurring loop only picks fresh Todo work. `Todo` queue now empty (FRO-145 = archived junk).
-- **STILL TODO (human/next-run):** (a) live-UI QA the batch on the Postgres dev stack + run `npm run test:e2e -- e2e/specs/orgs/org-access-lifecycle.spec.ts`; (b) promote `swarm/issue-integration` → `main`; (c) move verified issues Dispatched→Fixed; (d) FRO-143 decision; (e) FRO-138's 4 OPQs (org-viewer-sees-all default, etc.).
+- Per user `/loop` instruction: **all 11 dispatched issues moved Todo→`Dispatched` in Linear** (134,135,136,137,138,139,140,141,142,143,144) so the recurring loop only picks fresh Todo work. `Todo` queue now empty (AQU-145 = archived junk).
+- **STILL TODO (human/next-run):** (a) live-UI QA the batch on the Postgres dev stack + run `npm run test:e2e -- e2e/specs/orgs/org-access-lifecycle.spec.ts`; (b) promote `swarm/issue-integration` → `main`; (c) move verified issues Dispatched→Fixed; (d) AQU-143 decision; (e) AQU-138's 4 OPQs (org-viewer-sees-all default, etc.).
 - User switched to a **60-min CLOUD schedule** (must clone BOTH `codex-web-app` + `~/frontierrnd/aquilla-specs`) running: "whenever an issue is finished, revisit Linear, work anything still Todo; mark started-but-unfinished as Dispatched."
 
 ## §M Merge log
-- 2026-06-04 · integration `swarm/issue-integration` off main `bfacb67`. FRO-147 protected.
-- 2026-06-04 · **MERGED green → integration:** FRO-141 (OrgSwitcher scroll), FRO-140 (Aquilla rename, 5 files), FRO-136 (ProjectOverview show-all +test), FRO-142 (group toggle: migration `0028_groups_is_internal` + schema + auth-worker org-permissions + TeamsList +4 tests; default Internal-only), FRO-134 (auth.ts JWT-sub → canonical username, TRUE BUG +test), FRO-137 (matrix: stable useCallback deps + React.memo rows, +5 tests). Gate after FRO-137: **root tsc 0 · vitest 1510/1512 · auth-worker tsc 0 + 94/94** (the only reds = 2 baseline AssignedToMe).
-- 2026-06-04 · **FRO-143 HELD (review, NOT merged).** No version-pinning portal exists in codex-web-app OR codex-groups-admin; issue premise ("portal reachable via URL") false. Agent added a build-info "Versions" tab to AdminConsole (green) = version-info *discoverability*, not *pinning*. Branch preserved; awaiting user decision.
-- 2026-06-04 · FRO-146 actor wired staging deploy into `issue.md` Step 3 (`dev.aquilla.app`, `pnpm run deploy:aquilla:staging`). `--deploy` available once FRO-146 lands.
-- 2026-06-04 · **FRO-135 merged** → integration (sync-worker only: defer O(N²) per-cell file-counter recompute to once-per-chunk — the REAL cause of import-stuck-0% over Hyperdrive/PG, SQL dialect was already ported). **root tsc 0 · sync-worker npm test 400/400 · `npm run build` PASS.** ⚠️ sync-worker `tsc --noEmit` shows **60 PRE-EXISTING errors in `__tests__/` files** (CellRow not assignable to Record, node: module resolution) — CONFIRMED identical on `main` branch `bfacb67`, NOT swarm-introduced (from the recent D1→PG migration). Real gate = vitest, green. Traced as separate debt.
+- 2026-06-04 · integration `swarm/issue-integration` off main `bfacb67`. AQU-147 protected.
+- 2026-06-04 · **MERGED green → integration:** AQU-141 (OrgSwitcher scroll), AQU-140 (Aquilla rename, 5 files), AQU-136 (ProjectOverview show-all +test), AQU-142 (group toggle: migration `0028_groups_is_internal` + schema + auth-worker org-permissions + TeamsList +4 tests; default Internal-only), AQU-134 (auth.ts JWT-sub → canonical username, TRUE BUG +test), AQU-137 (matrix: stable useCallback deps + React.memo rows, +5 tests). Gate after AQU-137: **root tsc 0 · vitest 1510/1512 · auth-worker tsc 0 + 94/94** (the only reds = 2 baseline AssignedToMe).
+- 2026-06-04 · **AQU-143 HELD (review, NOT merged).** No version-pinning portal exists in codex-web-app OR codex-groups-admin; issue premise ("portal reachable via URL") false. Agent added a build-info "Versions" tab to AdminConsole (green) = version-info *discoverability*, not *pinning*. Branch preserved; awaiting user decision.
+- 2026-06-04 · AQU-146 actor wired staging deploy into `issue.md` Step 3 (`dev.aquilla.app`, `pnpm run deploy:aquilla:staging`). `--deploy` available once AQU-146 lands.
+- 2026-06-04 · **AQU-135 merged** → integration (sync-worker only: defer O(N²) per-cell file-counter recompute to once-per-chunk — the REAL cause of import-stuck-0% over Hyperdrive/PG, SQL dialect was already ported). **root tsc 0 · sync-worker npm test 400/400 · `npm run build` PASS.** ⚠️ sync-worker `tsc --noEmit` shows **60 PRE-EXISTING errors in `__tests__/` files** (CellRow not assignable to Record, node: module resolution) — CONFIRMED identical on `main` branch `bfacb67`, NOT swarm-introduced (from the recent D1→PG migration). Real gate = vitest, green. Traced as separate debt.
 - 2026-06-04 · **★ AUTOMATED GATE GREEN for the 7-issue batch** (135,140,141,136,142,134,137): root tsc 0 · vitest 1510/1512 (2 baseline AssignedToMe reds) · auth-worker tsc 0 + 94/94 · sync-worker test 400/400 · build PASS.
-- 2026-06-04 · **TOPOLOGY CLARIFIED:** `main` BRANCH = `bfacb67` (integration is correctly based on it; clean ff). The main *working dir* is checked out on **`ryder/fro-146-staging-subdomain`** @ `883ff20` (other actor's commits: FRO-146 staging-on-Neon, FRO-147 dialog redesign, dev-stack managed-local-Postgres). **Zero file overlap** with integration (`comm -12` empty) → conflict-free whenever that branch lands on main. ⇒ **FRO-147 + FRO-146 are DONE by the other actor.** dev-stack now boots Postgres for `pnpm dev` (unblocks live-UI QA).
-- 2026-06-04 · **FRO-138 committed** `swarm/fro-138`@`12230b0` ("lock permission semantics with 34 integration tests") — awaiting full agent completion before merge.
+- 2026-06-04 · **TOPOLOGY CLARIFIED:** `main` BRANCH = `bfacb67` (integration is correctly based on it; clean ff). The main *working dir* is checked out on **`ryder/fro-146-staging-subdomain`** @ `883ff20` (other actor's commits: AQU-146 staging-on-Neon, AQU-147 dialog redesign, dev-stack managed-local-Postgres). **Zero file overlap** with integration (`comm -12` empty) → conflict-free whenever that branch lands on main. ⇒ **AQU-147 + AQU-146 are DONE by the other actor.** dev-stack now boots Postgres for `pnpm dev` (unblocks live-UI QA).
+- 2026-06-04 · **AQU-138 committed** `swarm/fro-138`@`12230b0` ("lock permission semantics with 34 integration tests") — awaiting full agent completion before merge.
 - ⚠️ NOTE: this top block was once stripped by a linter/user edit and restored. If it goes missing again, the merge log here is the recovery source.
 
 ---

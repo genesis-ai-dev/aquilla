@@ -9,7 +9,7 @@ import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 const STORAGE_KEY = "org:active"
 const ALL_ORGS_VALUE = "all"
 
-/** FRO-473: an org the caller can reach only via a project-level grant —
+/** AQU-473: an org the caller can reach only via a project-level grant —
  *  not an org membership. Surfaced in the org switcher tagged "Guest". */
 export interface GuestOrg {
   id: number
@@ -76,7 +76,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { void refresh() }, [refresh])
 
-  // FRO-473: derive guest orgs (accessible-project orgs the caller isn't a
+  // AQU-473: derive guest orgs (accessible-project orgs the caller isn't a
   // member of) so the org switcher can surface them tagged "Guest". Race-
   // guarded like the other org-scoped effects in this file/hooks.
   const refreshGuestOrgs = useCallback(async (): Promise<void> => {

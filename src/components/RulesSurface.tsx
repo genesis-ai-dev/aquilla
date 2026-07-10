@@ -1,5 +1,5 @@
 /**
- * RulesSurface — in-shell Rules view for FRO-194.
+ * RulesSurface — in-shell Rules view for AQU-194.
  *
  * Renders INSIDE the ProjectWorkspace AppShell as the `main` content area.
  * The shell (sidebar, top bar, status bar) stays mounted at all times;

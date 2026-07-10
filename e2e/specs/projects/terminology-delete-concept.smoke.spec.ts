@@ -6,7 +6,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *
  * ConceptRow.tsx renders a "Delete concept <source>" button
  * (aria-label=`Delete concept ${concept.sourceTerm}`) next to the edit pencil.
- * FRO-291: clicking it opens a ConfirmActionDialog — the delete only fires
+ * AQU-291: clicking it opens a ConfirmActionDialog — the delete only fires
  * after ticking the "I understand…" checkbox and clicking "Delete concept".
  *
  * This spec:
@@ -52,7 +52,7 @@ test("terminology delete concept removes it from the list", async ({ alice }) =>
   await expect(deleteBtn).toBeVisible({ timeout: 3_000 })
   await deleteBtn.click()
 
-  // FRO-291: deletion now requires a checkbox-confirm dialog
+  // AQU-291: deletion now requires a checkbox-confirm dialog
   // (ConfirmActionDialog). Tick the acknowledgement (Base UI checkbox —
   // click its wrapping label text) and confirm.
   const confirmDialog = alice.getByRole("dialog")

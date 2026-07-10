@@ -36,12 +36,12 @@ interface Props {
   onSelectFile: (fileId: string, opts?: { sectionLabel?: string }) => void
   onRename: (fileId: string, newName: string) => void
   onMove: (fileId: string) => void
-  /** FRO-271: Optional — pass undefined to hide delete for roles below project_lead (500). */
+  /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead (500). */
   onDelete?: (fileId: string) => void
   onApplySuggestion?: (fileId: string) => void
   onRenameCorpus?: (oldMarker: string, newMarker: string) => void
   /**
-   * FRO-253 (a fix): whether org policy allows export. When false, the
+   * AQU-253 (a fix): whether org policy allows export. When false, the
    * per-file export menu items are hidden so dashboard affordances match
    * the workspace. Defaults to true (no gate) for callers that haven't
    * wired up org settings.
@@ -231,7 +231,7 @@ export function ExpandableFileList({
                               onSectionClick={(label) => {
                                 if (file.id !== activeFileId) {
                                   onSelectFile(file.id, { sectionLabel: label })
-                                  // FRO-250/254: stamp the fileId so ScrollToGroupHandler
+                                  // AQU-250/254: stamp the fileId so ScrollToGroupHandler
                                   // skips this request if cells still belong to the OLD file.
                                   setTimeout(() => requestScrollToSection(label, file.id), 100)
                                 } else {
@@ -253,7 +253,7 @@ export function ExpandableFileList({
       </div>
       {menu && (() => {
         const menuFile = files.find((f) => f.id === menu.fileId)
-        // FRO-253 (a fix): also gate on org policy, not just file type.
+        // AQU-253 (a fix): also gate on org policy, not just file type.
         const canExportFile = !!menuFile && EXPORTABLE_FILE_TYPES.has(menuFile.type) && canExportByOrgPolicy
         return (
           <FileActionMenu

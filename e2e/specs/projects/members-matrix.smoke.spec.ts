@@ -8,7 +8,7 @@ import { test, expect } from "../../helpers/multi-user"
  *   - MembersPanel for org role management
  *   - MemberAccessRow list for per-project access drill-down
  *
- * The Matrix tab was removed (FRO-218); project access is via expandable rows.
+ * The Matrix tab was removed (AQU-218); project access is via expandable rows.
  */
 test("members page renders roster with expandable project access", async ({ alice }) => {
   await alice.goto("/members")

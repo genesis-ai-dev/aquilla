@@ -1,5 +1,5 @@
-// FRO-477: second visual tone for inherited (ancestor-chain) staleness,
-// distinct from the existing amber direct-stale badge (FRO-476/AD-9).
+// AQU-477: second visual tone for inherited (ancestor-chain) staleness,
+// distinct from the existing amber direct-stale badge (AQU-476/AD-9).
 
 import { describe, it, expect } from "vitest"
 import { render, screen } from "@testing-library/react"

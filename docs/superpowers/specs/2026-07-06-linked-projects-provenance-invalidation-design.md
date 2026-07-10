@@ -7,7 +7,7 @@ drivers: unfoldingWord (git-based upstream), LangQuest (batch/quest invalidation
 **Builds on:** AD-9 (`projects.source_project_id`, `cells.source_event_id` staleness pin,
 `stale-source-route.ts`), the link/detach routes in `auth-worker/src/routes/source-linking.ts`,
 and the template/clone-vs-live sketch in
-`2026-06-24-multimedia-timeline-file-design.md` §6–§7 (Linear: FRO-440).
+`2026-06-24-multimedia-timeline-file-design.md` §6–§7 (Linear: AQU-440).
 
 ---
 
@@ -78,7 +78,7 @@ lifecycle than source rows:
   its true frontier.
 
 **Clone representation.** A clone **keeps** `source_project_id` set, with
-`source_link_mode = 'clone'` — the FRO-440 graph needs the edge. Every consumer of the link
+`source_link_mode = 'clone'` — the AQU-440 graph needs the edge. Every consumer of the link
 must therefore check the mode: the stale-source route, the mirror sync, and the push hook all
 **short-circuit on `mode = 'clone'`** (a clone must never show upstream-drift flags — that is
 the point of cloning). Detach remains the only operation that nulls the FK.
@@ -298,7 +298,7 @@ GET /api/v1/projects/:id/files/:fileId/stale-source
   4. Recurse: U becomes D; continue until a self-contained project or hop cap.
 
 - **behindSeq** — the file-independent probe (lane-relevant max seq vs cursor, §4) that
-  oversight surfaces (ProjectOverview, the FRO-440 graph) show as "N upstream changes to
+  oversight surfaces (ProjectOverview, the AQU-440 graph) show as "N upstream changes to
   review" without per-cell work.
 
 `useStaleSourceCells` grows the two extra fields; `StaleSourceIndicator` gets a second tone
@@ -356,7 +356,7 @@ frame to each downstream's ProjectSync DO:
 1. **Template episode project** (English): timeline file per the multimedia design — dialogue
    lane + subtitle lane + core video, cast labels (`cells.metadata.cast_name`), camera state.
    The one-time work (§6 of the timeline spec): ASR/diarization, cleanup, cast setup.
-2. **Create language projects from the template** — the missing FRO-440 UI. Creation writes
+2. **Create language projects from the template** — the missing AQU-440 UI. Creation writes
    the link (mode: clone vs **live** — a checkbox, not a fork; `consumes: 'source'`), copies
    cast/voice settings and rules, and seeds by running the first mirror sync (§5) — files and
    cells arrive with provenance set, ids preserved. 125 languages today, mandate to 500–600.
@@ -374,7 +374,7 @@ frame to each downstream's ProjectSync DO:
    upstream change batch (`link.cursor.advance` records), with per-cell diff (old mirrored
    text vs new), and bulk actions: re-translate queue, or bulk **repin** for accepted-as-is.
    This is the surface Anna uses instead of the migration tool + off-by-one surgery.
-6. **Oversight**: ProjectOverview shows `behindSeq`/stale counts; the FRO-440 graph view shows
+6. **Oversight**: ProjectOverview shows `behindSeq`/stale counts; the AQU-440 graph view shows
    the template with its 600 edges (clone vs live) and per-edge behind/stale counts — Wendi's
    trust surface.
 
@@ -483,7 +483,7 @@ never read cross-project.
    consumes choice when picking a source project vs "use its translations"), Upstream-changes
    review panel with diff + bulk repin, `target.cell.repin`.
 4. **Slice 4 — push accelerator:** commit-path notify hook + client sync-on-frame.
-5. **Slice 5 — graph view** (FRO-440's management surface) + template designation UX.
+5. **Slice 5 — graph view** (AQU-440's management surface) + template designation UX.
 6. **Slice 6 — external upstream adapter** (unfoldingWord agent, per §11).
 
 Slices 1–2 make the Come and See pilot safe (fixes propagate deterministically even with zero

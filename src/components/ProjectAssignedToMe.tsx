@@ -1,4 +1,4 @@
-// ProjectAssignedToMe — per-project "Assigned to me" pickup panel (FRO-192).
+// ProjectAssignedToMe — per-project "Assigned to me" pickup panel (AQU-192).
 //
 // Shows the current user's open assignments within ONE project. On row click,
 // jumps to the first cell matching the assignment's scopeLabel (using the same

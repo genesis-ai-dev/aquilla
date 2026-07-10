@@ -92,7 +92,7 @@ test("selecting source text reveals Add to termbase button and creates draft con
   const confirmBtn = alice.getByRole("button", { name: /Create draft concept/i })
   await expect(confirmBtn).toBeVisible({ timeout: 5_000 })
   // The prefill can be wiped by the selectionchange the dialog's own focus
-  // shift triggers (the FRO-260 mousedown guard doesn't cover post-open
+  // shift triggers (the AQU-260 mousedown guard doesn't cover post-open
   // events). The dialog supports manual entry, so type the term if empty —
   // the spec's intent is selection → dialog → draft concept, not the prefill.
   const termInput = alice.getByRole("textbox", { name: /Source term for new concept/i })

@@ -31,7 +31,7 @@ async function seedWorld(opts: { enabled: boolean }) {
   }
 }
 
-// FRO-460: a project with the setting UNSET but a scripture (USFM) file —
+// AQU-460: a project with the setting UNSET but a scripture (USFM) file —
 // the gate must derive "on" from the file, at the route level, without
 // anything ever being persisted to project_settings for this to work.
 async function seedScriptureProjectUnset(projectId: string) {
@@ -96,7 +96,7 @@ describe("GET /api/v1/aquifer/search", () => {
     expect(body.results).toHaveLength(1)
   })
 
-  it("FRO-460: 200 for a scripture project with the setting UNSET (derived default-on)", async () => {
+  it("AQU-460: 200 for a scripture project with the setting UNSET (derived default-on)", async () => {
     const project2 = "22222222-2222-4222-8222-222222222222"
     await seedScriptureProjectUnset(project2)
     const jwt = await jwtFor("bob")

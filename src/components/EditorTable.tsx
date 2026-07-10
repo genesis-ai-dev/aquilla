@@ -71,7 +71,7 @@ import { CellNumberPill } from "./cell/CellNumberPill"
 import { InterlinearAlignmentPanel } from "./InterlinearAlignmentPanel"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
-// popover (FRO-237). The component itself is no longer in the overflow popover.
+// popover (AQU-237). The component itself is no longer in the overflow popover.
 import { getUnsupportedReason } from "./CellAudioRecordButton"
 // AQU-513: plain file-picker upload next to the mic — works on mobile too.
 import { CellAudioUploadButton } from "./CellAudioUploadButton"
@@ -553,7 +553,7 @@ interface EditorTableProps {
    *  StaleSourceIndicator badge next to its validation status. Parent fetches
    *  once per file via `useStaleSourceCells` so we don't issue N requests. */
   staleCellIds?: ReadonlySet<string>
-  /** FRO-477 (§6) — set of cell ids whose ANCESTRY is stale (inherited, a
+  /** AQU-477 (§6) — set of cell ids whose ANCESTRY is stale (inherited, a
    *  further-upstream chain hop changed). Renders the violet/dotted second
    *  tone on `StaleSourceIndicator`, layered onto the same prop path as
    *  `staleCellIds` above. */
@@ -561,14 +561,14 @@ interface EditorTableProps {
   /** Token fetcher for project-scoped sync reads. Required for the inline
    *  History tab to query the D1 event log on demand. */
   getTokenForFile?: (fileId: string) => Promise<string | null>
-  /** FRO-207: Lazily returns the interlinear alignment model for source↔target
+  /** AQU-207: Lazily returns the interlinear alignment model for source↔target
    *  token alignment in the BT expansion tab. Built by ProjectWorkspace from
    *  all project cell pairs + persisted seeds only when the panel opens. */
   getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
-  /** FRO-207: Called when the user confirms or invalidates an alignment seed.
+  /** AQU-207: Called when the user confirms or invalidates an alignment seed.
    *  Parent persists via project-settings and rebuilds the model. */
   onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
-  /** FRO-192: Map of cellId → {username, scopeLabel} for cells that have an
+  /** AQU-192: Map of cellId → {username, scopeLabel} for cells that have an
    *  active assignment. The map is built in ProjectWorkspace from getMyAssignments
    *  (member's own inbox) and getProjectAssignments (manager workload). */
   assignmentsByCellId?: ReadonlyMap<string, { username: string; scopeLabel: string }>
@@ -585,7 +585,7 @@ interface EditorTableProps {
    */
   checkLockHolder?: (cellId: string) => string | null
   /**
-   * FRO-317: when true, USFM \f...\f* footnotes render as a distinct panel
+   * AQU-317: when true, USFM \f...\f* footnotes render as a distinct panel
    * immediately below each cell row. Editing is safe only for USFM files.
    */
   showFootnotesInline?: boolean
@@ -716,7 +716,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const ruleMap = useMemo(() => new Map(rules.map((r) => [r.id, r])), [rules])
 
-  // FRO-251: per-file, per-side font size. Persisted in localStorage keyed by
+  // AQU-251: per-file, per-side font size. Persisted in localStorage keyed by
   // fileId; adjusted from the View settings (eye) menu in the header.
   const editorFileId = audioFileId
   const { source: sourceFontSize, target: targetFontSize } = useFileFontSizes(editorFileId)
@@ -807,7 +807,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     },
   }), [displayCellIds.length, focusCellEditorByIndex, getListQueryRoot])
 
-  // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
+  // AQU-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.
   // The wrapper div has tabIndex={0} so it can receive programmatic focus.
   const focusGridRowByIndex = useCallback((index: number) => {
@@ -846,14 +846,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     focusCellEditorByIndex(direction === "next" ? idx + 1 : idx - 1)
   }, [focusCellEditorByIndex])
 
-  // FRO-297: Esc from a cell editor — commit-and-return to grid row focus.
+  // AQU-297: Esc from a cell editor — commit-and-return to grid row focus.
   const handleEscapeToGrid = useCallback((cellId: string) => {
     const idx = displayCellIdsRef.current.indexOf(cellId)
     if (idx < 0) return
     focusGridRowByIndex(idx)
   }, [focusGridRowByIndex])
 
-  // FRO-297: Arrow-key (or j/k) navigation within the grid (row focused, not TipTap).
+  // AQU-297: Arrow-key (or j/k) navigation within the grid (row focused, not TipTap).
   // This is called from the row's own keydown when focus is on the grid row wrapper.
   const handleGridRowKeyNav = useCallback((cellId: string, direction: "prev" | "next") => {
     const idx = displayCellIdsRef.current.indexOf(cellId)
@@ -1028,7 +1028,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const ids = displayCellIdsRef.current
     const anchorId = getSelectionAnchorId()
     const anchorIndex = anchorId ? ids.indexOf(anchorId) : -1
-    // FRO-348: range-select must be an explicit Shift-click. Previously a
+    // AQU-348: range-select must be an explicit Shift-click. Previously a
     // plain click on any unselected cell silently extended the range from
     // the old anchor whenever *something* was already selected — no
     // modifier, no visual preview. Under concurrent editing the anchor's
@@ -1383,7 +1383,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   return (
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
       <div className="shrink-0 bg-background">
-        {/* FRO-273: role badge — shown for read-only roles (viewer/commenter/reviewer) */}
+        {/* AQU-273: role badge — shown for read-only roles (viewer/commenter/reviewer) */}
         {readOnlyLabel && (
           <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 flex-shrink-0"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
@@ -1391,7 +1391,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </div>
         )}
         <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
-          {/* FRO-250: sticky chapter label — left gutter, does not shift Source */}
+          {/* AQU-250: sticky chapter label — left gutter, does not shift Source */}
           <div className="flex w-full items-center justify-center overflow-visible">
             {currentSectionLabel && !looksLikeUuid(currentSectionLabel) && (
               <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
@@ -1513,7 +1513,7 @@ interface MemoizedRowProps {
   onDeactivateEditor: (cellId: string) => void
   username: string
   editable: boolean
-  /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
+  /** AQU-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
   canValidate: boolean
   /** True when the user may edit SOURCE text (source.cell.commit): cloud
    *  project_lead+ (500) on a non-live-linked project. See canEditSource. */
@@ -1522,7 +1522,7 @@ interface MemoizedRowProps {
    *  Resolved once per file by the parent (membership look-up) so this prop
    *  is just a stable boolean — preserves the row's React.memo invariant. */
   isStaleSource: boolean
-  /** FRO-477 (§6): this cell's ANCESTRY is stale (a further-upstream chain
+  /** AQU-477 (§6): this cell's ANCESTRY is stale (a further-upstream chain
    *  hop changed). Same "stable boolean, resolved by the parent" shape as
    *  `isStaleSource` above. */
   isUpstreamStaleSource: boolean
@@ -1577,27 +1577,27 @@ interface MemoizedRowProps {
     e: React.PointerEvent<HTMLButtonElement>,
   ) => void
   onNavigateCell: (cellId: string, direction: "prev" | "next") => void
-  /** FRO-297: Called when Esc is pressed inside a cell editor — returns focus to the grid row. */
+  /** AQU-297: Called when Esc is pressed inside a cell editor — returns focus to the grid row. */
   onEscapeToGrid: (cellId: string) => void
-  /** FRO-297: Arrow-key navigation while grid-row (not TipTap) is focused. */
+  /** AQU-297: Arrow-key navigation while grid-row (not TipTap) is focused. */
   onGridRowKeyNav: (cellId: string, direction: "prev" | "next") => void
   getVoiceTakeCells: (startIndex: number, count: number) => CellData[]
   getTokenForFile?: (fileId: string) => Promise<string | null>
-  /** FRO-207: Lazily returns the interlinear alignment model. */
+  /** AQU-207: Lazily returns the interlinear alignment model. */
   getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
-  /** FRO-207: Called when user confirms/invalidates an alignment. */
+  /** AQU-207: Called when user confirms/invalidates an alignment. */
   onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
-  /** FRO-251: per-file source-column font size in px. Defaults to 14 when absent. */
+  /** AQU-251: per-file source-column font size in px. Defaults to 14 when absent. */
   sourceFontSize?: number
-  /** FRO-251: per-file target-column font size in px. Defaults to 14 when absent. */
+  /** AQU-251: per-file target-column font size in px. Defaults to 14 when absent. */
   targetFontSize?: number
-  /** FRO-192: username of the assignee for this cell. Null = no assignment. */
+  /** AQU-192: username of the assignee for this cell. Null = no assignment. */
   assigneeLabel?: string | null
-  /** FRO-192: scope label for the assignment tooltip. */
+  /** AQU-192: scope label for the assignment tooltip. */
   assigneeNote?: string | null
   /** RACE-5: ref-backed live lock check — see EditorTableProps.checkLockHolder. */
   checkLockHolder?: (cellId: string) => string | null
-  /** FRO-317: when true, USFM \f...\f* footnotes render below each cell. */
+  /** AQU-317: when true, USFM \f...\f* footnotes render below each cell. */
   showFootnotesInline?: boolean
   /** True when inline/tray footnote detail is already visible elsewhere. */
   footnotePanelActive?: boolean
@@ -1810,7 +1810,7 @@ interface EditorRowProps {
   onDeactivateEditor: (cellId: string) => void
   username: string
   editable: boolean
-  /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
+  /** AQU-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
   canValidate: boolean
   /** True when the user may edit SOURCE text (source.cell.commit): cloud
    *  project_lead+ (500) on a non-live-linked project. Surfaces the per-cell
@@ -1820,7 +1820,7 @@ interface EditorRowProps {
    *  target commit. Renders a small warning badge next to the validation
    *  status. Computed once-per-file by the parent. */
   isStaleSource: boolean
-  /** FRO-477 (§6) — true when this cell's ANCESTRY is stale (a further-
+  /** AQU-477 (§6) — true when this cell's ANCESTRY is stale (a further-
    *  upstream chain hop changed). Renders the violet/dotted second tone.
    *  Same once-per-file computation shape as `isStaleSource`. */
   isUpstreamStaleSource: boolean
@@ -1856,9 +1856,9 @@ interface EditorRowProps {
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   getStatisticalBt?: (translatedText: string) => string
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
-  /** FRO-207: Lazily returns the interlinear alignment model. */
+  /** AQU-207: Lazily returns the interlinear alignment model. */
   getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
-  /** FRO-207: Called when user confirms/invalidates an alignment. */
+  /** AQU-207: Called when user confirms/invalidates an alignment. */
   onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
   openCommentCount: number
   isActiveCue?: boolean
@@ -1867,9 +1867,9 @@ interface EditorRowProps {
   onDragEnter: () => void
   onSelectionPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => void
   onNavigateCell: (direction: "prev" | "next") => void
-  /** FRO-297: Esc inside TipTap — commit + return focus to the grid row wrapper. */
+  /** AQU-297: Esc inside TipTap — commit + return focus to the grid row wrapper. */
   onEscapeToGrid: () => void
-  /** FRO-297: Arrow/j/k navigation while grid row wrapper is focused (not TipTap). */
+  /** AQU-297: Arrow/j/k navigation while grid row wrapper is focused (not TipTap). */
   onGridRowKeyNav: (direction: "prev" | "next") => void
   getVoiceTakeCells: (startIndex: number, count: number) => CellData[]
   rowIndex: number
@@ -1889,17 +1889,17 @@ interface EditorRowProps {
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
-  /** FRO-251: per-file source-column font size in px. Defaults to 14 when absent. */
+  /** AQU-251: per-file source-column font size in px. Defaults to 14 when absent. */
   sourceFontSize?: number
-  /** FRO-251: per-file target-column font size in px. Defaults to 14 when absent. */
+  /** AQU-251: per-file target-column font size in px. Defaults to 14 when absent. */
   targetFontSize?: number
-  /** FRO-192: username of the assignee for this cell. Null = no assignment. */
+  /** AQU-192: username of the assignee for this cell. Null = no assignment. */
   assigneeLabel?: string | null
-  /** FRO-192: scope label for the assignment tooltip. */
+  /** AQU-192: scope label for the assignment tooltip. */
   assigneeNote?: string | null
   /** RACE-5: ref-backed live lock check — see EditorTableProps.checkLockHolder. */
   checkLockHolder?: (cellId: string) => string | null
-  /** FRO-317: when true, USFM \f...\f* footnotes render below the cell row. */
+  /** AQU-317: when true, USFM \f...\f* footnotes render below the cell row. */
   showFootnotesInline?: boolean
   /** True when inline/tray footnote detail is already visible elsewhere. */
   footnotePanelActive?: boolean
@@ -2038,7 +2038,7 @@ function SourceWithTermLookup({
 }
 
 // ---------------------------------------------------------------------------
-// USFM display rendering (FRO-317 follow-up)
+// USFM display rendering (AQU-317 follow-up)
 // ---------------------------------------------------------------------------
 // Cell text stores intra-verse USFM markers verbatim (lossless round-trip),
 // but the editor must never show raw `\f + \fr 2:1 \ft …\f*` / `\w …\w*` to a
@@ -2581,7 +2581,7 @@ function EditorRow({
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<ViolationAnchor | null>(null)
   const [examplesExpanded, setExamplesExpanded] = useState(false)
-  // FRO-204: chip click state for TermLookupPopover on target editor chips.
+  // AQU-204: chip click state for TermLookupPopover on target editor chips.
   const [termChipState, setTermChipState] = useState<{ term: string; anchor: HTMLElement } | null>(null)
   // Track whether the target editor has a non-empty text selection when a chip is clicked.
   const targetHasSelectionRef = useRef(false)
@@ -2591,13 +2591,13 @@ function EditorRow({
   // Add-from-selection (Slice 5): the source-side text the user has selected,
   // surfaced as an "Add to termbase" affordance. Null when nothing selected.
   const [sourceSelection, setSourceSelection] = useState<string | null>(null)
-  // FRO-260: ref mirror of sourceSelection so onClick handlers can read the
+  // AQU-260: ref mirror of sourceSelection so onClick handlers can read the
   // captured text even if a selectionchange event already cleared the React
   // state (the mousedown-before-click race that collapses the browser selection
   // before the click callback fires).
   const capturedSelectionRef = useRef<string | null>(null)
-  // FRO-260: set to true while the user is pressing down on a SelectionTermActions
-  // toolbar button, so the FRO-248 selectionchange guard doesn't clear
+  // AQU-260: set to true while the user is pressing down on a SelectionTermActions
+  // toolbar button, so the AQU-248 selectionchange guard doesn't clear
   // sourceSelection before onClick fires.
   const toolbarMouseDownRef = useRef(false)
   // Controls the confirm dialog shown before creating the draft concept.
@@ -2616,14 +2616,14 @@ function EditorRow({
   // Surfaces a compact inline message below the editor instead of swallowing.
   /** voice-chip drag-over state: the voiceId being dragged over this cell's audio area */
   const [dragOverVoiceId, setDragOverVoiceId] = useState<string | null>(null)
-  // FRO-237: mic-denied help popover state — rendered as an inline popover so
+  // AQU-237: mic-denied help popover state — rendered as an inline popover so
   // the rail button stays ENABLED when mic is blocked and routes click here.
   const [showMicDeniedHelp, setShowMicDeniedHelp] = useState(false)
-  // FRO-274: write-failure banner state. Set when any outbox enqueue fails
+  // AQU-274: write-failure banner state. Set when any outbox enqueue fails
   // (cell commit, validate, waive). The message persists until dismissed so
   // the user has time to copy their text before reloading.
   const [writeError, setWriteError] = useState<string | null>(null)
-  // FRO-278: confirm dialog shown when Generate is triggered on a non-empty
+  // AQU-278: confirm dialog shown when Generate is triggered on a non-empty
   // cell. True = dialog is open; clicking Confirm calls onCompleteSingle,
   // clicking Cancel discards the pending action (nothing committed).
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false)
@@ -2714,7 +2714,7 @@ function EditorRow({
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.warn("[waive] emit failed:", err)
-      // FRO-274: surface enqueue failure to the user so they know the waive
+      // AQU-274: surface enqueue failure to the user so they know the waive
       // didn't persist locally — silent failure is the worst failure mode.
       setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
@@ -2733,7 +2733,7 @@ function EditorRow({
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.warn("[unwaive] emit failed:", err)
-      // FRO-274: surface enqueue failure inline.
+      // AQU-274: surface enqueue failure inline.
       setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
   }, [project.id, cell.fileId, cell.id, username, onCellCommitted])
@@ -2781,7 +2781,7 @@ function EditorRow({
   const handleEditorCommit = useCallback(({ value, valueHtml }: { value: string; valueHtml: string }) => {
     if (!editable) return
     if (!project.id) return
-    // FRO-273: belt-and-suspenders role-mirror check. `editable` is already
+    // AQU-273: belt-and-suspenders role-mirror check. `editable` is already
     // false for roles < CONTRIBUTOR, so this guard only fires in the unlikely
     // race where `editable` hasn't updated yet after a role downgrade — it
     // prevents a guaranteed-403 event from entering the durable outbox.
@@ -2995,14 +2995,14 @@ function EditorRow({
     const sel = window.getSelection()
     const text = sel && !sel.isCollapsed ? sel.toString().trim() : ""
     const captured = text.length > 0 ? text : null
-    // FRO-260: keep the ref in sync with state so onClick handlers can read
+    // AQU-260: keep the ref in sync with state so onClick handlers can read
     // the captured text even after the selectionchange race clears the state.
     capturedSelectionRef.current = captured
     setSourceSelection(captured)
   }, [onAddConceptFromSelection, onAskAiFromSelection])
 
   // Opens the confirm dialog — actual creation happens in handleAddConceptConfirm.
-  // FRO-260: read from capturedSelectionRef (not sourceSelection state) so the
+  // AQU-260: read from capturedSelectionRef (not sourceSelection state) so the
   // dialog opens even when the selectionchange event already cleared the state
   // before this onClick fires (the mousedown-blur race).
   const handleAddSelectionToTermbase = useCallback(() => {
@@ -3026,9 +3026,9 @@ function EditorRow({
     setShowAddConceptDialog(false)
   }, [])
 
-  // FRO-260: toolbar mouse-down/up guards used by the selectionchange handler.
+  // AQU-260: toolbar mouse-down/up guards used by the selectionchange handler.
   // Set when the user presses down on a SelectionTermActions button so the
-  // FRO-248 selectionchange guard knows not to clear sourceSelection before the
+  // AQU-248 selectionchange guard knows not to clear sourceSelection before the
   // click callback fires. Cleared on mouseup or mouseleave.
   const handleToolbarMouseDown = useCallback(() => {
     toolbarMouseDownRef.current = true
@@ -3038,7 +3038,7 @@ function EditorRow({
   }, [])
 
   // Promote the current source selection into the AI agent as a context chip.
-  // FRO-260: read capturedSelectionRef (not state) for the same mousedown-race reason.
+  // AQU-260: read capturedSelectionRef (not state) for the same mousedown-race reason.
   const handleAskAiFromSelection = useCallback(() => {
     const text = capturedSelectionRef.current
     if (!text || !onAskAiFromSelection) return
@@ -3057,10 +3057,10 @@ function EditorRow({
     window.getSelection()?.removeAllRanges()
   }, [onAskAiFromSelection, cell.fileId, cell.id, cell.context, cell.group])
 
-  // FRO-248: clear source selection when the browser selection collapses (user
+  // AQU-248: clear source selection when the browser selection collapses (user
   // clicked elsewhere or selected text in a different row). This prevents the
   // "Add to termbase" toolbar from floating over a different row's content.
-  // FRO-260: guard — do NOT clear when the user is pressing down on a toolbar
+  // AQU-260: guard — do NOT clear when the user is pressing down on a toolbar
   // button (toolbarMouseDownRef=true). The selectionchange fires before onClick
   // in the mousedown-click sequence; clearing here would make onClick see null.
   useEffect(() => {
@@ -3098,7 +3098,7 @@ function EditorRow({
     )
   }, [isLoading, completionPreview, cell.translated, cell.original, project.terminology])
 
-  // FRO-204: Chip click handler for terminology chips in the target (TranslatedEditor).
+  // AQU-204: Chip click handler for terminology chips in the target (TranslatedEditor).
   // Records whether the target editor had a non-empty text selection at click time
   // so we can conditionally surface the Apply affordance in the popover.
   const handleTermChipClick = useCallback((term: string, anchor: HTMLElement) => {
@@ -3110,7 +3110,7 @@ function EditorRow({
   }, [])
 
   const emitValidationChange = useCallback((validated: boolean) => {
-    // FRO-273: role-mirror guard — viewer/commenter should never reach here
+    // AQU-273: role-mirror guard — viewer/commenter should never reach here
     // (canValidate=false disables the button) but guard defensively so a
     // guaranteed-403 never enters the outbox.
     if (!canPerform(validated ? "cell.validate" : "cell.unvalidate", project.syncRole?.level ?? null)) {
@@ -3130,7 +3130,7 @@ function EditorRow({
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.warn(`[${validated ? "validate" : "unvalidate"}] emit failed:`, err)
-      // FRO-274: surface enqueue failure inline.
+      // AQU-274: surface enqueue failure inline.
       setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
   }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, onCellCommitted])
@@ -3525,7 +3525,7 @@ function EditorRow({
     const next = e.relatedTarget as Node | null
     if (next && rowRef.current?.contains(next)) return
     setHasFocusWithin(false)
-    // FRO-248: clear source-text selection when focus leaves this row so the
+    // AQU-248: clear source-text selection when focus leaves this row so the
     // "Add to termbase" toolbar never floats over a different row's content.
     capturedSelectionRef.current = null
     setSourceSelection(null)
@@ -3578,7 +3578,7 @@ function EditorRow({
   const isSynthBusy = synthStatus.kind === "loading" || synthStatus.kind === "synthesizing"
   const isSynthError = synthStatus.kind === "error"
 
-  // FRO-297: Accessible label for the target editor textbox.
+  // AQU-297: Accessible label for the target editor textbox.
   // Format: "<ref> — <state>" so screen readers announce context on focus.
   // Uses cell.context (the canonical reference like "GEN 1:1") when available,
   // falls back to globalReferences[0], then rowIndex+1.
@@ -3593,7 +3593,7 @@ function EditorRow({
     <button
       type="button"
       data-showcase="cell.health"
-      // FRO-297: button role + aria-pressed so screen readers announce the
+      // AQU-297: button role + aria-pressed so screen readers announce the
       // validated/unvalidated toggle state. aria-label provides full context.
       aria-pressed={isSelfValidated}
       aria-label={
@@ -3647,7 +3647,7 @@ function EditorRow({
     "unvalidated"
   const editorAriaLabel = `${cellRef} — ${cellStateLabel}`
 
-  // FRO-297: Grid-row keydown handler. Fires when the row wrapper div has
+  // AQU-297: Grid-row keydown handler. Fires when the row wrapper div has
   // focus (not TipTap). Arrow keys / j / k navigate between rows; Enter
   // moves focus into the cell's TipTap editor (entering edit mode).
   const handleGridRowKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -3674,7 +3674,7 @@ function EditorRow({
     <div>
       <div
         ref={rowRef}
-        // FRO-297: tabIndex={0} makes the row wrapper a focus stop for
+        // AQU-297: tabIndex={0} makes the row wrapper a focus stop for
         // grid-level keyboard navigation (ArrowUp/Down, j/k, Enter).
         // focus-visible:outline shows a subtle ring when navigating by
         // keyboard so the focused row is clear to sighted keyboard users.
@@ -3802,7 +3802,7 @@ function EditorRow({
           {(isSynthBusy || isSynthError) && (
             <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
           )}
-          {/* FRO-192: assignee avatar chip — shows initials of the member
+          {/* AQU-192: assignee avatar chip — shows initials of the member
               this cell is assigned to. Tooltip = username + scope label. */}
           {assigneeLabel && (
             <AppTooltip content={assigneeNote ? `Assigned to ${assigneeLabel} (${assigneeNote})` : `Assigned to ${assigneeLabel}`}>
@@ -4115,7 +4115,7 @@ function EditorRow({
                     )}
                   </div>
                 )}
-              {/* FRO-204: Terminology chip popover — controlled via termChipState.
+              {/* AQU-204: Terminology chip popover — controlled via termChipState.
                   Anchored to the chip DOM element that was clicked. Apply is
                   offered only when the target had a non-empty text selection
                   at click time (per spec).
@@ -4202,8 +4202,8 @@ function EditorRow({
                 blocks accept/commit. */}
             <PreAcceptanceWarningBand warnings={preAcceptanceWarnings} className="mt-1" />
             {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
-            {/* FRO-297: polite live region for transient inline feedback that
-                is NOT already assertive (FRO-274 write-failure banners use
+            {/* AQU-297: polite live region for transient inline feedback that
+                is NOT already assertive (AQU-274 write-failure banners use
                 role="alert" aria-live="assertive" — don't double-announce those).
                 This region announces completion-phase transitions ("Generating…")
                 and other non-critical status changes to screen readers. */}
@@ -4220,7 +4220,7 @@ function EditorRow({
                   ? `${cellRef}: Translation preview available`
                   : null}
             </div>
-            {/* FRO-274: write-failure banner — shown when an outbox enqueue
+            {/* AQU-274: write-failure banner — shown when an outbox enqueue
                 fails (IndexedDB unavailable, quota exceeded, etc.). The user
                 must be told immediately so they can copy their text before
                 reloading rather than silently losing it. */}
@@ -4290,7 +4290,7 @@ function EditorRow({
                     editable &&
                     !isAnonymous
                   ) {
-                    // FRO-278: if the cell already has human text, confirm
+                    // AQU-278: if the cell already has human text, confirm
                     // before letting the AI overwrite it. Empty cells proceed
                     // immediately (byte-identical to previous behavior).
                     if (cell.translated.trim()) {
@@ -4312,10 +4312,10 @@ function EditorRow({
                 onMouseEnter={onDragEnter}
               />
 
-              {/* FRO-237: Direct mic button on the rail when no audio — one-click
+              {/* AQU-237: Direct mic button on the rail when no audio — one-click
                   action without needing to open a popover ("just hit the record
                   mic — quick action"). Replaces the redundant Record item inside
-                  the ⋯ popover. When audio IS present, FRO-236's Play icon on
+                  the ⋯ popover. When audio IS present, AQU-236's Play icon on
                   the overflow button already gives a direct play affordance.
                   WARN fix: the button must NOT be disabled when micDenied —
                   disabled elements receive no mouse events, so the "click for
@@ -4713,7 +4713,7 @@ function EditorRow({
                       )}
                     </div>
                   )}
-                  {/* ── FRO-207: Interlinear alignment panel ──────────────── */}
+                  {/* ── AQU-207: Interlinear alignment panel ──────────────── */}
                   {cell.original.trim() && cell.translated.trim() && getAlignmentModel && !btEditing && (
                     <div className="rounded-lg border border-border/60">
                       <button
@@ -5119,7 +5119,7 @@ function EditorRow({
         )
       })()}
 
-      {/* Add-from-selection confirm dialog (FRO-260). Mounted per-row so it
+      {/* Add-from-selection confirm dialog (AQU-260). Mounted per-row so it
           is scoped to the cell whose selection triggered it. */}
       {onAddConceptFromSelection && (
         <AddConceptDialog
@@ -5130,7 +5130,7 @@ function EditorRow({
         />
       )}
 
-      {/* FRO-278: confirm before AI Generate overwrites non-empty cell. */}
+      {/* AQU-278: confirm before AI Generate overwrites non-empty cell. */}
       <GenerateOverwriteDialog
         open={showGenerateConfirm}
         isValidated={cell.status === "validated"}
@@ -5156,7 +5156,7 @@ function EditorRow({
 }
 
 // ---------------------------------------------------------------------------
-// FRO-278 — GenerateOverwriteDialog
+// AQU-278 — GenerateOverwriteDialog
 // ---------------------------------------------------------------------------
 // Lightweight confirm dialog shown when the user clicks AI Generate on a cell
 // that already contains human-authored text. The copy is escalated when the

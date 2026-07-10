@@ -71,7 +71,7 @@ export function OrgSwitcher() {
   const [open, setOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
 
-  // FRO-473: a project-only invitee has zero member orgs but may still have
+  // AQU-473: a project-only invitee has zero member orgs but may still have
   // guest orgs to switch into — don't hide the whole switcher for them.
   if (!activeOrg && !isAllOrgs && guestOrgs.length === 0) return null
 
@@ -92,7 +92,7 @@ export function OrgSwitcher() {
     }
   }
 
-  // FRO-473: guest orgs are not activatable (no org membership, so
+  // AQU-473: guest orgs are not activatable (no org membership, so
   // setActiveOrg/org:active would misrepresent the user's role) — clicking
   // one just navigates. Single accessible project in that org → straight to
   // it; multiple → the all-orgs overview, which surfaces "Shared with you".

@@ -136,7 +136,7 @@ interface ChatMessage { role: "system" | "user" | "assistant"; content: string }
  * route (`/project/:id/...` or `/projects/:id`), or null when not on a
  * project surface.
  *
- * FRO-414 follow-up: chat spend is billed to the org of the project in scope
+ * AQU-414 follow-up: chat spend is billed to the org of the project in scope
  * when the completion is invoked. Every completion caller (copilot drafts,
  * backtranslation, brief generator, rule extract/suggest/autofix) runs on a
  * project route, so the URL IS the project context — deriving it here means

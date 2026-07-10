@@ -103,7 +103,7 @@ function MembersTab({ projectId }: { projectId: string }) {
 
   const { members, isLoading, error, add, remove } = useProjectMembers(projectId)
 
-  // FRO-285 (F-A4): derive callerMaxRole from the caller's own effective role
+  // AQU-285 (F-A4): derive callerMaxRole from the caller's own effective role
   // in the members list so the role picker never offers what the server 403s.
   // Fall back to MAINTAINER (600) if the caller's entry isn't in the list yet
   // (e.g. still loading) — the server is the security boundary regardless.

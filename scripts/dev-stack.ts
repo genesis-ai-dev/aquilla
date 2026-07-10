@@ -83,7 +83,7 @@ const DEFAULT_VITE_PORT = 5173
 // work end-to-end locally with a deterministic model.
 const MOCK_LLM_PORT = Number(process.env.DEV_STACK_MOCK_LLM_PORT) || 9456
 
-// D1→Neon migration (FRO-146): auth-worker + sync-worker bind HYPERDRIVE and
+// D1→Neon migration (AQU-146): auth-worker + sync-worker bind HYPERDRIVE and
 // swap AQUILLA_PG for a Postgres shim (see auth-worker/src/index.ts). Under
 // `wrangler dev --local`, Hyperdrive is emulated against a real Postgres given
 // by WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_<BINDING>. Without it the
@@ -562,7 +562,7 @@ async function main(): Promise<void> {
     // list only carries the real company emails. The email step-up gate is
     // already bypassed under WRANGLER_LOCAL=1 (middleware/platform-admin.ts).
     // Mirrors e2e-up.ts, which allowlists alice@example.test the same way.
-    // FRO-346: SYNC_WORKER_URL + ENVIRONMENT used to be passed via `env:`
+    // AQU-346: SYNC_WORKER_URL + ENVIRONMENT used to be passed via `env:`
     // (process env) like WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE
     // above — but unlike that Hyperdrive var, these two ARE read from
     // `c.env` by application code (types.ts SYNC_WORKER_URL, ENVIRONMENT),

@@ -51,7 +51,7 @@ export function hasUserApiKey(purpose: ApiKeyPurpose): boolean {
 /**
  * Resolve an API key with project-takes-precedence semantics.
  *
- * Precedence (FRO-433):
+ * Precedence (AQU-433):
  *   1. project key  — per-project override (highest priority)
  *   2. user key     — browser-local key saved by this user
  *   3. org key      — synced org-level baseline (lowest priority)

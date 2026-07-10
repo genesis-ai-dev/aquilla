@@ -1,5 +1,5 @@
 /**
- * FRO-249 fix tests — ImportDialog confirm-failure wedge and double-fire guard.
+ * AQU-249 fix tests — ImportDialog confirm-failure wedge and double-fire guard.
  *
  * WHY: Before the fix, handleDirectionConfirm cleared pendingImport BEFORE
  * awaiting onImported. A rejection left the direction screen in a broken state:
@@ -38,7 +38,7 @@ vi.mock("uuid", () => ({ v7: () => "mock-uuid" }))
 
 import { ImportDialog } from "./ImportDialog"
 
-describe("ImportDialog — confirm-failure wedge fix (FRO-249)", () => {
+describe("ImportDialog — confirm-failure wedge fix (AQU-249)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })

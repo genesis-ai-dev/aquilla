@@ -1,12 +1,12 @@
 /**
- * FRO-152: PPTX + DOCX side-car round-trip fidelity tests.
+ * AQU-152: PPTX + DOCX side-car round-trip fidelity tests.
  *
  * These tests verify that the raw source bytes captured during import
  * (stored as base64 in `rawSource`) decode back to the exact original
  * binary content. This is a prerequisite for the server-side serializer
  * that will inject translations back into the original ZIP structure.
  *
- * NOTE: These tests do NOT yet cover server-side injection (FRO-152a/b) —
+ * NOTE: These tests do NOT yet cover server-side injection (AQU-152a/b) —
  * that requires a server-side serializer.  They establish the invariant:
  *   import → base64(rawBytes) → base64Decode → originalBytes ≡ rawBytes
  */

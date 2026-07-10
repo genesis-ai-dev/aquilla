@@ -1,11 +1,11 @@
-// FRO-478: data hook for the "Upstream changes" review panel.
+// AQU-478: data hook for the "Upstream changes" review panel.
 //
 // Composes three existing/new read surfaces (no new server aggregation route
 // beyond the small `link/cursor-batches` addition — see that route's header
 // comment for why it was genuinely needed):
-//   1. `fetchStaleSourceResponse` (FRO-476, per file) — which target cells
+//   1. `fetchStaleSourceResponse` (AQU-476, per file) — which target cells
 //      are flagged (direct-stale or tombstoned) right now.
-//   2. `fetchLinkCursorBatches` (FRO-478) — the mirror-sync batches, each
+//   2. `fetchLinkCursorBatches` (AQU-478) — the mirror-sync batches, each
 //      carrying the `source.cell.mirror` events it produced, so flagged
 //      cells can be grouped by "when this changed" with an old→new diff.
 //   3. `fetchCellsByIds` — the current target row (event_id, sourceEventId)

@@ -34,7 +34,7 @@ interface MultiProjectInviteDialogProps {
 }
 
 /**
- * FRO-322: Unified add-to-projects dialog.
+ * AQU-322: Unified add-to-projects dialog.
  *
  * - Username mode (existing Aquilla user): multi-select projects, pick a
  *   role per project, hit Invite. Each project gets a direct membership grant
@@ -301,7 +301,7 @@ export function MultiProjectInviteDialog({
             )}
           </Field>
 
-          {/* FRO-322: email-mode guide — direct operator to per-project Share panels */}
+          {/* AQU-322: email-mode guide — direct operator to per-project Share panels */}
           {canShowEmailGuide && (
             <div className="rounded border bg-muted/30 p-3 space-y-2 text-xs">
               <p className="font-medium text-muted-foreground">

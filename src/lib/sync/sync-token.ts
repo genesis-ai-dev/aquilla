@@ -97,7 +97,7 @@ export interface SyncTokenCallbacks {
    * stale or was invalidated by a backend migration (e.g. Postgres switch).
    * The caller should clear the cached session so the user is directed to
    * re-authenticate rather than silently failing on every file open.
-   * FRO-159: without this hook the 401 was swallowed, leaving the user stuck.
+   * AQU-159: without this hook the 401 was swallowed, leaving the user stuck.
    */
   onUnauthorized?: () => void
 }
@@ -151,7 +151,7 @@ export function makeSyncTokenMinter(
           // Session JWT is stale or was invalidated (e.g. after Postgres migration).
           // Evict the in-memory sync token cache so the next call re-fetches,
           // and notify the caller so it can clear the persisted session and
-          // redirect to login — FRO-159.
+          // redirect to login — AQU-159.
           cached = null
           callbacks.onUnauthorized?.()
         }

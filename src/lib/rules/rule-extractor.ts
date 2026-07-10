@@ -1,5 +1,5 @@
 /**
- * rule-extractor.ts — FRO-196: Two-pass LLM extraction from unstructured documents.
+ * rule-extractor.ts — AQU-196: Two-pass LLM extraction from unstructured documents.
  *
  * Pass 1 (fast model): Extract raw candidate observations/rules as strings.
  * Pass 2 (stronger model): Convert each candidate into a structured TranslationRule draft.

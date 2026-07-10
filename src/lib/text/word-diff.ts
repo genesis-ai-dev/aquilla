@@ -1,4 +1,4 @@
-// Minimal word-level diff for the "Upstream changes" review panel (FRO-478).
+// Minimal word-level diff for the "Upstream changes" review panel (AQU-478).
 //
 // Not a general-purpose diff library — just enough to highlight what changed
 // between an old and new mirrored source string for a readable inline

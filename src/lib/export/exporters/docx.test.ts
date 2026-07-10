@@ -1,4 +1,4 @@
-// Tests for the client-side DOCX export with translation injection (FRO-233).
+// Tests for the client-side DOCX export with translation injection (AQU-233).
 //
 // We build minimal DOCX fixtures using JSZip (same lib the exporter uses)
 // and verify that:
@@ -71,7 +71,7 @@ function makeCell(
   }
 }
 
-describe("exportDocx — translation injection (FRO-233)", () => {
+describe("exportDocx — translation injection (AQU-233)", () => {
   it("injects translated text into a single paragraph", async () => {
     const buffer = await makeDocx(para("Hello world"))
     const cells = [makeCell("c1", "Hello world", "Hola mundo", "g1")]
@@ -199,7 +199,7 @@ function hasSzVal(doc: Document, szVal: string): boolean {
   return allSz.some((el) => el.getAttribute("w:val") === szVal || el.getAttribute("val") === szVal)
 }
 
-describe("exportDocx — inline run formatting preservation (FRO-233)", () => {
+describe("exportDocx — inline run formatting preservation (AQU-233)", () => {
   it("preserves bold (w:b) from dominant run onto injected run", async () => {
     const buffer = await makeDocx(paraWithRpr("Bold text", "<w:b/>"))
     const cells = [makeCell("c1", "Bold text", "Texto en negrita", "g1")]

@@ -1,4 +1,4 @@
-// FRO-181: maxHops DecaySettings round-trip tests.
+// AQU-181: maxHops DecaySettings round-trip tests.
 //
 // Verifies that maxHops persists through the DecaySettings type and is used
 // by the DecaySettingsSection and health-rollup client fetch.
@@ -6,7 +6,7 @@
 import { describe, it, expect } from "vitest"
 import type { DecaySettings } from "@/lib/parsers/types"
 
-describe("DecaySettings.maxHops (FRO-181)", () => {
+describe("DecaySettings.maxHops (AQU-181)", () => {
   it("accepts maxHops in the type", () => {
     const settings: DecaySettings = { maxHops: 6, decayWarnThreshold: 0.5 }
     expect(settings.maxHops).toBe(6)
@@ -30,7 +30,7 @@ describe("DecaySettings.maxHops (FRO-181)", () => {
   })
 })
 
-describe("DecaySettings maxHops propagated to health-rollup fetch args (FRO-181)", () => {
+describe("DecaySettings maxHops propagated to health-rollup fetch args (AQU-181)", () => {
   // Verify the health-rollup-read fetch wrapper passes maxHops and perHopDecay
   // as query parameters — structural check (no actual fetch).
   it("includes maxHops in query string when set", async () => {

@@ -142,7 +142,7 @@ export interface TermLookupPopoverProps {
   /** The trigger element — whatever the caller wraps. */
   children: React.ReactNode
   /**
-   * FRO-204 — controlled mode. When `open` is provided the popover is
+   * AQU-204 — controlled mode. When `open` is provided the popover is
    * controlled by the caller (chip-click flow). `onOpenChange` is fired
    * when the user dismisses the popover. `anchor` pins it to a specific
    * DOM element (the clicked chip) instead of the trigger child.

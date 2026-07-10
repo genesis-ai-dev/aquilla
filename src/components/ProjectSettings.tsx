@@ -137,7 +137,7 @@ interface Baseline {
   validationNamedUsers: string[]
   allowSelfValidation: boolean
   harmonize_min_role: "project_lead" | "maintainer"
-  /** FRO-460: EXPLICIT persisted value only. `undefined` = no explicit choice
+  /** AQU-460: EXPLICIT persisted value only. `undefined` = no explicit choice
    *  yet — the effective (displayed) state is derived via
    *  `resolveBibleResourcesEnabled`, not defaulted here. */
   bibleResourcesEnabled: boolean | undefined
@@ -174,7 +174,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     validationNamedUsers: project.validationNamedUsers ?? [],
     allowSelfValidation: project.allowSelfValidation ?? true,
     harmonize_min_role: project.harmonize_min_role ?? "project_lead",
-    // FRO-460: preserve "unset" — do NOT default to false here, that would
+    // AQU-460: preserve "unset" — do NOT default to false here, that would
     // make an unset scripture project look explicitly off in the diff/baseline.
     bibleResourcesEnabled: project.bibleResourcesEnabled,
     decaySettings: project.decaySettings,
@@ -223,7 +223,7 @@ export function ProjectSettings() {
   // yields graceful empty/403 states.
   const { org } = useOrg()
 
-  // FRO-311: AI post-edit metrics
+  // AQU-311: AI post-edit metrics
   const { session } = useFrontierSession()
   const isCloudProject = !!(project?.syncRole)
   const metricsFiles = useMemo(
@@ -244,7 +244,7 @@ export function ProjectSettings() {
     enabled: isCloudProject && !!id,
   })
 
-  // FRO-478: file-scoped sync-token minter for the Upstream-changes panel
+  // AQU-478: file-scoped sync-token minter for the Upstream-changes panel
   // (mirrors ProjectWorkspace's getTokenForFile — per-file JWTs, cached).
   const getTokenForUpstreamPanel = useMemo(
     () => buildFileScopedTokenFetcher(getJwt, id ?? "", {}),
@@ -291,9 +291,9 @@ export function ProjectSettings() {
   const [validationRoleFloor, setValidationRoleFloor] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
   const [validationNamedUsers, setValidationNamedUsers] = useState<string[]>([])
   const [allowSelfValidation, setAllowSelfValidation] = useState(true)
-  // FRO-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
+  // AQU-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
   const [harmonizeMinRole, setHarmonizeMinRole] = useState<"project_lead" | "maintainer">("project_lead")
-  // FRO-460: EXPLICIT persisted value only — `undefined` means no explicit
+  // AQU-460: EXPLICIT persisted value only — `undefined` means no explicit
   // choice yet. The switch displays the DERIVED effective value (see render);
   // this state only ever holds what will be persisted on Save.
   const [bibleResourcesEnabled, setBibleResourcesEnabled] = useState<boolean | undefined>(undefined)
@@ -363,7 +363,7 @@ export function ProjectSettings() {
     seededRef.current = true
   }, [project, applyBaseline])
 
-  // FRO-460 display-race fix: `project.bibleResourcesEnabled` hydrates in two
+  // AQU-460 display-race fix: `project.bibleResourcesEnabled` hydrates in two
   // async phases — `useProject`'s minimal record resolves first WITHOUT the
   // field (undefined), then its own `useProjectSettings` GET fills it in. If
   // the baseline seed above (which runs on first non-null `project`) lands
@@ -471,7 +471,7 @@ export function ProjectSettings() {
   const [discardOpen, setDiscardOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  // FRO-408: success message reflects the actual delta saved (a brief
+  // AQU-408: success message reflects the actual delta saved (a brief
   // enumeration of which fields changed), not a generic "Saved". Auto-dismisses
   // like the sibling `conflictBy` notice above. The modal/page itself stays
   // open on save — only an explicit "Save and close" leaves it.
@@ -536,7 +536,7 @@ export function ProjectSettings() {
     setSaving(true)
     setSaveError(null)
     setSavedMessage(null)
-    // FRO-408: track which fields actually changed so the success message can
+    // AQU-408: track which fields actually changed so the success message can
     // reflect the real delta saved, instead of a generic "Saved" that implies
     // everything on the page was written.
     const changedFieldLabels: string[] = []
@@ -673,7 +673,7 @@ export function ProjectSettings() {
       // updated IDB record. We don't await it — the form is already correct.
       refresh()
 
-      // FRO-408 acceptance criterion: the success message reflects the actual
+      // AQU-408 acceptance criterion: the success message reflects the actual
       // delta saved (a brief enumeration of which fields changed), and the
       // page/modal stays open afterward — callers decide separately whether
       // to also navigate away (see handleSaveAndClose).
@@ -728,7 +728,7 @@ export function ProjectSettings() {
   const hasGitOrigin = project?.origin?.kind === "git"
   const hasSourceLink = typeof project?.sourceProjectId === "string" && !!project.sourceProjectId
 
-  // FRO-478: only meaningful for a LIVE link (a clone never drifts from its
+  // AQU-478: only meaningful for a LIVE link (a clone never drifts from its
   // upstream — see the mirror-sync short-circuit in stale-source-route.ts).
   const hasLiveSourceLink = hasSourceLink && project?.sourceLinkMode !== "clone"
 
@@ -1059,7 +1059,7 @@ export function ProjectSettings() {
                     <p className="text-xs text-muted-foreground">
                       Scholarly reference data from bibletranslation.org in Search and the agent.
                     </p>
-                    {/* FRO-460 derive-on-read: nothing is written just by viewing this
+                    {/* AQU-460 derive-on-read: nothing is written just by viewing this
                         page — the hint below only describes what's already true. */}
                     {bibleResourcesEnabled === undefined && projectHasScriptureFiles(project?.files) && (
                       <p className="text-xs text-muted-foreground">
@@ -1525,7 +1525,7 @@ export function ProjectSettings() {
           </div>
         )}
 
-        {/* FRO-186: Harmonization settings — harmonize_min_role floor. */}
+        {/* AQU-186: Harmonization settings — harmonize_min_role floor. */}
         {sectionsToRender.some((s) => s.id === "section-validation") && (
           <Card>
             <CardHeader>

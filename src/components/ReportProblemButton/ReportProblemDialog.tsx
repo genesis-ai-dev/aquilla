@@ -1,5 +1,5 @@
 /**
- * FRO-307: Dialog for "Report a problem" — free-text + auto-captured context.
+ * AQU-307: Dialog for "Report a problem" — free-text + auto-captured context.
  *
  * Consent-aware:
  * - If analytics are ON  → submits PostHog event (with session replay URL if available).

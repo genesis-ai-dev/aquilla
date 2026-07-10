@@ -1,5 +1,5 @@
 /**
- * FRO-271 — FileActionMenu: delete affordance gating.
+ * AQU-271 — FileActionMenu: delete affordance gating.
  *
  * When onDelete is undefined (caller is below project_lead), the Delete button
  * and its separator must not appear.  When onDelete is provided, they appear.
@@ -12,7 +12,7 @@ import { FileActionMenu } from "./FileActionMenu"
 // The menu is built on the shadcn DropdownMenu (Base UI), which portals to
 // document.body — screen queries see it without any portal stubbing.
 
-describe("FileActionMenu — delete affordance gating (FRO-271)", () => {
+describe("FileActionMenu — delete affordance gating (AQU-271)", () => {
   const baseProps = {
     x: 0, y: 0,
     onClose: vi.fn(),

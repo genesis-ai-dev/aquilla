@@ -1,4 +1,4 @@
--- Migration 0031: project-level snapshots table (FRO-176).
+-- Migration 0031: project-level snapshots table (AQU-176).
 --
 -- The existing `snapshots` table in schema.sql is file-scoped (has file_id)
 -- which contradicts the spec (snapshots-and-history.md §Invariants — "labeled

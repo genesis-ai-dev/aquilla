@@ -321,7 +321,7 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
   const platformSettings = await getPlatformSettingsCached(c.env)
   const agentModel = resolveAgentModel(c.env, platformSettings)
 
-  // AI guard: model allowlist + per-user/global daily budget (FRO-265).
+  // AI guard: model allowlist + per-user/global daily budget (AQU-265).
   const guard = await runAiGuard(agentModel, user.id, c.env.AQUILLA_PG, c.env)
   if (!guard.ok) {
     return c.json(guard.body, guard.status)

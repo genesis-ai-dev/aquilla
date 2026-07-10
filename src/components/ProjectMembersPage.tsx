@@ -1,6 +1,6 @@
-// FRO-180: Per-project members page (/project/:id/members).
+// AQU-180: Per-project members page (/project/:id/members).
 //
-// Renders inside the ProjectWorkspace shell (FRO-254 surface-swap pattern).
+// Renders inside the ProjectWorkspace shell (AQU-254 surface-swap pattern).
 // Shell stays mounted; only the center content area swaps.
 //
 // Features:
@@ -128,7 +128,7 @@ export function ProjectMembersPage() {
 // ──────────────────────────────────────────────────────────────────────────
 // Members tab
 //
-// Exported (FRO-335) so the org-side ProjectOverview (/projects/:id) can
+// Exported (AQU-335) so the org-side ProjectOverview (/projects/:id) can
 // embed the same members add/change-role/revoke surface the in-project
 // members page offers — one implementation, two surfaces.
 // ──────────────────────────────────────────────────────────────────────────

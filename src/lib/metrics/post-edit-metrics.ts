@@ -1,5 +1,5 @@
 /**
- * Post-edit magnitude metrics for FRO-311.
+ * Post-edit magnitude metrics for AQU-311.
  *
  * Derives "how much do humans edit AI drafts?" from the event log.
  *
@@ -26,8 +26,8 @@
  * - Character-level NED is used, not word-level TER. See edit-distance.ts.
  * - We fetch up to MAX_EVENTS_PER_FILE events per file; cells with very long
  *   revision histories may be truncated (the server caps at 200 per cell).
- * - Historical events before FRO-292 (ai_suggestion field) lack provenance;
- *   they are treated as human commits (forward-only honesty per FRO-292 spec).
+ * - Historical events before AQU-292 (ai_suggestion field) lack provenance;
+ *   they are treated as human commits (forward-only honesty per AQU-292 spec).
  *
  * SWARM-TODO(fro-311-server-route): for large projects (> 40 files, > 200 events/cell)
  *   a dedicated read route that aggregates post-edit pairs server-side would be

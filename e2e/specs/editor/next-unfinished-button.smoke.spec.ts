@@ -8,7 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * Next unfinished — lives in the workspace header ⋯ overflow menu (FRO-331).
+ * Next unfinished — lives in the workspace header ⋯ overflow menu (AQU-331).
  */
 test("Next unfinished menu item navigates without error", async ({ alice }) => {
   const dash = new Dashboard(alice)

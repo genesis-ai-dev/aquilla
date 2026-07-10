@@ -1,4 +1,4 @@
-// FRO-433 — Org-level provider key storage via org-settings route.
+// AQU-433 — Org-level provider key storage via org-settings route.
 //
 // Verifies:
 //   1. A maintainer (600) can write orgProviderKeys into the settings blob.
@@ -48,7 +48,7 @@ const get = async (username: string): Promise<Response> =>
     headers: authHeader(await jwtFor(username)),
   }, env)
 
-describe("org-settings orgProviderKeys (FRO-433)", () => {
+describe("org-settings orgProviderKeys (AQU-433)", () => {
   it("maintainer (600) can store orgProviderKeys", async () => {
     await seedOrg()
     const res = await patch("anna", {

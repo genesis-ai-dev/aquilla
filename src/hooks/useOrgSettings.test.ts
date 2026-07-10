@@ -1,7 +1,7 @@
 // Tests for useOrgSettings:
-//   • canExport / exportMinRole derivation (FRO-253)
+//   • canExport / exportMinRole derivation (AQU-253)
 //   • write-floor alignment with the server + optimistic-write rollback
-//     (FRO-255 follow-up, org-settings-floor trace)
+//     (AQU-255 follow-up, org-settings-floor trace)
 //
 // SWARM-TODO click-path coverage:
 //   1. viewer in an unset org → canExport=true (non-breaking default).
@@ -69,7 +69,7 @@ describe("useOrgSettings — canExport non-breaking default (BLOCKER fix)", () =
   })
 })
 
-describe("useOrgSettings — explicit floor gating (FRO-253)", () => {
+describe("useOrgSettings — explicit floor gating (AQU-253)", () => {
   it("org sets floor=OWNER (700), maintainer (600) → canExport=false", async () => {
     mockFetchResponse = makeResponse(700) // owner-only
     const { result } = renderHook(() => useOrgSettings(1, 600))
@@ -103,7 +103,7 @@ describe("useOrgSettings — explicit floor gating (FRO-253)", () => {
 
 describe("useOrgSettings — project-resolved role (WARN fix: AD-12 max-wins)", () => {
   it("org viewer (100) + direct project MAINTAINER grant (600) → canExport=true under floor=MAINTAINER", async () => {
-    // FRO-253 WARN: compare project-resolved role, not org role.
+    // AQU-253 WARN: compare project-resolved role, not org role.
     // org VIEWER (100) + direct project MAINTAINER grant → project-resolved = 600.
     mockFetchResponse = makeResponse(600) // floor = MAINTAINER
     const orgRoleLevel = 100       // viewer in org
@@ -177,7 +177,7 @@ describe("useOrgSettings — garbage exportMinRole in server response", () => {
 })
 
 // ───────────────────────────────────────────────────────────────────────────
-// FRO-255 follow-up (org-settings-floor trace): write floor + rollback
+// AQU-255 follow-up (org-settings-floor trace): write floor + rollback
 // ───────────────────────────────────────────────────────────────────────────
 
 const rule = (id: string): TranslationRule => ({
@@ -200,11 +200,11 @@ const serverTruth = (): OrgSettingsResponse => ({
   updatedBy: 9,
 })
 
-describe("useOrgSettings — write floor matches server (FRO-255 follow-up)", () => {
+describe("useOrgSettings — write floor matches server (AQU-255 follow-up)", () => {
   // The server enforces SETTINGS_WRITE_MIN_ROLE = MAINTAINER (600) in
   // auth-worker/src/routes/org-settings.ts. If the client floor drifts below
   // that, below-floor users see editable controls and their writes 403
-  // silently — the original FRO-255 bug.
+  // silently — the original AQU-255 bug.
   it("canEdit is false at PROJECT_LEAD (500) and true at MAINTAINER (600)", async () => {
     mockFetchResponse = serverTruth()
 
@@ -239,7 +239,7 @@ describe("useOrgSettings — write floor matches server (FRO-255 follow-up)", ()
   })
 })
 
-describe("useOrgSettings — rollback on rejected writes (FRO-255 follow-up)", () => {
+describe("useOrgSettings — rollback on rejected writes (AQU-255 follow-up)", () => {
   it("server-forbidden write rolls back the optimistic state to server truth", async () => {
     mockFetchResponse = serverTruth()
     let resolvePatch!: (v: OrgPatchResult) => void

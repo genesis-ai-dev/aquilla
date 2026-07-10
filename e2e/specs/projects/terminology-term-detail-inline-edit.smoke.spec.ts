@@ -10,7 +10,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 /**
  * TerminologyTermDetail — inline cell editing.
  *
- * FRO-206 added TerminologyTermDetail with a "click-to-edit" OccurrenceRow.
+ * AQU-206 added TerminologyTermDetail with a "click-to-edit" OccurrenceRow.
  * When a concept has occurrences in loaded cells and canEdit is true (always
  * for local/no-origin projects), each occurrence row is a <button
  * title="Click to edit">. Clicking it opens a TranslatedEditor inline.

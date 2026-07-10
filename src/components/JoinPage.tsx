@@ -56,7 +56,7 @@ export function JoinPage() {
   // single-project preview if the multi endpoint has nothing.
   // The session JWT rides along (and the effect re-runs once the session
   // loads) so the server can recognize the original redeemer and return the
-  // friendly usedByCaller preview instead of 410 used (FRO-347).
+  // friendly usedByCaller preview instead of 410 used (AQU-347).
   useEffect(() => {
     if (!token) return
     let cancelled = false
@@ -95,7 +95,7 @@ export function JoinPage() {
       setError("Invalid invite link")
     }
     // Signed-in users land on the confirmation card and accept explicitly
-    // (FRO-335: silent auto-accept on link-open meant no user-facing signal
+    // (AQU-335: silent auto-accept on link-open meant no user-facing signal
     // that access was just granted — and contradicted the join-via-invite-link
     // spec's confirmation step). Signed-out users see the same preview with
     // inline auth; after signing in they land on the confirmation too.
@@ -128,7 +128,7 @@ export function JoinPage() {
       return
     }
 
-    // Both accepts failed. FRO-364: an expired-JWT stored session used to
+    // Both accepts failed. AQU-364: an expired-JWT stored session used to
     // land here as "invite invalid" — extended to ANY 401/network failure,
     // since neither is evidence the invite itself is dead. Only a
     // definitive server verdict (410 used/expired, 404 unknown token, 403
@@ -166,7 +166,7 @@ export function JoinPage() {
   const hasValidSession = !!session?.jwt && !sessionExpired
   const isSignedOut = !sessionLoading && !hasValidSession
   const showPreviewCard = isSignedOut && phase === "initial"
-  // FRO-335: signed-in users confirm explicitly instead of auto-accepting.
+  // AQU-335: signed-in users confirm explicitly instead of auto-accepting.
   const showConfirmCard = !sessionLoading && hasValidSession && phase === "initial"
   // Preview failed — show error instead of auth form / accept button. A
   // network failure only blocks the signed-out card (signed-in users can
@@ -180,7 +180,7 @@ export function JoinPage() {
 
   // AQU-338: an email-bound single-project invite carries the recipient email
   // in its preview — prefill the cold-signup form with it. An anyone-with-link
-  // invite (no bound email, valid per FRO-283) leaves the field empty and shows
+  // invite (no bound email, valid per AQU-283) leaves the field empty and shows
   // honest helper copy instead. Multi-project previews don't expose a bound
   // email today, so they fall into the anyone-with-link branch.
   const boundEmail = preview?.kind === "single" ? preview.data.email : null
@@ -286,7 +286,7 @@ export function JoinPage() {
               </Button>
             </div>
           ) : showConfirmCard ? (
-            // FRO-335: explicit accept step (spec join-via-invite-link Step 2:
+            // AQU-335: explicit accept step (spec join-via-invite-link Step 2:
             // "Token valid, recipient already signed in → JoinPage shows
             // confirmation"). Access is granted only on the button click, so
             // gaining membership is always a visible, deliberate action.

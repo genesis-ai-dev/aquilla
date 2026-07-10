@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { CompletionSettings } from "@/lib/parsers/types"
 
-// FRO-408: the AI Settings panel's Save Changes handler funnels every
+// AQU-408: the AI Settings panel's Save Changes handler funnels every
 // completion-settings edit through `buildCompletionSettings` (see
 // ProjectSettings.tsx handleSave -> buildCompletionSettings(latest.completionSettings,
 // completionUpdates)). Before this fix, the function's return object omitted
@@ -11,7 +11,7 @@ import type { CompletionSettings } from "@/lib/parsers/types"
 // fields it explicitly listed (systemPrompt, provider, endpoint, ...)
 // persisted. This test encodes that every field on the settings panel must
 // round-trip through the merge, not just systemPrompt.
-describe("buildCompletionSettings — FRO-408 retrieval-tuning keys", () => {
+describe("buildCompletionSettings — AQU-408 retrieval-tuning keys", () => {
   const base: CompletionSettings = {
     provider: "frontier",
     endpoint: "",

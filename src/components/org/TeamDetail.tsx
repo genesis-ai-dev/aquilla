@@ -62,7 +62,7 @@ const editTeamSchema = z.object({
 })
 
 /**
- * Canonical descriptions for each access level (from AD-6 / permission-semantics.md, FRO-138).
+ * Canonical descriptions for each access level (from AD-6 / permission-semantics.md, AQU-138).
  * Shown as tooltips next to the member's role display.
  */
 const ROLE_DESCRIPTIONS: Record<number, string> = {

@@ -103,7 +103,7 @@ function rowsToProgressCells(rows: CellRow[]): {
       section: canonical ? sectionLabelFromCanonical(canonical) : undefined,
       globalReferences: canonical ? [canonical] : undefined,
       translated: target?.value ?? "",
-      // FRO-280 (audit F-P2): pass the server-projected flag directly so
+      // AQU-280 (audit F-P2): pass the server-projected flag directly so
       // computeSectionProgress consumes it instead of re-deriving from
       // activeValidators. The activeValidators slot is left empty here because
       // the projection does not return per-cell validator lists — only the

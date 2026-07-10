@@ -1,4 +1,4 @@
-// AssignModal — "Assign…" workspace action (FRO-192).
+// AssignModal — "Assign…" workspace action (AQU-192).
 //
 // Scope kinds:
 //   selection  → cells in the current editor selection (Set<string>)

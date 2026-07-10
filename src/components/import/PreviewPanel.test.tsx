@@ -10,9 +10,11 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 import { PreviewPanel } from "@/components/import/PreviewPanel"
 import type { ImportResult } from "@/lib/import"
+
+const MB = 1024 * 1024
 
 const RESULTS: ImportResult[] = [
   { name: "test.docx", strings: [{ id: "s1", original: "Hello world", context: "Paragraph", group: "1" }] },
@@ -39,5 +41,41 @@ describe("PreviewPanel — commit error visibility (FRO-430 fix)", () => {
   it("renders no error banner when error is null", () => {
     render(<PreviewPanel results={RESULTS} onConfirm={vi.fn()} onCancel={vi.fn()} error={null} />)
     expect(screen.queryByTestId("preview-commit-error")).toBeNull()
+  })
+})
+
+describe("PreviewPanel — transferred-size readout during upload (AQU-520)", () => {
+  it("shows an X / Y MB readout alongside the cell count while committing", async () => {
+    // onConfirm never resolves, so the panel stays in its in-progress view and
+    // renders the uploadProgress the parent supplies.
+    render(
+      <PreviewPanel
+        results={RESULTS}
+        onConfirm={() => new Promise<void>(() => {})}
+        onCancel={vi.fn()}
+        uploadPhase="Uploading test.usfm"
+        uploadProgress={{ count: 100, total: 400, bytesReceived: 10 * MB, bytesTotal: 40 * MB }}
+        error={null}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /confirm import/i }))
+
+    const bytes = await screen.findByTestId("preview-upload-bytes")
+    expect(bytes).toHaveTextContent("10.0 / 40.0 MB (25%)")
+  })
+
+  it("omits the MB readout when byte totals are unavailable (e.g. media with no size)", () => {
+    render(
+      <PreviewPanel
+        results={RESULTS}
+        onConfirm={() => new Promise<void>(() => {})}
+        onCancel={vi.fn()}
+        uploadProgress={{ count: 100, total: 400 }}
+        error={null}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /confirm import/i }))
+    expect(screen.queryByTestId("preview-upload-bytes")).toBeNull()
   })
 })

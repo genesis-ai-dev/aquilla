@@ -56,7 +56,8 @@ import {
   type ImportResult,
 } from "@/lib/import"
 import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
-import { PreviewPanel } from "@/components/import/PreviewPanel"
+import { PreviewPanel, type ImportUploadProgress } from "@/components/import/PreviewPanel"
+import { formatBytesProgress } from "@/lib/format-bytes"
 import type { FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
 import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
 import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
@@ -196,7 +197,7 @@ export function ImportDialog({
   // preview screen is active (UploadPanel is unmounted; these live here so
   // PreviewPanel can render an in-flight indicator).
   const [previewUploadPhase, setPreviewUploadPhase] = useState("")
-  const [previewUploadProgress, setPreviewUploadProgress] = useState<{ count: number; total: number } | null>(null)
+  const [previewUploadProgress, setPreviewUploadProgress] = useState<ImportUploadProgress | null>(null)
   // FRO-430 (fix): a commit failure must be visible during the preview screen.
   // UploadPanel is unmounted here, so its local error never shows — surface it
   // up to this level and pass it to PreviewPanel instead of failing silently.
@@ -911,7 +912,7 @@ interface UploadPanelProps {
    * parent forwards these to PreviewPanel so an in-flight indicator is visible.
    */
   onCommitPhase?: (phase: string) => void
-  onCommitProgress?: (progress: { count: number; total: number } | null) => void
+  onCommitProgress?: (progress: ImportUploadProgress | null) => void
   /** FRO-430 (fix): surface a commit failure to the parent so the unmounted
    *  UploadPanel's local error is still shown on the preview screen. */
   onCommitError?: (message: string | null) => void
@@ -922,7 +923,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [phase, setPhase] = useState<string>("")
-  const [progress, setProgress] = useState<{ count: number; total: number } | null>(null)
+  const [progress, setProgress] = useState<ImportUploadProgress | null>(null)
   // Set when a dropped/selected set is a Paratext project — we pause to ask
   // whether it's a source text or a translation-in-progress (target) before
   // importing.
@@ -1035,6 +1036,12 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
       const allRefs: FileReference[] = []
       // Accumulate speaker pairs across all subtitle files in this batch.
       const allSpeakerPairs: { cellId: string; speaker: string | undefined }[] = []
+      // AQU-520: byte totals so the progress UI can show "X / Y MB", not just a
+      // cell count/percentage that "feels stalled" on large partner imports.
+      // Totals come from the real File.size; within a file we scale by the cell
+      // fraction. `bytesTotal === 0` (media with no size, etc.) hides the readout.
+      const bytesTotal = list.reduce((sum, f) => sum + (f.size || 0), 0)
+      let bytesBefore = 0
       try {
         for (const file of list) {
           const filePhase = `Uploading ${file.name}…`
@@ -1055,10 +1062,14 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
               const p = `Uploading ${file.name}`
               setPhase(p)
               onCommitPhase?.(p)
-              setProgress({ count, total })
-              onCommitProgress?.({ count, total })
+              const frac = total > 0 ? Math.min(count / total, 1) : 0
+              const bytesReceived = bytesBefore + Math.round(frac * (file.size || 0))
+              const next: ImportUploadProgress = { count, total, bytesReceived, bytesTotal }
+              setProgress(next)
+              onCommitProgress?.(next)
             },
           })
+          bytesBefore += file.size || 0
           allRefs.push(...refs)
           allSpeakerPairs.push(...speakerPairs)
         }
@@ -1152,6 +1163,14 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
               </div>
               <p className="mt-1.5 text-xs text-muted-foreground">
                 {progress.count.toLocaleString()} / {progress.total.toLocaleString()} cells
+                {progress.bytesTotal ? (
+                  <>
+                    {" · "}
+                    <span data-testid="upload-bytes">
+                      {formatBytesProgress(progress.bytesReceived, progress.bytesTotal)}
+                    </span>
+                  </>
+                ) : null}
               </p>
             </>
           ) : (
@@ -3082,11 +3101,7 @@ function ImportDialogBackButton({
   )
 }
 
-function formatProgress(received: number | undefined, total: number | undefined): string {
-  if (!received) return "0 MB"
-  const mb = (received / (1024 * 1024)).toFixed(1)
-  if (!total) return `${mb} MB`
-  const totalMb = (total / (1024 * 1024)).toFixed(1)
-  const pct = Math.round((received / total) * 100)
-  return `${mb} / ${totalMb} MB (${pct}%)`
-}
+// AQU-520: byte-transfer progress is formatted by the shared `formatBytesProgress`
+// helper (src/lib/format-bytes.ts) — kept as a thin alias so the download-phase
+// call sites below read the same and the behaviour is unit-tested in one place.
+const formatProgress = formatBytesProgress

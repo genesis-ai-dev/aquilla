@@ -129,14 +129,14 @@ export function deriveProjectStatus(
 
 function StatusChip({ status }: { status: ProjectStatus }) {
   if (status === "no-deadline") return null
-  const map: Record<Exclude<ProjectStatus, "no-deadline">, { label: string; cls: string }> = {
-    "on-track": { label: "On track", cls: "border-transparent bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" },
-    "due-soon": { label: "Due soon", cls: "border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300" },
-    "overdue":  { label: "Overdue",  cls: "border-transparent bg-destructive/10 text-destructive" },
+  const map: Record<Exclude<ProjectStatus, "no-deadline">, { label: string; variant: "outline" | "destructive" }> = {
+    "on-track": { label: "On track", variant: "outline" },
+    "due-soon": { label: "Due soon", variant: "outline" },
+    overdue: { label: "Overdue", variant: "destructive" },
   }
-  const { label, cls } = map[status as Exclude<ProjectStatus, "no-deadline">]
+  const { label, variant } = map[status as Exclude<ProjectStatus, "no-deadline">]
   return (
-    <Badge className={cls} data-testid="status-chip">
+    <Badge variant={variant} data-testid="status-chip">
       {label}
     </Badge>
   )
@@ -146,12 +146,12 @@ function StatusChip({ status }: { status: ProjectStatus }) {
 
 function DeadlineChip({ status }: { status: "overdue" | "soon" | "ok" | null }) {
   if (!status) return null
-  const map = {
-    ok:      { cls: "border-transparent bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" },
-    soon:    { cls: "border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300" },
-    overdue: { cls: "border-transparent bg-destructive/10 text-destructive" },
-  }
-  return <Badge className={map[status].cls}>{status === "overdue" ? "Overdue" : status === "soon" ? "Due soon" : "On track"}</Badge>
+  const variant = status === "overdue" ? "destructive" : "outline"
+  return (
+    <Badge variant={variant}>
+      {status === "overdue" ? "Overdue" : status === "soon" ? "Due soon" : "On track"}
+    </Badge>
+  )
 }
 
 // ── Stat tiles (big %) ────────────────────────────────────────────────────────

@@ -119,9 +119,7 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
           return reasons.length > 0 ? (
             <AttentionBadges reasons={reasons} />
           ) : (
-            <Badge variant="outline" className="text-emerald-600 dark:text-emerald-400">
-              On track
-            </Badge>
+            <Badge variant="outline">On track</Badge>
           )
         },
       },

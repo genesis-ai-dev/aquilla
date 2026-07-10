@@ -40,8 +40,9 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
                 {u.displayName ? `${u.displayName} (${u.username})` : u.username}
               </span>
               {adminEmails.has(u.email.trim().toLowerCase()) && (
-                <Badge variant="secondary" className="gap-1 text-[11px]">
-                  <ShieldCheck /> Platform admin
+                <Badge variant="secondary">
+                  <ShieldCheck data-icon="inline-start" />
+                  Platform admin
                 </Badge>
               )}
             </div>

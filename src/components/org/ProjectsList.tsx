@@ -13,6 +13,7 @@ import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 import { attentionRank, deadlineStatus, getPortfolios, translatedPct, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { UserError } from "@/lib/errors/user-error"
 import { buttonVariants, Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import {
   InputGroup,
   InputGroupAddon,
@@ -152,14 +153,14 @@ function ProjectRow({
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate text-sm font-medium">{p.name}</span>
           {orgLabel && (
-            <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            <Badge variant="secondary" className="shrink-0">
               {orgLabel}
-            </span>
+            </Badge>
           )}
           {p.isActive === false && (
-            <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            <Badge variant="secondary" className="shrink-0">
               inactive
-            </span>
+            </Badge>
           )}
         </span>
 
@@ -356,9 +357,7 @@ export function ProjectsList() {
           {activeOrgId != null ? (
             <ProjectCreateDialog orgId={activeOrgId} onCreated={handleCreated} />
           ) : (
-            <span className="rounded-full border bg-muted/40 px-3 py-1 text-xs text-muted-foreground">
-              Select an organization to create a project
-            </span>
+            <Badge variant="outline">Select an organization to create a project</Badge>
           )}
         </div>
       }

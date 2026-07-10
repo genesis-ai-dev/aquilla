@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Sparkles, Server, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { FieldError, FieldLabel } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
@@ -172,11 +173,7 @@ function ProviderOption({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">{label}</span>
-          {badge && (
-            <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">
-              {badge}
-            </span>
-          )}
+          {badge && <Badge>{badge}</Badge>}
         </div>
         <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
       </div>

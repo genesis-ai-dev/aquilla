@@ -16,6 +16,7 @@ import { AudioLines, Check, Plus, Sparkles, Star, Trash2, UserRound } from "luci
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -284,11 +285,7 @@ function NewVoiceModalBody({
                         >
                           <div className="flex items-center gap-1.5">
                             <span className="text-xs font-medium">{info.shortTitle}</span>
-                            {info.badge && (
-                              <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
-                                {info.badge}
-                              </span>
-                            )}
+                            {info.badge && <Badge>{info.badge}</Badge>}
                           </div>
                           <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">{info.blurb}</p>
                           {info.caveat && (

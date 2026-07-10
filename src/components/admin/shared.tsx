@@ -31,7 +31,7 @@ export function AttentionBadges({ reasons }: { reasons: AttentionReason[] }) {
   return (
     <div className="flex flex-wrap gap-1">
       {reasons.map((r) => (
-        <Badge key={r.kind} variant={REASON_VARIANT[r.kind]} className="text-[11px]">
+        <Badge key={r.kind} variant={REASON_VARIANT[r.kind]}>
           {r.label}
         </Badge>
       ))}

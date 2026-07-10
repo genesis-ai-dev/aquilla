@@ -34,6 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Button, buttonVariants } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import {
   InputGroup,
   InputGroupAddon,
@@ -316,19 +317,19 @@ function ProjectTable({
                 <span className="flex min-w-0 items-center gap-2">
                   <span className="truncate font-medium">{p.name}</span>
                   {showOrg && p.orgName && (
-                    <span className="max-w-[8rem] shrink-0 truncate rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    <Badge variant="secondary" className="max-w-[8rem] shrink-0 truncate">
                       {p.orgName}
-                    </span>
+                    </Badge>
                   )}
                   {dstatus === "overdue" && (
-                    <span className="shrink-0 rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-medium text-destructive">
+                    <Badge variant="destructive" className="shrink-0">
                       Overdue
-                    </span>
+                    </Badge>
                   )}
                   {dstatus === "soon" && (
-                    <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                    <Badge variant="outline" className="shrink-0">
                       Due soon
-                    </span>
+                    </Badge>
                   )}
                 </span>
 
@@ -394,9 +395,9 @@ function SharedWithYouSection({
             >
               <p className="flex-1 min-w-0 truncate font-medium">{p.name}</p>
               {label && (
-                <span className="shrink-0 truncate rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                <Badge variant="secondary" className="shrink-0 truncate">
                   {label}
-                </span>
+                </Badge>
               )}
               <span className="shrink-0 text-xs text-muted-foreground">{p.role.name}</span>
             </Link>
@@ -667,9 +668,7 @@ export function OrgHome() {
           {activeOrgId != null ? (
             <ProjectCreateDialog orgId={activeOrgId} onCreated={handleCreated} />
           ) : (
-            <span className="rounded-full border bg-muted/40 px-3 py-1 text-xs text-muted-foreground">
-              Select an organization to create a project
-            </span>
+            <Badge variant="outline">Select an organization to create a project</Badge>
           )}
         </div>
       }
@@ -788,9 +787,9 @@ export function OrgHome() {
                               <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-2">
                                   <p className="truncate font-medium">{orgDisplayName(summary.org)}</p>
-                                  <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                  <Badge variant="secondary" className="shrink-0">
                                     {roleLabel(summary.org)}
-                                  </span>
+                                  </Badge>
                                 </div>
                                 <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
                                   <span>{summary.projectCount} project{summary.projectCount === 1 ? "" : "s"}</span>

@@ -52,9 +52,7 @@ export function AdminActivityTimeline({
                 <span className="text-muted-foreground">{a.description ?? "did something"}</span>
               </p>
               {a.type && (
-                <Badge variant="secondary" className="text-[10px] font-normal">
-                  {a.type}
-                </Badge>
+                <Badge variant="secondary">{a.type}</Badge>
               )}
             </div>
             <time className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">

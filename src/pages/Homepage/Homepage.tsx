@@ -168,11 +168,11 @@ export function Homepage() {
         <section className="aq-container aq-section" id="languages">
           <div className="aq-head aq-center aq-reveal">
             <span className="aq-eyebrow">Low-resource? Still in reach.</span>
-            <h2 className="aq-display">A first draft in seconds — even in languages most tools have never seen.</h2>
+            <h2 className="aq-display">Trusted translations — even in languages most tools have never seen.</h2>
             <p>
               Aquilla brings real AI assistance to the long tail: the thousands of languages with little data and,
               often, a single translator. Here is the UDHR's opening line across the world's tongues — the kind
-              of head start now within reach for the languages still waiting.
+              of trusted, expert-led translation now within reach for the languages still waiting.
             </p>
           </div>
           <div className="aq-reveal">
@@ -457,8 +457,9 @@ export function Homepage() {
               <a href="/onboarding" className="aq-btn aq-btn-gold">Sign up free</a>
             </div>
             <div className="aq-price">
+              <span className="aq-chip" style={{ position: "absolute", top: 20, right: 20 }}>Coming soon</span>
               <h4 className="aq-display">Pro</h4>
-              <div className="aq-price-tag">Coming soon</div>
+              <div className="aq-price-tag">Per project / month</div>
               <p>For elevated AI usage beyond the free cap. Pay-as-you-go for usage over that — not live yet, and nothing is billed today.</p>
               <ul>
                 <li><IconCheck /> Everything in Everyone</li>

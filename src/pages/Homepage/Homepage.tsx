@@ -11,8 +11,6 @@ import "./homepage.css"
 
 export function Homepage() {
   const brand = useBrand()
-  // Pricing/billing surfaces are hidden until billing goes live. Flip to true to restore.
-  const SHOW_PRICING = false as boolean
   const rootRef = useRef<HTMLDivElement | null>(null)
   const [scrolled, setScrolled] = useState(false)
   const { theme, toggleTheme } = useMarketingShell()
@@ -64,7 +62,7 @@ export function Homepage() {
             <a className="aq-nav-link" href="#multimodal">Multimodal</a>
             <a className="aq-nav-link" href="#languages">Languages</a>
             <a className="aq-nav-link" href="#quality">Quality</a>
-            {SHOW_PRICING && <a className="aq-nav-link" href="#pricing">Pricing</a>}
+            <a className="aq-nav-link" href="#pricing">Pricing</a>
           </div>
           <div className="aq-nav-cta">
             <AppTooltip content={theme === "dark" ? "Light mode" : "Dark mode"}>
@@ -400,8 +398,7 @@ export function Homepage() {
           </div>
         </section>
 
-        {/* ── Pricing (hidden until billing is live) ──────────────────── */}
-        {SHOW_PRICING && (
+        {/* ── Pricing ─────────────────────────────────────────────────── */}
         <section className="aq-container aq-section" id="pricing">
           <div className="aq-head aq-center aq-reveal" style={{ marginBottom: 44 }}>
             <span className="aq-eyebrow">Access</span>
@@ -422,9 +419,8 @@ export function Homepage() {
               <a href="/onboarding" className="aq-btn aq-btn-gold">Sign up free</a>
             </div>
             <div className="aq-price">
-              <span className="aq-chip" style={{ position: "absolute", top: 20, right: 20 }}>Coming soon</span>
               <h4 className="aq-display">Pro</h4>
-              <div className="aq-price-tag">$45 / project / month</div>
+              <div className="aq-price-tag">Coming soon</div>
               <p>For elevated AI usage beyond the free cap. Pay-as-you-go for usage over that — not live yet, and nothing is billed today.</p>
               <ul>
                 <li><IconCheck /> Everything in Everyone</li>
@@ -446,7 +442,6 @@ export function Homepage() {
             </div>
           </div>
         </section>
-        )}
 
         {/* ── Final CTA ───────────────────────────────────────────────── */}
         <section className="aq-container aq-section" style={{ paddingTop: 0 }}>
@@ -475,14 +470,14 @@ export function Homepage() {
                 <a href="#workspace">Workspace</a>
                 <a href="#multimodal">Multimodal</a>
                 <a href="#quality">Quality</a>
-                {SHOW_PRICING && <a href="#pricing">Pricing</a>}
+                <a href="#pricing">Pricing</a>
                 <a href="/case-studies/come-and-see">Case study</a>
               </div>
               <div className="aq-footer-col">
                 <h5>Get started</h5>
                 <a href={appHref}>Open app</a>
                 <a href="/onboarding">Sign up free</a>
-                {SHOW_PRICING && <a href="#pricing">Enterprise</a>}
+                <a href="#pricing">Enterprise</a>
               </div>
             </div>
           </div>

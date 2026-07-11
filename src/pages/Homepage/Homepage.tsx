@@ -398,6 +398,44 @@ export function Homepage() {
           </div>
         </section>
 
+        {/* ── Proof / Biblica ─────────────────────────────────────────── */}
+        <section className="aq-container aq-section" style={{ paddingTop: 0 }}>
+          <div className="aq-feature" style={{ alignItems: "start" }}>
+            <div className="aq-feature-copy aq-reveal">
+              <span className="aq-eyebrow">Biblica Global Publishing</span>
+              <h3 className="aq-display" style={{ marginTop: 14 }}>A 130-year publisher, now AI-first.</h3>
+              <p>
+                Biblica&apos;s Global Publishing team moved almost its entire resource-translation workflow
+                onto Aquilla — with the expert leading every step. They updated full Spanish and Portuguese
+                Bibles in twelve months, and took a Study Bible straight to a typeset, print-ready PDF.
+              </p>
+              <blockquote className="aq-quote aq-display" style={{ marginTop: 26, color: "var(--aq-text)" }}>
+                Being able to end up with a print-ready document — that&apos;s game-changing.
+              </blockquote>
+              <a href="/case-studies/biblica" className="aq-btn aq-btn-ghost aq-btn-sm" style={{ marginTop: 24 }}>
+                Read the full story <IconArrow />
+              </a>
+            </div>
+            <div className="aq-reveal" style={{ alignSelf: "center" }}>
+              <div className="aq-stats" style={{ gridTemplateColumns: "1fr" }}>
+                {/* Stats from the Biblica case study / Noeline's write-up. Verify current before launch. */}
+                <div className="aq-stat">
+                  <div className="aq-stat-num aq-display aq-gold-text">2</div>
+                  <div className="aq-stat-label">full Bibles — Spanish &amp; Portuguese — updated in twelve months</div>
+                </div>
+                <div className="aq-stat">
+                  <div className="aq-stat-num aq-display aq-gold-text">130 yrs</div>
+                  <div className="aq-stat-label">of traditional publishing experience, now working AI-first</div>
+                </div>
+                <div className="aq-stat">
+                  <div className="aq-stat-num aq-display aq-gold-text">Print-ready</div>
+                  <div className="aq-stat-label">a Study Bible taken straight to a typeset PDF — not just a draft</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* ── Pricing ─────────────────────────────────────────────────── */}
         <section className="aq-container aq-section" id="pricing">
           <div className="aq-head aq-center aq-reveal" style={{ marginBottom: 44 }}>
@@ -471,7 +509,8 @@ export function Homepage() {
                 <a href="#multimodal">Multimodal</a>
                 <a href="#quality">Quality</a>
                 <a href="#pricing">Pricing</a>
-                <a href="/case-studies/come-and-see">Case study</a>
+                <a href="/case-studies/come-and-see">Come and See</a>
+                <a href="/case-studies/biblica">Biblica</a>
               </div>
               <div className="aq-footer-col">
                 <h5>Get started</h5>

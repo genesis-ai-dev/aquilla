@@ -138,6 +138,11 @@ don't share `cell_id` simply stay N=1. Nothing forces a flag-day.
    and the AD-9 pin. Ship migrations to **both** D1 and `db/postgres/schema.sql`
    (schema-guard CI). Backfill existing target rows as lane = the project's current
    `targetLanguage`. This alone leaves every existing project working as N=1.
+   **Status: implemented** (migration `0054_cells_target_lang.sql`; `target_lang` with
+   `'' = default lane` so no backfill is needed; lane-qualified AD-2 chain slots across
+   live claim / pre-check / rebuild / bulk fold; editor + focus-lock lane threading is
+   deferred to slice 2 with the add-a-language UI — no UI can produce a non-default
+   lane yet, so N=1 behavior is unchanged).
 2. **UI — add-a-language.** A project gains "add target language," producing a new lane over
    the existing source assets. Few-shot retrieval is re-scoped per lane (retrieval layer
    already keys on the pair, so this is a scoping change, not a rebuild).

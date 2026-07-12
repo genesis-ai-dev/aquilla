@@ -360,13 +360,29 @@ async function loadUpstreamTargetDelta(
   for (const row of results) {
     if (!row.file_id || !row.cell_id) continue
     const key = `${row.file_id}\0${row.cell_id}`
-    touchedKeys.add(key)
     let payload: Record<string, unknown>
     try {
       payload = JSON.parse(row.payload) as Record<string, unknown>
     } catch {
+      touchedKeys.add(key)
       continue
     }
+
+    // AQU-538 lanes: v1 target-consumption links consume the upstream's
+    // DEFAULT lane only ('' / absent targetLang). A commit on a non-default
+    // upstream lane is not part of the consumed stream — skip it entirely
+    // (it doesn't mark the cell "touched" either: nothing about the consumed
+    // lane changed). Validate/unvalidate events stay lane-blind here — a
+    // validate of a non-default-lane commit falls through to the
+    // current-state read, which is itself pinned to the default lane.
+    if (
+      row.kind === 'target.cell.commit' &&
+      typeof payload.targetLang === 'string' &&
+      payload.targetLang !== ''
+    ) {
+      continue
+    }
+    touchedKeys.add(key)
 
     if (row.kind === 'target.cell.commit') {
       states.set(key, {
@@ -421,7 +437,7 @@ async function loadUpstreamTargetCurrentState(
   const { results } = await db
     .prepare(
       `SELECT file_id, cell_id, event_id, value, value_html, validated FROM cells
-       WHERE project_id = ? AND side = 'target' AND (file_id, cell_id) IN (${placeholders})`,
+       WHERE project_id = ? AND side = 'target' AND target_lang = '' AND (file_id, cell_id) IN (${placeholders})`,
     )
     .bind(...binds)
     .all<{ file_id: string; cell_id: string; event_id: string; value: string; value_html: string | null; validated: number | boolean }>()

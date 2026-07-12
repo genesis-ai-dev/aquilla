@@ -150,6 +150,13 @@ export interface CellCommitInput {
   parentId: string | null
   /** AD-9 staleness pin: source row's `event_id`. Null for target-owned cells. */
   sourceEventId?: string | null
+  /**
+   * AQU-538: target-language lane this commit addresses. Omit (or pass '')
+   * for the file's single configured target language — the default lane;
+   * every pre-lane caller. Non-'' lanes commit to that lane's own row and
+   * chain slot server-side.
+   */
+  targetLang?: string
   value: string
   valueHtml?: string
   author: string
@@ -218,6 +225,9 @@ export async function emitTargetCellCommit(
       ...(input.sourceEventId !== undefined
         ? { sourceEventId: input.sourceEventId }
         : {}),
+      // AQU-538: '' (default lane) is omitted so default-lane events stay
+      // byte-identical to pre-lane events (idempotency ids, replay, history).
+      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
       ...(input.aiSuggestion ? { ai_suggestion: true } : {}),
       ...(input.searchQuery !== undefined ? { search_query: input.searchQuery } : {}),
       ...(input.replaceString !== undefined ? { replace_string: input.replaceString } : {}),

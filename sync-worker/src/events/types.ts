@@ -154,6 +154,15 @@ export interface EventPayloads {
   }
 
   // ── Target-side ────────────────────────────────────────────────────────
+  //
+  // AQU-538 lanes: every target-side chain-mutating payload MAY carry
+  // `targetLang` — the target-language lane this event addresses. Absent or
+  // '' = the file's single configured target language (the legacy/default
+  // lane; every pre-lane event). The lane is part of the cells row key
+  // (PRIMARY KEY …, side, target_lang) AND of the AD-2 chain slot for
+  // non-default lanes (see chain-claims.ts laneQualifiedParentKey): two
+  // lanes' first commits both chain on the same source head and must not
+  // compete for one slot. Source-side rows/events never carry a lane.
   'target.cell.create': {
     cellId: string
     anchorCellId?: string | null
@@ -167,10 +176,14 @@ export interface EventPayloads {
     sequenceIndex?: number
     transcription?: string
     cameraState?: string
+    /** AQU-538: target-language lane. Absent/'' = default lane. */
+    targetLang?: string
   }
   'target.cell.commit': {
     value: string
     valueHtml?: string
+    /** AQU-538: target-language lane. Absent/'' = default lane. */
+    targetLang?: string
     /**
      * UUIDv7 of the source row's `event_id` as observed by the editor at
      * commit time. Stored on `cells.source_event_id` and used for AD-9
@@ -216,9 +229,14 @@ export interface EventPayloads {
       parent_proposal_id?: string
     }
   }
-  'target.cell.delete': Record<string, never>
+  'target.cell.delete': {
+    /** AQU-538: target-language lane whose row is deleted. Absent/'' = default lane. */
+    targetLang?: string
+  }
   'target.cell.reorder': {
     anchorCellId: string | null
+    /** AQU-538: target-language lane. Absent/'' = default lane. */
+    targetLang?: string
   }
 
   // ── Validation ─────────────────────────────────────────────────────────

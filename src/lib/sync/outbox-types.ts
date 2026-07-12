@@ -120,10 +120,19 @@ export interface OutboxEventPayloads {
     type?: string
     startMs?: number
     endMs?: number
+    /**
+     * AQU-538: target-language lane this event addresses. Absent/'' = the
+     * file's single configured target language (the default lane — every
+     * pre-lane event). Part of the cells row key server-side, and of the
+     * AD-2 chain slot for non-default lanes.
+     */
+    targetLang?: string
   }
   "target.cell.commit": {
     value: string
     valueHtml?: string
+    /** AQU-538: target-language lane. Absent/'' = default lane. */
+    targetLang?: string
     /**
      * AD-9 staleness pin: the source row's `event_id` as observed at commit
      * time. Null when no source counterpart exists (target-owned cell).
@@ -179,9 +188,14 @@ export interface OutboxEventPayloads {
       parent_proposal_id?: string
     }
   }
-  "target.cell.delete": Record<string, never>
+  "target.cell.delete": {
+    /** AQU-538: target-language lane whose row is deleted. Absent/'' = default lane. */
+    targetLang?: string
+  }
   "target.cell.reorder": {
     anchorCellId: string | null
+    /** AQU-538: target-language lane. Absent/'' = default lane. */
+    targetLang?: string
   }
 
   "cell.validate": {

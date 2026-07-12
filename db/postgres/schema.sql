@@ -377,9 +377,16 @@ CREATE TABLE cells (
     upstream_event_id TEXT,
     upstream_seq      BIGINT,
     tombstoned_at     BIGINT,
+    -- AQU-538: target-language lane (migration 0054). '' = the file's single
+    -- configured target language (every pre-lane row, and the default lane for
+    -- projects that never add a second language — N=1 back-compat). Source-side
+    -- rows are ALWAYS '' (the source is shared by all lanes; that is the point
+    -- of the TMS-style model). Non-'' lanes are BCP-47-ish tags chosen by the
+    -- add-a-language flow; the projection treats the value as opaque.
+    target_lang       TEXT NOT NULL DEFAULT '',
     -- Replaces SQLite FTS5. Maintained automatically; no triggers needed.
     value_tsv         tsvector GENERATED ALWAYS AS (to_tsvector('simple', value)) STORED,
-    PRIMARY KEY (project_id, file_id, cell_id, side)
+    PRIMARY KEY (project_id, file_id, cell_id, side, target_lang)
 );
 
 -- AQU-517: compact derived progress. One file row plus one row per meaningful

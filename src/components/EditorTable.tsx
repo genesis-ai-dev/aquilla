@@ -3083,6 +3083,13 @@ function EditorRow({
       cell.targetEventId ??
       cell.sourceEventId ??
       null
+    // SWARM-TODO(AQU-538): thread the active lane here (`targetLang: activeLane`)
+    // once useActiveCellStore is lane-filtered. Both must land together — the
+    // store must render this row's ACTIVE-lane target value before a hand edit
+    // can be tagged with that lane, otherwise a commit tags lane X while the
+    // edited text is the default-lane row. emitTargetCellCommit already omits
+    // '' on the wire, so N=1 is unaffected today. The lane arrives as a new
+    // prop on EditorTableProps → MemoizedRowProps → EditorRowProps.
     emitTargetCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
@@ -3386,6 +3393,10 @@ function EditorRow({
     }
     const editEventId = cell.targetEventId ?? pendingTargetEventIdRef.current
     if (!project.id || !editEventId) return
+    // SWARM-TODO(AQU-538): pass `targetLang: activeLane` here once the active
+    // lane threads into EditorRow (see the emitTargetCellCommit note above).
+    // emitCellValidate/emitCellUnvalidate already omit '' on the wire, so the
+    // default lane is byte-identical until the store is lane-filtered.
     const emit = validated ? emitCellValidate : emitCellUnvalidate
     void emit({
       projectId: project.id,

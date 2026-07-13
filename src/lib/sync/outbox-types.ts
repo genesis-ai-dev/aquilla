@@ -120,6 +120,12 @@ export interface OutboxEventPayloads {
     type?: string
     startMs?: number
     endMs?: number
+    /**
+     * AQU-538: the target LANE this row belongs to. Omitted on the wire for the
+     * default lane (`''`), so N=1 projects emit a byte-identical payload. The
+     * projection keys `cells` on (project,file,cell,side,target_lang).
+     */
+    targetLang?: string
   }
   "target.cell.commit": {
     value: string
@@ -129,6 +135,13 @@ export interface OutboxEventPayloads {
      * time. Null when no source counterpart exists (target-owned cell).
      */
     sourceEventId?: string | null
+    /**
+     * AQU-538: the target LANE this commit lands on. Omitted on the wire for
+     * the default lane (`''`) — N=1 emits are unchanged. Slice-1 lane-qualified
+     * the AD-2 chain slot, so a commit for lane "es" competes only with other
+     * "es" commits on the same (project,file,cell).
+     */
+    targetLang?: string
     /**
      * FRO-177 / search-and-replace: when true, the cell-service projector
      * re-anchors prior validations to the new head rather than dropping them
@@ -179,17 +192,30 @@ export interface OutboxEventPayloads {
       parent_proposal_id?: string
     }
   }
-  "target.cell.delete": Record<string, never>
+  "target.cell.delete": {
+    /** AQU-538: lane of the target row being deleted. Omitted for `''`. */
+    targetLang?: string
+  }
   "target.cell.reorder": {
     anchorCellId: string | null
+    /** AQU-538: lane of the target row being reordered. Omitted for `''`. */
+    targetLang?: string
   }
 
   "cell.validate": {
     /** The target.cell.commit / target.cell.create event being validated. */
     editEventId: string
+    /**
+     * AQU-538: lane of the target row being validated. Omitted on the wire for
+     * the default lane (`''`). Validation is projected per lane so a cell can
+     * be validated in one lane and unvalidated in another.
+     */
+    targetLang?: string
   }
   "cell.unvalidate": {
     editEventId: string
+    /** AQU-538: lane of the target row being unvalidated. Omitted for `''`. */
+    targetLang?: string
   }
 
   // QA rule waivers. One row per (cell, rule); DELETE-on-unwaive.

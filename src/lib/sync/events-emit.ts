@@ -154,6 +154,11 @@ export interface CellCommitInput {
   valueHtml?: string
   author: string
   clientTs?: number
+  /**
+   * AQU-538: the active target LANE. `''`/undefined = default lane and is
+   * OMITTED from the wire payload, so N=1 commits are byte-identical.
+   */
+  targetLang?: string
   /** When true, tags the payload with `ai_suggestion: true` to record
    *  `cell.commit.llm-accept` provenance. Normal (human-typed) commits
    *  omit this field entirely — the generic commit path is unaffected. */
@@ -218,6 +223,8 @@ export async function emitTargetCellCommit(
       ...(input.sourceEventId !== undefined
         ? { sourceEventId: input.sourceEventId }
         : {}),
+      // AQU-538: '' (default lane) is omitted — truthy check, not `!== undefined`.
+      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
       ...(input.aiSuggestion ? { ai_suggestion: true } : {}),
       ...(input.searchQuery !== undefined ? { search_query: input.searchQuery } : {}),
       ...(input.replaceString !== undefined ? { replace_string: input.replaceString } : {}),
@@ -233,6 +240,11 @@ export interface CellValidateInput {
   cellId: string
   /** The target.cell.commit (or target.cell.create) event being validated. */
   editEventId: string
+  /**
+   * AQU-538: the active target LANE. `''`/undefined = default lane and is
+   * OMITTED from the wire payload, so N=1 validations are byte-identical.
+   */
+  targetLang?: string
   author: string
   clientTs?: number
 }
@@ -261,7 +273,11 @@ export async function emitCellValidate(input: CellValidateInput): Promise<string
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { editEventId: input.editEventId },
+    payload: {
+      editEventId: input.editEventId,
+      // AQU-538: '' (default lane) is omitted from the wire.
+      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
+    },
     clientTs: input.clientTs,
   })
   return eventId
@@ -276,7 +292,11 @@ export async function emitCellUnvalidate(input: CellValidateInput): Promise<stri
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { editEventId: input.editEventId },
+    payload: {
+      editEventId: input.editEventId,
+      // AQU-538: '' (default lane) is omitted from the wire.
+      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
+    },
     clientTs: input.clientTs,
   })
   return eventId

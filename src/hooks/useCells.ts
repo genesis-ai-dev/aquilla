@@ -21,6 +21,17 @@ import { readCellsCache, writeCellsCache, mergeCellsDelta } from "@/lib/sync/cel
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 import { formatVttTime } from "@/lib/video/vtt-generator"
 
+// AQU-538 (slice 2): one source, N target lanes; `''` is the default lane.
+// SWARM-TODO(AQU-538): slice 1 adds `targetLang` to `CellRow` in
+// `cells-read-types.ts`; until that lands in this worktree we read it through
+// this local widening so the lane filter compiles under `no-any`. Once
+// `CellRow.targetLang` exists, drop `LaneCellRow` and read `r.targetLang`.
+type LaneCellRow = CellRow & { targetLang?: string }
+/** The lane a row belongs to. Source rows and default-lane targets → `''`. */
+function laneOf(r: CellRow): string {
+  return (r as LaneCellRow).targetLang ?? ""
+}
+
 /**
  * Per-edit summary used by the validation popover timeline. Was previously
  * exported from `@/lib/codex-editor/edits/types`; inlined here when the
@@ -319,7 +330,7 @@ export function buildCellData(
  * iterating once over each side preserves the source chain for paired
  * cells, then appends any target-only cells at the tail.
  */
-function joinSourceAndTarget(rows: CellRow[]): {
+function joinSourceAndTarget(rows: CellRow[], lane: string): {
   ordered: string[]
   sources: Map<string, CellRow>
   targets: Map<string, CellRow>
@@ -335,6 +346,12 @@ function joinSourceAndTarget(rows: CellRow[]): {
         sourceOrder.push(r.cellId)
       }
     } else if (r.side === "target") {
+      // AQU-538: only the active lane's target row participates in the pair, so
+      // every downstream one-target-per-cell assumption holds per view. Rows
+      // from other lanes stay in `rowsRef` (for optimistic/merge bookkeeping)
+      // but never render in this lane's list. For `''` (default lane) with no
+      // non-default rows present, this filter keeps everything — N=1 identical.
+      if (laneOf(r) !== lane) continue
       if (!targets.has(r.cellId)) {
         targets.set(r.cellId, r)
         targetOrder.push(r.cellId)
@@ -362,6 +379,13 @@ export interface UseCellsOptions {
   getToken?: (fileId: string) => Promise<string | null>
   /** Disable the fetch (e.g. before identity loads). */
   enabled?: boolean
+  /**
+   * AQU-538: the active target LANE to render. `''` (default) shows the
+   * default-lane target row for each cell — byte-identical to the pre-lane
+   * behaviour when no non-default lanes exist. Switching lane re-fetches and
+   * re-derives the view against that lane's target rows.
+   */
+  lane?: string
 }
 
 export interface UseCellsResult {
@@ -401,6 +425,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     auditStats = EMPTY_STATS,
     getToken,
     enabled = true,
+    lane = "",
   } = opts
 
   const [cells, setCells] = useState<CellData[]>([])
@@ -451,6 +476,9 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // entry, or explicit resync). Keyed to the current file — reset on switch.
   const maxServerSeqRef = useRef<number | null>(null)
   const statsRef = useRef<ReadonlyMap<string, CellAuditStats>>(auditStats)
+  // AQU-538: the active lane, read inside rebuild/merge/shadow paths (which run
+  // off refs, not props) so lane changes take effect without recreating them.
+  const laneRef = useRef(lane)
   const usernameRef = useRef(username)
   const requiredRef = useRef(requiredValidations)
   const tokenFetcherRef = useRef(getToken)
@@ -476,6 +504,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   const tokenAttemptsRef = useRef(0)
 
   statsRef.current = auditStats
+  laneRef.current = lane
   usernameRef.current = username
   requiredRef.current = requiredValidations
   tokenFetcherRef.current = getToken
@@ -494,7 +523,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       setCells((prev) => prev.length === 0 ? prev : [])
       return
     }
-    const { ordered, sources, targets } = joinSourceAndTarget(rows)
+    const { ordered, sources, targets } = joinSourceAndTarget(rows, laneRef.current)
     const fid = fileRef.current ?? ""
     const out: CellData[] = ordered.map((cellId) =>
       buildCellData(
@@ -551,6 +580,10 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     if (shadows.size === 0) return
     for (const r of serverRows) {
       if (r.side !== "target") continue
+      // AQU-538: a shadow belongs to the active-lane view; only a server row in
+      // that same lane may confirm it (a same-cellId row in another lane must
+      // not clear it). No-op for N=1 where every row is the default lane.
+      if (laneOf(r) !== laneRef.current) continue
       const o = shadows.get(r.cellId)
       if (o && o.seq <= fetchStartSeq && (r.value ?? "") === o.value) shadows.delete(r.cellId)
     }
@@ -584,10 +617,17 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     for (const [id, seq] of floors) if (seq > fetchStartSeq) protectedIds.add(id)
     for (const id of shadows.keys()) protectedIds.add(id)
     if (protectedIds.size === 0) return { rows: buffer, discardedCellIds }
-    // Current (fresher) rows for protected cells, keyed by cellId|side.
+    // AQU-538: qualify the target-side key by lane so a protected cell's rows in
+    // different lanes don't collide (source rows carry no lane → `''`). For N=1
+    // this is `${cellId}|target|` vs the old `${cellId}|target`; since the key
+    // is internal and symmetric across the keep-map + lookup, behaviour is
+    // identical.
+    const keyOf = (r: CellRow): string =>
+      r.side === "target" ? `${r.cellId}|target|${laneOf(r)}` : `${r.cellId}|source`
+    // Current (fresher) rows for protected cells, keyed by cellId|side|lane.
     const keep = new Map<string, CellRow>()
     for (const r of rowsRef.current) {
-      if (protectedIds.has(r.cellId)) keep.set(`${r.cellId}|${r.side}`, r)
+      if (protectedIds.has(r.cellId)) keep.set(keyOf(r), r)
     }
     const out: CellRow[] = []
     for (const r of buffer) {
@@ -599,7 +639,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       // the fresher local row, or dropped) — record it so the caller holds
       // the watermark back (B1).
       discardedCellIds.add(r.cellId)
-      const k = `${r.cellId}|${r.side}`
+      const k = keyOf(r)
       const cur = keep.get(k)
       // No current row for this side means a fresher read said it doesn't
       // exist — drop the stale buffer row rather than resurrecting it.
@@ -888,9 +928,11 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     }
   }, [rebuildFromCache, clearConfirmedShadows, mergeProtectedRows])
 
-  // Reload on (projectId, fileId, enabled) change. The optimistic-edit shadow
-  // and freshness floors are per-file local state — drop them so edits from
-  // the previous file can't bleed onto a same-id cell in the next one.
+  // Reload on (projectId, fileId, enabled, lane) change. The optimistic-edit
+  // shadow and freshness floors are per-file/per-lane local state — drop them
+  // so edits from the previous file/lane can't bleed onto a same-id cell in the
+  // next one. AQU-538: switching lane re-fetches and clears these shadows so a
+  // pending edit in the old lane never paints on the new lane's same-id cell.
   useEffect(() => {
     optimisticEditsRef.current.clear()
     cellFreshnessRef.current.clear()
@@ -898,7 +940,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     maxServerSeqRef.current = null
     void doFetch()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, fileId, enabled])
+  }, [projectId, fileId, enabled, lane])
 
   // Re-derive when stats / username / threshold change without refetching.
   useEffect(() => {
@@ -938,6 +980,11 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         if (k !== "target.cell.commit" && k !== "target.cell.create") continue
         const cellId = r.event.cellId
         if (!cellId) continue
+        // AQU-538: a queued edit belongs to a specific lane ('' when omitted).
+        // Only overlay it onto the active-lane view — a pending commit in
+        // another lane must not paint on this lane's same-id cell. N=1 no-op.
+        const evLane = (r.event.payload as { targetLang?: string }).targetLang ?? ""
+        if (evLane !== laneRef.current) continue
         // FRO-274: skip quarantined (failed) records — they must not drive cell
         // content in the overlay; the inspector still shows them.
         if ((r.status ?? "pending") === "failed") {
@@ -971,7 +1018,10 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       cancelled = true
       unsub()
     }
-  }, [enabled, fileId, rebuildFromCache])
+    // AQU-538: `lane` recomputes the overlay so a queued edit in the previous
+    // lane stops painting when the user switches lane (and the new lane's
+    // queued edits appear).
+  }, [enabled, fileId, lane, rebuildFromCache])
 
   // Cancel any pending token-retry on unmount.
   useEffect(() => () => {
@@ -1086,20 +1136,27 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
           // server no longer returns is dropped; a side the cache never had
           // (first commit's target row) appends at the tail, which doesn't
           // affect ordering (cells order by their source rows).
-          const bySide = new Map(rows.map((r) => [r.side, r]))
+          // AQU-538: key by side AND lane so a targeted refetch that returns
+          // this cell's rows across multiple lanes replaces each lane's row in
+          // place (rather than one target lane clobbering another). For N=1
+          // every target row is lane `''`, so this is the old `side`-only map.
+          const keyOf = (r: CellRow): string =>
+            r.side === "target" ? `target|${laneOf(r)}` : "source"
+          const byKey = new Map(rows.map((r) => [keyOf(r), r]))
           const next: CellRow[] = []
           for (const r of rowsRef.current) {
             if (r.cellId !== cellId) {
               next.push(r)
               continue
             }
-            const repl = bySide.get(r.side)
+            const k = keyOf(r)
+            const repl = byKey.get(k)
             if (repl) {
               next.push(repl)
-              bySide.delete(r.side)
+              byKey.delete(k)
             }
           }
-          for (const r of bySide.values()) next.push(r)
+          for (const r of byKey.values()) next.push(r)
           rowsRef.current = next
           rebuildFromCache()
           refreshCellsCacheFromRows()
@@ -1145,23 +1202,29 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       const seq = ++writeSeqRef.current
       optimisticEditsRef.current.set(cellId, { value: patch.value, valueHtml: patch.valueHtml, seq })
       cellFreshnessRef.current.set(cellId, seq)
+      // AQU-538: the edit lands on the ACTIVE lane's target row. Match on
+      // (cellId, side, lane) so an edit in lane "es" never mutates the
+      // default-lane row that shares the cellId — and mint the synthetic row
+      // tagged with the active lane. N=1 (lane `''`) behaves identically.
+      const activeLane = laneRef.current
       const rows = rowsRef.current
       let touched = false
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i]
-        if (r.cellId !== cellId || r.side !== "target") continue
+        if (r.cellId !== cellId || r.side !== "target" || laneOf(r) !== activeLane) continue
         rows[i] = { ...r, value: patch.value, valueHtml: patch.valueHtml ?? null }
         touched = true
         break
       }
       if (!touched) {
-        // No target row yet — first commit against a source-only pair. Mint
-        // a synthetic target row by cloning the source row's anchor/cellId
-        // and replacing the value-bearing fields. event_id stays null until
-        // the server projection lands; useHealth doesn't care about event_id.
+        // No target row yet for this lane — first commit against a source-only
+        // (or other-lane-only) pair. Mint a synthetic target row by cloning the
+        // source row's anchor/cellId and replacing the value-bearing fields.
+        // event_id stays null until the server projection lands; useHealth
+        // doesn't care about event_id.
         const src = rows.find((r) => r.cellId === cellId && r.side === "source")
         if (!src) return // unknown cellId — nothing to optimise
-        rows.push({
+        const synthetic: LaneCellRow = {
           ...src,
           side: "target",
           value: patch.value,
@@ -1173,7 +1236,11 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
           lastEditAt: Date.now(),
           validated: false,
           wordCount: patch.value.trim() ? patch.value.trim().split(/\s+/).length : 0,
-        })
+        }
+        // Tag the lane only when non-default so `''` rows stay byte-identical
+        // to the pre-lane shape.
+        if (activeLane) synthetic.targetLang = activeLane
+        rows.push(synthetic)
       }
       rebuildFromCache()
     },

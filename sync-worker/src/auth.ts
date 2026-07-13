@@ -20,6 +20,15 @@ export interface SyncTokenClaims {
    * is env-configured, not data-derived).
    */
   src?: string
+  /**
+   * AQU-553: additive lane/file write restrictions. ABSENT = unscoped =
+   * today's behavior (unrestricted within the role floor). When present,
+   * authorize gates chain-mutating target.* writes and cell.validate/
+   * cell.unvalidate: 'lane' entries restrict which target-language lanes the
+   * user may write; 'file' entries restrict which fileIds. Kinds compose (AND).
+   * Source-side, comment, audio, and file-level events are never scope-gated.
+   */
+  scopes?: Array<{ kind: "lane" | "file"; value: string }>
   aud: "sync"
   iat: number
   exp: number

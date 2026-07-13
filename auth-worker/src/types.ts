@@ -227,6 +227,13 @@ export interface SyncTokenClaims {
    * env-configured, not data-derived, so there is no row to re-check).
    */
   src: RoleResolution["source"]
+  /**
+   * AQU-553: additive lane/file write restrictions for this user on this
+   * project. OMITTED entirely when the user is unscoped (no rows) — an absent
+   * claim means "exactly today's behavior." When present, sync-worker authorize
+   * gates target-side writes + validate/unvalidate against these scopes.
+   */
+  scopes?: Array<{ kind: "lane" | "file"; value: string }>
   aud: "sync"
   iat: number
   exp: number

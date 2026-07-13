@@ -7,6 +7,7 @@ import type { EventKind, EventClaims, RawEvent } from './types'
 import { requiredRoleFor, ROLE } from './role-policy'
 import { verifyTokenForDoc, verifyTokenForProject, type SyncTokenClaims } from '../auth'
 import { resolveAllowSelfAssignment } from './assignment-authority'
+import { laneOfEvent } from './event-projection'
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
 export const PROJECT_SENTINEL_FILE_ID = '__project__'
@@ -15,6 +16,70 @@ export const PROJECT_SENTINEL_FILE_ID = '__project__'
 function isCommentKind(kind: string): boolean {
   return kind === 'comment.create' || kind === 'comment.edit' ||
     kind === 'comment.delete' || kind === 'comment.resolve'
+}
+
+/**
+ * AQU-553: event kinds subject to lane/file scope gating — chain-mutating
+ * target-side cell writes plus text-side validation. These are the ONLY kinds
+ * a scoped contributor/reviewer is restricted on. Everything else (source-side
+ * cell events, comments, audio, waivers, back-translations, assignments,
+ * file-level lifecycle) is NEVER scope-gated: source rows are shared across
+ * lanes, and the other surfaces aren't lane-addressable.
+ */
+const SCOPE_GATED_KINDS = new Set<string>([
+  'target.cell.create',
+  'target.cell.commit',
+  'target.cell.delete',
+  'target.cell.reorder',
+  'cell.validate',
+  'cell.unvalidate',
+])
+
+/**
+ * AQU-553: the target-language lane a scope-gated event addresses. For
+ * `target.cell.*` this is `laneOfEvent` (reads `payload.targetLang`, '' for the
+ * default lane). For `cell.validate` / `cell.unvalidate` the lane rides on the
+ * payload the same way but the kind isn't `target.cell.*`, so read it directly.
+ */
+function scopeLaneOf(kind: string, payload: unknown): string {
+  if (kind === 'cell.validate' || kind === 'cell.unvalidate') {
+    const lang = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
+    return typeof lang === 'string' ? lang : ''
+  }
+  return laneOfEvent(kind, payload)
+}
+
+/**
+ * AQU-553: enforce a token's lane/file scopes against one event. Returns a
+ * structured 403 rejection when the event violates a scope, or null when it
+ * passes (or isn't a scope-gated kind). `scopes` is the verified token claim;
+ * an ABSENT claim means unscoped and this function is never called.
+ *
+ * Composition is AND: if any 'lane' scopes exist the event's lane must be among
+ * them, AND if any 'file' scopes exist the event's fileId must be among them.
+ */
+function enforceScopes(
+  scopes: ReadonlyArray<{ kind: 'lane' | 'file'; value: string }>,
+  raw: RawEvent<EventKind>,
+): { ok: false; status: 403; reason: string } | null {
+  if (!SCOPE_GATED_KINDS.has(raw.kind)) return null
+
+  const laneScopes = scopes.filter((s) => s.kind === 'lane').map((s) => s.value)
+  if (laneScopes.length > 0) {
+    const lane = scopeLaneOf(raw.kind, raw.payload)
+    if (!laneScopes.includes(lane)) {
+      return { ok: false, status: 403, reason: `lane '${lane}' not in scope for ${raw.kind}` }
+    }
+  }
+
+  const fileScopes = scopes.filter((s) => s.kind === 'file').map((s) => s.value)
+  if (fileScopes.length > 0) {
+    if (!raw.fileId || !fileScopes.includes(raw.fileId)) {
+      return { ok: false, status: 403, reason: `file '${raw.fileId ?? ''}' not in scope for ${raw.kind}` }
+    }
+  }
+
+  return null
 }
 
 /**
@@ -169,6 +234,17 @@ export async function authorize<K extends EventKind>(
     if (!selfAssignOk) {
       return { ok: false, status: 403, reason: `role too low for ${raw.kind}` }
     }
+  }
+
+  // AQU-553: after the role floor passes, apply ADDITIVE lane/file scopes. An
+  // absent `scopes` claim is unscoped (skip). Present scopes gate chain-mutating
+  // target.* writes + validate/unvalidate; every other kind falls through.
+  if (Array.isArray(tokenClaims.scopes) && tokenClaims.scopes.length > 0) {
+    const scopeRejection = enforceScopes(
+      tokenClaims.scopes,
+      raw as RawEvent<EventKind>,
+    )
+    if (scopeRejection) return scopeRejection
   }
 
   const claims: EventClaims = {

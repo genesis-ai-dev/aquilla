@@ -12,8 +12,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *     ProjectOverview.tsx — so a freshly created empty project shows none)
  *   - "Open project" button linking to the workspace
  *
- * This spec verifies the overview renders correctly and the Open project
- * button navigates to the workspace.
+ * This spec verifies the overview renders correctly, the Open project button
+ * navigates to the workspace, and the shared breadcrumb path remains useful
+ * across both surfaces.
  */
 test("project overview renders name, overview cards, and Open project button", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -39,6 +40,10 @@ test("project overview renders name, overview cards, and Open project button", a
     alice.locator("h2").filter({ hasText: /Team/i }).first()
   ).toBeVisible({ timeout: 5_000 })
 
+  const overviewBreadcrumb = alice.getByRole("navigation", { name: "breadcrumb" })
+  await expect(overviewBreadcrumb.getByRole("link", { name: "All organizations", exact: true })).toBeVisible()
+  await expect(overviewBreadcrumb.getByText(name, { exact: true })).toHaveAttribute("aria-current", "page")
+
   // "Open project" button navigates to the workspace.
   const openBtn = alice.getByRole("link", { name: /Open project/i })
     .or(alice.getByRole("button", { name: /Open project/i }))
@@ -48,4 +53,16 @@ test("project overview renders name, overview cards, and Open project button", a
   // Workspace URL: /project/:id
   await alice.waitForURL(/\/project\/[^/]+$/, { timeout: 10_000 })
   await expect(alice.locator('[aria-label="Filter files"]')).toBeVisible({ timeout: 5_000 })
+
+  const workspaceBreadcrumb = alice.getByRole("navigation", { name: "breadcrumb" })
+  const allOrganizations = workspaceBreadcrumb.getByRole("link", { name: "All organizations", exact: true })
+  await expect(allOrganizations).toBeVisible()
+  await expect(workspaceBreadcrumb.getByRole("link", { name, exact: true })).toBeVisible()
+  await expect(workspaceBreadcrumb.getByText("Editor", { exact: true })).toHaveAttribute("aria-current", "page")
+
+  await allOrganizations.click()
+  await alice.waitForURL(/\/?\?org=all$/, { timeout: 10_000 })
+  await expect(
+    alice.getByRole("navigation", { name: "breadcrumb" }).getByText("All organizations", { exact: true }),
+  ).toHaveAttribute("aria-current", "page")
 })

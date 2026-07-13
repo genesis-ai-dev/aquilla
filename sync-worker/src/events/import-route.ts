@@ -43,6 +43,18 @@ import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcas
  *  order of magnitude under it while keeping SQL text small. */
 const BULK_ROWS = 1000
 
+async function runImportBatch(
+  db: AquillaDb,
+  stmts: AquillaStatement[],
+): Promise<void> {
+  if (stmts.length === 0) return
+  if (db.batchPipelined) {
+    await db.batchPipelined(stmts)
+    return
+  }
+  await db.batch(stmts)
+}
+
 export interface ImportRouteEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
@@ -173,10 +185,23 @@ export async function handleBulkImportRequest(
   }
 
   // The browser sends this empty, authenticated marker only after every
-  // concurrent data chunk has committed. The last data chunk already rebuilt
-  // the file and section rollups, so avoid needlessly recomputing a large
-  // file here. Its only job is to fan out one accurate realtime invalidation.
+  // concurrent data chunk has settled. Source chunks intentionally perform no
+  // full-file scans; finalize all derived counters exactly once here. The
+  // statements are self-healing and idempotent, so retrying this request is
+  // safe after a dropped response or a partial import.
   if (body.complete && !body.file && body.cells.length === 0) {
+    const finalizedAt = Date.now()
+    try {
+      await runImportBatch(db, [
+        fileCountersRecomputeStmt(db, body.projectId, body.fileId, finalizedAt),
+        ...fullProgressRecomputeStmts(db, body.projectId, body.fileId, finalizedAt),
+      ])
+    } catch (err) {
+      return withCors(
+        Response.json({ error: `Import finalization failed: ${String(err)}` }, { status: 500 }),
+        request,
+      )
+    }
     if (env.ProjectSync) {
       const notify = notifyProjectDoFileProgressChanged(
         env,
@@ -325,21 +350,16 @@ export async function handleBulkImportRequest(
       }
     }
 
-    // Cells projection, multi-row. File counters are deferred to one trailing
-    // recompute (AQU-135) — per-cell recomputes were O(cells²).
+    // Cells projection, multi-row. All full-file counters are deferred to the
+    // explicit completion request after every concurrent chunk settles.
     for (let i = 0; i < cellEvents.length; i += BULK_ROWS) {
       stmts.push(buildBulkSourceCellCreateStmt(db, cellEvents.slice(i, i + BULK_ROWS)))
     }
 
-    // One final file-counter recompute per (project, file) pair: counts all cells
-    // in the DB that belong to this file (including those from prior chunks of the
-    // same import if the client retries). Self-healing by design — always correct.
-    stmts.push(fileCountersRecomputeStmt(db, body.projectId, body.fileId, serverTs))
-    stmts.push(...fullProgressRecomputeStmts(db, body.projectId, body.fileId, serverTs))
-
-    // ~6 statements per request (vs ~3000 in the per-cell shape), committed in
-    // one transaction.
-    await db.batch(stmts)
+    // Keep each data request to the event log + direct projections only. The
+    // pipelined transaction removes avoidable Hyperdrive↔Neon round trips while
+    // retaining the same atomic ordering and rollback behavior.
+    await runImportBatch(db, stmts)
   } catch (err) {
     return withCors(
       Response.json({ error: `DB batch failed: ${String(err)}` }, { status: 500 }),

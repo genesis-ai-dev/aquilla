@@ -25,14 +25,10 @@ export class Workspace {
       await expect(skipChecklist).toBeHidden({ timeout: 5_000 })
     }
     // Open the ImportDialog — lands on the "landing" screen (card grid).
-    // Retry once: right after a previous import, header re-renders can
-    // swallow the click (the button is replaced mid-press), leaving no
-    // dialog open and the next locator hanging for the full test budget.
-    const uploadCard = this.page.getByText("Upload Files")
+    // Use the card's accessible button name rather than a case-sensitive text
+    // locator; the product label is "Upload files".
+    const uploadCard = this.uploadFilesCard()
     await this.openImportDialog()
-    if (!(await uploadCard.isVisible({ timeout: 3_000 }).catch(() => false))) {
-      await this.openImportDialog()
-    }
     // Navigate to the Upload Files panel by clicking its card.
     await uploadCard.click()
     // UploadPanel is now visible with a "Choose Files" button.
@@ -48,34 +44,76 @@ export class Workspace {
     const confirmBtn = this.page.getByRole("button", { name: /Confirm import/i })
     await expect(confirmBtn).toBeVisible({ timeout: 10_000 })
     await confirmBtn.click()
-    // The upload runs ("Uploading…"), then the dialog closes on success.
-    await expect(confirmBtn).not.toBeVisible({ timeout: 15_000 })
-    // The dialog closing only means the upload was handed off — the sidebar
-    // file list renders from the server projection, which lags the import by
-    // a sync round-trip. Wait for an actual file row so callers can click it
-    // immediately (every openFileBySubstring caller depends on this).
-    await expect(
-      this.page.locator("aside").locator('button[aria-label="File actions"]').first(),
-    ).toBeVisible({ timeout: 15_000 })
+    // A hidden confirm button is only the transient "Uploading…" state, not a
+    // success signal. Wait for the authoritative sidebar row, while surfacing
+    // any import error immediately instead of timing out on an unrelated row.
+    const fileActions = this.page
+      .locator("aside")
+      .locator('button[aria-label="File actions"]')
+      .first()
+    const importError = this.page.getByText(/^Import failed:/i).first()
+    let outcome = "pending"
+    await expect.poll(async () => {
+      if (await importError.isVisible().catch(() => false)) {
+        outcome = `error:${(await importError.textContent())?.trim() ?? "Import failed"}`
+        return "settled"
+      }
+      if (await fileActions.isVisible().catch(() => false)) {
+        outcome = "success"
+        return "settled"
+      }
+      return "pending"
+    }, { timeout: 30_000 }).toBe("settled")
+    if (outcome.startsWith("error:")) throw new Error(outcome.slice("error:".length))
+  }
+
+  private uploadFilesCard(): Locator {
+    return this.page.getByRole("button", { name: /^Upload files/i }).first()
   }
 
   private async openImportDialog(): Promise<void> {
-    const banner = this.page.getByRole("banner")
-    const moreActionsBtn = banner.getByRole("button", { name: /More actions/i })
-    if (await moreActionsBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {
-      await moreActionsBtn.click()
-      const importItem = this.page
-        .getByRole("menuitem", { name: /^Import$/i })
-        .filter({ visible: true })
-        .last()
-      await expect(importItem).toBeVisible({ timeout: 5_000 })
-      await importItem.click()
-      return
+    const uploadCard = this.uploadFilesCard()
+    if (await uploadCard.isVisible({ timeout: 250 }).catch(() => false)) return
+
+    // Header controls can be replaced while project data hydrates. Retry the
+    // opener, but first check whether the previous click already opened the
+    // dialog so we never click through its overlay.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (await uploadCard.isVisible({ timeout: 250 }).catch(() => false)) return
+
+      const banner = this.page.getByRole("banner")
+      const moreActionsBtn = banner.getByRole("button", { name: /More actions/i })
+      if (await moreActionsBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {
+        await moreActionsBtn.click()
+        const importItem = this.page
+          .getByRole("menuitem", { name: /^Import$/i })
+          .filter({ visible: true })
+          .last()
+        await expect(importItem).toBeVisible({ timeout: 5_000 })
+        try {
+          await importItem.click({ timeout: 2_000 })
+        } catch (error) {
+          // Base UI can open the dialog on pointer-up before Playwright's
+          // actionability loop finishes. The new overlay then covers the menu
+          // item and makes click() reject even though the intended action won.
+          if (!(await uploadCard.isVisible({ timeout: 500 }).catch(() => false))) {
+            throw error
+          }
+          return
+        }
+      } else {
+        const directImportBtn = this.page
+          .getByRole("button", { name: /^Import$/i })
+          .filter({ visible: true })
+          .first()
+        await expect(directImportBtn).toBeVisible({ timeout: 10_000 })
+        await directImportBtn.click()
+      }
+
+      if (await uploadCard.isVisible({ timeout: 3_000 }).catch(() => false)) return
     }
 
-    const directImportBtn = this.page.getByRole("button", { name: /^Import$/i }).filter({ visible: true }).first()
-    await expect(directImportBtn).toBeVisible({ timeout: 10_000 })
-    await directImportBtn.click()
+    throw new Error("Import dialog did not open")
   }
 
   /** Click a file row in the sidebar, identified by a substring of its name. */
@@ -164,6 +202,22 @@ export class Workspace {
     // CellActionRail children are opacity:0 until hover/focus — reveal first.
     await row.hover()
     await expect(this.validationToggle(index)).toHaveAttribute("aria-pressed", "true", { timeout: 10_000 })
+  }
+
+  /** Remove the current user's validation and wait for the row state to settle. */
+  async unvalidateCell(index: number): Promise<void> {
+    const row = this.cellRow(index)
+    const validationButton = this.validationToggle(index)
+    await row.hover()
+    await expect(validationButton).toHaveAttribute("aria-pressed", "true", { timeout: 10_000 })
+    await validationButton.click()
+
+    const removeButton = this.page.locator(
+      '[data-tooltip="Remove your validation"] button, button[aria-label="Remove your validation"]',
+    )
+    await expect(removeButton).toBeVisible({ timeout: 8_000 })
+    await removeButton.click()
+    await expect(validationButton).toHaveAttribute("aria-pressed", "false", { timeout: 15_000 })
   }
 
   /** Validate a cell and assert the emerald indicator appears.

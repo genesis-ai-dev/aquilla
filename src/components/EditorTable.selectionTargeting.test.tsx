@@ -242,4 +242,10 @@ describe("EditorTable — selection targeting (AQU-348)", () => {
     pointerDown(selectCheckbox("3"), { metaKey: true })
     expect(new Set(getSelectedIds())).toEqual(new Set(["1", "3"]))
   })
+
+  it("reserves source-column space for the divider control", () => {
+    renderTable([makeCell("1")])
+
+    expect(screen.getByLabelText("Source text")).toHaveClass("pr-4")
+  })
 })

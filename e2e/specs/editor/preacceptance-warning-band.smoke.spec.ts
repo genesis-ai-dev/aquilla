@@ -1,5 +1,4 @@
 import { test, expect } from "../../helpers/multi-user"
-import { pickSelectOption } from "../../helpers/base-ui"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import { Glossary } from "../../helpers/page-objects/Glossary"
@@ -45,9 +44,7 @@ test("pre-acceptance warning band appears when forbidden rendering is typed", as
   const glossary = new Glossary(alice)
   await glossary.goto(projectId!)
   await glossary.addTerm("sample", "verboten")
-  const row = await glossary.expandTerm("sample")
-  const statusSelect = row.getByRole("combobox", { name: "Rendering 1 status" })
-  await pickSelectOption(alice, statusSelect, "forbidden")
+  await glossary.setRenderingStatus("sample", "forbidden")
 
   // Import sample.md and open the editor.
   await alice.goto(`/project/${projectId}`)

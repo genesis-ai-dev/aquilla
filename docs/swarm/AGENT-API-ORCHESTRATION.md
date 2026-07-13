@@ -31,9 +31,11 @@ green. STOP when:
       `pnpm build`, and per-worker `npm test` in auth-worker + sync-worker
 - [ ] Adversarial review panel passed (races / regressions / contract+permission lenses)
 
-Storage decision (D9 fallback exercised): changesets/credentials/jobs on **D1** via
-migrations, schema written to port cleanly to Postgres. R2 for artifacts. Do NOT wire
-Neon in this swarm.
+Storage decision (SCOUT-CORRECTED): sync-worker ALREADY runs on shared Postgres
+(Neon via Hyperdrive; `db/postgres/migrations/`, latest 0053; avoid the existing
+0050 numbering collision — use 0054+). Changesets/credentials/jobs = shared Postgres
+migrations. R2 for artifacts via worker-proxied PUT (repo has NO presigned-URL
+pattern; do not invent one). CLAUDE.md's "workers still run on D1" is stale.
 
 ## Operating model
 
@@ -88,10 +90,49 @@ Neon in this swarm.
   import → translate → check → export.
 - Adversarial review panel → fix/revert → orchestrator final gate → (with Ryder) dev push.
 
+## Cross-agent interface contracts (Wave 1 — agents code against these exactly)
+
+- `db/shared/api-credentials.ts` (OWNED by W1-A):
+  `validateApiCredential(db: AquillaDb, token: string): Promise<ApiCredentialContext | null>`
+  where `ApiCredentialContext = { credentialId: string; userId: string; username: string;
+  mode: "ask" | "act"; orgId: string | null; projectId: string | null }`.
+  Token format: `aqk_<base64url>`; SHA-256 hash at rest; expiry/revocation checked here.
+- `db/shared/project-roles.ts` (OWNED by W1-A): port of auth-worker
+  `resolveProjectRole` max-wins logic as
+  `resolveProjectRoleShared(db, user: {id, email?}, projectId): Promise<{level, source} | null>`.
+  Do NOT refactor auth-worker to use it in W1 (blast radius) — note dup in TRACES.
+- `sync-worker/src/external/token-bridge.ts` (OWNED by W1-B):
+  `mintInternalSyncToken(env, db, cred: ApiCredentialContext, projectId, fileId?): Promise<string>`
+  — resolves role via project-roles + scope-checks the credential (org/project match),
+  signs a short-lived internal sync JWT with SYNC_SECRET_KEY, so ALL external writes
+  and reads flow through the existing authorize.ts perimeter unchanged.
+- `sync-worker/src/external/errors.ts` (OWNED by W1-B): `errorResponse(code, message,
+  details?)`; codes: permission_denied | scope_denied | plan_stale |
+  confirmation_required | validation_failed | job_failed | rate_limited | not_found.
+  W1-C may ship a local fallback shim marked `SWARM-TODO: unify` if merging first.
+- Migration numbers RESERVED: 0054 = api_credentials (W1-A); 0055 = changesets +
+  changeset_confirmations + events.provenance column (W1-B). Nobody else adds
+  migrations in Wave 1.
+
 ## Merge log
 | when | branch | result | notes |
 | --- | --- | --- | --- |
 | 2026-07-13 | (setup) | ff dev→integration @ 9dace448b | reused prior swarm worktree, 0 unique commits |
+| 2026-07-13 | dev @ ccd631e17 | merged | dev advanced mid-swarm (remote merge); integration synced |
+| 2026-07-13 | swarm/agent-api-w1b-changesets | merged 49d855bae | engine + 0055 migration + provenance; 9 tests |
+| 2026-07-13 | swarm/agent-api-w1c-reads | merged 93b692742 | add/add conflicts resolved: errors.ts unioned (externalError alias), stubs split (api-credentials-db.ts); 14 tests |
+| 2026-07-13 | GATE | GREEN | sync-worker tsc clean; 76 files / 788 tests pass |
+
+INCIDENT LOG: first W1-B/W1-C merge accidentally ran in the MAIN worktree on dev
+(orchestrator cwd reset between tool calls). Recovered: merge --abort + hard reset
+dev→ccd631e17 (only the accidental merge commit removed; user's untracked files
+untouched). Lesson: EVERY git command in this swarm must be prefixed with an
+explicit `cd` to the intended worktree — never rely on persistent cwd.
+
+W1-A NOTE: first run died on a provider server error; rerun in flight. W1-B's stub
+assumed userId:number + autonomyMode field + resolveProjectRoleShared(db, projectId,
+userId); the contract says userId:string-or-actual-users.id-type, mode field,
+(db, user, projectId). Reconciliation pass (W1-D) must unify stubs → db/shared.
 
 ## Known landmines (from repo docs + memory)
 - Root vitest EXCLUDES sync-worker/**; worker tests run per-package with npm.

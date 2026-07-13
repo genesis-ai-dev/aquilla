@@ -720,6 +720,28 @@ CREATE TABLE IF NOT EXISTS model_ab_events (
 CREATE INDEX IF NOT EXISTS idx_model_ab_events_created ON model_ab_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_ab_events_user ON model_ab_events(user_id);
 
+-- External API credentials (0054_api_credentials.sql): personal access tokens
+-- for the Agent API (AQU-533 §2). Per-user, optionally scoped to an org and/or
+-- project, with an autonomy ceiling ('ask' | 'act'). Only a SHA-256 hash is
+-- stored; token_prefix (first 12 chars, incl. the 'aqk_' tag) is display-only.
+-- User-scoped like agent_sessions; live role is re-resolved per call.
+CREATE TABLE IF NOT EXISTS api_credentials (
+    id           UUID PRIMARY KEY,
+    user_id      TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    token_prefix TEXT NOT NULL,
+    token_hash   TEXT NOT NULL UNIQUE,
+    mode         TEXT NOT NULL CHECK (mode IN ('ask', 'act')),
+    org_id       TEXT,
+    project_id   TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at   TIMESTAMPTZ,
+    last_used_at TIMESTAMPTZ,
+    revoked_at   TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_api_credentials_user ON api_credentials(user_id);
+CREATE INDEX IF NOT EXISTS idx_api_credentials_token_hash ON api_credentials(token_hash);
+
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new
 -- inserts don't collide with migrated ids:

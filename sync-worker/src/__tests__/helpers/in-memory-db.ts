@@ -117,6 +117,8 @@ export interface ValidatorRow {
   project_id: string
   file_id: string
   cell_id: string
+  /** AQU-538 (0055): target-language lane of the validation ('' = default). */
+  target_lang: string
   /** The validated commit's event_id (renamed from edit_event_id in 0012). */
   event_id: string
   username: string
@@ -451,22 +453,32 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       return matched
     }
 
-    // ── GET /cell-validators read route ─────────────────────────────────
+    // ── GET /cell-validators read route (AQU-538: per-lane) ─────────────
+    // Two shapes: all lanes (no ?lane=) or a single lane (AND target_lang = ?).
     if (
-      /^SELECT event_id, username, decided_ts FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \? ORDER BY decided_ts DESC/.test(
+      /^SELECT event_id, username, decided_ts, target_lang FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \?( AND target_lang = \?)? ORDER BY decided_ts DESC/.test(
         normalized,
       )
     ) {
       const projectId = args[0] as string
       const fileId = args[1] as string
       const cellId = args[2] as string
+      const laneFiltered = /AND target_lang = \? ORDER BY/.test(normalized)
+      const lane = laneFiltered ? ((args[3] as string) ?? "") : null
       return db.cell_validators
-        .filter((v) => v.project_id === projectId && v.file_id === fileId && v.cell_id === cellId)
+        .filter(
+          (v) =>
+            v.project_id === projectId &&
+            v.file_id === fileId &&
+            v.cell_id === cellId &&
+            (lane === null || (v.target_lang ?? "") === lane),
+        )
         .sort((a, b) => b.decided_ts - a.decided_ts)
         .map((v) => ({
           event_id: v.event_id,
           username: v.username,
           decided_ts: v.decided_ts,
+          target_lang: v.target_lang ?? "",
         }))
     }
 
@@ -1037,21 +1049,26 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       return []
     }
 
-    // ── INSERT cell_validators (UPSERT — cell.validate, 0012) ──────────
+    // ── INSERT cell_validators (UPSERT — cell.validate, 0055) ──────────
+    // AQU-538 bind order: project_id, file_id, cell_id, target_lang,
+    // event_id, username, decided_ts. Standing validation is per (cell, lane,
+    // user).
     if (/^INSERT INTO cell_validators/.test(normalized)) {
       const row: ValidatorRow = {
         project_id: args[0] as string,
         file_id: args[1] as string,
         cell_id: args[2] as string,
-        event_id: args[3] as string,
-        username: args[4] as string,
-        decided_ts: args[5] as number,
+        target_lang: (args[3] as string) ?? "",
+        event_id: args[4] as string,
+        username: args[5] as string,
+        decided_ts: args[6] as number,
       }
       const idx = db.cell_validators.findIndex(
         (v) =>
           v.project_id === row.project_id &&
           v.file_id === row.file_id &&
           v.cell_id === row.cell_id &&
+          (v.target_lang ?? "") === row.target_lang &&
           v.username === row.username,
       )
       if (idx === -1) {
@@ -1062,40 +1079,60 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       return []
     }
 
-    // ── DELETE cell_validators (cell.unvalidate, 0012) ─────────────────
+    // ── DELETE cell_validators (cell.unvalidate, 0055) ─────────────────
     if (
-      /^DELETE FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \? AND username = \?$/.test(
+      /^DELETE FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \? AND target_lang = \? AND username = \?$/.test(
         normalized,
       )
     ) {
       const pid = args[0] as string
       const fid = args[1] as string
       const cid = args[2] as string
-      const user = args[3] as string
+      const lane = (args[3] as string) ?? ""
+      const user = args[4] as string
       db.cell_validators = db.cell_validators.filter(
-        (v) => !(v.project_id === pid && v.file_id === fid && v.cell_id === cid && v.username === user),
+        (v) =>
+          !(
+            v.project_id === pid &&
+            v.file_id === fid &&
+            v.cell_id === cid &&
+            (v.target_lang ?? "") === lane &&
+            v.username === user
+          ),
       )
       return []
     }
 
     // ── UPDATE cells SET validated = (...) ─────────────────────────────
     // From validate/unvalidate: re-evaluate validated against the current
-    // chain head (cells.event_id). side='target' filter matches 0012 SQL.
-    // Bind order: 0=project_id, 1=file_id, 2=cell_id (subquery), 3=project_id, 4=file_id, 5=cell_id (WHERE).
+    // chain head (cells.event_id) FOR THIS LANE. side='target' filter matches
+    // 0055 SQL. AQU-538 bind order: 0=threshold, 1=project_id, 2=file_id,
+    // 3=cell_id, 4=target_lang (subquery), 5=project_id, 6=file_id, 7=cell_id,
+    // 8=target_lang (WHERE).
     if (/^UPDATE cells SET validated/.test(normalized)) {
-      const projectId = args[0] as string
-      const fileId = args[4] as string
-      const cellId = args[5] as string
-      const cell = findCell(projectId, fileId, cellId)
+      const threshold = Math.max(1, (args[0] as number) ?? 1)
+      const projectId = args[5] as string
+      const fileId = args[6] as string
+      const cellId = args[7] as string
+      const lane = (args[8] as string) ?? ""
+      const cell = db.cells.find(
+        (c) =>
+          c.project_id === projectId &&
+          c.file_id === fileId &&
+          c.cell_id === cellId &&
+          c.side === "target" &&
+          (c.target_lang ?? "") === lane,
+      )
       if (cell) {
-        const activeForHead = db.cell_validators.some(
+        const count = db.cell_validators.filter(
           (v) =>
             v.project_id === projectId &&
             v.file_id === fileId &&
             v.cell_id === cellId &&
+            (v.target_lang ?? "") === lane &&
             v.event_id === cell.event_id,
-        )
-        cell.validated = activeForHead ? 1 : 0
+        ).length
+        cell.validated = count >= threshold ? 1 : 0
       }
       return []
     }

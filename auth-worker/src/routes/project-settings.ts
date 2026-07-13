@@ -91,12 +91,16 @@ function validationProjectionStmts(
   )`
   return [
     db.prepare(
+      // AQU-538: validations are per target-language lane, so each target
+      // row's validated flag counts only its own lane's validators
+      // (v.target_lang = c.target_lang). N=1 (all rows '') is byte-identical.
       `UPDATE cells c
           SET validated = CASE WHEN (
             SELECT COUNT(*) FROM cell_validators v
              WHERE v.project_id = c.project_id
                AND v.file_id = c.file_id
                AND v.cell_id = c.cell_id
+               AND v.target_lang = c.target_lang
                AND v.event_id = c.event_id
           ) >= ? THEN 1 ELSE 0 END
         WHERE c.project_id = ? AND c.side = 'target' AND ${guard}`,

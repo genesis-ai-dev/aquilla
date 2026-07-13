@@ -151,7 +151,11 @@ export async function handleFilesReadRequest(
     "COALESCE(p.filled_count, f.filled_count) AS filled_count, " +
     "f.word_count, f.last_edit_at, f.deleted_at"
   const joins =
-    " LEFT JOIN file_section_progress p ON p.project_id = f.project_id AND p.file_id = f.id AND p.scope = 'file' AND p.section_key = ''" +
+    // AQU-538: file_section_progress now materializes one row per target lane.
+    // The files list is a cross-project legacy surface — pin it to the default
+    // lane ('') so N=1 stays byte-identical and N>1 files don't fan out into
+    // one listing row per lane.
+    " LEFT JOIN file_section_progress p ON p.project_id = f.project_id AND p.file_id = f.id AND p.scope = 'file' AND p.section_key = '' AND p.target_lang = ''" +
     " LEFT JOIN project_settings ps ON ps.project_id = f.project_id"
 
   // ?trash=1 returns soft-deleted files only; default returns active files only.

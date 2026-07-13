@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils"
 import { clearSelection, MAX_SELECTED, useSelectedIds } from "@/lib/audio/selection"
 import { emitCellValidate, emitCellUnvalidate } from "@/lib/sync/events-emit"
 import { canPerform } from "@/lib/sync/role-policy"
+import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 
 interface Props {
   project: ProjectRecord
@@ -92,7 +93,7 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
   )
   const validatableCount = useMemo(
     () => selectedCells.filter(
-      (c) => c.translated.trim() && !c.activeValidators.includes(username),
+      (c) => isBulkValidationEligible(c) && !c.activeValidators.includes(username),
     ).length,
     [selectedCells, username],
   )
@@ -149,7 +150,7 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
       let validated = 0
       let alreadyValidated = 0
       for (const cell of selectedCells) {
-        if (!cell.translated.trim()) continue
+        if (!isBulkValidationEligible(cell)) continue
         if (cell.activeValidators.includes(username)) { alreadyValidated++; continue }
         if (!cell.targetEventId || !project.id) continue
         void emitCellValidate({
@@ -295,7 +296,7 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
         disabled={isBusy || validatableCount === 0}
         title={
           validatableCount === 0
-            ? "Nothing to validate — selected cells are empty or already validated by you"
+            ? "Nothing eligible — untouched AI drafts require individual review"
             : `Validate ${validatableCount} cell${validatableCount === 1 ? "" : "s"}`
         }
       >

@@ -151,6 +151,36 @@ describe("events-emit", () => {
         (peek[0].event as unknown as OutboxRawEvent<"target.cell.commit">).parentId,
       ).toBe(null)
     })
+
+    it("persists model, prompt, retrieval, and project-state provenance for AI drafts", async () => {
+      const aiDraft = {
+        model: "test/model",
+        provider: "frontier",
+        promptVersion: "translation-draft-v1",
+        exampleIds: ["approved-1"],
+        generatedAt: 1234,
+        mode: "single" as const,
+        projectState: {
+          sourceLanguage: "English",
+          targetLanguage: "Spanish",
+          approvedExampleCount: 1,
+        },
+      }
+      await emitTargetCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c-ai",
+        parentId: "head",
+        value: "borrador",
+        author: "test/model",
+        aiSuggestion: true,
+        aiDraft,
+      })
+      const [record] = await peekOutboxBatch(10)
+      const event = record.event as unknown as OutboxRawEvent<"target.cell.commit">
+      expect(event.payload.ai_suggestion).toBe(true)
+      expect(event.payload.ai_draft).toEqual(aiDraft)
+    })
   })
 
   describe("emitSourceCellCommit", () => {

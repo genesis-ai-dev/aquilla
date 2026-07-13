@@ -84,6 +84,21 @@ export type CommentScope =
   | { kind: "file"; fileId: string }
   | { kind: "project" }
 
+/** Durable context for reproducing and evaluating one machine draft. */
+export interface AiDraftProvenance {
+  model: string
+  provider: string
+  promptVersion: string
+  exampleIds: string[]
+  generatedAt: number
+  mode: "single" | "batch" | "paragraph" | "agent"
+  projectState: {
+    sourceLanguage: string
+    targetLanguage: string
+    approvedExampleCount: number
+  }
+}
+
 // ── Per-kind payload shapes ───────────────────────────────────────────────
 
 export interface OutboxEventPayloads {
@@ -149,6 +164,8 @@ export interface OutboxEventPayloads {
      * on the cell row until a human edit or validation clears it.
      */
     ai_suggestion?: true
+    /** Model, prompt, retrieval, and project-state snapshot for this draft. */
+    ai_draft?: AiDraftProvenance
     /**
      * Translation-agent provenance: the agent_runs ledger row this commit
      * came from. Injected server-side at stage time (agent implementation

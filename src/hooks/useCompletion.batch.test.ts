@@ -5,8 +5,8 @@
 // caused an early `return`, abandoning every subsequent chunk with no
 // surfaced summary.
 //
-// Repro shape: 90 cells / MAX_CELLS_PER_CALL=30 → chunks [1-30],[31-60],[61-90].
-// Chunk 2 (cells 31-60) rejects. Chunks 1 and 3 must still run, and the
+// Repro shape: 30 cells / research-aligned package size 10 → chunks
+// [1-10],[11-20],[21-30]. Chunk 2 rejects. Chunks 1 and 3 must still run, and the
 // end-of-run progress must report the failure count instead of just
 // disappearing.
 
@@ -75,8 +75,7 @@ function makeCell(id: string, fileId: string, original: string): MinimalCell {
 
 const FILE_A = "file-a"
 
-// 90 cells → 3 chunks of 30 under MAX_CELLS_PER_CALL.
-const NINETY_CELLS: MinimalCell[] = Array.from({ length: 90 }, (_, i) =>
+const THIRTY_CELLS: MinimalCell[] = Array.from({ length: 30 }, (_, i) =>
   makeCell(`cell-${i + 1}`, FILE_A, `Source sentence ${i + 1}`),
 )
 
@@ -102,14 +101,14 @@ describe("completeBatch — mid-run sub-batch failure (AQU-361)", () => {
       "fetch",
       vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
         const body = typeof init?.body === "string" ? init.body : ""
-        // Chunk 2 (cells 31-60) always fails — both the original attempt and
+        // Chunk 2 (cells 11-20) always fails — both the original attempt and
         // the one retry — to exercise the "retried twice, still failed, skip
         // and continue" path.
-        if (body.includes("Source sentence 31")) {
+        if (body.includes("Source sentence 11")) {
           return Promise.resolve({ ok: false, status: 500, statusText: "Internal Server Error", text: () => Promise.resolve("boom") })
         }
-        const chunkIndex = body.includes("Source sentence 61") ? 2 : 0
-        const chunk = NINETY_CELLS.slice(chunkIndex * 30, chunkIndex * 30 + 30)
+        const chunkIndex = body.includes("Source sentence 21") ? 2 : 0
+        const chunk = THIRTY_CELLS.slice(chunkIndex * 10, chunkIndex * 10 + 10)
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ choices: [{ message: { content: encodeChunkResponse(chunk) } }] }),
@@ -130,25 +129,25 @@ describe("completeBatch — mid-run sub-batch failure (AQU-361)", () => {
         SESSION,
         commitMock,
         [],
-        NINETY_CELLS as never,
+        THIRTY_CELLS as never,
         undefined,
         DEFAULT_DRAFT_CONTEXT,
       ),
     )
 
     await act(async () => {
-      await result.current.completeBatch(NINETY_CELLS as never)
+      await result.current.completeBatch(THIRTY_CELLS as never)
     })
 
-    // Chunk 1 (30 cells) and chunk 3 (30 cells) must have committed despite
+    // Chunk 1 and chunk 3 must have committed despite
     // chunk 2 failing — the whole run must NOT have halted after chunk 1.
     const committedIds = new Set(commitMock.mock.calls.map((args: unknown[]) => (args[0] as MinimalCell).id))
-    for (let i = 1; i <= 30; i++) expect(committedIds.has(`cell-${i}`)).toBe(true)
-    for (let i = 61; i <= 90; i++) expect(committedIds.has(`cell-${i}`)).toBe(true)
-    expect(commitMock).toHaveBeenCalledTimes(60)
+    for (let i = 1; i <= 10; i++) expect(committedIds.has(`cell-${i}`)).toBe(true)
+    for (let i = 21; i <= 30; i++) expect(committedIds.has(`cell-${i}`)).toBe(true)
+    expect(commitMock).toHaveBeenCalledTimes(20)
 
     // Chunk 2's cells must be flagged as errored, not silently dropped.
-    for (let i = 31; i <= 60; i++) {
+    for (let i = 11; i <= 20; i++) {
       expect(result.current.errors.has(`cell-${i}`)).toBe(true)
     }
 
@@ -156,9 +155,9 @@ describe("completeBatch — mid-run sub-batch failure (AQU-361)", () => {
     // disappear as if everything succeeded).
     const finalProgress = getCompletionBatchProgress()
     expect(finalProgress).not.toBeNull()
-    expect(finalProgress?.total).toBe(90)
-    expect(finalProgress?.done).toBe(60)
-    expect(finalProgress?.failed).toBe(30)
+    expect(finalProgress?.total).toBe(30)
+    expect(finalProgress?.done).toBe(20)
+    expect(finalProgress?.failed).toBe(10)
     expect(finalProgress?.finished).toBe(true)
   })
 })

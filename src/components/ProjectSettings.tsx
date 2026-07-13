@@ -165,7 +165,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     llmHealthPenalty: project.completionSettings?.llmHealthPenalty ?? 0.1,
     top_k: project.completionSettings?.top_k ?? 15,
     contextSize: project.completionSettings?.contextSize ?? "medium",
-    useOnlyValidatedExamples: project.completionSettings?.useOnlyValidatedExamples ?? false,
+    useOnlyValidatedExamples: true,
     main_chat_language: project.completionSettings?.main_chat_language ?? "",
     fewShotExampleFormat: project.completionSettings?.fewShotExampleFormat ?? "source-and-target",
     autoSyncEnabled: project.syncSettings?.autoSync.enabled ?? false,
@@ -288,7 +288,7 @@ export function ProjectSettings() {
   const [llmHealthPenalty, setLlmHealthPenalty] = useState(0.1)
   const [topK, setTopK] = useState(15)
   const [contextSize, setContextSize] = useState<ContextSize>("medium")
-  const [useOnlyValidatedExamples, setUseOnlyValidatedExamples] = useState(false)
+  const [useOnlyValidatedExamples, setUseOnlyValidatedExamples] = useState(true)
   const [fewShotExampleFormat, setFewShotExampleFormat] = useState<"source-and-target" | "target-only">("source-and-target")
   const [mainChatLanguage, setMainChatLanguage] = useState("")
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false)
@@ -341,7 +341,7 @@ export function ProjectSettings() {
     setLlmHealthPenalty(b.llmHealthPenalty)
     setTopK(b.top_k)
     setContextSize(b.contextSize)
-    setUseOnlyValidatedExamples(b.useOnlyValidatedExamples)
+    setUseOnlyValidatedExamples(true)
     setFewShotExampleFormat(b.fewShotExampleFormat)
     setMainChatLanguage(b.main_chat_language)
     setAutoSyncEnabled(b.autoSyncEnabled)
@@ -1243,13 +1243,13 @@ export function ProjectSettings() {
                   <Checkbox
                     id="validated-only"
                     className="mt-1"
-                    checked={useOnlyValidatedExamples}
-                    onCheckedChange={(checked) => setUseOnlyValidatedExamples(checked)}
+                    checked
+                    disabled
                   />
                   <div>
-                    <FieldLabel htmlFor="validated-only">Validated examples only</FieldLabel>
+                    <FieldLabel htmlFor="validated-only">Approved examples only</FieldLabel>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      When on, only human-validated cells are used as reference examples — unvalidated results are excluded.
+                      Drafting always retrieves human-validated project translations. Raw machine drafts never enter the trusted example pool.
                     </p>
                   </div>
                 </div>

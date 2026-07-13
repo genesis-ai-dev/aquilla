@@ -481,7 +481,19 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     // will shift, triggering a per-cell rule re-evaluation on the next render.
     expect(result.current.cells[0].translated).toBe("Hola mundo")
     expect(result.current.cells[0].status).not.toBe("empty")
+    expect(result.current.cells[0].aiDrafted).toBe(false)
     expect(result.current.cells[0].original).toBe("Hello world") // source untouched
+
+    act(() => {
+      result.current.applyOptimisticTargetEdit("c1", { value: "Borrador", aiDrafted: true })
+    })
+    expect(result.current.cells[0].aiDrafted).toBe(true)
+
+    // Any ordinary editor commit is a human touch and clears the draft marker.
+    act(() => {
+      result.current.applyOptimisticTargetEdit("c1", { value: "Corrección humana" })
+    })
+    expect(result.current.cells[0].aiDrafted).toBe(false)
     // No refetch fired.
     expect(fetchAllMock).toHaveBeenCalledTimes(1)
   })

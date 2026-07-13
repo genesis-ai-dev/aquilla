@@ -9,7 +9,7 @@ function cell(partial: Partial<CellData> & { id: string; original: string; trans
     cellLabel: partial.id,
     validationStatus: "none",
     activeValidators: [],
-    status: partial.translated ? "unvalidated" : "empty",
+    status: partial.translated ? "validated" : "empty",
     context: "",
     group: "",
     type: "text",
@@ -54,5 +54,14 @@ describe("useSearchIndex.search", () => {
     // had the excluded cell never been there. We assert at least as many results as the
     // post-filter baseline — i.e. the buffer didn't make us return fewer.
     expect(withExclude.length).toBeGreaterThanOrEqual(baseline.length)
+  })
+
+  it("never indexes unreviewed target text", () => {
+    const cells = [
+      cell({ id: "approved", original: "approved source", translated: "approved target" }),
+      cell({ id: "draft", original: "unreviewed source", translated: "unreviewed target", status: "unvalidated" }),
+    ]
+    const { result } = renderHook(() => useSearchIndex([], cells))
+    expect(result.current.search("unreviewed source", 5).every((pair) => pair.cellId !== "draft")).toBe(true)
   })
 })

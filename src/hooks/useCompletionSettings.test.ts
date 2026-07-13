@@ -34,7 +34,7 @@ describe("buildCompletionSettings — AQU-408 retrieval-tuning keys", () => {
     const merged = buildCompletionSettings(base, { systemPrompt: "new instructions" })
     expect(merged.top_k).toBe(15)
     expect(merged.contextSize).toBe("medium")
-    expect(merged.useOnlyValidatedExamples).toBe(false)
+    expect(merged.useOnlyValidatedExamples).toBe(true)
     expect(merged.main_chat_language).toBe("")
     expect(merged.fewShotExampleFormat).toBe("source-and-target")
     expect(merged.systemPrompt).toBe("new instructions")
@@ -62,14 +62,14 @@ describe("buildCompletionSettings — AQU-408 retrieval-tuning keys", () => {
     const merged = buildCompletionSettings(undefined, {})
     expect(merged.top_k).toBe(15)
     expect(merged.contextSize).toBe("medium")
-    expect(merged.useOnlyValidatedExamples).toBe(false)
+    expect(merged.useOnlyValidatedExamples).toBe(true)
     expect(merged.main_chat_language).toBe("")
     expect(merged.fewShotExampleFormat).toBe("source-and-target")
   })
 
-  it("allows explicitly clearing useOnlyValidatedExamples back to false", () => {
+  it("ignores legacy attempts to opt drafting into unreviewed examples", () => {
     const validatedOnlyBase: CompletionSettings = { ...base, useOnlyValidatedExamples: true }
     const merged = buildCompletionSettings(validatedOnlyBase, { useOnlyValidatedExamples: false })
-    expect(merged.useOnlyValidatedExamples).toBe(false)
+    expect(merged.useOnlyValidatedExamples).toBe(true)
   })
 })

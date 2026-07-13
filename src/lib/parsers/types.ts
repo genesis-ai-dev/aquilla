@@ -537,9 +537,10 @@ export interface CompletionSettings {
   contextSize?: ContextSize
 
   /**
-   * When true, only cells with `status === "validated"` are eligible as
-   * few-shot examples (no search-retrieved unvalidated examples).
-   * Spec key: `useOnlyValidatedExamples`. Default false.
+   * Legacy compatibility key. Production drafting always restricts few-shot
+   * examples to approved (`status === "validated"`) cells; false values from
+   * older project settings are ignored.
+   * Spec key: `useOnlyValidatedExamples`. Effective value: true.
    */
   useOnlyValidatedExamples?: boolean
 

@@ -14,7 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { Languages, Sparkles, Wand2, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
-import { type CellStore, useCellStoreVersion } from "@/hooks/useActiveCellStore"
+import { type CellStore, readAtVersion, useCellStoreVersion } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { Button } from "@/components/ui/button"
@@ -84,7 +84,7 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
   }, [])
 
   const selectedCells = useMemo(() => {
-    return cellStore.getCellsByIds(selected).slice(0, MAX_SELECTED)
+    return readAtVersion(cellStoreVersion, () => cellStore.getCellsByIds(selected).slice(0, MAX_SELECTED))
   }, [cellStore, cellStoreVersion, selected])
 
   const missingCount = useMemo(

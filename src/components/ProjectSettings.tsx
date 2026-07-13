@@ -784,7 +784,14 @@ export function ProjectSettings() {
   ]
 
   // ── Search filter ──────────────────────────────────────────────────────────
-  const [searchQuery, setSearchQuery] = useState("")
+  // AQU-522: the settings search is deep-linkable via `?q=<term>` so callers can
+  // point a user straight at a buried section. The Gemini/TTS key lives in the
+  // Voice section far down the page; "open audio setup" affordances navigate to
+  // `…/settings?q=gemini`, which filters to the Voice card so the key entry is
+  // visible immediately with nothing to hunt for or scroll past. Seeded once on
+  // mount; the box stays user-editable/clearable afterward.
+  const [searchParams] = useSearchParams()
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get("q") ?? "")
   const lowerQuery = searchQuery.trim().toLowerCase()
   const visibleSections = lowerQuery
     ? ALL_SECTIONS.filter(
@@ -861,9 +868,8 @@ export function ProjectSettings() {
     .filter((g) => g.sectionIds.length > 0)
 
   // Navigation between the index and a pane is a plain in-page Link to
-  // `?section=<id>` (read here via useSearchParams) — no new route, App.tsx
+  // `?section=<id>` (read via `searchParams` above) — no new route, App.tsx
   // untouched, and the pane is deep-linkable / back-button friendly.
-  const [searchParams] = useSearchParams()
   const activeGroupId = searchParams.get("section")
   const activeGroup = visibleGroups.find((g) => g.id === activeGroupId) ?? null
   // An unknown/stale group id (e.g. its only section just became invisible)

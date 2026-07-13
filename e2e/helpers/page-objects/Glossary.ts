@@ -1,4 +1,5 @@
 import { type Locator, type Page, expect } from "@playwright/test"
+import { pickSelectOption } from "../base-ui"
 
 /** User-level interactions for the editor-style Glossary surface. */
 export class Glossary {
@@ -22,10 +23,32 @@ export class Glossary {
   async addTerm(sourceTerm: string, rendering: string): Promise<Locator> {
     await this.page.getByPlaceholder("New source term…").fill(sourceTerm)
     if (rendering) await this.page.getByPlaceholder("rendering", { exact: true }).fill(rendering)
+    const saved = this.waitForSettingsPatch()
     await this.page.getByRole("button", { name: "Add term" }).click()
+    await this.expectSettingsPatchOk(saved)
     const row = this.row(sourceTerm)
     await expect(row).toBeVisible({ timeout: 8_000 })
     return row
+  }
+
+  async setRenderingStatus(sourceTerm: string, status: string): Promise<void> {
+    const row = await this.expandTerm(sourceTerm)
+    const statusSelect = row.getByRole("combobox", { name: "Rendering 1 status" })
+    const saved = this.waitForSettingsPatch()
+    await pickSelectOption(this.page, statusSelect, status)
+    await this.expectSettingsPatchOk(saved)
+  }
+
+  private waitForSettingsPatch() {
+    return this.page.waitForResponse((response) =>
+      response.request().method() === "PATCH"
+      && /\/api\/v2\/projects\/[^/]+\/settings(?:\?|$)/.test(response.url()),
+    )
+  }
+
+  private async expectSettingsPatchOk(responsePromise: ReturnType<Page["waitForResponse"]>) {
+    const response = await responsePromise
+    expect(response.ok(), `settings PATCH failed: HTTP ${response.status()}`).toBe(true)
   }
 
   async expandTerm(sourceTerm: string): Promise<Locator> {

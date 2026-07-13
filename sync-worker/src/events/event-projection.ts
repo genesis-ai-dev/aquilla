@@ -102,22 +102,31 @@ export function fileCountersRecomputeStmt(
 ): AquillaStatement {
   return db
     .prepare(
-      `UPDATE files SET
-        cell_count = (SELECT COUNT(DISTINCT cell_id) FROM cells WHERE project_id = ? AND file_id = ?),
-        approved_count = (SELECT COUNT(*) FROM cells WHERE project_id = ? AND file_id = ? AND validated = 1),
-        filled_count = (SELECT COUNT(*) FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target' AND TRIM(value) != ''),
-        word_count = (SELECT COALESCE(SUM(word_count), 0) FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target'),
-        last_edit_at = (SELECT MAX(last_edit_at) FROM cells WHERE project_id = ? AND file_id = ?),
-        ai_drafted_count = (SELECT COUNT(*) FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target' AND ai_drafted = 1),
-        updated_at = ?
-      WHERE id = ? AND project_id = ?`,
+      `WITH counters AS (
+         SELECT COUNT(DISTINCT cell_id)::integer AS cell_count,
+                COUNT(*) FILTER (WHERE validated = 1)::integer AS approved_count,
+                COUNT(*) FILTER (
+                  WHERE side = 'target' AND TRIM(value) != ''
+                )::integer AS filled_count,
+                COALESCE(SUM(word_count) FILTER (WHERE side = 'target'), 0)::integer AS word_count,
+                MAX(last_edit_at) AS last_edit_at,
+                COUNT(*) FILTER (
+                  WHERE side = 'target' AND ai_drafted = 1
+                )::integer AS ai_drafted_count
+           FROM cells
+          WHERE project_id = ? AND file_id = ?
+       )
+       UPDATE files SET cell_count = counters.cell_count,
+         approved_count = counters.approved_count,
+         filled_count = counters.filled_count,
+         word_count = counters.word_count,
+         last_edit_at = counters.last_edit_at,
+         ai_drafted_count = counters.ai_drafted_count,
+         updated_at = ?
+        FROM counters
+       WHERE files.id = ? AND files.project_id = ?`,
     )
     .bind(
-      projectId, fileId,
-      projectId, fileId,
-      projectId, fileId,
-      projectId, fileId,
-      projectId, fileId,
       projectId, fileId,
       serverTs,
       fileId, projectId,

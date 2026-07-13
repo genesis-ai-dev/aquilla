@@ -13,10 +13,31 @@
 
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 
-/** Cells per HTTP request. Each cell = 2 D1 statements server-side; the worker
- *  batches them ≤100/batch, so 1500 cells ≈ 30 D1 batches per request — well
- *  under Workers' subrequest ceiling, with smooth progress. */
+/** Cells per HTTP request. The worker turns each chunk into bounded multi-row
+ *  Postgres inserts, keeping request bodies manageable while still amortizing
+ *  Hyperdrive/network latency. */
 const CHUNK = 1500
+const IMPORT_ATTEMPTS = 3
+const IMPORT_RETRY_DELAYS_MS = [200, 800] as const
+
+function isRetryableImportStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500
+}
+
+async function waitForImportRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw new Error("Import cancelled")
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(timeout)
+      reject(new Error("Import cancelled"))
+    }
+    signal?.addEventListener("abort", onAbort, { once: true })
+  })
+}
 
 export interface BulkImportCell {
   /** Client-minted event id (UUIDv7); becomes the cell's chain head. */
@@ -91,7 +112,7 @@ export interface BulkUploadArgs {
  */
 export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   const fetchFn = args.fetchImpl ?? fetch
-  const token = await args.getToken(args.fileId)
+  let token = await args.getToken(args.fileId)
   if (!token) {
     throw new Error(
       "Couldn't get an upload token — you may be signed out. Sign in and import again.",
@@ -128,27 +149,104 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
       }
     }
 
-    let res: Response
-    try {
-      res = await fetchFn(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(payload),
-        signal: args.signal,
-      })
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : "network error"
-      throw new Error(`Upload failed: ${reason}`)
-    }
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "")
-      throw new Error(
-        `Upload failed (HTTP ${res.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`,
-      )
+    let lastError: Error | null = null
+    for (let attempt = 0; attempt < IMPORT_ATTEMPTS; attempt++) {
+      if (args.signal?.aborted) throw new Error("Import cancelled")
+      let response: Response | null = null
+      try {
+        response = await fetchFn(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify(payload),
+          signal: args.signal,
+        })
+      } catch (err) {
+        if (args.signal?.aborted) throw new Error("Import cancelled")
+        const reason = err instanceof Error ? err.message : "network error"
+        lastError = new Error(`Upload failed: ${reason}`)
+      }
+
+      if (response) {
+        if (response.ok) {
+          uploaded += chunk.length
+          args.onProgress?.(uploaded, total)
+          return
+        }
+
+        const detail = await response.text().catch(() => "")
+        lastError = new Error(
+          `Upload failed (HTTP ${response.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`,
+        )
+
+        // Large imports can outlive their original file token. Refresh it and
+        // retry the exact same idempotent chunk once the server returns 401.
+        if (response.status === 401 && attempt < IMPORT_ATTEMPTS - 1) {
+          const refreshed = await args.getToken(args.fileId)
+          if (refreshed) {
+            token = refreshed
+            continue
+          }
+        }
+        if (!isRetryableImportStatus(response.status)) throw lastError
+      }
+
+      if (attempt < IMPORT_ATTEMPTS - 1) {
+        await waitForImportRetry(IMPORT_RETRY_DELAYS_MS[attempt], args.signal)
+      }
     }
 
-    uploaded += chunk.length
-    args.onProgress?.(uploaded, total)
+    throw lastError ?? new Error("Upload failed")
+  }
+
+  const finalize = async (): Promise<void> => {
+    let lastError: Error | null = null
+
+    for (let attempt = 0; attempt < IMPORT_ATTEMPTS; attempt++) {
+      if (args.signal?.aborted) throw new Error("Import cancelled")
+      let response: Response | null = null
+      try {
+        response = await fetchFn(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            projectId: args.projectId,
+            fileId: args.fileId,
+            cells: [],
+            complete: true,
+            clientTs: Date.now(),
+          }),
+          signal: args.signal,
+        })
+      } catch (err) {
+        if (err instanceof Error && err.message === "Import cancelled") throw err
+        lastError = err instanceof Error ? err : new Error(String(err))
+      }
+
+      if (response) {
+        if (response.ok) return
+        const detail = await response.text().catch(() => "")
+        lastError = new Error(
+          `Import finalization failed (HTTP ${response.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`,
+        )
+
+        // A long-running upload can outlive its original sync token. Refresh
+        // once through the normal token provider before treating 401 as fatal.
+        if (response.status === 401 && attempt < IMPORT_ATTEMPTS - 1) {
+          const refreshed = await args.getToken(args.fileId)
+          if (refreshed) {
+            token = refreshed
+            continue
+          }
+        }
+        if (!isRetryableImportStatus(response.status)) throw lastError
+      }
+
+      if (attempt < IMPORT_ATTEMPTS - 1) {
+        await waitForImportRetry(IMPORT_RETRY_DELAYS_MS[attempt], args.signal)
+      }
+    }
+
+    throw lastError ?? new Error("Import finalization failed")
   }
 
   // The first chunk carries file.create (+ side-car raw source) and must land
@@ -166,38 +264,43 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   const rest = offsets.slice(1)
   const POOL = 4
   let cursor = 0
+  let uploadFailure: unknown | null = null
   const worker = async (): Promise<void> => {
-    while (cursor < rest.length) {
+    while (uploadFailure === null && cursor < rest.length) {
       const i = cursor++
-      await sendChunk(rest[i], false)
+      try {
+        await sendChunk(rest[i], false)
+      } catch (err) {
+        // Stop assigning new chunks as soon as one fails. Requests already in
+        // flight are allowed to settle before the partial state is finalized.
+        uploadFailure ??= err
+      }
     }
   }
-  await Promise.all(Array.from({ length: Math.min(POOL, rest.length) }, () => worker()))
+  await Promise.all(
+    Array.from({ length: Math.min(POOL, rest.length) }, () => worker()),
+  )
 
-  // Tell the server every source chunk has landed. The completion request is
-  // deliberately tiny and does not rewrite cells; it lets the project DO send
-  // one accurate progress invalidation after concurrent chunks settle.
+  // Finalization is a required, idempotent part of the import now: it performs
+  // the single authoritative counter/progress rebuild after all concurrent
+  // chunks settle. It also runs after a partial failure so whatever did land
+  // remains internally consistent and recoverable.
   try {
-    const response = await fetchFn(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        projectId: args.projectId,
-        fileId: args.fileId,
-        cells: [],
-        complete: true,
-        clientTs: Date.now(),
-      }),
-      signal: args.signal,
-    })
-    if (!response.ok) {
-      console.warn(`[bulk-import] completion notification failed for ${args.fileId}: HTTP ${response.status}`)
+    await finalize()
+  } catch (finalizeError) {
+    if (uploadFailure !== null) {
+      const uploadMessage = uploadFailure instanceof Error
+        ? uploadFailure.message
+        : String(uploadFailure)
+      const finalizeMessage = finalizeError instanceof Error
+        ? finalizeError.message
+        : String(finalizeError)
+      throw new Error(`${uploadMessage}; additionally, ${finalizeMessage}`)
     }
-  } catch (err) {
-    // Content is already committed. A missed realtime hint must never make a
-    // completed import look failed or tempt the user to re-import the file.
-    console.warn(`[bulk-import] completion notification failed for ${args.fileId}:`, err)
+    throw finalizeError
   }
+
+  if (uploadFailure !== null) throw uploadFailure
 }
 
 // ---------------------------------------------------------------------------

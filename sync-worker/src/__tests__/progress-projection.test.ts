@@ -99,6 +99,24 @@ describe('file_section_progress projection', () => {
     expect(projected.find((row) => row.section_key === 'GEN 1')?.filled_count).toBe(2)
     expect(projected.find((row) => row.section_key === 'GEN 2')?.filled_count).toBe(1)
   })
+
+  it('full rebuild removes section rows that no longer exist', async () => {
+    const { db, pg, rows } = await fixture()
+    await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
+    expect(await rows('file_section_progress')).toHaveLength(3)
+
+    await pg.query(
+      `UPDATE cells SET canonical_ref = NULL
+        WHERE project_id = $1 AND file_id = $2 AND cell_id = 'c3' AND side = 'source'`,
+      [PROJECT, FILE],
+    )
+    await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 101))
+
+    const projected = await rows<{ scope: string; section_key: string }>('file_section_progress')
+    expect(projected).toHaveLength(2)
+    expect(projected.some((row) => row.section_key === 'GEN 2')).toBe(false)
+    expect(projected.some((row) => row.scope === 'file')).toBe(true)
+  })
 })
 
 describe('GET file progress', () => {

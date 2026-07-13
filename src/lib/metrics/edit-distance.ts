@@ -75,3 +75,56 @@ export function normalizedEditDistance(a: string, b: string): number {
   if (maxLen === 0) return 0
   return levenshteinDistance(a, b) / maxLen
 }
+
+/** Character-level edit operations for effort telemetry. */
+export interface EditOperations {
+  insertions: number
+  deletions: number
+  substitutions: number
+}
+
+/**
+ * Return one deterministic minimum-cost Levenshtein edit script summary.
+ * When several scripts have the same cost, substitutions are preferred,
+ * followed by deletions, then insertions. The totals always sum to the raw
+ * Levenshtein distance.
+ */
+export function levenshteinOperations(a: string, b: string): EditOperations {
+  const rows = a.length + 1
+  const cols = b.length + 1
+  const dp = Array.from({ length: rows }, () => new Array<number>(cols).fill(0))
+  for (let i = 0; i < rows; i++) dp[i][0] = i
+  for (let j = 0; j < cols; j++) dp[0][j] = j
+
+  for (let i = 1; i < rows; i++) {
+    for (let j = 1; j < cols; j++) {
+      const substitutionCost = a[i - 1] === b[j - 1] ? 0 : 1
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + substitutionCost,
+      )
+    }
+  }
+
+  const operations: EditOperations = { insertions: 0, deletions: 0, substitutions: 0 }
+  let i = a.length
+  let j = b.length
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && a[i - 1] === b[j - 1] && dp[i][j] === dp[i - 1][j - 1]) {
+      i--
+      j--
+    } else if (i > 0 && j > 0 && dp[i][j] === dp[i - 1][j - 1] + 1) {
+      operations.substitutions++
+      i--
+      j--
+    } else if (i > 0 && dp[i][j] === dp[i - 1][j] + 1) {
+      operations.deletions++
+      i--
+    } else {
+      operations.insertions++
+      j--
+    }
+  }
+  return operations
+}

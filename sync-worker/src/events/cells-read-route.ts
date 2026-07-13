@@ -66,6 +66,7 @@ interface CellRowRaw {
   last_editor: string | null
   last_edit_at: number
   validated: number
+  ai_drafted: number
   word_count: number
   endorsement_count: number
   start_ms: number | null
@@ -92,6 +93,7 @@ interface CellRowOut {
   lastEditor: string | null
   lastEditAt: number
   validated: boolean
+  aiDrafted: boolean
   wordCount: number
   endorsementCount: number
   startMs: number | null
@@ -135,6 +137,7 @@ function mapRow(row: CellRowRaw): CellRowOut {
     lastEditor: row.last_editor,
     lastEditAt: row.last_edit_at,
     validated: row.validated === 1,
+    aiDrafted: row.ai_drafted === 1,
     wordCount: row.word_count,
     endorsementCount: row.endorsement_count ?? 0,
     startMs: row.start_ms,
@@ -387,7 +390,7 @@ export async function handleCellsReadRequest(
   // walk dominates only at >10x current file sizes.
   const columns =
     "cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, " +
-    "event_id, source_event_id, last_editor, last_edit_at, validated, word_count, " +
+    "event_id, source_event_id, last_editor, last_edit_at, validated, ai_drafted, word_count, " +
     "endorsement_count, start_ms, end_ms, " +
     "medium, sequence_index, transcription, camera_state, metadata"
 

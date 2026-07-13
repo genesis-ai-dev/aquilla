@@ -33,7 +33,10 @@ export function buildCompletionSettings(
     // funnels every completion-settings edit through this function.
     top_k: overrides.top_k ?? base?.top_k ?? 15,
     contextSize: overrides.contextSize ?? base?.contextSize ?? "medium",
-    useOnlyValidatedExamples: overrides.useOnlyValidatedExamples ?? base?.useOnlyValidatedExamples ?? false,
+    // Approved-only retrieval is a production trust invariant. Preserve the
+    // legacy field for wire compatibility, but never allow a project/device
+    // override to opt drafting back into raw model output.
+    useOnlyValidatedExamples: true,
     main_chat_language: overrides.main_chat_language ?? base?.main_chat_language ?? "",
     fewShotExampleFormat: overrides.fewShotExampleFormat ?? base?.fewShotExampleFormat ?? "source-and-target",
   }

@@ -60,6 +60,8 @@ export interface CellRow {
   lastEditor: string | null
   lastEditAt: number
   validated: boolean
+  /** True while the current target head is an untouched machine draft. */
+  aiDrafted?: boolean
   wordCount: number
   endorsementCount?: number
   /** Cue start/end in milliseconds; null for non-subtitle cells. */

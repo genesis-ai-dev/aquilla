@@ -49,6 +49,7 @@ export interface CellSummary {
   sourceEventId?: string
   targetEventId?: string
   targetSourceEventId?: string | null
+  aiDrafted?: boolean
   lastEditAt?: number
   startTime?: number
   endTime?: number
@@ -140,6 +141,7 @@ interface PendingOverlay {
   value: string
   valueHtml?: string
   eventId?: string
+  aiDrafted?: boolean
 }
 
 interface OptimisticEdit extends PendingOverlay {
@@ -446,6 +448,7 @@ export class CellStore {
       sourceEventId: view.sourceEventId,
       targetEventId: view.targetEventId,
       targetSourceEventId: view.targetSourceEventId,
+      aiDrafted: view.aiDrafted,
       lastEditAt: view.lastEditAt,
       startTime: view.startTime,
       endTime: view.endTime,
@@ -619,7 +622,10 @@ export class CellStore {
     const changed = symmetricChangedKeys(
       this.pendingOverlay,
       next,
-      (a, b) => a.value === b.value && a.valueHtml === b.valueHtml && a.eventId === b.eventId,
+      (a, b) => a.value === b.value
+        && a.valueHtml === b.valueHtml
+        && a.eventId === b.eventId
+        && a.aiDrafted === b.aiDrafted,
     )
     if (changed.size === 0) return
     this.pendingOverlay = next
@@ -654,7 +660,7 @@ export class CellStore {
 
     const existing = this.targetById.get(cellId)
     if (existing) {
-      this.targetById.set(cellId, { ...existing, value: patch.value, valueHtml: patch.valueHtml ?? null })
+      this.targetById.set(cellId, { ...existing, value: patch.value, valueHtml: patch.valueHtml ?? null, aiDrafted: patch.aiDrafted ?? false })
     } else {
       const source = this.sourceById.get(cellId)
       if (!source) return
@@ -668,6 +674,7 @@ export class CellStore {
         lastEditor: this.ctx.username,
         lastEditAt: Date.now(),
         validated: false,
+        aiDrafted: patch.aiDrafted ?? false,
         wordCount: patch.value.trim() ? patch.value.trim().split(/\s+/).length : 0,
       })
       if (!this.targetOrder.includes(cellId)) this.targetOrder.push(cellId)
@@ -751,6 +758,7 @@ export class CellStore {
       cell.translated = pending.value
       if (pending.valueHtml !== undefined) cell.translatedHtml = pending.valueHtml
       cell.status = deriveStatus(pending.value, false)
+      cell.aiDrafted = pending.aiDrafted ?? false
       cell.hasPendingEdit = true
     }
     const optimistic = this.optimisticEdits.get(cell.id)
@@ -758,6 +766,7 @@ export class CellStore {
       cell.translated = optimistic.value
       if (optimistic.valueHtml !== undefined) cell.translatedHtml = optimistic.valueHtml
       cell.status = deriveStatus(optimistic.value, false)
+      cell.aiDrafted = optimistic.aiDrafted ?? false
       cell.hasPendingEdit = true
     }
   }
@@ -916,7 +925,7 @@ export interface UseActiveCellStoreResult {
   store: CellStore
   revalidate: () => void
   revalidateCell: (cellId: string) => void
-  applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string }) => void
+  applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => void
   isLoading: boolean
   isError: boolean
 }
@@ -1135,13 +1144,18 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         if (kind !== "target.cell.commit" && kind !== "target.cell.create") continue
         const cellId = record.event.cellId
         if (!cellId) continue
-        const payload = record.event.payload as { value?: string; valueHtml?: string }
+        const payload = record.event.payload as { value?: string; valueHtml?: string; ai_suggestion?: true }
         if (failed) {
           if (typeof payload.value === "string") store.clearOptimisticIfValue(cellId, payload.value)
           continue
         }
         if (typeof payload.value !== "string") continue
-        next.set(cellId, { value: payload.value, valueHtml: payload.valueHtml, eventId: record.event.id })
+        next.set(cellId, {
+          value: payload.value,
+          valueHtml: payload.valueHtml,
+          eventId: record.event.id,
+          aiDrafted: payload.ai_suggestion === true,
+        })
       }
       store.setPendingOverlay(next)
       store.setPendingProgressEventIds(pendingProgressEventIds)
@@ -1234,7 +1248,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   }, [doFetch, refreshCellsCacheFromStore, store])
   revalidateCellRef.current = revalidateCell
 
-  const applyOptimisticTargetEdit = useCallback((cellId: string, patch: { value: string; valueHtml?: string }) => {
+  const applyOptimisticTargetEdit = useCallback((cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => {
     store.applyOptimisticTargetEdit(cellId, patch)
   }, [store])
 

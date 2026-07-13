@@ -201,14 +201,14 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     renderAt(`/project/${PROJECT_ID}/settings?section=validation`)
     expect(screen.getByLabelText(/required validators \(text\)/i)).toBeTruthy()
     expect(screen.getByText(/^harmonization$/i)).toBeTruthy()
-    expect(screen.getByText(/staleness & health/i)).toBeTruthy()
+    expect(screen.getByText(/retrieval support/i)).toBeTruthy()
 
     renderAt(`/project/${PROJECT_ID}/settings?section=audio-media`)
     expect(screen.getByText(/audio loading/i)).toBeTruthy()
 
     renderAt(`/project/${PROJECT_ID}/settings?section=metrics`)
     // PostEditMetricsSection renders its own heading regardless of loading state.
-    expect(screen.getByText(/ai metrics|post-edit/i)).toBeTruthy()
+    expect(screen.getByText(/approved ai review effort/i)).toBeTruthy()
   })
 
   // The hidden termbase-sharing section (SHOW_TERMBASE_SHARING_IN_SETTINGS

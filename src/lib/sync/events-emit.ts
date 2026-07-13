@@ -158,6 +158,8 @@ export interface CellCommitInput {
    *  `cell.commit.llm-accept` provenance. Normal (human-typed) commits
    *  omit this field entirely — the generic commit path is unaffected. */
   aiSuggestion?: boolean
+  /** Required context for research-aligned machine-draft telemetry. */
+  aiDraft?: import("./outbox-types").AiDraftProvenance
   /**
    * AQU-177: audit metadata for replace-all operations. Records the find and
    * replace strings so the per-cell history drawer can show the replace context.
@@ -219,6 +221,7 @@ export async function emitTargetCellCommit(
         ? { sourceEventId: input.sourceEventId }
         : {}),
       ...(input.aiSuggestion ? { ai_suggestion: true } : {}),
+      ...(input.aiSuggestion && input.aiDraft ? { ai_draft: input.aiDraft } : {}),
       ...(input.searchQuery !== undefined ? { search_query: input.searchQuery } : {}),
       ...(input.replaceString !== undefined ? { replace_string: input.replaceString } : {}),
     },

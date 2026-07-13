@@ -48,6 +48,8 @@ export interface CellData {
    *  When set, `translated` / `translatedHtml` reflect the *pending* value, not
    *  the server projection. UI can render a subtle "queued" indicator. */
   hasPendingEdit?: boolean
+  /** Current target head is machine-generated and has not been human-edited or approved. */
+  aiDrafted?: boolean
   cellLabel?: string
   original: string
   originalHtml?: string
@@ -151,6 +153,7 @@ function cellsEqual(a: CellData, b: CellData): boolean {
     a.id === b.id &&
     a.fileId === b.fileId &&
     a.hasPendingEdit === b.hasPendingEdit &&
+    a.aiDrafted === b.aiDrafted &&
     a.cellLabel === b.cellLabel &&
     a.original === b.original &&
     a.originalHtml === b.originalHtml &&
@@ -190,15 +193,15 @@ function cellArraysEqual(a: readonly CellData[], b: readonly CellData[]): boolea
 }
 
 function pendingOverlayMapsEqual(
-  a: ReadonlyMap<string, { value: string; valueHtml?: string }>,
-  b: ReadonlyMap<string, { value: string; valueHtml?: string }>,
+  a: ReadonlyMap<string, { value: string; valueHtml?: string; aiDrafted?: boolean }>,
+  b: ReadonlyMap<string, { value: string; valueHtml?: string; aiDrafted?: boolean }>,
 ): boolean {
   if (a === b) return true
   if (a.size !== b.size) return false
   for (const [cellId, av] of a) {
     const bv = b.get(cellId)
     if (!bv) return false
-    if (av.value !== bv.value || av.valueHtml !== bv.valueHtml) return false
+    if (av.value !== bv.value || av.valueHtml !== bv.valueHtml || av.aiDrafted !== bv.aiDrafted) return false
   }
   return true
 }
@@ -287,6 +290,7 @@ export function buildCellData(
     originalHtml: source?.valueHtml ?? undefined,
     translated,
     translatedHtml: target?.valueHtml ?? undefined,
+    aiDrafted: target?.aiDrafted ?? false,
     sourceEventId: source?.eventId,
     targetEventId: target?.eventId,
     targetSourceEventId: target?.sourceEventId ?? null,
@@ -378,7 +382,7 @@ export interface UseCellsResult {
    *  Used by the editor commit path so rule infractions + per-cell UI
    *  re-derive instantly (no round-trip wait). The follow-up server fetch
    *  (`revalidate()`) overwrites this with the authoritative projection. */
-  applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string }) => void
+  applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => void
   isLoading: boolean
   isError: boolean
 }
@@ -416,7 +420,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // on top of the server projection in rebuildFromCache so refreshes (and
   // initial loads) reflect locally-queued edits before sync lands. Cleared
   // entries roll off automatically as the flusher removes them from IDB.
-  const pendingOverlayRef = useRef<Map<string, { value: string; valueHtml?: string }>>(new Map())
+  const pendingOverlayRef = useRef<Map<string, { value: string; valueHtml?: string; aiDrafted?: boolean }>>(new Map())
   // Optimistic-edit shadow: a local commit (AI predict, hand edit, promote) that
   // must stay visible even after its outbox event flushes — until a server read
   // actually shows the new value. The outbox overlay above clears the instant
@@ -432,7 +436,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // (AQU-247): a fetch may only confirm-and-clear a shadow it provably
   // postdates (fetch startSeq >= shadow seq), so a stale snapshot that
   // coincidentally carries the same value can never clear it.
-  const optimisticEditsRef = useRef<Map<string, { value: string; valueHtml?: string; seq: number }>>(new Map())
+  const optimisticEditsRef = useRef<Map<string, { value: string; valueHtml?: string; aiDrafted?: boolean; seq: number }>>(new Map())
   // Local-mutation clock (AQU-247). Bumped on every local rowsRef mutation:
   // an optimistic edit, or a targeted revalidateCell write-back. Fetches
   // record the clock when their server snapshot begins; any cell mutated
@@ -513,6 +517,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         if (!o) continue
         cell.translated = o.value
         if (o.valueHtml !== undefined) cell.translatedHtml = o.valueHtml
+        cell.aiDrafted = o.aiDrafted ?? false
         // Pending edits are by definition unvalidated until they replay
         // through the server projection.
         cell.status = deriveStatus(o.value, false)
@@ -532,6 +537,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         if (!o) continue
         cell.translated = o.value
         if (o.valueHtml !== undefined) cell.translatedHtml = o.valueHtml
+        cell.aiDrafted = o.aiDrafted ?? false
         cell.status = deriveStatus(o.value, false)
         cell.hasPendingEdit = true
       }
@@ -930,7 +936,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       const all = await peekOutboxBatch(2000)
       if (cancelled) return
       const fid = fileRef.current
-      const next = new Map<string, { value: string; valueHtml?: string }>()
+      const next = new Map<string, { value: string; valueHtml?: string; aiDrafted?: boolean }>()
       let shadowChanged = false
       for (const r of all) {
         if (fid && r.event.fileId !== fid) continue
@@ -957,9 +963,9 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
           }
           continue
         }
-        const p = r.event.payload as { value?: string; valueHtml?: string }
+        const p = r.event.payload as { value?: string; valueHtml?: string; ai_suggestion?: true }
         if (typeof p.value !== "string") continue
-        next.set(cellId, { value: p.value, valueHtml: p.valueHtml })
+        next.set(cellId, { value: p.value, valueHtml: p.valueHtml, aiDrafted: p.ai_suggestion === true })
       }
       const overlayChanged = !pendingOverlayMapsEqual(pendingOverlayRef.current, next)
       if (overlayChanged) pendingOverlayRef.current = next
@@ -1136,21 +1142,21 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // The next `revalidate()` (called by the parent after outbox flush) will
   // overwrite this with the authoritative server projection.
   const applyOptimisticTargetEdit = useCallback(
-    (cellId: string, patch: { value: string; valueHtml?: string }) => {
+    (cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => {
       // Record the shadow so a stale in-flight refetch's buffer swap can't wipe
       // this value before the projection catches up (see optimisticEditsRef).
       // The seq stamps this write on the local-mutation clock: only a fetch
       // whose snapshot began at-or-after it may confirm the shadow, and any
       // fetch that began before it must keep this cell's rows at its swap.
       const seq = ++writeSeqRef.current
-      optimisticEditsRef.current.set(cellId, { value: patch.value, valueHtml: patch.valueHtml, seq })
+      optimisticEditsRef.current.set(cellId, { value: patch.value, valueHtml: patch.valueHtml, aiDrafted: patch.aiDrafted ?? false, seq })
       cellFreshnessRef.current.set(cellId, seq)
       const rows = rowsRef.current
       let touched = false
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i]
         if (r.cellId !== cellId || r.side !== "target") continue
-        rows[i] = { ...r, value: patch.value, valueHtml: patch.valueHtml ?? null }
+        rows[i] = { ...r, value: patch.value, valueHtml: patch.valueHtml ?? null, aiDrafted: patch.aiDrafted ?? false }
         touched = true
         break
       }
@@ -1172,6 +1178,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
           lastEditor: usernameRef.current,
           lastEditAt: Date.now(),
           validated: false,
+          aiDrafted: patch.aiDrafted ?? false,
           wordCount: patch.value.trim() ? patch.value.trim().split(/\s+/).length : 0,
         })
       }

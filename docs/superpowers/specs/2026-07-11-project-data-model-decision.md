@@ -130,31 +130,112 @@ don't share `cell_id` simply stay N=1. Nothing forces a flag-day.
 
 ---
 
-## Migration path (sketch)
+## Rollout slices
 
-1. **Schema — the invasive slice.** Add the target-lane dimension to `cells` (key becomes
-   `(project, file, cell, targetLang)`), extend the projection to last-write-wins per
-   `(cell, lang)`, thread `targetLang` through `target.cell.commit`, the editor, focus locks,
-   and the AD-9 pin. Ship migrations to **both** D1 and `db/postgres/schema.sql`
-   (schema-guard CI). Backfill existing target rows as lane = the project's current
-   `targetLanguage`. This alone leaves every existing project working as N=1.
-   **Status: implemented** (migration `0054_cells_target_lang.sql`; `target_lang` with
-   `'' = default lane` so no backfill is needed; lane-qualified AD-2 chain slots across
-   live claim / pre-check / rebuild / bulk fold; editor + focus-lock lane threading is
-   deferred to slice 2 with the add-a-language UI — no UI can produce a non-default
-   lane yet, so N=1 behavior is unchanged).
-2. **UI — add-a-language.** A project gains "add target language," producing a new lane over
-   the existing source assets. Few-shot retrieval is re-scoped per lane (retrieval layer
-   already keys on the pair, so this is a scoping change, not a rebuild).
-3. **Demote sibling linking.** New sibling languages are lanes, not linked projects. The mirror
-   engine is no longer invoked for `consumes: 'source'` **within** a project; it remains for
-   chains and external upstreams. (The `consumes: 'source'` cross-project path stays available
-   for legacy links until they're merged, then can be retired.)
-4. **Opt-in sibling-merge tool.** Fold pair-projects sharing a `cell_id` lineage into one N-lane
-   project; leave non-matching legacy projects as N=1.
-5. **Keep the linked-projects engine for B + C.** Chains (`consumes: 'target'`) and the
-   unfoldingWord adapter (§11) ride the existing mirror + pin + derive-on-read machinery,
-   unchanged.
+Each slice ends with a **"How to think about it now"** block — the dev-team mental model
+after that slice lands. Finalizing that block (draft → final, reflecting what actually
+shipped) is part of every slice's definition of done; it is the paragraph you'd paste into
+the team channel when the slice merges. Slice 1's is final; the rest are drafted intent.
+
+### Invariants that hold at every slice
+
+- **Source rows are always lane `''`.** The source exists once, shared by all lanes — that
+  is the point of the TMS model. No source-side event or row ever carries a lane.
+- **`''` is the default lane** = the file's single configured `targetLanguage`. Every
+  pre-lane row and every event without `targetLang` lives there; clients omit `''` on the
+  wire so default-lane events stay byte-identical to pre-lane events (idempotency ids,
+  replay, history).
+- **Lanes ride events, never raw writes.** Anything that creates lane content (UI, merge
+  tool, agents) emits `target.cell.*` events with `targetLang` through the normal `/events`
+  path — the same front-door rule as the mirror engine and external adapters.
+- **AD-2 arbitration is per lane.** The chain slot for a non-default lane is
+  lane-qualified (`chain-claims.ts laneQualifiedParentKey`), identically in all four
+  arbitration sites: live claim, `isWinningChild` pre-check, `rebuild.ts`, and the bulk
+  fold (`scripts/lib/fold-projection.ts`). If you add a fifth site, qualify it.
+- **Links are for graphs.** Chains (`consumes: 'target'`) and external upstreams keep the
+  mirror + pin + derive-on-read engine unchanged; v1 target-consumption consumes the
+  upstream's **default lane** only.
+
+### Slice 1 — schema + projection lanes ✅ SHIPPED (AQU-538)
+
+Migration `0054_cells_target_lang.sql`; `cells` PK is now
+`(project_id, file_id, cell_id, side, target_lang)`; `target.cell.create/commit/delete/
+reorder` payloads accept optional `targetLang`; lane-qualified chain slots everywhere;
+cells reads return `targetLang` and chain-walk per lane. No backfill needed (`''` = every
+existing row). Editor/focus-lock threading deliberately deferred to slice 2 — no UI can
+produce a non-default lane yet, so live behavior is unchanged.
+
+> **How to think about it now (final):** A target cell is no longer a row — it's a row
+> **per lane**, and today exactly one lane (`''`) exists everywhere. If you write SQL
+> against `cells`: every INSERT needs `target_lang` (source ⇒ `''`), every `ON CONFLICT`
+> must name all five key columns (Postgres errors otherwise), and every target-side
+> `WHERE` must make a lane decision — one lane, or deliberately all lanes (structural
+> updates like `cell.retime`/`cast.assign` are deliberately all-lane; content updates are
+> one-lane). Three rollups are knowingly lane-blind until slice 2: `files` counters sum
+> across lanes, `cell_validators` allows one standing validation per (cell, user) across
+> all lanes, and `file_section_progress` aggregates cross-lane — all correct at N=1.
+> Nothing you do in the UI today can create a second lane; the schema is ahead of the
+> product, on purpose.
+
+### Slice 2 — lanes reach the client (add-a-language + editor threading)
+
+- **Lane registry:** a project-level list of target lanes (settings), seeded from the
+  file's `targetLanguage`; "Add target language" appends a lane — no new project, no link,
+  no copy (the source is already shared).
+- **Editor:** an active-lane context; `TranslatedEditor` commits carry `targetLang`;
+  `useCells` filters/pairs by `(cellId, lane)`; optimistic updates keyed per lane.
+- **Focus locks:** the lease key gains the lane — two translators on different lanes of
+  the same cell must not contend.
+- **Per-lane validators:** `cell_validators` PK gains the lane (removing the slice-1
+  limitation); `files` counters and `file_section_progress` become per-lane rollups with
+  cross-lane sums for existing surfaces.
+- **Few-shot/completion:** scoped by the active lane's pair — the retrieval layer already
+  keys on `(sourceLang, targetLang)`, so this is plumbing, not a rebuild.
+
+> **How to think about it now (draft — finalize on merge):** "A project view" becomes
+> "(project, lane)". Every target-side surface — editor, progress, validation, completion
+> — reads the active lane from context and must never assume one target row per cell.
+> Source-side surfaces are untouched. N=1 projects look and behave exactly as before;
+> the lane switcher simply doesn't render until a second lane exists.
+
+### Slice 3 — demote sibling linking
+
+New sibling languages are lanes, not linked projects: the create-from-template flow
+(AQU-440) offers "add these languages as lanes" for the within-org sibling case; the
+mirror engine is no longer the mechanism for `consumes: 'source'` sibling fan-out. The
+cross-project `consumes: 'source'` path stays for legacy links until they're merged
+(slice 4), then can be retired.
+
+> **How to think about it now (draft — finalize on merge):** Reach for a **lane**, not a
+> **link**. A link now means one of exactly two things: a translation chain (a target
+> feeding another project's source) or an external upstream (git adapter). If you're
+> about to create a sibling-language linked project, stop — that's a lane. The AQU-440
+> graph shows only real graph edges from here on.
+
+### Slice 4 — opt-in sibling-merge tool
+
+Fold legacy pair-projects that share a `cell_id` lineage (seeded from a common template)
+into one N-lane host project: for each donor, emit `target.cell.commit { targetLang }`
+events into the host **through the front door** (never raw projection writes), union
+members/roles, archive the donor with a pointer to the host. Donor event logs stay intact
+as provenance. Non-matching legacy projects simply remain N=1 forever — merging is never
+required.
+
+> **How to think about it now (draft — finalize on merge):** Legacy sibling projects are
+> just N=1 TMS projects; the merge tool is a convenience, not a migration. After a merge,
+> history for merged lanes starts at the merge events in the host — deep history lives in
+> the archived donor's log. If a partner never merges, nothing degrades.
+
+### Slice 5 — lane-scoped permissions + oversight (AQU-553)
+
+Lane- and asset-scoped grants (a reviewer sees one lane, or one book) as additive
+restrictions on the existing role floors; ProjectOverview grows per-lane progress and
+validation counts.
+
+> **How to think about it now (draft — finalize on merge):** Roles answer "how much can
+> you do"; lane/asset scopes answer "where". A grant without a scope behaves exactly as
+> today. Permission checks on target-side writes take (role, lane) — source-side writes
+> are unscoped by lanes, as ever.
 
 ---
 

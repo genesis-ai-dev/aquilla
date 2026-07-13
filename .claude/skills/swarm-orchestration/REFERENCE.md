@@ -28,10 +28,10 @@ ln -sfn "$ROOT/node_modules" "$ROOT/.worktrees/swarm-ws-foo/node_modules"
 ## §0 STOP checklist
 - [ ] every changed/new journey has matching smoke coverage in the same workstream
 - [ ] every new journey is registered in e2e/JOURNEYS.md
-- [ ] vitest green
+- [ ] directly affected vitest/worker tests green
 - [ ] npm run build passes
-- [ ] worker tests pass (sync-worker, auth-worker)
-- [ ] npm run test:e2e:smoke green (mandatory; run centrally to avoid stack collisions)
+- [ ] directly affected smoke specs green (run centrally to avoid stack collisions)
+- [ ] if pushing/promoting/merging/deploying: npm run test:e2e:smoke green once on final integration
 - [ ] every homepage claim demonstrably true on the golden path
 - [ ] every known gap has a SWARM-TODO trace in TRACES.md
 
@@ -109,9 +109,9 @@ You are a sonnet implementation agent in an autonomous swarm. Work ONLY in your 
 
 ## Verify (from your worktree):
 `npm run build` → 0 errors (the CI gate; `tsc --noEmit` is not a substitute)
-`npx vitest run` → green incl. your new tests
+Run directly affected Vitest/worker tests → green incl. your new tests
 Run directly affected smoke specs with `npx tsx scripts/e2e-up.ts -- <spec>` when no other local stack will collide.
-The orchestrator runs the complete smoke suite centrally after integration.
+The orchestrator runs the complete smoke suite centrally only at the push/release boundary, not after every wave.
 Then `git add -A && git commit -m "<message>"`. DO NOT push.
 
 ## Report (concise):
@@ -133,9 +133,10 @@ Then `git add -A && git commit -m "<message>"`. DO NOT push.
 git merge swarm/<branch> --no-edit
 # Resolve conflicts: keep BOTH sides (union, not overwrite)
 # Then:
-npm run build && npx vitest run
+npm run build
+# Run directly affected Vitest/worker tests.
 # Audit the merged diff for matching journey/spec/page-object changes.
-# Run affected smoke specs after each wave; before promotion:
+# Run affected smoke specs after each wave. Only before push/promotion/merge/deploy:
 npm run test:e2e:smoke
 git log --oneline -1  # record the sha in §4
 ```

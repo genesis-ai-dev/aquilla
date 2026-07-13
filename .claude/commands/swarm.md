@@ -36,8 +36,9 @@ success state. **Do not manufacture work.**
 
 - `--deploy` — after main is green, deploy to staging and advance Fixed issues per `/issue` Step 3. Default: stop at Fixed-on-main.
 - `--no-verify` — pass through to agents only when the user explicitly insists. This may skip live/dev-stack
-  verification, but it never waives required test updates. Mark the swarm incomplete and do not promote or
-  deploy while `npm run build` or `npm run test:e2e:smoke` is red or unrun.
+  verification, but it never waives required test updates. Mark the swarm incomplete if affected tests or the
+  build are red. The full smoke suite may remain unrun during implementation, but must pass before push,
+  promotion, merge, or deploy.
 - `--max N` — cap concurrent in-flight agents (default 6; the skill's 4–6 band).
 - `--dry-run` — resolve the project, build the wave plan, write ORCHESTRATION.md, but dispatch **no** agents. Show the plan and stop.
 
@@ -123,9 +124,10 @@ If `--dry-run`: print the wave plan and **stop here.**
 - [ ] Every eligible issue is at **Fixed** (verified) or honestly **blocked** with a Linear note.
 - [ ] Every changed or new user journey has its matching smoke spec/page object updated in the same workstream;
       every new journey is also registered in `e2e/JOURNEYS.md`.
-- [ ] Integration green: `npm run build` + `npx vitest run`; do not substitute `tsc --noEmit` for the build gate.
-- [ ] `npm run test:e2e:smoke` passes on the integrated result with no skipped/weakened assertions added merely
-      to make the gate green.
+- [ ] Integration green for the changed surface: `npm run build` + directly affected Vitest/worker/smoke tests;
+      do not substitute `tsc --noEmit` for the build gate.
+- [ ] If this swarm will push, promote, merge, or deploy, `npm run test:e2e:smoke` passes once on the final
+      integrated result with no skipped/weakened assertions added merely to make the gate green.
 - [ ] `cd sync-worker && npx tsc --noEmit && npm test` (and auth-worker) green **if** any agent touched them.
 - [ ] Each fix verified on the **real dev stack (live UI)** before its issue → Fixed; spec reconciled per `/issue` Step 2.5.
 - [ ] Promoted to main only with main's working tree clean apart from recorded protected files (never clobbered).
@@ -171,9 +173,10 @@ ln -sfn "$ROOT/node_modules" "$ROOT/.worktrees/aqu-###/node_modules"
   and intended behavior before deciding whether product or test is wrong. Non-UI behavior must add or update
   the nearest unit/integration/worker test. A no-test exception is allowed only for genuinely non-behavioral
   docs/config/mechanical work and must be justified in the agent report and §M merge log.
-- **Verify before committing:** `npm run build` → 0; `npx vitest run` → green incl. new tests; run the directly
+- **Verify before committing:** `npm run build` → 0; run the directly affected Vitest/worker tests incl. new tests; run the directly
   affected smoke spec through `scripts/e2e-up.ts` when the worktree can do so without colliding with another
-  stack (+ sync-worker tsc/test if touched). Full smoke remains the orchestrator's serialized integration gate.
+  stack (+ sync-worker tsc/test if touched). Full smoke remains the orchestrator's serialized push/release gate,
+  not a per-agent or per-prompt development check.
   Then `git add -A && git commit -m "AQU-###: …"`.
 - **Hard limits:** do NOT push, do NOT deploy, do NOT promote, do NOT run the shared dev stack.
   Live-UI verification is centralized (Step 6) — instead leave a precise **SWARM-TODO** in the code
@@ -201,8 +204,9 @@ Per completed, verified agent branch:
    confirm `e2e/JOURNEYS.md` and a new smoke spec are present. Missing or weakened coverage is a red merge:
    revert it and respawn a finisher rather than leaving test debt on integration. For non-UI behavior, require
    the nearest unit/integration/worker coverage or a recorded, defensible non-behavioral no-test justification.
-3. Verify on integration: `npm run build && npx vitest run` (+ worker tests if touched). After each wave, run
-   directly affected smoke specs centrally. Before promotion, `npm run test:e2e:smoke` MUST pass in full.
+3. Verify on integration: `npm run build` plus directly affected Vitest/worker tests. After each wave, run
+   directly affected smoke specs centrally. Run `npm run test:e2e:smoke` once, only when the integrated result
+   is about to be pushed, promoted, merged, or deployed.
    Record date · WS · branch · sha · build · vitest · targeted smoke in §M.
 4. **Red merge → revert it** (`git revert <merge-sha>`), trace the failure, respawn a fixer agent.
    Never leave integration broken.

@@ -8,18 +8,19 @@ Rules for any AI coding assistant working in this repo (Claude Code, Cursor, Cop
 
 ## Testing — non-negotiable
 
-Before claiming any feature is complete:
+Keep test coverage synchronized with behavior without running the entire suite after every coding step:
 
-1. **Run the smoke suite.** `npm run test:e2e:smoke` must pass. The pre-push hook enforces this; do not bypass with `--no-verify` unless explicitly told to.
-2. **If your change touches a journey listed in `e2e/JOURNEYS.md`, extend the matching spec OR add a new spec under `e2e/specs/<area>/`.**
-3. **New user-facing journey = new row in `e2e/JOURNEYS.md` AND a new spec.**
-4. **Changed behavior means changed tests.** If a feature, UI flow, label, role, selector, route, validation rule, or loading state changes, update the existing smoke spec/page object in the same change. A stale smoke test is a product bug, not something to ignore.
-5. **Do not leave smoke specs testing removed UI.** If the old journey no longer exists, rewrite the spec around the replacement journey or remove it only when `e2e/JOURNEYS.md` is updated to say the journey was intentionally retired.
-6. **Investigate before changing a failing test.** Check the implementation, relevant commits/issues/specs, and the intended user journey before classifying a failure. Fix the product when behavior regressed; update the test only when the intended behavior genuinely changed. Never delete, skip, broaden, or weaken an assertion merely to make CI pass.
-7. **Reuse helpers** in `e2e/helpers/page-objects/`. Do not duplicate selectors. If no page object fits, add one or update the existing one as part of the feature.
-8. Tests run against **local `wrangler dev` instances** of `auth-worker` and `sync-worker`, backed by a Docker-managed local Postgres (container `aquilla-dev-pg`). See `e2e/README.md` for setup.
+1. **During implementation, run the directly affected tests.** Run the nearest unit/integration/worker tests and the specific smoke spec(s) covering the changed journey. Use `npx tsx scripts/e2e-up.ts -- <spec>` for targeted smoke coverage. Do not rerun the complete smoke suite after every prompt or incremental edit.
+2. **The complete smoke suite is a push/release gate.** `npm run test:e2e:smoke` must pass before pushing, merging, or deploying. The pre-push hook enforces this; do not bypass with `--no-verify` unless explicitly told to.
+3. **If your change touches a journey listed in `e2e/JOURNEYS.md`, extend the matching spec OR add a new spec under `e2e/specs/<area>/`.**
+4. **New user-facing journey = new row in `e2e/JOURNEYS.md` AND a new spec.**
+5. **Changed behavior means changed tests.** If a feature, UI flow, label, role, selector, route, validation rule, or loading state changes, update the existing smoke spec/page object in the same change. A stale smoke test is a product bug, not something to ignore.
+6. **Do not leave smoke specs testing removed UI.** If the old journey no longer exists, rewrite the spec around the replacement journey or remove it only when `e2e/JOURNEYS.md` is updated to say the journey was intentionally retired.
+7. **Investigate before changing a failing test.** Check the implementation, relevant commits/issues/specs, and the intended user journey before classifying a failure. Fix the product when behavior regressed; update the test only when the intended behavior genuinely changed. Never delete, skip, broaden, or weaken an assertion merely to make CI pass.
+8. **Reuse helpers** in `e2e/helpers/page-objects/`. Do not duplicate selectors. If no page object fits, add one or update the existing one as part of the feature.
+9. Tests run against **local `wrangler dev` instances** of `auth-worker` and `sync-worker`, backed by a Docker-managed local Postgres (container `aquilla-dev-pg`). See `e2e/README.md` for setup.
 
-Smoke tests are production guardrails. Shipping a UI or workflow change with knowingly stale smoke specs is incomplete work, even when the app appears to work manually.
+Smoke tests are production guardrails. Shipping a UI or workflow change with knowingly stale smoke specs is incomplete work, even when the app appears to work manually. Full-suite execution is intentionally deferred to the push/release boundary; test creation and targeted execution are not.
 
 ## Conventions
 

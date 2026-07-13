@@ -93,6 +93,7 @@ async function loadFilesByProject(
     `SELECT id, project_id, name, kind, role, cell_count, meta
        FROM files
       WHERE project_id IN (${placeholders})
+        AND deleted_at IS NULL
       ORDER BY LOWER(name)`,
   )
     .bind(...projectIds)

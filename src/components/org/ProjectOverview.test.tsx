@@ -990,6 +990,31 @@ describe("ProjectOverview chapter/verse rollup (AQU-493)", () => {
     expect(screen.queryByTestId("canonical-rollup-books")).not.toBeInTheDocument()
   })
 
+  it("expanding a file with book-level sections renders a flat section list", async () => {
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
+    getFileProgress.mockResolvedValue(progress([
+      { key: "GEN", totalCount: 2, filledCount: 1, validatedCount: 0 },
+      { key: "EXO", totalCount: 3, filledCount: 2, validatedCount: 1 },
+    ]))
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "Bible.usfm", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+
+    renderOverview()
+
+    const row = await screen.findByTestId("file-row")
+    fireEvent.click(within(row).getByRole("button", { name: /^expand/i }))
+
+    const sectionRows = await within(row).findAllByTestId("section-row")
+    expect(sectionRows).toHaveLength(2)
+    expect(sectionRows[0]).toHaveTextContent("GEN")
+    expect(sectionRows[0]).toHaveTextContent("1/0/2")
+    expect(sectionRows[1]).toHaveTextContent("EXO")
+    expect(screen.queryByText(/no chapter structure detected/i)).not.toBeInTheDocument()
+    expect(screen.queryByTestId("canonical-rollup-books")).not.toBeInTheDocument()
+  })
+
   it("collapsing and re-expanding a file does not re-fetch its compact progress", async () => {
     fetchProjectFiles.mockResolvedValue([fileSummary(1)])
     getFileProgress.mockResolvedValue(progress([

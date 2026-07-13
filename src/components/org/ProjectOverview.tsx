@@ -829,7 +829,7 @@ export function ProjectOverview() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section={project?.name ?? "Project"} />}
+      header={<OrgBreadcrumb section={project?.name ?? "Project"} orgId={project?.orgId} />}
       statusBar={null}
       main={
         <div className="h-full overflow-y-auto">

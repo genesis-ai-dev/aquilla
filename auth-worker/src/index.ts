@@ -64,6 +64,7 @@ import projectMembersRoutes from "./routes/project-members"
 import projectSettingsRoutes from "./routes/project-settings"
 import orgSettingsRoutes from "./routes/org-settings"
 import sourceLinkingRoutes from "./routes/source-linking"
+import mergeSiblingRoutes from "./routes/merge-sibling"
 import invitesRoutes from "./routes/invites"
 import orgsRoutes from "./routes/orgs"
 import usersRoutes from "./routes/users"
@@ -174,6 +175,7 @@ app.route("/api/v2/admin", adminRoutes)
 app.route("/api/v2/projects", projectMembersRoutes)
 app.route("/api/v2/projects", projectSettingsRoutes)
 app.route("/api/v2/projects", sourceLinkingRoutes)
+app.route("/api/v2/projects", mergeSiblingRoutes)
 app.route("/api/v2/projects", termbaseSubscriptionRoutes)
 app.route("/api/v2/projects", projectsRoutes)
 // Multi-project invite surface.

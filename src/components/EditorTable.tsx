@@ -66,7 +66,6 @@ import {
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
@@ -648,7 +647,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   getTokenForFile,
   getAlignmentModel,
   onAlignmentSeedChange,
-  assignmentsByCellId,
   checkLockHolder,
   showFootnotesInline,
   footnotePanelActive,
@@ -1318,8 +1316,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onAlignmentSeedChange={onAlignmentSeedChange}
           sourceFontSize={sourceFontSize}
           targetFontSize={targetFontSize}
-          assigneeLabel={assignmentsByCellId?.get(cell.id)?.username ?? null}
-          assigneeNote={assignmentsByCellId?.get(cell.id)?.scopeLabel ?? null}
           checkLockHolder={checkLockHolder}
           showFootnotesInline={showFootnotesInline}
           footnotePanelActive={footnotePanelActive}
@@ -1337,7 +1333,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [
     activeCueIndex,
     activeEditorCellId,
-    assignmentsByCellId,
     audioByCellId,
     audioLens,
     backtranslationByCellId,
@@ -1633,10 +1628,6 @@ interface MemoizedRowProps {
   sourceFontSize?: number
   /** FRO-251: per-file target-column font size in px. Defaults to 14 when absent. */
   targetFontSize?: number
-  /** FRO-192: username of the assignee for this cell. Null = no assignment. */
-  assigneeLabel?: string | null
-  /** FRO-192: scope label for the assignment tooltip. */
-  assigneeNote?: string | null
   /** RACE-5: ref-backed live lock check — see EditorTableProps.checkLockHolder. */
   checkLockHolder?: (cellId: string) => string | null
   /** FRO-317: when true, USFM \f...\f* footnotes render below each cell. */
@@ -1684,8 +1675,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
     isStaleSource,
     isUpstreamStaleSource,
-    assigneeLabel,
-    assigneeNote,
     checkLockHolder,
     showFootnotesInline,
     footnotePanelActive,
@@ -1834,8 +1823,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onAckRemoteChange={onAckRemoteChange}
         sourceFontSize={sourceFontSize}
         targetFontSize={targetFontSize}
-        assigneeLabel={assigneeLabel}
-        assigneeNote={assigneeNote}
         checkLockHolder={checkLockHolder}
         showFootnotesInline={showFootnotesInline}
         footnotePanelActive={footnotePanelActive}
@@ -1945,10 +1932,6 @@ interface EditorRowProps {
   sourceFontSize?: number
   /** FRO-251: per-file target-column font size in px. Defaults to 14 when absent. */
   targetFontSize?: number
-  /** FRO-192: username of the assignee for this cell. Null = no assignment. */
-  assigneeLabel?: string | null
-  /** FRO-192: scope label for the assignment tooltip. */
-  assigneeNote?: string | null
   /** RACE-5: ref-backed live lock check — see EditorTableProps.checkLockHolder. */
   checkLockHolder?: (cellId: string) => string | null
   /** FRO-317: when true, USFM \f...\f* footnotes render below the cell row. */
@@ -2801,8 +2784,6 @@ function EditorRow({
   onAlignmentSeedChange,
   sourceFontSize = 14,
   targetFontSize = 14,
-  assigneeLabel,
-  assigneeNote,
   checkLockHolder,
   showFootnotesInline,
   footnotePanelActive,
@@ -3095,6 +3076,27 @@ function EditorRow({
       author: username,
     }).then((eventId) => {
       pendingTargetEventIdRef.current = eventId
+      // Restore codex behaviour: a direct human edit auto-validates the cell
+      // ("a human has touched it"). The target.cell.commit above cleared any
+      // prior validators (audit-stats-overlay resets activeValidators on every
+      // edit), so we re-add the current user against the JUST-committed event
+      // id — a cell.validate only sticks when its editEventId matches the
+      // cell's latest edit. cell.validate needs only REVIEWER (≤ the CONTRIBUTOR
+      // floor already required to reach this commit path), so anyone who can
+      // edit can validate; guard defensively anyway. Skip empty commits so
+      // clearing a cell doesn't mark an empty row "validated".
+      if (value.trim() && canValidate && canPerform("cell.validate", project.syncRole?.level ?? null)) {
+        void emitCellValidate({
+          projectId: project.id,
+          fileId: cell.fileId,
+          cellId: cell.id,
+          editEventId: eventId,
+          author: username,
+        }).catch((err) => {
+          // Telemetry-adjacent, non-blocking: the commit already landed.
+          console.warn("[auto-validate] emit failed:", err)
+        })
+      }
       // Pass the just-assigned event id: the auto-BT in the parent pins to it
       // so the BT describes THIS commit, not the lagging projection head.
       void onCellCommitted?.(cell.id, eventId, parentId)
@@ -3112,7 +3114,7 @@ function EditorRow({
         valueHtml: cell.translatedHtml ?? "",
       })
     })
-  }, [editable, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder])
+  }, [editable, canValidate, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder])
 
   // Source-edit commit path. The inline source editor (a plain TranslatedEditor)
   // calls this on idle/blur with the current source `{value, valueHtml}`. We emit
@@ -3947,7 +3949,7 @@ function EditorRow({
         size={22}
         strokeWidth={2}
         className="pointer-events-none"
-        style={{ position: "absolute", inset: 0 }}
+        style={{ position: "absolute", inset: 0, margin: "auto" }}
       />
       <ValidationIcon
         className="relative h-3.5 w-3.5"
@@ -4117,17 +4119,6 @@ function EditorRow({
           )}
           {(isSynthBusy || isSynthError) && (
             <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
-          )}
-          {/* FRO-192: assignee avatar chip — shows initials of the member
-              this cell is assigned to. Tooltip = username + scope label. */}
-          {assigneeLabel && (
-            <AppTooltip content={assigneeNote ? `Assigned to ${assigneeLabel} (${assigneeNote})` : `Assigned to ${assigneeLabel}`}>
-              <InitialsAvatar
-                name={assigneeLabel}
-                size="xs"
-                fallbackClassName="bg-indigo-100 text-[8px] uppercase text-indigo-700 ring-1 ring-indigo-300 dark:bg-indigo-900 dark:text-indigo-300 dark:ring-indigo-700"
-              />
-            </AppTooltip>
           )}
         </div>
 

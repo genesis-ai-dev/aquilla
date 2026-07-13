@@ -27,6 +27,7 @@ import { handleCellAudioReadRequest } from "./events/cell-audio-read-route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleEventsWriteRequest } from "./events/route"
 import { handleExternalChangesetsRequest } from "./external/changesets-route"
+import { handleExternalArtifactsRequest } from "./external/artifacts-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleProgressReadRequest } from "./events/progress-read-route"
 import { handleBulkImportRequest } from "./events/import-route"
@@ -307,6 +308,10 @@ export default {
     // AQU-533: Agent API changeset engine (external command layer).
     const externalChangesetsResponse = await handleExternalChangesetsRequest(request, env, ctx)
     if (externalChangesetsResponse) return withCors(externalChangesetsResponse, request)
+
+    // AQU-533 (W2-B): Agent API source-artifact upload / inspect.
+    const externalArtifactsResponse = await handleExternalArtifactsRequest(request, env)
+    if (externalArtifactsResponse) return withCors(externalArtifactsResponse, request)
 
     const projectSyncResponse = routeProjectSync(request, env)
     if (projectSyncResponse) return projectSyncResponse

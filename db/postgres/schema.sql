@@ -790,6 +790,27 @@ CREATE TABLE IF NOT EXISTS api_credentials (
 CREATE INDEX IF NOT EXISTS idx_api_credentials_user ON api_credentials(user_id);
 CREATE INDEX IF NOT EXISTS idx_api_credentials_token_hash ON api_credentials(token_hash);
 
+-- Uploaded source artifacts (0056_artifacts.sql): agent-uploaded original files
+-- (USFM, JSON, XLIFF, …) preserved verbatim in R2 for round-trip fidelity and
+-- format inspection (AQU-533 §5). Bytes live in SNAPSHOTS under
+-- `{prefix}artifacts/{projectId}/{artifactId}`; this row is metadata +
+-- provenance + integrity digest. `file_id` is linked when a PlanImport
+-- changeset referencing the artifact commits.
+CREATE TABLE IF NOT EXISTS artifacts (
+    id                  UUID PRIMARY KEY,
+    project_id          TEXT NOT NULL,
+    uploaded_by_user_id TEXT NOT NULL,
+    credential_id       TEXT NOT NULL,
+    name                TEXT NOT NULL,
+    content_type        TEXT,
+    size_bytes          BIGINT NOT NULL,
+    sha256              TEXT NOT NULL,
+    r2_key              TEXT NOT NULL,
+    file_id             TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project_id);
+
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new
 -- inserts don't collide with migrated ids:

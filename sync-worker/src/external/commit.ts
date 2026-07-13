@@ -10,15 +10,15 @@
 // re-applying. Ask-mode confirmations are consumed exactly once.
 
 import { errorResponse, toErrorResponse } from './errors'
-import { cellKey, type Command } from './commands'
+import { cellKey, type PlanImportCommand, type SetTranslationCommand } from './commands'
 import { resolveCellStates } from './preconditions'
 import { loadChangeset } from './store'
 import { mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
 import { handleEventsWriteRequest } from '../events/route'
 import type { RawEvent } from '../events/types'
-import type { ChangesetReceipt, ChangesetWarning, ExternalEnv } from './types'
-import { validateApiCredential } from '../../../db/shared/api-credentials'
+import type { ChangesetReceipt, ChangesetWarning, ExternalEnv, StoredChangeset } from './types'
+import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 
 function bearer(request: Request): string | null {
   const h = request.headers.get('Authorization') ?? ''
@@ -112,9 +112,21 @@ export async function handleCommit(
     return errorResponse('plan_stale', 'project state changed since prepare', { drift })
   }
 
+  // ── PlanImport takes its own compile/commit path ──────────────────────────
+  const planImport = cs.commands.find(
+    (c): c is PlanImportCommand => c.kind === 'PlanImport',
+  )
+  if (planImport) {
+    return commitPlanImport(request, env, db, cred, cs, planImport, confirmationId, ctx)
+  }
+
   // ── Compile commands → target.cell.commit events, grouped by file ─────────
-  const commandByCell = new Map<string, Command>()
-  for (const c of cs.commands) commandByCell.set(cellKey(c.fileId, c.cellId), c)
+  // Past the PlanImport branch every remaining command is a SetTranslation.
+  const commandByCell = new Map<string, SetTranslationCommand>()
+  for (const c of cs.commands) {
+    if (c.kind !== 'SetTranslation') continue
+    commandByCell.set(cellKey(c.fileId, c.cellId), c)
+  }
 
   const eventsByFile = new Map<string, RawEvent<'target.cell.commit'>[]>()
   const allEventIds: string[] = []
@@ -235,6 +247,202 @@ export async function handleCommit(
     )
     .bind(JSON.stringify(receipt), confirmationId, id)
     .run()
+
+  return Response.json({ receipt })
+}
+
+/** Parse the caller-declared agent metadata header (recorded, never verified). */
+function readAgentMeta(request: Request): unknown {
+  const header = request.headers.get('x-agent-meta')
+  if (!header) return null
+  try {
+    return JSON.parse(header)
+  } catch {
+    return null
+  }
+}
+
+/** Build the server-verified provenance envelope (§2). */
+function buildProvenance(
+  request: Request,
+  cs: StoredChangeset,
+  confirmationId: string | null,
+): Record<string, unknown> {
+  return {
+    origin: 'agent',
+    human_authority: { user_id: cs.createdByUserId, credential_id: cs.credentialId },
+    agent: readAgentMeta(request),
+    channel: 'rest',
+    autonomy_mode: cs.autonomyMode,
+    changeset_id: cs.id,
+    ...(confirmationId ? { confirmation_id: confirmationId } : {}),
+  }
+}
+
+/** Statements per POST to the /events perimeter — mirrors the perimeter's own
+ *  BATCH_LIMIT (100). A PlanImport can seed thousands of source cells, so the
+ *  compiled events are chunked; the receipt reports applied counts accurately
+ *  across chunks (all-or-nothing is not required, but a partial apply is
+ *  surfaced honestly and fails the changeset — no silent truncation). */
+const PLAN_IMPORT_CHUNK = 100
+
+/**
+ * Compile a PlanImport into one file.create + N genesis source.cell.create
+ * events (chained by anchorCellId, mirroring the SPA import + bulk /import
+ * semantics), route them through the SAME /events perimeter Wave 1 uses (source.*
+ * requires PROJECT_LEAD (500) — a contributor credential is 403'd there), stamp
+ * provenance on applied events, link the artifact, and write the receipt.
+ */
+async function commitPlanImport(
+  request: Request,
+  env: ExternalEnv,
+  db: AquillaDb,
+  cred: ApiCredentialContext,
+  cs: StoredChangeset,
+  cmd: PlanImportCommand,
+  confirmationId: string | null,
+  ctx: Pick<ExecutionContext, 'waitUntil'> | undefined,
+): Promise<Response> {
+  const projectId = cs.projectId
+  const fileId = uuidv7()
+  const clientTs = Date.now()
+
+  const fileEvent: RawEvent<'file.create'> = {
+    id: uuidv7(),
+    schemaVersion: 1,
+    kind: 'file.create',
+    projectId,
+    fileId,
+    parentId: null,
+    author: cred.username,
+    payload: {
+      name: cmd.fileName,
+      fileType: cmd.fileType,
+      ...(cmd.sourceLanguage !== undefined ? { sourceLanguage: cmd.sourceLanguage } : {}),
+      ...(cmd.targetLanguage !== undefined ? { targetLanguage: cmd.targetLanguage } : {}),
+    },
+    clientTs,
+  }
+
+  // Genesis source cells, chained via anchorCellId (null for the first cell).
+  const cellEvents: RawEvent<'source.cell.create'>[] = []
+  let prevCellId: string | null = null
+  for (const cell of cmd.cells) {
+    const cellId = cell.id ?? uuidv7()
+    cellEvents.push({
+      id: uuidv7(),
+      schemaVersion: 1,
+      kind: 'source.cell.create',
+      projectId,
+      fileId,
+      cellId,
+      parentId: null,
+      author: cred.username,
+      payload: {
+        cellId,
+        anchorCellId: prevCellId,
+        value: cell.content,
+        ...(cell.canonicalRef !== undefined ? { canonicalRef: cell.canonicalRef } : {}),
+        ...(cell.type !== undefined ? { type: cell.type } : {}),
+        ...(cell.section !== undefined ? { metadata: { section: cell.section } } : {}),
+      },
+      clientTs,
+    })
+    prevCellId = cellId
+  }
+
+  // file.create must land in the first chunk (it seeds the files row).
+  const allEvents: RawEvent[] = [fileEvent, ...cellEvents]
+  const allEventIds = allEvents.map((e) => e.id)
+
+  let token: string
+  try {
+    token = await mintInternalSyncToken(env, db, cred, projectId, fileId)
+  } catch (err) {
+    return toErrorResponse(err)
+  }
+
+  const acceptedIds = new Set<string>()
+  const rejected: { id: string; status: number; reason: string }[] = []
+  for (let i = 0; i < allEvents.length; i += PLAN_IMPORT_CHUNK) {
+    const chunk = allEvents.slice(i, i + PLAN_IMPORT_CHUNK)
+    const req = new Request('https://internal/events', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events: chunk }),
+    })
+    const res = await handleEventsWriteRequest(req, env, ctx)
+    if (!res) return errorResponse('job_failed', 'events perimeter did not respond')
+    const out = (await res.json()) as EventsWriteResponse
+    for (const a of out.accepted) acceptedIds.add(a.id)
+    for (const r of out.rejected) rejected.push(r)
+  }
+
+  // Nothing applied but events were rejected — surface the reason (a contributor
+  // credential is 403'd by the perimeter since source.* needs PROJECT_LEAD 500).
+  if (acceptedIds.size === 0 && rejected.length > 0) {
+    const anyForbidden = rejected.some((r) => r.status === 403)
+    return errorResponse(
+      anyForbidden ? 'permission_denied' : 'job_failed',
+      'no events were applied',
+      { rejected },
+    )
+  }
+
+  // Stamp provenance on the applied events.
+  const provenance = buildProvenance(request, cs, confirmationId)
+  const appliedIds = allEventIds.filter((eid) => acceptedIds.has(eid))
+  if (appliedIds.length > 0) {
+    const placeholders = appliedIds.map(() => '?').join(', ')
+    await db
+      .prepare(`UPDATE events SET provenance = ?::jsonb WHERE id IN (${placeholders})`)
+      .bind(JSON.stringify(provenance), ...appliedIds)
+      .run()
+  }
+
+  // Link the uploaded artifact to the created file, if one was referenced.
+  const fileApplied = acceptedIds.has(fileEvent.id)
+  if (cmd.artifactId && fileApplied) {
+    await db
+      .prepare(`UPDATE artifacts SET file_id = ? WHERE id::text = ? AND project_id = ?`)
+      .bind(fileId, cmd.artifactId, projectId)
+      .run()
+  }
+
+  const warnings: ChangesetWarning[] = [...cs.summary.warnings]
+  for (const r of rejected) {
+    warnings.push({ code: 'rejected', fileId: '', cellId: '', message: `${r.id}: ${r.reason}` })
+  }
+
+  const receipt: ChangesetReceipt = {
+    eventIds: appliedIds,
+    appliedCount: appliedIds.length,
+    staleCount: 0,
+    warnings,
+    committedAt: new Date().toISOString(),
+    fileId,
+  }
+
+  // Mark committed regardless of partial rejects: event ids are regenerated on
+  // each attempt, so a retry after a partial apply would create a DUPLICATE
+  // file. Committing (idempotently returning this receipt on re-commit) is the
+  // safe choice; a partial apply is reported as job_failed with the receipt.
+  await db
+    .prepare(
+      `UPDATE changesets
+          SET status = 'committed', receipt = ?::jsonb, confirmation_id = ?, committed_at = now()
+        WHERE id = ?`,
+    )
+    .bind(JSON.stringify(receipt), confirmationId, cs.id)
+    .run()
+
+  if (rejected.length > 0) {
+    // Partial apply: honest accounting — the changeset failed even though some
+    // events landed. The receipt carries the accurate applied count + rejects.
+    return errorResponse('job_failed', 'import partially failed — some events were rejected', {
+      receipt,
+    })
+  }
 
   return Response.json({ receipt })
 }

@@ -1,5 +1,5 @@
 /**
- * Tests for GenerateOverwriteDialog (FRO-278).
+ * Tests for GenerateOverwriteDialog (AQU-278).
  *
  * Covers:
  *   - Dialog renders with standard copy for non-validated cells

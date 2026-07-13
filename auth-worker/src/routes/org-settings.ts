@@ -183,7 +183,7 @@ orgSettings.on(
       )
     }
 
-    // FRO-253 / AQU-485: validate every permission-policy key present in the
+    // AQU-253 / AQU-485: validate every permission-policy key present in the
     // patch (exportMinRole, rosterViewMinRole, memberProgressViewMinRole).
     // Each must be a known role-ladder value (100–700); garbage values (e.g.
     // "owner", -1, 9999) are rejected with 400 so misconfiguration is
@@ -370,7 +370,7 @@ orgSettings.post(
       ...current.settings,
       promotionRequests: [...existingRequests, newRequest],
     }
-    // FRO-253 / AQU-485 invariant: this blob write must never alter any
+    // AQU-253 / AQU-485 invariant: this blob write must never alter any
     // permission-policy key (exportMinRole, rosterViewMinRole,
     // memberProgressViewMinRole).
     for (const key of Object.keys(PERMISSION_POLICY_KEYS)) {

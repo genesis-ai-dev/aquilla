@@ -1,8 +1,8 @@
 /**
- * FRO-365 — Tests that SelectionBar (the multi-select "dynamic island")
+ * AQU-365 — Tests that SelectionBar (the multi-select "dynamic island")
  * doesn't appear at all for a viewer / any role below every action it offers
  * (translate = contributor 400, validate = reviewer 300). Mirrors the
- * CommentsDrawer FRO-427 role-gating test pattern.
+ * CommentsDrawer AQU-427 role-gating test pattern.
  */
 import { describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
@@ -118,7 +118,7 @@ function renderBar(project: ProjectRecord) {
   )
 }
 
-describe("SelectionBar — viewer suppression (FRO-365)", () => {
+describe("SelectionBar — viewer suppression (AQU-365)", () => {
   it("renders nothing for VIEWER (100), even with a live selection", () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
     const { container } = renderBar(makeProject(ROLE.VIEWER))

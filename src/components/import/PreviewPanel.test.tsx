@@ -1,10 +1,10 @@
 /**
- * FRO-430 (fix) — a failed commit must be VISIBLE, never silent.
+ * AQU-430 (fix) — a failed commit must be VISIBLE, never silent.
  *
  * WHY: doCommit() catches commit errors into UploadPanel's local state, but
  * UploadPanel is unmounted during the preview screen, so the error was lost and
  * the dialog returned to the buttons with no explanation — the same silent-
- * failure class FRO-427/FRO-430 set out to kill. The fix threads the error up to
+ * failure class AQU-427/AQU-430 set out to kill. The fix threads the error up to
  * ImportDialog and passes it to PreviewPanel, which shows it above the actions
  * while keeping Confirm/Cancel available for retry.
  */
@@ -18,7 +18,7 @@ const RESULTS: ImportResult[] = [
   { name: "test.docx", strings: [{ id: "s1", original: "Hello world", context: "Paragraph", group: "1" }] },
 ] as unknown as ImportResult[]
 
-describe("PreviewPanel — commit error visibility (FRO-430 fix)", () => {
+describe("PreviewPanel — commit error visibility (AQU-430 fix)", () => {
   it("shows the error and keeps Confirm/Cancel available when commit fails", () => {
     render(
       <PreviewPanel

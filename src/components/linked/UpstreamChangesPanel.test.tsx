@@ -1,4 +1,4 @@
-// FRO-478: UpstreamChangesPanel tests — role gating + repin flow.
+// AQU-478: UpstreamChangesPanel tests — role gating + repin flow.
 //
 // Mocks useUpstreamChangesReview directly (the hook's own fetch-composition
 // logic is covered by the sync-worker route tests) so this file focuses on

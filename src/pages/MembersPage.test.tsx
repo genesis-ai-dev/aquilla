@@ -73,7 +73,7 @@ vi.mock("@/hooks/useAccessibleProjects", () => ({
     isLoading: false,
     refresh: vi.fn(async () => {}),
   })),
-  // FRO-474: OrgSidebar's "Shared with you" nav section uses this hook.
+  // AQU-474: OrgSidebar's "Shared with you" nav section uses this hook.
   useProjectsForNavigation: vi.fn(() => ({
     projects: [],
     isLoading: false,
@@ -87,7 +87,7 @@ afterEach(() => vi.restoreAllMocks())
 describe("MembersPage active-org", () => {
   it("renders members for the active org (42)", async () => {
     // QueryClientProvider: the org shell's AccountSwitcher reaches useAccounts,
-    // which clears the React Query cache on account switch (FRO-212).
+    // which clears the React Query cache on account switch (AQU-212).
     render(
       <QueryClientProvider client={new QueryClient()}>
         <MemoryRouter>

@@ -86,7 +86,7 @@ export function buildEventInsertStmt(db: AquillaDb, e: EventInsertRow): AquillaS
 //
 // The per-event CTE above costs one DB round trip per event; through the
 // Postgres shim a 1500-cell chunk became ~3000 sequential round trips
-// (~30ms each ≈ 100s/book — FRO-310 follow-up). Bulk imports instead
+// (~30ms each ≈ 100s/book — AQU-310 follow-up). Bulk imports instead
 // allocate the whole seq block in ONE counter bump, then write all rows in
 // multi-row INSERTs with explicit seqs.
 //

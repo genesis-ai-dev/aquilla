@@ -459,7 +459,7 @@ export interface ProjectEffectiveMembers {
 }
 
 /**
- * Batched membership-matrix resolver (FRO-218). Computes effective members for
+ * Batched membership-matrix resolver (AQU-218). Computes effective members for
  * EVERY non-archived project the viewer can access in `orgId`, in a small
  * constant number of queries regardless of project count — replacing the
  * client's per-project /:projectId/members fan-out that flooded the connection
@@ -1045,7 +1045,7 @@ export async function canReadTermbase(
 // ──────────────────────────────────────────────────────────────────────────
 // AQU-485: configurable roster + member-progress visibility
 //
-// Generalizes the FRO-253 exportMinRole pattern to two independent,
+// Generalizes the AQU-253 exportMinRole pattern to two independent,
 // org-scoped read floors stored in the same org_settings JSON blob:
 //
 //   - rosterViewMinRole:        who can see the member list (+ count)

@@ -91,7 +91,7 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
   }, [comments])
 
   // Monotonic fetch-sequence guard (mirrors the cell-side writeSeqRef pattern
-  // from FRO-247). Bumped on every optimistic mutation; fetches record their
+  // from AQU-247). Bumped on every optimistic mutation; fetches record their
   // startSeq so a stale in-flight response can't clobber newer optimistic state.
   const mutationSeqRef = useRef(0)
   // Optimistic comments: records queued locally but not yet confirmed by server.

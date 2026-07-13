@@ -28,7 +28,7 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     hasFetched: true,
     canEdit: true,
     canExport: true,
-    // FRO-433: OrgProviderSection consumes these from the hook contract.
+    // AQU-433: OrgProviderSection consumes these from the hook contract.
     orgProviderKeys: {},
     canEditOrgKeys: true,
     // AQU-485: roster/member-progress visibility — default floor (Maintainer)

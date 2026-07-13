@@ -1,11 +1,11 @@
-// Stale-source read route (Phase 5 / AD-9; extended FRO-476 §6).
+// Stale-source read route (Phase 5 / AD-9; extended AQU-476 §6).
 //
 //   GET /api/v1/projects/:projectId/files/:fileId/stale-source
 //
 // Returns the list of target-side cell ids whose source has advanced
 // since the translator last committed. The query is the AD-9 pointer
 // comparison from spec 03-data-model §"Source-project linking", now
-// HASH-AWARE (FRO-476 §6): a pin whose event id differs but whose
+// HASH-AWARE (AQU-476 §6): a pin whose event id differs but whose
 // content_hash matches the current source head is NOT stale — this is
 // what lets the mirror sync's no-op suppression (unchanged content keeps
 // an old upstream_event_id) stay invisible to the translator.
@@ -123,13 +123,13 @@ export async function handleStaleSourceRequest(
   }
 
   // 2. Run the AD-9 pointer comparison, computed LOCALLY against the
-  // mirrored source lane (FRO-476 §6) — the mirror sync (link-sync.ts)
+  // mirrored source lane (AQU-476 §6) — the mirror sync (link-sync.ts)
   // materializes the upstream's source cells as real local rows with
   // provenance (upstream_event_id/upstream_seq), so a target's
   // source_event_id pin (always a same-project id — set from the LOCAL
   // source row's event_id at commit time, per target.cell.commit's
   // projection) is compared against the LOCAL mirrored row, never a
-  // cross-project row. This replaces the pre-FRO-476 cross-project JOIN,
+  // cross-project row. This replaces the pre-AQU-476 cross-project JOIN,
   // which compared a same-project pin against the upstream's OWN event ids
   // — a mismatch by construction once mirrored rows carry deterministic
   // mirror event ids distinct from the upstream's.
@@ -172,7 +172,7 @@ export async function handleStaleSourceRequest(
     staleCellIds = []
   }
 
-  // 3. Tombstoned cells (FRO-476 §5): upstream deleted this line — the
+  // 3. Tombstoned cells (AQU-476 §5): upstream deleted this line — the
   // downstream's local source row is kept (never deleted) so the orphaned
   // target stays visible; `tombstoned_at` flags it here for the review UI.
   let tombstonedCellIds: string[] = []
@@ -206,7 +206,7 @@ export async function handleStaleSourceRequest(
     }
   }
 
-  // 5. Inherited staleness (FRO-477 §6): the per-hop chain walk. Only
+  // 5. Inherited staleness (AQU-477 §6): the per-hop chain walk. Only
   // relevant for live-linked projects with at least one ancestor hop above
   // the immediate upstream — a direct (single-hop) link has nothing to
   // inherit (its own staleCellIds query above already covers that case).

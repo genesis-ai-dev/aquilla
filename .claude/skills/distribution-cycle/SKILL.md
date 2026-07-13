@@ -8,7 +8,7 @@ description: Produce persona-targeted announcement, documentation, and marketing
 Turn a feature into announce/document/market assets framed around one client persona's **money moment**, with authentic footage of the live app. Full design: `docs/distribution/DISTRIBUTION-CYCLE.md`. Cast: `docs/distribution/PERSONAS.md`. Strategy/channels: `docs/distribution/DISTRIBUTION-ORCHESTRATION.md`.
 
 ## When to use
-- A feature merged (an `FRO-###`) and "done" includes telling its story.
+- A feature merged (an `AQU-###`) and "done" includes telling its story.
 - The user wants a demo/showcase video, launch assets, docs walkthrough, or to re-tell an existing feature.
 - Asked to "run the distribution cycle" / "ship the announcement".
 

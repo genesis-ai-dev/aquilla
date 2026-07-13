@@ -6,7 +6,7 @@ import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
 /**
  * MultiProjectInviteDialog — fill recipient + select project + submit.
  *
- * FRO-322 renamed the flow to "Add to projects". The dialog (opened from
+ * AQU-322 renamed the flow to "Add to projects". The dialog (opened from
  * /members via the "Add to projects" button) has:
  *   - UsernameTypeahead input (id="invite-recipient"); suggestions are
  *     plain buttons labelled with the username

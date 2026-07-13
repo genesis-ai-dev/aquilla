@@ -61,7 +61,7 @@ Wave-1 gate (orchestrator-run): root vitest 2343/2343 · auth-worker 195/195 · 
 
 **Main moved mid-run** (user/PD6 session): merged `main@7b1ed43` into integration at `e765537` — brings platform-admin work (formerly the dirty files), media-lens, and the **Neon schema-migration guard** (`scripts/neon-migrate.ts` ledger + CI schema-guard job). Our migration 0034 fits its convention; `pnpm neon:apply` is the deploy-blocker remedy. Post-merge: root vitest 2347/2347, concurrent-writes 10/10, tsc clean.
 
-**Concurrent session (PD6)** active on FRO-262/263/264 (ProductTour/OrgSidebar/OrgSwitcher/Homepage/TeamDetail/teams.ts/org-permissions.ts) — those files are off-limits to aud-* agents; expect another main merge before promotion. Chrome-profile/dev-port contention: schedule aud UI-QA after PD6's.
+**Concurrent session (PD6)** active on AQU-262/263/264 (ProductTour/OrgSidebar/OrgSwitcher/Homepage/TeamDetail/teams.ts/org-permissions.ts) — those files are off-limits to aud-* agents; expect another main merge before promotion. Chrome-profile/dev-port contention: schedule aud UI-QA after PD6's.
 
 Wave 2 dispatched off `d72f3d7`: aud-delta-read (M2-1+PERF-4+RES-6) · aud-batch-perf (M2-2+PERF-8) · aud-lock-client (RACE-5 client, workspace unreachable UI) · aud-audio-cache (M2-6) · aud-lint-green (CI lint gate green). All five merged clean; +0035 watermark index (orchestrator).
 
@@ -70,7 +70,7 @@ Wave 2 dispatched off `d72f3d7`: aud-delta-read (M2-1+PERF-4+RES-6) · aud-batch
 - aud-fix-locks `1faa871`: B4 lock-map aliasing — new Map per WS frame via pure cell-lock-state.ts helpers; reconnect-wipes-lock finding documented (open).
 - aud-fix-server `490b8a5,880994e` (agent died at session limit AFTER committing; orchestrator-verified 57/57): B5 rebuilt_seq resync marker + migration 0036 + ETag epoch; B6 snapshot restore claims chain slots.
 
-**Second main merge** (`6a04392` + fix `52a5c36`): main gained the UXA wave (FRO-266/271/273/274/278/279/280/282/295). 15 conflict hunks hand-resolved — ErrorBoundary: main's FRO-266 wins + swarm chunk-guard ported; editor commit: FRO-273 role guard + RACE-5 live re-check + revert-on-failure through FRO-274 writeError; route: FRO-279 validationCount via memoized settings reader; dispatch opts forwarding restored (auto-merge had dropped deferFileCounters/chainGate).
+**Second main merge** (`6a04392` + fix `52a5c36`): main gained the UXA wave (AQU-266/271/273/274/278/279/280/282/295). 15 conflict hunks hand-resolved — ErrorBoundary: main's AQU-266 wins + swarm chunk-guard ported; editor commit: AQU-273 role guard + RACE-5 live re-check + revert-on-failure through AQU-274 writeError; route: AQU-279 validationCount via memoized settings reader; dispatch opts forwarding restored (auto-merge had dropped deferFileCounters/chainGate).
 
 **Final gate (merged tree, `52a5c36`)**: tsc clean · lint 0 errors · root 2540/2540 (296 files) · auth-worker 235/235 · sync-worker 573/573 · `pnpm build` + brand check OK.
 
@@ -78,7 +78,7 @@ Wave 2 dispatched off `d72f3d7`: aud-delta-read (M2-1+PERF-4+RES-6) · aud-batch
 
 ## Promotion (2026-06-10 evening)
 
-- Third main merge `6d27c0c` (PD6 promotion: FRO-262/263/264 + ai_drafted + FRO-293 session-expiry) and fourth main merge `5832d9c` (FRO-288 focus-lock hook, FRO-296/297, FRO-290 copy pass, sync-worker test-tsc cleanup) hand-resolved; lock handlers compose FRO-288 hook feed + B4 new-Map-per-frame; ProjectsList composes RES-5 unreachable + FRO-293 notify.
+- Third main merge `6d27c0c` (PD6 promotion: AQU-262/263/264 + ai_drafted + AQU-293 session-expiry) and fourth main merge `5832d9c` (AQU-288 focus-lock hook, AQU-296/297, AQU-290 copy pass, sync-worker test-tsc cleanup) hand-resolved; lock handlers compose AQU-288 hook feed + B4 new-Map-per-frame; ProjectsList composes RES-5 unreachable + AQU-293 notify.
 - Final gate round 4 (tip pre-promotion): lint 0 errors · root 2636/2636 · auth-worker green · sync-worker green · build + brand check OK · tsc clean.
 - UI-QA: golden path PASSED (first agent, before session-limit kill); focused re-run of delta-reads/unreachable/?__crash=1 dispatched — verdict lands post-promotion; findings become follow-ups.
 - Promoted to main via fast-forward.

@@ -111,9 +111,9 @@ describe("resolveDecayConfig", () => {
   })
 })
 
-// FRO-181: needsAttentionFromConfidence — AD-14 amendment 2026-06-04.
+// AQU-181: needsAttentionFromConfidence — AD-14 amendment 2026-06-04.
 // Uses a server-derived confidence score (0-100) instead of endorsement_count.
-describe("needsAttentionFromConfidence (FRO-181)", () => {
+describe("needsAttentionFromConfidence (AQU-181)", () => {
   const WARN = DEFAULT_DECAY_WARN_THRESHOLD // 0.66
 
   it("marks a cell with confidence 0 (decay 1 > 0.66)", () => {
@@ -142,11 +142,11 @@ describe("needsAttentionFromConfidence (FRO-181)", () => {
   })
 })
 
-// FRO-232: guard the exact user-visible status string shown in the cell popover
+// AQU-232: guard the exact user-visible status string shown in the cell popover
 // when the cell needs attention. The string must not duplicate "needs attention"
 // (the popover header already carries that label) and must use domain vocabulary
 // (passage/context rather than "neighborhood").
-describe("CELL_NEEDS_ATTENTION_STATUS (FRO-232)", () => {
+describe("CELL_NEEDS_ATTENTION_STATUS (AQU-232)", () => {
   it("does not contain the word 'neighborhood'", () => {
     expect(CELL_NEEDS_ATTENTION_STATUS.toLowerCase()).not.toContain("neighborhood")
   })
@@ -158,7 +158,7 @@ describe("CELL_NEEDS_ATTENTION_STATUS (FRO-232)", () => {
     expect(firstIdx).toBe(lastIdx) // only one occurrence (or none at all)
   })
 
-  it("is the expected exact string (FRO-232 regression guard)", () => {
+  it("is the expected exact string (AQU-232 regression guard)", () => {
     expect(CELL_NEEDS_ATTENTION_STATUS).toBe(
       "This cell's passage context hasn't been validated yet.",
     )

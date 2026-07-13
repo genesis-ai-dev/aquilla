@@ -49,8 +49,8 @@ vi.mock("@/lib/sync/cloud-projects", () => ({
   setProjectDeadline: vi.fn(),
   // OrgSidebar (rendered by ProjectOverview's AppShell) calls
   // useProjectsForNavigation -> fetchAccessibleProjects for the "Shared with
-  // you" nav section (FRO-474). Default to empty so it never interferes with
-  // pre-existing tests; individual FRO-474 tests override via mockResolvedValue.
+  // you" nav section (AQU-474). Default to empty so it never interferes with
+  // pre-existing tests; individual AQU-474 tests override via mockResolvedValue.
   fetchAccessibleProjects: vi.fn(async () => []),
 }))
 const downloadProjectBundle = vi.fn()
@@ -157,7 +157,7 @@ function renderOverview() {
 beforeEach(async () => {
   localStorage.clear()
   _deadlineStatusResult = null
-  // Some FRO-474 tests override this to simulate a user with no orgs;
+  // Some AQU-474 tests override this to simulate a user with no orgs;
   // vi.clearAllMocks() clears call history but not mockResolvedValue
   // implementations, so restore the default (single org, auto-selected) here.
   const { listMyOrgs } = await import("@/lib/frontier/orgs")
@@ -264,7 +264,7 @@ describe("ProjectOverview load states", () => {
 
 // ── Per-metric conditionality ──────────────────────────────────────────────
 
-describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
+describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
   // WHY: audio-only projects must hide text metrics; text-only must hide audio.
   // Showing irrelevant metrics confuses managers scanning project state.
 
@@ -318,7 +318,7 @@ describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
     // but note: totalCells > 0 means hasText=true in current logic which guards on totalCells.
     // The real guard is audioCells > 0 for audio, and totalCells > 0 for text.
     // For audio-only: filledCells=0 but totalCells=100, so text bars still show.
-    // Per FRO-168 spec: hide text metrics only when "no text content (translatable cells > 0)".
+    // Per AQU-168 spec: hide text metrics only when "no text content (translatable cells > 0)".
     // totalCells > 0 means there IS translatable content, so text bars appear even if empty.
     // The audio-only guard is specifically: audioCells > 0 shows Has Audio, always shows text when totalCells > 0.
     // This test therefore confirms Has Audio appears when audioCells > 0.
@@ -363,7 +363,7 @@ describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
 
 describe("ProjectOverview file list show-more", () => {
   it("shows only the first 12 files when there are more than 12, then reveals all after clicking show-all", async () => {
-    // WHY: the file list was silently capped at 12 with no way to reach the rest (FRO-136).
+    // WHY: the file list was silently capped at 12 with no way to reach the rest (AQU-136).
     // This asserts that all files become reachable via the show-more toggle.
     const totalFiles = 16
     const fileList = Array.from({ length: totalFiles }, (_, i) => fileSummary(i + 1))
@@ -537,7 +537,7 @@ describe("ProjectOverview archive/restore", () => {
 
 // ── Audio progress ─────────────────────────────────────────────────────────
 
-describe("ProjectOverview audio progress (FRO-160)", () => {
+describe("ProjectOverview audio progress (AQU-160)", () => {
   // WHY: audio progress was showing 0% on all projects even when recordings
   // existed. The portfolio endpoint computes audioCells from the cell_audio
   // table; if it returns non-zero, the overview MUST display a non-zero
@@ -610,9 +610,9 @@ describe("ProjectOverview audio progress (FRO-160)", () => {
   })
 })
 
-// ── FRO-474: project-only invitee navigation ────────────────────────────────
+// ── AQU-474: project-only invitee navigation ────────────────────────────────
 
-describe("ProjectOverview project-only invitee access (FRO-474)", () => {
+describe("ProjectOverview project-only invitee access (AQU-474)", () => {
   // WHY: a user with a direct project_members grant but no org membership
   // (activeOrgId == null, or an org that doesn't include this project) was
   // being redirected straight back to "/" — they could never open their own
@@ -640,7 +640,7 @@ describe("ProjectOverview project-only invitee access (FRO-474)", () => {
 
   it("renders the overview (no redirect) when the project's orgId does not match activeOrgId", async () => {
     // OrgProvider auto-selects the single org (id 1) from listMyOrgs (default mock).
-    // The project belongs to org 99 — a mismatch that pre-FRO-474 triggered a redirect.
+    // The project belongs to org 99 — a mismatch that pre-AQU-474 triggered a redirect.
     useProject.mockReturnValue({
       project: projectRecord({ level: 400, orgId: 99, files: [] }),
       status: "ready",
@@ -683,7 +683,7 @@ describe("ProjectOverview project-only invitee access (FRO-474)", () => {
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("/", { replace: true }))
   })
 
-  // FRO-416: the overview rendering (no redirect) is necessary but not
+  // AQU-416: the overview rendering (no redirect) is necessary but not
   // sufficient — a guest must be able to actually ENTER the workspace from
   // here. "Open project" navigates unconditionally to `/project/:id`; this
   // locks in that the button still fires for a project whose org the caller
@@ -707,9 +707,9 @@ describe("ProjectOverview project-only invitee access (FRO-474)", () => {
   })
 })
 
-// ── FRO-292: AI-drafted segment ─────────────────────────────────────────────
+// ── AQU-292: AI-drafted segment ─────────────────────────────────────────────
 
-describe("ProjectOverview AI-drafted segment (FRO-292)", () => {
+describe("ProjectOverview AI-drafted segment (AQU-292)", () => {
   // WHY: manager-facing overview must surface AI-drafted volume as a distinct
   // third segment so owners (Wendi/Anna) know how much AI batch output is
   // awaiting human review, not counting it as "human-translated" work.
@@ -1191,12 +1191,12 @@ describe("ProjectOverview file list sort/filter (AQU-499)", () => {
 describe("ProjectOverview CSV export (AQU-500)", () => {
   // WHY: PMs want the progress table out into a spreadsheet. The control must
   // (a) only appear when the org's export permission (useOrgSettings.canExport
-  // — the pre-existing FRO-253 primitive) allows it, and (b) export exactly
+  // — the pre-existing AQU-253 primitive) allows it, and (b) export exactly
   // the rows/order the PM currently sees, honoring AQU-499's sort/filter.
 
   beforeEach(() => {
     fetchSyncToken.mockResolvedValue({ token: "tok" })
-    // happy-dom's navigator.clipboard is getter-only — define it per FRO-277's
+    // happy-dom's navigator.clipboard is getter-only — define it per AQU-277's
     // ImportDialog.partial-import.test.tsx pattern.
     Object.defineProperty(navigator, "clipboard", {
       value: { writeText: vi.fn().mockResolvedValue(undefined) },

@@ -1,5 +1,5 @@
 /**
- * Tests for AddConceptDialog (FRO-260).
+ * Tests for AddConceptDialog (AQU-260).
  *
  * Covers:
  *   - Dialog pre-fills with the provided sourceTerm

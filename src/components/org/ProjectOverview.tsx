@@ -559,7 +559,7 @@ export function ProjectOverview() {
   const [rollupErrors, setRollupErrors] = useState<Record<string, boolean>>({})
   const chapterVerseRequests = useRef(new Map<string, Promise<VerseRollup[]>>())
 
-  // FRO-474: project-only invitees (direct project_members grant, no org
+  // AQU-474: project-only invitees (direct project_members grant, no org
   // membership) have `activeOrgId == null` or an org that doesn't include this
   // project's org. The portfolio endpoint is org-scoped, so fall back to the
   // project's own (server-verified) orgId when it differs from the active
@@ -596,9 +596,9 @@ export function ProjectOverview() {
   // `useProject` is server-verified per-project (not org-scoped): a
   // project-only invitee (no org membership, or org mismatch) still resolves
   // to "ready" here when they hold a direct grant. Redirecting on org
-  // mismatch alone (pre-FRO-474 behavior) sent guests right back to "/".
+  // mismatch alone (pre-AQU-474 behavior) sent guests right back to "/".
   useEffect(() => {
-    // FRO-346: "forbidden" (access revoked) leaves the overview the same way
+    // AQU-346: "forbidden" (access revoked) leaves the overview the same way
     // a missing project does — back to the dashboard.
     if (status === "not-found" || status === "forbidden") {
       navigate("/", { replace: true })
@@ -963,7 +963,7 @@ export function ProjectOverview() {
                           tooltip="Percentage of cells that have at least one audio recording attached. This is coverage, not validation — see 'Audio Validated' for review status."
                         />
                         {/*
-                         * AQU-490 (was TODO(FRO-168)): a distinct audio-VALIDATION metric
+                         * AQU-490 (was TODO(AQU-168)): a distinct audio-VALIDATION metric
                          * is not reachable today. Investigated 2026-07-08:
                          *   - `cells.validated` (db/postgres/schema.sql) is ONE boolean per
                          *     cell, shared by text and audio review — there is no per-medium
@@ -1034,7 +1034,7 @@ export function ProjectOverview() {
                           fillClass="bg-sky-500"
                           suffix=" cells"
                         />
-                        {/* TODO: confirm whether legacy GitLab project import populated audio (cell_audio) — see FRO-160 data gap */}
+                        {/* TODO: confirm whether legacy GitLab project import populated audio (cell_audio) — see AQU-160 data gap */}
                       </>
                     )}
                   </div>
@@ -1447,7 +1447,7 @@ export function ProjectOverview() {
                 </div>
               </SectionVisibilityGate>
 
-              {/* ── Members card (FRO-335) — same add / change-role / revoke
+              {/* ── Members card (AQU-335) — same add / change-role / revoke
                   surface as the in-project members page, so access can be
                   managed from the overview without opening the workspace. ──
                   AQU-486: gated by AQU-485's rosterViewMinRole — the same

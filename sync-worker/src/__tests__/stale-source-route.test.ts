@@ -1,4 +1,4 @@
-// FRO-476: stale-source route extension tests.
+// AQU-476: stale-source route extension tests.
 //
 // Covers the acceptance criteria:
 //   - tombstoned cells surface in tombstonedCellIds, target rows stay visible

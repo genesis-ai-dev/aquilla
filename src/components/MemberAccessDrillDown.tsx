@@ -5,7 +5,7 @@
  *
  * Opened by clicking a member's name in MembersMatrixView (or any surface
  * that passes orgId + a selected member). Self-contained so it doesn't
- * collide with the FRO-170 org-vs-project legibility redesign.
+ * collide with the AQU-170 org-vs-project legibility redesign.
  */
 import { X, FolderX } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"

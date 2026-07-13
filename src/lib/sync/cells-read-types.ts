@@ -32,7 +32,7 @@ export interface FileSummary {
   wordCount: number
   /** Last cell.commit timestamp on this file. Null on freshly-created files. */
   lastEditAt: number | null
-  /** FRO-272: epoch-ms when this file was soft-deleted, or null when active. */
+  /** AQU-272: epoch-ms when this file was soft-deleted, or null when active. */
   deletedAt?: number | null
 }
 

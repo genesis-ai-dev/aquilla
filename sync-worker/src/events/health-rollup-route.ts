@@ -16,7 +16,7 @@
 // the pull model first and promote to a DO broadcast + materialized graph only
 // when latency data justifies it. See SWARM-TODO below.
 //
-// SWARM-TODO (FRO-190 / next wave): wire health.rollup DO broadcast so clients
+// SWARM-TODO (AQU-190 / next wave): wire health.rollup DO broadcast so clients
 // receive a pushed update after cell.validate without re-fetching.
 //
 // Auth: sync-token JWT scoped to projectId.

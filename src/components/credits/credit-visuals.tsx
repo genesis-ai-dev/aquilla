@@ -45,7 +45,7 @@ export function SegmentedCapBar({
  * Compact legend: one chip per rail (colored dot · label · value). `chipTestId`
  * lets a caller stamp a stable test id on a given rail's chip — the org panel
  * scopes by window (`rail-day-agent`), the admin table scopes by org
- * (`agent-day-1`) so the FRO-414 anti-transposition tests can pin each value.
+ * (`agent-day-1`) so the AQU-414 anti-transposition tests can pin each value.
  */
 export function RailLegend({
   byRail,

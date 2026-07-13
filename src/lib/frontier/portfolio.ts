@@ -10,7 +10,7 @@ export interface PortfolioProject {
   /** Target cells with content: the "translated" count (distinct from validated). */
   filledCells: number
   /**
-   * FRO-292: target cells that were machine-drafted (AI completion path) and have
+   * AQU-292: target cells that were machine-drafted (AI completion path) and have
    * not yet been human-edited or validated. 0 for projects predating this marker —
    * historical AI commits are indistinguishable from human edits (forward-only).
    */
@@ -64,7 +64,7 @@ export function translatedPct(p: PortfolioProject): number {
 }
 
 /**
- * FRO-292: fraction of cells that are AI-drafted and awaiting human review, 0..1.
+ * AQU-292: fraction of cells that are AI-drafted and awaiting human review, 0..1.
  * 0 for projects that predate the provenance marker (forward-only, honest).
  */
 export function aiDraftedPct(p: PortfolioProject): number {

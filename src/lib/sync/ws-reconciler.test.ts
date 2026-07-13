@@ -140,11 +140,11 @@ describe("parseProjectWsMessage", () => {
     ).toEqual({ t: "event.stale", id: "x", reason: "parent mismatch" })
   })
 
-  it("parses member.removed (FRO-346 eject frame)", () => {
+  it("parses member.removed (AQU-346 eject frame)", () => {
     // WHY: the DO sends this to a removed member right before closing their
     // socket. If the parser drops it (returns null), the workspace never
     // re-fetches the project and the removed user keeps an apparently-live
-    // editor until token expiry — the exact bug FRO-346 fixes.
+    // editor until token expiry — the exact bug AQU-346 fixes.
     expect(
       parseProjectWsMessage(
         JSON.stringify({ t: "member.removed", project: "p", userId: "bob" }),
@@ -222,7 +222,7 @@ describe("parseProjectWsMessage", () => {
     expect(parseProjectWsMessage(JSON.stringify({ t: "presence", users: "wrong" }))).toBeNull()
   })
 
-  it("parses link.upstream-changed (FRO-479 push accelerator)", () => {
+  it("parses link.upstream-changed (AQU-479 push accelerator)", () => {
     const msg = parseProjectWsMessage(
       JSON.stringify({
         t: "link.upstream-changed",
@@ -449,7 +449,7 @@ describe("isOwnWriteEcho", () => {
   })
 })
 
-describe("createLinkUpstreamChangedHandler (FRO-479 push accelerator)", () => {
+describe("createLinkUpstreamChangedHandler (AQU-479 push accelerator)", () => {
   function frame(
     overrides: Partial<Extract<ProjectWsServerMessage, { t: "link.upstream-changed" }>> = {},
   ): Extract<ProjectWsServerMessage, { t: "link.upstream-changed" }> {

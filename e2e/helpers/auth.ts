@@ -105,7 +105,7 @@ export async function injectSession(page: Page, session: PersistedSession): Prom
 
     // Mark onboarding complete so the app routes straight to dashboard.
     localStorage.setItem("codex:onboardingComplete", "true")
-    // Suppress the first-run product tour (FRO-243) — its modal welcome
+    // Suppress the first-run product tour (AQU-243) — its modal welcome
     // dialog makes the workspace inert and blocks every role-based locator.
     localStorage.setItem("codex:productTourDone", "1")
     // Set the auth-hint cookie (aq_hint=1) that App.tsx checks via
@@ -114,7 +114,7 @@ export async function injectSession(page: Page, session: PersistedSession): Prom
     document.cookie = "aq_hint=1; Path=/; Max-Age=31536000; SameSite=Lax"
   }, session)
 
-  // FRO-244: the "Project setup" checklist auto-opens as a modal sheet on the
+  // AQU-244: the "Project setup" checklist auto-opens as a modal sheet on the
   // first workspace visit to any incomplete project, making the page inert.
   // Its localStorage key is per-project (codex.setupAutoShown.<id>) so it
   // can't be pre-seeded for projects the test creates later. Patch getItem at

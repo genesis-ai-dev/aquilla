@@ -23,7 +23,7 @@ const CHAPTER_2 = path.resolve(__dirname, "../../fixtures/chapter-2.md")
  * both suggestion rows visible → clicks "Cancel" → dialog closes.
  */
 test("suggestion banner Review opens dialog with file suggestions; Cancel closes it", async ({ alice }) => {
-  // Two sequential FRO-310 import flows (preview → confirm → projection wait)
+  // Two sequential AQU-310 import flows (preview → confirm → projection wait)
   // plus project creation routinely exceed the 30s harness budget under load.
   test.slow()
   const dash = new Dashboard(alice)

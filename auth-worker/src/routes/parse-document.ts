@@ -1,4 +1,4 @@
-// parse-document — FRO-197
+// parse-document — AQU-197
 //
 // POST /api/v2/parse-document
 //
@@ -12,7 +12,7 @@
 // PDF: minimal text-stream extraction (look for BT…ET blocks and Tj/TJ
 // operators). This covers most simple PDFs. Complex PDFs with embedded fonts
 // or encoding tables may produce garbled text.
-// SWARM-TODO(FRO-197-pdf): replace the minimal PDF text extractor with a
+// SWARM-TODO(AQU-197-pdf): replace the minimal PDF text extractor with a
 // proper Workers-compatible library (e.g. unpdf) once a build-verified
 // version is available. The current extractor is a best-effort fallback.
 
@@ -66,7 +66,7 @@ export function extractTextFromDocx(bytes: Uint8Array): string {
 // ── PDF helpers ───────────────────────────────────────────────────────────────
 
 export function extractTextFromPdf(bytes: Uint8Array): string {
-  // SWARM-TODO(FRO-197-pdf): this is a minimal best-effort extractor.
+  // SWARM-TODO(AQU-197-pdf): this is a minimal best-effort extractor.
   // It decodes the raw byte stream looking for PDF text operators (Tj, TJ, ')
   // inside BT…ET blocks. It handles ISO-8859-1 literals and octal escapes
   // but will produce garbled output for PDFs with custom font encoding tables.

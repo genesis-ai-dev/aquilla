@@ -53,11 +53,11 @@ interface ProjectCreateDialogProps {
  *  - source-only:    targetLanguage left blank; exists to be linked-against.
  *  - linked-target:  reads source from another project (shape recorded locally).
  *
- * FRO-478: "linked-target" now actually links (previously the shape was
+ * AQU-478: "linked-target" now actually links (previously the shape was
  * recorded locally with no server-side link). See the "linked-target"
  * branch in handleSubmit below for the create → link-with-seed sequence.
  *
- * SWARM-TODO(FRO-478): live-UI walk once FRO-476 is deployed —
+ * SWARM-TODO(AQU-478): live-UI walk once AQU-476 is deployed —
  *   1. + New Project → Advanced: project shape → "Linked target".
  *   2. Pick an existing project from the "Upstream project" dropdown.
  *   3. Choose Live (subscribed) vs Clone (one-time snapshot), and — the
@@ -78,7 +78,7 @@ type ProjectShape = "self-contained" | "source-only" | "linked-target"
  */
 const FIELD_CLASS = "h-9 px-3 focus-visible:ring-2 focus-visible:ring-ring/35"
 
-/** FRO-478: clone vs live — "a checkbox, not a fork" per the design spec §9.2. */
+/** AQU-478: clone vs live — "a checkbox, not a fork" per the design spec §9.2. */
 type LinkMode = "clone" | "live"
 /** Which upstream lane becomes this project's source: sibling-language case
  *  ("use its source") vs chain case ("use its translations"). */

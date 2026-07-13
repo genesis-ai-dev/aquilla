@@ -1,4 +1,4 @@
-# Row-Level Security backstop — Aquilla Postgres (FRO-289)
+# Row-Level Security backstop — Aquilla Postgres (AQU-289)
 
 Migration: `db/postgres/migrations/0034_rls_backstop.sql`
 Shim changes: `db/shim/postgres.ts` — `withUser()` / `asAdmin()`
@@ -122,7 +122,7 @@ const db = env.AQUILLA_PG.asAdmin()
 await db.prepare("SELECT * FROM events WHERE project_id = ?").bind(projectId).all()
 ```
 
-### Named asAdmin() call sites (FRO-289 audit)
+### Named asAdmin() call sites (AQU-289 audit)
 
 | Worker | File / route | Auth mechanism |
 |---|---|---|
@@ -162,6 +162,6 @@ regression in features that return empty lists.  During staging soak:
 This migration has **not** been applied to any live Neon database.  It exists
 only as a repo artifact.  See the Apply Procedure above.
 
-`SWARM-TODO(FRO-289): deploy-time — create runtime role on staging Neon branch,
+`SWARM-TODO(AQU-289): deploy-time — create runtime role on staging Neon branch,
 apply migration, soak, then prod; verify admin console + migrations still work
 via owner role.`

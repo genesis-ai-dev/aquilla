@@ -92,6 +92,7 @@ import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOve
 import { useComments } from "@/hooks/useComments"
 import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, Mic2, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose } from "lucide-react"
 import { AgentDockPanel } from "./AgentDockPanel"
+import { agentSessionStore } from "@/lib/agent/session-store"
 import { AgentWorkbench } from "./agent/AgentWorkbench"
 import type { ContextChip } from "@/lib/agent/context-chip"
 import { SearchDockPanel } from "./SearchDockPanel"
@@ -645,12 +646,31 @@ export function ProjectWorkspace() {
     prevSurfaceRef.current = centerSurface
     if (centerSurface === "agent" && prev !== "agent") {
       dockTabBeforeAgentRef.current = dockTab
-      setDockTab(null)
+      // The file explorer is the workbench's scope picker — open it by
+      // default (the Agent tab itself stays unreachable during the takeover).
+      setDockTab("files")
     } else if (centerSurface !== "agent" && prev === "agent") {
       setDockTab((cur) => cur ?? dockTabBeforeAgentRef.current)
+    } else if (centerSurface === "agent" && dockTab === "agent") {
+      // Restore/route paths can re-land the agent tab mid-takeover; collapse.
+      setDockTab(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- dockTab read on transition only
   }, [centerSurface])
+  // Agent working area (agent-complete follow-up): in the workbench the file
+  // explorer doubles as the SCOPE PICKER — clicking a file designates what the
+  // agent works on instead of opening the editor. Falls back to the editor's
+  // active file until the user picks one; cleared when they leave the surface
+  // (the editor's own focus is the scope again).
+  const [agentScopeFileId, setAgentScopeFileId] = useState<string | null>(null)
+  useEffect(() => {
+    if (centerSurface !== "agent") setAgentScopeFileId(null)
+  }, [centerSurface])
+  const agentScopeFile = useMemo(() => {
+    const id = agentScopeFileId ?? activeFileId
+    return id ? projectFiles.find((f) => f.id === id) ?? null : null
+  }, [agentScopeFileId, activeFileId, projectFiles])
+
   // A source selection the user sent to the agent via "Ask AI". Opens the
   // Agent dock and is inserted into the composer as a context chip.
   const [pendingChip, setPendingChip] = useState<ContextChip | null>(null)
@@ -3754,6 +3774,10 @@ export function ProjectWorkspace() {
             storageKey={projectId}
             activeTab={dockTab}
             onActiveTabChange={(t) => {
+              // While the workbench IS the agent surface, the dock's Agent tab
+              // has nothing to show but a pointer back to it — a wide panel of
+              // dead chrome beside the takeover. Make that state unreachable.
+              if (t === "agent" && centerSurface === "agent") return
               setDockTab(t)
               // Opening the Voices tab puts the editor into the Audio lens so
               // the per-line voice controls show alongside the panel.
@@ -3793,12 +3817,28 @@ export function ProjectWorkspace() {
                 <ExpandableFileList
                   projectId={projectId!}
                   files={project.files}
-                  activeFileId={activeFileId}
+                  activeFileId={centerSurface === "agent" ? (agentScopeFile?.id ?? activeFileId) : activeFileId}
                   fileProgress={fileProgress}
                   suggestionFileIds={suggestionFileIds}
                   validationCount={validationCount}
                   getTokenForFile={getTokenForFile}
-                  onSelectFile={workspaceTabs.openFile}
+                  onSelectFile={(fileId, opts) => {
+                    // Workbench: the explorer designates the agent's working
+                    // area — stay in the takeover, retarget the session, and
+                    // let the model hear about it on the next turn.
+                    if (centerSurface === "agent") {
+                      setAgentScopeFileId(fileId)
+                      const name = projectFiles.find((f) => f.id === fileId)?.name ?? fileId
+                      if (project?.id) {
+                        agentSessionStore(project.id).noteActivity(
+                          "scope",
+                          `The user set the working area to the file "${name}" (:file now resolves to it).`,
+                        )
+                      }
+                      return
+                    }
+                    workspaceTabs.openFile(fileId, opts)
+                  }}
                   onRename={handleRename}
                   onMove={(fileId) => {
                     setMoveTargetId(fileId)
@@ -4256,10 +4296,10 @@ export function ProjectWorkspace() {
               author: currentUsername,
               roleLevel: currentRoleLevel,
               context: {
-                fileId: activeFileId ?? undefined,
-                cellId: focusedCellId ?? undefined,
+                fileId: agentScopeFile?.id ?? undefined,
+                cellId: agentScopeFile?.id === activeFileId ? focusedCellId ?? undefined : undefined,
               },
-              fileName: activeFile?.name,
+              fileName: agentScopeFile?.name,
               currentCell: null,
               rules,
               resolveCell: resolveCellById,

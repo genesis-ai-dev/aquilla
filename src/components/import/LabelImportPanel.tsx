@@ -1,6 +1,6 @@
 /**
- * FRO-438: Cell-label / cast import via downloadable spreadsheet template.
- * FRO-439: Now splits angle-embedded labels ("Mary Magdalene   (on)") into
+ * AQU-438: Cell-label / cast import via downloadable spreadsheet template.
+ * AQU-439: Now splits angle-embedded labels ("Mary Magdalene   (on)") into
  *           voice name + cameraState before emitting cast.assign.
  *
  * Flow:
@@ -53,7 +53,7 @@ export function LabelImportPanel({
   const [preview, setPreview] = useState<{
     ref: string
     castName: string
-    /** FRO-439: camera angle extracted from the cast_name string, or undefined */
+    /** AQU-439: camera angle extracted from the cast_name string, or undefined */
     cameraState: "on" | "mixed" | "off" | undefined
   }[] | null>(null)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
@@ -100,7 +100,7 @@ export function LabelImportPanel({
         const ref = (row[refCol] ?? "").trim()
         const rawCast = (row[castCol] ?? "").trim()
         if (ref && rawCast) {
-          // FRO-439: split angle suffix from name ("Mary (on)" → voice + cameraState)
+          // AQU-439: split angle suffix from name ("Mary (on)" → voice + cameraState)
           const { voice, cameraState } = splitCastName(rawCast)
           entries.push({ ref, castName: voice, cameraState })
         }
@@ -111,7 +111,7 @@ export function LabelImportPanel({
     }
   }, [])
 
-  /** Apply the cast labels via cast.assign events (FRO-438).
+  /** Apply the cast labels via cast.assign events (AQU-438).
    *
    * For each row in the preview:
    *   - Look up the cellId from sourceCells by canonicalRef.
@@ -146,7 +146,7 @@ export function LabelImportPanel({
           fileId: cell.fileId,
           cellId: cell.cellId,
           castName,
-          // FRO-439: forward camera angle when it was present in the import row
+          // AQU-439: forward camera angle when it was present in the import row
           ...(cameraState !== undefined ? { cameraState } : {}),
           author: username,
         }),

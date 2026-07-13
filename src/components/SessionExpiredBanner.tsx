@@ -1,5 +1,5 @@
 /**
- * FRO-293: In-place session-expiry banner.
+ * AQU-293: In-place session-expiry banner.
  *
  * Subscribes to the session-expired signal (src/lib/errors/session-expired-signal.ts).
  * When the signal fires (any fetch helper threw UserError(401)), shows a

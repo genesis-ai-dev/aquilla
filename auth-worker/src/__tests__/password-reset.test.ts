@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest"
 import app from "../index"
 
 // End-to-end coverage for the account-recovery path. The /reset-password PAGE
-// (FRO-270) and the SPA edge fallback already make the email link reachable;
+// (AQU-270) and the SPA edge fallback already make the email link reachable;
 // these guard the verify + reset ENDPOINTS the page depends on — the audit's
 // #1 risk ("account recovery") was previously untested at the API level.
 

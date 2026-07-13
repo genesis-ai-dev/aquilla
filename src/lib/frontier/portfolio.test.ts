@@ -95,7 +95,7 @@ describe("deadlineStatus", () => {
     expect(deadlineStatus(project({ deadlineAt: "2026-09-01" }), now)).toBe("ok")
   })
 
-  // AoE boundary tests (FRO-294): deadline is inclusive through end-of-day everywhere on earth.
+  // AoE boundary tests (AQU-294): deadline is inclusive through end-of-day everywhere on earth.
   // UTC midnight of deadline + 36 h = end-of-day at UTC-12 (Baker/Howland Island).
 
   it("due TODAY is never overdue — even at UTC midnight of that day", () => {

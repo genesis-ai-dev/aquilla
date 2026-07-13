@@ -1,4 +1,4 @@
--- FRO-265: AI budget counters
+-- AQU-265: AI budget counters
 -- One row per (user_id, UTC date). user_id=0 is the global aggregate sentinel.
 -- Upserted on every proxied AI request; checked against per-user and global
 -- daily limits before forwarding to OpenRouter.

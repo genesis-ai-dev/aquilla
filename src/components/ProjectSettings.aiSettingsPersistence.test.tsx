@@ -1,4 +1,4 @@
-// FRO-408 — AI Settings panel: every field must actually persist, not just
+// AQU-408 — AI Settings panel: every field must actually persist, not just
 // "AI instructions". Prior bug: `buildCompletionSettings` (the merge function
 // the Save Changes handler funnels every completion-settings edit through)
 // omitted top_k / contextSize / useOnlyValidatedExamples / main_chat_language /
@@ -157,7 +157,7 @@ beforeEach(() => {
   lastUpdateProjectArg = null
 })
 
-describe("ProjectSettings — AI Settings persistence (FRO-408)", () => {
+describe("ProjectSettings — AI Settings persistence (AQU-408)", () => {
   it("persists Top K, context window, validated-only, and example format on Save", async () => {
     renderSettings()
 

@@ -29,7 +29,7 @@ test("export dialog scope toggle switches between file and project", async ({ al
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Open the export dialog from the header overflow menu (FRO-331).
+  // Open the export dialog from the header overflow menu (AQU-331).
   await ws.openExportDialog()
 
   const dialog = alice.getByRole("dialog")

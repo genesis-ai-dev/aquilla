@@ -26,7 +26,7 @@ interface ViewSettingsMenuProps {
   directionWarningScope?: string | null
   cellLabelsEnabled: boolean
   tnSidebarEnabled: boolean
-  /** FRO-317: USFM \f...\f* footnote display mode. */
+  /** AQU-317: USFM \f...\f* footnote display mode. */
   footnoteViewMode?: FootnoteViewMode
   /** Per-file source-column font size in px. */
   sourceFontSize: number

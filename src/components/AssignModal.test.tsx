@@ -1,4 +1,4 @@
-// FRO-192: AssignModal tests — scope→event payload wiring, role gate.
+// AQU-192: AssignModal tests — scope→event payload wiring, role gate.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { AssignModal } from "./AssignModal"

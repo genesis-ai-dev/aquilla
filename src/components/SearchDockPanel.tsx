@@ -1,5 +1,5 @@
 /**
- * SearchDockPanel.tsx — FRO-308
+ * SearchDockPanel.tsx — AQU-308
  *
  * Inline search/find-replace panel for the left dock.
  * Wraps the same search logic as ParallelPassagesPanel but in a
@@ -9,7 +9,7 @@
  * duplicated here — this panel re-uses the same hook callbacks passed
  * down from ProjectWorkspace via props.
  *
- * FRO-303 note: streaming / parallel passages heavy internals remain
+ * AQU-303 note: streaming / parallel passages heavy internals remain
  * in ParallelPassagesPanel.tsx — that Dialog is still available for
  * full-screen searches. This dock panel is the quick-access surface.
  */
@@ -57,7 +57,7 @@ export interface SearchDockPanelProps {
   onReplaceAll?: (payload: ReplaceAllPayload) => void
   /** Called when user wants to open the full ParallelPassagesPanel dialog */
   onOpenFullPanel?: () => void
-  /** FRO-309: Called when user wants to expand all results into the main area */
+  /** AQU-309: Called when user wants to expand all results into the main area */
   onExpandResults?: (query: string) => void
   /** Bible Aquifer reference mode — when true, a "Bible resources" mode is
    *  offered. Sourced from project settings (`bibleResourcesEnabled`). */

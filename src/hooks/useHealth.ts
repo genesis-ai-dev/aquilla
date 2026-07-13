@@ -111,10 +111,10 @@ function healthStatsEqual(a: HealthStats, b: HealthStats): boolean {
 // Health derives from decay (endorsement_count). File progress + comment
 // counts are a cheap O(N) auxiliary derivation — no rule checks, no scoring.
 //
-// FRO-280 (audit F-P2): deriveAuxStats counts `cell.status === "validated"` for
+// AQU-280 (audit F-P2): deriveAuxStats counts `cell.status === "validated"` for
 // the validated tally. `cell.status` is derived in useCells.buildCellData from
 // the server-projected `target.validated` flag (via deriveStatus → validatedForStatus),
-// which FRO-279 made threshold-aware. This function therefore already consumes
+// which AQU-279 made threshold-aware. This function therefore already consumes
 // the authoritative server flag — no client-side threshold re-derivation here.
 function deriveAuxStats(fileCells: Map<string, readonly HealthCell[]>): {
   fileProgress: HealthStats["fileProgress"]

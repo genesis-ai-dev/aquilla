@@ -33,7 +33,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   const raw = rawMessage.trim()
   const m = raw.toLowerCase()
 
-  // Platform daily quota (FRO-265): 429 responses from the Frontier/Aquilla proxy.
+  // Platform daily quota (AQU-265): 429 responses from the Frontier/Aquilla proxy.
   if (
     m.includes("daily ai limit") ||
     m.includes("daily_budget_exceeded") ||

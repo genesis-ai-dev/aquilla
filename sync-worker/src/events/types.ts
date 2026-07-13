@@ -78,7 +78,7 @@ export type EventKind =
   // detached). sync-worker receives this via the shared events table and uses
   // it to invalidate any cached upstream-resolution in the stale-source route.
   | 'project.link-source'
-  // FRO-438: Cast/character label assignment. Non-chain-mutating (does NOT move
+  // AQU-438: Cast/character label assignment. Non-chain-mutating (does NOT move
   // cells.event_id). Writes cast_name into cells.metadata JSONB without touching
   // target text. Contributor-level — a PM/project-lead labels cells for voice actors.
   | 'cast.assign'
@@ -88,7 +88,7 @@ export type EventKind =
   // Timeline editor: set/clear a file's core video URL (timeline preview master
   // clock), stored in files.meta JSON. Non-chain-mutating; file-level.
   | 'file.video.set'
-  // FRO-476: live source links — mirror engine. Server-emitted only (the
+  // AQU-476: live source links — mirror engine. Server-emitted only (the
   // mirror sync engine in link-sync.ts; never a client outbox kind). Mirror
   // events replicate an ordering the UPSTREAM already arbitrated, so they
   // carry parentId: null and are EXEMPT from CHAIN_MUTATING_KINDS / the
@@ -101,9 +101,9 @@ export type EventKind =
   | 'file.mirror'
   // Audit-trail record of a non-empty mirror batch (an empty fold advances
   // `projects.source_link_cursor` directly with no event). No cells
-  // projection — purely a history record for the review panel (FRO-478).
+  // projection — purely a history record for the review panel (AQU-478).
   | 'link.cursor.advance'
-  // FRO-478: "accept upstream change as-is" — reviewer(300)+ asserts a
+  // AQU-478: "accept upstream change as-is" — reviewer(300)+ asserts a
   // translation still stands against the new source. Non-chain-mutating:
   // the chain head does NOT move, so validations/endorsements survive
   // (deliberate — spec §7). Guarded: the projection only applies when the
@@ -179,7 +179,7 @@ export interface EventPayloads {
      */
     sourceEventId?: string | null
     /**
-     * FRO-292 / AI provenance: when true, tags this commit as machine-drafted
+     * AQU-292 / AI provenance: when true, tags this commit as machine-drafted
      * (the `cell.commit.llm-accept` variant per AD-2). Set by the AI completion
      * path (useCompletion → commitCompletedCell). Human edits omit this field
      * entirely — the projection tracks `cells.ai_drafted` until a human edit
@@ -202,7 +202,7 @@ export interface EventPayloads {
      */
     undo_of_agent_run_id?: string
     /**
-     * FRO-186 / harmonization: when present, tags this commit as a harmonize
+     * AQU-186 / harmonization: when present, tags this commit as a harmonize
      * sweep event (cell.commit.harmonize variant per AD-2). The route layer
      * uses this field to enforce harmonize_min_role and to trigger the AD-14
      * endorsement-revocation cascade. Only set by the harmonize sweep path.
@@ -391,12 +391,12 @@ export interface EventPayloads {
     sourceProjectId: string | null
   }
 
-  // ── FRO-438: Cast/character label assignment (non-chain-mutating) ──────────
+  // ── AQU-438: Cast/character label assignment (non-chain-mutating) ──────────
   // Sets cells.metadata.cast_name WITHOUT touching target text or cells.event_id.
   // Emitted by the label import panel when a PM uploads a filled cast template.
   // Idempotent JSONB merge: repeated assigns for the same cell overwrite the
   // cast_name; clearing requires a null value.
-  // FRO-439: extended with optional cameraState so angle-embedded labels
+  // AQU-439: extended with optional cameraState so angle-embedded labels
   // ("Mary Magdalene   (on)") can be split on import. The projection updates
   // cells.camera_state when cameraState is present in the payload.
   'cast.assign': {
@@ -406,7 +406,7 @@ export interface EventPayloads {
      */
     castName: string | null
     /**
-     * FRO-439: Optional camera-angle override ("on" | "mixed" | "off").
+     * AQU-439: Optional camera-angle override ("on" | "mixed" | "off").
      * When present, the projection also updates cells.camera_state.
      * Null clears the column; omitting this field (undefined) is a no-op.
      */
@@ -426,7 +426,7 @@ export interface EventPayloads {
     coreMediaUrl: string | null
   }
 
-  // ── FRO-476: live source links — mirror engine (server-emitted) ────────
+  // ── AQU-476: live source links — mirror engine (server-emitted) ────────
   // Advances a downstream source cell to match the upstream. Full
   // create-grade shape (structural fields for a cell with no local row yet)
   // PLUS the fields source.cell.commit carries (value/valueHtml) — a mirror
@@ -473,7 +473,7 @@ export interface EventPayloads {
     }
   }
   // Audit-trail record of one non-empty mirror sync batch. No cells
-  // projection; purely a history row for the review panel (FRO-478).
+  // projection; purely a history row for the review panel (AQU-478).
   'link.cursor.advance': {
     upstreamProjectId: string
     fromSeq: number
@@ -481,7 +481,7 @@ export interface EventPayloads {
     cellCount: number
   }
 
-  // ── FRO-478: repin (accept upstream change as-is) ──────────────────────
+  // ── AQU-478: repin (accept upstream change as-is) ──────────────────────
   // Reviewer-level "translation still correct against the new source."
   // Updates ONLY cells.source_event_id on the target row — never value,
   // event_id, validated, or endorsement_count. Guarded by
@@ -547,7 +547,7 @@ export interface EventClaims {
   /** Numeric role level (100=viewer..700=owner). */
   roleLevel: number
   /**
-   * FRO-346: role-resolution source stamped at mint time. `"platform"`
+   * AQU-346: role-resolution source stamped at mint time. `"platform"`
    * exempts the token from the live membership re-check (ADMIN_EMAILS
    * operators have no membership rows). Absent on older tokens.
    */

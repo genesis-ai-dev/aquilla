@@ -6,9 +6,9 @@
  *
  * Edit access is gated at MAINTAINER (600) via useProjectSettings.canEdit.
  * Below-floor users see read-only affordances with a tooltip naming the
- * required role, mirroring the FRO-255 pattern in useProjectSettings.
+ * required role, mirroring the AQU-255 pattern in useProjectSettings.
  *
- * Layout: FRO-254 renders this page inside the ProjectWorkspace shell
+ * Layout: AQU-254 renders this page inside the ProjectWorkspace shell
  * (centerSurface === "memory"), so this component owns only the content
  * area — no full-page header, no back button.
  */
@@ -429,7 +429,7 @@ function AuthoredEntriesSection({
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────
-// FRO-254: rendered inside ProjectWorkspace's AppShell (centerSurface===
+// AQU-254: rendered inside ProjectWorkspace's AppShell (centerSurface===
 // "memory") in a h-full overflow-y-auto wrapper. No full-page header or
 // back-button chrome here — the shell owns that. Content scrolls naturally.
 
@@ -445,7 +445,7 @@ export function LivingMemoryPage() {
 
   const { project, loading: projectLoading } = useProject(projectId ?? "")
 
-  // Role-aware edit gate: mirrors the FRO-255 pattern — get roleLevel from
+  // Role-aware edit gate: mirrors the AQU-255 pattern — get roleLevel from
   // syncRole, pass to useProjectSettings which enforces MAINTAINER (600) floor.
   const roleLevel = project?.syncRole?.level ?? null
   const { settings, canEdit, reasonCannotEdit, patch: patchSettings } = useProjectSettings(

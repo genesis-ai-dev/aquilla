@@ -1,4 +1,4 @@
-// FRO-436: Username self-change lock
+// AQU-436: Username self-change lock
 //
 // Verifies the acceptance criteria:
 //   1. Finding: there is no route today for a user to change their own username
@@ -30,7 +30,7 @@ async function patchMe(
   )
 }
 
-describe("PATCH /api/v2/auth/me — username lock (FRO-436)", () => {
+describe("PATCH /api/v2/auth/me — username lock (AQU-436)", () => {
   it("blocks a Contributor from changing their own username (403)", async () => {
     await seedUser(1, "alice")
     const jwt = await jwtFor("alice")
@@ -41,7 +41,7 @@ describe("PATCH /api/v2/auth/me — username lock (FRO-436)", () => {
   })
 
   it("blocks a Maintainer from self-changing their username too (403)", async () => {
-    // FRO-436: the lock is unconditional for self-service — no role override exists.
+    // AQU-436: the lock is unconditional for self-service — no role override exists.
     await seedUser(2, "bob")
     const jwt = await jwtFor("bob")
     const res = await patchMe(jwt, { username: "new-bob" })

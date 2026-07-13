@@ -3925,7 +3925,7 @@ function EditorRow({
         size={22}
         strokeWidth={2}
         className="pointer-events-none"
-        style={{ position: "absolute", inset: 0 }}
+        style={{ position: "absolute", inset: 0, margin: "auto" }}
       />
       <ValidationIcon
         className="relative h-3.5 w-3.5"

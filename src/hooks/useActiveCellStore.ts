@@ -773,7 +773,11 @@ export class CellStore {
     const optimistic = this.optimisticEdits.get(cell.id)
     if (optimistic) {
       cell.translated = optimistic.value
-      if (optimistic.valueHtml !== undefined) cell.translatedHtml = optimistic.valueHtml
+      // The optimistic value is authoritative for BOTH text and html. When an
+      // edit carries no valueHtml (e.g. an AI completion commits plain `text`),
+      // clear translatedHtml so the editor's html-first hydration falls back to
+      // the fresh plain text instead of re-showing the stale prior html.
+      cell.translatedHtml = optimistic.valueHtml
       cell.status = deriveStatus(optimistic.value, false)
       cell.hasPendingEdit = true
     }
@@ -1303,11 +1307,9 @@ export function useCellIds(store: CellStore, orderedBy?: OrderedBy, mediaLayer =
 }
 
 export function useCellView(store: CellStore, cellId: string): CellViewModel | null {
-  const version = useSyncExternalStore(
-    (listener) => store.subscribeCell(cellId, listener),
-    () => store.getCellVersion(cellId),
-    () => 0,
-  )
+  const subscribe = useCallback((listener: () => void) => store.subscribeCell(cellId, listener), [store, cellId])
+  const getSnapshot = useCallback(() => store.getCellVersion(cellId), [store, cellId])
+  const version = useSyncExternalStore(subscribe, getSnapshot, () => 0)
   return useMemo(() => store.getCellView(cellId), [cellId, store, version])
 }
 

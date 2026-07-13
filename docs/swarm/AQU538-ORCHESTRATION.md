@@ -35,10 +35,10 @@ branch rules). Orchestrator merges, verifies, promotes, pushes. Agents NEVER pus
 
 ## Design decisions (orchestrator-owned; agents implement, don't re-litigate)
 
-1. **Lane registry** = project setting `targetLanes: string[]` (BCP-47-ish, opaque), default
-   `[]` meaning "just the default lane ''". The default lane is ALWAYS implicitly present and
-   is never stored in the list. Adding a language appends to the list. (Exact storage surface
-   confirmed after recon — project-settings module.)
+1. **Lane registry** = `ProjectWideSettings.targetLanes?: string[]` (BCP-47-ish, opaque),
+   in the auth-worker `project_settings` blob (dumb store — new top-level key, no server
+   validation needed; MAINTAINER 600 write floor applies). Default absent/[] = "just the
+   default lane ''". The default lane is ALWAYS implicit and never stored in the list.
 2. **Validate events carry the lane**: `cell.validate` / `cell.unvalidate` payloads gain
    optional `targetLang` (same pattern as commits; '' omitted on wire). `cell_validators`
    gains `target_lang TEXT NOT NULL DEFAULT ''` with PK
@@ -46,13 +46,17 @@ branch rules). Orchestrator merges, verifies, promotes, pushes. Agents NEVER pus
    idempotent PK rebuild. Projection validated/endorsement recomputes stay per-row-correct
    (they already compare `event_id = cells.event_id`); the lane column scopes the
    one-standing-validation-per-user rule per lane. rebuild + fold read lane from payload.
-3. **Focus locks**: lease key gains the lane — `cellId` for the default lane (unchanged,
-   back-compat), `` `${cellId}@lane:${lane}` `` for non-default lanes. Client and DO use the
-   same composition helper; no protocol version bump needed (key is an opaque string).
+3. **Focus locks**: CLIENT-composed key — the DO's lock map keys on the opaque `cellId`
+   string (project-do-handlers.ts), so `useFocusLock` sends `cellId` for the default lane
+   (unchanged) and `` `${cellId}@lane:${lane}` `` for non-default lanes. Zero server/DO
+   changes; cross-lane clients naturally don't match each other's lock frames.
 4. **Per-lane progress**: `file_section_progress` gains `target_lang` in its PK (migration
-   0055, same file); `files` scalar counters REMAIN cross-lane sums (documented; they feed
-   sort/legacy list surfaces). Progress reads accept an optional lane param; existing
-   consumers get cross-lane behavior unchanged.
+   0055). Recomputes produce one row set per lane present in the file's target cells (''
+   always present; denominator = source rows, lane-independent). Progress READS default to
+   `target_lang = ''` — byte-identical semantics for N=1 — with an optional `?lane=` param.
+   `files` scalar counters REMAIN cross-lane sums (documented). NOTE: cell_validators' true
+   PK today is `(project_id, file_id, cell_id, username)` (schema.sql; the recon's mention
+   of event_id in the key was wrong) — 0055 inserts `target_lang` into that key.
 5. **Cells read**: `GET .../cells` gains optional `lane=<tag>` query param — filters target
    rows to that lane (source rows always included). Default: all lanes (unchanged).
 6. **Active lane on the client**: a lane context owned by the project workspace (whatever

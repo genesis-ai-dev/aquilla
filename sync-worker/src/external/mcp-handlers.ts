@@ -16,6 +16,8 @@ import { ROLE } from '../events/role-policy'
 import { assertCredentialScope } from './token-bridge'
 import { loadChangeset } from './store'
 import { CHANGESET_TTL_MS } from './prepare'
+import { PLAN_IMPORT_MAX_CELLS } from './commands'
+import { MAX_ARTIFACT_BYTES } from './artifacts-route'
 import { handleExternalReadRequest } from './read-routes'
 import { handleExternalChangesetsRequest } from './changesets-route'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
@@ -78,6 +80,10 @@ function bearer(token: string): Record<string, string> {
   return { Authorization: `Bearer ${token}` }
 }
 
+/** Marks a synthetic in-process Request as MCP-originated so commit.ts stamps
+ *  `channel: 'mcp'` into the provenance envelope (§2) instead of the REST default. */
+const MCP_CHANNEL_HEADER: Record<string, string> = { 'x-aquilla-channel': 'mcp' }
+
 const EXTERNAL_BASE = 'https://internal/api/v1/external/projects'
 
 // ── direct reads ─────────────────────────────────────────────────────────────
@@ -86,11 +92,23 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
   return ok({
     apiVersion: 'v1',
     credentialMode: cred.mode,
-    commandKinds: ['SetTranslation'],
+    // Both domain command kinds now ship. PlanImport, however, has no MCP
+    // staging tool yet (prepare_translations only stages SetTranslation) — it
+    // is staged over REST (POST .../changesets). Advertised so an MCP-only host
+    // knows to reach for the REST surface for imports.
+    commandKinds: ['SetTranslation', 'PlanImport'],
+    planImport: {
+      stagingChannels: ['rest'],
+      mcpStagingTool: null,
+      maxCellsPerChangeset: PLAN_IMPORT_MAX_CELLS,
+      note: 'PlanImport is staged via REST only; no MCP staging tool exists yet.',
+    },
     limits: {
       changesetExpirySeconds: CHANGESET_TTL_MS / 1000,
       // Wave-1 validateCommands enforces no hard per-changeset command cap.
       maxCommandsPerChangeset: null,
+      planImportMaxCells: PLAN_IMPORT_MAX_CELLS,
+      maxArtifactBytes: MAX_ARTIFACT_BYTES,
     },
     errorCodes: ERROR_CODES,
     askModeFlow:
@@ -288,7 +306,7 @@ async function prepareTranslations(
 
   const req = new Request(`${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets`, {
     method: 'POST',
-    headers: { ...bearer(token), 'Content-Type': 'application/json' },
+    headers: { ...bearer(token), 'Content-Type': 'application/json', ...MCP_CHANNEL_HEADER },
     body: JSON.stringify(body),
   })
   const res = await handleExternalChangesetsRequest(req, env, ctx)
@@ -381,7 +399,7 @@ async function confirmChangeset(
 
   const req = new Request(
     `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets/${encodeURIComponent(changesetId)}/commit`,
-    { method: 'POST', headers: bearer(token) },
+    { method: 'POST', headers: { ...bearer(token), ...MCP_CHANNEL_HEADER } },
   )
   const res = await handleExternalChangesetsRequest(req, env, ctx)
   if (!res) return fail('not_found', 'changesets route did not match')

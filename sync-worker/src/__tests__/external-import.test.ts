@@ -400,20 +400,23 @@ describe('PlanImport — commit', () => {
     expect(cs[0].status).toBe('committed')
   })
 
-  it('a CONTRIBUTOR credential is permission_denied (source.* needs PROJECT_LEAD)', async () => {
+  it('a CONTRIBUTOR credential is permission_denied at prepare (PlanImport needs PROJECT_LEAD)', async () => {
     const token = await credToken(tdb, { credentialId: CRED_CONTRIB, userId: 2, username: 'contrib' })
+    // PlanImport compiles to file.create / source.cell.create (PROJECT_LEAD 500).
+    // A contributor (400) is now denied at PREPARE — staging a plan it could
+    // never commit is pointless and leaks the effect summary, so the gate moved
+    // to prepare rather than only firing at the /events perimeter on commit.
     const prepRes = (await handleExternalChangesetsRequest(
       prepareReq(token, { kind: 'PlanImport', fileName: 'Nope.usfm', fileType: 'usfm', cells: [{ content: 'x' }] }),
       env,
     ))!
-    const prep = (await prepRes.json()) as { changeset: { id: string; status: string } }
-    expect(prep.changeset.status).toBe('staged') // staging is not gated on write role
+    expect(prepRes.status).toBe(403)
+    const prep = (await prepRes.json()) as { error: { code: string }; changeset?: unknown }
+    expect(prep.error.code).toBe('permission_denied')
+    expect(prep.changeset).toBeUndefined()
 
-    const res = (await handleExternalChangesetsRequest(commitReq(token, prep.changeset.id), env))!
-    expect(res.status).toBe(403)
-    expect((await res.json() as { error: { code: string } }).error.code).toBe('permission_denied')
-
-    // Nothing landed.
+    // Nothing staged, nothing landed.
+    expect(await tdb.rows('changesets')).toHaveLength(0)
     const files = await tdb.rows('files')
     expect(files).toHaveLength(0)
     const created = (await tdb.rows<{ kind: string }>('events')).filter(

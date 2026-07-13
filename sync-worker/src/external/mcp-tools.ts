@@ -29,8 +29,10 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'Discover what this API and THIS credential can do before attempting anything. ' +
       'Returns the API version, the autonomy mode of the calling credential (ask|act), ' +
-      'the domain command kinds available (currently SetTranslation), the operational ' +
-      'limits (changeset expiry, max commands per changeset), the full list of stable ' +
+      'the domain command kinds available (SetTranslation and PlanImport — note ' +
+      'PlanImport is staged over REST only, there is no MCP staging tool for it yet), ' +
+      'the operational limits (changeset expiry, PlanImport max cells, artifact max ' +
+      'bytes, max commands per changeset), the full list of stable ' +
       'machine-actionable error codes, and an explanation of the ask-mode approval flow ' +
       '(prepare -> approvalUrl -> a human approves in a browser -> confirm_changeset). ' +
       'This is the recommended first call: it tells an agent its ceiling so it does not ' +

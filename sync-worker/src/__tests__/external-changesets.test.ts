@@ -370,8 +370,8 @@ describe('changesets — credential scope', () => {
 
 // ── role enforcement via the perimeter ──────────────────────────────────────
 
-describe('changesets — role enforcement (via /events perimeter)', () => {
-  it("a viewer-role user's credential cannot commit translations", async () => {
+describe('changesets — role enforcement (prepare gate + /events perimeter)', () => {
+  it("a viewer-role user's credential cannot stage a translation changeset", async () => {
     const env = makeEnv(tdb.db)
     // Credential owned by user 2, who is only a VIEWER (role 100) on the project.
     const token = await credToken(
@@ -379,22 +379,69 @@ describe('changesets — role enforcement (via /events perimeter)', () => {
       contributorCred({ credentialId: CRED_VIEWER, userId: 2, username: 'vic' }),
     )
 
-    // Prepare succeeds (staging is not gated on write role).
-    const { body: prep } = await prepare(env, token, [
+    // Prepare is now gated at the SetTranslation floor (target.cell.commit →
+    // CONTRIBUTOR 400): a viewer is denied at staging, so no plan is created and
+    // the server-computed effect summary is never leaked.
+    const { res, body } = await prepare(env, token, [
       { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'nope' },
     ])
-    expect(prep.changeset.status).toBe('staged')
-
-    // Commit is rejected — target.cell.commit needs CONTRIBUTOR(400); the
-    // internal token carries the live-resolved viewer role, so the perimeter
-    // 403s and no event is applied.
-    const res = (await handleExternalChangesetsRequest(commitReq(token, prep.changeset.id), env))!
     expect(res.status).toBe(403)
-    expect((await res.json() as any).error.code).toBe('permission_denied')
+    expect(body.error.code).toBe('permission_denied')
+    expect(body.changeset).toBeUndefined()
 
+    // Nothing staged, nothing applied.
+    expect(await tdb.rows('changesets')).toHaveLength(0)
     const commits = (await tdb.rows('events')).filter((e: any) => e.kind === 'target.cell.commit')
     expect(commits).toHaveLength(0)
     const target = (await tdb.rows<{ side: string }>('cells')).find((c) => c.side === 'target')
     expect(target).toBeUndefined()
+  })
+})
+
+// ── live role re-resolution on GET / commit / discard ───────────────────────
+// §2 "live role/membership resolution on every call": a user removed from the
+// project after staging must not be able to view, commit, or discard the plan.
+
+describe('changesets — member removed after prepare is denied on GET/commit/discard', () => {
+  it('GET, commit, and discard all 403 permission_denied once membership is gone', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb, contributorCred()) // alice, contributor (400)
+
+    const { body: prep } = await prepare(env, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hi' },
+    ])
+    expect(prep.changeset.status).toBe('staged')
+    const id = prep.changeset.id
+
+    // Alice loses all project access — her live role now resolves to null
+    // (project creator is user 99, no org/group path).
+    await tdb.db.prepare('DELETE FROM project_members WHERE project_id = ? AND user_id = ?').bind(PROJECT, 1).run()
+
+    const getRes = (await handleExternalChangesetsRequest(
+      new Request(`https://w/api/v1/external/projects/${PROJECT}/changesets/${id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      env,
+    ))!
+    expect(getRes.status).toBe(403)
+    expect((await getRes.json() as any).error.code).toBe('permission_denied')
+
+    const commitRes = (await handleExternalChangesetsRequest(commitReq(token, id), env))!
+    expect(commitRes.status).toBe(403)
+    expect((await commitRes.json() as any).error.code).toBe('permission_denied')
+
+    const discardRes = (await handleExternalChangesetsRequest(
+      new Request(`https://w/api/v1/external/projects/${PROJECT}/changesets/${id}/discard`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      env,
+    ))!
+    expect(discardRes.status).toBe(403)
+    expect((await discardRes.json() as any).error.code).toBe('permission_denied')
+
+    // The plan was never committed or discarded — it remains staged.
+    const cs = await tdb.rows<{ status: string }>('changesets')
+    expect(cs[0].status).toBe('staged')
   })
 })

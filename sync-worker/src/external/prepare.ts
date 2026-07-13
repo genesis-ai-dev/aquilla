@@ -9,6 +9,7 @@ import { errorResponse, toErrorResponse } from './errors'
 import {
   validateCommands,
   cellKey,
+  requiredRoleForCommand,
   PLAN_IMPORT_MAX_CELLS,
   type Command,
   type PlanImportCommand,
@@ -21,6 +22,7 @@ import { loadChangeset, changesetToResponse } from './store'
 import { assertCredentialScope } from './token-bridge'
 import type { ChangesetSummary, ChangesetWarning, ExternalEnv } from './types'
 import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 
 /** Staged changesets live for one hour before they expire. Exported so the MCP
  *  adapter's get_capabilities can publish the real value (never invent limits). */
@@ -59,6 +61,19 @@ export async function handlePrepare(
   const validated = validateCommands(raw.commands)
   if (!validated.ok) {
     return errorResponse('validation_failed', 'invalid commands', validated.issues)
+  }
+
+  // Live role/membership gate (§2 — resolve the caller's CURRENT role on every
+  // call, never a role baked into the credential). Scope alone (checked above)
+  // does not imply membership: a non-member with a project-scoped credential
+  // would otherwise receive the server-computed effect summary (cell existence,
+  // added/modified counts). Require the role FLOOR of the command kind being
+  // staged — the same floor its commit hits at the /events perimeter, so a plan
+  // the caller could never commit is denied here rather than leaked.
+  const requiredRole = Math.max(...validated.commands.map(requiredRoleForCommand))
+  const resolvedRole = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
+  if (!resolvedRole || resolvedRole.level < requiredRole) {
+    return errorResponse('permission_denied', 'insufficient project role to stage this changeset')
   }
 
   // Effective autonomy: the credential is a ceiling; a request may downgrade

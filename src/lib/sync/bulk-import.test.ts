@@ -164,6 +164,64 @@ describe("bulkUploadSource", () => {
         fetchImpl: fetchMock,
       }),
     ).rejects.toThrow(/403/)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("retries a data chunk after a transient network failure", async () => {
+    vi.useFakeTimers()
+    let dataAttempts = 0
+    const progress = vi.fn()
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(init?.body as string) as Record<string, unknown>
+      if (body.complete) {
+        return new Response(JSON.stringify({ accepted: 0, fileId: "f1" }), { status: 200 })
+      }
+      dataAttempts++
+      if (dataAttempts === 1) throw new TypeError("Failed to fetch")
+      return new Response(JSON.stringify({ accepted: 1, fileId: "f1" }), { status: 200 })
+    }) as typeof fetch
+
+    const upload = bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: "test.txt" },
+      cells: [makeCell(0)],
+      getToken: async () => "tok",
+      onProgress: progress,
+      fetchImpl: fetchMock,
+    })
+    await vi.runAllTimersAsync()
+    await expect(upload).resolves.toBeUndefined()
+
+    expect(dataAttempts).toBe(2)
+    expect(progress).toHaveBeenCalledTimes(1)
+    expect(progress).toHaveBeenCalledWith(1, 1)
+  })
+
+  it("retries a data chunk after a retryable HTTP response", async () => {
+    vi.useFakeTimers()
+    let dataAttempts = 0
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(init?.body as string) as Record<string, unknown>
+      if (body.complete) {
+        return new Response(JSON.stringify({ accepted: 0, fileId: "f1" }), { status: 200 })
+      }
+      dataAttempts++
+      if (dataAttempts === 1) return new Response("temporary", { status: 503 })
+      return new Response(JSON.stringify({ accepted: 1, fileId: "f1" }), { status: 200 })
+    }) as typeof fetch
+
+    const upload = bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: "test.txt" },
+      cells: [makeCell(0)],
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+    await vi.runAllTimersAsync()
+    await expect(upload).resolves.toBeUndefined()
+    expect(dataAttempts).toBe(2)
   })
 
   it("retries transient finalization failures without re-uploading data", async () => {

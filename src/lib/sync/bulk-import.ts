@@ -17,14 +17,14 @@ import { syncWorkerHttpOrigin } from "./sync-worker-url"
  *  Postgres inserts, keeping request bodies manageable while still amortizing
  *  Hyperdrive/network latency. */
 const CHUNK = 1500
-const FINALIZE_ATTEMPTS = 3
-const FINALIZE_RETRY_DELAYS_MS = [200, 800] as const
+const IMPORT_ATTEMPTS = 3
+const IMPORT_RETRY_DELAYS_MS = [200, 800] as const
 
-function isRetryableFinalizeStatus(status: number): boolean {
+function isRetryableImportStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500
 }
 
-async function waitForFinalizeRetry(ms: number, signal?: AbortSignal): Promise<void> {
+async function waitForImportRetry(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) throw new Error("Import cancelled")
   await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -149,33 +149,59 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
       }
     }
 
-    let res: Response
-    try {
-      res = await fetchFn(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(payload),
-        signal: args.signal,
-      })
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : "network error"
-      throw new Error(`Upload failed: ${reason}`)
-    }
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "")
-      throw new Error(
-        `Upload failed (HTTP ${res.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`,
-      )
+    let lastError: Error | null = null
+    for (let attempt = 0; attempt < IMPORT_ATTEMPTS; attempt++) {
+      if (args.signal?.aborted) throw new Error("Import cancelled")
+      let response: Response | null = null
+      try {
+        response = await fetchFn(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify(payload),
+          signal: args.signal,
+        })
+      } catch (err) {
+        if (args.signal?.aborted) throw new Error("Import cancelled")
+        const reason = err instanceof Error ? err.message : "network error"
+        lastError = new Error(`Upload failed: ${reason}`)
+      }
+
+      if (response) {
+        if (response.ok) {
+          uploaded += chunk.length
+          args.onProgress?.(uploaded, total)
+          return
+        }
+
+        const detail = await response.text().catch(() => "")
+        lastError = new Error(
+          `Upload failed (HTTP ${response.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`,
+        )
+
+        // Large imports can outlive their original file token. Refresh it and
+        // retry the exact same idempotent chunk once the server returns 401.
+        if (response.status === 401 && attempt < IMPORT_ATTEMPTS - 1) {
+          const refreshed = await args.getToken(args.fileId)
+          if (refreshed) {
+            token = refreshed
+            continue
+          }
+        }
+        if (!isRetryableImportStatus(response.status)) throw lastError
+      }
+
+      if (attempt < IMPORT_ATTEMPTS - 1) {
+        await waitForImportRetry(IMPORT_RETRY_DELAYS_MS[attempt], args.signal)
+      }
     }
 
-    uploaded += chunk.length
-    args.onProgress?.(uploaded, total)
+    throw lastError ?? new Error("Upload failed")
   }
 
   const finalize = async (): Promise<void> => {
     let lastError: Error | null = null
 
-    for (let attempt = 0; attempt < FINALIZE_ATTEMPTS; attempt++) {
+    for (let attempt = 0; attempt < IMPORT_ATTEMPTS; attempt++) {
       if (args.signal?.aborted) throw new Error("Import cancelled")
       let response: Response | null = null
       try {
@@ -205,18 +231,18 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
 
         // A long-running upload can outlive its original sync token. Refresh
         // once through the normal token provider before treating 401 as fatal.
-        if (response.status === 401 && attempt < FINALIZE_ATTEMPTS - 1) {
+        if (response.status === 401 && attempt < IMPORT_ATTEMPTS - 1) {
           const refreshed = await args.getToken(args.fileId)
           if (refreshed) {
             token = refreshed
             continue
           }
         }
-        if (!isRetryableFinalizeStatus(response.status)) throw lastError
+        if (!isRetryableImportStatus(response.status)) throw lastError
       }
 
-      if (attempt < FINALIZE_ATTEMPTS - 1) {
-        await waitForFinalizeRetry(FINALIZE_RETRY_DELAYS_MS[attempt], args.signal)
+      if (attempt < IMPORT_ATTEMPTS - 1) {
+        await waitForImportRetry(IMPORT_RETRY_DELAYS_MS[attempt], args.signal)
       }
     }
 

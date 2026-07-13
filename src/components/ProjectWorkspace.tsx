@@ -877,13 +877,20 @@ export function ProjectWorkspace() {
   })
 
   const validationCount = project ? readValidationCount(project) : 1
-  // SWARM-TODO(AQU-538): the workspace cell list is served by useActiveCellStore
-  // (a fork of useCells' read logic), which is not in Agent C's owned set and
-  // still keys cells one-target-per-cellId. The lane filter landed in useCells
-  // (used by living-memory/export) + the write/focus/completion plumbing here;
-  // useActiveCellStore needs the same `(r.targetLang ?? '') === activeLane`
-  // filter + a `lane` opt threaded from here before N>1 target rows render
-  // correctly. N=1 is byte-identical today (only default-lane rows exist).
+  // AQU-538: the active target lane. Declared here (above useActiveCellStore)
+  // because the store's cell list is lane-filtered on this value. Persisted
+  // per-project; N=1 is always `''` (no switcher rendered, byte-identical).
+  const [activeLane, setActiveLaneState] = useState<string>(() =>
+    projectId ? readPersistedActiveLane(projectId) : "",
+  )
+  // Reload the persisted lane when navigating between projects.
+  useEffect(() => {
+    setActiveLaneState(projectId ? readPersistedActiveLane(projectId) : "")
+  }, [projectId])
+  // AQU-538: useActiveCellStore serves the ACTUAL workspace cell list; it now
+  // filters target rows to `activeLane` (same `(r.targetLang ?? '') === lane`
+  // rule as useCells) before the one-target-per-cell pairing. N=1 is
+  // byte-identical (only default-lane rows exist).
   const {
     store: cellStore,
     revalidate: revalidateCells,
@@ -898,6 +905,7 @@ export function ProjectWorkspace() {
     auditStats: auditStatsByCellId,
     getToken: getTokenForFile,
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
+    lane: activeLane,
   })
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const cellSummaries = useMemo(() => cellStore.getAllSummaries(), [cellStore, cellStoreVersion])
@@ -1114,13 +1122,6 @@ export function ProjectWorkspace() {
     return Array.isArray(raw) ? raw : []
   }, [project])
   const availableLanes = useMemo(() => ["", ...targetLanes], [targetLanes])
-  const [activeLane, setActiveLaneState] = useState<string>(() =>
-    projectId ? readPersistedActiveLane(projectId) : "",
-  )
-  // Reload the persisted lane when navigating between projects.
-  useEffect(() => {
-    setActiveLaneState(projectId ? readPersistedActiveLane(projectId) : "")
-  }, [projectId])
   // If the active lane is no longer offered (removed from settings), fall back
   // to the default lane so the editor never points at a nonexistent lane.
   useEffect(() => {
@@ -4393,6 +4394,7 @@ export function ProjectWorkspace() {
             footnoteViewMode={footnoteViewMode}
             onVisibleFootnotesChange={footnoteViewMode === "tray" ? handleVisibleFootnotesChange : undefined}
             username={currentUsername}
+            activeLane={activeLane}
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
             onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}

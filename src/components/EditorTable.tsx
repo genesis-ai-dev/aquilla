@@ -4144,7 +4144,10 @@ function EditorRow({
             data-showcase="editor.source"
             ref={sourceColRef}
             className={cn(
-              "relative flex flex-col transition-opacity",
+              // The selection control is centered on the physical divider and
+              // protrudes into this column. Reserve enough room for RTL text,
+              // whose first glyph sits against this right edge.
+              "relative flex flex-col pr-4 transition-opacity",
               isSynthBusy && "opacity-70",
             )}
             dir={sourceCellDirection}

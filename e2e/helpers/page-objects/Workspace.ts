@@ -216,4 +216,35 @@ export class Workspace {
     await this.openHeaderOverflowMenu()
     await this.page.getByRole("menuitem", { name: /Next unfinished/i }).click()
   }
+
+  /** Read the currently active target cell's text (empty string if untranslated). */
+  async readTargetText(index: number): Promise<string> {
+    return ((await this.targetColumn(index).textContent()) ?? "").trim()
+  }
+
+  /**
+   * AQU-538: the LaneSwitcher (`data-testid="lane-switcher"`) renders in the
+   * workspace header ONLY when the project has a second target lane — see
+   * `LaneSwitcher.tsx`. Options are `data-testid="lane-option-<tag>"`; the
+   * default lane's tag is the empty string (`lane-option-`).
+   */
+  laneSwitcher(): Locator {
+    return this.page.getByTestId("lane-switcher")
+  }
+
+  /** Switch the active target lane. Pass `""` for the default lane. */
+  async switchLane(tag: string): Promise<void> {
+    await expect(this.laneSwitcher()).toBeVisible({ timeout: 10_000 })
+    const option = this.page.getByTestId(`lane-option-${tag}`)
+    await option.click()
+    await expect(option).toHaveAttribute("aria-checked", "true", { timeout: 5_000 })
+  }
+
+  /** Read the currently active lane's tag (`""` = default) off the switcher. */
+  async readActiveLane(): Promise<string> {
+    await expect(this.laneSwitcher()).toBeVisible({ timeout: 10_000 })
+    const checked = this.laneSwitcher().locator('[role="radio"][aria-checked="true"]')
+    const testId = await checked.getAttribute("data-testid")
+    return testId?.replace(/^lane-option-/, "") ?? ""
+  }
 }

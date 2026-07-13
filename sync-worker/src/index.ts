@@ -26,6 +26,7 @@ import { handleHealthRollupRequest } from "./events/health-rollup-route"
 import { handleCellAudioReadRequest } from "./events/cell-audio-read-route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleEventsWriteRequest } from "./events/route"
+import { handleExternalChangesetsRequest } from "./external/changesets-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleProgressReadRequest } from "./events/progress-read-route"
 import { handleBulkImportRequest } from "./events/import-route"
@@ -299,6 +300,10 @@ export default {
     if (exportBundleResponse) return exportBundleResponse
     const eventsWriteResponse = await handleEventsWriteRequest(request, env, ctx)
     if (eventsWriteResponse) return withCors(eventsWriteResponse, request)
+
+    // AQU-533: Agent API changeset engine (external command layer).
+    const externalChangesetsResponse = await handleExternalChangesetsRequest(request, env, ctx)
+    if (externalChangesetsResponse) return withCors(externalChangesetsResponse, request)
 
     const projectSyncResponse = routeProjectSync(request, env)
     if (projectSyncResponse) return projectSyncResponse

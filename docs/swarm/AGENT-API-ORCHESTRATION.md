@@ -125,6 +125,17 @@ pattern; do not invent one). CLAUDE.md's "workers still run on D1" is stale.
 | 2026-07-13 | swarm/agent-api-w1a-credentials | merged 549804917 | schema.sql union conflict resolved; 11 tests; pre-existing invites.test.ts failure noted |
 | 2026-07-13 | swarm/agent-api-w1d-reconcile | merged 6bfa5b206 | stubs deleted, real db/shared wired; 788/788 green; userId string→number conversion at token-bridge boundary |
 | 2026-07-13 | WAVE 2 DISPATCHED | — | w2a-mcp (opus), w2b-import (opus), w2c-approval (sonnet) in .worktrees/w2{a,b,c}-* off 6bfa5b206 |
+| 2026-07-13 | swarm/agent-api-w2c-approval | merged fd5ab8519 | approval endpoints + /approve page; 12+3 tests |
+| 2026-07-13 | swarm/agent-api-w2a-mcp | merged 7c4583edf | 11-tool MCP server; TRACES union-resolved; 18 tests |
+| 2026-07-13 | swarm/agent-api-w2b-import | merged afdc3fec8 | artifacts (0056) + PlanImport; index.ts union (both handlers kept); 12 tests |
+| 2026-07-13 | GATE (Wave 2) | GREEN | sync-worker tsc + 818/818; auth-worker tsc + 650/651 (1 PRE-EXISTING invites.test.ts failure, task chip spawned); root tsc -b clean; ApproveChangeset 3/3 |
+| 2026-07-13 | WAVE 3 DISPATCHED | — | w3a-parity (sonnet), w3b-docs (sonnet), w3c-coldstart (opus) off afdc3fec8 |
+
+Post-merge fixups owed (from wave-2 reports, for reviewer panel to check):
+- mcp-tools get_capabilities: commandKinds/limits may be hardcoded pre-PlanImport-merge
+  → verify it now reports PlanImport + PLAN_IMPORT_MAX_CELLS after the W2-B merge.
+- PlanImport partial-apply: changeset marked committed with job_failed receipt; no
+  rollback path (traced; acceptable v1 if receipt honest).
 
 INCIDENT LOG: first W1-B/W1-C merge accidentally ran in the MAIN worktree on dev
 (orchestrator cwd reset between tool calls). Recovered: merge --abort + hard reset

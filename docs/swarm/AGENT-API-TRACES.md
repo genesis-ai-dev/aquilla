@@ -82,6 +82,41 @@ fresh agent to pick up. Orchestrator: drain into wave briefs or sub-issues.
   artifacts whose PlanImport changeset is never committed (or is discarded) keep
   their R2 bytes + row indefinitely (`file_id` stays NULL). No TTL/GC job exists.
 
+### W3-B (docs) — surprises found while writing the practitioner guide
+
+- **`channel` in the provenance envelope is hardcoded `"rest"` regardless of adapter.**
+  `sync-worker/src/external/commit.ts` (`buildProvenance` and the inline `provenance` object in
+  `handleCommit`) always sets `channel: 'rest'`, even when the commit was reached via
+  `confirm_changeset` over MCP (`mcp-handlers.ts::confirmChangeset` delegates to the same REST
+  commit handler through a synthetic in-process `Request`). The design doc's §2 envelope sketch
+  implies `channel` should distinguish `"mcp"` vs `"rest"`. Not a bug exactly — MCP genuinely
+  goes through the REST handler internally — but it means the envelope cannot answer "did this
+  come in over MCP or REST" today, which the design doc's provenance promise implies it should.
+  Documented as a spec-vs-implementation gap in `docs/api/agent-api.md` §6.
+- **No audit ledger exists.** The design doc's D7/§2 calls for a bounded-retention audit ledger
+  for reads/searches/check-runs/discarded plans, separate from the event log. `db/postgres/
+  schema.sql` has `agent_runs` and `agent_sessions` tables, but nothing in
+  `sync-worker/src/external/*` writes to them — searches, reads, and discards leave no
+  audit trail at all beyond the `changesets` row's own status transitions. Worth flagging before
+  anyone relies on the "universal auditability" claim in AGENT-API.md §2.
+- **`PlanImport` has no MCP tool.** `mcp-tools.ts` only exposes `SetTranslation` staging
+  (`prepare_translations`) over MCP; the entire "one supported end-to-end import" gate-5
+  workflow (upload artifact → inspect → PlanImport prepare/commit) is REST-only. An MCP-only
+  agent host cannot run the Blackfoot import without a REST-capable escape hatch. Called out in
+  the worked example (`docs/api/examples/blackfoot-import.md`, "Using MCP instead of raw REST").
+- **`rate_limited` is a fully specified error code with zero enforcement.** Grepped for rate
+  limiting anywhere under `sync-worker/src/external/` and `auth-worker/src/routes/`
+  ({credentials,changeset-approvals}.ts) — none exists. `get_capabilities` also does not publish
+  any rate-limit numbers (§8 open question 3 in AGENT-API.md is still open).
+- **`GET /api/v1/external/projects/:projectId/changesets/:id` and `.../commit`/`.../discard`
+  authorize by "credential that staged it", not by live role** — `changesets-route.ts` checks
+  `cred.credentialId !== cs.credentialId` rather than re-resolving project role for these three
+  endpoints (unlike prepare, which does check scope/role). This means a *different* credential
+  belonging to the same or another user — even one with a higher live role — cannot view, commit,
+  or discard someone else's staged changeset via the external API. Consistent with "the human who
+  staged it owns its lifecycle," matching the approval-page authz note above, but worth a second
+  look if a future wave wants a maintainer to intervene on another agent's stuck changeset.
+
 ## Resolved
 
 - W2-C: one-time human approval assertion (GET/approve/reject) +

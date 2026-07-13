@@ -32,6 +32,7 @@ import type { FileReference } from "@/lib/parsers/types"
 import { fileOrderedBy, fileTypeHasSections, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { LaneSwitcher } from "./LaneSwitcher"
+import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
 import type { EditorTableHandle } from "./EditorTable"
@@ -1129,6 +1130,29 @@ export function ProjectWorkspace() {
     },
     [projectId],
   )
+  // AQU-538 deep link: `/project/:id?lane=<tag>` — PM surfaces link into the
+  // editor at the lane they were viewing. Read the param ONCE per project (after
+  // the lane registry loads so an unknown tag can be told apart from a
+  // not-yet-loaded one); a valid tag selects that lane, an unknown tag falls
+  // back to the default. One-shot: it never fights the user's later switches.
+  const deepLinkLaneAppliedRef = useRef(false)
+  useEffect(() => {
+    deepLinkLaneAppliedRef.current = false
+  }, [projectId])
+  useEffect(() => {
+    if (deepLinkLaneAppliedRef.current || !projectId) return
+    const param = searchParams.get("lane")
+    if (!param) {
+      deepLinkLaneAppliedRef.current = true
+      return
+    }
+    // Defer until the project (and thus its lane registry) has loaded, so an
+    // unknown tag isn't mistaken for one whose registry hasn't arrived yet.
+    if (!project) return
+    const resolved = resolveDeepLinkLane(param, availableLanes)
+    deepLinkLaneAppliedRef.current = true
+    if (resolved !== null) setActiveLane(resolved)
+  }, [projectId, project, searchParams, availableLanes, setActiveLane])
   const editorProject = useMemo<ProjectRecord | null>(() => {
     if (!project) return null
     const sourceLanguage = activeSourceLanguage ?? project.sourceLanguage

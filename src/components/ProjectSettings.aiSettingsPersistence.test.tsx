@@ -82,6 +82,10 @@ vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "tok", username: "tester" }, loading: false }),
 }))
 
+vi.mock("@/hooks/useAccounts", () => ({
+  useAccounts: () => ({ active: null, sessions: [], loading: false, add: vi.fn(), activate: vi.fn(), remove: vi.fn() }),
+}))
+
 // Intentionally NOT mocked: we want the real buildCompletionSettings so a
 // regression in the merge logic itself fails this test.
 

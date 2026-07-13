@@ -1113,14 +1113,9 @@ export function ProjectWorkspace() {
   const activeSourceLanguage = activeFile?.sourceLanguage || project?.sourceLanguage
   const activeTargetLanguage = activeFile?.targetLanguage || project?.targetLanguage
 
-  // AQU-538 (slice 2): active target lane. `''` = default lane.
-  // SWARM-TODO(AQU-538): read `targetLanes` from ProjectWideSettings once
-  // Agent B adds the field; until then read it off the (settings-overlaid)
-  // project record defensively so N=1 stays a no-op (empty list → no switcher).
-  const targetLanes = useMemo<string[]>(() => {
-    const raw = project ? (project as { targetLanes?: string[] }).targetLanes : undefined
-    return Array.isArray(raw) ? raw : []
-  }, [project])
+  // AQU-538 (slice 2): active target lane. `''` = default lane. The registry
+  // arrives on the settings-overlaid project record (useProject overlaySettings).
+  const targetLanes = useMemo<string[]>(() => project?.targetLanes ?? [], [project])
   const availableLanes = useMemo(() => ["", ...targetLanes], [targetLanes])
   // If the active lane is no longer offered (removed from settings), fall back
   // to the default lane so the editor never points at a nonexistent lane.

@@ -1049,10 +1049,7 @@ export function ProjectSettings() {
         {sectionsToRender.some((s) => s.id === "section-languages") && (
           <LanguagesSection
             defaultTargetLanguage={sharedSettingsBlob?.targetLanguage ?? project?.targetLanguage ?? ""}
-            // SWARM-TODO(AQU-538): `targetLanes` isn't on `ProjectWideSettings`
-            // yet (Agent B owns that field in src/lib/sync/project-settings.ts).
-            // Defensive cast until it lands.
-            targetLanes={(sharedSettingsBlob as { targetLanes?: string[] } | null)?.targetLanes ?? []}
+            targetLanes={sharedSettingsBlob?.targetLanes ?? []}
             canEdit={canEditShared}
             disabledTooltip={sharedDisabledTooltip}
             patch={patchShared}

@@ -38,6 +38,9 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   }
   assign("sourceLanguage", settings.sourceLanguage)
   assign("targetLanguage", settings.targetLanguage)
+  // AQU-538: the lane registry must reach the workspace or the LaneSwitcher
+  // never renders (found by the add-target-language e2e journey).
+  assign("targetLanes", settings.targetLanes)
   if (settings.systemPrompt != null) {
     if (record.completionSettings?.systemPrompt !== settings.systemPrompt) {
       draft().completionSettings = buildCompletionSettings(

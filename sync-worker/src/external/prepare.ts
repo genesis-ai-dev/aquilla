@@ -15,8 +15,9 @@ import { assertCredentialScope } from './token-bridge'
 import type { ChangesetSummary, ChangesetWarning, ExternalEnv } from './types'
 import { validateApiCredential } from '../../../db/shared/api-credentials'
 
-/** Staged changesets live for one hour before they expire. */
-const CHANGESET_TTL_MS = 60 * 60 * 1000
+/** Staged changesets live for one hour before they expire. Exported so the MCP
+ *  adapter's get_capabilities can publish the real value (never invent limits). */
+export const CHANGESET_TTL_MS = 60 * 60 * 1000
 
 function bearer(request: Request): string | null {
   const h = request.headers.get('Authorization') ?? ''

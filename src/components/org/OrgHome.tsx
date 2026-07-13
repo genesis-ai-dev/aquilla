@@ -6,7 +6,7 @@ import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
 import type { OrgSummary } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, languagePairLabel, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { portfolioActivityStatus } from "@/lib/project-status"
 import { ProjectDeadlineStatuses } from "@/components/ProjectStatus"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
@@ -311,14 +311,24 @@ function ProjectTable({
                 to={`/projects/${p.id}`}
                 className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-3 px-4 py-2.5 text-sm transition-colors hover:bg-muted/50`}
               >
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className="truncate font-medium">{p.name}</span>
-                  {showOrg && p.orgName && (
-                    <Badge variant="secondary" className="max-w-[8rem] shrink-0 truncate">
-                      {p.orgName}
-                    </Badge>
+                <span className="flex min-w-0 flex-col">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate font-medium">{p.name}</span>
+                    {showOrg && p.orgName && (
+                      <Badge variant="secondary" className="max-w-[8rem] shrink-0 truncate">
+                        {p.orgName}
+                      </Badge>
+                    )}
+                    <ProjectDeadlineStatuses deadline={dstatus} className="shrink-0" />
+                  </span>
+                  {/* AQU-523: source → target language pair beneath the name, so
+                      the org / all-orgs list shows it at a glance (matching the
+                      single-project overview). Rendered only when known. */}
+                  {languagePairLabel(p) && (
+                    <span className="truncate text-xs text-muted-foreground" aria-label="Source and target language">
+                      {languagePairLabel(p)}
+                    </span>
                   )}
-                  <ProjectDeadlineStatuses deadline={dstatus} className="shrink-0" />
                 </span>
 
                 <span className="text-right font-medium tabular-nums text-foreground" aria-label={`${tpct}% translated`}>

@@ -318,6 +318,30 @@ export function useProjectSettings(
     return () => window.removeEventListener("aquilla:project-settings-updated", onSettingsUpdated)
   }, [projectId, refresh])
 
+  // Re-fetch on tab focus / visibility regain (AQU-349). Validation-policy
+  // settings (validationCount, validationRoleFloor, …) are PATCHed through the
+  // auth-worker REST API, NOT the sync event log — so no WS `event.applied`
+  // frame ever notifies a connected client that another maintainer changed
+  // them. Without this, an already-open workspace keeps a STALE threshold until
+  // a full page reload: a cell with 1 validation still renders "1/3 confirmed"
+  // after the owner lowered the requirement to 1. `refresh()` re-GETs the
+  // server row; the fresh validationCount overlays onto the ProjectRecord
+  // (useProject) and useCells' threshold effect re-derives the badge. Mirrors
+  // useCells' "refetch on focus is the cheap drift mitigation" for settings.
+  useEffect(() => {
+    if (!projectId || !jwt) return
+    const revalidateOnVisible = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return
+      void refresh()
+    }
+    window.addEventListener("focus", revalidateOnVisible)
+    document.addEventListener("visibilitychange", revalidateOnVisible)
+    return () => {
+      window.removeEventListener("focus", revalidateOnVisible)
+      document.removeEventListener("visibilitychange", revalidateOnVisible)
+    }
+  }, [projectId, jwt, refresh])
+
   // Server values overlay local for keys the server has set (non-empty row).
   const settings: ProjectWideSettings = useMemo(
     () => server && server.version > 0

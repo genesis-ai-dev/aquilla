@@ -973,16 +973,23 @@ projects.post(
     if (email) {
       const baseUrl = c.env.BASE_URL || "https://aquilla.app"
       const joinUrl = `${baseUrl}/join/${token}`
+      // AQU-471: also resolve the org name so the invite email can read
+      // "{inviter} invited you to {project} in {org}". LEFT JOIN so a
+      // personal (org-less) project still returns the project row.
       const proj = await c.env.AQUILLA_PG.prepare(
-        "SELECT name FROM projects WHERE id = ?",
+        `SELECT p.name AS name, o.name AS org_name
+           FROM projects p
+           LEFT JOIN organizations o ON o.id = p.org_id
+          WHERE p.id = ?`,
       )
         .bind(projectId)
-        .first<{ name: string }>()
+        .first<{ name: string; org_name: string | null }>()
       const emailPromise = sendProjectInviteEmail(
         c.env,
         email,
         joinUrl,
         proj?.name ?? "a project",
+        { invitedBy: user.username, orgName: proj?.org_name ?? null },
       ).catch((err) => console.warn("[invites] invite email failed:", err))
       // waitUntil only exists with a real ExecutionContext (prod); the test
       // harness has none and the getter throws, so fall back to letting the

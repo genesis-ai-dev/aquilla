@@ -98,7 +98,12 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   }
 
   return (
-    <div className="relative flex items-center">
+    // AQU-358: when the trigger is hidden (opened from the ⋯ menu) this wrapper
+    // is a zero-width flex child sitting between the primary-action button and the
+    // ⋯ menu; the parent's `gap-1` then renders on *both* sides of it, doubling the
+    // visible gap before the ⋯. Pull it back by one gap step so the ⋯ sits tight
+    // against the action button while the wrapper still anchors the warning popover.
+    <div className={cn("relative flex items-center", hideTrigger && "-ml-1")}>
       {showMismatchWarning && mismatch && (
         <div
           className={cn(

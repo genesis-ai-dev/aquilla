@@ -7,6 +7,7 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -66,6 +67,11 @@ export function PrimaryActionButton({ ctx, run }: Props) {
             }
           />
           <DropdownMenuContent align="end" className="min-w-56">
+            {/* AQU-358: label this menu so it reads as the *actions* menu (run,
+                import, export, validate…), distinct from the neighbouring ⋯ menu
+                which holds project/view settings. Two adjacent "more" affordances
+                were indistinguishable without this. */}
+            <DropdownMenuLabel>Actions</DropdownMenuLabel>
             <DropdownMenuGroup>
               {primary.map((a) => (
                 <ActionMenuItem

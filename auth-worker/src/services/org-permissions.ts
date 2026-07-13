@@ -780,7 +780,7 @@ export async function detachGroupProject(env: Env, groupId: number, projectId: s
   await env.AQUILLA_PG.prepare("DELETE FROM group_project_grants WHERE group_id = ? AND project_id = ?").bind(groupId, projectId).run()
 }
 
-export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number }
+export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; sourceLanguage: string | null; targetLanguage: string | null }
 export interface OrgPortfolioRow extends PortfolioRow { orgId: number }
 
 interface PortfolioDbRow {
@@ -796,6 +796,10 @@ interface PortfolioDbRow {
   audio_cells: number
   validated_audio_cells: number
   recorded_ms: number
+  // AQU-523: project language pair, read from the project_settings JSON blob
+  // (the canonical per-project source useProject overlays). Null when unset.
+  source_language: string | null
+  target_language: string | null
 }
 
 function mapPortfolioRow(r: PortfolioDbRow): PortfolioRow {
@@ -811,6 +815,10 @@ function mapPortfolioRow(r: PortfolioDbRow): PortfolioRow {
     validatedAudioCells: r.validated_audio_cells,
     recordedMs: r.recorded_ms,
     deadlineAt: r.deadline_at,
+    // "" (empty settings default) is normalized to null so the client shows a
+    // graceful "no language set" rather than a blank/broken "→" (AQU-523).
+    sourceLanguage: r.source_language || null,
+    targetLanguage: r.target_language || null,
   }
 }
 
@@ -823,6 +831,12 @@ export async function getOrgPortfolio(env: Env, orgId: number): Promise<Portfoli
             COALESCE(SUM(f.filled_count), 0)        AS filled_cells,
             COALESCE(SUM(f.ai_drafted_count), 0)    AS ai_drafted_cells,
             MAX(f.last_edit_at)                     AS last_edit_at,
+            -- AQU-523: language pair from the project_settings JSON. The join is
+            -- 1:1 on project_id (settings.project_id is PK), so MAX() collapses
+            -- the file-multiplied rows to the single settings value (or NULL)
+            -- without needing these in GROUP BY and without affecting the SUMs.
+            MAX((ps.settings::jsonb)->>'sourceLanguage') AS source_language,
+            MAX((ps.settings::jsonb)->>'targetLanguage') AS target_language,
             (SELECT COUNT(DISTINCT ca.cell_id) FROM cell_audio ca
               WHERE ca.project_id = p.id AND ca.deleted = 0)                    AS audio_cells,
             (SELECT COUNT(DISTINCT ca.cell_id) FROM cell_audio ca
@@ -832,6 +846,7 @@ export async function getOrgPortfolio(env: Env, orgId: number): Promise<Portfoli
               WHERE ca.project_id = p.id AND ca.deleted = 0 AND ca.selected = 1) AS recorded_ms
        FROM projects p
        LEFT JOIN files f ON f.project_id = p.id
+       LEFT JOIN project_settings ps ON ps.project_id = p.id
       WHERE p.org_id = ? AND p.archived_at IS NULL
       GROUP BY p.id, p.name
       ORDER BY LOWER(p.name)`,
@@ -851,6 +866,10 @@ export async function getOrgPortfolios(env: Env, orgIds: number[]): Promise<OrgP
             COALESCE(SUM(f.filled_count), 0)        AS filled_cells,
             COALESCE(SUM(f.ai_drafted_count), 0)    AS ai_drafted_cells,
             MAX(f.last_edit_at)                     AS last_edit_at,
+            -- AQU-523: see getOrgPortfolio above for why MAX() over the 1:1
+            -- project_settings join is the right shape here.
+            MAX((ps.settings::jsonb)->>'sourceLanguage') AS source_language,
+            MAX((ps.settings::jsonb)->>'targetLanguage') AS target_language,
             (SELECT COUNT(DISTINCT ca.cell_id) FROM cell_audio ca
               WHERE ca.project_id = p.id AND ca.deleted = 0)                    AS audio_cells,
             (SELECT COUNT(DISTINCT ca.cell_id) FROM cell_audio ca
@@ -860,6 +879,7 @@ export async function getOrgPortfolios(env: Env, orgIds: number[]): Promise<OrgP
               WHERE ca.project_id = p.id AND ca.deleted = 0 AND ca.selected = 1) AS recorded_ms
        FROM projects p
        LEFT JOIN files f ON f.project_id = p.id
+       LEFT JOIN project_settings ps ON ps.project_id = p.id
       WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL
       GROUP BY p.org_id, p.id, p.name
       ORDER BY p.org_id, LOWER(p.name)`,

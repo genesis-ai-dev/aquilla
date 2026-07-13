@@ -92,7 +92,7 @@ import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-dia
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, Mic2, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose } from "lucide-react"
 import { AgentDockPanel } from "./AgentDockPanel"
 import { agentSessionStore } from "@/lib/agent/session-store"
 import { AgentWorkbench } from "./agent/AgentWorkbench"
@@ -109,6 +109,7 @@ import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
 import { EditorModeToggle } from "./EditorModeToggle"
+import { audioLensLabel, audioLensIcon } from "@/lib/editor/audio-lens-label"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
@@ -3252,6 +3253,9 @@ export function ProjectWorkspace() {
   }, [project?.id, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex])
 
   const projectNavItems = useMemo(() => {
+    // AQU-353: mirror the header lens toggle's label/icon exactly (see the
+    // "voice-studio" item below).
+    const audioLensTimeOrdered = activeFile ? fileOrderedBy(activeFile) === "time" : false
     const items = [
       { id: "rules", label: "Rules", icon: Scale,
         onClick: () => navigate(`/project/${projectId}/rules`) },
@@ -3264,20 +3268,17 @@ export function ProjectWorkspace() {
         onClick: () => navigate(`/project/${projectId}/comments`) },
       { id: "living-memory", label: "Memory", icon: BookMarked,
         onClick: () => navigate(`/project/${projectId}/memory`) },
-      // SWARM-TODO(voice-a7): "Voice" nav button toggles the Audio/Text lens
-      // (current intentional behavior, fixed in a prior wave to avoid the
-      // one-way-trap). QA now reports this is AMBIGUOUS: users expect a nav
-      // button to navigate to a Voice settings page, not to toggle a lens mode.
-      // Product decision needed:
-      //   Option A: Keep as lens toggle but rename/re-icon it (e.g. "Audio lens"
-      //             with a headphones icon) so it's clear it's a VIEW mode switch.
-      //   Option B: Make "Voice" open a dedicated /project/:id/voice settings page
-      //             (requires adding a route + VoiceStudioPage component) and put
-      //             the lens toggle in the header bar only.
-      //   Option C: Two-step: first click = switch to Audio lens, second click
-      //             while in Audio lens = open voice settings modal.
-      // See: src/components/ProjectWorkspace.tsx (this file), src/App.tsx (routes)
-      { id: "voice-studio", label: "Voice", icon: Mic2,
+      // AQU-353: this sidebar entry toggles the SAME Text/Audio lens as the
+      // header segmented control (EditorModeToggle). It used to be labelled
+      // "Voice" with the Mic2 icon while the header said "Audio", so testers hit
+      // what looked like two different destinations. Both now read the canonical
+      // label/icon from the shared audio-lens helper so they can't drift apart
+      // ("Audio"/Mic2 for cell files, "Media"/AudioWaveform for time-ordered).
+      //
+      // NB: whether a nav *button* toggling a view mode (rather than navigating)
+      // is the right interaction is a separate open question tracked with the
+      // sidebar rework (FRO-308); this change only unifies the naming.
+      { id: "voice-studio", label: audioLensLabel(audioLensTimeOrdered), icon: audioLensIcon(audioLensTimeOrdered),
         onClick: () => {
           const next = lens === "audio" ? "text" : "audio"
           setLens(next)
@@ -3303,7 +3304,7 @@ export function ProjectWorkspace() {
         : []),
     ]
     return items
-  }, [projectId, activeFileId, navigate, openCommentCount, lens, setLens, setDockTab, currentRoleLevel])
+  }, [projectId, activeFileId, activeFile, navigate, openCommentCount, lens, setLens, setDockTab, currentRoleLevel])
 
   // Phase 2c-gamma: countTranscribeTargets/countSynthTargets lived in bulk-audio
   // (Y.Doc-coupled). They're zeroed until the audio-attachment event grammar

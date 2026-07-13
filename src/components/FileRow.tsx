@@ -127,14 +127,34 @@ export function FileRow(props: FileRowProps) {
           </AppTooltip>
         )}
       </div>
-      {progress && progress.total > 0 && !editing && (
-        <div className="flex items-center gap-0.5 shrink-0" aria-label={`${translatedPct}% translated, ${validatedPct}% validated`}>
-          <span className="h-2 w-6 rounded-full bg-muted overflow-hidden">
-            <span className="block h-full bg-amber-500" style={{ width: `${translatedPct}%` }} />
-          </span>
-          <span className="h-2 w-6 rounded-full bg-muted overflow-hidden">
-            <span className="block h-full bg-emerald-500" style={{ width: `${validatedPct}%` }} />
-          </span>
+      {/* AQU-341: reserve a fixed-width slot for the progress meter whether or
+          not this file has progress, so the `flex-1 min-w-0` name column above
+          keeps the same width across every row. Rendering the meter only when
+          progress exists let same-named files diverge: a fully-imported file
+          (meter shown) and a partial/empty import residue of the same name (no
+          meter) gave their name labels different available widths, so they
+          truncated at different points. A stable reservation makes identical
+          names truncate identically. */}
+      {!editing && (
+        <div
+          className="flex w-[50px] shrink-0 items-center justify-end gap-0.5"
+          data-testid="file-row-progress-slot"
+          aria-label={
+            progress && progress.total > 0
+              ? `${translatedPct}% translated, ${validatedPct}% validated`
+              : undefined
+          }
+        >
+          {progress && progress.total > 0 && (
+            <>
+              <span className="h-2 w-6 rounded-full bg-muted overflow-hidden">
+                <span className="block h-full bg-amber-500" style={{ width: `${translatedPct}%` }} />
+              </span>
+              <span className="h-2 w-6 rounded-full bg-muted overflow-hidden">
+                <span className="block h-full bg-emerald-500" style={{ width: `${validatedPct}%` }} />
+              </span>
+            </>
+          )}
         </div>
       )}
       {!editing && (

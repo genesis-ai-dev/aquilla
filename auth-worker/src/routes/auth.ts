@@ -74,8 +74,14 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
       )
     }
 
+    // Uniqueness is case-insensitive (AQU-340): reject `ryan` when `Ryan`
+    // already exists so we never mint case-twin accounts that then collide in
+    // lookups/@mentions/audit trails. The row still stores the exact casing the
+    // user typed (see INSERT below) — case-insensitive functionally, but the
+    // chosen casing is preserved for display. Email is likewise compared
+    // case-insensitively (it is the closest sibling identifier).
     const existingUser = await c.env.AQUILLA_PG.prepare(
-      "SELECT id FROM users WHERE username = ? OR email = ?",
+      "SELECT id FROM users WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)",
     )
       .bind(username, email)
       .first<ExistingUserCheck>()

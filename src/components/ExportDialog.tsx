@@ -561,6 +561,13 @@ export function ExportDialog({
   }
 
   const isBusy = status.kind === "busy"
+  // AQU-519: after a successful export the dialog must make it obvious the
+  // export completed and give an unmistakable way out. The success banner shows
+  // the confirmation; here the footer swaps "Cancel" for a primary "Done"
+  // button (and demotes "Export" to "Export again") so users aren't left
+  // wondering whether anything happened. We keep the dialog open rather than
+  // auto-closing so lossy/fidelity warnings stay visible.
+  const isDone = status.kind === "ok" || status.kind === "ok-lossy"
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -957,20 +964,25 @@ export function ExportDialog({
         </DialogBody>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={isBusy}>
-            Cancel
+          <Button
+            variant={isDone ? "default" : "outline"}
+            onClick={() => handleOpenChange(false)}
+            disabled={isBusy}
+          >
+            {isDone ? "Done" : "Cancel"}
           </Button>
           <Button
             onClick={handleExport}
             disabled={!activeFileId || isBusy}
             aria-busy={isBusy}
+            variant={isDone ? "outline" : "default"}
           >
             {isBusy ? (
               <Spinner aria-hidden="true" />
             ) : (
               <Download className="h-4 w-4" aria-hidden="true" />
             )}
-            {isBusy ? "Exporting…" : "Export"}
+            {isBusy ? "Exporting…" : isDone ? "Export again" : "Export"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -48,7 +48,8 @@ import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
 import { CellExpansion } from "./CellExpansion"
-import { tokenizeWords } from "@/lib/audio/timings"
+import { tokenizeWords, activeWordRange } from "@/lib/audio/timings"
+import { KaraokeReadText } from "./KaraokeReadText"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { useCellEditHistory } from "@/hooks/useCellEditHistory"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
@@ -244,8 +245,10 @@ function SynthStatusBadge({
   // A2: "Open audio setup" must DO something. When the callback is provided we
   // call it (host may already be in audio mode); otherwise we navigate directly
   // to the project settings page which contains the Gemini API key section.
+  // AQU-522: deep-link with `?q=gemini` so the settings search filters to the
+  // Voice card and the key entry is visible immediately (no scrolling/hunting).
   const openVoiceSetup = () =>
-    onOpenAudioSetup ? onOpenAudioSetup() : navigate(`/project/${projectId}/settings`)
+    onOpenAudioSetup ? onOpenAudioSetup() : navigate(`/project/${projectId}/settings?q=gemini`)
   // A4: track whether the user dismissed the popover without fixing the error.
   // Dismissed = popover hidden but cell is still unvoiced — show a muted badge
   // so the row doesn't look falsely clean.
@@ -3517,6 +3520,32 @@ function EditorRow({
   ])
   const generatedVoiceController = useCellAudio(project, cellForGeneratedVoice, cell.fileId)
 
+  // AQU-521: karaoke-while-listening for the read-only target view. When a cell
+  // is not being actively edited its target renders as plain text (not a
+  // ProseMirror editor), so the editor's karaoke plugin can't paint the active
+  // word. Compute the active word's plain-text offset span from whichever audio
+  // is playing (recorded take or generated voice) so KaraokeReadText can paint
+  // it as playback advances. Scoped to plain (non-USFM, non-rich) target text —
+  // WordTiming offsets are computed against that plain text.
+  const targetIsPlainText = useMemo(
+    () => !targetHasRichFormatting && segmentUsfmForDisplay(visibleTranslated ?? "") === null,
+    [targetHasRichFormatting, visibleTranslated],
+  )
+  const karaokeReadRange = useMemo(() => {
+    if (!targetIsPlainText) return null
+    if (audioController.isPlaying) {
+      return activeWordRange(cellAudioTimings, audioController.currentTime)
+    }
+    if (generatedVoiceController.isPlaying) {
+      return activeWordRange(generatedVoiceTimings, generatedVoiceController.currentTime)
+    }
+    return null
+  }, [
+    targetIsPlainText, cellAudioTimings, generatedVoiceTimings,
+    audioController.isPlaying, audioController.currentTime,
+    generatedVoiceController.isPlaying, generatedVoiceController.currentTime,
+  ])
+
   // When this cell starts playing, gently bring it into view if it's
   // off-screen. Skips when the user is actively interacting with another cell
   // (focus inside an editable element).
@@ -4426,15 +4455,19 @@ function EditorRow({
                           footnoteNumberOffset={targetFootnoteNumberOffset}
                         />
                       ) : visibleTranslated?.trim() ? (
-                        <TargetReadText
-                          text={visibleTranslated}
-                          ranges={targetRanges}
-                          concepts={terminologyConcepts}
-                          onRangeClick={openInlineRule}
-                          onTermChipClick={handleTermChipClick}
-                          footnotePanelActive={footnotePanelActive}
-                          footnoteNumberOffset={targetFootnoteNumberOffset}
-                        />
+                        karaokeReadRange ? (
+                          <KaraokeReadText text={visibleTranslated} range={karaokeReadRange} />
+                        ) : (
+                          <TargetReadText
+                            text={visibleTranslated}
+                            ranges={targetRanges}
+                            concepts={terminologyConcepts}
+                            onRangeClick={openInlineRule}
+                            onTermChipClick={handleTermChipClick}
+                            footnotePanelActive={footnotePanelActive}
+                            footnoteNumberOffset={targetFootnoteNumberOffset}
+                          />
+                        )
                       ) : (
                         <span aria-hidden="true" className="block min-h-[1.6em]" />
                       )}

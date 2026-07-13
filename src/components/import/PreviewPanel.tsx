@@ -16,6 +16,19 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import type { ImportResult } from "@/lib/import"
+import { formatBytesProgress } from "@/lib/format-bytes"
+
+/**
+ * Live upload progress surfaced from the importer. `count`/`total` are cells;
+ * `bytesReceived`/`bytesTotal` (AQU-520) are the byte size of the import so the
+ * UI can show a "X / Y MB" readout alongside the cell count.
+ */
+export interface ImportUploadProgress {
+  count: number
+  total: number
+  bytesReceived?: number
+  bytesTotal?: number
+}
 
 export interface PreviewPanelProps {
   /** One entry per file; USFM may produce multiple results (one per book). */
@@ -33,7 +46,7 @@ export interface PreviewPanelProps {
    * AQU-430: Cell-level upload progress from the parent. Drives the progress bar.
    * When provided alongside a non-zero total, a determinate bar is rendered.
    */
-  uploadProgress?: { count: number; total: number } | null
+  uploadProgress?: ImportUploadProgress | null
   /**
    * AQU-430 (fix): a commit error surfaced from the parent. When set, it is shown
    * above the actions so a failed import is never mistaken for success or a hang —
@@ -80,6 +93,14 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
             </div>
             <p className="text-xs text-muted-foreground">
               {uploadProgress.count.toLocaleString()} / {uploadProgress.total.toLocaleString()} cells
+              {uploadProgress.bytesTotal ? (
+                <>
+                  {" · "}
+                  <span data-testid="preview-upload-bytes">
+                    {formatBytesProgress(uploadProgress.bytesReceived, uploadProgress.bytesTotal)}
+                  </span>
+                </>
+              ) : null}
             </p>
           </>
         ) : (

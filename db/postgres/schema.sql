@@ -729,6 +729,23 @@ CREATE TABLE IF NOT EXISTS model_ab_events (
 CREATE INDEX IF NOT EXISTS idx_model_ab_events_created ON model_ab_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_ab_events_user ON model_ab_events(user_id);
 
+-- Lane-scoped reviewer permissions (0056_project_member_scopes.sql, AQU-553).
+-- ADDITIVE restrictions on a member's role floor. No rows for a (project,user)
+-- pair = unscoped = today's behavior. 'lane' rows restrict target-side writes
+-- to those lanes (default lane stored as literal ''); 'file' rows restrict
+-- writes to those fileIds. Kinds compose with AND. Enforced in sync-worker
+-- authorize; source/comment/audio/file-level events are never gated. Leads
+-- (role >= 500) must stay unscoped (auth-worker CRUD rejects scoping them).
+CREATE TABLE IF NOT EXISTS project_member_scopes (
+    project_id TEXT NOT NULL,
+    user_id    BIGINT NOT NULL,
+    kind       TEXT NOT NULL CHECK (kind IN ('lane','file')),
+    value      TEXT NOT NULL,
+    created_by TEXT,
+    created_at BIGINT NOT NULL,
+    PRIMARY KEY (project_id, user_id, kind, value)
+);
+
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new
 -- inserts don't collide with migrated ids:

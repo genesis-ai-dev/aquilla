@@ -61,6 +61,7 @@ import authRoutes from "./routes/auth"
 import syncTokenRoutes from "./routes/sync-token"
 import projectsRoutes from "./routes/projects"
 import projectMembersRoutes from "./routes/project-members"
+import memberScopesRoutes from "./routes/member-scopes"
 import projectSettingsRoutes from "./routes/project-settings"
 import orgSettingsRoutes from "./routes/org-settings"
 import sourceLinkingRoutes from "./routes/source-linking"
@@ -173,6 +174,8 @@ app.route("/api/v2/admin", adminRoutes)
 // the main projects router so they live in their own files without colliding.
 // AQU-180: project-members revoke-all endpoint (new file, doesn't touch projects.ts).
 app.route("/api/v2/projects", projectMembersRoutes)
+// AQU-553: per-member lane/file scopes (new file, doesn't touch projects.ts).
+app.route("/api/v2/projects", memberScopesRoutes)
 app.route("/api/v2/projects", projectSettingsRoutes)
 app.route("/api/v2/projects", sourceLinkingRoutes)
 app.route("/api/v2/projects", mergeSiblingRoutes)

@@ -34,13 +34,17 @@ export class ProjectSettings {
 
     // Lands on the settings index (no `?section=` yet) — drill into "General",
     // which holds the Languages section. If a deep-link already put us inside
-    // a group (e.g. `?section=general`), the index/back-link isn't shown and
-    // this is a no-op.
+    // a group (e.g. `?section=general`), the section is already there and the
+    // index link never appears. NOTE: `isVisible()` reports the INSTANTANEOUS
+    // state (its timeout option is ignored), so guard-then-click races the
+    // index render — wait for whichever of the two states materializes first.
     const generalLink = this.page.getByRole("link", { name: /General/i })
-    if (await generalLink.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    const section = this.page.locator("#section-languages")
+    await expect(generalLink.or(section).first()).toBeVisible({ timeout: 10_000 })
+    if (!(await section.isVisible().catch(() => false))) {
       await generalLink.click()
     }
-    await expect(this.page.locator("#section-languages")).toBeVisible({ timeout: 10_000 })
+    await expect(section).toBeVisible({ timeout: 10_000 })
   }
 
   private laneRow(tag: string): Locator {

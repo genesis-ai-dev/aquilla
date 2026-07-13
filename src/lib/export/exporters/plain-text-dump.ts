@@ -5,7 +5,7 @@
 //   - The translated text of each segment (trimmed)
 //   - Canonical refs (e.g. "GEN 1:1") as inline labels when includeRefs=true
 //
-// What this LOSES (FRO-276 honesty bar):
+// What this LOSES (AQU-276 honesty bar):
 //   - All USFM / DOCX markers: footnotes (\f), cross-references (\x), poetry
 //     layout (\q, \qr), character markup (\nd, \add, \wj, etc.)
 //   - Paragraph structure and headings (\\s, \\p, \\ms)

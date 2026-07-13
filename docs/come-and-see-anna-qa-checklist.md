@@ -83,7 +83,7 @@ Contributor (400) · Project Lead (500) · Maintainer (600) · Owner (700).
 
 - [ ] 🚧 **Importing character/cast labels onto existing cells is not available yet.** The
       template download and preview work, but *applying* labels is intentionally disabled
-      (no safe server path yet — FRO-314). Do not test label import as working. The intended
+      (no safe server path yet — AQU-314). Do not test label import as working. The intended
       replacement is a **template project** (§9) that already carries the cast list.
 - [ ] ❓ Come and See currently appends camera angle to the character name with three spaces +
       parentheses, e.g. `Mary Magdalene   (on)`. Since camera angle is already a separate field

@@ -204,7 +204,7 @@ function RailKey({ label, dot }: { label: string; dot: string }) {
 }
 
 /** One spend window in the admin table: total/cap + % + segmented rail bar +
- *  legend. The agent chip carries `agentTestId` so the FRO-414 anti-transposition
+ *  legend. The agent chip carries `agentTestId` so the AQU-414 anti-transposition
  *  tests can pin the agent value distinctly from the total. */
 function SpendWindow({
   total,

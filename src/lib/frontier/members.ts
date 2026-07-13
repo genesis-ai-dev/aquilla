@@ -146,7 +146,7 @@ export async function listProjectMembers(
  *
  * One request that returns effective members for every project the caller can
  * access in the org — replaces the per-project listProjectMembers fan-out that
- * flooded the backend (FRO-218). Returns a map of projectId → members. Projects
+ * flooded the backend (AQU-218). Returns a map of projectId → members. Projects
  * the caller can't access are simply absent from the map (cells render empty),
  * matching the old fan-out's per-project 403→[] collapse.
  */

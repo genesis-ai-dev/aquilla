@@ -1,11 +1,11 @@
 /**
- * Tests for the FRO-260 selection-capture race fix in SelectionTermActions.
+ * Tests for the AQU-260 selection-capture race fix in SelectionTermActions.
  *
- * BUG CONTEXT (FRO-260 / BUG-FRO260-A):
+ * BUG CONTEXT (AQU-260 / BUG-FRO260-A):
  *   When the user clicks "Add to termbase", the browser fires:
  *     mousedown → selectionchange → (focus shift) → click
  *
- *   The FRO-248 `selectionchange` handler was designed to clear `sourceSelection`
+ *   The AQU-248 `selectionchange` handler was designed to clear `sourceSelection`
  *   when the browser selection collapses (e.g. the user clicked somewhere else).
  *   But during a toolbar button click, the selectionchange fires BEFORE the click
  *   callback. If `handleAddSelectionToTermbase` reads from React state, it sees
@@ -63,11 +63,11 @@ function SelectionCaptureHarness({
     setDialogOpen(true)
   }, [])
 
-  // Mirrors FRO-248 selectionchange guard, now with FRO-260 toolbarMouseDownRef check.
+  // Mirrors AQU-248 selectionchange guard, now with AQU-260 toolbarMouseDownRef check.
   useEffect(() => {
     if (!sourceSelection) return
     const handleSelectionChange = () => {
-      if (toolbarMouseDownRef.current) return // FRO-260: suppress during toolbar click
+      if (toolbarMouseDownRef.current) return // AQU-260: suppress during toolbar click
       const sel = window.getSelection()
       if (!sel || sel.isCollapsed || sel.toString().trim() === "") {
         setSourceSelection(null)
@@ -149,7 +149,7 @@ function collapseSelection() {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("FRO-260 — selection-capture race fix", () => {
+describe("AQU-260 — selection-capture race fix", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
   })
@@ -220,9 +220,9 @@ describe("FRO-260 — selection-capture race fix", () => {
     expect(screen.getByTestId("dialog-term")).toHaveTextContent("grace")
   })
 
-  it("FRO-248 still works: selectionchange clears toolbar when NOT clicking the toolbar", () => {
+  it("AQU-248 still works: selectionchange clears toolbar when NOT clicking the toolbar", () => {
     /**
-     * The FRO-248 dismissal behavior must not regress: when the user clicks
+     * The AQU-248 dismissal behavior must not regress: when the user clicks
      * somewhere OTHER than the toolbar (toolbarMouseDownRef stays false), a
      * selectionchange with collapsed selection should hide the toolbar.
      */
@@ -238,7 +238,7 @@ describe("FRO-260 — selection-capture race fix", () => {
       document.dispatchEvent(new Event("selectionchange"))
     })
 
-    // Toolbar should be gone (FRO-248 dismissal).
+    // Toolbar should be gone (AQU-248 dismissal).
     expect(screen.queryByTestId("add-to-termbase")).not.toBeInTheDocument()
   })
 

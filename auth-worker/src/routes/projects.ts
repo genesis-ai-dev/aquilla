@@ -263,7 +263,7 @@ projects.get("/", authMiddleware, async (c) => {
   const wantArchived = archivedParam === "true" || archivedParam === "1"
   const archivedClause = wantArchived ? "p.archived_at IS NOT NULL" : "p.archived_at IS NULL"
 
-  // FRO-321: minRole filter — callers can pass ?minRole=600 to see only
+  // AQU-321: minRole filter — callers can pass ?minRole=600 to see only
   // projects where their resolved role >= the threshold (e.g. maintainer for
   // the invite picker). Ignored when isAdmin (admins resolve as 700 everywhere).
   const minRoleParam = c.req.query("minRole")
@@ -359,7 +359,7 @@ projects.get("/", authMiddleware, async (c) => {
       role_source: "creator" | "override" | "org" | "group"
     }>()
 
-  // FRO-321: apply minRole filter before loading files (avoid extra DB round-trip).
+  // AQU-321: apply minRole filter before loading files (avoid extra DB round-trip).
   const allRows = rows.results ?? []
   const filteredRows = minRole !== null && !isAdmin
     ? allRows.filter((r) => r.role_level >= minRole)
@@ -387,7 +387,7 @@ projects.get("/", authMiddleware, async (c) => {
         orgName: row.org_name,
         archivedAt: row.archived_at,
         isActive: row.is_active,
-        // FRO-478: see the single-project route's comment — this field was
+        // AQU-478: see the single-project route's comment — this field was
         // declared on CloudProjectSummary but never actually populated.
         sourceProjectId: row.source_project_id,
         role,
@@ -447,7 +447,7 @@ projects.get("/:projectId", authMiddleware, async (c) => {
       ? { id: row.archived_by, username: row.archived_by_username }
       : null,
     isActive: row.is_active,
-    // FRO-478: surface the AD-9/FRO-476 link state so the client's
+    // AQU-478: surface the AD-9/AQU-476 link state so the client's
     // SourceLinkSection actually renders (it gates on sourceProjectId, which
     // this route previously never selected — the section was effectively
     // unreachable in production despite the client plumbing existing).
@@ -724,7 +724,7 @@ projects.post(
       return c.json({ error: "cannot grant role to self" }, 400)
     }
 
-    // FRO-285 (F-B6): target-level cap — you cannot add-over (change the role
+    // AQU-285 (F-B6): target-level cap — you cannot add-over (change the role
     // of) a member whose current level is >= yours, unless you are owner (700).
     // Owners may modify any member. For a new member (no existing row), this
     // check is a no-op (existing.role_level will be 0).
@@ -794,7 +794,7 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
     )
   }
 
-  // FRO-285 (F-B6): target-level cap — you cannot delete the project_members
+  // AQU-285 (F-B6): target-level cap — you cannot delete the project_members
   // row of a user whose current level is >= yours, unless you are owner (700).
   const targetCurrentLevel = Number(existing.role_level)
   if (callerRole.level < ROLE.OWNER && targetCurrentLevel >= callerRole.level) {
@@ -820,7 +820,7 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
     .bind(projectId, targetUserId)
     .run()
 
-  // FRO-346: when NO grant path survives the delete (AD-12: org / group /
+  // AQU-346: when NO grant path survives the delete (AD-12: org / group /
   // creator paths are additive and unaffected by removing the direct row),
   // eject the removed user's live WS sessions + denylist their still-valid
   // sync tokens. Users who retain access via another path must NOT be
@@ -848,7 +848,7 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
 
 // ──────────────────────────────────────────────────────────────────────────
 // DELETE /api/v2/projects/:projectId/files/:fileId — drop projection
-// FRO-271: raised from contributor(400) to project_lead(500) — this hard-
+// AQU-271: raised from contributor(400) to project_lead(500) — this hard-
 // deletes all cells and R2 audio objects; contributors must not be able to
 // wipe data they cannot recover.
 // ──────────────────────────────────────────────────────────────────────────
@@ -1156,7 +1156,7 @@ projects.post(
       .bind(invite.project_id, user.id)
       .first<{ role_level: number }>()
 
-    // FRO-347: "idempotent-while-member" (option 2). A same-user re-click
+    // AQU-347: "idempotent-while-member" (option 2). A same-user re-click
     // (invite.used_at already stamped to this user) used to unconditionally
     // re-grant/re-insert project_members — including after the owner removed
     // them, turning the old link into a permanent self-service re-entry pass.

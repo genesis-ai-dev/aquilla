@@ -35,9 +35,21 @@ Five **state** roles:
 
 Every triaged issue should carry exactly one category role and one state role. If state roles conflict, flag it and ask the maintainer before doing anything else.
 
-These are canonical role names — the actual label strings used in the issue tracker may differ. For this repo the tracker is Linear, team `FrontierR&D` (key `FRO`), project `Prototype Debugging`; see the `/issue` command and `AGENTS.md` → "Issue workflow" for the live label/status mapping.
+**Live mapping for this repo (Linear, team `Aquilla` / key `AQU`).** The state roles are **native Linear statuses**, not labels — the pickup path reads status, so triage must move the *status*, not just tag. The category roles are the existing labels.
 
-State transitions: an unlabeled issue normally goes to `needs-triage` first; from there it moves to `needs-info`, `ready-for-agent`, `ready-for-human`, or `wontfix`. `needs-info` returns to `needs-triage` once the reporter replies. The maintainer can override at any time — flag transitions that look unusual and ask before proceeding.
+| Role | Kind | Linear value | id |
+| --- | --- | --- | --- |
+| `bug` | category label | `Bug` | `e1218564-173a-497f-8a10-b2760e49b23f` |
+| `enhancement` | category label | `Feature` (or `Improvement`) | `c322eb84-…` / `37bac6c3-…` |
+| `needs-triage` | status | **Triage** | `086173c5-e3e4-4f37-93d5-ae2f069ab6a6` |
+| `needs-info` | status | **Triage** (stays; post triage-notes) | `086173c5-…` |
+| `ready-for-agent` | status | **Todo** (+ agent-brief comment) | `a3c6383f-3893-4691-a75a-b4add1ff1ce1` |
+| `ready-for-human` | status | **Triage** (human owns it; keep it out of the agent queue) | `086173c5-…` |
+| `wontfix` | status | **Canceled** (then close) | `f2f40b74-fc7b-4f79-89ef-05a6e210656f` |
+
+The consequence that matters: **`ready-for-agent` = `Todo` is the only thing `/issue next` and `/swarm` pick up. Everything a human must touch stays in `Triage`.** HITL / `ready-for-human` work is safe from agents by construction — it never leaves `Triage` until you promote it to `Todo`.
+
+State transitions: an un-triaged issue lands in **`Triage`** (`needs-triage`); from there it moves to `needs-info` (stays in Triage), `ready-for-agent` (→ `Todo`), `ready-for-human` (stays in Triage), or `wontfix` (→ `Canceled`). `needs-info` returns to active-Triage attention once the reporter replies. The maintainer can override at any time — flag transitions that look unusual and ask before proceeding.
 
 ## Invocation
 

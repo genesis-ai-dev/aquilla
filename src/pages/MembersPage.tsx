@@ -132,7 +132,7 @@ interface MembersPageContentProps {
 function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
   const callerUserId = null // FrontierSession has no userId; server enforces self-block.
   const { activeOrg } = useActiveOrg()
-  // FRO-326: the External-collaborators governance view is maintainer+ only.
+  // AQU-326: the External-collaborators governance view is maintainer+ only.
   const canGovern = (activeOrg?.role.level ?? 0) >= ROLE.MAINTAINER
   const { members, isLoading: membersLoading, error: membersError, rosterHidden, add, remove, listMemberProjects, refresh } =
     useOrgMembers(orgId)
@@ -284,7 +284,7 @@ interface RosterProps {
   add: (username: string, role: number) => Promise<unknown>
   remove: (userId: number) => Promise<void>
   callerUserId: number | null
-  /** FRO-427: the current user's org-level role, forwarded to MemberAccessRow
+  /** AQU-427: the current user's org-level role, forwarded to MemberAccessRow
    *  so the Revoke button can be disabled-with-explanation for low roles. */
   callerOrgRoleLevel: number | null
   onRequestRemove: (userId: number, username: string) => void

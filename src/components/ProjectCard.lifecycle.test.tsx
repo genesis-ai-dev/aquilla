@@ -1,4 +1,4 @@
-// FRO-214: ProjectCard inactive badge + lifecycle toggle tests.
+// AQU-214: ProjectCard inactive badge + lifecycle toggle tests.
 
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"

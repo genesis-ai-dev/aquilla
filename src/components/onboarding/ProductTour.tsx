@@ -1,5 +1,5 @@
 /**
- * FRO-243: Lightweight spotlight / coach-marks product tour.
+ * AQU-243: Lightweight spotlight / coach-marks product tour.
  *
  * Design constraints:
  * - No new npm dependencies — built with React portals + inline Tailwind.

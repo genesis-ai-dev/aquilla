@@ -85,7 +85,7 @@ export interface ServerFileProgressUpdated {
   fileCreated: boolean
 }
 /**
- * FRO-346: sent to a removed member's own sockets right before the DO
+ * AQU-346: sent to a removed member's own sockets right before the DO
  * closes them (code 4403). `userId` is the presence identity (username) —
  * the same identity used in presence/lock frames — so the client can
  * compare against its currentUsername.
@@ -96,11 +96,11 @@ export interface ServerMemberRemoved {
   userId: string
 }
 /**
- * FRO-479 push accelerator: notifies a live downstream's connected clients
+ * AQU-479 push accelerator: notifies a live downstream's connected clients
  * that its upstream committed lane-relevant changes. This is a REALTIME
  * message only — never written to the `events` table, never load-bearing
  * (see the linked-projects design spec §8). A missed/dropped frame is
- * recovered by the existing lazy-pull mirror sync (FRO-476) on next file
+ * recovered by the existing lazy-pull mirror sync (AQU-476) on next file
  * open; this frame only shaves the latency down to "seconds" for clients
  * that are already connected.
  */

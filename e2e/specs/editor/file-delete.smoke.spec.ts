@@ -8,7 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * File delete via context menu — ConfirmActionDialog (FRO-272 soft delete).
+ * File delete via context menu — ConfirmActionDialog (AQU-272 soft delete).
  *
  * FileRow right-click → FileActionMenu "Delete" → ConfirmActionDialog opens
  * with:

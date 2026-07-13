@@ -35,7 +35,7 @@ export function Homepage() {
   // Signed-in visitors (aq_hint=1 cookie — same bit the Worker reads at the
   // edge) go straight into the app at `/`; returning (unsigned-in) users go to
   // /login; brand-new visitors use the "Sign up free" button → /onboarding.
-  // FRO-282: "Open app" is the sign-in entry for returning users — it must
+  // AQU-282: "Open app" is the sign-in entry for returning users — it must
   // NOT send them through the signup wizard.
   const appHref = hasAuthHintCookie() ? "/" : "/login"
 

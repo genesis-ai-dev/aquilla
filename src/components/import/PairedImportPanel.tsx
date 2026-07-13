@@ -1,10 +1,10 @@
 /**
- * FRO-315: Import finished translation projects (paired source+target files)
+ * AQU-315: Import finished translation projects (paired source+target files)
  * to populate the target column / translation memory.
  *
  * The user provides a CSV/XLSX where each row has a source text AND a target
  * translation. These are matched against existing source cells by canonical ref
- * (same mechanism as eBible → target, FRO-191) and the target column is
+ * (same mechanism as eBible → target, AQU-191) and the target column is
  * populated via bulkUploadTargetCommits.
  *
  * Flow:

@@ -56,6 +56,8 @@ export interface CellsReadEnv {
 interface CellRowRaw {
   cell_id: string
   side: "source" | "target"
+  /** AQU-538: target-language lane. '' = default lane; always '' on source rows. */
+  target_lang: string
   value: string
   value_html: string | null
   type: string | null
@@ -82,6 +84,8 @@ interface CellRowRaw {
 interface CellRowOut {
   cellId: string
   side: "source" | "target"
+  /** AQU-538: target-language lane. '' = default lane; always '' on source rows. */
+  targetLang: string
   value: string
   valueHtml: string | null
   type: string | null
@@ -125,6 +129,7 @@ function mapRow(row: CellRowRaw): CellRowOut {
   return {
     cellId: row.cell_id,
     side: row.side,
+    targetLang: row.target_lang ?? "",
     value: row.value,
     valueHtml: row.value_html,
     type: row.type,
@@ -386,7 +391,7 @@ export async function handleCellsReadRequest(
   // but the v1 SLO target is "open a project, render cells" and the chain
   // walk dominates only at >10x current file sizes.
   const columns =
-    "cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, " +
+    "cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, " +
     "event_id, source_event_id, last_editor, last_edit_at, validated, word_count, " +
     "endorsement_count, start_ms, end_ms, " +
     "medium, sequence_index, transcription, camera_state, metadata"
@@ -515,13 +520,45 @@ export async function handleCellsReadRequest(
   } else if (sideFilter === null) {
     // Chain-walk source and target independently; emit source first, then
     // target, each in chain order. The client pairs by cell_id.
+    //
+    // AQU-538: the walk dedupes by cell_id, so N target lanes for the same
+    // cell must be walked PER LANE or sibling-lane rows silently drop.
+    // Default lane ('') first, then added lanes in name order — for N=1
+    // (only '' exists) the output is byte-identical to the pre-lane walk.
     const sourceRows: CellRowRaw[] = []
-    const targetRows: CellRowRaw[] = []
+    const targetByLane = new Map<string, CellRowRaw[]>()
     for (const r of allRows) {
       if (r.side === "source") sourceRows.push(r)
-      else if (r.side === "target") targetRows.push(r)
+      else if (r.side === "target") {
+        const lane = r.target_lang ?? ""
+        let bucket = targetByLane.get(lane)
+        if (!bucket) {
+          bucket = []
+          targetByLane.set(lane, bucket)
+        }
+        bucket.push(r)
+      }
     }
-    ordered = [...walkAnchorChain(sourceRows), ...walkAnchorChain(targetRows)]
+    ordered = walkAnchorChain(sourceRows)
+    for (const lane of [...targetByLane.keys()].sort()) {
+      ordered = [...ordered, ...walkAnchorChain(targetByLane.get(lane)!)]
+    }
+  } else if (sideFilter === "target") {
+    // Same per-lane walk for target-only reads.
+    const byLane = new Map<string, CellRowRaw[]>()
+    for (const r of allRows) {
+      const lane = r.target_lang ?? ""
+      let bucket = byLane.get(lane)
+      if (!bucket) {
+        bucket = []
+        byLane.set(lane, bucket)
+      }
+      bucket.push(r)
+    }
+    ordered = []
+    for (const lane of [...byLane.keys()].sort()) {
+      ordered = [...ordered, ...walkAnchorChain(byLane.get(lane)!)]
+    }
   } else {
     ordered = walkAnchorChain(allRows)
   }

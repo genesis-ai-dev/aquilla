@@ -90,7 +90,7 @@ describe("useProject status distinction", () => {
     expect(result.current.project).toBeNull()
   })
 
-  it("returns status='forbidden' when resolveCloudProjectResult returns reason='forbidden' (FRO-346)", async () => {
+  it("returns status='forbidden' when resolveCloudProjectResult returns reason='forbidden' (AQU-346)", async () => {
     // WHY: a removed member reloading the workspace URL must land on a clean
     // "you no longer have access" state — distinct from "not-found" (the
     // project exists) and never a live editor rendered from stale caches.

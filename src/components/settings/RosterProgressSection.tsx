@@ -1,7 +1,7 @@
 // AQU-485: org-level roster + member-progress visibility controls.
 //
 // Two independent, configurable read-permission floors, generalizing the
-// FRO-253 exportMinRole pattern:
+// AQU-253 exportMinRole pattern:
 //   - rosterViewMinRole:        who can see the member list + count
 //   - memberProgressViewMinRole: who can see per-member progress/productivity
 //

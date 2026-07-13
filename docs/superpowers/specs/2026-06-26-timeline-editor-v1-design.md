@@ -52,7 +52,7 @@ The existing grammar (`src/lib/sync/events-emit.ts`, projected in `sync-worker/s
 - **Payload:** `{ cellId, fileId, startMs, endMs }`.
 - **Projection:** `UPDATE cells SET start_ms = ?, end_ms = ? WHERE project_id = ? AND file_id = ? AND cell_id = ?` — updates **both sides** (source + target) of the cell, because timing is a property of the segment and the two sides must stay aligned.
 - **Why a dedicated event:** re-emitting `*.cell.create` would resend `value` and risk clobbering a concurrent content edit; `retime` touches only the two timing columns, which is also conflict-friendly.
-- **Optimistic + clock-fenced:** emit through the outbox and hold the dragged position with the existing `writeSeqRef` + per-cell freshness-floor mechanism (FRO-247, `useCells`) so the card does not snap back before the projection read confirms.
+- **Optimistic + clock-fenced:** emit through the outbox and hold the dragged position with the existing `writeSeqRef` + per-cell freshness-floor mechanism (AQU-247, `useCells`) so the card does not snap back before the projection read confirms.
 - **Permissions:** routed at the same role level as content edits (CONTRIBUTOR); disabled in the UI when the file is read-only/frozen/git-imported.
 
 ### 4.2 `file.video.set`
@@ -121,5 +121,5 @@ Hand-rolled over existing primitives (matching `CellWaveform` and `CombinedBound
 - `sync-worker/src/events/event-projection.ts` — add `cell.retime` and `file.video.set` cases; cell.create timing upsert (~207-208/335-336), commit-skips-timing (~399) for reference.
 - `sync-worker/src/events/files-read-route.ts` — `meta` JSON read (~63-79) to surface `coreMediaUrl`.
 - `src/lib/timeline/derive.ts` — `sortByLens` (~96-127) to extend with `deriveLanes`.
-- `src/hooks/useCells.ts` — `buildCellData` (~93-108/182-229) and the FRO-247 write-clock fence.
+- `src/hooks/useCells.ts` — `buildCellData` (~93-108/182-229) and the AQU-247 write-clock fence.
 - Primitives to reuse: `src/components/CellWaveform.tsx`, `src/components/voice/CombinedBoundaryEditor.tsx`, `react-player`.

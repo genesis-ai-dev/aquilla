@@ -8,7 +8,7 @@ import type { OutboxRecord } from "@/lib/sync/outbox"
 import type { StaleSiblingEntry } from "@/lib/sync/outbox-flush"
 
 /**
- * App-shell ownership of the CQRS outbox drain (FRO-221). Historically the
+ * App-shell ownership of the CQRS outbox drain (AQU-221). Historically the
  * flusher was mounted inside ProjectWorkspace and only ran while a project was
  * open — so a backlog sat undrained on the org dashboard or any non-project
  * route. The outbox is global across every project the user touches, so its

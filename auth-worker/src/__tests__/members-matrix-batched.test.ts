@@ -1,5 +1,5 @@
 /**
- * FRO-218: Batched members-matrix endpoint.
+ * AQU-218: Batched members-matrix endpoint.
  *
  * Verifies that GET /api/v2/orgs/:orgId/members-matrix produces per-project
  * effective-member rows IDENTICAL to what GET /api/v2/projects/:id/members
@@ -88,7 +88,7 @@ interface MatrixBody {
 
 // ---------------------------------------------------------------------------
 
-describe("GET /api/v2/orgs/:orgId/members-matrix (FRO-218 batched endpoint)", () => {
+describe("GET /api/v2/orgs/:orgId/members-matrix (AQU-218 batched endpoint)", () => {
   it("returns identical role/source/secondarySources as per-project endpoint for each project", async () => {
     await seedFixture()
     const jwt = await jwtFor("wendi")

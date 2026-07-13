@@ -1,9 +1,9 @@
 /**
- * ParallelPassagesPanel — FRO-177 replace mode tests.
+ * ParallelPassagesPanel — AQU-177 replace mode tests.
  *
  * WHY: The replace flow must show an inline diff preview before committing,
  * respect the scope toggle (file vs project), surface the HTML-spanning skip
- * count to the user, and always emit retainValidations=false (FRO-286:
+ * count to the user, and always emit retainValidations=false (AQU-286:
  * "Retain my validations" checkbox was a server no-op and has been removed;
  * the honest copy "Replacing text clears validation" is shown instead).
  * These tests verify intent, not just wiring.
@@ -237,9 +237,9 @@ describe("ParallelPassagesPanel — scope toggle", () => {
   })
 })
 
-// ── FRO-286: "Retain my validations" removed — honest copy + always-false ────
+// ── AQU-286: "Retain my validations" removed — honest copy + always-false ────
 
-describe("ParallelPassagesPanel — validation copy (FRO-286)", () => {
+describe("ParallelPassagesPanel — validation copy (AQU-286)", () => {
   it("does NOT render a 'Retain my validations' checkbox", () => {
     render(<ParallelPassagesPanel {...baseProps()} />)
     expect(screen.queryByRole("checkbox", { name: /retain my validations/i })).toBeNull()

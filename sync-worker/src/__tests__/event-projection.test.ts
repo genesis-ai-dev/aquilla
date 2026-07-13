@@ -105,18 +105,19 @@ describe('buildEventProjectionStmts — source.cell.create', () => {
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     const { sql, args } = cellsStmts[0]
     expect(sql).toContain('INSERT INTO cells')
-    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, side)')
-    // 0=project_id, 1=file_id, 2=cell_id, 3=side, 4=value, 5=value_html,
-    // 6=type, 7=canonical_ref, 8=anchor_cell_id, 9=event_id,
-    // 10=last_editor, 11=last_edit_at, 12=word_count, 13=content_hash
+    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, side, target_lang)')
+    // 0=project_id, 1=file_id, 2=cell_id, 3=side, 4=target_lang, 5=value,
+    // 6=value_html, 7=type, 8=canonical_ref, 9=anchor_cell_id, 10=event_id,
+    // 11=last_editor, 12=last_edit_at, 13=word_count, 14=content_hash
     expect(args[0]).toBe('proj-1')
     expect(args[1]).toBe('file-a')
     expect(args[2]).toBe('cell-1')
     expect(args[3]).toBe('source')
-    expect(args[4]).toBe('In the beginning')
-    expect(args[6]).toBe('verse')
-    expect(args[7]).toBe('GEN 1:1')
-    expect(args[9]).toBe('evt-test-id')
+    expect(args[4]).toBe('') // AQU-538: source rows always on the default lane
+    expect(args[5]).toBe('In the beginning')
+    expect(args[7]).toBe('verse')
+    expect(args[8]).toBe('GEN 1:1')
+    expect(args[10]).toBe('evt-test-id')
   })
 })
 
@@ -136,8 +137,9 @@ describe('buildEventProjectionStmts — target.cell.create', () => {
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     const { args } = cellsStmts[0]
     expect(args[3]).toBe('target')
-    expect(args[8]).toBe('cell-0')   // anchor_cell_id
-    expect(args[9]).toBe('evt-test-id') // event_id
+    expect(args[4]).toBe('')            // target_lang: default lane
+    expect(args[9]).toBe('cell-0')      // anchor_cell_id
+    expect(args[10]).toBe('evt-test-id') // event_id
   })
 })
 
@@ -162,18 +164,19 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
     // The client never emits target.cell.create, so the commit is an UPSERT:
     // INSERT the target row on first translation, ON CONFLICT UPDATE after.
     expect(sql).toContain('INSERT INTO cells')
-    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, side) DO UPDATE SET')
+    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET')
     expect(sql).toContain('event_id = excluded.event_id')
     expect(sql).toContain('source_event_id = excluded.source_event_id')
     // bind order (mirrors the INSERT column list):
-    // 0=project_id, 1=file_id, 2=cell_id, 3=value, 4=value_html,
-    // 5=event_id, 6=source_event_id, 7=last_editor, 8=last_edit_at,
-    // 9=word_count, 10=content_hash
+    // 0=project_id, 1=file_id, 2=cell_id, 3=target_lang, 4=value,
+    // 5=value_html, 6=event_id, 7=source_event_id, 8=last_editor,
+    // 9=last_edit_at, 10=word_count, 11=content_hash
     expect(args[0]).toBe('proj-1')
     expect(args[2]).toBe('cell-1')
-    expect(args[3]).toBe('new text')
-    expect(args[5]).toBe('evt-test-id')
-    expect(args[6]).toBe('src-event-99')
+    expect(args[3]).toBe('') // AQU-538: default lane when targetLang absent
+    expect(args[4]).toBe('new text')
+    expect(args[6]).toBe('evt-test-id')
+    expect(args[7]).toBe('src-event-99')
   })
 
   it('writes NULL source_event_id when omitted', () => {
@@ -185,7 +188,7 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
       stmts,
     )
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
-    expect(cellsStmts[0].args[6]).toBe(null)
+    expect(cellsStmts[0].args[7]).toBe(null)
   })
 })
 
@@ -213,7 +216,8 @@ describe('buildEventProjectionStmts — *.cell.delete', () => {
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     expect(cellsStmts[0].sql).toContain('DELETE FROM cells')
     expect(cellsStmts[0].sql).toContain('side = ?')
-    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target'])
+    // AQU-538: trailing bind is the target lane ('' = default).
+    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', ''])
   })
 
   it('source.cell.delete binds side=source', () => {
@@ -221,7 +225,17 @@ describe('buildEventProjectionStmts — *.cell.delete', () => {
     const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(db, makeEvent('source.cell.delete', {}), stmts)
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
-    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'source'])
+    // AQU-538: source rows always live on the default lane ('').
+    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'source', ''])
+  })
+
+  it('target.cell.delete with targetLang deletes only that lane', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(db, makeEvent('target.cell.delete', { targetLang: 'fr' }), stmts)
+    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
+    expect(cellsStmts[0].sql).toContain('target_lang = ?')
+    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', 'fr'])
   })
 })
 
@@ -238,8 +252,9 @@ describe('buildEventProjectionStmts — *.cell.reorder', () => {
     expect(recorded[0].sql).toContain('side = ?')
     expect(recorded[0].args[0]).toBe('cell-7')
     expect(recorded[0].args[1]).toBe('evt-test-id') // event_id
-    // Last positional arg is the bound `side`.
-    expect(recorded[0].args[recorded[0].args.length - 1]).toBe('target')
+    // AQU-538: last two positional args are the bound `side` and lane.
+    expect(recorded[0].args[recorded[0].args.length - 2]).toBe('target')
+    expect(recorded[0].args[recorded[0].args.length - 1]).toBe('')
   })
 
   it('source.cell.reorder binds side=source', () => {
@@ -250,7 +265,8 @@ describe('buildEventProjectionStmts — *.cell.reorder', () => {
       makeEvent('source.cell.reorder', { anchorCellId: 'cell-9' }),
       stmts,
     )
-    expect(recorded[0].args[recorded[0].args.length - 1]).toBe('source')
+    expect(recorded[0].args[recorded[0].args.length - 2]).toBe('source')
+    expect(recorded[0].args[recorded[0].args.length - 1]).toBe('')
   })
 })
 
@@ -312,14 +328,14 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
       makeEvent('cell.validate', { editEventId: 'evt-commit-id' }),
       stmts,
     )
-    // FRO-292: validator UPSERT + ai_drafted clear + cells.validated recompute
+    // AQU-292: validator UPSERT + ai_drafted clear + cells.validated recompute
     // + endorsement_count recompute + files counters recompute.
     expect(stmts).toHaveLength(5)
     expect(recorded[0].sql).toContain('INSERT INTO cell_validators')
     // 0012: columns are (project_id, file_id, cell_id, event_id, username, decided_ts) — no is_active
     expect(recorded[0].sql).toContain('event_id')
     expect(recorded[0].sql).not.toContain('is_active')
-    // FRO-292: ai_drafted cleared before the validated recompute so the
+    // AQU-292: ai_drafted cleared before the validated recompute so the
     // file counter reflects the final state correctly.
     expect(recorded[1].sql).toContain('SET ai_drafted = 0')
     expect(recorded[2].sql).toContain('UPDATE cells')
@@ -754,12 +770,12 @@ describe('isChainMutatingKind', () => {
     'cast.assign': false,
     'cell.retime': false,
     'file.video.set': false,
-    // FRO-476: mirror events replicate an ordering the upstream already
+    // AQU-476: mirror events replicate an ordering the upstream already
     // arbitrated — see CHAIN_MUTATING_KINDS's doc comment.
     'source.cell.mirror': false,
     'file.mirror': false,
     'link.cursor.advance': false,
-    // FRO-478: repin is non-chain-mutating — it does not compete for the
+    // AQU-478: repin is non-chain-mutating — it does not compete for the
     // chain slot (guarded instead by expectedTargetEventId in the SQL).
     'target.cell.repin': false,
   }

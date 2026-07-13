@@ -1,4 +1,4 @@
-// FRO-192: Assignment gutter chip unit tests.
+// AQU-192: Assignment gutter chip unit tests.
 // Tests the assignmentsByCellId → assigneeLabel/assigneeNote prop chain
 // by testing the building logic directly (extracted as a pure function
 // to keep the test fast and isolated from the full EditorTable stack).

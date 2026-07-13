@@ -1,5 +1,5 @@
 /**
- * PostEditMetricsSection — FRO-311 AI metrics panel.
+ * PostEditMetricsSection — AQU-311 AI metrics panel.
  *
  * Shows post-edit magnitude (normalized edit distance between AI drafts and
  * the final human-edited text) over time, with a by-user breakdown.
@@ -348,7 +348,7 @@ export function PostEditMetricsSection({
               {/* Approximation disclosure */}
               <p className="mt-4 text-[11px] text-muted-foreground/70">
                 Metric: character-level normalized Levenshtein distance (NED).
-                Pairs require FRO-292 AI provenance (ai_suggestion=true on the commit event).
+                Pairs require AQU-292 AI provenance (ai_suggestion=true on the commit event).
                 Historical commits before that feature are excluded.
               </p>
             </>

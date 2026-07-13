@@ -26,6 +26,7 @@
 import {
   buildEventProjectionStmts,
   CHAIN_MUTATING_KINDS,
+  laneOfEvent,
   type PersistedEvent,
 } from './event-projection'
 import type { EventKind } from './types'
@@ -112,8 +113,22 @@ export async function handleRebuildProjectionRequest(
   //    siblings stay in `events` (which we're not rewriting) but don't
   //    contribute to the projection.
   const winningChildAt = new Map<string, string>()
+  // AQU-538 lanes: the slot is lane-qualified for non-default target lanes,
+  // mirroring the live claim (handlers/cell-events.ts) and isWinningChild —
+  // replay must arbitrate exactly like live or the projections diverge.
+  // Default-lane events ('' / absent targetLang, all pre-lane history) keep
+  // the legacy key byte-for-byte.
+  const laneSuffixOf = (row: EventRow): string => {
+    if (!row.kind.startsWith('target.cell.')) return ''
+    try {
+      const lane = laneOfEvent(row.kind, JSON.parse(row.payload))
+      return lane ? `@lane:${lane}` : ''
+    } catch {
+      return ''
+    }
+  }
   const childKey = (row: EventRow): string =>
-    `${row.project_id}\0${row.file_id ?? ''}\0${row.cell_id ?? ''}\0${row.parent_id ?? '<null>'}`
+    `${row.project_id}\0${row.file_id ?? ''}\0${row.cell_id ?? ''}\0${row.parent_id ?? '<null>'}${laneSuffixOf(row)}`
 
   const stmts: AquillaStatement[] = []
   let eventsRead = 0

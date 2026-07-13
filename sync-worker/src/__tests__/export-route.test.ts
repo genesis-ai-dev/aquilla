@@ -1,9 +1,9 @@
 // The export route gates at the org's exportMinRole (default MAINTAINER 600
 // per spec Q32). Org owners can raise or lower the floor via org settings
-// (FRO-253). A viewer who can read a project should NOT be able to pull a full
+// (AQU-253). A viewer who can read a project should NOT be able to pull a full
 // deliverable export unless the org has explicitly lowered the floor.
 //
-// FRO-276: the route also counts verses whose original span contained
+// AQU-276: the route also counts verses whose original span contained
 // intra-verse markers that plain-text substitution drops, and surfaces that
 // count as the X-Usfm-Lossy-Verse-Count response header.
 import { describe, it, expect } from "vitest"
@@ -97,7 +97,7 @@ describe("export role gate (Q32 — maintainer 600 default)", () => {
   })
 })
 
-describe("export role gate with org exportMinRole (FRO-253)", () => {
+describe("export role gate with org exportMinRole (AQU-253)", () => {
   it("allows a contributor (400) when org sets exportMinRole=400", async () => {
     const settings = JSON.stringify({ exportMinRole: 400 })
     const env: ExportRouteEnv = {
@@ -142,7 +142,7 @@ describe("export role gate with org exportMinRole (FRO-253)", () => {
 })
 
 // ---------------------------------------------------------------------------
-// FRO-276: X-Usfm-Lossy-Verse-Count response header
+// AQU-276: X-Usfm-Lossy-Verse-Count response header
 // ---------------------------------------------------------------------------
 
 const FOOTNOTED_USFM = `\\id MAT
@@ -155,7 +155,7 @@ const PLAIN_USFM = `\\id GEN
 \\v 1 In the beginning.
 \\v 2 The earth was without form.`
 
-describe("X-Usfm-Lossy-Verse-Count header (FRO-276)", () => {
+describe("X-Usfm-Lossy-Verse-Count header (AQU-276)", () => {
   it("emits header=0 when export has no translated verses (all fall back to source)", async () => {
     const env: ExportRouteEnv = {
       SYNC_SECRET_KEY: SECRET,

@@ -209,7 +209,7 @@ describe("serializeUsfmLossless", () => {
   })
 })
 
-describe("hasIntraVerseMarkers (FRO-276)", () => {
+describe("hasIntraVerseMarkers (AQU-276)", () => {
   it("returns false for plain prose verse text", () => {
     expect(hasIntraVerseMarkers("In the beginning God created the heavens and the earth.")).toBe(false)
     expect(hasIntraVerseMarkers("The earth was without form.\n")).toBe(false)

@@ -3,7 +3,7 @@
 // never start its countdown if mic permission is denied. This matters because
 // a countdown into a missing permission wastes the speaker's preparation time
 // and produces a confusing "failed recording" UX rather than an immediate,
-// actionable error. (FRO-155)
+// actionable error. (AQU-155)
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { probeMicPermission } from "./probeMicPermission"

@@ -12,12 +12,14 @@ Arguments: $ARGUMENTS
 
 ## Constants
 
-- Linear team: `FrontierR&D` (id `de0f5d29-418f-4f62-ade7-02f77974c598`)
+- Linear team: `Aquilla` (id `de0f5d29-418f-4f62-ade7-02f77974c598`)
 - Linear project: `Prototype Debugging` (id `215cff7b-1a95-443d-9343-1f1528754462`)
 - Status pipeline (AGENTS.md → "Issue workflow"):
-  `Backlog → Todo → Dispatched → Fixed → Dev Verification Needed → Ready for QA → Deployed/Done`
+  `Triage → Backlog → Todo → Dispatched → Fixed → Dev Verification Needed → Ready for QA → Deployed/Done`
   - `Deployed`/`Done` are **post-merge-to-main** (QA owns that merge).
   - Everything from `Fixed` through `Ready for QA` means "code exists, not necessarily on main yet."
+  - **`Triage`** is the human / HITL queue — expected to have **no** `main` ref. Never flag a Triage
+    issue as drift; it hasn't entered the agent pipeline. Count it separately if useful, don't alarm on it.
 
 ## Step 1 — Gather main's ticket references
 
@@ -30,10 +32,10 @@ Run (adjust range per args):
 git fetch origin --quiet
 # Subjects + bodies of commits on the base, with their ticket refs
 git log origin/main --no-merges --pretty='%h%x09%s%x09%b' > /tmp/main-commits.tsv
-# Distinct FRO-### present in main
-grep -oiE 'FRO-[0-9]+' /tmp/main-commits.tsv | tr a-z A-Z | sort -u > /tmp/main-tickets.txt
+# Distinct AQU-### present in main
+grep -oiE 'AQU-[0-9]+' /tmp/main-commits.tsv | tr a-z A-Z | sort -u > /tmp/main-tickets.txt
 # Commits on main with NO ticket reference (traceability gaps)
-git log origin/main --no-merges --pretty='%h%x09%s' | grep -ivE 'FRO-[0-9]+' > /tmp/main-untracked.tsv || true
+git log origin/main --no-merges --pretty='%h%x09%s' | grep -ivE 'AQU-[0-9]+' > /tmp/main-untracked.tsv || true
 ```
 
 ## Step 2 — Pull the board
@@ -47,7 +49,7 @@ for the reverse check). Capture each issue's identifier + status.
 For each issue, test membership in `/tmp/main-tickets.txt`. Classify into:
 
 1. **Status lagging reality** — issue is in `Fixed` / `Dev Verification Needed` / `Ready for
-   QA` **and** its `FRO-###` appears in `main`. The code shipped; the board hasn't caught up
+   QA` **and** its `AQU-###` appears in `main`. The code shipped; the board hasn't caught up
    past the merge. Candidate to advance toward `Deployed`/`Done` (QA's call) — flag, don't
    auto-move.
 2. **Claimed done, not in main** — issue is `Deployed`/`Done` but its ticket is **absent**
@@ -65,7 +67,7 @@ For each issue, test membership in `/tmp/main-tickets.txt`. Classify into:
 Output a concise report:
 
 - A one-line headline (e.g. "7 issues drifted, 12 untracked commits (3 fix/feat)").
-- A table per category 1–3 with `FRO-###`, status, the matching commit `%h %s`, and the
+- A table per category 1–3 with `AQU-###`, status, the matching commit `%h %s`, and the
   suggested action.
 - Category 5 split into "should have had a ticket" (fix/feat/refactor) vs "fine without"
   (chore/docs/polish/build).

@@ -76,7 +76,7 @@ describe("OrgProvider", () => {
     await waitFor(() => expect(screen.getByTestId("active").textContent).toBe("1"))
   })
 
-  describe("guestOrgs (FRO-473)", () => {
+  describe("guestOrgs (AQU-473)", () => {
     it("is empty when every accessible project's org is a member org", async () => {
       listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
       fetchAccessibleProjects.mockResolvedValue([

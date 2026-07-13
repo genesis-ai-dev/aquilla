@@ -103,7 +103,7 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // auth-worker gate.
   'project.link-source': ROLE.PROJECT_LEAD,
 
-  // FRO-438: cast.assign is a metadata-only label written by a PM or project
+  // AQU-438: cast.assign is a metadata-only label written by a PM or project
   // lead who is assigning voice actors to cells. Contributor-level so a project
   // lead can bulk-assign from the label import panel without needing owner role.
   'cast.assign': ROLE.CONTRIBUTOR,
@@ -114,7 +114,7 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // file.rename (normal editing flow, not a structural change to the inventory).
   'file.video.set': ROLE.CONTRIBUTOR,
 
-  // FRO-476: mirror-engine kinds are server-emitted only (link-sync.ts calls
+  // AQU-476: mirror-engine kinds are server-emitted only (link-sync.ts calls
   // buildEventProjectionStmts directly in-process — never through the client
   // POST /events → authorize() path, so this floor is never actually checked
   // against a caller). Set to MAINTAINER as the nominal "no client may emit
@@ -123,7 +123,7 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'file.mirror': ROLE.MAINTAINER,
   'link.cursor.advance': ROLE.MAINTAINER,
 
-  // FRO-478: repin ("accept upstream change as-is") asserts translation
+  // AQU-478: repin ("accept upstream change as-is") asserts translation
   // correctness against a new source — same authority bar as validating,
   // per the design spec §12 permissions table. Bulk repin is gated higher
   // (project_lead 500) at the route/UI layer, not here — a single repin's

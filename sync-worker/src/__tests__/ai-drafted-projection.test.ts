@@ -1,4 +1,4 @@
-// FRO-292: AI-drafted cell projection tests.
+// AQU-292: AI-drafted cell projection tests.
 //
 // WHY: The ai_drafted column tracks machine-generated cells that haven't been
 // human-reviewed yet. Reclassification rules that must hold:
@@ -50,7 +50,7 @@ async function replay(
   }
 }
 
-describe("FRO-292 ai_drafted projection", () => {
+describe("AQU-292 ai_drafted projection", () => {
   it("AI commit sets ai_drafted = 1 on the cell row", async () => {
     const db = await makeTestDb()
     try {

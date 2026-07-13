@@ -26,7 +26,7 @@ interface SetupChecklistDrawerProps {
   onOpenChange: (open: boolean) => void
   project: ProjectRecord
   /**
-   * FRO-334: caller's resolved project role, fresh from this load's
+   * AQU-334: caller's resolved project role, fresh from this load's
    * `useProject` resolve (`roleLevel`, NOT `project.syncRole?.level`).
    * `project.syncRole` is an intentionally stale-tolerant cache (see its doc
    * comment) stamped by unrelated /sync-token round-trips elsewhere in the

@@ -156,7 +156,7 @@ describe("useProjectSettings — read path", () => {
     expect(result.current.reasonCannotEdit).toBe("role")
   })
 
-  // FRO-255: floor raised to MAINTAINER (600) — PROJECT_LEAD (500) is now read-only.
+  // AQU-255: floor raised to MAINTAINER (600) — PROJECT_LEAD (500) is now read-only.
   // Spec: 01-personas-and-roles.md §Role ladder row 600 — "change project settings
   // (languages, system prompt, validation rules, health) — maintainer".
   it("canEdit is false at PROJECT_LEAD (500) while online — below MAINTAINER floor", async () => {
@@ -220,7 +220,7 @@ describe("useProjectSettings — write path", () => {
     expect(idbMod.patchProject).toHaveBeenCalled()
   })
 
-  // FRO-255: synced below-floor writes must NOT apply locally — local apply
+  // AQU-255: synced below-floor writes must NOT apply locally — local apply
   // before role-check was the root cause of silent per-device divergence.
   it("returns blocked-role for below-MAINTAINER callers on synced projects and does NOT apply locally", async () => {
     const idbMod = await import("@/lib/store/project-index")
@@ -235,7 +235,7 @@ describe("useProjectSettings — write path", () => {
     })
     expect(got.kind).toBe("blocked")
     if (got.kind === "blocked") expect(got.reason).toBe("role")
-    // CRITICAL: local state must NOT be mutated — FRO-255 acceptance criteria
+    // CRITICAL: local state must NOT be mutated — AQU-255 acceptance criteria
     expect(result.current.settings.sourceLanguage).toBe("en")
     expect(idbMod.patchProject).not.toHaveBeenCalled()
   })
@@ -344,7 +344,7 @@ describe("useProjectSettings — migration", () => {
     })
   })
 
-  // FRO-255: migration guard now blocks at MAINTAINER (600), not PROJECT_LEAD (500).
+  // AQU-255: migration guard now blocks at MAINTAINER (600), not PROJECT_LEAD (500).
   it("does NOT migrate when below MAINTAINER (600)", async () => {
     vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
       version: 0, updatedAt: "x", updatedBy: null, settings: {},
@@ -375,10 +375,10 @@ describe("useProjectSettings — migration", () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FRO-255 acceptance criteria tests
+// AQU-255 acceptance criteria tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("FRO-255 — role-floor alignment (client = server = MAINTAINER 600)", () => {
+describe("AQU-255 — role-floor alignment (client = server = MAINTAINER 600)", () => {
   it("(a) below-MAINTAINER user (PROJECT_LEAD 500) gets canEdit=false and read-only state", async () => {
     vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
       version: 2, updatedAt: "x", updatedBy: { id: 1, username: "ryder" },

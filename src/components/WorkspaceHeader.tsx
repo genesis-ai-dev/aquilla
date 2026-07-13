@@ -8,7 +8,7 @@ interface Props {
   children?: ReactNode
   extraMenuItems?: OverflowMenuItem[]
   /**
-   * FRO-428: When provided, the project name in the breadcrumb becomes a
+   * AQU-428: When provided, the project name in the breadcrumb becomes a
    * clickable link to the project overview page (`/projects/:id`), giving
    * project-only invitees (and all users) a direct path back to the overview
    * without having to navigate through the full dashboard.

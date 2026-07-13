@@ -1,4 +1,4 @@
-// FRO-361: completeBatch must not silently halt the whole run when one
+// AQU-361: completeBatch must not silently halt the whole run when one
 // sub-batch (chunk) fails. Encodes the INTENT already stated in the code
 // comments (a failing sub-batch "should not break the batch as a whole")
 // but that the implementation violated: a non-abort error from complete()
@@ -87,7 +87,7 @@ function encodeChunkResponse(chunk: MinimalCell[]): string {
   return chunk.map((_, i) => `<v${i + 1}>Translated ${i + 1}</v${i + 1}>`).join("\n")
 }
 
-describe("completeBatch — mid-run sub-batch failure (FRO-361)", () => {
+describe("completeBatch — mid-run sub-batch failure (AQU-361)", () => {
   beforeEach(() => {
     vi.unstubAllGlobals()
     clearBatchCompletionProgress()

@@ -28,7 +28,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * bolded "sample" cell never gets the underline affordance.
  */
 test("term lookup popover appears for terminology-matched source word", async ({ alice }) => {
-  // Project create + terminology round-trip + a full FRO-310 import flow can
+  // Project create + terminology round-trip + a full AQU-310 import flow can
   // exceed the 30s harness budget under load.
   test.slow()
   const dash = new Dashboard(alice)

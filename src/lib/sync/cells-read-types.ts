@@ -32,7 +32,7 @@ export interface FileSummary {
   wordCount: number
   /** Last cell.commit timestamp on this file. Null on freshly-created files. */
   lastEditAt: number | null
-  /** FRO-272: epoch-ms when this file was soft-deleted, or null when active. */
+  /** AQU-272: epoch-ms when this file was soft-deleted, or null when active. */
   deletedAt?: number | null
 }
 
@@ -45,6 +45,13 @@ export interface FileSummary {
 export interface CellRow {
   cellId: string
   side: "source" | "target"
+  /**
+   * AQU-538: target-language lane. '' = the file's single configured target
+   * language (the default lane — every pre-lane row, and all rows in projects
+   * that never add a second language). Always '' on source rows: the source
+   * is shared by all lanes. Optional so cached/older responses parse.
+   */
+  targetLang?: string
   value: string
   /** Rich-text variant. Null for plain-text cells. */
   valueHtml: string | null

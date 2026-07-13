@@ -503,6 +503,10 @@ CREATE TABLE assignments (
     assignee_user_id BIGINT NOT NULL,
     scope_kind       TEXT NOT NULL,
     scope_label      TEXT NOT NULL,
+    -- AQU-538 (§3.5 / migration 0057): target-language lane this assignment is
+    -- pinned to. '' = the default lane (every pre-lane assignment). Not part of
+    -- the PK — assignment_id stays the key; a lane is a property of the unit.
+    target_lang      TEXT NOT NULL DEFAULT '',
     cells_total      INTEGER NOT NULL DEFAULT 0,
     deadline         TEXT,
     note             TEXT,

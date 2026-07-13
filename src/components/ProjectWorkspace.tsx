@@ -4603,6 +4603,8 @@ export function ProjectWorkspace() {
           projectId={project.id}
           activeFileId={activeFileId}
           projectFiles={projectFiles}
+          targetLanes={project.targetLanes}
+          defaultLane={activeLane}
           members={projectMembers}
           roleLevel={currentRoleLevel}
           allowSelfAssignment={allowSelfAssignment}

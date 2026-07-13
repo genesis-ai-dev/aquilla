@@ -1,0 +1,24 @@
+-- 0057_assignments_target_lang.sql
+--
+-- AQU-538 (§3.5): assignments meet lanes. An assignment can be pinned to one
+-- target-language lane so PM surfaces can route "who's on Spanish" work. The
+-- lane is the same `''`-is-default convention as every other lane field
+-- (migrations 0054–0056): `target_lang = ''` is the legacy/default lane, so
+-- every existing assignment row and every `assignment.create` that doesn't
+-- carry a `targetLang` keeps byte-identical behavior.
+--
+-- NO primary-key change: assignment_id stays the sole key — an assignment is
+-- one unit of work with one lane, not a per-lane fan-out (unlike cells /
+-- cell_validators / file_section_progress, where the lane joins the PK).
+--
+-- NOT applied automatically to live Neon branches. Apply by hand per
+-- auth-worker/wrangler.toml's documented procedure:
+--   set -a; . ./.env; set +a
+--   npx tsx scripts/pg.ts db/postgres/migrations/0057_assignments_target_lang.sql
+-- (Fresh databases pick this up from schema.sql; the dev-stack reconcile's
+-- generic ADD-COLUMN loop also performs this exact upgrade on drifted local
+-- containers — a plain new column with a DEFAULT needs no special handling
+-- there, unlike the PK rebuilds of 0054/0055.)
+-- Verify: `SELECT target_lang FROM assignments LIMIT 1;` resolves.
+
+ALTER TABLE assignments ADD COLUMN IF NOT EXISTS target_lang TEXT NOT NULL DEFAULT '';

@@ -8,7 +8,7 @@ import { mergeCellsDelta, readCellsCache, writeCellsCache } from "@/lib/sync/cel
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { sortByLens } from "@/lib/timeline/derive"
-import type { OrderedBy } from "@/lib/parsers/types"
+import type { OrderedBy, RuleWaiver } from "@/lib/parsers/types"
 import type { FileProgressResponse, ProgressCounts } from "@/lib/progress/file-progress-resource"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
@@ -192,12 +192,29 @@ export class CellStore {
   private derivedCache: DerivedCache = { baseVersion: -1, summaries: [], textPairs: [] }
 
   setRuntime(next: RuntimeContext): void {
-    const statsChanged = this.ctx.auditStats !== next.auditStats
+    const prevStats = this.ctx.auditStats
+    const statsChanged = prevStats !== next.auditStats
     const userChanged = this.ctx.username !== next.username || this.ctx.requiredValidations !== next.requiredValidations
     this.ctx = next
     if (statsChanged || userChanged) {
       this.bumpAllCells()
       this.rebuildDerivedIndexes()
+      // The footer subscribes store-wide (subscribeAll), but editor rows subscribe
+      // per-cell (subscribeCell). emitAll() alone never wakes the per-cell listeners,
+      // so an audit-stats-only change (validate / sparkle-generate) left the row stale
+      // until a manual refresh. Notify the per-cell listeners for the cells whose
+      // audit stats actually changed. The emit set stays small regardless: a targeted
+      // revalidateCellStats shares entry refs so unchanged cells short-circuit on ===,
+      // and even when applyOutboxOverlay rebuilds the whole map during active editing
+      // (defeating the ref fast path), the value comparison still filters to the truly
+      // changed cells. The O(N) diff is no worse than the bumpAllCells() pass above.
+      if (statsChanged) {
+        const changed = diffChangedAuditCellIds(prevStats, next.auditStats)
+        if (changed.size > 0) {
+          this.emit(changed) // per-cell + list + all listeners
+          return
+        }
+      }
       this.emitAll()
     }
   }
@@ -1327,6 +1344,53 @@ function sameStringArray(a: readonly string[], b: readonly string[]): boolean {
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
   return true
+}
+
+function waiversEqual(a: readonly RuleWaiver[], b: readonly RuleWaiver[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].ruleId !== b[i].ruleId || a[i].reason !== b[i].reason
+      || a[i].waivedAt !== b[i].waivedAt || a[i].waivedBy !== b[i].waivedBy) return false
+  }
+  return true
+}
+
+function auditStatsEqual(a: CellAuditStats | undefined, b: CellAuditStats | undefined): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return (
+    a.editCount === b.editCount &&
+    a.contentHash === b.contentHash &&
+    a.lastEditAt === b.lastEditAt &&
+    a.lastEditEventId === b.lastEditEventId &&
+    sameStringArray(a.activeValidators, b.activeValidators) &&
+    waiversEqual(a.waivers, b.waivers)
+  )
+}
+
+/**
+ * Cell ids whose audit-stats entry actually changed between two stats maps.
+ * Targeted single-cell refetches produce a `new Map(prev)` that shares entry
+ * references for every untouched cell, so the `prevStats === nextStats` fast
+ * path skips them in O(1) and only the genuinely-changed cell is value-compared
+ * — keeping the per-cell emit set small even on Bible-sized files.
+ */
+function diffChangedAuditCellIds(
+  prev: ReadonlyMap<string, CellAuditStats>,
+  next: ReadonlyMap<string, CellAuditStats>,
+): Set<string> {
+  const changed = new Set<string>()
+  if (prev === next) return changed
+  for (const [id, nextStats] of next) {
+    const prevStats = prev.get(id)
+    if (prevStats === nextStats) continue
+    if (!auditStatsEqual(prevStats, nextStats)) changed.add(id)
+  }
+  for (const id of prev.keys()) {
+    if (!next.has(id)) changed.add(id)
+  }
+  return changed
 }
 
 function symmetricChangedKeys<T>(

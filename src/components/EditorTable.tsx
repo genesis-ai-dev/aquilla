@@ -65,7 +65,6 @@ import {
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
@@ -647,7 +646,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   getTokenForFile,
   getAlignmentModel,
   onAlignmentSeedChange,
-  assignmentsByCellId,
   checkLockHolder,
   showFootnotesInline,
   footnotePanelActive,
@@ -1317,8 +1315,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onAlignmentSeedChange={onAlignmentSeedChange}
           sourceFontSize={sourceFontSize}
           targetFontSize={targetFontSize}
-          assigneeLabel={assignmentsByCellId?.get(cell.id)?.username ?? null}
-          assigneeNote={assignmentsByCellId?.get(cell.id)?.scopeLabel ?? null}
           checkLockHolder={checkLockHolder}
           showFootnotesInline={showFootnotesInline}
           footnotePanelActive={footnotePanelActive}
@@ -1336,7 +1332,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [
     activeCueIndex,
     activeEditorCellId,
-    assignmentsByCellId,
     audioByCellId,
     audioLens,
     backtranslationByCellId,
@@ -1632,10 +1627,6 @@ interface MemoizedRowProps {
   sourceFontSize?: number
   /** FRO-251: per-file target-column font size in px. Defaults to 14 when absent. */
   targetFontSize?: number
-  /** FRO-192: username of the assignee for this cell. Null = no assignment. */
-  assigneeLabel?: string | null
-  /** FRO-192: scope label for the assignment tooltip. */
-  assigneeNote?: string | null
   /** RACE-5: ref-backed live lock check — see EditorTableProps.checkLockHolder. */
   checkLockHolder?: (cellId: string) => string | null
   /** FRO-317: when true, USFM \f...\f* footnotes render below each cell. */
@@ -1683,8 +1674,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
     isStaleSource,
     isUpstreamStaleSource,
-    assigneeLabel,
-    assigneeNote,
     checkLockHolder,
     showFootnotesInline,
     footnotePanelActive,
@@ -1833,8 +1822,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onAckRemoteChange={onAckRemoteChange}
         sourceFontSize={sourceFontSize}
         targetFontSize={targetFontSize}
-        assigneeLabel={assigneeLabel}
-        assigneeNote={assigneeNote}
         checkLockHolder={checkLockHolder}
         showFootnotesInline={showFootnotesInline}
         footnotePanelActive={footnotePanelActive}
@@ -1944,10 +1931,6 @@ interface EditorRowProps {
   sourceFontSize?: number
   /** FRO-251: per-file target-column font size in px. Defaults to 14 when absent. */
   targetFontSize?: number
-  /** FRO-192: username of the assignee for this cell. Null = no assignment. */
-  assigneeLabel?: string | null
-  /** FRO-192: scope label for the assignment tooltip. */
-  assigneeNote?: string | null
   /** RACE-5: ref-backed live lock check — see EditorTableProps.checkLockHolder. */
   checkLockHolder?: (cellId: string) => string | null
   /** FRO-317: when true, USFM \f...\f* footnotes render below the cell row. */
@@ -2800,8 +2783,6 @@ function EditorRow({
   onAlignmentSeedChange,
   sourceFontSize = 14,
   targetFontSize = 14,
-  assigneeLabel,
-  assigneeNote,
   checkLockHolder,
   showFootnotesInline,
   footnotePanelActive,
@@ -4114,17 +4095,6 @@ function EditorRow({
           )}
           {(isSynthBusy || isSynthError) && (
             <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
-          )}
-          {/* FRO-192: assignee avatar chip — shows initials of the member
-              this cell is assigned to. Tooltip = username + scope label. */}
-          {assigneeLabel && (
-            <AppTooltip content={assigneeNote ? `Assigned to ${assigneeLabel} (${assigneeNote})` : `Assigned to ${assigneeLabel}`}>
-              <InitialsAvatar
-                name={assigneeLabel}
-                size="xs"
-                fallbackClassName="bg-indigo-100 text-[8px] uppercase text-indigo-700 ring-1 ring-indigo-300 dark:bg-indigo-900 dark:text-indigo-300 dark:ring-indigo-700"
-              />
-            </AppTooltip>
           )}
         </div>
 

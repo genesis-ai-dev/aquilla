@@ -63,3 +63,17 @@ export function toErrorResponse(err: unknown): Response {
   const message = err instanceof Error ? err.message : String(err)
   return errorResponse('job_failed', message)
 }
+
+/**
+ * SWARM-TODO(merge): W1-C alias. Same envelope, optional status override
+ * (e.g. 401 for a missing credential while keeping code `permission_denied`).
+ * Fold call sites into `errorResponse` during the W1-A reconciliation pass.
+ */
+export function externalError(
+  code: ExternalErrorCode,
+  message: string,
+  status?: number,
+): Response {
+  if (status === undefined) return errorResponse(code, message)
+  return Response.json({ error: { code, message } }, { status })
+}

@@ -174,6 +174,14 @@ export class CellStore {
   private optimisticEdits = new Map<string, OptimisticEdit>()
   private freshnessFloors = new Map<string, number>()
   private cellVersionById = new Map<string, number>()
+  // Feeds per-cell versions from one store-lifetime counter that reset() never
+  // rewinds. useSyncExternalStore bails out when getCellVersion returns a value
+  // the row already rendered with, so a version number may never be reused: a
+  // per-cell counter that restarts at 0 on reset() can silently re-inflate
+  // (bumpAllCells on audit-stats churn notifies only the audit-changed cells)
+  // and land a real data change on an already-seen number — the row then stays
+  // stale until remount.
+  private versionCounter = 0
   private cellListeners = new Map<string, Set<() => void>>()
   private listListeners = new Set<() => void>()
   private allListeners = new Set<() => void>()
@@ -199,30 +207,39 @@ export class CellStore {
     const userChanged = this.ctx.username !== next.username || this.ctx.requiredValidations !== next.requiredValidations
     this.ctx = next
     if (statsChanged || userChanged) {
-      this.bumpAllCells()
-      this.rebuildDerivedIndexes()
-      // The footer subscribes store-wide (subscribeAll), but editor rows subscribe
-      // per-cell (subscribeCell). emitAll() alone never wakes the per-cell listeners,
-      // so an audit-stats-only change (validate / sparkle-generate) left the row stale
-      // until a manual refresh. Notify the per-cell listeners for the cells whose
-      // audit stats actually changed. The emit set stays small regardless: a targeted
-      // revalidateCellStats shares entry refs so unchanged cells short-circuit on ===,
-      // and even when applyOutboxOverlay rebuilds the whole map during active editing
-      // (defeating the ref fast path), the value comparison still filters to the truly
-      // changed cells. The O(N) diff is no worse than the bumpAllCells() pass above.
-      if (statsChanged) {
-        const changed = diffChangedAuditCellIds(prevStats, next.auditStats)
-        if (changed.size > 0) {
-          this.emit(changed) // per-cell + list + all listeners
-          return
-        }
+      // Invariant: a per-cell version bump is ALWAYS paired with a per-cell
+      // emit of the same set. Editor rows read useSyncExternalStore over
+      // getCellVersion; a bump without an emit lets a parent-driven render
+      // consume the new version number with the data of that moment, and any
+      // later same-version data change looks like "no change" to React — the
+      // row then stays stale until remount. The old bumpAllCells()-but-emit-
+      // only-the-changed-cells shape here was exactly that: audit-stats churn
+      // during a batch silently inflated every cell's version.
+      if (userChanged) {
+        this.bumpAllCells()
+        this.rebuildDerivedIndexes()
+        this.emit(this.order)
+        return
       }
-      this.emitAll()
+      const changed = diffChangedAuditCellIds(prevStats, next.auditStats)
+      this.bumpCells(changed)
+      this.fileVersion++
+      this.rebuildDerivedIndexes()
+      if (changed.size > 0) {
+        this.emit(changed) // per-cell + list + all listeners
+      } else {
+        this.emitAll()
+      }
     }
   }
 
   reset(projectId: string | null, fileId: string | null): void {
     this.ctx = { ...this.ctx, projectId, fileId }
+    // Rows still subscribed to the outgoing cells must hear about the reset —
+    // emitAll() alone only wakes subscribeAll consumers (footer/table shell),
+    // and a per-cell subscriber left unnotified keeps rendering the old file's
+    // content until something else touches its cell.
+    const clearedIds = this.order
     this.order = []
     this.sourceOrder = []
     this.targetOrder = []
@@ -240,7 +257,7 @@ export class CellStore {
     this.rebuildDerivedIndexes()
     this.listVersion++
     this.fileVersion++
-    this.emitAll()
+    this.emit(clearedIds)
   }
 
   subscribeList = (listener: () => void): (() => void) => {
@@ -680,7 +697,17 @@ export class CellStore {
       this.targetById.set(cellId, { ...existing, value: patch.value, valueHtml: patch.valueHtml ?? null, aiDrafted: patch.aiDrafted ?? false })
     } else {
       const source = this.sourceById.get(cellId)
-      if (!source) return
+      // No source row (mid-refetch/reset window): the shadow written above is
+      // still live data that getCellView overlays, so fall through to the
+      // bump + emit below — an early return here left the write invisible to
+      // the subscribed row (stale until remount) while the footer moved on.
+      if (!source) {
+        this.rebuildDerivedIndexes()
+        this.bumpCells([cellId])
+        this.fileVersion++
+        this.emit([cellId])
+        return
+      }
       this.targetById.set(cellId, {
         ...source,
         side: "target",
@@ -789,6 +816,17 @@ export class CellStore {
       cell.status = deriveStatus(optimistic.value, false)
       cell.aiDrafted = optimistic.aiDrafted ?? false
       cell.hasPendingEdit = true
+    }
+    if (pending || optimistic) {
+      // The overlay changed `translated`/`status`; recompute validationStatus
+      // from the overlaid text so the row's aria/ring can't keep reporting
+      // "empty" (or a stale validator state) while showing the fresh value.
+      cell.validationStatus = deriveValidationStatus(
+        cell.status,
+        cell.activeValidators,
+        this.ctx.username,
+        this.ctx.requiredValidations,
+      )
     }
   }
 
@@ -905,7 +943,7 @@ export class CellStore {
 
   private bumpCells(ids: Iterable<string>): void {
     for (const id of ids) {
-      this.cellVersionById.set(id, (this.cellVersionById.get(id) ?? 0) + 1)
+      this.cellVersionById.set(id, ++this.versionCounter)
     }
   }
 
@@ -1317,16 +1355,34 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   return { store, revalidate, revalidateCell, applyOptimisticTargetEdit, isLoading, isError }
 }
 
+/**
+ * Anchor a store read to a version counter so the React Compiler keys the
+ * surrounding memo on the version. The compiler infers memoization deps from
+ * the values REFERENCED in the computation and DISCARDS manual dep arrays —
+ * `useMemo(() => store.read(), [store, version])` compiles to a cache guarded
+ * only by `store`, so the read is frozen at its mount-time value and the row
+ * stays stale forever while the store (and footer) move on. Routing every
+ * version-keyed read through this function makes the version an operand the
+ * compiler must track.
+ */
+export function readAtVersion<T>(version: number, read: () => T): T {
+  if (Number.isNaN(version)) throw new Error("unreachable: version counters are integers")
+  return read()
+}
+
 export function useCellIds(store: CellStore, orderedBy?: OrderedBy, mediaLayer = false): readonly string[] {
   const version = useSyncExternalStore(store.subscribeList, store.getListVersion, () => 0)
-  return useMemo(() => store.getCellIdsForLens(orderedBy, mediaLayer), [mediaLayer, orderedBy, store, version])
+  return useMemo(
+    () => readAtVersion(version, () => store.getCellIdsForLens(orderedBy, mediaLayer)),
+    [mediaLayer, orderedBy, store, version],
+  )
 }
 
 export function useCellView(store: CellStore, cellId: string): CellViewModel | null {
   const subscribe = useCallback((listener: () => void) => store.subscribeCell(cellId, listener), [store, cellId])
   const getSnapshot = useCallback(() => store.getCellVersion(cellId), [store, cellId])
   const version = useSyncExternalStore(subscribe, getSnapshot, () => 0)
-  return useMemo(() => store.getCellView(cellId), [cellId, store, version])
+  return useMemo(() => readAtVersion(version, () => store.getCellView(cellId)), [cellId, store, version])
 }
 
 export function useCellStoreVersion(store: CellStore): number {
@@ -1335,7 +1391,7 @@ export function useCellStoreVersion(store: CellStore): number {
 
 export function useCellStoreViews(store: CellStore): CellViewModel[] {
   const version = useCellStoreVersion(store)
-  return useMemo(() => store.getAllCellViews(), [store, version])
+  return useMemo(() => readAtVersion(version, () => store.getAllCellViews()), [store, version])
 }
 
 function deriveStatus(translated: string, validated: boolean): CellData["status"] {

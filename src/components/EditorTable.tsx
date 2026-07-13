@@ -19,6 +19,7 @@ import type { CellData } from "@/hooks/useCells"
 import {
   type CellFootnoteDetails,
   type CellStore,
+  readAtVersion,
   useCellIds,
   useCellStoreVersion,
   useCellView,
@@ -1158,7 +1159,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // so the effect only fires on actual row changes, not every scrolled pixel.
   const firstVisibleRef = useMemo(() => {
     if (!firstVisibleCellId) return null
-    return cellStore.getCellView(firstVisibleCellId)?.group || null
+    return readAtVersion(cellStoreVersion, () => cellStore.getCellView(firstVisibleCellId)?.group || null)
   }, [cellStore, cellStoreVersion, firstVisibleCellId])
   useEffect(() => {
     onVisibleRefChange?.(firstVisibleRef)
@@ -1168,7 +1169,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (!onVisibleFootnotesChange || displayCellIds.length === 0) return []
 
     const indexes = viewableIndexes.length > 0 ? viewableIndexes : [firstVisibleIndex]
-    return indexes
+    return readAtVersion(cellStoreVersion, () => indexes
       .map((index) => {
         const cellId = displayCellIds[index]
         const cell = cellId ? cellStore.getCellView(cellId) : null
@@ -1188,7 +1189,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           numberOffset: offsets.target,
         }
       })
-      .filter((entry): entry is VisibleFootnoteEntry => entry !== null)
+      .filter((entry): entry is VisibleFootnoteEntry => entry !== null))
   }, [cellStore, cellStoreVersion, displayCellIds, firstVisibleIndex, hoveredFootnote, onVisibleFootnotesChange, viewableIndexes])
 
   useEffect(() => {

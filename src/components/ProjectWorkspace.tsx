@@ -11,7 +11,7 @@ import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs
 import { clearLastLocation, readLastLocation, writeLastLocation } from "@/lib/frontier/last-location-store"
 import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
-import { useActiveCellStore, useCellStoreVersion, type CellStore, type CellSummary } from "@/hooks/useActiveCellStore"
+import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellStore, type CellSummary } from "@/hooks/useActiveCellStore"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { triggerLinkSync } from "@/lib/sync/archive"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
@@ -894,16 +894,16 @@ export function ProjectWorkspace() {
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
   })
   const cellStoreVersion = useCellStoreVersion(cellStore)
-  const cellSummaries = useMemo(() => cellStore.getAllSummaries(), [cellStore, cellStoreVersion])
-  const localFileProgress = useMemo(() => cellStore.getFileProgressSnapshot(), [cellStore, cellStoreVersion])
+  const cellSummaries = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()), [cellStore, cellStoreVersion])
+  const localFileProgress = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getFileProgressSnapshot()), [cellStore, cellStoreVersion])
   useEffect(() => {
     if (!project?.id || !activeFileId || !localFileProgress) return
-    setLocalFileProgress(
+    readAtVersion(cellStoreVersion, () => setLocalFileProgress(
       project.id,
       activeFileId,
       localFileProgress,
       cellStore.getPendingProgressEventIds(),
-    )
+    ))
   }, [activeFileId, cellStore, cellStoreVersion, localFileProgress, project?.id])
   const getActiveCells = useCallback(() => cellStore.getAllCellViews(), [cellStore])
   const getActiveCell = useCallback((cellId: string) => cellStore.getCellView(cellId), [cellStore])
@@ -1302,7 +1302,7 @@ export function ProjectWorkspace() {
   // VTT blob round-trip.
   const videoCues = useMemo(() => {
     if (!isSubtitleFile || !videoSrc || cellSummaries.length === 0) return []
-    return extractCuesFromCells(cellStore.getAllCellViews())
+    return readAtVersion(cellStoreVersion, () => extractCuesFromCells(cellStore.getAllCellViews()))
   }, [cellStore, cellStoreVersion, cellSummaries.length, isSubtitleFile, videoSrc])
 
   const videoStartOffset = videoAttachment.videoStartOffset ?? 0
@@ -2201,7 +2201,7 @@ export function ProjectWorkspace() {
       pendingPresenceJumpRef.current = null
       return
     }
-    const idx = cellStore.findIndexByCellId(pending.cellId)
+    const idx = readAtVersion(cellStoreVersion, () => cellStore.findIndexByCellId(pending.cellId!))
     if (idx < 0) return
     pendingPresenceJumpRef.current = null
     editorRef.current?.scrollToCellIndex(idx)
@@ -2238,7 +2238,7 @@ export function ProjectWorkspace() {
   useEffect(() => {
     const cellId = pendingCellScrollRef.current
     if (!cellId || cellStore.getCellCount() === 0) return
-    const idx = cellStore.findIndexByCellId(cellId)
+    const idx = readAtVersion(cellStoreVersion, () => cellStore.findIndexByCellId(cellId))
     if (idx >= 0) {
       pendingCellScrollRef.current = null
       editorRef.current?.scrollToCellIndex(idx)
@@ -2251,7 +2251,7 @@ export function ProjectWorkspace() {
     : []
   const drawerCellsByFile = useMemo(() => {
     const map = new Map<string, CellData[]>()
-    if (drawerRuleId && activeFileId) map.set(activeFileId, getActiveCells())
+    if (drawerRuleId && activeFileId) map.set(activeFileId, readAtVersion(cellStoreVersion, getActiveCells))
     return map
   }, [activeFileId, cellStoreVersion, drawerRuleId, getActiveCells])
 
@@ -3318,7 +3318,7 @@ export function ProjectWorkspace() {
     if (!frontierSession?.jwt) return
     if (cellSummaries.length === 0) return
     let cancelled = false
-    const cells = getActiveCells()
+    const cells = readAtVersion(cellStoreVersion, getActiveCells)
     void eagerlyPrefetchPeaks({
       cells, project, session: frontierSession, bins: 320,
       isCancelled: () => cancelled,
@@ -3438,7 +3438,7 @@ export function ProjectWorkspace() {
     recordingCellId !== null ||
     exportOpen
   const legacyCells = useMemo(
-    () => legacyCellsNeeded ? getActiveCells() : EMPTY_CELL_DATA,
+    () => legacyCellsNeeded ? readAtVersion(cellStoreVersion, getActiveCells) : EMPTY_CELL_DATA,
     [cellStoreVersion, getActiveCells, legacyCellsNeeded],
   )
 

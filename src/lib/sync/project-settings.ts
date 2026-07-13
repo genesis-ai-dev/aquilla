@@ -87,6 +87,11 @@ export interface ProjectWideSettings {
    * See docs/superpowers/specs/2026-07-06-dcs-importer-design.md §8.
    */
   dcsUpstream?: import("@/lib/dcs/types").DcsCursor
+  /**
+   * AQU-538: non-default target-language lanes ('' is always implicit, never stored).
+   * Opaque BCP-47-ish tags; order = display order.
+   */
+  targetLanes?: string[]
 }
 
 export interface ProjectSettingsResponse {

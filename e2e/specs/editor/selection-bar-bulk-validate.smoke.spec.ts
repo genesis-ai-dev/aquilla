@@ -15,8 +15,17 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * Clicking it emits a validate event for each selected cell.
  * After bulk validation a success toast is shown (role="status").
  *
- * This spec: selects the first cell → clicks "Validate" in the SelectionBar
- * → asserts the success status message appears.
+ * Bulk validate only counts cells that are eligible AND not already validated
+ * by the current user (isBulkValidationEligible + !activeValidators.includes).
+ * A direct human edit now AUTO-VALIDATES the cell for the editor
+ * (EditorTable.tsx, "Auto validate on human edit"), so a freshly edited cell
+ * is already validated and would make the button disabled ("Nothing eligible").
+ * To exercise bulk Validate we therefore first edit the cell (auto-validates),
+ * then remove that validation so the cell becomes a translated, human-touched,
+ * not-yet-validated-by-me cell — the state bulk Validate is built for.
+ *
+ * This spec: edit cell 0 → remove the auto-validation → select cell 0 →
+ * click "Validate" in the SelectionBar → assert the success status message.
  */
 test("SelectionBar bulk validate marks selected cells as validated", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -30,12 +39,28 @@ test("SelectionBar bulk validate marks selected cells as validated", async ({ al
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Edit the first cell to give it a non-empty translation (required to validate).
+  // Edit the first cell to give it a non-empty translation (required to
+  // validate). This auto-validates the cell for alice.
   await ws.editCell(0, "translated text")
 
-  // Select the first cell via its selection checkbox.
   const row = ws.cellRow(0)
   await row.scrollIntoViewIfNeeded()
+
+  // Remove alice's auto-validation so the cell is eligible for bulk Validate
+  // (mirrors validation/cell-unvalidate.smoke.spec.ts). Click the already-
+  // validated indicator to open the popover, then the trash button. Wait for
+  // aria-pressed="false" so the removal has fully round-tripped before we
+  // rely on the SelectionBar seeing an unvalidated cell.
+  await row.hover()
+  const healthBtn = row.getByRole("button", { name: /Validated/i }).first()
+  await expect(healthBtn).toHaveAttribute("aria-pressed", "true", { timeout: 10_000 })
+  await healthBtn.click()
+  const removeBtn = alice.locator('[data-tooltip="Remove your validation"] button, button[aria-label="Remove your validation"]')
+  await expect(removeBtn).toBeVisible({ timeout: 8_000 })
+  await removeBtn.click()
+  await expect(healthBtn).toHaveAttribute("aria-pressed", "false", { timeout: 15_000 })
+
+  // Select the first cell via its selection checkbox.
   await row.hover()
   const selCheckbox = row.getByRole("checkbox", { name: /Select cell/i })
   await expect(selCheckbox).toBeVisible({ timeout: 3_000 })

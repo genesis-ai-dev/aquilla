@@ -103,6 +103,25 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
     ).length,
     [selectedCells, username],
   )
+  // When nothing is validatable, explain the actual reason rather than always
+  // blaming AI drafts. Priority: everything already validated by me → AI
+  // drafts needing individual review → cells still lacking a translation.
+  const validateDisabledReason = useMemo(() => {
+    if (validatableCount > 0) return null
+    const alreadyMine = selectedCells.filter(
+      (c) => isBulkValidationEligible(c) && c.activeValidators.includes(username),
+    ).length
+    const aiDrafts = selectedCells.filter(
+      (c) => c.translated.trim() && c.targetEventId && c.aiDrafted,
+    ).length
+    const needTranslation = selectedCells.filter((c) => !c.translated.trim()).length
+    if (alreadyMine > 0 && aiDrafts === 0 && needTranslation === 0) {
+      return "All selected cells are already validated by you"
+    }
+    if (aiDrafts > 0) return "Nothing eligible — untouched AI drafts require individual review"
+    if (needTranslation > 0) return "Selected cells need a translation first"
+    return "Nothing eligible to validate"
+  }, [validatableCount, selectedCells, username])
   const allHaveTranslation = selectedCells.length > 0 && selectedCells.every((c) => c.translated.trim())
   const voiceableCount = useMemo(
     () => selectedCells.filter((c) => c.type !== "paratext" && c.translated.trim()).length,
@@ -295,8 +314,8 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
         onClick={onValidate}
         disabled={isBusy || validatableCount === 0}
         title={
-          validatableCount === 0
-            ? "Nothing eligible — untouched AI drafts require individual review"
+          validateDisabledReason
+            ? validateDisabledReason
             : `Validate ${validatableCount} cell${validatableCount === 1 ? "" : "s"}`
         }
       >

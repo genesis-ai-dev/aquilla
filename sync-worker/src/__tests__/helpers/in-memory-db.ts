@@ -609,8 +609,12 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       const fid = args[1] as string
       const hasSide = normalized.includes("AND side = ?")
       const inMatch = normalized.match(/AND cell_id IN \(([^)]*)\)/)
+      // AQU-538: optional lane filter — target rows only; source rows are
+      // always included. Bind order places it AFTER the cellIds list (matches
+      // the production query builder in cells-read-route.ts).
+      const hasLane = normalized.includes("AND (side = 'source' OR target_lang = ?)")
       const hasTimecodes = normalized.includes("start_ms") && normalized.includes("end_ms")
-      // bind order: [pid, fid, side?, ...cellIds]
+      // bind order: [pid, fid, side?, ...cellIds, lane?]
       let bindIdx = 2
       const side: string | null = hasSide ? (args[bindIdx++] as string) : null
       const cellIdsFilter: string[] | null = inMatch
@@ -621,13 +625,15 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
             return ids
           })()
         : null
+      const lane: string | null = hasLane ? (args[bindIdx++] as string) : null
       return db.cells
         .filter(
           (c) =>
             c.project_id === pid &&
             c.file_id === fid &&
             (side === null || c.side === side) &&
-            (cellIdsFilter === null || cellIdsFilter.includes(c.cell_id)),
+            (cellIdsFilter === null || cellIdsFilter.includes(c.cell_id)) &&
+            (lane === null || c.side === "source" || laneOf(c) === lane),
         )
         .map((c) => ({
           cell_id: c.cell_id,

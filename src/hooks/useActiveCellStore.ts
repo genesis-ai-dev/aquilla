@@ -203,8 +203,11 @@ export class CellStore {
       // per-cell (subscribeCell). emitAll() alone never wakes the per-cell listeners,
       // so an audit-stats-only change (validate / sparkle-generate) left the row stale
       // until a manual refresh. Notify the per-cell listeners for the cells whose
-      // audit stats actually changed — validate/sparkle touch only a handful, and the
-      // reference-equality fast path keeps the diff cheap on Bible-sized files.
+      // audit stats actually changed. The emit set stays small regardless: a targeted
+      // revalidateCellStats shares entry refs so unchanged cells short-circuit on ===,
+      // and even when applyOutboxOverlay rebuilds the whole map during active editing
+      // (defeating the ref fast path), the value comparison still filters to the truly
+      // changed cells. The O(N) diff is no worse than the bumpAllCells() pass above.
       if (statsChanged) {
         const changed = diffChangedAuditCellIds(prevStats, next.auditStats)
         if (changed.size > 0) {

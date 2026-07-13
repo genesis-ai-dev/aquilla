@@ -482,6 +482,13 @@ export function ProjectSettings() {
   // account's role. Rendered as an enriched inline alert (names the account,
   // offers an account switch) rather than the bare header string.
   const [permissionBlocked, setPermissionBlocked] = useState(false)
+  // Clear the permission alert when the active account changes (e.g. the user
+  // clicks "switch account" in the alert itself) or the current account gains
+  // edit permission — otherwise the stale alert re-renders and misattributes the
+  // denial to the newly-active, possibly-authorized account.
+  useEffect(() => {
+    setPermissionBlocked(false)
+  }, [session?.username, canEditShared])
   // AQU-408: success message reflects the actual delta saved (a brief
   // enumeration of which fields changed), not a generic "Saved". Auto-dismisses
   // like the sibling `conflictBy` notice above. The modal/page itself stays

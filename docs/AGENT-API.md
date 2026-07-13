@@ -4,6 +4,31 @@ Status: **draft v2, post-review** · 2026-07-13 · Ryder + Claude
 Linear: [AQU-533](https://linear.app/frontierrandd/issue/AQU-533/expose-a-public-permission-checked-api-agentic-import-admin-partner)
 Related: AQU-550 (Biblica), AQU-525 / AQU-532 (WAHA JSON import)
 
+## Implementation status (2026-07-13)
+
+This document is the **design spec**. For what is actually implemented and callable today, see
+the practitioner guide: [`docs/api/agent-api.md`](api/agent-api.md) (plus
+[`docs/api/examples/blackfoot-import.md`](api/examples/blackfoot-import.md) and
+[`docs/api/openapi.yaml`](api/openapi.yaml)). Status against the §6 release gates:
+
+| # | Gate | Status |
+| --- | --- | --- |
+| 1 | Credential creation, scoping, expiry, revocation | **Done** — `auth-worker/src/routes/credentials.ts` |
+| 2 | Read project state via MCP and REST | **Done** — `sync-worker/src/external/read-routes.ts`, `mcp-handlers.ts` |
+| 3 | Update translations via commands + changesets | **Done** for `SetTranslation`; `CreateProject`/`UpdateProjectSettings`/`LinkMedia` **not implemented** |
+| 4 | Upload and preserve a source artifact | **Done**, but worker-proxied bytes, not signed URLs (D10 not yet built) |
+| 5 | One supported end-to-end import: Blackfoot / USFM | **Done** via `PlanImport` (REST only, capped 5,000 cells/changeset) — see the worked example |
+| 6 | Ask/act changeset behavior incl. one-time approval + `plan_stale` | **Done** — `sync-worker/src/external/{prepare,commit}.ts`, `auth-worker/src/routes/changeset-approvals.ts`, `src/pages/ApproveChangeset/` |
+| 7 | Permission-parity tests | **Not verified by this pass** — commit paths reuse the in-app `/events` perimeter (same role gates), but no dedicated parity test suite was located |
+| 8 | Provenance envelope + execution receipts | **Partial** — envelope stamped on changeset-committed events only; `channel` is hardcoded `"rest"` (doesn't yet distinguish MCP), and there is no separate audit ledger for reads/searches/discarded plans |
+| 9 | Minimal REST + MCP docs with one worked example | **Done by this pass** — `docs/api/agent-api.md`, `docs/api/openapi.yaml`, `docs/api/examples/blackfoot-import.md` |
+| 10 | Cold-start test | **Not run** — no evidence of an executed cold-start session in this repo |
+
+Also not yet implemented, called out explicitly rather than left silent: `run_checks`, jobs
+(`get_job`), export (`prepare_export`/`get_export`), OAuth 2.1, rate limiting, and MCP tools for
+artifacts/`PlanImport` (REST-only today). Full detail in `docs/api/agent-api.md` §8 and the
+running list in `docs/swarm/AGENT-API-TRACES.md`.
+
 ---
 
 ## 1. Product thesis and user outcomes

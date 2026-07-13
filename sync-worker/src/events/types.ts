@@ -243,6 +243,13 @@ export interface EventPayloads {
   'cell.validate': {
     /** The target.cell.commit / target.cell.create event being validated. */
     editEventId: string
+    /**
+     * AQU-538: target-language lane of the validated commit. Absent/'' =
+     * default lane — same convention as target.cell.commit. A user's standing
+     * validation is per-lane: validating the same cell in two lanes yields two
+     * cell_validators rows.
+     */
+    targetLang?: string
   }
   'cell.unvalidate': {
     /** The target commit event whose validation is being withdrawn. */
@@ -255,6 +262,11 @@ export interface EventPayloads {
      * caller must have maintainer (600) or above.
      */
     targetUsername?: string
+    /**
+     * AQU-538: target-language lane whose validation is withdrawn. Absent/'' =
+     * default lane — same convention as target.cell.commit.
+     */
+    targetLang?: string
   }
 
   // ── QA rule waivers ────────────────────────────────────────────────────

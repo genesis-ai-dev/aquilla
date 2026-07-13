@@ -397,12 +397,13 @@ CREATE TABLE file_section_progress (
     file_id             TEXT NOT NULL,
     scope               TEXT NOT NULL CHECK (scope IN ('file', 'section')),
     section_key         TEXT NOT NULL DEFAULT '',
+    target_lang         TEXT NOT NULL DEFAULT '',
     total_count         INTEGER NOT NULL DEFAULT 0 CHECK (total_count >= 0),
     filled_count        INTEGER NOT NULL DEFAULT 0 CHECK (filled_count >= 0),
     validator_histogram JSONB NOT NULL DEFAULT '{}'::jsonb,
     revision            BIGINT NOT NULL DEFAULT 0,
     updated_at          BIGINT NOT NULL,
-    PRIMARY KEY (project_id, file_id, scope, section_key),
+    PRIMARY KEY (project_id, file_id, scope, section_key, target_lang),
     CHECK (
       (scope = 'file' AND section_key = '') OR
       (scope = 'section' AND section_key <> '')
@@ -412,13 +413,14 @@ CREATE TABLE file_section_progress (
 CREATE INDEX idx_file_section_progress_file_revision ON file_section_progress(project_id, file_id, revision);
 
 CREATE TABLE cell_validators (
-    project_id TEXT NOT NULL,
-    file_id    TEXT NOT NULL,
-    cell_id    TEXT NOT NULL,
-    event_id   TEXT NOT NULL,
-    username   TEXT NOT NULL,
-    decided_ts BIGINT NOT NULL,
-    PRIMARY KEY (project_id, file_id, cell_id, username)
+    project_id  TEXT NOT NULL,
+    file_id     TEXT NOT NULL,
+    cell_id     TEXT NOT NULL,
+    target_lang TEXT NOT NULL DEFAULT '',
+    event_id    TEXT NOT NULL,
+    username    TEXT NOT NULL,
+    decided_ts  BIGINT NOT NULL,
+    PRIMARY KEY (project_id, file_id, cell_id, target_lang, username)
 );
 
 CREATE TABLE cell_waivers (

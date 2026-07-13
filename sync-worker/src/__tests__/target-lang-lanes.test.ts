@@ -189,7 +189,9 @@ describe('projection — two lanes on one cell', () => {
       ev({ kind: 'source.cell.create', id: 'src-1', payload: { cellId: CELL, value: 'Hello' } }),
       ev({ kind: 'target.cell.commit', id: 'tc-fr', parentId: 'src-1', payload: { value: 'Bonjour', targetLang: 'fr' } }),
       ev({ kind: 'target.cell.commit', id: 'tc-swh', parentId: 'src-1', payload: { value: 'Habari', targetLang: 'swh' } }),
-      ev({ kind: 'cell.validate', author: 'reviewer', payload: { editEventId: 'tc-fr' } }),
+      // AQU-538 slice 2: validate events carry the lane; validating fr's head
+      // marks only the fr row (a lane-less validate would address the '' lane).
+      ev({ kind: 'cell.validate', author: 'reviewer', payload: { editEventId: 'tc-fr', targetLang: 'fr' } }),
     ])
     const targets = (await laneRows()).filter((r) => r.side === 'target')
     expect(targets.find((r) => r.target_lang === 'fr')!.validated).toBe(1)

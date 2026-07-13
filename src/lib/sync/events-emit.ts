@@ -161,11 +161,6 @@ export interface CellCommitInput {
   valueHtml?: string
   author: string
   clientTs?: number
-  /**
-   * AQU-538: the active target LANE. `''`/undefined = default lane and is
-   * OMITTED from the wire payload, so N=1 commits are byte-identical.
-   */
-  targetLang?: string
   /** When true, tags the payload with `ai_suggestion: true` to record
    *  `cell.commit.llm-accept` provenance. Normal (human-typed) commits
    *  omit this field entirely — the generic commit path is unaffected. */

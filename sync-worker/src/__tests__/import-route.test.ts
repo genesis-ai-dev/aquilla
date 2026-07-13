@@ -77,29 +77,66 @@ async function makeImportRequest(
   })
 }
 
-describe('POST /import — server_seq is race-safe', () => {
-  it('completion marker emits no events or projection rewrite', async () => {
-    const token = await leadToken()
-    const { db, snapshot } = await makeTestDb()
-    const request = new Request('https://worker/import', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        projectId: PROJECT_ID,
-        fileId: FILE_ID,
-        cells: [],
-        complete: true,
-      }),
-    })
+async function makeCompletionRequest(token: string): Promise<Request> {
+  return new Request('https://worker/import', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      projectId: PROJECT_ID,
+      fileId: FILE_ID,
+      cells: [],
+      complete: true,
+    }),
+  })
+}
 
-    const response = await handleBulkImportRequest(request, makeEnv(db))
+describe('POST /import — server_seq is race-safe', () => {
+  it('defers derived rollups until one idempotent completion request', async () => {
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+
+    const first = await makeImportRequest(token, {
+      idPrefix: 'A',
+      cellCount: 3,
+      includeFile: true,
+    })
+    const second = await makeImportRequest(token, {
+      idPrefix: 'B',
+      cellCount: 2,
+    })
+    expect((await handleBulkImportRequest(first, makeEnv(db)))?.status).toBe(200)
+    expect((await handleBulkImportRequest(second, makeEnv(db)))?.status).toBe(200)
+
+    // Data chunks are the hot path: they write events/cells only and perform
+    // no growing full-file scans or progress rewrites.
+    expect(await rows('file_section_progress')).toHaveLength(0)
+    expect((await rows<any>('files'))[0].cell_count).toBe(0)
+    const eventCountBeforeCompletion = (await rows('events')).length
+
+    const response = await handleBulkImportRequest(
+      await makeCompletionRequest(token),
+      makeEnv(db),
+    )
 
     expect(response?.status).toBe(200)
     expect(await response?.json()).toEqual({ accepted: 0, fileId: FILE_ID })
-    expect((await snapshot()).events).toHaveLength(0)
+    expect(await rows('events')).toHaveLength(eventCountBeforeCompletion)
+    expect((await rows<any>('files'))[0].cell_count).toBe(5)
+    expect(await rows('file_section_progress')).toHaveLength(1)
+
+    // A dropped response can make the browser retry finalization. Repeating it
+    // must not emit events or duplicate/corrupt the derived rows.
+    const retry = await handleBulkImportRequest(
+      await makeCompletionRequest(token),
+      makeEnv(db),
+    )
+    expect(retry?.status).toBe(200)
+    expect(await rows('events')).toHaveLength(eventCountBeforeCompletion)
+    expect(await rows('file_section_progress')).toHaveLength(1)
+    expect((await rows<any>('files'))[0].cell_count).toBe(5)
   })
 
   it('two concurrent imports for the same project produce strictly distinct server_seqs', async () => {
@@ -231,8 +268,15 @@ describe('POST /import — cells land in Postgres projection (AQU-135)', () => {
     expect(cellRows.every((c: any) => c.side === 'source')).toBe(true)
     expect(cellRows.every((c: any) => c.file_id === FILE_ID)).toBe(true)
 
-    // files row must exist with accurate cell_count (deferred recompute runs
-    // once at the end of the batch — AQU-135 fix).
+    // The explicit completion marker performs the one authoritative rollup
+    // after every data chunk has landed.
+    const completion = await handleBulkImportRequest(
+      await makeCompletionRequest(token),
+      makeEnv(db),
+    )
+    expect(completion?.status).toBe(200)
+
+    // files row must exist with accurate cell_count after finalization.
     const fileRows = await rows('files')
     expect(fileRows).toHaveLength(1)
     expect(fileRows[0]).toMatchObject({

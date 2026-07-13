@@ -175,8 +175,94 @@ export function fullProgressRecomputeStmts(
   updatedAt: number,
 ): AquillaStatement[] {
   return [
-    fileProgressRecomputeStmt(db, projectId, fileId, updatedAt),
-    clearSectionProgressStmt(db, projectId, fileId),
-    allSectionsProgressRecomputeStmt(db, projectId, fileId, updatedAt),
+    db.prepare(
+      `WITH paired AS MATERIALIZED (
+         SELECT TRIM(SPLIT_PART(COALESCE(s.canonical_ref, ''), ':', 1)) AS section_key,
+                CASE WHEN TRIM(COALESCE(t.value, '')) <> '' THEN 1 ELSE 0 END AS filled,
+                LEAST(
+                  COALESCE(t.endorsement_count, 0),
+                  ${MAX_VALIDATOR_HISTOGRAM_BUCKET}
+                ) AS validator_bucket
+           FROM cells s
+           LEFT JOIN cells t
+             ON t.project_id = s.project_id
+            AND t.file_id = s.file_id
+            AND t.cell_id = s.cell_id
+            AND t.side = 'target'
+          WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
+       ), summaries AS (
+         SELECT 'file'::text AS scope,
+                ''::text AS section_key,
+                COUNT(*)::integer AS total_count,
+                COALESCE(SUM(filled), 0)::integer AS filled_count
+           FROM paired
+         UNION ALL
+         SELECT 'section'::text AS scope,
+                section_key,
+                COUNT(*)::integer AS total_count,
+                COALESCE(SUM(filled), 0)::integer AS filled_count
+           FROM paired
+          WHERE section_key <> ''
+          GROUP BY section_key
+       ), bucket_counts AS (
+         SELECT ''::text AS section_key,
+                validator_bucket,
+                COUNT(*)::integer AS bucket_count
+           FROM paired
+          GROUP BY validator_bucket
+         UNION ALL
+         SELECT section_key,
+                validator_bucket,
+                COUNT(*)::integer AS bucket_count
+           FROM paired
+          WHERE section_key <> ''
+          GROUP BY section_key, validator_bucket
+       ), histograms AS (
+         SELECT section_key,
+                jsonb_object_agg(validator_bucket::text, bucket_count) AS validator_histogram
+           FROM bucket_counts
+          GROUP BY section_key
+       ), watermark AS (
+         SELECT GREATEST(
+           COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ? AND file_id = ?), 0),
+           COALESCE((SELECT rebuilt_seq FROM project_seq_counters WHERE project_id = ?), 0)
+         )::bigint AS revision
+       )
+       INSERT INTO file_section_progress (
+         project_id, file_id, scope, section_key, total_count, filled_count,
+         validator_histogram, revision, updated_at
+       )
+       SELECT ?, ?, summaries.scope, summaries.section_key,
+              summaries.total_count, summaries.filled_count,
+              COALESCE(histograms.validator_histogram, '{}'::jsonb),
+              watermark.revision, ?
+         FROM summaries
+         LEFT JOIN histograms USING (section_key)
+         CROSS JOIN watermark
+       ON CONFLICT (project_id, file_id, scope, section_key) DO UPDATE SET
+         total_count = excluded.total_count,
+         filled_count = excluded.filled_count,
+         validator_histogram = excluded.validator_histogram,
+         revision = excluded.revision,
+         updated_at = excluded.updated_at`,
+    ).bind(
+      projectId, fileId,
+      projectId, fileId, projectId,
+      projectId, fileId, updatedAt,
+    ),
+    db.prepare(
+      `DELETE FROM file_section_progress progress
+        WHERE progress.project_id = ?
+          AND progress.file_id = ?
+          AND progress.scope = 'section'
+          AND NOT EXISTS (
+            SELECT 1
+              FROM cells source
+             WHERE source.project_id = progress.project_id
+               AND source.file_id = progress.file_id
+               AND source.side = 'source'
+               AND TRIM(SPLIT_PART(COALESCE(source.canonical_ref, ''), ':', 1)) = progress.section_key
+          )`,
+    ).bind(projectId, fileId),
   ]
 }

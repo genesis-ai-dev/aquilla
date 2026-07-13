@@ -307,6 +307,36 @@ describe("chapters scope", () => {
   })
 })
 
+// ── AQU-538 (§3.5): lane select ──────────────────────────────────────────────
+describe("lane select (AQU-538)", () => {
+  it("is hidden when the project has no extra lanes", () => {
+    render(<AssignModal {...BASE_PROPS} />)
+    expect(screen.queryByRole("combobox", { name: /language lane/i })).toBeNull()
+  })
+
+  it("renders and pre-fills from defaultLane when the project has extra lanes", () => {
+    render(<AssignModal {...BASE_PROPS} targetLanes={["es", "fr"]} defaultLane="fr" />)
+    const laneTrigger = screen.getByRole("combobox", { name: /language lane/i })
+    expect(laneTrigger.textContent).toMatch(/fr/i)
+  })
+
+  it("threads the pre-filled lane into createAssignment as targetLang", async () => {
+    render(<AssignModal {...BASE_PROPS} targetLanes={["es", "fr"]} defaultLane="es" />)
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /assign/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][0].targetLang).toBe("es")
+  })
+
+  it("omits the lane (default) when defaultLane is '' even with extra lanes present", async () => {
+    render(<AssignModal {...BASE_PROPS} targetLanes={["es", "fr"]} defaultLane="" />)
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /assign/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][0].targetLang).toBeUndefined()
+  })
+})
+
 // ── Error: no member selected ────────────────────────────────────────────────
 describe("validation", () => {
   it("assign button is disabled when no member is selected", () => {

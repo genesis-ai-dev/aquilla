@@ -43,8 +43,8 @@ describe("AssignedToMe", () => {
     // One org-level request (GET /orgs/:orgId/assignments/mine) replaces the
     // old per-project fan-out — rows arrive with projectName attached.
     mockGetMy.mockResolvedValue([
-      { assignmentId: "a1", projectId: "pa", projectName: "John", scopeKind: "books", scopeLabel: "John", deadline: "2026-06-30", note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
-      { assignmentId: "a2", projectId: "pb", projectName: "Mark", scopeKind: "chapters", scopeLabel: "Mark · MRK 1", deadline: null, note: null, cellsTotal: 5, cellsDone: 5, createdAt: 100 },
+      { assignmentId: "a1", projectId: "pa", projectName: "John", scopeKind: "books", scopeLabel: "John", targetLang: "", deadline: "2026-06-30", note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
+      { assignmentId: "a2", projectId: "pb", projectName: "Mark", scopeKind: "chapters", scopeLabel: "Mark · MRK 1", targetLang: "", deadline: null, note: null, cellsTotal: 5, cellsDone: 5, createdAt: 100 },
     ])
     renderInbox()
 
@@ -54,6 +54,25 @@ describe("AssignedToMe", () => {
     expect(screen.getByText("5/5 cells · 100%")).toBeInTheDocument()
     expect(screen.getByText("Due 2026-06-30")).toBeInTheDocument()
     expect(mockGetMy).toHaveBeenCalledWith("jwt", 1)
+  })
+
+  // AQU-538 (§3.5): a lane-pinned assignment shows a lane chip and deep-links
+  // into the project at that lane (?lane=<tag>); the default lane ('') does not.
+  it("renders a lane chip and appends ?lane= for a lane-pinned assignment", async () => {
+    mockGetMy.mockResolvedValue([
+      { assignmentId: "a1", projectId: "pa", projectName: "John", scopeKind: "books", scopeLabel: "John scope", targetLang: "es", deadline: null, note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
+      { assignmentId: "a2", projectId: "pb", projectName: "Mark", scopeKind: "books", scopeLabel: "Mark scope", targetLang: "", deadline: null, note: null, cellsTotal: 5, cellsDone: 1, createdAt: 100 },
+    ])
+    renderInbox()
+
+    await waitFor(() => expect(screen.getByText("John scope")).toBeInTheDocument())
+    // The lane chip renders the tag for the pinned lane only.
+    expect(screen.getByText("es")).toBeInTheDocument()
+    // The pinned assignment's link carries ?lane=es; the default-lane one doesn't.
+    const esLink = screen.getByText("John scope").closest("a")
+    expect(esLink?.getAttribute("href")).toContain("?lane=es")
+    const defLink = screen.getByText("Mark scope").closest("a")
+    expect(defLink?.getAttribute("href")).not.toContain("lane=")
   })
 
   it("shows an empty state when there are no assignments", async () => {
@@ -87,7 +106,7 @@ describe("AssignedToMe", () => {
   // ProjectsList.tsx for the full explanation of the flex chain this depends on.
   it("renders the list in a scrollable container (h-full + overflow-y-auto, no clipping)", async () => {
     mockGetMy.mockResolvedValue([
-      { assignmentId: "a1", projectId: "pa", projectName: "John", scopeKind: "books", scopeLabel: "John", deadline: null, note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
+      { assignmentId: "a1", projectId: "pa", projectName: "John", scopeKind: "books", scopeLabel: "John", targetLang: "", deadline: null, note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
     ])
     renderInbox()
     await waitFor(() => expect(screen.getAllByText("John").length).toBeGreaterThan(0))

@@ -87,3 +87,21 @@ fresh agent to pick up. Orchestrator: drain into wave briefs or sub-issues.
 - W2-C: one-time human approval assertion (GET/approve/reject) +
   `/approve/:changesetId` SPA page shipped — see commit on
   `swarm/agent-api-w2c-approval` for file list.
+
+### W3-A (permission parity) — PARITY VIOLATION found
+
+- **`prepare` (POST .../changesets) has no role/membership gate.**
+  `sync-worker/src/external/prepare.ts::handlePrepare` validates the credential and
+  calls `assertCredentialScope` (token-bridge.ts) — which only compares the
+  credential's `projectId`/`orgId` against the target project. It never calls
+  `resolveProjectRoleShared`. A credential owned by a user who is NOT a project
+  member by any path (no project_members / group grant / org membership / creator)
+  can still stage a changeset and receive the server-computed effect summary —
+  which leaks per-cell existence and added-vs-modified counts for a project the
+  user has zero in-app visibility into. Every other exposed operation (reads,
+  commit, artifact upload) resolves the LIVE role and denies non-members.
+  Documented as `it.fails` in
+  `sync-worker/src/__tests__/external-permission-parity.test.ts`
+  ("PARITY VIOLATION — prepare lacks a role/membership gate"). Fix: resolve the
+  live role in `handlePrepare` and require >= VIEWER (or CONTRIBUTOR, to match the
+  commit floor) before staging; then flip the `it.fails` to a plain `it`.

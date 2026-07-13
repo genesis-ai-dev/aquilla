@@ -15,6 +15,7 @@
     "predev:context": "node scripts/ensure-port-free.mjs 5173",
     "dev:context": "BRAND=context vite",
     "build": "tsc -b && vite build && tsx scripts/check-brand-build.ts aquilla",
+    "build:ci": "bash scripts/ci-build.sh",
     "build:codex": "BRAND=codex tsc -b && BRAND=codex vite build && tsx scripts/check-brand-build.ts codex",
     "build:honeycomb": "BRAND=honeycomb tsc -b && BRAND=honeycomb vite build && tsx scripts/check-brand-build.ts honeycomb",
     "build:context": "BRAND=context tsc -b && BRAND=context vite build && tsx scripts/check-brand-build.ts context",

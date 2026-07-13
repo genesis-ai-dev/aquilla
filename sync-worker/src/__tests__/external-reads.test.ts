@@ -1,36 +1,19 @@
 // Tests for the external read surface (AGENT-API §4 read tier — AQU-533 W1-C).
 //
-// `api_credentials` doesn't exist in db/postgres/schema.sql yet (W1-A owns
-// migration 0054 in parallel) — SWARM-TODO(W1-C): drop the CREATE TABLE
-// below once that migration merges; the shape here matches the COMMON
-// contract description in docs/AGENT-API.md §2.
+// Credentials are seeded through the real `api_credentials` table (migration
+// 0054, db/postgres/schema.sql) and minted via the shared db/shared/api-credentials
+// module — no more ad-hoc CREATE TABLE / hand-hashed tokens.
 
 import { describe, it, expect, beforeEach } from "vitest"
 import { handleExternalReadRequest } from "../external/read-routes"
-import { hashApiToken } from "../external/__stubs__/api-credentials-db"
+import { mintApiToken } from "../../../db/shared/api-credentials"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
 
 const SECRET = "test-secret"
-
-async function createApiCredentialsTable(testDb: TestDb) {
-  await testDb.pg.exec(`
-    CREATE TABLE IF NOT EXISTS api_credentials (
-      id            TEXT PRIMARY KEY,
-      user_id       BIGINT NOT NULL,
-      org_id        BIGINT,
-      project_id    TEXT,
-      token_hash    TEXT NOT NULL UNIQUE,
-      autonomy_mode TEXT NOT NULL DEFAULT 'ask',
-      revoked_at    TIMESTAMPTZ,
-      expires_at    TIMESTAMPTZ,
-      created_at    TIMESTAMPTZ DEFAULT now()
-    );
-  `)
-}
+const CRED_1 = "00000000-0000-0000-0000-000000000001"
 
 interface SeedCredentialOpts {
   id: string
-  token: string
   userId: number
   orgId?: number | null
   projectId?: string | null
@@ -38,21 +21,25 @@ interface SeedCredentialOpts {
   expired?: boolean
 }
 
-async function seedCredential(testDb: TestDb, opts: SeedCredentialOpts) {
-  const tokenHash = await hashApiToken(opts.token)
+/** Mint a real `aqk_` token and persist its hash — returns the plaintext token
+ *  to use as the test's bearer credential. */
+async function seedCredential(testDb: TestDb, opts: SeedCredentialOpts): Promise<string> {
+  const { token, tokenHash, tokenPrefix } = await mintApiToken()
   await testDb.pg.query(
-    `INSERT INTO api_credentials (id, user_id, org_id, project_id, token_hash, autonomy_mode, revoked_at, expires_at)
-     VALUES ($1, $2, $3, $4, $5, 'act', $6, $7)`,
+    `INSERT INTO api_credentials (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id, revoked_at, expires_at)
+     VALUES ($1, $2, 'test', $3, $4, 'act', $5, $6, $7, $8)`,
     [
       opts.id,
-      opts.userId,
-      opts.orgId ?? null,
-      opts.projectId ?? null,
+      String(opts.userId),
+      tokenPrefix,
       tokenHash,
+      opts.orgId != null ? String(opts.orgId) : null,
+      opts.projectId ?? null,
       opts.revoked ? new Date().toISOString() : null,
       opts.expired ? new Date(Date.now() - 60_000).toISOString() : null,
     ],
   )
+  return token
 }
 
 function env(testDb: TestDb) {
@@ -68,6 +55,9 @@ function req(path: string, token?: string): Request {
 async function seedProjectAndCells(testDb: TestDb) {
   await testDb.pg.query(
     `INSERT INTO users (id, username, email, password_hash) VALUES (1, 'owner', 'owner@x.com', 'h')`,
+  )
+  await testDb.pg.query(
+    `INSERT INTO users (id, username, email, password_hash) VALUES (2, 'member', 'member@x.com', 'h')`,
   )
   await testDb.pg.query(
     `INSERT INTO organizations (id, name, owner_user_id) VALUES (10, 'Org A', 1)`,
@@ -107,7 +97,6 @@ describe("external read surface", () => {
 
   beforeEach(async () => {
     testDb = await makeTestDb()
-    await createApiCredentialsTable(testDb)
     await seedProjectAndCells(testDb)
   })
 
@@ -118,9 +107,9 @@ describe("external read surface", () => {
 
   describe("search", () => {
     it("scoped member credential can search cells", async () => {
-      await seedCredential(testDb, { id: "cred-1", token: "aqk_member", userId: 2, projectId: "proj-a" })
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
       const res = await handleExternalReadRequest(
-        req("/api/v1/external/projects/proj-a/search?q=beginning", "aqk_member"),
+        req("/api/v1/external/projects/proj-a/search?q=beginning", token),
         env(testDb),
       )
       expect(res).not.toBeNull()
@@ -131,9 +120,9 @@ describe("external read surface", () => {
     })
 
     it("missing q is validation_failed", async () => {
-      await seedCredential(testDb, { id: "cred-1", token: "aqk_member", userId: 2, projectId: "proj-a" })
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
       const res = await handleExternalReadRequest(
-        req("/api/v1/external/projects/proj-a/search", "aqk_member"),
+        req("/api/v1/external/projects/proj-a/search", token),
         env(testDb),
       )
       const body = (await res!.json()) as { error: { code: string } }
@@ -144,9 +133,9 @@ describe("external read surface", () => {
 
   describe("cells + files reads", () => {
     it("scoped member credential reads files", async () => {
-      await seedCredential(testDb, { id: "cred-1", token: "aqk_member", userId: 2, projectId: "proj-a" })
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
       const res = await handleExternalReadRequest(
-        req("/api/v1/external/projects/proj-a/files", "aqk_member"),
+        req("/api/v1/external/projects/proj-a/files", token),
         env(testDb),
       )
       expect(res!.status).toBe(200)
@@ -156,9 +145,9 @@ describe("external read surface", () => {
     })
 
     it("scoped member credential reads cells for a file", async () => {
-      await seedCredential(testDb, { id: "cred-1", token: "aqk_member", userId: 2, projectId: "proj-a" })
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
       const res = await handleExternalReadRequest(
-        req("/api/v1/external/projects/proj-a/files/file-x/cells", "aqk_member"),
+        req("/api/v1/external/projects/proj-a/files/file-x/cells", token),
         env(testDb),
       )
       expect(res!.status).toBe(200)
@@ -170,9 +159,9 @@ describe("external read surface", () => {
 
   describe("cell history", () => {
     it("scoped member credential reads cell history newest-first", async () => {
-      await seedCredential(testDb, { id: "cred-1", token: "aqk_member", userId: 2, projectId: "proj-a" })
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
       const res = await handleExternalReadRequest(
-        req("/api/v1/external/projects/proj-a/cells/cell-1/history", "aqk_member"),
+        req("/api/v1/external/projects/proj-a/cells/cell-1/history", token),
         env(testDb),
       )
       expect(res!.status).toBe(200)
@@ -183,9 +172,9 @@ describe("external read surface", () => {
 
   describe("permission and scope errors", () => {
     it("wrong-project-scoped credential -> scope_denied", async () => {
-      await seedCredential(testDb, { id: "cred-1", token: "aqk_scoped", userId: 2, projectId: "proj-b" })
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-b" })
       const res = await handleExternalReadRequest(
-        req("/api/v1/external/projects/proj-a/files", "aqk_scoped"),
+        req("/api/v1/external/projects/proj-a/files", token),
         env(testDb),
       )
       expect(res!.status).toBe(403)
@@ -194,9 +183,9 @@ describe("external read surface", () => {
     })
 
     it("wrong-org-scoped credential -> scope_denied", async () => {
-      await seedCredential(testDb, { id: "cred-1", token: "aqk_org", userId: 2, orgId: 999 })
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, orgId: 999 })
       const res = await handleExternalReadRequest(
-        req("/api/v1/external/projects/proj-a/files", "aqk_org"),
+        req("/api/v1/external/projects/proj-a/files", token),
         env(testDb),
       )
       expect(res!.status).toBe(403)
@@ -205,15 +194,14 @@ describe("external read surface", () => {
     })
 
     it("revoked credential -> permission_denied", async () => {
-      await seedCredential(testDb, {
-        id: "cred-1",
-        token: "aqk_revoked",
+      const token = await seedCredential(testDb, {
+        id: CRED_1,
         userId: 2,
         projectId: "proj-a",
         revoked: true,
       })
       const res = await handleExternalReadRequest(
-        req("/api/v1/external/projects/proj-a/files", "aqk_revoked"),
+        req("/api/v1/external/projects/proj-a/files", token),
         env(testDb),
       )
       expect(res!.status).toBe(401)
@@ -222,15 +210,14 @@ describe("external read surface", () => {
     })
 
     it("expired credential -> permission_denied", async () => {
-      await seedCredential(testDb, {
-        id: "cred-1",
-        token: "aqk_expired",
+      const token = await seedCredential(testDb, {
+        id: CRED_1,
         userId: 2,
         projectId: "proj-a",
         expired: true,
       })
       const res = await handleExternalReadRequest(
-        req("/api/v1/external/projects/proj-a/files", "aqk_expired"),
+        req("/api/v1/external/projects/proj-a/files", token),
         env(testDb),
       )
       expect(res!.status).toBe(401)
@@ -242,9 +229,9 @@ describe("external read surface", () => {
       await testDb.pg.query(
         `INSERT INTO users (id, username, email, password_hash) VALUES (3, 'stranger', 'stranger@x.com', 'h')`,
       )
-      await seedCredential(testDb, { id: "cred-1", token: "aqk_stranger", userId: 3 })
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 3 })
       const res = await handleExternalReadRequest(
-        req("/api/v1/external/projects/proj-a/files", "aqk_stranger"),
+        req("/api/v1/external/projects/proj-a/files", token),
         env(testDb),
       )
       expect(res!.status).toBe(403)
@@ -260,9 +247,9 @@ describe("external read surface", () => {
     })
 
     it("unknown project -> not_found", async () => {
-      await seedCredential(testDb, { id: "cred-1", token: "aqk_member", userId: 2, projectId: "proj-a" })
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
       const res = await handleExternalReadRequest(
-        req("/api/v1/external/projects/does-not-exist/files", "aqk_member"),
+        req("/api/v1/external/projects/does-not-exist/files", token),
         env(testDb),
       )
       expect(res!.status).toBe(404)
@@ -281,10 +268,10 @@ describe("external read surface", () => {
           [`cell-${n}`, `source text ${n}`, `evt-src-${n}`, 1000 + n],
         )
       }
-      await seedCredential(testDb, { id: "cred-1", token: "aqk_member", userId: 2, projectId: "proj-a" })
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
 
       const page1Res = await handleExternalReadRequest(
-        req("/api/v1/external/projects/proj-a/files/file-x/cells?limit=2", "aqk_member"),
+        req("/api/v1/external/projects/proj-a/files/file-x/cells?limit=2", token),
         env(testDb),
       )
       const page1 = (await page1Res!.json()) as {
@@ -295,7 +282,7 @@ describe("external read surface", () => {
       expect(page1.nextCursor).not.toBeNull()
 
       const page2Res = await handleExternalReadRequest(
-        req(`/api/v1/external/projects/proj-a/files/file-x/cells?limit=2&cursor=${encodeURIComponent(page1.nextCursor as string)}`, "aqk_member"),
+        req(`/api/v1/external/projects/proj-a/files/file-x/cells?limit=2&cursor=${encodeURIComponent(page1.nextCursor as string)}`, token),
         env(testDb),
       )
       const page2 = (await page2Res!.json()) as {
@@ -313,7 +300,7 @@ describe("external read surface", () => {
       while (cursor !== null && guard < 10) {
         guard++
         const res = await handleExternalReadRequest(
-          req(`/api/v1/external/projects/proj-a/files/file-x/cells?limit=2&cursor=${encodeURIComponent(cursor)}`, "aqk_member"),
+          req(`/api/v1/external/projects/proj-a/files/file-x/cells?limit=2&cursor=${encodeURIComponent(cursor)}`, token),
           env(testDb),
         )
         const body = (await res!.json()) as { data: unknown[]; nextCursor: string | null }

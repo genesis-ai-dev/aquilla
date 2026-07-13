@@ -17,10 +17,7 @@ vi.mock('partyserver', () => ({
 
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
 import { handleEventsWriteRequest } from '../events/route'
-import {
-  makeStubCredentialToken,
-  type ApiCredentialContext,
-} from '../external/__stubs__/api-credentials'
+import { mintApiToken } from '../../../db/shared/api-credentials'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 import type { RawEvent } from '../events/types'
@@ -28,22 +25,58 @@ import type { RawEvent } from '../events/types'
 const SECRET = 'test-secret'
 const PROJECT = 'proj-a'
 const FILE = 'file-x'
+const CRED_1 = '00000000-0000-0000-0000-000000000001'
+const CRED_VIEWER = '00000000-0000-0000-0000-000000000002'
 
 function makeEnv(db: AquillaDb) {
   return { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET, BASE_URL: 'https://aquilla.app' }
 }
 
+interface CredSpec {
+  credentialId: string
+  userId: number
+  username: string
+  orgId?: string | null
+  projectId?: string | null
+  mode?: 'ask' | 'act'
+}
+
 /** Contributor (role 400) credential owned by user 1, scoped to PROJECT. */
-function contributorCred(overrides: Partial<ApiCredentialContext> = {}): ApiCredentialContext {
+function contributorCred(overrides: Partial<CredSpec> = {}): CredSpec {
   return {
-    credentialId: 'cred-1',
+    credentialId: CRED_1,
     userId: 1,
     username: 'alice',
     orgId: null,
     projectId: PROJECT,
-    autonomyMode: 'act',
+    mode: 'act',
     ...overrides,
   }
+}
+
+/** Seed a real users row + api_credentials row and mint a live `aqk_` token
+ *  through the shared credential module — no more decode-stub tokens. */
+async function credToken(tdb: TestDb, spec: CredSpec): Promise<string> {
+  await tdb.pg.query(
+    `INSERT INTO users (id, username, email, password_hash) VALUES ($1, $2, $3, 'h')
+     ON CONFLICT (id) DO NOTHING`,
+    [spec.userId, spec.username, `${spec.username}@x.com`],
+  )
+  const { token, tokenHash, tokenPrefix } = await mintApiToken()
+  await tdb.pg.query(
+    `INSERT INTO api_credentials (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id)
+     VALUES ($1, $2, 'test', $3, $4, $5, $6, $7)`,
+    [
+      spec.credentialId,
+      String(spec.userId),
+      tokenPrefix,
+      tokenHash,
+      spec.mode ?? 'act',
+      spec.orgId ?? null,
+      spec.projectId ?? null,
+    ],
+  )
+  return token
 }
 
 async function seedProject(): Promise<TestDb> {
@@ -115,7 +148,7 @@ beforeEach(async () => {
 describe('changesets — prepare → commit (act mode)', () => {
   it('lands real events + projection rows with provenance stamped', async () => {
     const env = makeEnv(tdb.db)
-    const token = makeStubCredentialToken(contributorCred())
+    const token = await credToken(tdb, contributorCred())
 
     const { body: prep } = await prepare(env, token, [
       { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hello', valueHtml: '<p>hello</p>' },
@@ -143,7 +176,7 @@ describe('changesets — prepare → commit (act mode)', () => {
     expect(prov.channel).toBe('rest')
     expect(prov.autonomy_mode).toBe('act')
     expect(prov.changeset_id).toBe(prep.changeset.id)
-    expect(prov.human_authority).toEqual({ user_id: '1', credential_id: 'cred-1' })
+    expect(prov.human_authority).toEqual({ user_id: '1', credential_id: CRED_1 })
     expect(prov.agent).toEqual({ model: 'claude' }) // caller-declared, recorded verbatim
     expect(prov.confirmation_id).toBeUndefined() // act mode: no confirmation
 
@@ -161,7 +194,7 @@ describe('changesets — prepare → commit (act mode)', () => {
 
   it('summary counts: added vs modified vs missing', async () => {
     const env = makeEnv(tdb.db)
-    const token = makeStubCredentialToken(contributorCred())
+    const token = await credToken(tdb, contributorCred())
 
     // Give cell-2 an existing target head so it counts as "modified".
     const seedTok = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE, userId: 1, username: 'alice', role: 400 })
@@ -196,7 +229,7 @@ describe('changesets — prepare → commit (act mode)', () => {
 describe('changesets — ask-mode confirmation', () => {
   it('commit without a confirmation → confirmation_required', async () => {
     const env = makeEnv(tdb.db)
-    const token = makeStubCredentialToken(contributorCred({ autonomyMode: 'ask' }))
+    const token = await credToken(tdb, contributorCred({ mode: 'ask' }))
     const { body: prep } = await prepare(env, token, [
       { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'x' },
     ])
@@ -213,17 +246,17 @@ describe('changesets — ask-mode confirmation', () => {
 
   it('consumed or expired confirmation → confirmation_required', async () => {
     const env = makeEnv(tdb.db)
-    const token = makeStubCredentialToken(contributorCred({ autonomyMode: 'ask' }))
+    const token = await credToken(tdb, contributorCred({ mode: 'ask' }))
     const { body: prep } = await prepare(env, token, [
       { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'x' },
     ])
 
     await insertConfirmation(tdb.db, {
-      id: 'conf-consumed', changesetId: prep.changeset.id, credentialId: 'cred-1',
+      id: 'conf-consumed', changesetId: prep.changeset.id, credentialId: CRED_1,
       digest: prep.digest, consumed: true,
     })
     await insertConfirmation(tdb.db, {
-      id: 'conf-expired', changesetId: prep.changeset.id, credentialId: 'cred-1',
+      id: 'conf-expired', changesetId: prep.changeset.id, credentialId: CRED_1,
       digest: prep.digest, expired: true,
     })
 
@@ -234,12 +267,12 @@ describe('changesets — ask-mode confirmation', () => {
 
   it('valid confirmation commits once; a second commit returns the receipt without double-applying', async () => {
     const env = makeEnv(tdb.db)
-    const token = makeStubCredentialToken(contributorCred({ autonomyMode: 'ask' }))
+    const token = await credToken(tdb, contributorCred({ mode: 'ask' }))
     const { body: prep } = await prepare(env, token, [
       { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'approved' },
     ])
     await insertConfirmation(tdb.db, {
-      id: 'conf-ok', changesetId: prep.changeset.id, credentialId: 'cred-1', digest: prep.digest,
+      id: 'conf-ok', changesetId: prep.changeset.id, credentialId: CRED_1, digest: prep.digest,
     })
 
     const res1 = (await handleExternalChangesetsRequest(commitReq(token, prep.changeset.id), env))!
@@ -273,7 +306,7 @@ describe('changesets — ask-mode confirmation', () => {
 describe('changesets — precondition drift', () => {
   it('a direct write between prepare and commit yields 409 plan_stale + status stale', async () => {
     const env = makeEnv(tdb.db)
-    const token = makeStubCredentialToken(contributorCred())
+    const token = await credToken(tdb, contributorCred())
     const { body: prep } = await prepare(env, token, [
       { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'planned' },
     ])
@@ -318,7 +351,7 @@ describe('changesets — precondition drift', () => {
 describe('changesets — credential scope', () => {
   it('prepare for a project outside the credential scope → scope_denied', async () => {
     const env = makeEnv(tdb.db)
-    const token = makeStubCredentialToken(contributorCred({ projectId: 'other-project' }))
+    const token = await credToken(tdb, contributorCred({ projectId: 'other-project' }))
     const res = (await handleExternalChangesetsRequest(
       prepareReq(token, { commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'x' }] }),
       env,
@@ -341,8 +374,9 @@ describe('changesets — role enforcement (via /events perimeter)', () => {
   it("a viewer-role user's credential cannot commit translations", async () => {
     const env = makeEnv(tdb.db)
     // Credential owned by user 2, who is only a VIEWER (role 100) on the project.
-    const token = makeStubCredentialToken(
-      contributorCred({ credentialId: 'cred-viewer', userId: 2, username: 'vic' }),
+    const token = await credToken(
+      tdb,
+      contributorCred({ credentialId: CRED_VIEWER, userId: 2, username: 'vic' }),
     )
 
     // Prepare succeeds (staging is not gated on write role).

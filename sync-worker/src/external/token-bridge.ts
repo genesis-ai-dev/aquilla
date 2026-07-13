@@ -9,9 +9,8 @@
 
 import { sign } from 'hono/jwt'
 import { ExternalError } from './errors'
-// SWARM-TODO: after W1-A merges, switch these to `db/shared/*`.
-import type { ApiCredentialContext } from './__stubs__/api-credentials'
-import { resolveProjectRoleShared } from './__stubs__/project-roles'
+import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import type { SyncTokenClaims } from '../auth'
 
 /** Internal sync token lifetime — deliberately short (§ token never exposed). */
@@ -78,7 +77,7 @@ export async function mintInternalSyncToken(
 
   await assertCredentialScope(db, cred, projectId)
 
-  const resolved = await resolveProjectRoleShared(db, projectId, cred.userId)
+  const resolved = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
   if (!resolved) {
     // No live grant path — the credential owner is not (or no longer) a member.
     throw new ExternalError('permission_denied', 'no access to project')
@@ -86,7 +85,7 @@ export async function mintInternalSyncToken(
 
   const now = Math.floor(Date.now() / 1000)
   const claims: SyncTokenClaims = {
-    userId: cred.userId,
+    userId: Number(cred.userId),
     username: cred.username,
     projectId,
     // The perimeter's verifyTokenForDoc requires an exact fileId match, so a

@@ -18,8 +18,7 @@ import { uuidv7 } from './uuid'
 import { handleEventsWriteRequest } from '../events/route'
 import type { RawEvent } from '../events/types'
 import type { ChangesetReceipt, ChangesetWarning, ExternalEnv } from './types'
-// SWARM-TODO: after W1-A merges, switch to `db/shared/api-credentials`.
-import { validateApiCredential } from './__stubs__/api-credentials'
+import { validateApiCredential } from '../../../db/shared/api-credentials'
 
 function bearer(request: Request): string | null {
   const h = request.headers.get('Authorization') ?? ''
@@ -43,7 +42,7 @@ export async function handleCommit(
   if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
 
-  const cred = await validateApiCredential(db, bearer(request))
+  const cred = await validateApiCredential(db, bearer(request) ?? "")
   if (!cred) return errorResponse('permission_denied', 'invalid or missing API credential')
 
   const cs = await loadChangeset(db, projectId, id)

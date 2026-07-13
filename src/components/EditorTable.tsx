@@ -3094,6 +3094,27 @@ function EditorRow({
       author: username,
     }).then((eventId) => {
       pendingTargetEventIdRef.current = eventId
+      // Restore codex behaviour: a direct human edit auto-validates the cell
+      // ("a human has touched it"). The target.cell.commit above cleared any
+      // prior validators (audit-stats-overlay resets activeValidators on every
+      // edit), so we re-add the current user against the JUST-committed event
+      // id — a cell.validate only sticks when its editEventId matches the
+      // cell's latest edit. cell.validate needs only REVIEWER (≤ the CONTRIBUTOR
+      // floor already required to reach this commit path), so anyone who can
+      // edit can validate; guard defensively anyway. Skip empty commits so
+      // clearing a cell doesn't mark an empty row "validated".
+      if (value.trim() && canValidate && canPerform("cell.validate", project.syncRole?.level ?? null)) {
+        void emitCellValidate({
+          projectId: project.id,
+          fileId: cell.fileId,
+          cellId: cell.id,
+          editEventId: eventId,
+          author: username,
+        }).catch((err) => {
+          // Telemetry-adjacent, non-blocking: the commit already landed.
+          console.warn("[auto-validate] emit failed:", err)
+        })
+      }
       // Pass the just-assigned event id: the auto-BT in the parent pins to it
       // so the BT describes THIS commit, not the lagging projection head.
       void onCellCommitted?.(cell.id, eventId, parentId)
@@ -3111,7 +3132,7 @@ function EditorRow({
         valueHtml: cell.translatedHtml ?? "",
       })
     })
-  }, [editable, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder])
+  }, [editable, canValidate, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder])
 
   // Source-edit commit path. The inline source editor (a plain TranslatedEditor)
   // calls this on idle/blur with the current source `{value, valueHtml}`. We emit

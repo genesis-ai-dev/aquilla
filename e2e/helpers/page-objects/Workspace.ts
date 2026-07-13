@@ -152,6 +152,20 @@ export class Workspace {
     return (await this.cellRow(index).textContent()) ?? ""
   }
 
+  /** The per-cell validation toggle. `aria-pressed="true"` means the current
+   * user is one of the cell's active validators. */
+  validationToggle(index: number): Locator {
+    return this.cellRow(index).getByRole("button", { name: /Validate|Validated/i }).first()
+  }
+
+  /** Assert the current user has validated this cell (green self-validated). */
+  async expectSelfValidated(index: number): Promise<void> {
+    const row = this.cellRow(index)
+    // CellActionRail children are opacity:0 until hover/focus — reveal first.
+    await row.hover()
+    await expect(this.validationToggle(index)).toHaveAttribute("aria-pressed", "true", { timeout: 10_000 })
+  }
+
   /** Validate a cell and assert the emerald indicator appears.
    *
    * The health button uses Base UI's Popover with openOnHover — hover events

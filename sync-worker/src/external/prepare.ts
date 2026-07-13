@@ -6,14 +6,21 @@
 // client-supplied UUIDv7 id). Nothing is applied here — ask/act commit does that.
 
 import { errorResponse, toErrorResponse } from './errors'
-import { validateCommands, cellKey, type Command } from './commands'
+import {
+  validateCommands,
+  cellKey,
+  PLAN_IMPORT_MAX_CELLS,
+  type Command,
+  type PlanImportCommand,
+  type SetTranslationCommand,
+} from './commands'
 import { resolveCellStates, type CellPrecondition } from './preconditions'
 import { computeDigest } from './canonical'
 import { uuidv7 } from './uuid'
 import { loadChangeset, changesetToResponse } from './store'
 import { assertCredentialScope } from './token-bridge'
 import type { ChangesetSummary, ChangesetWarning, ExternalEnv } from './types'
-import { validateApiCredential } from '../../../db/shared/api-credentials'
+import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 
 /** Staged changesets live for one hour before they expire. Exported so the MCP
  *  adapter's get_capabilities can publish the real value (never invent limits). */
@@ -62,11 +69,32 @@ export async function handlePrepare(
 
   const id = typeof raw.id === 'string' && raw.id.length > 0 ? raw.id : uuidv7()
 
+  // PlanImport is a whole-file operation, not a per-cell batch — it takes its
+  // own prepare path (no cell preconditions; a duplicate-name precondition). A
+  // PlanImport must be the sole command in its changeset.
+  const planImports = validated.commands.filter(
+    (c): c is PlanImportCommand => c.kind === 'PlanImport',
+  )
+  if (planImports.length > 0) {
+    if (validated.commands.length !== 1) {
+      return errorResponse(
+        'validation_failed',
+        'PlanImport must be the only command in a changeset',
+      )
+    }
+    return preparePlanImport(db, cred, projectId, id, autonomyMode, planImports[0], env)
+  }
+
+  // Past the PlanImport branch every remaining command is a SetTranslation.
+  const setCommands = validated.commands.filter(
+    (c): c is SetTranslationCommand => c.kind === 'SetTranslation',
+  )
+
   // De-dupe commands by target cell (last write wins); a dropped duplicate is a
   // warning, never a silent drop.
   const warnings: ChangesetWarning[] = []
-  const byCell = new Map<string, Command>()
-  for (const c of validated.commands) {
+  const byCell = new Map<string, SetTranslationCommand>()
+  for (const c of setCommands) {
     const key = cellKey(c.fileId, c.cellId)
     if (byCell.has(key)) {
       warnings.push({
@@ -140,6 +168,105 @@ export async function handlePrepare(
 
   const approvalUrl = `${env.BASE_URL ?? ''}/approve/${stored.id}`
 
+  return Response.json({
+    changeset: changesetToResponse(stored),
+    summary: stored.summary,
+    digest: stored.digest,
+    approvalUrl,
+  })
+}
+
+/**
+ * Prepare a PlanImport changeset: validate the plan, compute the server-side
+ * effect summary (files_created / source_cells_added / artifact_linked), and
+ * stage it. Preconditions are empty — a brand-new file has no per-cell live
+ * state to pin; the only precondition is a soft duplicate-name warning.
+ */
+async function preparePlanImport(
+  db: AquillaDb,
+  cred: ApiCredentialContext,
+  projectId: string,
+  id: string,
+  autonomyMode: 'ask' | 'act',
+  cmd: PlanImportCommand,
+  env: ExternalEnv,
+): Promise<Response> {
+  if (cmd.cells.length === 0) {
+    return errorResponse('validation_failed', 'PlanImport.cells must be non-empty')
+  }
+  if (cmd.cells.length > PLAN_IMPORT_MAX_CELLS) {
+    return errorResponse('validation_failed', 'PlanImport exceeds maximum cells per changeset', {
+      cells: cmd.cells.length,
+      maxCells: PLAN_IMPORT_MAX_CELLS,
+    })
+  }
+
+  // A referenced artifact must exist in this project.
+  if (cmd.artifactId) {
+    const artifact = await db
+      .prepare(`SELECT id FROM artifacts WHERE id::text = ? AND project_id = ?`)
+      .bind(cmd.artifactId, projectId)
+      .first<{ id: string }>()
+    if (!artifact) {
+      return errorResponse('validation_failed', `artifact ${cmd.artifactId} not found in project`)
+    }
+  }
+
+  // Soft precondition: a same-named active file already exists → warn, don't
+  // block (§3 "no silent truncation" — the collision is surfaced in the summary).
+  const warnings: ChangesetWarning[] = []
+  const existing = await db
+    .prepare(
+      `SELECT id FROM files WHERE project_id = ? AND name = ? AND deleted_at IS NULL LIMIT 1`,
+    )
+    .bind(projectId, cmd.fileName)
+    .first<{ id: string }>()
+  if (existing) {
+    warnings.push({
+      code: 'duplicate_file',
+      fileId: existing.id,
+      cellId: '',
+      message: `a file named "${cmd.fileName}" already exists — a second file with the same name will be created`,
+    })
+  }
+
+  const summary: ChangesetSummary = {
+    filesCreated: 1,
+    sourceCellsAdded: cmd.cells.length,
+    ...(cmd.artifactId ? { artifactLinked: cmd.artifactId } : {}),
+    warnings,
+  }
+  const commands: Command[] = [cmd]
+  const preconditions: CellPrecondition[] = []
+  const digest = await computeDigest(commands, preconditions)
+  const expiresAt = new Date(Date.now() + CHANGESET_TTL_MS).toISOString()
+
+  await db
+    .prepare(
+      `INSERT INTO changesets (
+         id, project_id, created_by_user_id, credential_id, autonomy_mode,
+         status, commands, preconditions, summary, digest, expires_at
+       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::jsonb, ?::jsonb, ?::jsonb, ?, ?)
+       ON CONFLICT (id) DO NOTHING`,
+    )
+    .bind(
+      id,
+      projectId,
+      String(cred.userId),
+      cred.credentialId,
+      autonomyMode,
+      JSON.stringify(commands),
+      JSON.stringify(preconditions),
+      JSON.stringify(summary),
+      digest,
+      expiresAt,
+    )
+    .run()
+
+  const stored = await loadChangeset(db, projectId, id)
+  if (!stored) return errorResponse('job_failed', 'changeset insert did not persist')
+
+  const approvalUrl = `${env.BASE_URL ?? ''}/approve/${stored.id}`
   return Response.json({
     changeset: changesetToResponse(stored),
     summary: stored.summary,

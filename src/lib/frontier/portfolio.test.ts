@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { getPortfolio, validatedPct, attentionRank, audioPct, audioValidatedPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "./portfolio"
+import { getPortfolio, validatedPct, attentionRank, audioPct, audioValidatedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "./portfolio"
 
 const ORIG = global.fetch
 
@@ -41,6 +41,28 @@ describe("validatedPct", () => {
 
   it("returns 0 when totalCells is 0", () => {
     expect(validatedPct(project({ totalCells: 0, validatedCells: 0 }))).toBe(0)
+  })
+})
+
+describe("lane helpers (AQU-538)", () => {
+  const lane = (over: Partial<PortfolioLane>): PortfolioLane => ({ lane: "", totalCells: 0, filledCells: 0, validatedCells: 0, lastEditAt: null, ...over })
+
+  it("laneTranslatedPct is filled/total, 0 when empty", () => {
+    expect(laneTranslatedPct(lane({ totalCells: 200, filledCells: 50 }))).toBe(0.25)
+    expect(laneTranslatedPct(lane({ totalCells: 0, filledCells: 0 }))).toBe(0)
+  })
+
+  it("laneValidatedPct is validated/total, 0 when empty", () => {
+    expect(laneValidatedPct(lane({ totalCells: 200, validatedCells: 20 }))).toBe(0.1)
+    expect(laneValidatedPct(lane({ totalCells: 0, validatedCells: 0 }))).toBe(0)
+  })
+
+  it("getPortfolio round-trips the optional lanes[] array", async () => {
+    const projects: PortfolioProject[] = [project({ id: "p1", lanes: [lane({ lane: "", totalCells: 100, filledCells: 40 }), lane({ lane: "es", totalCells: 100, filledCells: 10 })] })]
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ projects }), { status: 200 })) as unknown as typeof fetch
+    const result = await getPortfolio("jwt", 1)
+    expect(result[0].lanes).toHaveLength(2)
+    expect(result[0].lanes?.[0].lane).toBe("")
   })
 })
 

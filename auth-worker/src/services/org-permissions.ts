@@ -780,7 +780,26 @@ export async function detachGroupProject(env: Env, groupId: number, projectId: s
   await env.AQUILLA_PG.prepare("DELETE FROM group_project_grants WHERE group_id = ? AND project_id = ?").bind(groupId, projectId).run()
 }
 
-export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number }
+/**
+ * AQU-538: per-target-language-lane rollup for a project. Aggregated from
+ * `file_section_progress` file-scope rows (`scope='file'`) grouped by
+ * `target_lang`. `lane: ''` is the default lane (the project's configured
+ * `targetLanguage`, labeled client-side) and is always present whenever the
+ * project has any file-scope progress rows. `validatedCells` mirrors the
+ * per-file progress route: cells whose endorsement count meets the project's
+ * `validationCount` threshold (default 1, cap 15). `lastEditAt` is the most
+ * recent progress-projection update in the lane (updated on every edit /
+ * validation that touches the lane), which avoids a heavy per-lane cells scan.
+ */
+export interface PortfolioLane {
+  lane: string
+  totalCells: number
+  filledCells: number
+  validatedCells: number
+  lastEditAt: number | null
+}
+
+export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; lanes: PortfolioLane[] }
 export interface OrgPortfolioRow extends PortfolioRow { orgId: number }
 
 interface PortfolioDbRow {
@@ -798,7 +817,7 @@ interface PortfolioDbRow {
   recorded_ms: number
 }
 
-function mapPortfolioRow(r: PortfolioDbRow): PortfolioRow {
+function mapPortfolioRow(r: PortfolioDbRow, lanesByProject: Map<string, PortfolioLane[]>): PortfolioRow {
   return {
     id: r.id,
     name: r.name,
@@ -811,7 +830,105 @@ function mapPortfolioRow(r: PortfolioDbRow): PortfolioRow {
     validatedAudioCells: r.validated_audio_cells,
     recordedMs: r.recorded_ms,
     deadlineAt: r.deadline_at,
+    lanes: lanesByProject.get(r.id) ?? [],
   }
+}
+
+const MAX_VALIDATION_LEVEL = 15
+
+interface LaneDbRow {
+  project_id: string
+  target_lang: string
+  total_count: number | string
+  filled_count: number | string
+  validator_histogram: Record<string, number> | string | null
+  updated_at: number | string | null
+}
+
+/** Endorsement threshold at which a cell counts as validated, per the project's settings (default 1, cap 15). */
+function readValidationCounts(settingsRows: Array<{ project_id: string; settings: string | null }>): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const row of settingsRows) {
+    let threshold = 1
+    try {
+      const parsed = row.settings ? (JSON.parse(row.settings) as { validationCount?: unknown }) : null
+      const value = Math.floor(Number(parsed?.validationCount))
+      if (Number.isFinite(value)) threshold = Math.min(MAX_VALIDATION_LEVEL, Math.max(1, value))
+    } catch {
+      threshold = 1
+    }
+    out.set(row.project_id, threshold)
+  }
+  return out
+}
+
+/** Sum of histogram buckets whose endorsement count meets the threshold. */
+function validatedFromHistogram(raw: LaneDbRow["validator_histogram"], threshold: number): number {
+  let value: unknown = raw
+  if (typeof raw === "string") {
+    try { value = JSON.parse(raw) } catch { value = null }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return 0
+  let count = 0
+  for (const [key, amount] of Object.entries(value as Record<string, unknown>)) {
+    const bucket = Number(key)
+    const cells = Number(amount)
+    if (Number.isInteger(bucket) && bucket >= threshold && Number.isFinite(cells) && cells > 0) count += cells
+  }
+  return count
+}
+
+/**
+ * Per-lane rollup for the given org's non-archived projects, keyed by project
+ * id. Derive-on-read over `file_section_progress` file-scope rows (one row per
+ * file per lane since migration 0055) — a SUM, not new bookkeeping. Lanes are
+ * ordered default ('') first, then by tag, for deterministic output.
+ */
+async function fetchPortfolioLanes(env: Env, orgIds: number[]): Promise<Map<string, PortfolioLane[]>> {
+  const byProject = new Map<string, PortfolioLane[]>()
+  if (orgIds.length === 0) return byProject
+  const placeholders = orgIds.map(() => "?").join(", ")
+  const [laneRows, settingsRows] = await Promise.all([
+    env.AQUILLA_PG.prepare(
+      `SELECT fsp.project_id AS project_id, fsp.target_lang AS target_lang,
+              fsp.total_count AS total_count, fsp.filled_count AS filled_count,
+              fsp.validator_histogram AS validator_histogram, fsp.updated_at AS updated_at
+         FROM file_section_progress fsp
+         JOIN projects p ON p.id = fsp.project_id
+        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL AND fsp.scope = 'file'`,
+    ).bind(...orgIds).all<LaneDbRow>(),
+    env.AQUILLA_PG.prepare(
+      `SELECT ps.project_id AS project_id, ps.settings AS settings
+         FROM project_settings ps
+         JOIN projects p ON p.id = ps.project_id
+        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL`,
+    ).bind(...orgIds).all<{ project_id: string; settings: string | null }>(),
+  ])
+  const thresholds = readValidationCounts(settingsRows.results ?? [])
+  // Accumulate one lane entry per (project, target_lang).
+  const acc = new Map<string, Map<string, PortfolioLane>>()
+  for (const row of laneRows.results ?? []) {
+    const threshold = thresholds.get(row.project_id) ?? 1
+    let lanes = acc.get(row.project_id)
+    if (!lanes) { lanes = new Map(); acc.set(row.project_id, lanes) }
+    const lane = row.target_lang ?? ""
+    let entry = lanes.get(lane)
+    if (!entry) { entry = { lane, totalCells: 0, filledCells: 0, validatedCells: 0, lastEditAt: null }; lanes.set(lane, entry) }
+    entry.totalCells += Number(row.total_count) || 0
+    entry.filledCells += Number(row.filled_count) || 0
+    entry.validatedCells += validatedFromHistogram(row.validator_histogram, threshold)
+    const updatedAt = row.updated_at == null ? null : Number(row.updated_at)
+    if (updatedAt != null && Number.isFinite(updatedAt)) {
+      entry.lastEditAt = entry.lastEditAt == null ? updatedAt : Math.max(entry.lastEditAt, updatedAt)
+    }
+  }
+  for (const [projectId, lanes] of acc) {
+    byProject.set(
+      projectId,
+      [...lanes.values()].sort((a, b) => (a.lane === b.lane ? 0 : a.lane === "" ? -1 : b.lane === "" ? 1 : a.lane < b.lane ? -1 : 1)),
+    )
+  }
+  return byProject
 }
 
 /** Per-project rollup over the org's non-archived projects (derive-on-read, one GROUP BY). */
@@ -836,7 +953,8 @@ export async function getOrgPortfolio(env: Env, orgId: number): Promise<Portfoli
       GROUP BY p.id, p.name
       ORDER BY LOWER(p.name)`,
   ).bind(orgId).all<PortfolioDbRow>()
-  return (rows.results ?? []).map(mapPortfolioRow)
+  const lanesByProject = await fetchPortfolioLanes(env, [orgId])
+  return (rows.results ?? []).map((r) => mapPortfolioRow(r, lanesByProject))
 }
 
 /** Batched portfolio rollup for all-org dashboard/list views. */
@@ -864,7 +982,8 @@ export async function getOrgPortfolios(env: Env, orgIds: number[]): Promise<OrgP
       GROUP BY p.org_id, p.id, p.name
       ORDER BY p.org_id, LOWER(p.name)`,
   ).bind(...uniqueOrgIds).all<PortfolioDbRow>()
-  return (rows.results ?? []).map((r) => ({ ...mapPortfolioRow(r), orgId: r.org_id }))
+  const lanesByProject = await fetchPortfolioLanes(env, uniqueOrgIds)
+  return (rows.results ?? []).map((r) => ({ ...mapPortfolioRow(r, lanesByProject), orgId: r.org_id }))
 }
 
 export interface ProjectAccessBreakdown {

@@ -201,9 +201,17 @@ export interface OutboxEventPayloads {
   "cell.validate": {
     /** The target.cell.commit / target.cell.create event being validated. */
     editEventId: string
+    /**
+     * AQU-538: lane of the target row being validated. Omitted on the wire for
+     * the default lane (`''`). Validation is projected per lane so a cell can
+     * be validated in one lane and unvalidated in another.
+     */
+    targetLang?: string
   }
   "cell.unvalidate": {
     editEventId: string
+    /** AQU-538: lane of the target row being unvalidated. Omitted for `''`. */
+    targetLang?: string
   }
 
   // QA rule waivers. One row per (cell, rule); DELETE-on-unwaive.

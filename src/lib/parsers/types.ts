@@ -297,6 +297,12 @@ export interface ProjectRecord {
   orgId?: number | null
   sourceLanguage: string
   targetLanguage: string
+  /**
+   * AQU-538: non-default target-language lanes ('' is always implicit, never
+   * stored). Overlaid from ProjectWideSettings.targetLanes by useProject's
+   * overlaySettings — the workspace LaneSwitcher reads this.
+   */
+  targetLanes?: string[]
   createdAt: string
   files: FileReference[]
   members: ProjectMember[]

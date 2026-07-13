@@ -11,6 +11,12 @@
 //   limit=N             — page size. Default 500, max 2000.
 //   cursor=...          — opaque pagination cursor; the previous response's
 //                         `nextCursor`.
+//   lane=<tag>          — AQU-538: optional. When present, target rows are
+//                         filtered to `target_lang = <tag>`; source rows are
+//                         ALWAYS included regardless. Applies to the full
+//                         read, the delta (`?since=`) read, and the cellIds
+//                         fast path alike. Absent = all lanes (unchanged).
+//                         Max 64 chars; longer values are rejected with 400.
 //   since=<serverSeq>   — delta read (audit M2-1). Returns only the cells
 //                         touched by events with `server_seq > since`,
 //                         unpaginated, as `{ delta: true, changedCellIds,
@@ -375,6 +381,14 @@ export async function handleCellsReadRequest(
 
   const cursor = decodeCursor(url.searchParams.get("cursor"))
 
+  // AQU-538: optional lane filter — target rows only; source rows are always
+  // included (the shared-source invariant). Absent = all lanes (unchanged).
+  const qLane = url.searchParams.get("lane")
+  if (qLane !== null && qLane.length > 64) {
+    return new Response("invalid lane: must be 64 characters or fewer", { status: 400 })
+  }
+  const laneFilter = qLane && qLane.length > 0 ? qLane : null
+
   const qSince = url.searchParams.get("since")
   let since: number | null = null
   if (qSince !== null) {
@@ -459,6 +473,10 @@ export async function handleCellsReadRequest(
           deltaParts.push("AND side = ?")
           deltaBinds.push(sideFilter)
         }
+        if (laneFilter !== null) {
+          deltaParts.push("AND (side = 'source' OR target_lang = ?)")
+          deltaBinds.push(laneFilter)
+        }
         const deltaRes = await env.AQUILLA_PG.prepare(deltaParts.join(" "))
           .bind(...deltaBinds)
           .all<CellRowRaw>()
@@ -493,6 +511,10 @@ export async function handleCellsReadRequest(
     const placeholders = cellIdsFilter.map(() => "?").join(", ")
     parts.push(`AND cell_id IN (${placeholders})`)
     binds.push(...cellIdsFilter)
+  }
+  if (laneFilter !== null) {
+    parts.push("AND (side = 'source' OR target_lang = ?)")
+    binds.push(laneFilter)
   }
   const sql = parts.join(" ")
 

@@ -31,6 +31,7 @@ import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileOrderedBy, fileTypeHasSections, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
+import { LaneSwitcher } from "./LaneSwitcher"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
 import type { EditorTableHandle } from "./EditorTable"
@@ -270,6 +271,28 @@ function sameStringMap(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, st
     if (b.get(key) !== value) return false
   }
   return true
+}
+
+// AQU-538 (slice 2): per-project persistence of the active target lane.
+// `''` (default lane) is stored as "no key" so a single-lane project keeps a
+// clean localStorage — reading a missing key yields the default lane.
+function activeLaneStorageKey(projectId: string): string {
+  return `aquilla:activeLane:${projectId}`
+}
+function readPersistedActiveLane(projectId: string): string {
+  try {
+    return localStorage.getItem(activeLaneStorageKey(projectId)) ?? ""
+  } catch {
+    return ""
+  }
+}
+function writePersistedActiveLane(projectId: string, lane: string): void {
+  try {
+    if (lane) localStorage.setItem(activeLaneStorageKey(projectId), lane)
+    else localStorage.removeItem(activeLaneStorageKey(projectId))
+  } catch {
+    /* storage unavailable (private mode / quota) — lane stays in-memory only */
+  }
 }
 
 export function ProjectWorkspace() {
@@ -854,6 +877,20 @@ export function ProjectWorkspace() {
   })
 
   const validationCount = project ? readValidationCount(project) : 1
+  // AQU-538: the active target lane. Declared here (above useActiveCellStore)
+  // because the store's cell list is lane-filtered on this value. Persisted
+  // per-project; N=1 is always `''` (no switcher rendered, byte-identical).
+  const [activeLane, setActiveLaneState] = useState<string>(() =>
+    projectId ? readPersistedActiveLane(projectId) : "",
+  )
+  // Reload the persisted lane when navigating between projects.
+  useEffect(() => {
+    setActiveLaneState(projectId ? readPersistedActiveLane(projectId) : "")
+  }, [projectId])
+  // AQU-538: useActiveCellStore serves the ACTUAL workspace cell list; it now
+  // filters target rows to `activeLane` (same `(r.targetLang ?? '') === lane`
+  // rule as useCells) before the one-target-per-cell pairing. N=1 is
+  // byte-identical (only default-lane rows exist).
   const {
     store: cellStore,
     revalidate: revalidateCells,
@@ -868,6 +905,7 @@ export function ProjectWorkspace() {
     auditStats: auditStatsByCellId,
     getToken: getTokenForFile,
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
+    lane: activeLane,
   })
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const cellSummaries = useMemo(() => cellStore.getAllSummaries(), [cellStore, cellStoreVersion])
@@ -1074,6 +1112,23 @@ export function ProjectWorkspace() {
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const activeSourceLanguage = activeFile?.sourceLanguage || project?.sourceLanguage
   const activeTargetLanguage = activeFile?.targetLanguage || project?.targetLanguage
+
+  // AQU-538 (slice 2): active target lane. `''` = default lane. The registry
+  // arrives on the settings-overlaid project record (useProject overlaySettings).
+  const targetLanes = useMemo<string[]>(() => project?.targetLanes ?? [], [project])
+  const availableLanes = useMemo(() => ["", ...targetLanes], [targetLanes])
+  // If the active lane is no longer offered (removed from settings), fall back
+  // to the default lane so the editor never points at a nonexistent lane.
+  useEffect(() => {
+    if (activeLane && !availableLanes.includes(activeLane)) setActiveLaneState("")
+  }, [activeLane, availableLanes])
+  const setActiveLane = useCallback(
+    (lane: string) => {
+      setActiveLaneState(lane)
+      if (projectId) writePersistedActiveLane(projectId, lane)
+    },
+    [projectId],
+  )
   const editorProject = useMemo<ProjectRecord | null>(() => {
     if (!project) return null
     const sourceLanguage = activeSourceLanguage ?? project.sourceLanguage
@@ -1226,6 +1281,7 @@ export function ProjectWorkspace() {
         sourceEventId: cell.sourceEventId ?? null,
         value,
         author: currentUsername,
+        targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
       })
       rememberPendingTargetCommit(cellId, eventId, parentId)
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
@@ -1237,6 +1293,7 @@ export function ProjectWorkspace() {
       cellStore,
       applyOptimisticTargetEdit,
       currentUsername,
+      activeLane,
       resolveTargetCommitParentId,
       rememberPendingTargetCommit,
       getTokenForProjectFile,
@@ -1586,6 +1643,7 @@ export function ProjectWorkspace() {
       sourceEventId: cell.sourceEventId ?? null,
       value: text,
       author,
+      targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
       // FRO-292: tag AI-generated commits so the server projection can
       // track ai_drafted on the cell row. A human edit (no aiSuggestion)
       // will clear it on the next commit.
@@ -1602,7 +1660,7 @@ export function ProjectWorkspace() {
     // confirms; the WS event.applied also pokes the same cell (coalesced).
     revalidateCellStats(cell.id)
     revalidateCell(cell.id)
-  }, [project?.id, applyOptimisticTargetEdit, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell])
+  }, [project?.id, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
   /**
    * AD-2 sibling promotion: emit a new target-cell commit whose parentId is
@@ -1625,6 +1683,7 @@ export function ProjectWorkspace() {
       sourceEventId: cell.sourceEventId ?? null,
       value: entry.value,
       author: currentUsername,
+      targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
     })
     rememberPendingTargetCommit(cell.id, eventId, parentId)
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
@@ -1632,10 +1691,13 @@ export function ProjectWorkspace() {
     // Single-cell promotion — targeted refetch (see commitCompletedCell).
     revalidateCellStats(cell.id)
     revalidateCell(cell.id)
-  }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateCellStats, revalidateCell])
+  }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
   const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
-    project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, project?.translationBrief?.l1Summary ?? undefined,
+    // AQU-538: when a non-default lane is active, its tag IS the target
+    // language for few-shot/completion; default lane falls back to the file's
+    // (then project's) targetLanguage exactly as before.
+    project?.completionSettings, project?.sourceLanguage || "", activeLane || activeTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, project?.translationBrief?.l1Summary ?? undefined,
     project?.draftContext ?? DEFAULT_DRAFT_CONTEXT,
   )
 
@@ -2640,6 +2702,8 @@ export function ProjectWorkspace() {
   const [focusLockState, focusLockFeedFrame] = useFocusLock({
     reconciler: liveReconciler,
     cellId: focusedCellId,
+    // AQU-538: lane-qualify the focus lease so per-lane editors don't contend.
+    lane: activeLane,
     currentUserId: currentUsername,
   })
   const focusLockFeedFrameRef = useRef(focusLockFeedFrame)
@@ -2823,6 +2887,7 @@ export function ProjectWorkspace() {
       value: updatedText,
       valueHtml: updatedText,
       author: currentUsername,
+      targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
     })
     rememberPendingTargetCommit(cell.id, eventId, parentId)
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
@@ -2836,6 +2901,7 @@ export function ProjectWorkspace() {
     isReadOnly,
     getActiveCell,
     applyOptimisticTargetEditWithCapture,
+    activeLane,
     resolveTargetCommitParentId,
     rememberPendingTargetCommit,
     currentUsername,
@@ -3198,6 +3264,7 @@ export function ProjectWorkspace() {
         sourceEventId: cell.sourceEventId ?? null,
         value: diff.after,
         author: currentUsername,
+        targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
         searchQuery: payload.findQuery,
         replaceString: payload.replaceQuery,
       })
@@ -3212,7 +3279,7 @@ export function ProjectWorkspace() {
       if (getActiveCell(id)?.fileId === activeFileId) revalidateCell(id)
     }
     rebuildSearchIndex()
-  }, [project?.id, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex])
+  }, [project?.id, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex])
 
   const projectNavItems = useMemo(() => {
     const items = [
@@ -3350,6 +3417,7 @@ export function ProjectWorkspace() {
             cellId: cell.id,
             editEventId: cell.targetEventId!,
             author: currentUsername,
+            targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
           })
         }
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
@@ -3386,7 +3454,7 @@ export function ProjectWorkspace() {
       })
     },
     navigate,
-  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell])
+  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell])
 
   const timelineEditorVisible =
     cellAreaState.kind === "ready" &&
@@ -3948,15 +4016,24 @@ export function ProjectWorkspace() {
             )}
 
             {project && centerSurface === "editor" && activeFileId ? (
-              <EditorModeToggle
-                lens={lens}
-                onChange={(l) => {
-                  setLens(l)
-                  // Surface the Voices tab when entering the Audio lens.
-                  if (l === "audio") setDockTab("voices")
-                }}
-                timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
-              />
+              <>
+                {/* AQU-538: active-lane switcher — renders only when >1 lane. */}
+                <LaneSwitcher
+                  lanes={availableLanes}
+                  value={activeLane}
+                  onChange={setActiveLane}
+                  defaultLaneLabel={activeTargetLanguage || "Target"}
+                />
+                <EditorModeToggle
+                  lens={lens}
+                  onChange={(l) => {
+                    setLens(l)
+                    // Surface the Voices tab when entering the Audio lens.
+                    if (l === "audio") setDockTab("voices")
+                  }}
+                  timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
+                />
+              </>
             ) : null}
 
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
@@ -4312,6 +4389,7 @@ export function ProjectWorkspace() {
             footnoteViewMode={footnoteViewMode}
             onVisibleFootnotesChange={footnoteViewMode === "tray" ? handleVisibleFootnotesChange : undefined}
             username={currentUsername}
+            activeLane={activeLane}
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
             onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}

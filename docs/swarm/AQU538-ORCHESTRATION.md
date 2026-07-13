@@ -80,10 +80,10 @@ branch rules). Orchestrator merges, verifies, promotes, pushes. Agents NEVER pus
 
 | Wave | Slice | Status | Agents |
 | --- | --- | --- | --- |
-| 1 | 2 (client lanes) | RUNNING | A validators+progress (opus) · B lane registry+read param (sonnet) · C editor+context+locks (opus) · D settings UI+few-shot (sonnet) · E e2e journey (sonnet) |
-| 2 | 3 (demote linking) | pending | single agent + doc updates |
-| 3 | 4 (merge tool) | pending | server (opus) + UI (sonnet) |
-| 4 | 5 (lane scopes) | pending | auth-worker (opus) + sync enforcement (opus) + UI (sonnet) |
+| 1 | 2 (client lanes) | MERGED | A validators+progress (opus) · B lane registry+read param (sonnet) · C editor+context+locks (opus) · D settings UI+few-shot (sonnet) · E e2e journey (sonnet) |
+| 2 | 3 (demote linking) | MERGED | single sonnet agent |
+| 3 | 4 (merge tool) | MERGED (server) | client UI deferred |
+| 4 | 5 (lane scopes) | MERGED | SharePanel wiring in flight |
 
 ## Forbidden paths (all agents)
 
@@ -96,3 +96,12 @@ branch rules). Orchestrator merges, verifies, promotes, pushes. Agents NEVER pus
 
 | # | Branch | Verdict | Notes |
 | --- | --- | --- | --- |
+| 1 | worktree-wf_db96fdc0-ac7-1 (A validators+progress) | GREEN | clean; agent self-merged integration (stale base) |
+| 2 | worktree-wf_db96fdc0-ac7-2 (B registry+read param) | GREEN | clean; in-memory-db.ts auto-merged with A |
+| 3 | worktree-wf_db96fdc0-ac7-3 (C editor threading) | GREEN | 3 conflicts (stale base re-implemented slice-1 fields) — kept HEAD canon, took C's validate lanes + lane overlay; deduped CellCommitInput.targetLang post-merge |
+| 4 | worktree-wf_db96fdc0-ac7-4 (D Languages UI) | GREEN | clean |
+| 5 | swarm/aqu538-fix-lane-feed (fixer) | GREEN | closes C's useActiveCellStore + EditorTable gaps |
+| 6 | swarm/aqu538-slice3-lanes | GREEN | clean |
+| 7 | swarm/aqu538-wave15-e2e | GREEN | found REAL bug: useProject overlay dropped targetLanes → fixed by orchestrator (+ regression test); live run blocked by env, spec ready |
+| 8 | swarm/aqu538-slice4-merge | GREEN | server-only; UI follow-up noted |
+| 9 | swarm/aqu538-slice5-scopes | GREEN | clean; SharePanel wiring dispatched as follow-up |

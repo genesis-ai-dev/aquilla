@@ -192,11 +192,20 @@ produce a non-default lane yet, so live behavior is unchanged.
 - **Few-shot/completion:** scoped by the active lane's pair — the retrieval layer already
   keys on `(sourceLang, targetLang)`, so this is plumbing, not a rebuild.
 
-> **How to think about it now (draft — finalize on merge):** "A project view" becomes
-> "(project, lane)". Every target-side surface — editor, progress, validation, completion
-> — reads the active lane from context and must never assume one target row per cell.
-> Source-side surfaces are untouched. N=1 projects look and behave exactly as before;
-> the lane switcher simply doesn't render until a second lane exists.
+> **How to think about it now (final):** "A project view" is now "(project, lane)".
+> `ProjectWorkspace` owns `activeLane` (persisted per-project in localStorage); the
+> `LaneSwitcher` renders only when `settings.targetLanes` is non-empty, and that registry
+> reaches the workspace via `useProject`'s settings overlay (`project.targetLanes`).
+> Every target-side surface reads the active lane: `useCells`/`useActiveCellStore` filter
+> target rows to the lane before their one-target-per-cell pairing, all commit/validate/
+> unvalidate emits carry `targetLang` (omitted for `''`), focus-lock keys are client-composed
+> `cellId@lane:<tag>` (the DO treats them as opaque — zero server changes), and completion
+> uses the active lane's language. Validators and file/section progress are per-lane in the
+> schema (`cell_validators` and `file_section_progress` PKs gained `target_lang`, migration
+> 0055); progress reads default to lane `''` so N=1 semantics are byte-identical. `files`
+> scalar counters remain cross-lane sums by design. If you add a new target-side surface:
+> take the lane from ProjectWorkspace's context, filter rows by `(r.targetLang ?? '') ===
+> lane`, and pass `targetLang` on every emit — never assume one target row per cellId.
 
 ### Slice 3 — demote sibling linking
 
@@ -206,11 +215,14 @@ mirror engine is no longer the mechanism for `consumes: 'source'` sibling fan-ou
 cross-project `consumes: 'source'` path stays for legacy links until they're merged
 (slice 4), then can be retired.
 
-> **How to think about it now (draft — finalize on merge):** Reach for a **lane**, not a
-> **link**. A link now means one of exactly two things: a translation chain (a target
-> feeding another project's source) or an external upstream (git adapter). If you're
-> about to create a sibling-language linked project, stop — that's a lane. The AQU-440
-> graph shows only real graph edges from here on.
+> **How to think about it now (final):** Reach for a **lane**, not a **link**. The
+> create-project dialog now actively steers: picking "linked project / use its source"
+> (the sibling case) surfaces an "Add as lane on <upstream>" recommendation that PATCHes
+> the upstream's `targetLanes` and creates no project at all (maintainer 600+ on the
+> upstream; the panel handles the 403 gracefully otherwise). The classic linked-project
+> path survives untouched for the two graph-shaped cases: chains (`consumes: 'target'`)
+> and external upstreams. Nothing was removed — the sibling fan just stopped being the
+> default shape. The mirror engine's remaining scope is chains + external only.
 
 ### Slice 4 — opt-in sibling-merge tool
 
@@ -221,10 +233,16 @@ members/roles, archive the donor with a pointer to the host. Donor event logs st
 as provenance. Non-matching legacy projects simply remain N=1 forever — merging is never
 required.
 
-> **How to think about it now (draft — finalize on merge):** Legacy sibling projects are
-> just N=1 TMS projects; the merge tool is a convenience, not a migration. After a merge,
-> history for merged lanes starts at the merge events in the host — deep history lives in
-> the archived donor's log. If a partner never merges, nothing degrades.
+> **How to think about it now (final):** Legacy sibling projects are just N=1 TMS
+> projects; the merge tool is a convenience, not a migration. `POST /api/v2/projects/:id/
+> merge-sibling { donorProjectId, lane }` (project_lead 500+ on BOTH sides) folds the
+> donor's default-lane targets into a new host lane through the front door: real
+> `target.cell.commit { targetLang }` events, parent = the host source head, deterministic
+> ids so re-runs are no-ops. Only cells sharing `cell_id` with the host merge; the rest
+> return as `skipped` — never guessed. The donor is archived with `{ mergedInto,
+> mergedLane }` in its settings; its event log stays intact as deep history (the host lane's
+> history starts at the merge). If a partner never merges, nothing degrades. No client UI
+> yet — server-only; the UI is a follow-up.
 
 ### Slice 5 — lane-scoped permissions + oversight (AQU-553)
 
@@ -232,10 +250,15 @@ Lane- and asset-scoped grants (a reviewer sees one lane, or one book) as additiv
 restrictions on the existing role floors; ProjectOverview grows per-lane progress and
 validation counts.
 
-> **How to think about it now (draft — finalize on merge):** Roles answer "how much can
-> you do"; lane/asset scopes answer "where". A grant without a scope behaves exactly as
-> today. Permission checks on target-side writes take (role, lane) — source-side writes
-> are unscoped by lanes, as ever.
+> **How to think about it now (final):** Roles answer "how much"; scopes answer "where".
+> `project_member_scopes` (migration 0056) holds additive restrictions — kind `lane` or
+> `file`, composing with AND; no rows = unscoped = exactly today. Scopes ride the sync
+> token as an optional claim (omitted when empty) and are enforced in sync-worker
+> `authorize()` AFTER the role floor, on chain-mutating `target.*` writes and
+> validate/unvalidate only — source-side, comments, audio, and file-level events are never
+> scope-gated. Leads (500+) are unscopable by rule. Manage scopes per member from the
+> share panel's members list (lead+). If you add a new target-side event kind, decide
+> explicitly whether it's scope-gated and add it to the authorize matrix + tests.
 
 ---
 

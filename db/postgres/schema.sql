@@ -397,12 +397,13 @@ CREATE TABLE file_section_progress (
     file_id             TEXT NOT NULL,
     scope               TEXT NOT NULL CHECK (scope IN ('file', 'section')),
     section_key         TEXT NOT NULL DEFAULT '',
+    target_lang         TEXT NOT NULL DEFAULT '',
     total_count         INTEGER NOT NULL DEFAULT 0 CHECK (total_count >= 0),
     filled_count        INTEGER NOT NULL DEFAULT 0 CHECK (filled_count >= 0),
     validator_histogram JSONB NOT NULL DEFAULT '{}'::jsonb,
     revision            BIGINT NOT NULL DEFAULT 0,
     updated_at          BIGINT NOT NULL,
-    PRIMARY KEY (project_id, file_id, scope, section_key),
+    PRIMARY KEY (project_id, file_id, scope, section_key, target_lang),
     CHECK (
       (scope = 'file' AND section_key = '') OR
       (scope = 'section' AND section_key <> '')
@@ -412,13 +413,14 @@ CREATE TABLE file_section_progress (
 CREATE INDEX idx_file_section_progress_file_revision ON file_section_progress(project_id, file_id, revision);
 
 CREATE TABLE cell_validators (
-    project_id TEXT NOT NULL,
-    file_id    TEXT NOT NULL,
-    cell_id    TEXT NOT NULL,
-    event_id   TEXT NOT NULL,
-    username   TEXT NOT NULL,
-    decided_ts BIGINT NOT NULL,
-    PRIMARY KEY (project_id, file_id, cell_id, username)
+    project_id  TEXT NOT NULL,
+    file_id     TEXT NOT NULL,
+    cell_id     TEXT NOT NULL,
+    target_lang TEXT NOT NULL DEFAULT '',
+    event_id    TEXT NOT NULL,
+    username    TEXT NOT NULL,
+    decided_ts  BIGINT NOT NULL,
+    PRIMARY KEY (project_id, file_id, cell_id, target_lang, username)
 );
 
 CREATE TABLE cell_waivers (
@@ -726,6 +728,23 @@ CREATE TABLE IF NOT EXISTS model_ab_events (
 );
 CREATE INDEX IF NOT EXISTS idx_model_ab_events_created ON model_ab_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_ab_events_user ON model_ab_events(user_id);
+
+-- Lane-scoped reviewer permissions (0056_project_member_scopes.sql, AQU-553).
+-- ADDITIVE restrictions on a member's role floor. No rows for a (project,user)
+-- pair = unscoped = today's behavior. 'lane' rows restrict target-side writes
+-- to those lanes (default lane stored as literal ''); 'file' rows restrict
+-- writes to those fileIds. Kinds compose with AND. Enforced in sync-worker
+-- authorize; source/comment/audio/file-level events are never gated. Leads
+-- (role >= 500) must stay unscoped (auth-worker CRUD rejects scoping them).
+CREATE TABLE IF NOT EXISTS project_member_scopes (
+    project_id TEXT NOT NULL,
+    user_id    BIGINT NOT NULL,
+    kind       TEXT NOT NULL CHECK (kind IN ('lane','file')),
+    value      TEXT NOT NULL,
+    created_by TEXT,
+    created_at BIGINT NOT NULL,
+    PRIMARY KEY (project_id, user_id, kind, value)
+);
 
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new

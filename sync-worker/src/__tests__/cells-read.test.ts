@@ -100,6 +100,72 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells", () => {
     expect(targetBody.cells[0].side).toBe("target")
   })
 
+  it("AQU-538: lane filters target rows to the requested lane; source rows are always included", async () => {
+    const { db } = await makeTestDb({
+      cells: [
+        makeCell({ cell_id: "s1", side: "source", anchor_cell_id: null, event_id: "es1", value: "src-1" }),
+        makeCell({
+          cell_id: "t1", side: "target", anchor_cell_id: null, event_id: "et1-default", value: "default-lane",
+          target_lang: "",
+        }),
+        makeCell({
+          cell_id: "t1", side: "target", anchor_cell_id: null, event_id: "et1-fr", value: "fr-lane",
+          target_lang: "fr",
+        }),
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+
+    const req = new Request(
+      "https://w/api/v1/projects/proj-a/files/file-x/cells?lane=fr",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const res = (await handleCellsReadRequest(req, envWith(db)))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      cells: Array<{ side: string; value: string; targetLang: string }>
+    }
+    // Source row always present; only the fr-lane target row is present.
+    expect(body.cells.map((c) => c.value).sort()).toEqual(["fr-lane", "src-1"])
+    const target = body.cells.find((c) => c.side === "target")!
+    expect(target.targetLang).toBe("fr")
+  })
+
+  it("AQU-538: absent lane param returns all lanes (unchanged behavior)", async () => {
+    const { db } = await makeTestDb({
+      cells: [
+        makeCell({
+          cell_id: "t1", side: "target", anchor_cell_id: null, event_id: "et1-default", value: "default-lane",
+          target_lang: "",
+        }),
+        makeCell({
+          cell_id: "t1", side: "target", anchor_cell_id: null, event_id: "et1-fr", value: "fr-lane",
+          target_lang: "fr",
+        }),
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const req = new Request(
+      "https://w/api/v1/projects/proj-a/files/file-x/cells?side=target",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const res = (await handleCellsReadRequest(req, envWith(db)))!
+    const body = (await res.json()) as { cells: Array<{ value: string }> }
+    expect(body.cells.map((c) => c.value).sort()).toEqual(["default-lane", "fr-lane"])
+  })
+
+  it("rejects a lane value longer than 64 characters with 400", async () => {
+    const { db } = await makeTestDb({})
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const longLane = "x".repeat(65)
+    const req = new Request(
+      `https://w/api/v1/projects/proj-a/files/file-x/cells?lane=${longLane}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const res = (await handleCellsReadRequest(req, envWith(db)))!
+    expect(res.status).toBe(400)
+  })
+
   it("round-trips source.cell.create payload.metadata through the JSONB column to the read route (OBS parity)", async () => {
     // Drive the REAL projection write path (source.cell.create → cells.metadata
     // JSONB) against real Postgres, then read it back through the route. This is
@@ -483,6 +549,36 @@ describe("conditional reads + ?since= delta", () => {
     expect(body.changedCellIds).toEqual(["c1"])
     expect(body.cells).toHaveLength(1)
     expect(body.cells[0].side).toBe("target")
+  })
+
+  it("AQU-538: delta reads honor the lane filter; source rows are always included", async () => {
+    const { db } = await makeTestDb({
+      cells: [
+        makeCell({ cell_id: "c1", side: "source", anchor_cell_id: null, event_id: "es1", value: "src" }),
+        makeCell({
+          cell_id: "c1", side: "target", anchor_cell_id: null, event_id: "et1-default", value: "default-lane",
+          target_lang: "",
+        }),
+        makeCell({
+          cell_id: "c1", side: "target", anchor_cell_id: null, event_id: "et1-fr", value: "fr-lane",
+          target_lang: "fr",
+        }),
+      ],
+      events: [makeEvent({ id: "et1", server_seq: 9, cell_id: "c1" })],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const req = new Request(
+      "https://w/api/v1/projects/proj-a/files/file-x/cells?since=0&lane=fr",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const res = (await handleCellsReadRequest(req, envWith(db)))!
+    const body = (await res.json()) as {
+      changedCellIds: string[]
+      cells: Array<{ side: string; value: string }>
+    }
+    expect(body.changedCellIds).toEqual(["c1"])
+    // Source row for c1 plus only the fr-lane target row — not the default lane one.
+    expect(body.cells.map((c) => c.value).sort()).toEqual(["fr-lane", "src"])
   })
 
   it("tells the client to resync when the changed set exceeds the delta limit", async () => {

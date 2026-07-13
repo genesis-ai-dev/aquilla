@@ -591,9 +591,18 @@ export function buildEventProjectionStmts(
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
 
+      // AQU-538: the lane this validation addresses. Absent/'' = default lane
+      // (byte-identical for N=1). A user's standing validation is per-lane —
+      // the cell_validators PK carries target_lang — so validating a cell in
+      // lane A leaves lane B's validators (and validated flag) untouched.
+      const lane =
+        typeof (p as { targetLang?: unknown }).targetLang === 'string'
+          ? (p as { targetLang?: string }).targetLang!
+          : ''
+
       // DELETE-on-unvalidate (spec §"Validator record"): a row exists iff
       // the validator currently endorses the cell. `cell.validate` upserts
-      // one row per (cell, validator) carrying the validated commit's
+      // one row per (cell, lane, validator) carrying the validated commit's
       // `event_id`; `cell.unvalidate` deletes it. The decided_ts guard keeps
       // out-of-order replays from clobbering a newer decision.
       if (event.kind === 'cell.validate') {
@@ -601,9 +610,9 @@ export function buildEventProjectionStmts(
           db
             .prepare(
               `INSERT INTO cell_validators (
-                project_id, file_id, cell_id, event_id, username, decided_ts
-              ) VALUES (?, ?, ?, ?, ?, ?)
-              ON CONFLICT(project_id, file_id, cell_id, username)
+                project_id, file_id, cell_id, target_lang, event_id, username, decided_ts
+              ) VALUES (?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(project_id, file_id, cell_id, target_lang, username)
               DO UPDATE SET
                 event_id   = excluded.event_id,
                 decided_ts = excluded.decided_ts
@@ -613,6 +622,7 @@ export function buildEventProjectionStmts(
               event.projectId,
               event.fileId,
               event.cellId,
+              lane,
               p.editEventId,
               event.author,
               event.serverTs,
@@ -637,9 +647,10 @@ export function buildEventProjectionStmts(
           db
             .prepare(
               `DELETE FROM cell_validators
-                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND username = ?`,
+                WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                  AND target_lang = ? AND username = ?`,
             )
-            .bind(event.projectId, event.fileId, event.cellId, targetUsername),
+            .bind(event.projectId, event.fileId, event.cellId, lane, targetUsername),
         )
       }
 
@@ -653,9 +664,10 @@ export function buildEventProjectionStmts(
           db
             .prepare(
               `UPDATE cells SET ai_drafted = 0
-               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'`,
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                 AND side = 'target' AND target_lang = ?`,
             )
-            .bind(event.projectId, event.fileId, event.cellId),
+            .bind(event.projectId, event.fileId, event.cellId, lane),
         )
       }
 
@@ -674,21 +686,25 @@ export function buildEventProjectionStmts(
             SET validated = (
               SELECT CASE WHEN COUNT(*) >= ? THEN 1 ELSE 0 END
               FROM cell_validators
-              WHERE project_id = ?
-                AND file_id    = ?
-                AND cell_id    = ?
-                AND event_id   = cells.event_id
+              WHERE project_id  = ?
+                AND file_id     = ?
+                AND cell_id     = ?
+                AND target_lang = ?
+                AND event_id    = cells.event_id
             )
-            WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'`,
+            WHERE project_id = ? AND file_id = ? AND cell_id = ?
+              AND side = 'target' AND target_lang = ?`,
           )
           .bind(
             validationThreshold,
             event.projectId,
             event.fileId,
             event.cellId,
+            lane,
             event.projectId,
             event.fileId,
             event.cellId,
+            lane,
           ),
       )
 
@@ -723,20 +739,24 @@ export function buildEventProjectionStmts(
             SET endorsement_count = (
               SELECT COUNT(*)
               FROM cell_validators
-              WHERE project_id = ?
-                AND file_id    = ?
-                AND cell_id    = ?
-                AND event_id   = cells.event_id
+              WHERE project_id  = ?
+                AND file_id     = ?
+                AND cell_id     = ?
+                AND target_lang = ?
+                AND event_id    = cells.event_id
             )
-            WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'`,
+            WHERE project_id = ? AND file_id = ? AND cell_id = ?
+              AND side = 'target' AND target_lang = ?`,
           )
           .bind(
             event.projectId,
             event.fileId,
             event.cellId,
+            lane,
             event.projectId,
             event.fileId,
             event.cellId,
+            lane,
           ),
       )
       if (!opts?.deferFileCounters)

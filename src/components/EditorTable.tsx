@@ -477,6 +477,13 @@ interface EditorTableProps {
   project: ProjectRecord
   cellStore: CellStore
   username: string
+  /**
+   * AQU-538: the active target LANE. Threaded down to each row so target-side
+   * emits (`target.cell.commit`, `cell.validate`/`cell.unvalidate`) carry
+   * `targetLang`. `''`/undefined = the default lane, OMITTED from the wire by
+   * the emit helpers, so N=1 is byte-identical.
+   */
+  activeLane?: string
   /** When set, each row shows the Audio-lens strip (speaker chip + generate). */
   audioLens?: AudioLensContext | null
   /** Timeline-segment-model: the active file's order lens. When `'time'`, the
@@ -620,7 +627,7 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, username, isCompletionConfigured, isCompletionAvailable,
+  project, cellStore, username, activeLane = "", isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews,
   onCompleteSingle, onCompleteBatch, healthMap,
   infractions = new Map(), rules = [],
@@ -1255,6 +1262,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           isStaleSource={staleCellIds?.has(cell.id) ?? false}
           isUpstreamStaleSource={upstreamStaleCellIds?.has(cell.id) ?? false}
           username={username}
+          activeLane={activeLane}
           editable={canEdit}
           canValidate={canValidate}
           canEditSource={canEditSource}
@@ -1336,6 +1344,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [
     activeCueIndex,
     activeEditorCellId,
+    activeLane,
     assignmentsByCellId,
     audioByCellId,
     audioLens,
@@ -1548,6 +1557,8 @@ interface MemoizedRowProps {
   onActivateEditor: (cellId: string) => void
   onDeactivateEditor: (cellId: string) => void
   username: string
+  /** AQU-538: active target lane, carried into target-side emits. */
+  activeLane: string
   editable: boolean
   /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
   canValidate: boolean
@@ -1671,7 +1682,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     isEditorActive,
     onActivateEditor,
     onDeactivateEditor,
-    project, username, editable, canValidate, canEditSource, isCompletionConfigured, isCompletionAvailable,
+    project, username, activeLane, editable, canValidate, canEditSource, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
     getFootnoteDetails,
@@ -1766,6 +1777,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onActivateEditor={onActivateEditor}
         onDeactivateEditor={onDeactivateEditor}
         username={username}
+        activeLane={activeLane}
         editable={editable}
         canValidate={canValidate}
         canEditSource={canEditSource}
@@ -1855,6 +1867,9 @@ interface EditorRowProps {
   onActivateEditor: (cellId: string) => void
   onDeactivateEditor: (cellId: string) => void
   username: string
+  /** AQU-538: active target lane. Passed into `target.cell.commit` and
+   *  validate/unvalidate emits as `targetLang` (`''` omitted on the wire). */
+  activeLane: string
   editable: boolean
   /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
   canValidate: boolean
@@ -2776,7 +2791,7 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
 
 function EditorRow({
   project, cell, isEditorActive, onActivateEditor, onDeactivateEditor,
-  username, editable, canValidate, canEditSource, isCompletionConfigured, isCompletionAvailable, isLoading,
+  username, activeLane = "", editable, canValidate, canEditSource, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, highlights, error, health,
   cellInfractions, waivedInfractions, ruleMap,
@@ -3083,6 +3098,10 @@ function EditorRow({
       cell.targetEventId ??
       cell.sourceEventId ??
       null
+    // AQU-538: tag the commit with the active lane. The store now renders this
+    // row's ACTIVE-lane target value, so the edited text belongs to `activeLane`.
+    // emitTargetCellCommit omits `''` (default lane) on the wire, so N=1 is
+    // byte-identical.
     emitTargetCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
@@ -3092,6 +3111,7 @@ function EditorRow({
       value,
       valueHtml,
       author: username,
+      targetLang: activeLane,
     }).then((eventId) => {
       pendingTargetEventIdRef.current = eventId
       // Pass the just-assigned event id: the auto-BT in the parent pins to it
@@ -3111,7 +3131,7 @@ function EditorRow({
         valueHtml: cell.translatedHtml ?? "",
       })
     })
-  }, [editable, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder])
+  }, [editable, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder])
 
   // Source-edit commit path. The inline source editor (a plain TranslatedEditor)
   // calls this on idle/blur with the current source `{value, valueHtml}`. We emit
@@ -3386,6 +3406,9 @@ function EditorRow({
     }
     const editEventId = cell.targetEventId ?? pendingTargetEventIdRef.current
     if (!project.id || !editEventId) return
+    // AQU-538: scope the validation to the active lane. emitCellValidate/
+    // emitCellUnvalidate omit `''` (default lane) on the wire, so N=1 is
+    // byte-identical.
     const emit = validated ? emitCellValidate : emitCellUnvalidate
     void emit({
       projectId: project.id,
@@ -3393,6 +3416,7 @@ function EditorRow({
       cellId: cell.id,
       editEventId,
       author: username,
+      targetLang: activeLane,
     }).then(() => {
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
@@ -3400,7 +3424,7 @@ function EditorRow({
       // FRO-274: surface enqueue failure inline.
       setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
-  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, onCellCommitted])
+  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, onCellCommitted])
 
   const editorFocusedRef = useRef(false)
   const requestTargetEdit = useCallback(() => {

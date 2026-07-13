@@ -53,6 +53,7 @@ import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
+import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
 import { readCursor } from "@/lib/dcs/cursor"
 import { UpstreamChangesPanel } from "./linked/UpstreamChangesPanel"
@@ -745,6 +746,7 @@ export function ProjectSettings() {
     { id: "section-upstream-changes", label: "Upstream changes", keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
     { id: "section-dcs-upstream", label: "Door43 upstream", keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
     { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language"] },
+    { id: "section-languages", label: "Languages", keywords: ["languages", "target lanes", "lane", "target language", "dialect"] },
     { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["system prompt", "ai", "llm", "instructions"] },
@@ -791,7 +793,7 @@ export function ProjectSettings() {
       label: "General",
       description: "Name, languages, username, Bible resources",
       icon: SlidersHorizontal,
-      sectionIds: ["section-project-info", "section-bible-resources", "section-user"],
+      sectionIds: ["section-project-info", "section-languages", "section-bible-resources", "section-user"],
     },
     {
       id: "source-sync",
@@ -1042,6 +1044,16 @@ export function ProjectSettings() {
               </div>
             </CardContent>
           </Card>
+        )}
+
+        {sectionsToRender.some((s) => s.id === "section-languages") && (
+          <LanguagesSection
+            defaultTargetLanguage={sharedSettingsBlob?.targetLanguage ?? project?.targetLanguage ?? ""}
+            targetLanes={sharedSettingsBlob?.targetLanes ?? []}
+            canEdit={canEditShared}
+            disabledTooltip={sharedDisabledTooltip}
+            patch={patchShared}
+          />
         )}
 
         {sectionsToRender.some((s) => s.id === "section-bible-resources") && (

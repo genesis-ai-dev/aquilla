@@ -5,8 +5,11 @@ relevant) for anything you defer. The orchestrator drains this list before the f
 
 ## Open
 
-- (none yet)
+
 
 ## Resolved
+
+- [orchestrator, wave-1.5 review] SWARM-TODO(AQU-538): `useProject.ts`'s `overlaySettings()` doesn't merge
+  RESOLVED: ProjectRecord.targetLanes added, overlaySettings assigns it, casts in ProjectWorkspace/ProjectSettings simplified, regression test in useProject.overlay.test.tsx.
 
 - (none yet)

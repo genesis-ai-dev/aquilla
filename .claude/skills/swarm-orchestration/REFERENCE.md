@@ -26,11 +26,12 @@ ln -sfn "$ROOT/node_modules" "$ROOT/.worktrees/swarm-ws-foo/node_modules"
 **Goal:** Production-ready given homepage claims / demo criteria.
 
 ## §0 STOP checklist
-- [ ] tsc clean
+- [ ] every changed/new journey has matching smoke coverage in the same workstream
+- [ ] every new journey is registered in e2e/JOURNEYS.md
 - [ ] vitest green
 - [ ] npm run build passes
 - [ ] worker tests pass (sync-worker, auth-worker)
-- [ ] e2e smoke green (run centrally — too heavy for isolated worktrees)
+- [ ] npm run test:e2e:smoke green (mandatory; run centrally to avoid stack collisions)
 - [ ] every homepage claim demonstrably true on the golden path
 - [ ] every known gap has a SWARM-TODO trace in TRACES.md
 
@@ -46,10 +47,10 @@ ln -sfn "$ROOT/node_modules" "$ROOT/.worktrees/swarm-ws-foo/node_modules"
 <!-- append each wave dispatch here -->
 
 ## §3 Workstream registry
-| ID | Title | Status | Owns (files) | Notes |
+| ID | Title | Status | Owns (implementation + test files) | Journey impact / Notes |
 
 ## §4 Merge log
-<!-- append: date · WS · branch · sha · tsc · vitest · notes -->
+<!-- append: date · WS · branch · sha · build · vitest · targeted smoke · coverage audit · notes -->
 ```
 
 ---
@@ -93,16 +94,32 @@ You are a sonnet implementation agent in an autonomous swarm. Work ONLY in your 
 ## Files you OWN: <explicit list>
 ## FORBIDDEN (do not create/edit): <explicit list> — another actor/agent owns these.
 
+## Test ownership (required)
+- Read `AGENTS.md` → Testing before editing.
+- List the `e2e/JOURNEYS.md` row(s) this change touches.
+- Include matching `e2e/specs/<area>/` and page-object files in OWNED files. If two workstreams overlap
+  there, tell the orchestrator to serialize them; do not omit tests.
+- Changed behavior (UI flow, label, role, selector, route, validation, loading state) means changed smoke tests.
+- New journey means a new JOURNEYS row and smoke spec.
+- Non-UI behavior means adding/updating the nearest unit, integration, or worker test.
+- A no-test exception is only for genuinely non-behavioral docs/config/mechanical work; justify it in the
+  report so the orchestrator can record it in the merge log.
+- Reuse page objects. Never delete, skip, broaden, or weaken an assertion merely to make it pass.
+- For a failure, inspect product code, relevant commits/issues/specs, and intended behavior before changing the test.
+
 ## Verify (from your worktree):
-`npx tsc -b --noEmit` → 0 errors
+`npm run build` → 0 errors (the CI gate; `tsc --noEmit` is not a substitute)
 `npx vitest run` → green incl. your new tests
+Run directly affected smoke specs with `npx tsx scripts/e2e-up.ts -- <spec>` when no other local stack will collide.
+The orchestrator runs the complete smoke suite centrally after integration.
 Then `git add -A && git commit -m "<message>"`. DO NOT push.
 
 ## Report (concise):
 - Branch + worktree path
 - What's implemented vs stubbed
 - Every SWARM-TODO you left (required for anything not finished)
-- tsc + vitest summary lines
+- build + vitest + targeted smoke summary lines
+- Journey rows/specs/page objects added or updated (or why the change is provably not user-facing)
 - Any out-of-scope file you needed (flag, don't silently edit it)
 ```
 
@@ -116,7 +133,10 @@ Then `git add -A && git commit -m "<message>"`. DO NOT push.
 git merge swarm/<branch> --no-edit
 # Resolve conflicts: keep BOTH sides (union, not overwrite)
 # Then:
-npx tsc -b --noEmit && npx vitest run
+npm run build && npx vitest run
+# Audit the merged diff for matching journey/spec/page-object changes.
+# Run affected smoke specs after each wave; before promotion:
+npm run test:e2e:smoke
 git log --oneline -1  # record the sha in §4
 ```
 

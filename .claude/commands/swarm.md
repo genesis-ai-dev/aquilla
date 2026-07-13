@@ -35,7 +35,9 @@ success state. **Do not manufacture work.**
 ## Flags
 
 - `--deploy` — after main is green, deploy to staging and advance Fixed issues per `/issue` Step 3. Default: stop at Fixed-on-main.
-- `--no-verify` — pass through to agents (skip the dev-stack gate). Discouraged; only if the user insists.
+- `--no-verify` — pass through to agents only when the user explicitly insists. This may skip live/dev-stack
+  verification, but it never waives required test updates. Mark the swarm incomplete and do not promote or
+  deploy while `npm run build` or `npm run test:e2e:smoke` is red or unrun.
 - `--max N` — cap concurrent in-flight agents (default 6; the skill's 4–6 band).
 - `--dry-run` — resolve the project, build the wave plan, write ORCHESTRATION.md, but dispatch **no** agents. Show the plan and stop.
 
@@ -119,7 +121,11 @@ If `--dry-run`: print the wave plan and **stop here.**
 
 ### §0 STOP checklist (the goal — copy into ORCHESTRATION.md, fill in the project)
 - [ ] Every eligible issue is at **Fixed** (verified) or honestly **blocked** with a Linear note.
-- [ ] Integration green: `npx tsc -b --noEmit` + `npx vitest run`; `npm run build` passes before each promotion.
+- [ ] Every changed or new user journey has its matching smoke spec/page object updated in the same workstream;
+      every new journey is also registered in `e2e/JOURNEYS.md`.
+- [ ] Integration green: `npm run build` + `npx vitest run`; do not substitute `tsc --noEmit` for the build gate.
+- [ ] `npm run test:e2e:smoke` passes on the integrated result with no skipped/weakened assertions added merely
+      to make the gate green.
 - [ ] `cd sync-worker && npx tsc --noEmit && npm test` (and auth-worker) green **if** any agent touched them.
 - [ ] Each fix verified on the **real dev stack (live UI)** before its issue → Fixed; spec reconciled per `/issue` Step 2.5.
 - [ ] Promoted to main only with main's working tree clean apart from recorded protected files (never clobbered).
@@ -150,12 +156,25 @@ ln -sfn "$ROOT/node_modules" "$ROOT/.worktrees/aqu-###/node_modules"
   for this issue. The orchestrator has already moved it to **`Dispatched`** and assigned it to you — do
   not re-claim; just restate repro/acceptance, fix surgically (systematic-debugging for bugs /
   brainstorming for improvements), verify, reconcile the spec (Step 2.5), then move the issue
-  **`Dispatched → Fixed`** and post a Linear comment. **Leave it in `Dispatched` if you cannot finish**
+  **`Dispatched → Fixed`** and post a Linear comment. A user-facing change without its corresponding journey
+  tests is unfinished. **Leave it in `Dispatched` if you cannot finish**
   — report the blocker; the orchestrator decides whether to revert it to `Todo`.
 - **Files you OWN** (the issue's surface) and **FORBIDDEN files** (every other wave member's surface +
-  recorded protected paths) — explicit lists.
-- **Verify before committing:** `npx tsc -b --noEmit` → 0; `npx vitest run` → green incl. new tests
-  (+ sync-worker tsc/test if touched). Then `git add -A && git commit -m "AQU-###: …"`.
+  recorded protected paths) — explicit lists. Ownership MUST include the matching `e2e/specs/<area>/`
+  spec, shared page object, and `e2e/JOURNEYS.md` when the work changes or adds a user journey. Schedule
+  overlapping journey/page-object work serially rather than forbidding the agent from updating tests.
+- **Testing contract (copy into every brief):** read `AGENTS.md` → Testing before editing. Determine which
+  `e2e/JOURNEYS.md` row(s) the change touches. Changed behavior (including labels, roles, selectors, routes,
+  validation, and loading states) requires updating the matching smoke spec/page object in this same branch;
+  a new journey requires both a new row and a new smoke spec. Reuse page objects. Never delete, skip, broaden,
+  or weaken an assertion merely to pass. When a test fails, inspect implementation, relevant commits/issues,
+  and intended behavior before deciding whether product or test is wrong. Non-UI behavior must add or update
+  the nearest unit/integration/worker test. A no-test exception is allowed only for genuinely non-behavioral
+  docs/config/mechanical work and must be justified in the agent report and §M merge log.
+- **Verify before committing:** `npm run build` → 0; `npx vitest run` → green incl. new tests; run the directly
+  affected smoke spec through `scripts/e2e-up.ts` when the worktree can do so without colliding with another
+  stack (+ sync-worker tsc/test if touched). Full smoke remains the orchestrator's serialized integration gate.
+  Then `git add -A && git commit -m "AQU-###: …"`.
 - **Hard limits:** do NOT push, do NOT deploy, do NOT promote, do NOT run the shared dev stack.
   Live-UI verification is centralized (Step 6) — instead leave a precise **SWARM-TODO** in the code
   and in your report saying exactly what to click to verify.
@@ -177,9 +196,15 @@ records pass/fail. Only **then** is an issue's Fixed transition trustworthy. App
 Per completed, verified agent branch:
 1. In the integration worktree: `git merge swarm/aqu-### --no-edit`. On conflict, **keep both
    sides** when both are additive (union route tables, switch cases, FileType unions — don't overwrite).
-2. Verify on integration: `npx tsc -b --noEmit && npx vitest run` (+ worker tests if touched).
-   Record date · WS · branch · sha · tsc · vitest in §M.
-3. **Red merge → revert it** (`git revert <merge-sha>`), trace the failure, respawn a fixer agent.
+2. Before accepting the merge, inspect its full diff and classify journey impact. For every user-facing behavior
+   change, confirm the same workstream updated the matching smoke spec/page object; for every new journey,
+   confirm `e2e/JOURNEYS.md` and a new smoke spec are present. Missing or weakened coverage is a red merge:
+   revert it and respawn a finisher rather than leaving test debt on integration. For non-UI behavior, require
+   the nearest unit/integration/worker coverage or a recorded, defensible non-behavioral no-test justification.
+3. Verify on integration: `npm run build && npx vitest run` (+ worker tests if touched). After each wave, run
+   directly affected smoke specs centrally. Before promotion, `npm run test:e2e:smoke` MUST pass in full.
+   Record date · WS · branch · sha · build · vitest · targeted smoke in §M.
+4. **Red merge → revert it** (`git revert <merge-sha>`), trace the failure, respawn a fixer agent.
    Never leave integration broken.
 
 **Failure / release of a claim.** If an agent fails, crashes, returns broken work, or the orchestrator
@@ -189,11 +214,11 @@ Comment on the issue with why (what failed, any SWARM-TODO/blocker), and update 
 only be left in `Dispatched` while a live agent owns it; a stale `Dispatched` with no owner is a bug —
 release it to `Todo`. If the issue is genuinely blocked (needs an external unblock), say so in the
 Linear comment and trace it rather than churning it back into the queue.
-4. **Promote to main** only when integration is green AND `git status` on main is clean apart from
+5. **Promote to main** only when integration is green, the full smoke suite passes, AND `git status` on main is clean apart from
    recorded protected files: `H != base`, `D == 0` (or only untracked files you own), no `MERGE_HEAD`.
    FF if possible; squash-merge if histories diverged deeply (see REFERENCE.md §5). If main is dirty
    in a way that overlaps your changes — **hold, never force.**
-5. Unlock the next wave as prerequisites merge; dispatch it (Step 5).
+6. Unlock the next wave as prerequisites merge; dispatch it (Step 5).
 
 ## Step 8 — Converge and stop
 

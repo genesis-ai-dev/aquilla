@@ -13,8 +13,7 @@ import { uuidv7 } from './uuid'
 import { loadChangeset, changesetToResponse } from './store'
 import { assertCredentialScope } from './token-bridge'
 import type { ChangesetSummary, ChangesetWarning, ExternalEnv } from './types'
-// SWARM-TODO: after W1-A merges, switch to `db/shared/api-credentials`.
-import { validateApiCredential } from './__stubs__/api-credentials'
+import { validateApiCredential } from '../../../db/shared/api-credentials'
 
 /** Staged changesets live for one hour before they expire. */
 const CHANGESET_TTL_MS = 60 * 60 * 1000
@@ -32,7 +31,7 @@ export async function handlePrepare(
   if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
 
-  const cred = await validateApiCredential(db, bearer(request))
+  const cred = await validateApiCredential(db, bearer(request) ?? "")
   if (!cred) return errorResponse('permission_denied', 'invalid or missing API credential')
 
   try {
@@ -58,7 +57,7 @@ export async function handlePrepare(
   // act→ask but never upgrade ask→act.
   const requested = raw.autonomyMode
   const autonomyMode: 'ask' | 'act' =
-    requested === 'ask' || cred.autonomyMode === 'ask' ? 'ask' : 'act'
+    requested === 'ask' || cred.mode === 'ask' ? 'ask' : 'act'
 
   const id = typeof raw.id === 'string' && raw.id.length > 0 ? raw.id : uuidv7()
 

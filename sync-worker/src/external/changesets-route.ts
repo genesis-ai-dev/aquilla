@@ -14,8 +14,7 @@ import { handlePrepare } from './prepare'
 import { handleCommit } from './commit'
 import { loadChangeset, changesetToResponse } from './store'
 import type { ExternalEnv } from './types'
-// SWARM-TODO: after W1-A merges, switch to `db/shared/api-credentials`.
-import { validateApiCredential } from './__stubs__/api-credentials'
+import { validateApiCredential } from '../../../db/shared/api-credentials'
 
 const ROUTE_RE =
   /^\/api\/v1\/external\/projects\/([^/]+)\/changesets(?:\/([^/]+)(?:\/(commit|discard))?)?$/
@@ -33,7 +32,7 @@ async function handleGet(
 ): Promise<Response> {
   if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
-  const cred = await validateApiCredential(db, bearer(request))
+  const cred = await validateApiCredential(db, bearer(request) ?? "")
   if (!cred) return errorResponse('permission_denied', 'invalid or missing API credential')
 
   const cs = await loadChangeset(db, projectId, id)
@@ -53,7 +52,7 @@ async function handleDiscard(
 ): Promise<Response> {
   if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
-  const cred = await validateApiCredential(db, bearer(request))
+  const cred = await validateApiCredential(db, bearer(request) ?? "")
   if (!cred) return errorResponse('permission_denied', 'invalid or missing API credential')
 
   const cs = await loadChangeset(db, projectId, id)

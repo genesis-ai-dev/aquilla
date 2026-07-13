@@ -5,10 +5,10 @@
 //   GET /api/v1/external/projects/:projectId/files/:fileId/cells?since=&limit=&cursor=
 //   GET /api/v1/external/projects/:projectId/cells/:cellId/history?limit=&cursor=
 //
-// Auth: `Authorization: Bearer aqk_...` — a credential minted via the (W1-A)
-// api_credentials table, NOT a sync-token JWT. Every request:
-//   1. validates the credential (hashed lookup, revocation/expiry — see the
-//      __stubs__/api-credentials SWARM-TODO),
+// Auth: `Authorization: Bearer aqk_...` — a credential minted via the
+// api_credentials table (db/shared/api-credentials.ts), NOT a sync-token JWT.
+// Every request:
+//   1. validates the credential (hashed lookup, revocation/expiry),
 //   2. checks it is scoped to this project (credential.projectId null-or-match)
 //      and this project's org (credential.orgId null-or-match projects.org_id),
 //   3. resolves the calling user's LIVE role on the project (>= VIEWER (100)
@@ -45,8 +45,8 @@ import { makeVerifiedProjectId, queryScopedSearch } from "../events/scoped-searc
 import { handleFilesReadRequest } from "../events/files-read-route"
 import { handleCellsReadRequest } from "../events/cells-read-route"
 import { externalError } from "./errors"
-import { validateApiCredential, type ApiCredential } from "./__stubs__/api-credentials-db"
-import { resolveProjectRoleShared } from "./__stubs__/resolve-role"
+import { validateApiCredential, type ApiCredentialContext } from "../../../db/shared/api-credentials"
+import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
 import { paginate, parsePageParams } from "./pagination"
 
 export interface ExternalReadsEnv {
@@ -64,7 +64,7 @@ const CELL_HISTORY_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/cells\/([^/]+)
 // ---------------------------------------------------------------------------
 
 interface AuthedContext {
-  credential: ApiCredential
+  credential: ApiCredentialContext
   /** Live-resolved role level (>= ROLE.VIEWER), NOT the credential's own
    *  (nonexistent) role field — the credential only carries autonomy/scope. */
   role: number
@@ -88,14 +88,15 @@ async function authenticateAndScope(
     return { ok: false, response: externalError("permission_denied", "missing Authorization header", 401) }
   }
 
-  const validated = await validateApiCredential(env.AQUILLA_PG, token)
-  if (!validated.ok) {
+  const credential = await validateApiCredential(env.AQUILLA_PG, token)
+  if (!credential) {
+    // Collapses invalid/revoked/expired into one generic message — the code
+    // (permission_denied) is what callers branch on, not the message text.
     return {
       ok: false,
-      response: externalError("permission_denied", `credential ${validated.reason}`, 401),
+      response: externalError("permission_denied", "invalid, revoked, or expired API credential", 401),
     }
   }
-  const { credential } = validated
 
   const projectRow = await env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
     .bind(projectId)
@@ -103,7 +104,7 @@ async function authenticateAndScope(
   if (!projectRow) {
     return { ok: false, response: externalError("not_found", "project not found", 404) }
   }
-  const projectOrgId = projectRow.org_id == null ? null : Number(projectRow.org_id)
+  const projectOrgId = projectRow.org_id == null ? null : String(projectRow.org_id)
 
   if (credential.projectId !== null && credential.projectId !== projectId) {
     return {
@@ -118,7 +119,8 @@ async function authenticateAndScope(
     }
   }
 
-  const role = await resolveProjectRoleShared(env.AQUILLA_PG, projectId, credential.userId)
+  const resolved = await resolveProjectRoleShared(env.AQUILLA_PG, { id: credential.userId }, projectId)
+  const role = resolved?.level ?? null
   if (role === null || role < ROLE.VIEWER) {
     return { ok: false, response: externalError("permission_denied", "no project membership", 403) }
   }
@@ -138,7 +140,7 @@ async function mintInternalToken(
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000)
   const claims: SyncTokenClaims = {
-    userId: ctx.credential.userId,
+    userId: Number(ctx.credential.userId),
     projectId,
     fileId,
     role: ctx.role,
@@ -184,7 +186,7 @@ async function handleExternalSearch(
   // queryScopedSearch requires, the same way search-route.ts's real JWT
   // claims do.
   const claims: SyncTokenClaims = {
-    userId: authed.ctx.credential.userId,
+    userId: Number(authed.ctx.credential.userId),
     projectId,
     fileId: "",
     role: authed.ctx.role,

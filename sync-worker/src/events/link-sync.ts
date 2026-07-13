@@ -1,4 +1,4 @@
-// FRO-476: mirror sync engine — the single propagation function every
+// AQU-476: mirror sync engine — the single propagation function every
 // trigger (lazy pull on file open, push accelerator, manual "check now")
 // funnels into. See the linked-projects design spec §5 for the full
 // contract; this module is the tracer-bullet implementation for
@@ -34,9 +34,15 @@
 // contract).
 
 import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
-import { buildEventProjectionStmts, contentHash, type PersistedEvent } from './event-projection'
+import {
+  buildEventProjectionStmts,
+  contentHash,
+  fileCountersRecomputeStmt,
+  type PersistedEvent,
+} from './event-projection'
 import { buildBulkEventInsertStmt, allocateSeqRange, type SeqEventInsertRow } from './event-insert'
 import type { EventPayloads } from './types'
+import { fullProgressRecomputeStmts } from './progress-projection'
 
 const BATCH_LIMIT = 100
 const MIRROR_AUTHOR = 'link-sync'
@@ -56,7 +62,7 @@ const LANE_KINDS_SOURCE = [
   'file.create',
 ] as const
 
-/** FRO-477: additional lane-relevant kinds for `consumes: 'target'` links —
+/** AQU-477: additional lane-relevant kinds for `consumes: 'target'` links —
  *  the chain case (this project's source lane IS the upstream's translation
  *  lane). Structural events (source.cell.create/cell.retime/cast.assign/
  *  file.create) still matter in target-consumption mode: the merge takes
@@ -98,7 +104,7 @@ export async function loadLink(db: AquillaDb, downstreamProjectId: string): Prom
  *  `consumes` selects the lane set: 'target' links also watch
  *  target.cell.commit / cell.validate / cell.unvalidate (§5) on top of the
  *  always-watched structural kinds. Defaults to the source-only set when
- *  omitted (backward compatible with FRO-476 call sites). */
+ *  omitted (backward compatible with AQU-476 call sites). */
 export async function laneRelevantHeadSeq(
   db: AquillaDb,
   upstreamProjectId: string,
@@ -140,7 +146,7 @@ interface FoldedCell {
   anchorCellId: string | null
   startMs: number | null
   endMs: number | null
-  /** FRO-477: only populated by the consumes='target' merge fold (§2) — the
+  /** AQU-477: only populated by the consumes='target' merge fold (§2) — the
    *  consumes='source' fold leaves these undefined/null and the emit loop's
    *  payload construction omits them (matching slice-1 behavior exactly). */
   sequenceIndex?: number | null
@@ -288,7 +294,7 @@ async function loadDelta(
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// FRO-477: consumes='target' — the chain case. The downstream's SOURCE lane
+// AQU-477: consumes='target' — the chain case. The downstream's SOURCE lane
 // mirrors the upstream's TRANSLATIONS (target lane), merged with structural
 // fields (type/refs/timing/sequence/cast) from the upstream cell's OWN
 // source row (§2 — target rows are born with no structure; a dubbing chain
@@ -749,14 +755,14 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
   // Clone mode: one-time snapshot at creation, then independent forever.
   // Never runs a mirror sync (§2 — a clone must never show upstream drift).
   if (link.source_link_mode === 'clone') return NOOP_RESULT
-  // NULL mode = legacy/self-contained link (pre-FRO-476 `source_project_id`
+  // NULL mode = legacy/self-contained link (pre-AQU-476 `source_project_id`
   // without link metadata) — treated as clone (no sync) until explicitly
   // re-linked with mode='live'.
   if (link.source_link_mode !== 'live') return NOOP_RESULT
 
   const upstreamProjectId = link.source_project_id
   const cursor = Number(link.source_link_cursor ?? 0)
-  // FRO-477: consumes='target' watches an extended lane set (target commits
+  // AQU-477: consumes='target' watches an extended lane set (target commits
   // + validations on top of the always-watched structural kinds, §5); the
   // freshness probe must use the SAME lane set the delta query below uses,
   // or a target-only change would never trip `head > cursor`.
@@ -909,7 +915,7 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
       anchorCellId: cell.anchorCellId,
       startMs: cell.startMs ?? undefined,
       endMs: cell.endMs ?? undefined,
-      // FRO-477: only set by the consumes='target' merge fold — undefined
+      // AQU-477: only set by the consumes='target' merge fold — undefined
       // (omitted) for consumes='source', matching slice-1 payload shape
       // exactly (the projection's COALESCE-upsert treats undefined/missing
       // the same as it always has).
@@ -922,7 +928,7 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
         cellId: cell.cellId,
         eventId: cell.eventId,
         seq: cell.seq,
-        // FRO-477: 'target' when this mirror's TEXT came from the upstream's
+        // AQU-477: 'target' when this mirror's TEXT came from the upstream's
         // target lane (consumes='target' links); 'source' otherwise. This is
         // what the inherited-staleness walk's ancestor-pin check (§6 step 2)
         // keys on to know it must side-switch to the ancestor's sibling
@@ -1008,16 +1014,10 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
     touchedFiles.add(downstreamFileIdOf.get(upstreamFileId)!)
   }
   for (const fileId of touchedFiles) {
-    await db
-      .prepare(
-        `UPDATE files SET
-           cell_count = (SELECT COUNT(DISTINCT cell_id) FROM cells WHERE project_id = ? AND file_id = ?),
-           word_count = (SELECT COALESCE(SUM(word_count), 0) FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target'),
-           updated_at = ?
-         WHERE id = ? AND project_id = ?`,
-      )
-      .bind(downstreamProjectId, fileId, downstreamProjectId, fileId, now, fileId, downstreamProjectId)
-      .run()
+    await db.batch([
+      fileCountersRecomputeStmt(db, downstreamProjectId, fileId, now),
+      ...fullProgressRecomputeStmts(db, downstreamProjectId, fileId, now),
+    ])
   }
 
   // Cursor write: GREATEST(cursor, head) at the very end (§5) — a crashed or

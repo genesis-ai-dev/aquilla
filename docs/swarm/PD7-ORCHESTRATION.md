@@ -2,7 +2,7 @@
 
 Driver: `/swarm` on Linear project **Prototype Debugging** (id `215cff7b-1a95-443d-9343-1f1528754462`).
 Scope per user: **a prioritized batch, NOT a full drain** of the 61 Todos — the 2 Urgent + 11
-code-fixable High issues (13 issues, 12 workstreams; FRO-347+364 share the invite surface).
+code-fixable High issues (13 issues, 12 workstreams; AQU-347+364 share the invite surface).
 Base: **dev @ `b686b4e74`** (clean apart from protected untracked docs below). Integration:
 `swarm/pd7-integration` (worktree `.worktrees/pd7-integration`). **Promotion target: dev**
 (repo works dev→main via PR; LINKEDPROJ precedent).
@@ -10,26 +10,26 @@ CONCURRENT ACTORS: the Linked Projects swarm (`swarm/linkedproj-integration`, lp
 pending) is live in this repo — re-check dev tip before every promotion; compose, don't pick-one.
 
 ## §0 STOP checklist — CONVERGED 2026-07-06, promoted dev@0189d3971
-- [x] FRO-346, 365, 347, 364, 408, 414, 361, 366, 334, 416, 360, 348, 325 all at **Fixed** (13/13,
+- [x] AQU-346, 365, 347, 364, 408, 414, 361, 366, 334, 416, 360, 348, 325 all at **Fixed** (13/13,
       Linear audited).
 - [x] Integration green: tsc 0 · vitest 3532/3532 (429 files) · build+brand OK.
 - [x] sync-worker 722/722 + auth-worker 540/540 (composed pd7+linked-projects tree).
 - [x] Every fix live-UI verified by the QA singleton (punchlist §PD7 + re-verify sections):
       9 PASS first pass; 334/346/347 fixed+re-verified PASS (347 took 3 rounds: server, client JWT,
       no-store); 361 failure-banner PASS, happy path honestly BLOCKED-env. Spec reconciled
-      (aquilla-specs: FRO-416, FRO-347/364, FRO-408 commits by orchestrator).
+      (aquilla-specs: AQU-416, AQU-347/364, AQU-408 commits by orchestrator).
 - [x] Promoted to dev @ 0189d3971 (--no-ff); dev tip re-checked (advanced 14 commits by the LP swarm
       mid-run → merged into integration, 5 conflicts composed additively, full re-gate before promote);
       promoted tree byte-identical to gated tree.
 - [x] Gaps traced in `docs/swarm/TRACES.md` §PD7.
 
 ## §EXCLUDED (and why)
-- FRO-153, FRO-224, FRO-227 — pre-existing `Dispatched` locks (stale, from June sessions). None
+- AQU-153, AQU-224, AQU-227 — pre-existing `Dispatched` locks (stale, from June sessions). None
   in this batch's priority set; NOT reclaimed this run.
-- FRO-426, FRO-434, FRO-410 — manual-QA / human tracking tasks, not agent work.
-- FRO-442 — design approval (HITL), FRO-318 — Milestones feature (oversized, needs own project
-  decomposition), FRO-440 — deliberately owned by the Linked Projects track.
-- FRO-350 — memory/heap loop owns it (cron 96235b6d); FRO-173 — blocked on product decision
+- AQU-426, AQU-434, AQU-410 — manual-QA / human tracking tasks, not agent work.
+- AQU-442 — design approval (HITL), AQU-318 — Milestones feature (oversized, needs own project
+  decomposition), AQU-440 — deliberately owned by the Linked Projects track.
+- AQU-350 — memory/heap loop owns it (cron 96235b6d); AQU-173 — blocked on product decision
   (backfill A/B/C, see AUDIO-GAP-FRO173.md).
 - All Medium/Low Todos — below this batch's bar.
 - PROTECTED (untracked, owned by the concurrent LP swarm — forbidden to all agents):
@@ -84,7 +84,7 @@ per wave each ★ file has exactly ONE owner, all others forbidden.
 - 2026-07-06 · validation-toggle(348) · swarm/fro-348 · 037496706 (merge b9b9badbd) · tsc 0 · vitest 3415/3415.
   Root cause: NOT the validation pill (id-keyed, sound) — the round multi-select checkbox at the source/target
   divider silently promoted plain clicks to INDEX-based range-select whenever any cell was already selected.
-  Fix: range requires explicit Shift-click. FRO-288 batch-validate ruled out. Scope clean (2 files).
+  Fix: range requires explicit Shift-click. AQU-288 batch-validate ruled out. Scope clean (2 files).
   Agent spun off out-of-scope finding (remote WS validate events don't revalidateCellStats) as a task chip.
   Linear: Fixed (pending live-UI QA).
 - 2026-07-06 · ai-settings(408) · swarm/fro-408 · a189d45b1 (merge a2f13e096) · gate pending (combined w/ 366).
@@ -93,16 +93,16 @@ per wave each ★ file has exactly ONE owner, all others forbidden.
   tests mocked the fn with a spread, hiding it. Fix: merge all fields + success msg enumerates delta + Save
   stays open (explicit "Save and close" added). Scope clean (4 files). Linear: Fixed (pending live-UI QA).
 - 2026-07-06 · org-scroll(366) · swarm/fro-366 · 16a9a9e01 (merge 1ccea52e2) · gate pending (combined w/ 408).
-  HONEST FINDING: FRO-164 ScrollArea hypothesis REFUTED — lists use plain h-full overflow-y-auto and the chain
+  HONEST FINDING: AQU-164 ScrollArea hypothesis REFUTED — lists use plain h-full overflow-y-auto and the chain
   measures correctly. Shipped overscroll-contain (scroll-chaining suspect) + structural regression tests.
   Live repro still unproven → UI-QA MUST test with a 30+-project org. Scope clean (6 files).
   Linear: Fixed (pending live-UI QA — weakest verification of the wave).
 - 2026-07-06 · ★ combined gate @ 1ccea52e2 (361+348+408+366 on integration): tsc 0 · vitest **3425/3425 (420 files)**,
   vitest exit code verified 0 (first run's tail clipped the summary — re-ran; fail-loud rule).
 - 2026-07-06 · invite-redeem(347+364) · swarm/fro-347-364 · 0723afa7c+0e0c075cf (merge) · root tsc 0 ·
-  vitest **3439/3439** · aw tsc 0 · aw **516/516**. FRO-364 root cause: JoinPage collapsed every accept
+  vitest **3439/3439** · aw tsc 0 · aw **516/516**. AQU-364 root cause: JoinPage collapsed every accept
   failure into "no longer valid" (server redeem verified CORRECT via e2e test) — fix: discriminated
-  AcceptResult (used/time_expired/invalid vs unauthorized/network/wrong_email/server). FRO-347: accept-invite
+  AcceptResult (used/time_expired/invalid vs unauthorized/network/wrong_email/server). AQU-347: accept-invite
   treated same-user re-redeem as unconditional idempotent success — now idempotent-while-member, 410 after
   removal. Scope clean (7 files). Draft spec amendment in Linear comments (orchestrator to apply).
   Linear: both Fixed (pending live-UI QA).
@@ -120,7 +120,7 @@ per wave each ★ file has exactly ONE owner, all others forbidden.
   of ours involved). Fix: exponential backoff ×4 on 401/403/408/429/5xx + mid-stream drops, 404 non-retry,
   actionable errors via existing importErr. No byte-range resume (deliberate). Linear: Fixed (pending live-UI QA).
 - 2026-07-06 · setup-gating(334) · swarm/fro-334 · 9bca50520 (merge 429c5d3d4) · scope clean (4 files).
-  New RoleGatedStep wrapper; invites gated 500, instructions/voice 600 (follows shipped FRO-255 floor; spec
+  New RoleGatedStep wrapper; invites gated 500, instructions/voice 600 (follows shipped AQU-255 floor; spec
   says 500 — divergence documented). CONFIRMED SERVER GAP (flagged, not fixed): AiInstructions/AiModels steps
   persist via IDB-only path, never reach the gated PATCH /settings — follow-up needed. Linear: Fixed (pending QA).
 - 2026-07-06 · access-revoke(346) · swarm/fro-346 · 65fcfb1c5 (merge 91b18fccb) · 26 files, +353/−7.
@@ -131,8 +131,8 @@ per wave each ★ file has exactly ONE owner, all others forbidden.
 - 2026-07-06 · ★ FULL COMBINED GATE @ 91b18fccb: root tsc 0 · vitest **3471/3471 (423 files)** · sw tsc 0 +
   **666/666** · aw tsc 0 + **524/524**.
 - 2026-07-06 · shared-nav(416) · swarm/fro-416 · c2d2072c5 (merge 90f1cf29b) · TESTS-ONLY (3 files, +93).
-  Verdict: no live defect — pre-FRO-474 org-mismatch redirect in ProjectOverview was the root cause, already
-  fixed on today's dev by FRO-473/474/475 (other actor). Added click-nav regression tests across all 3 surfaces.
+  Verdict: no live defect — pre-AQU-474 org-mismatch redirect in ProjectOverview was the root cause, already
+  fixed on today's dev by AQU-473/474/475 (other actor). Added click-nav regression tests across all 3 surfaces.
   Spec amendment applied by orchestrator (aquilla-specs f90ff6f). Gate @ 90f1cf29b: tsc 0 · vitest 3474/3474.
   Linear: Fixed (verify status at convergence — one of the two agents' flip was permission-blocked).
 - 2026-07-06 · ★ `npm run build` @ 90f1cf29b: exit 0, brand check aquilla OK.
@@ -141,24 +141,24 @@ per wave each ★ file has exactly ONE owner, all others forbidden.
   viewer token (new sync-worker test); #2/#3 character CRUD = client local-echo bug (localStorage/IDB write
   before doomed 403 PATCH) → gated saveVoice/writeBack/delete/makeDefault at 600 + disabled affordances;
   #4 header AI actions gated in workspace-actions registry; #5 comments + #6 validate already closed
-  (FRO-427 / useEditorCapabilities — verified, no change); #7 island returns null below 300.
+  (AQU-427 / useEditorCapabilities — verified, no change); #7 island returns null below 300.
   Linear: Fixed (pending live-UI QA).
 - 2026-07-06 · ★★ FINAL GATE @ d95a5e06d (ALL 13 issues): root tsc 0 · vitest **3489/3489 (424 files)** ·
   sw tsc 0 + **670/670** · aw tsc 0 + **524/524** · `npm run build` exit 0 (brand aquilla OK).
   Baseline was 3399 → +90 net new tests across the batch. Zero migrations added (none needed).
 - 2026-07-06 · UI-QA singleton dispatched over integration @ d95a5e06d (alternate ports; punchlist → §PD7).
   Promotion to dev HELD until QA verdict.
-- 2026-07-06 · SPEC RECONCILED (orchestrator commits in ~/frontierrnd/aquilla-specs): f90ff6f (FRO-416
-  openable-not-just-visible), + FRO-347/364 redeem idempotency & failure classification, + FRO-408
+- 2026-07-06 · SPEC RECONCILED (orchestrator commits in ~/frontierrnd/aquilla-specs): f90ff6f (AQU-416
+  openable-not-just-visible), + AQU-347/364 redeem idempotency & failure classification, + AQU-408
   persistence/save-UX criteria. Spec checkout clean of swarm edits.
 - 2026-07-06 · ★ QA VERDICT (punchlist §PD7): PASS 408/348/365/364/416/366/414/360/325 ·
   PARTIAL 346 (reload+403 correct; live WS eject inert — SYNC_WORKER_URL unset in dev / wrong in [env.e2e]) ·
   PARTIAL/FAIL 347 (post-removal refusal works; still-member friendly no-op never reachable — preview 410s
   before accept logic) · FAIL 334 (contributor sees zero gated steps — roleLevel null at render) ·
   361 banner-path PASS / happy-path BLOCKED-env (cell-completion route lacks OPENROUTER_BASE_URL mock override).
-  NEW BUGS: viewer can open Import dialog → filed FRO-481 (Todo, this project); SYNC_WORKER_URL config gap +
+  NEW BUGS: viewer can open Import dialog → filed AQU-481 (Todo, this project); SYNC_WORKER_URL config gap +
   347 preview + 334 gate → fixer.
-- 2026-07-06 · Linear knock-backs: FRO-334 Fixed→Dispatched, FRO-347 Fixed→Dispatched (comments posted).
+- 2026-07-06 · Linear knock-backs: AQU-334 Fixed→Dispatched, AQU-347 Fixed→Dispatched (comments posted).
   Fixer agent dispatched on swarm/pd7-qa-fixes (off d95a5e06d) for 334-gate / 347-preview / 346-config.
   Promotion still HELD.
 - 2026-07-06 · 347 round-2 (orchestrator glue 3a8efa22c): client previewMultiInvite never sent Authorization →
@@ -174,10 +174,10 @@ per wave each ★ file has exactly ONE owner, all others forbidden.
   sw **722/722** · aw **540/540** · build+brand OK.
 - 2026-07-06 · **PROMOTED → dev @ 0189d3971** (--no-ff; dev tip unchanged at merge time; promoted tree
   byte-identical to gated integration).
-- 2026-07-06 · FIXER MERGED (ff → d2c7b6fd1): 052c6593d FRO-334 (useProject gains synchronous roleLevel from
-  the GET's guaranteed role field; drawer no longer reads stale syncRole cache) · d0d1faeaf FRO-347 (preview
+- 2026-07-06 · FIXER MERGED (ff → d2c7b6fd1): 052c6593d AQU-334 (useProject gains synchronous roleLevel from
+  the GET's guaranteed role field; drawer no longer reads stale syncRole cache) · d0d1faeaf AQU-347 (preview
   route optional-auth; still-member redeemer gets 200 usedByCaller:true; legacy single-project preview has the
-  same bug → follow-up chip) · d2c7b6fd1 FRO-346 (dev-stack.ts env:→--var [wrangler drops env:], .dev.vars.example
+  same bug → follow-up chip) · d2c7b6fd1 AQU-346 (dev-stack.ts env:→--var [wrangler drops env:], .dev.vars.example
   + [env.e2e] 8789, [env.staging] → api.staging.aquilla.app/sync; prod/dev values were already correct;
   e2e-up.ts has same env: bug → follow-up chip).
   ★ GATE @ d2c7b6fd1: root tsc 0 · vitest 3490/3490 · aw tsc 0 + 528/528 · build OK.
@@ -185,11 +185,11 @@ per wave each ★ file has exactly ONE owner, all others forbidden.
 
 ## §CLAIMS
 (record each Todo→Dispatched flip + any stale-claim decisions)
-- 2026-07-06 ~19:46Z · FRO-346, 347, 364, 408, 361, 348, 366 → Dispatched + assigned (orchestrator, pre-spawn). Wave 1.
-- 2026-07-06 ~20:13Z · FRO-414, 416, 360, 334, 325 → Dispatched + assigned (orchestrator, pre-spawn). Wave 2
-  dispatched early off integration tip f8c8d0891 (5 of 6 wave-1 WS merged; only FRO-365 gated on FRO-346).
+- 2026-07-06 ~19:46Z · AQU-346, 347, 364, 408, 361, 348, 366 → Dispatched + assigned (orchestrator, pre-spawn). Wave 1.
+- 2026-07-06 ~20:13Z · AQU-414, 416, 360, 334, 325 → Dispatched + assigned (orchestrator, pre-spawn). Wave 2
+  dispatched early off integration tip f8c8d0891 (5 of 6 wave-1 WS merged; only AQU-365 gated on AQU-346).
 - Wave-1 registry statuses: 361/348/408/366/347+364 merged-integration; 346 still in flight (agent nudged once).
-- 2026-07-06 ~20:46Z · FRO-365 → Dispatched + assigned; worktree off integration tip 91b18fccb (contains 346+348).
-- 2026-07-06 · SPEC: FRO-416 agent edited ~/frontierrnd/aquilla-specs directly (rule breach, caught) — content
+- 2026-07-06 ~20:46Z · AQU-365 → Dispatched + assigned; worktree off integration tip 91b18fccb (contains 346+348).
+- 2026-07-06 · SPEC: AQU-416 agent edited ~/frontierrnd/aquilla-specs directly (rule breach, caught) — content
   reviewed sound; orchestrator committed it as f90ff6f. Remaining spec drafts (347/364 redeem semantics, 408)
   stay in Linear comments for orchestrator application at promotion.

@@ -20,6 +20,7 @@ import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
 import posthog from "@/lib/posthog"
 import { INVITE_REDEEMED } from "@/lib/event-names"
+import { RoleLabel } from "@/components/RoleLabel"
 
 type Phase = "initial" | "redeeming" | "error"
 type AuthMode = "login" | "signup" | "forgot"
@@ -56,7 +57,7 @@ export function JoinPage() {
   // single-project preview if the multi endpoint has nothing.
   // The session JWT rides along (and the effect re-runs once the session
   // loads) so the server can recognize the original redeemer and return the
-  // friendly usedByCaller preview instead of 410 used (FRO-347).
+  // friendly usedByCaller preview instead of 410 used (AQU-347).
   useEffect(() => {
     if (!token) return
     let cancelled = false
@@ -95,7 +96,7 @@ export function JoinPage() {
       setError("Invalid invite link")
     }
     // Signed-in users land on the confirmation card and accept explicitly
-    // (FRO-335: silent auto-accept on link-open meant no user-facing signal
+    // (AQU-335: silent auto-accept on link-open meant no user-facing signal
     // that access was just granted — and contradicted the join-via-invite-link
     // spec's confirmation step). Signed-out users see the same preview with
     // inline auth; after signing in they land on the confirmation too.
@@ -128,7 +129,7 @@ export function JoinPage() {
       return
     }
 
-    // Both accepts failed. FRO-364: an expired-JWT stored session used to
+    // Both accepts failed. AQU-364: an expired-JWT stored session used to
     // land here as "invite invalid" — extended to ANY 401/network failure,
     // since neither is evidence the invite itself is dead. Only a
     // definitive server verdict (410 used/expired, 404 unknown token, 403
@@ -166,7 +167,7 @@ export function JoinPage() {
   const hasValidSession = !!session?.jwt && !sessionExpired
   const isSignedOut = !sessionLoading && !hasValidSession
   const showPreviewCard = isSignedOut && phase === "initial"
-  // FRO-335: signed-in users confirm explicitly instead of auto-accepting.
+  // AQU-335: signed-in users confirm explicitly instead of auto-accepting.
   const showConfirmCard = !sessionLoading && hasValidSession && phase === "initial"
   // Preview failed — show error instead of auth form / accept button. A
   // network failure only blocks the signed-out card (signed-in users can
@@ -178,55 +179,36 @@ export function JoinPage() {
   const previewLoading =
     (showPreviewCard || showConfirmCard) && preview === null && previewLoadState === null
 
+  // AQU-338: an email-bound single-project invite carries the recipient email
+  // in its preview — prefill the cold-signup form with it. An anyone-with-link
+  // invite (no bound email, valid per AQU-283) leaves the field empty and shows
+  // honest helper copy instead. Multi-project previews don't expose a bound
+  // email today, so they fall into the anyone-with-link branch.
+  const boundEmail = preview?.kind === "single" ? preview.data.email : null
+
   // Invite summary — shared by the signed-out (auth) and signed-in (confirm)
-  // branches.
+  // branches. Single- and multi-project tokens both render through the one
+  // InviteSummary component so the singular/plural copy stays correct (a
+  // single-project token actually arrives via the multi endpoint — see the
+  // preview effect above — so the "kind: multi, length 1" case is the common
+  // real-world path and must not say "each"; AQU-337).
   const previewSummary =
     preview?.kind === "single" ? (
-      <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
-        <p className="text-sm">
-          Project:{" "}
-          <strong className="font-medium">{preview.data.projectName}</strong>
-        </p>
-        <p className="text-xs text-muted-foreground">
-          You'll join as{" "}
-          <span className="capitalize">
-            {preview.data.role.name.replace(/_/g, " ")}
-          </span>
-          {preview.data.email && (
-            <>
-              {" "}— invitation sent to{" "}
-              <span className="font-mono">{preview.data.email}</span>
-            </>
-          )}
-          .
-        </p>
-      </div>
+      <InviteSummary
+        projects={[
+          {
+            projectId: preview.data.projectId,
+            projectName: preview.data.projectName,
+          },
+        ]}
+        roleName={preview.data.role.name}
+        email={preview.data.email}
+      />
     ) : preview?.kind === "multi" ? (
-      <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
-        <p className="text-sm">
-          You're invited to{" "}
-          <strong className="font-medium">
-            {preview.data.projects.length} project
-            {preview.data.projects.length === 1 ? "" : "s"}
-          </strong>
-          :
-        </p>
-        <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
-          {preview.data.projects.map((p) => (
-            <li key={p.projectId}>
-              {p.projectName}
-              {p.archived ? " (archived)" : ""}
-            </li>
-          ))}
-        </ul>
-        <p className="text-xs text-muted-foreground">
-          You'll join each as{" "}
-          <span className="capitalize">
-            {preview.data.role.name.replace(/_/g, " ")}
-          </span>
-          .
-        </p>
-      </div>
+      <InviteSummary
+        projects={preview.data.projects}
+        roleName={preview.data.role.name}
+      />
     ) : previewLoading ? (
       <div className="flex items-center gap-2 py-1">
         <Spinner className="text-muted-foreground" />
@@ -305,7 +287,7 @@ export function JoinPage() {
               </Button>
             </div>
           ) : showConfirmCard ? (
-            // FRO-335: explicit accept step (spec join-via-invite-link Step 2:
+            // AQU-335: explicit accept step (spec join-via-invite-link Step 2:
             // "Token valid, recipient already signed in → JoinPage shows
             // confirmation"). Access is granted only on the button click, so
             // gaining membership is always a visible, deliberate action.
@@ -356,7 +338,18 @@ export function JoinPage() {
                 )}
                 {authMode === "signup" && (
                   <div className="space-y-3">
-                    <FrontierSignupForm onSuccess={() => {}} />
+                    {/* AQU-338: be honest about what the email field means —
+                        prefilled-and-changeable for a bound invite, or
+                        free-form for an anyone-with-link invite. Gated on the
+                        preview so we never assert "unbound" while it loads. */}
+                    {preview && (
+                      <p className="text-xs text-muted-foreground">
+                        {boundEmail
+                          ? "We've pre-filled the email from your invitation — you can use a different one if you prefer."
+                          : "This invite isn't bound to an email — sign up with any email you'd like."}
+                      </p>
+                    )}
+                    <FrontierSignupForm onSuccess={() => {}} initialEmail={boundEmail} />
                     <p className="text-center text-xs text-muted-foreground">
                       Already have an account?{" "}
                       <button
@@ -397,6 +390,89 @@ export function JoinPage() {
           )}
         </CardContent>
       </Card>
+    </div>
+  )
+}
+
+/** One project row in the invite summary. `projectName` is preferred for
+ * display; `projectId` is only a fallback so a nameless row never shows blank
+ * (AQU-337 acceptance: show the project name, not the opaque id). */
+export interface InviteSummaryProject {
+  projectId: string
+  projectName: string
+  archived?: boolean
+}
+
+/**
+ * Invite-summary card body, shared by the single- and multi-project preview
+ * branches. Pluralization is driven purely by how many projects the token
+ * grants:
+ *
+ * - Exactly one project → "You'll join as {role}." (no "each"), with the
+ *   project named inline. This is the case the cold-signup walkthrough hit
+ *   (AQU-337): a single-project token that arrives through the multi endpoint
+ *   used to render "You'll join each as …", which is wrong for one invitee /
+ *   one project.
+ * - More than one project → the bulleted project list plus "You'll join each
+ *   as {role}." — here "each" correctly distributes the role over the list.
+ *
+ * The multi-invite payload carries a single `role` for the whole token (there
+ * is no per-project role in the preview data model), so the role line is
+ * shared across all rows by design.
+ */
+export function InviteSummary({
+  projects,
+  roleName,
+  email,
+}: {
+  projects: InviteSummaryProject[]
+  roleName: string
+  email?: string | null
+}) {
+  const role = <RoleLabel name={roleName} />
+  const emailSuffix = email ? (
+    <>
+      {" "}— invitation sent to <span className="font-mono">{email}</span>
+    </>
+  ) : null
+
+  if (projects.length === 1) {
+    const p = projects[0]
+    return (
+      <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
+        <p className="text-sm">
+          Project:{" "}
+          <strong className="font-medium">
+            {p.projectName || p.projectId}
+            {p.archived ? " (archived)" : ""}
+          </strong>
+        </p>
+        <p className="text-xs text-muted-foreground">
+          You'll join as {role}
+          {emailSuffix}.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
+      <p className="text-sm">
+        You're invited to{" "}
+        <strong className="font-medium">{projects.length} projects</strong>:
+      </p>
+      <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+        {projects.map((p) => (
+          <li key={p.projectId}>
+            {p.projectName || p.projectId}
+            {p.archived ? " (archived)" : ""}
+          </li>
+        ))}
+      </ul>
+      <p className="text-xs text-muted-foreground">
+        You'll join each as {role}
+        {emailSuffix}.
+      </p>
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { Glossary } from "../../helpers/page-objects/Glossary"
 
 /**
  * Terminology CSV and TBX export.
@@ -20,17 +21,9 @@ test("terminology CSV export downloads after adding a concept", async ({ alice }
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}/terminology`)
-  await alice.waitForLoadState("networkidle")
-
-  // Add a concept so exports are enabled.
-  await alice.getByRole("button", { name: /Add concept/i }).first().click()
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
-  await dialog.locator("#concept-source-term").fill("grace")
-  await dialog.locator('input[placeholder="rendering"]').first().fill("grâce")
-  await dialog.getByRole("button", { name: /^Add concept$/i }).click()
-  await expect(dialog).not.toBeVisible({ timeout: 5_000 })
+  const glossary = new Glossary(alice)
+  await glossary.goto(projectId!)
+  await glossary.addTerm("grace", "grâce")
 
   // CSV export — button becomes enabled once concepts exist.
   const csvBtn = alice.getByRole("button", { name: /Export CSV/i })
@@ -52,17 +45,9 @@ test("terminology TBX export downloads after adding a concept", async ({ alice }
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}/terminology`)
-  await alice.waitForLoadState("networkidle")
-
-  // Add a concept.
-  await alice.getByRole("button", { name: /Add concept/i }).first().click()
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
-  await dialog.locator("#concept-source-term").fill("faith")
-  await dialog.locator('input[placeholder="rendering"]').first().fill("foi")
-  await dialog.getByRole("button", { name: /^Add concept$/i }).click()
-  await expect(dialog).not.toBeVisible({ timeout: 5_000 })
+  const glossary = new Glossary(alice)
+  await glossary.goto(projectId!)
+  await glossary.addTerm("faith", "foi")
 
   // TBX export.
   const tbxBtn = alice.getByRole("button", { name: /Export TBX/i })

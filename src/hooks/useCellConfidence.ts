@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import type { CellData } from "./useCells"
+import type { CellSummary } from "./useActiveCellStore"
 import { fetchCellConfidence } from "@/lib/sync/cell-confidence-read"
 
 // PROTOTYPE (AD-14 health-as-confidence). Derives per-cell health on read from
@@ -31,7 +31,7 @@ export function useCellConfidence(args: {
   fileId?: string
   /** Mints a project-scoped sync-token (NOT the raw session JWT). */
   getToken?: () => Promise<string | null>
-  cells: CellData[]
+  cells: readonly CellSummary[]
   enabled: boolean
   /** Per-hop authority decay (project setting); server defaults to 0.8. */
   perHopDecay?: number

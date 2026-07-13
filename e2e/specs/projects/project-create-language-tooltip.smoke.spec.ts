@@ -16,13 +16,7 @@ test("project create dialog language tooltip shows hint text", async ({ alice })
   const dash = new Dashboard(alice)
   await dash.goto()
 
-  // Open the project create dialog.
-  const newProjectBtn = alice.getByRole("button", { name: /New project/i })
-  await expect(newProjectBtn).toBeVisible({ timeout: 10_000 })
-  await newProjectBtn.click()
-
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
+  const dialog = await dash.openCreateProjectDialog()
 
   // Hover the "What can I enter here?" tooltip trigger button.
   // (Base UI tooltips open on hover/focus; a click dismisses them.)

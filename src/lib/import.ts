@@ -63,7 +63,7 @@ export interface EBibleProgress {
 }
 
 // ---------------------------------------------------------------------------
-// eBible → target column (FRO-191)
+// eBible → target column (AQU-191)
 // ---------------------------------------------------------------------------
 
 /**
@@ -339,6 +339,8 @@ export interface ImportContext {
   /** Optional language pair to stamp on the `file.create` payload. */
   sourceLanguage?: string
   targetLanguage?: string
+  sourceTextDirection?: "ltr" | "rtl"
+  targetTextDirection?: "ltr" | "rtl"
   /** Mints a sync-token scoped to (projectId, fileId) for the bulk upload. */
   getToken: (fileId: string) => Promise<string | null>
   /** Fired as cells upload — drives the dialog progress UI. */
@@ -346,7 +348,7 @@ export interface ImportContext {
   /** Aborts the in-flight upload (dialog close / cancel). */
   signal?: AbortSignal
   /**
-   * FRO-287: Books (or files) the user chose to skip on collision.
+   * AQU-287: Books (or files) the user chose to skip on collision.
    * Keys are USFM bookCodes (uppercase, e.g. "GEN") for Paratext imports, or
    * normalised file names (lowercase trimmed) for single-file imports.
    * `importParatextProject`, `importParatextAsTarget`, and `importFile` all
@@ -354,6 +356,11 @@ export interface ImportContext {
    * "skipped by user" rather than being uploaded.
    */
   skipKeys?: ReadonlySet<string>
+}
+
+function normalizeImportedDirection(value: string | undefined | null): "ltr" | "rtl" | undefined {
+  const normalized = value?.trim().toLowerCase()
+  return normalized === "ltr" || normalized === "rtl" ? normalized : undefined
 }
 
 export interface ImportFileResult {
@@ -388,7 +395,7 @@ export async function importFile(
     return { refs: [ref], speakerPairs: [] }
   }
 
-  // FRO-287: single-file skip — key is normalized file name (lowercase trimmed).
+  // AQU-287: single-file skip — key is normalized file name (lowercase trimmed).
   const fileNameKey = file.name.trim().toLowerCase()
   if (ctx.skipKeys?.has(fileNameKey)) {
     return { refs: [], speakerPairs: [] }
@@ -399,7 +406,7 @@ export async function importFile(
   const speakerPairs: { cellId: string; speaker: string | undefined }[] = []
 
   for (const result of results) {
-    // FRO-287: per-result skip — key is normalized display name (for USFM parsed
+    // AQU-287: per-result skip — key is normalized display name (for USFM parsed
     // results the name is the book display name; fall back to bookCode key too).
     const resultNameKey = result.name.trim().toLowerCase()
     const resultCodeKey = result.bookCode?.toUpperCase()
@@ -453,6 +460,7 @@ export async function importEBible(
     "ebible",
     {
       ...ctx,
+      sourceTextDirection: normalizeImportedDirection(translation.textDirection) ?? ctx.sourceTextDirection,
       signal: signal ?? ctx.signal,
       onCellEnqueued: (count, total) => {
         onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total })
@@ -627,6 +635,7 @@ export async function importHelloao(
     "helloao",
     {
       ...ctx,
+      sourceTextDirection: normalizeImportedDirection(translation.textDirection) ?? ctx.sourceTextDirection,
       signal: signal ?? ctx.signal,
       onCellEnqueued: (count, total) => {
         onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total })
@@ -912,6 +921,8 @@ export async function emitParsedFile(
       parserVersion: "workspace-import-v1",
       sourceLanguage: ctx.sourceLanguage,
       targetLanguage: ctx.targetLanguage,
+      sourceTextDirection: ctx.sourceTextDirection,
+      targetTextDirection: ctx.targetTextDirection,
       orderedBy,
       ...(result.bookCode ? { bookCode: result.bookCode } : {}),
     },
@@ -931,6 +942,10 @@ export async function emitParsedFile(
       createdAt: new Date().toISOString(),
       cellCount: cells.length,
       orderedBy,
+      ...(ctx.sourceLanguage ? { sourceLanguage: ctx.sourceLanguage } : {}),
+      ...(ctx.targetLanguage ? { targetLanguage: ctx.targetLanguage } : {}),
+      ...(ctx.sourceTextDirection ? { sourceTextDirection: ctx.sourceTextDirection } : {}),
+      ...(ctx.targetTextDirection ? { targetTextDirection: ctx.targetTextDirection } : {}),
       ...(result.corpusMarker ? { corpusMarker: result.corpusMarker } : {}),
       ...(result.originalName ? { originalName: result.originalName } : {}),
     },
@@ -1015,6 +1030,8 @@ export async function emitMediaFile(
       parserVersion: "workspace-import-v1",
       sourceLanguage: ctx.sourceLanguage,
       targetLanguage: ctx.targetLanguage,
+      sourceTextDirection: ctx.sourceTextDirection,
+      targetTextDirection: ctx.targetTextDirection,
       orderedBy: "time",
     },
     cells,
@@ -1147,7 +1164,7 @@ export interface ParatextBookPlan {
 
 /** A fully client-side-parsed Paratext project: everything the preview screen
  *  needs, and everything the commit phase uploads. Nothing has touched the
- *  network when this exists (FRO-310 preview-before-confirm). */
+ *  network when this exists (AQU-310 preview-before-confirm). */
 export interface ParatextPlan {
   project: ParatextProject
   books: ParatextBookPlan[]
@@ -1219,6 +1236,7 @@ export async function commitParatextProject(
   const baseCtx: ImportContext = {
     ...ctx,
     sourceLanguage: plan.project.settings.languageIsoCode || ctx.sourceLanguage,
+    sourceTextDirection: plan.project.settings.rightToLeft ? "rtl" : ctx.sourceTextDirection,
   }
   const isSkipped = (bookId: string) => ctx.skipKeys?.has(bookId.toUpperCase()) ?? false
   const cellsTotal = plan.books.reduce(
@@ -1234,7 +1252,7 @@ export async function commitParatextProject(
       phase: "save", book: book.displayName, booksDone: done, booksTotal: total,
       cellsDone: cellsUploaded, cellsTotal,
     })
-    // FRO-287 / preview toggles: honour skip decisions.
+    // AQU-287 / preview toggles: honour skip decisions.
     if (isSkipped(book.bookId)) {
       skipped.push({ book: book.displayName, reason: "skipped by user" })
       done++
@@ -1316,7 +1334,7 @@ export async function importParatextAsTarget(
       phase: "save", book: bookPlan.displayName, booksDone: done, booksTotal: total,
       cellsDone: cellsUploaded, cellsTotal,
     })
-    // FRO-287 / preview toggles: honour skip decisions.
+    // AQU-287 / preview toggles: honour skip decisions.
     if (isSkipped(bookPlan.bookId)) {
       skipped.push({ book: bookPlan.displayName, reason: "skipped by user" })
       done++
@@ -1367,6 +1385,7 @@ export async function importParatextAsTarget(
           parserVersion: "paratext-target-v1",
           sourceLanguage: ctx.sourceLanguage,
           targetLanguage: ctx.targetLanguage,
+          targetTextDirection: plan.project.settings.rightToLeft ? "rtl" : ctx.targetTextDirection,
           bookCode: bookPlan.bookId,
         },
         cells,
@@ -1393,6 +1412,9 @@ export async function importParatextAsTarget(
         type: "usfm",
         createdAt: new Date().toISOString(),
         cellCount: cells.length,
+        ...(ctx.sourceLanguage ? { sourceLanguage: ctx.sourceLanguage } : {}),
+        ...(ctx.targetLanguage ? { targetLanguage: ctx.targetLanguage } : {}),
+        ...(plan.project.settings.rightToLeft ? { targetTextDirection: "rtl" as const } : {}),
         ...(bookPlan.corpusMarker ? { corpusMarker: bookPlan.corpusMarker } : {}),
       })
       cellsUploaded = cellsBefore + cells.length + targets.length

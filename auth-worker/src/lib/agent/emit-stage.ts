@@ -236,7 +236,7 @@ async function stageOne(
           return { kind: "rejected", reason: "target.cell.commit payload needs a string `value`" }
         }
         display.after = payload.value
-        // Provenance injection (FRO-292): machine-drafted, attributable to the run.
+        // Provenance injection (AQU-292): machine-drafted, attributable to the run.
         payload.ai_suggestion = true
         payload.agent_run_id = ctx.runId
         payload.sourceEventId = pair.source?.event_id ?? null

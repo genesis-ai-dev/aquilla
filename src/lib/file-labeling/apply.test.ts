@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { applySuggestions, buildUndo } from "./apply"
+import { applySuggestions, buildUndo, hasEffectiveChange } from "./apply"
 import type { RenameSuggestion } from "./detect"
 import type { ProjectRecord, FileReference } from "@/lib/parsers/types"
 
@@ -60,6 +60,27 @@ describe("applySuggestions", () => {
       mkSug({ fileId: "f1", currentName: "partly-renamed", suggestedName: "Genesis" }),
     ])
     expect(next.files[0].originalName).toBe("gen.usfm")
+  })
+})
+
+describe("hasEffectiveChange (AQU-374)", () => {
+  it("is true when the name changes", () => {
+    expect(hasEffectiveChange(mkSug({ currentName: "gen.usfm", suggestedName: "Genesis" }))).toBe(true)
+  })
+  it("is true when only the corpus changes", () => {
+    expect(hasEffectiveChange(mkSug({
+      currentName: "Genesis", suggestedName: "Genesis",
+      currentCorpus: undefined, suggestedCorpus: "OT",
+    }))).toBe(true)
+  })
+  it("is false when neither name nor corpus changes", () => {
+    expect(hasEffectiveChange(mkSug({
+      currentName: "Genesis", suggestedName: "Genesis",
+      currentCorpus: "OT", suggestedCorpus: "OT",
+    }))).toBe(false)
+  })
+  it("is false when the name matches and no corpus is suggested", () => {
+    expect(hasEffectiveChange(mkSug({ currentName: "Genesis", suggestedName: "Genesis" }))).toBe(false)
   })
 })
 

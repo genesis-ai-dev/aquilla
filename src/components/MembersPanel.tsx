@@ -6,6 +6,8 @@ import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { formatRelativeTime, isStale } from "@/lib/time/relative";
+import { RoleLabel } from "@/components/RoleLabel";
+import { roleDisplayText } from "@/lib/frontier/roles";
 import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead";
 
 export interface MembersPanelMember {
@@ -32,7 +34,14 @@ export interface MembersPanelRoleOption {
 interface MembersPanelProps {
   members: MembersPanelMember[];
   roleOptions: MembersPanelRoleOption[];
-  defaultRole: number;
+  /**
+   * Initial value of the "role to grant" picker when adding a NEW member.
+   * This is local UI state only — it is never persisted and has no effect
+   * on any existing member's role. There is no project-wide default role;
+   * every member's effective role comes solely from their own explicit
+   * grant (see AD-12 max-wins resolver in project-permissions.ts).
+   */
+  newMemberDefaultRole: number;
   onAdd: (username: string, role: number) => Promise<{ ok: boolean; error?: string }>;
   onRemove: (userId: number) => Promise<void>;
   onChangeRole?: (username: string, role: number) => Promise<void>;
@@ -48,7 +57,7 @@ interface MembersPanelProps {
 export function MembersPanel({
   members,
   roleOptions,
-  defaultRole,
+  newMemberDefaultRole,
   onAdd,
   onRemove,
   onChangeRole,
@@ -64,7 +73,7 @@ export function MembersPanel({
     mode: "username",
     raw: "",
   });
-  const [role, setRole] = useState(defaultRole);
+  const [role, setRole] = useState(newMemberDefaultRole);
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
@@ -80,7 +89,7 @@ export function MembersPanel({
       return;
     }
     setRecipient({ mode: "username", raw: "" });
-    setRole(defaultRole);
+    setRole(newMemberDefaultRole);
   }
 
   const grantableRoles = roleOptions.filter((r) => r.level <= callerMaxRole);
@@ -94,7 +103,7 @@ export function MembersPanel({
           return (
             <li key={m.userId} className="flex min-w-0 items-center gap-3 overflow-x-hidden px-3 py-2">
               <span className="min-w-0 truncate font-medium">{m.username}</span>
-              <span className="text-xs text-muted-foreground">{m.roleName}</span>
+              <RoleLabel name={m.roleName} className="text-xs text-muted-foreground" />
               {m.source === "org" && (
                 <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">via org</span>
               )}
@@ -114,8 +123,8 @@ export function MembersPanel({
                       // renders the role name instead of the raw level.
                       ...(grantableRoles.some((r) => r.level === m.roleLevel)
                         ? []
-                        : [{ value: String(m.roleLevel), label: m.roleName }]),
-                      ...grantableRoles.map((r) => ({ value: String(r.level), label: r.name })),
+                        : [{ value: String(m.roleLevel), label: roleDisplayText(m.roleName) }]),
+                      ...grantableRoles.map((r) => ({ value: String(r.level), label: roleDisplayText(r.name) })),
                     ]}
                     value={String(m.roleLevel)}
                     onValueChange={(v) => onChangeRole(m.username, parseInt(v ?? "", 10))}
@@ -126,7 +135,9 @@ export function MembersPanel({
                     <SelectContent>
                       <SelectGroup>
                         {grantableRoles.map((r) => (
-                          <SelectItem key={r.level} value={String(r.level)}>{r.name}</SelectItem>
+                          <SelectItem key={r.level} value={String(r.level)}>
+                            <RoleLabel name={r.name} />
+                          </SelectItem>
                         ))}
                       </SelectGroup>
                     </SelectContent>
@@ -168,7 +179,7 @@ export function MembersPanel({
             />
           </div>
           <Select
-            items={grantableRoles.map((r) => ({ value: String(r.level), label: r.name }))}
+            items={grantableRoles.map((r) => ({ value: String(r.level), label: roleDisplayText(r.name) }))}
             value={String(role)}
             onValueChange={(v) => setRole(parseInt(v ?? "", 10))}
             disabled={adding}
@@ -179,7 +190,9 @@ export function MembersPanel({
             <SelectContent>
               <SelectGroup>
                 {grantableRoles.map((r) => (
-                  <SelectItem key={r.level} value={String(r.level)}>{r.name}</SelectItem>
+                  <SelectItem key={r.level} value={String(r.level)}>
+                    <RoleLabel name={r.name} />
+                  </SelectItem>
                 ))}
               </SelectGroup>
             </SelectContent>

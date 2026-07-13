@@ -459,7 +459,7 @@ export interface ProjectEffectiveMembers {
 }
 
 /**
- * Batched membership-matrix resolver (FRO-218). Computes effective members for
+ * Batched membership-matrix resolver (AQU-218). Computes effective members for
  * EVERY non-archived project the viewer can access in `orgId`, in a small
  * constant number of queries regardless of project count — replacing the
  * client's per-project /:projectId/members fan-out that flooded the connection
@@ -780,7 +780,7 @@ export async function detachGroupProject(env: Env, groupId: number, projectId: s
   await env.AQUILLA_PG.prepare("DELETE FROM group_project_grants WHERE group_id = ? AND project_id = ?").bind(groupId, projectId).run()
 }
 
-export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number }
+export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number }
 export interface OrgPortfolioRow extends PortfolioRow { orgId: number }
 
 interface PortfolioDbRow {
@@ -794,6 +794,7 @@ interface PortfolioDbRow {
   ai_drafted_cells: number
   last_edit_at: number | null
   audio_cells: number
+  validated_audio_cells: number
   recorded_ms: number
 }
 
@@ -807,6 +808,7 @@ function mapPortfolioRow(r: PortfolioDbRow): PortfolioRow {
     aiDraftedCells: r.ai_drafted_cells,
     lastEditAt: r.last_edit_at,
     audioCells: r.audio_cells,
+    validatedAudioCells: r.validated_audio_cells,
     recordedMs: r.recorded_ms,
     deadlineAt: r.deadline_at,
   }
@@ -823,6 +825,9 @@ export async function getOrgPortfolio(env: Env, orgId: number): Promise<Portfoli
             MAX(f.last_edit_at)                     AS last_edit_at,
             (SELECT COUNT(DISTINCT ca.cell_id) FROM cell_audio ca
               WHERE ca.project_id = p.id AND ca.deleted = 0)                    AS audio_cells,
+            (SELECT COUNT(DISTINCT ca.cell_id) FROM cell_audio ca
+              WHERE ca.project_id = p.id AND ca.deleted = 0 AND ca.selected = 1
+                AND ca.approved = 1)                                            AS validated_audio_cells,
             (SELECT COALESCE(SUM(ca.duration_ms), 0) FROM cell_audio ca
               WHERE ca.project_id = p.id AND ca.deleted = 0 AND ca.selected = 1) AS recorded_ms
        FROM projects p
@@ -848,6 +853,9 @@ export async function getOrgPortfolios(env: Env, orgIds: number[]): Promise<OrgP
             MAX(f.last_edit_at)                     AS last_edit_at,
             (SELECT COUNT(DISTINCT ca.cell_id) FROM cell_audio ca
               WHERE ca.project_id = p.id AND ca.deleted = 0)                    AS audio_cells,
+            (SELECT COUNT(DISTINCT ca.cell_id) FROM cell_audio ca
+              WHERE ca.project_id = p.id AND ca.deleted = 0 AND ca.selected = 1
+                AND ca.approved = 1)                                            AS validated_audio_cells,
             (SELECT COALESCE(SUM(ca.duration_ms), 0) FROM cell_audio ca
               WHERE ca.project_id = p.id AND ca.deleted = 0 AND ca.selected = 1) AS recorded_ms
        FROM projects p
@@ -1032,4 +1040,111 @@ export async function canReadTermbase(
   if (upstream.org_id == null || upstream.org_id !== subscriber.org_id) return false
 
   return true
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-485: configurable roster + member-progress visibility
+//
+// Generalizes the AQU-253 exportMinRole pattern to two independent,
+// org-scoped read floors stored in the same org_settings JSON blob:
+//
+//   - rosterViewMinRole:        who can see the member list (+ count)
+//   - memberProgressViewMinRole: who can see per-member progress/productivity
+//
+// Sensitive teams may not want to reveal WHO is on a project (roster) even
+// to their own members, and separately may want to hide WHAT each member did
+// (progress) even from people who CAN see the roster. The two floors are
+// independent — one may be low while the other is high.
+//
+// Both default to MAINTAINER (600) when unset — the same safe default as
+// exportMinRole, and safe for sensitive teams out of the box. The write gate
+// for changing either key is OWNER (700), mirroring EXPORT_FLOOR_WRITE_MIN_ROLE
+// in org-settings.ts (this is a permission-policy key, not a general setting).
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Default floor for both roster and member-progress visibility. */
+export const DEFAULT_ROSTER_VIEW_MIN_ROLE = 600 // ROLE.MAINTAINER
+export const DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE = 600 // ROLE.MAINTAINER
+
+interface OrgSettingsRowShape {
+  settings: string
+}
+
+/**
+ * Read the raw org_settings JSON blob for a given org, tolerating a missing
+ * row (never configured) or malformed JSON (defensive — treat as empty).
+ */
+async function loadOrgSettingsBlob(env: Env, orgId: number): Promise<Record<string, unknown>> {
+  const row = await env.AQUILLA_PG.prepare(
+    "SELECT settings FROM org_settings WHERE org_id = ?",
+  )
+    .bind(orgId)
+    .first<OrgSettingsRowShape>()
+  if (!row) return {}
+  try {
+    const parsed = JSON.parse(row.settings)
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>
+    }
+  } catch {
+    // fall through
+  }
+  return {}
+}
+
+/** Extract a valid role-ladder floor from a settings blob key, or the default. */
+function extractRoleFloor(
+  settings: Record<string, unknown>,
+  key: string,
+  fallback: number,
+): number {
+  const raw = settings[key]
+  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 100 && raw <= 700) return raw
+  return fallback
+}
+
+/**
+ * Resolve the effective roster-view floor for an org (falls back to the
+ * MAINTAINER default when the org hasn't configured one).
+ */
+export async function getRosterViewMinRole(env: Env, orgId: number): Promise<number> {
+  const settings = await loadOrgSettingsBlob(env, orgId)
+  return extractRoleFloor(settings, "rosterViewMinRole", DEFAULT_ROSTER_VIEW_MIN_ROLE)
+}
+
+/**
+ * Resolve the effective member-progress-view floor for an org (falls back to
+ * the MAINTAINER default when the org hasn't configured one).
+ */
+export async function getMemberProgressViewMinRole(env: Env, orgId: number): Promise<number> {
+  const settings = await loadOrgSettingsBlob(env, orgId)
+  return extractRoleFloor(settings, "memberProgressViewMinRole", DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE)
+}
+
+/**
+ * True when `callerRoleLevel` meets or exceeds the org's configured roster
+ * floor. Pass the floor directly (from getRosterViewMinRole) to avoid a
+ * redundant settings fetch when the caller already has it.
+ */
+export function canViewRoster(callerRoleLevel: number | null, rosterMinRole: number): boolean {
+  if (callerRoleLevel == null) return false
+  return callerRoleLevel >= rosterMinRole
+}
+
+/**
+ * True when `callerRoleLevel` meets or exceeds the org's configured
+ * member-progress floor.
+ *
+ * SWARM-TODO(AQU-498): still unconsumed by any auth-worker route — the
+ * per-member activity view AQU-498 shipped reads straight from sync-worker
+ * (GET /api/v1/projects/:projectId/members/:author/activity, gated by its
+ * own resolveMemberProgressFloor in member-progress-floor.ts, since
+ * sync-worker doesn't depend on auth-worker). If a future auth-worker route
+ * needs the same floor (e.g. a member-progress summary folded into
+ * /projects/:projectId/members), it should call this helper rather than
+ * re-deriving the comparison.
+ */
+export function canViewMemberProgress(callerRoleLevel: number | null, progressMinRole: number): boolean {
+  if (callerRoleLevel == null) return false
+  return callerRoleLevel >= progressMinRole
 }

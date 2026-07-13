@@ -29,6 +29,8 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'cell.audio.attach': { audioId: 'audio-1.wav', url: 'frontier-audio://audio-1.wav', slot: 'recording' },
     'cell.audio.select': { audioId: 'audio-1.wav', slot: 'recording' },
     'cell.audio.remove': { audioId: 'audio-1.wav' },
+    'cell.audio.validate': { audioId: 'audio-1.wav' },
+    'cell.audio.unvalidate': { audioId: 'audio-1.wav' },
     'file.create': { name: 'Genesis', fileType: 'codex' },
     'file.rename': { name: 'Genesis (renamed)' },
     'file.delete': {},
@@ -123,7 +125,7 @@ describe('dispatchEvent', () => {
     const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
-    // 1 events INSERT + 1 validator UPSERT + 1 ai_drafted clear (FRO-292)
+    // 1 events INSERT + 1 validator UPSERT + 1 ai_drafted clear (AQU-292)
     // + 1 validated recompute + 1 endorsement_count recompute (AD-14 pass 1)
     // + 1 files-counter recompute (approved_count moves) = 6
     expect(outcome.result.stmts.length).toBe(6)

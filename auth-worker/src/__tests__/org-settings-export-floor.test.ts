@@ -1,4 +1,4 @@
-// Tests for exportMinRole validation in the org-settings PATCH route (FRO-253).
+// Tests for exportMinRole validation in the org-settings PATCH route (AQU-253).
 //
 // Verifies:
 //   1. Garbage values (string, out-of-range, NaN) → 400 with a clear message.
@@ -41,7 +41,7 @@ async function patchSettings(
   )
 }
 
-describe("org-settings PATCH exportMinRole validation (FRO-253)", () => {
+describe("org-settings PATCH exportMinRole validation (AQU-253)", () => {
   it("400s when exportMinRole is a string ('owner')", async () => {
     await seed()
     const ownerJwt = await jwtFor("alice")

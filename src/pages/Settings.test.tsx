@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
-import { Settings } from "./Settings"
+import { Settings, OrgSettingsIdentity, OrgSettingsExport } from "./Settings"
 import { renameOrg, listMyOrgs } from "@/lib/frontier/orgs"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -14,12 +14,6 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 vi.mock("@/lib/frontier/orgs", () => ({
   listMyOrgs: vi.fn(async () => [{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }]),
   renameOrg: vi.fn(async () => {}),
-}))
-vi.mock("@/hooks/useOrg", () => ({
-  useOrgMembers: () => ({ members: [{ userId: 1 }, { userId: 2 }, { userId: 3 }], isLoading: false, error: null }),
-}))
-vi.mock("@/lib/frontier/portfolio", () => ({
-  getPortfolio: vi.fn(async () => [{ id: "p1" }, { id: "p2" }]),
 }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 vi.mock("@/hooks/useOrgSettings", () => ({
@@ -34,12 +28,25 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     hasFetched: true,
     canEdit: true,
     canExport: true,
-    // FRO-433: OrgProviderSection consumes these from the hook contract.
+    // AQU-433: OrgProviderSection consumes these from the hook contract.
     orgProviderKeys: {},
     canEditOrgKeys: true,
+    // AQU-485: roster/member-progress visibility — default floor (Maintainer)
+    // and the mocked caller (owner, role 700) passes it.
+    canViewRoster: true,
+    rosterViewMinRole: 600,
+    canViewMemberProgress: true,
+    memberProgressViewMinRole: 600,
+    // AQU-496: self-assignment authority — default leads-only.
+    allowSelfAssignment: false,
     refresh: vi.fn(async () => null),
     requestPromotion: vi.fn(async () => ({ kind: "blocked" })),
   }),
+  // AQU-485: Settings.tsx imports this directly (not part of the hook's
+  // return value) to gate the roster/progress Select controls owner-only.
+  canEditRosterProgressFloor: (level: number | null | undefined) => (level ?? 0) >= 700,
+  // AQU-496: same pattern, gates the allowSelfAssignment Switch owner-only.
+  canEditAssignmentAuthority: (level: number | null | undefined) => (level ?? 0) >= 700,
 }))
 
 beforeEach(() => localStorage.clear())
@@ -68,7 +75,8 @@ function renderSettings(path = "/settings") {
       <OrgProvider>
         <Routes>
           <Route path="/settings" element={<Settings />} />
-          <Route path="/settings/:section" element={<Settings />} />
+          <Route path="/settings/identity" element={<OrgSettingsIdentity />} />
+          <Route path="/settings/export" element={<OrgSettingsExport />} />
         </Routes>
       </OrgProvider>
     </MemoryRouter>,
@@ -80,17 +88,10 @@ describe("Org Settings", () => {
     renderSettings("/settings/identity")
     await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))
     fireEvent.click(screen.getByRole("button", { name: /rename/i }))
-    const input = screen.getByLabelText(/organization name/i)
+    const input = await screen.findByLabelText(/organization name/i)
     fireEvent.change(input, { target: { value: "CAS" } })
-    // Exact "Save" targets the rename control (OrgProviderSection adds a "Save key").
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(renameOrg).toHaveBeenCalledWith("jwt", 1, "CAS"))
-  })
-
-  it("shows org facts (member + project counts)", async () => {
-    renderSettings()
-    await waitFor(() => expect(screen.getByText("3")).toBeInTheDocument()) // members
-    await waitFor(() => expect(screen.getByText("2")).toBeInTheDocument()) // projects
   })
 
   it("hides the rename control for a non-admin", async () => {
@@ -124,5 +125,37 @@ describe("Export policy saved acknowledgment", () => {
     // The server error must surface, and the Saved acknowledgment must not.
     expect(await screen.findByText(/server error/i)).toBeDefined()
     expect(screen.queryByTestId("export-role-saved")).toBeNull()
+  })
+})
+
+// AQU-485: roster + member-progress visibility settings UI.
+describe("Roster & member-progress visibility settings (AQU-485)", () => {
+  it("renders both independent controls, defaulting to Maintainer", async () => {
+    renderSettings("/settings/roster")
+    await waitFor(() => expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined())
+    expect(screen.getByLabelText(/who can view member progress/i)).toBeDefined()
+  })
+
+  it("shows Saved after successfully changing the roster floor, independent of the progress floor", async () => {
+    mockPatch.mockResolvedValueOnce({ kind: "ok", value: { orgId: 1, settings: { rosterViewMinRole: 400 }, version: 2, updatedAt: null, updatedBy: null } })
+    renderSettings("/settings/roster")
+    await waitFor(() => expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined())
+
+    await pickSelectOption(/who can view the roster/i, /contributor \(400\)/i)
+
+    await waitFor(() => expect(screen.getByTestId("roster-role-saved")).toBeDefined())
+    // Changing the roster floor must not touch the progress floor's ack state.
+    expect(screen.queryByTestId("progress-role-saved")).toBeNull()
+  })
+
+  it("surfaces a server error for the member-progress floor without a false Saved", async () => {
+    mockPatch.mockResolvedValueOnce({ kind: "error" as const, status: 500, message: "Server error" })
+    renderSettings("/settings/roster")
+    await waitFor(() => expect(screen.getByLabelText(/who can view member progress/i)).toBeDefined())
+
+    await pickSelectOption(/who can view member progress/i, /owner \(700\)/i)
+
+    expect(await screen.findByText(/server error/i)).toBeDefined()
+    expect(screen.queryByTestId("progress-role-saved")).toBeNull()
   })
 })

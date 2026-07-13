@@ -35,7 +35,7 @@ export function BibleTranslationLanding() {
   // Signed-in visitors (aq_hint=1 cookie — same bit the Worker reads at the
   // edge) go straight into the app at `/`; returning (unsigned-in) users go to
   // /login; brand-new visitors use the "Sign up free" button → /onboarding.
-  // FRO-282: "Open app" is the sign-in entry for returning users — it must
+  // AQU-282: "Open app" is the sign-in entry for returning users — it must
   // NOT send them through the signup wizard.
   const appHref = hasAuthHintCookie() ? "/" : "/login"
 
@@ -170,11 +170,11 @@ export function BibleTranslationLanding() {
         <section className="aq-container aq-section" id="languages">
           <div className="aq-head aq-center aq-reveal">
             <span className="aq-eyebrow">Low-resource? Still in reach.</span>
-            <h2 className="aq-display">A first draft in seconds — even in languages most tools have never seen.</h2>
+            <h2 className="aq-display">Trusted translations — even in languages most tools have never seen.</h2>
             <p>
               Aquilla brings real AI assistance to the long tail: the thousands of languages with little data and,
-              often, a single translator. But a draft is a starting point, not a verdict. Here is John 3:16 across
-              the world's tongues — the kind of head start now within reach for the languages still waiting.
+              often, a single translator. Here is John 3:16 across the world's tongues — the kind of trusted,
+              expert-led translation now within reach for the languages still waiting.
             </p>
           </div>
           <div className="aq-reveal">

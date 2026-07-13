@@ -1,5 +1,5 @@
 /**
- * PostEditMetricsSection — FRO-311 AI metrics panel.
+ * PostEditMetricsSection — AQU-311 AI metrics panel.
  *
  * Shows post-edit magnitude (normalized edit distance between AI drafts and
  * the final human-edited text) over time, with a by-user breakdown.
@@ -20,9 +20,17 @@
 import { useMemo, useState } from "react"
 import { AlertTriangle, Cloud, Sparkles } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { EmptyState } from "@/components/ui/page"
+import { EmptyState } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import type { PostEditMetrics, WeekBucket, UserBucket } from "@/lib/metrics/post-edit-metrics"
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -99,43 +107,41 @@ function UserTable({ users, activeUser, onSelectUser }: {
   if (users.length === 0) return null
 
   return (
-    <div className="mt-2 overflow-hidden rounded border text-sm">
-      <table className="w-full">
-        <thead>
-          <tr className="border-b bg-muted/30 text-xs text-muted-foreground">
-            <th className="py-1.5 pl-3 text-left font-medium">User</th>
-            <th className="py-1.5 pr-3 text-right font-medium">Edits</th>
-            <th className="py-1.5 pr-3 text-right font-medium">Avg edit distance</th>
-          </tr>
-        </thead>
-        <tbody>
+    <div className="mt-2 overflow-hidden rounded-md border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>User</TableHead>
+            <TableHead className="text-right">Edits</TableHead>
+            <TableHead className="text-right">Avg edit distance</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {users.map((u) => {
             const isActive = activeUser === u.author
             return (
-              <tr
+              <TableRow
                 key={u.author}
+                data-state={isActive ? "selected" : undefined}
                 onClick={() => onSelectUser(isActive ? null : u.author)}
-                className={[
-                  "cursor-pointer border-b last:border-0 transition-colors",
-                  isActive ? "bg-accent" : "hover:bg-muted/30",
-                ].join(" ")}
+                className="cursor-pointer"
               >
-                <td className="py-1.5 pl-3 font-mono text-xs">{u.author}</td>
-                <td className="py-1.5 pr-3 text-right text-muted-foreground">{u.count}</td>
-                <td className="py-1.5 pr-3 text-right">
+                <TableCell className="font-mono text-xs">{u.author}</TableCell>
+                <TableCell className="text-right text-muted-foreground">{u.count}</TableCell>
+                <TableCell className="text-right">
                   <span className="inline-flex items-center gap-1.5">
                     <span
-                      className={`inline-block h-2 w-2 rounded-full ${nedColor(u.avgNed)}`}
+                      className={`inline-block size-2 rounded-full ${nedColor(u.avgNed)}`}
                     />
                     <span>{pct(u.avgNed)}</span>
                     <span className="text-xs text-muted-foreground">({nedLabel(u.avgNed)})</span>
                   </span>
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             )
           })}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   )
 }
@@ -167,7 +173,8 @@ function MetricsEmptyState({ reason }: { reason: "no-data" | "error" | "no-cloud
   const { icon, title, description } = config[reason]
   return (
     <EmptyState
-      className="mt-3 border-0 bg-transparent px-0 py-4"
+      variant="inline"
+      className="mt-3 py-4"
       icon={icon}
       title={title}
       description={description}
@@ -341,7 +348,7 @@ export function PostEditMetricsSection({
               {/* Approximation disclosure */}
               <p className="mt-4 text-[11px] text-muted-foreground/70">
                 Metric: character-level normalized Levenshtein distance (NED).
-                Pairs require FRO-292 AI provenance (ai_suggestion=true on the commit event).
+                Pairs require AQU-292 AI provenance (ai_suggestion=true on the commit event).
                 Historical commits before that feature are excluded.
               </p>
             </>

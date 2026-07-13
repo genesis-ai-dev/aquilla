@@ -3,6 +3,7 @@ import { AlertTriangle, HelpCircle, FolderOpen, Users } from "lucide-react"
 import { useProjectsMembersMatrix } from "@/hooks/useProjectsMembersMatrix"
 import { useOrg } from "@/hooks/useOrg"
 import { ROLE } from "@/lib/frontier/roles"
+import { RoleLabel } from "@/components/RoleLabel"
 import { MembersMatrixCellEditor } from "./MembersMatrixCellEditor"
 import { MemberAccessDrillDown } from "./MemberAccessDrillDown"
 import { AccessModelLegend } from "./AccessModelLegend"
@@ -13,7 +14,14 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
-import { EmptyState } from "@/components/ui/page"
+import { EmptyState } from "@/components/ui/empty"
+import {
+  Table,
+  TableBody,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import type { MatrixMember, MatrixCell } from "@/hooks/useProjectsMembersMatrix"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
@@ -72,17 +80,16 @@ export function MembersMatrixView() {
   }
 
   if (!matrix || matrix.members.length === 0 || matrix.projects.length === 0) {
+    const noProjects = matrix?.projects.length === 0
+    const Icon = noProjects ? FolderOpen : Users
     return (
       <EmptyState
-        className="border-0 bg-muted/30 py-8"
-        icon={matrix?.projects.length === 0 ? FolderOpen : Users}
-        title={
-          matrix?.projects.length === 0
-            ? "No projects yet"
-            : "No members beyond yourself"
-        }
+        variant="inline"
+        className="bg-muted/30 py-8"
+        icon={Icon}
+        title={noProjects ? "No projects yet" : "No members beyond yourself"}
         description={
-          matrix?.projects.length === 0
+          noProjects
             ? "Once you create or sync a project, this view will populate."
             : "Invite someone from the Roster tab to start."
         }
@@ -91,16 +98,16 @@ export function MembersMatrixView() {
   }
 
   return (
-    <div className="flex gap-0 rounded-md border bg-background overflow-hidden">
+    <div className="flex gap-0 overflow-hidden rounded-md border bg-background">
       <div className="flex-1 overflow-x-auto">
         {/* Access model legend — collapsible, rendered above the table */}
         <AccessModelLegend open={legendOpen} onToggle={() => setLegendOpen((v) => !v)} />
-        <table className="min-w-full text-sm">
-          <thead className="bg-muted/40">
-            <tr>
-              <th
+        <Table className="min-w-full">
+          <TableHeader>
+            <TableRow>
+              <TableHead
                 scope="col"
-                className="sticky left-0 z-10 bg-muted/40 border-r px-3 py-2 text-left text-xs font-medium text-muted-foreground"
+                className="sticky left-0 z-10 border-r bg-background"
               >
                 <div className="flex items-center gap-1">
                   <span>Member</span>
@@ -115,7 +122,7 @@ export function MembersMatrixView() {
                         />
                       }
                     >
-                      <HelpCircle className="h-3 w-3" aria-hidden />
+                      <HelpCircle aria-hidden />
                     </TooltipTrigger>
                     <TooltipContent
                       side="bottom"
@@ -129,7 +136,7 @@ export function MembersMatrixView() {
                     </TooltipContent>
                   </Tooltip>
                 </div>
-              </th>
+              </TableHead>
               {matrix.projects.map((p) => (
                 <ProjectHeaderCell
                   key={p.id}
@@ -137,9 +144,9 @@ export function MembersMatrixView() {
                   ownerCount={matrix.ownerCountByProject.get(p.id) ?? 0}
                 />
               ))}
-            </tr>
-          </thead>
-          <tbody>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {matrix.members.map((m) => (
               <MatrixRow
                 key={m.userId}
@@ -151,8 +158,8 @@ export function MembersMatrixView() {
                 onSelectMember={setSelectedMember}
               />
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
 
       {/* Per-member drill-down panel — shown when a member row is selected */}
@@ -179,29 +186,27 @@ function ProjectHeaderCell({
 }) {
   const concentrationRisk = ownerCount === 1
   return (
-    <th
+    <TableHead
       scope="col"
-      className="px-2 py-2 text-left text-xs font-medium border-l align-bottom"
+      className="border-l align-bottom"
       style={{ minWidth: "9rem", maxWidth: "14rem" }}
     >
       <div className="flex items-center gap-1">
         <AppTooltip content={project.name}>
-          <span className="truncate">
-            {project.name}
-          </span>
+          <span className="truncate">{project.name}</span>
         </AppTooltip>
         {concentrationRisk && (
           <AppTooltip content="Sole Owner: losing this person locks the project">
             <span className="inline-flex items-center text-amber-600 dark:text-amber-400">
-              <AlertTriangle className="h-3 w-3" />
+              <AlertTriangle />
             </span>
           </AppTooltip>
         )}
       </div>
-      <div className="mt-0.5 text-[10px] text-muted-foreground capitalize">
-        {project.role?.name?.replace(/_/g, " ") ?? ""}
+      <div className="mt-0.5 text-[10px] text-muted-foreground">
+        {project.role?.name ? <RoleLabel name={project.role.name} /> : ""}
       </div>
-    </th>
+    </TableHead>
   )
 }
 
@@ -228,15 +233,15 @@ const MatrixRow = memo(function MatrixRow({
   }
 
   return (
-    <tr className="border-t hover:bg-muted/20">
-      <th
+    <TableRow>
+      <TableHead
         scope="row"
-        className="sticky left-0 z-10 bg-background border-r px-3 py-1.5 text-left font-normal whitespace-nowrap"
+        className="sticky left-0 z-10 border-r bg-background font-normal"
       >
         <button
           onClick={handleMemberClick}
           className={[
-            "text-sm rounded px-1 -mx-1 hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            "-mx-1 rounded px-1 text-sm hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
             isSelected ? "font-semibold text-primary" : "",
           ].join(" ")}
         >
@@ -244,12 +249,12 @@ const MatrixRow = memo(function MatrixRow({
         </button>
         {member.isOrgInherited && (
           <AppTooltip content="Access on every project comes from org-wide role; no per-project overrides.">
-            <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground align-middle">
+            <span className="ml-1.5 align-middle rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground">
               org-wide
             </span>
           </AppTooltip>
         )}
-      </th>
+      </TableHead>
       {projects.map((p) => {
         const cell = memberCells?.get(p.id)
         const palette = cell ? colorForRole(cell.role.level) : ""
@@ -271,7 +276,7 @@ const MatrixRow = memo(function MatrixRow({
           />
         )
       })}
-    </tr>
+    </TableRow>
   )
 })
 

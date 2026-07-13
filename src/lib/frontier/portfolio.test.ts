@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { getPortfolio, validatedPct, attentionRank, audioPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "./portfolio"
+import { getPortfolio, validatedPct, attentionRank, audioPct, audioValidatedPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "./portfolio"
 
 const ORIG = global.fetch
 
 function project(over: Partial<PortfolioProject>): PortfolioProject {
-  return { id: "p", name: "P", totalCells: 0, validatedCells: 0, filledCells: 0, aiDraftedCells: 0, lastEditAt: null, audioCells: 0, recordedMs: 0, deadlineAt: null, ...over }
+  return { id: "p", name: "P", totalCells: 0, validatedCells: 0, filledCells: 0, aiDraftedCells: 0, lastEditAt: null, audioCells: 0, validatedAudioCells: 0, recordedMs: 0, deadlineAt: null, ...over }
 }
 
 afterEach(() => {
@@ -54,6 +54,16 @@ describe("audioPct", () => {
   })
 })
 
+describe("audioValidatedPct (AQU-508)", () => {
+  it("is validated audio over covered audio, not over total cells", () => {
+    expect(audioValidatedPct(project({ totalCells: 200, audioCells: 50, validatedAudioCells: 20 }))).toBe(0.4)
+  })
+
+  it("returns 0 when no cells have audio (avoids divide-by-zero)", () => {
+    expect(audioValidatedPct(project({ totalCells: 100, audioCells: 0, validatedAudioCells: 0 }))).toBe(0)
+  })
+})
+
 describe("recordedMinutes", () => {
   it("rounds milliseconds to whole minutes", () => {
     expect(recordedMinutes(project({ recordedMs: 90000 }))).toBe(2) // 1.5 min → 2
@@ -85,7 +95,7 @@ describe("deadlineStatus", () => {
     expect(deadlineStatus(project({ deadlineAt: "2026-09-01" }), now)).toBe("ok")
   })
 
-  // AoE boundary tests (FRO-294): deadline is inclusive through end-of-day everywhere on earth.
+  // AoE boundary tests (AQU-294): deadline is inclusive through end-of-day everywhere on earth.
   // UTC midnight of deadline + 36 h = end-of-day at UTC-12 (Baker/Howland Island).
 
   it("due TODAY is never overdue — even at UTC midnight of that day", () => {

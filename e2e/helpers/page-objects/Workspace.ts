@@ -9,7 +9,7 @@ export class Workspace {
   }
 
   async importFile(filePath: string): Promise<void> {
-    // FRO-244 auto-opens the "Project setup" checklist sheet once per fresh
+    // AQU-244 auto-opens the "Project setup" checklist sheet once per fresh
     // project, and the modal sheet intercepts workspace clicks. Pre-mark it
     // as already-shown for this project, then dismiss it if it beat us to it.
     const projectId = this.page.url().match(/\/project\/([^/?#]+)/)?.[1]
@@ -36,15 +36,13 @@ export class Workspace {
     // Navigate to the Upload Files panel by clicking its card.
     await uploadCard.click()
     // UploadPanel is now visible with a "Choose Files" button.
-    await expect(this.page.getByRole("button", { name: /Choose Files/i })).toBeVisible({
-      timeout: 5_000,
-    })
-    // The panel has two file inputs: file picker + folder picker (webkitdirectory).
-    // Target the plain file picker.
-    await this.page
-      .locator('input[type="file"]:not([webkitdirectory])')
-      .setInputFiles(filePath)
-    // FRO-310: selecting a file now lands on a Preview panel (parsed cells +
+    // Prefer the import dialog's file picker — cell audio upload inputs also
+    // match a bare `input[type=file]:not([webkitdirectory])` once the editor
+    // has hydrated, which trips Playwright's strict mode.
+    const chooseFilesBtn = this.page.getByRole("button", { name: /Choose Files/i })
+    await expect(chooseFilesBtn).toBeVisible({ timeout: 5_000 })
+    await chooseFilesBtn.locator('input[type="file"]').setInputFiles(filePath)
+    // AQU-310: selecting a file now lands on a Preview panel (parsed cells +
     // counts) instead of starting the upload immediately. Confirm it to kick
     // off the actual bulk upload.
     const confirmBtn = this.page.getByRole("button", { name: /Confirm import/i })
@@ -66,9 +64,12 @@ export class Workspace {
     const moreActionsBtn = banner.getByRole("button", { name: /More actions/i })
     if (await moreActionsBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {
       await moreActionsBtn.click()
-      const importBtn = this.page.getByRole("button", { name: /^Import$/i }).filter({ visible: true }).last()
-      await expect(importBtn).toBeVisible({ timeout: 5_000 })
-      await importBtn.click()
+      const importItem = this.page
+        .getByRole("menuitem", { name: /^Import$/i })
+        .filter({ visible: true })
+        .last()
+      await expect(importItem).toBeVisible({ timeout: 5_000 })
+      await importItem.click()
       return
     }
 
@@ -195,7 +196,7 @@ export class Workspace {
     await moreBtn.click()
   }
 
-  /** FRO-331: view settings live in the header overflow menu. */
+  /** AQU-331: view settings live in the header overflow menu. */
   async openViewSettingsMenu(): Promise<void> {
     await this.openHeaderOverflowMenu()
     await this.page.getByRole("menuitem", { name: /View settings/i }).click()
@@ -207,10 +208,10 @@ export class Workspace {
     const moreActionsBtn = banner.getByRole("button", { name: /More actions/i })
     await expect(moreActionsBtn).toBeVisible({ timeout: 10_000 })
     await moreActionsBtn.click()
-    await this.page.getByRole("button", { name: /^Export$/i }).click()
+    await this.page.getByRole("menuitem", { name: /^Export$/i }).click()
   }
 
-  /** FRO-331: next unfinished lives in the header overflow menu. */
+  /** AQU-331: next unfinished lives in the header overflow menu. */
   async jumpNextUnfinished(): Promise<void> {
     await this.openHeaderOverflowMenu()
     await this.page.getByRole("menuitem", { name: /Next unfinished/i }).click()

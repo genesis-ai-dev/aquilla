@@ -337,9 +337,9 @@ describe("complete", () => {
     expect(body.model).toBe("gemma")
   })
 
-  // FRO-414 follow-up: frontier chat invoked from a project route carries the
+  // AQU-414 follow-up: frontier chat invoked from a project route carries the
   // project id so the server bills the spend to that project's org.
-  describe("projectId attribution (FRO-414 follow-up)", () => {
+  describe("projectId attribution (AQU-414 follow-up)", () => {
     afterEach(() => {
       window.history.pushState({}, "", "/")
     })
@@ -692,7 +692,7 @@ describe("buildBatchPrompt with rules and validatedPairs", () => {
 })
 
 // ---------------------------------------------------------------------------
-// FRO-187: v1 AI retrieval-tuning settings defaults & top_k wiring
+// AQU-187: v1 AI retrieval-tuning settings defaults & top_k wiring
 // ---------------------------------------------------------------------------
 
 describe("CompletionSettings v1 retrieval fields", () => {
@@ -1029,7 +1029,7 @@ describe("buildParagraphPrompt", () => {
 })
 
 describe("activeProjectIdFromPath", () => {
-  // WHY: this is the single attribution point for chat credit spend (FRO-414
+  // WHY: this is the single attribution point for chat credit spend (AQU-414
   // follow-up) — every completion caller runs on a project route, so the URL
   // defines "the project in scope". A wrong match here silently bills the
   // wrong org (or none), so the route shapes are pinned.

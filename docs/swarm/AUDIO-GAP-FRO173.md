@@ -1,4 +1,4 @@
-# FRO-173: Audio Data Gap Investigation
+# AQU-173: Audio Data Gap Investigation
 
 **Branch:** swarm/fro-173  
 **Date:** 2026-06-09  
@@ -14,7 +14,7 @@
 | 1. Did legacy GitLab projects contain audio that should have been imported? | **YES — audio existed, but the importer was run without `--audio` flag** | See §Q1 below |
 | 2. Is there an import/backfill path? | **Path exists, never executed for staging** | `scripts/migrate-all.ts --audio`, `scripts/migrate.ts --audio` |
 | 3. Does a freshly recorded clip land as a cell_audio row? | **Code path is sound (verified by unit tests)** | See §Q3 below |
-| 4. Will Overview audio % reflect data once it exists? | **Yes — no code change needed** | Already confirmed in FRO-160/FRO-168 swarm |
+| 4. Will Overview audio % reflect data once it exists? | **Yes — no code change needed** | Already confirmed in AQU-160/AQU-168 swarm |
 
 ---
 
@@ -179,9 +179,9 @@ No gaps in unit coverage for this path.
 
 ## Q4: Overview Audio % (no code change needed)
 
-The Overview audio % query already reads from `cell_audio`. Confirmed in FRO-160 and
-FRO-168 swarms. Once rows exist, the Overview will reflect them automatically.
-The `// TODO(FRO-168): audio VALIDATION metric` placeholder remains (validation coverage
+The Overview audio % query already reads from `cell_audio`. Confirmed in AQU-160 and
+AQU-168 swarms. Once rows exist, the Overview will reflect them automatically.
+The `// TODO(AQU-168): audio VALIDATION metric` placeholder remains (validation coverage
 is separate from recording coverage and is moot until audio data exists).
 
 ---
@@ -223,7 +223,7 @@ onto staging/prod?
 **If Option A or C:** An operator with GitLab LFS access, `SYNC_SECRET_KEY`, and
 staging worker access must run `scripts/migrate-all.ts --audio --apply`.
 
-**If Option B:** Close FRO-173 as "won't fix / data decision — no code change."
+**If Option B:** Close AQU-173 as "won't fix / data decision — no code change."
 
 ---
 
@@ -260,7 +260,7 @@ To confirm a freshly recorded clip lands as a `cell_audio` row on staging:
   `SELECT COUNT(*) FROM cell_audio;` on staging to confirm rows exist.
 - [ ] If backfilling, run canary first:
   `npx tsx scripts/migrate-all.ts --audio --apply --only <known-audio-project-gitlabId>`
-- [ ] The `// TODO(FRO-168): audio VALIDATION metric` placeholder can be addressed
+- [ ] The `// TODO(AQU-168): audio VALIDATION metric` placeholder can be addressed
   once audio data exists (separate ticket).
 
 ---

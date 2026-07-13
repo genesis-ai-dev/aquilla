@@ -255,7 +255,7 @@ export function buildCellData(
   // Prefer the target row's `validated` flag as the source of truth for the
   // simple "is it green?" UI. When no stats are present, this is the only
   // available signal — D1 encodes the "validators-meet-threshold" gate at the
-  // projection layer (FRO-279 made this threshold-aware; FRO-280 aligns all
+  // projection layer (AQU-279 made this threshold-aware; AQU-280 aligns all
   // client progress surfaces to consume this flag). Falls back to the
   // activeValidators count only when the server flag is absent (local projects
   // or mid-migration states).
@@ -429,11 +429,11 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // rebuildFromCache once the projection catches up (value matches).
   //
   // `seq` is the local-mutation clock value at which the shadow was recorded
-  // (FRO-247): a fetch may only confirm-and-clear a shadow it provably
+  // (AQU-247): a fetch may only confirm-and-clear a shadow it provably
   // postdates (fetch startSeq >= shadow seq), so a stale snapshot that
   // coincidentally carries the same value can never clear it.
   const optimisticEditsRef = useRef<Map<string, { value: string; valueHtml?: string; seq: number }>>(new Map())
-  // Local-mutation clock (FRO-247). Bumped on every local rowsRef mutation:
+  // Local-mutation clock (AQU-247). Bumped on every local rowsRef mutation:
   // an optimistic edit, or a targeted revalidateCell write-back. Fetches
   // record the clock when their server snapshot begins; any cell mutated
   // AFTER that point (cellFreshnessRef floor > fetch startSeq) is fresher
@@ -545,7 +545,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // the cell. Only real server rows are passed here (never the optimistically
   // mutated rowsRef), so a confirm means the value genuinely round-tripped.
   // `fetchStartSeq` gates confirmation to fetches that postdate the shadow's
-  // write — a snapshot taken before the write can't confirm it (FRO-247).
+  // write — a snapshot taken before the write can't confirm it (AQU-247).
   const clearConfirmedShadows = useCallback((serverRows: CellRow[], fetchStartSeq: number) => {
     const shadows = optimisticEditsRef.current
     if (shadows.size === 0) return
@@ -556,7 +556,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     }
   }, [])
 
-  // FRO-247: merge a completed soft-fetch buffer with the rows of any cell
+  // AQU-247: merge a completed soft-fetch buffer with the rows of any cell
   // mutated locally AFTER the fetch's snapshot began. The buffer predates
   // those mutations, so for each protected cell the current rowsRef rows
   // (optimistic edit or fresher targeted write-back) replace the buffer's —
@@ -714,7 +714,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       // stays up and the next trigger retries (RES-6).
       const since = maxServerSeqRef.current
       if (since !== null) {
-        // Local-mutation clock at snapshot start (FRO-247): rows for any cell
+        // Local-mutation clock at snapshot start (AQU-247): rows for any cell
         // mutated after this point outrank the delta's and must survive it.
         const deltaStartSeq = writeSeqRef.current
         const result = await fetchCellsDelta(projectId, fileId, since, token)
@@ -782,7 +782,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
           rebuildFromCache()
         }
       }
-      // FRO-247: the local-mutation clock at the moment the server snapshot
+      // AQU-247: the local-mutation clock at the moment the server snapshot
       // begins. Any cell mutated after this point is fresher than this
       // fetch's data — it can neither confirm that cell's shadow nor replace
       // its rows at the swap below.
@@ -852,7 +852,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         // (and thus does not clear) an optimistic edit it predates.
         clearConfirmedShadows(buffer, startSeq)
         // Swap in the buffer, retaining rows for any cell mutated locally
-        // after this fetch's snapshot began (FRO-247).
+        // after this fetch's snapshot began (AQU-247).
         const { rows: kept, discardedCellIds } = mergeProtectedRows(buffer, startSeq)
         rowsRef.current = kept
         discardedProtected = discardedCellIds.size > 0
@@ -912,7 +912,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // order, so iterating once and writing into a Map yields last-write-wins
   // per cellId — matching the order the server will eventually apply them in.
   //
-  // FRO-274: `failed` (quarantined) records are EXCLUDED from the overlay so a
+  // AQU-274: `failed` (quarantined) records are EXCLUDED from the overlay so a
   // 403-rejected commit no longer pins the rejected text as live cell content.
   // They remain visible in the outbox inspector (usePendingOutboxRecords keeps
   // all statuses for that purpose). When a record transitions to `failed`, we
@@ -938,7 +938,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         if (k !== "target.cell.commit" && k !== "target.cell.create") continue
         const cellId = r.event.cellId
         if (!cellId) continue
-        // FRO-274: skip quarantined (failed) records — they must not drive cell
+        // AQU-274: skip quarantined (failed) records — they must not drive cell
         // content in the overlay; the inspector still shows them.
         if ((r.status ?? "pending") === "failed") {
           // Clear the optimistic shadow for this cell so it reverts to the
@@ -1010,6 +1010,13 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     void doFetch(true)
   }, [doFetch])
 
+  const refreshCellsCacheFromRows = useCallback(() => {
+    const projectId = projectRef.current
+    const fileId = fileRef.current
+    if (!projectId || !fileId) return
+    void writeCellsCache(projectId, fileId, rowsRef.current, maxServerSeqRef.current ?? undefined)
+  }, [])
+
   // Targeted single-cell refetch. WS `event.applied` calls this with the
   // changed cellId so a remote validate/commit only pulls one row instead
   // of re-streaming the entire file (which is ~thousands of cells for a
@@ -1051,7 +1058,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       try {
         const token = await getToken(fileId)
         if (!token) return
-        // Bounded retry (FRO-247): if a local mutation lands while the fetch
+        // Bounded retry (AQU-247): if a local mutation lands while the fetch
         // is in flight, the response predates it and is discarded — try once
         // more against the newer state rather than stranding the cell until
         // the next WS poke / focus refetch.
@@ -1075,7 +1082,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
           // Replace this cellId's rows IN PLACE — rows arrive as one source +
           // one target (either may be absent). The cell list renders in row
           // order, so filter-and-append would teleport the edited row to the
-          // bottom of the file (FRO-247's "row disappears"). A side the
+          // bottom of the file (AQU-247's "row disappears"). A side the
           // server no longer returns is dropped; a side the cache never had
           // (first commit's target row) appends at the tail, which doesn't
           // affect ordering (cells order by their source rows).
@@ -1095,6 +1102,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
           for (const r of bySide.values()) next.push(r)
           rowsRef.current = next
           rebuildFromCache()
+          refreshCellsCacheFromRows()
           return
         }
       } catch {
@@ -1114,7 +1122,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         }
       }
     })()
-  }, [doFetch, rebuildFromCache, clearConfirmedShadows])
+  }, [doFetch, rebuildFromCache, clearConfirmedShadows, refreshCellsCacheFromRows])
   revalidateCellRef.current = revalidateCell
 
   // Optimistic local patch for the target row of a single cell. We mutate

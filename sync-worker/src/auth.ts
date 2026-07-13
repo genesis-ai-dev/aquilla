@@ -12,7 +12,7 @@ export interface SyncTokenClaims {
   fileId: string
   role: number
   /**
-   * FRO-346: role-resolution path that produced `role` at mint time
+   * AQU-346: role-resolution path that produced `role` at mint time
    * (`override` | `group` | `org` | `creator` | `platform`). Older tokens
    * omit it. `"platform"` marks the ADMIN_EMAILS operator path — the ONLY
    * documented exemption from the live membership re-check on writes

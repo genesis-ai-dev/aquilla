@@ -15,7 +15,15 @@ export const PROJECT_DO_DEFAULT_LEASE_MS = 30_000
 export interface PresenceState {
   userId: string
   focusedCell?: string
+  currentFileId?: string
+  selection?: PresenceSelection
   ts: number
+}
+
+export interface PresenceSelection {
+  side: "target"
+  anchor: number
+  head: number
 }
 
 export interface LockState {
@@ -62,8 +70,22 @@ export interface ServerProjectArchived {
   archivedAt: string | null
   deletedBy: string | null
 }
+/** Identity owns the durable settings row; this frame refreshes connected
+ * clients' overlays and validation-derived progress immediately. */
+export interface ServerProjectSettingsUpdated {
+  t: "project.settings.updated"
+  project: string
+  version: number
+}
+/** Sent after the first, file-creating bulk-import chunk has committed. */
+export interface ServerFileProgressUpdated {
+  t: "file.progress.updated"
+  project: string
+  file: string
+  fileCreated: boolean
+}
 /**
- * FRO-346: sent to a removed member's own sockets right before the DO
+ * AQU-346: sent to a removed member's own sockets right before the DO
  * closes them (code 4403). `userId` is the presence identity (username) —
  * the same identity used in presence/lock frames — so the client can
  * compare against its currentUsername.
@@ -74,11 +96,11 @@ export interface ServerMemberRemoved {
   userId: string
 }
 /**
- * FRO-479 push accelerator: notifies a live downstream's connected clients
+ * AQU-479 push accelerator: notifies a live downstream's connected clients
  * that its upstream committed lane-relevant changes. This is a REALTIME
  * message only — never written to the `events` table, never load-bearing
  * (see the linked-projects design spec §8). A missed/dropped frame is
- * recovered by the existing lazy-pull mirror sync (FRO-476) on next file
+ * recovered by the existing lazy-pull mirror sync (AQU-476) on next file
  * open; this frame only shaves the latency down to "seconds" for clients
  * that are already connected.
  */
@@ -105,6 +127,8 @@ export type ProjectDoServerMessage =
   | ServerLockClaimed
   | ServerLockReleased
   | ServerProjectArchived
+  | ServerProjectSettingsUpdated
+  | ServerFileProgressUpdated
   | ServerMemberRemoved
   | ServerLinkUpstreamChanged
 
@@ -158,11 +182,18 @@ export interface ClientFocusRelease {
   t: "focus.release"
   cellId: string
 }
+export interface ClientPresenceUpdate {
+  t: "presence.update"
+  currentFileId?: string | null
+  focusedCell?: string | null
+  selection?: PresenceSelection | null
+}
 export type ProjectDoClientMessage =
   | ClientOutboxEvent
   | ClientFocusClaim
   | ClientFocusRenew
   | ClientFocusRelease
+  | ClientPresenceUpdate
 
 /**
  * Parse a wire-format JSON string into a typed client message. Returns null
@@ -189,6 +220,22 @@ export function parseProjectDoClientMessage(raw: string): ProjectDoClientMessage
   if (t === "focus.renew" || t === "focus.release") {
     if (typeof m.cellId !== "string") return null
     return { t, cellId: m.cellId }
+  }
+  if (t === "presence.update") {
+    const out: ClientPresenceUpdate = { t: "presence.update" }
+    if ("currentFileId" in m) {
+      if (m.currentFileId !== null && typeof m.currentFileId !== "string") return null
+      out.currentFileId = m.currentFileId
+    }
+    if ("focusedCell" in m) {
+      if (m.focusedCell !== null && typeof m.focusedCell !== "string") return null
+      out.focusedCell = m.focusedCell
+    }
+    if ("selection" in m) {
+      if (m.selection !== null && !isPresenceSelection(m.selection)) return null
+      out.selection = m.selection
+    }
+    return out
   }
   if (t === "outbox.event") {
     const ev = m.event
@@ -217,6 +264,44 @@ export interface LockTransitionResult {
 
 function clone<K, V>(m: ReadonlyMap<K, V>): Map<K, V> {
   return new Map(m)
+}
+
+function isPresenceSelection(value: unknown): value is PresenceSelection {
+  if (!value || typeof value !== "object") return false
+  const v = value as Record<string, unknown>
+  return (
+    v.side === "target" &&
+    typeof v.anchor === "number" &&
+    Number.isFinite(v.anchor) &&
+    typeof v.head === "number" &&
+    Number.isFinite(v.head)
+  )
+}
+
+function sameSelection(a: PresenceSelection | undefined, b: PresenceSelection | undefined): boolean {
+  if (!a && !b) return true
+  if (!a || !b) return false
+  return a.side === b.side && a.anchor === b.anchor && a.head === b.head
+}
+
+function samePresence(a: PresenceState | undefined, b: PresenceState | undefined): boolean {
+  if (!a && !b) return true
+  if (!a || !b) return false
+  return (
+    a.userId === b.userId &&
+    a.focusedCell === b.focusedCell &&
+    a.currentFileId === b.currentFileId &&
+    a.ts === b.ts &&
+    sameSelection(a.selection, b.selection)
+  )
+}
+
+function clearFocusedPresence(cur: PresenceState, now: number): PresenceState {
+  return {
+    userId: cur.userId,
+    ...(cur.currentFileId ? { currentFileId: cur.currentFileId } : {}),
+    ts: now,
+  }
 }
 
 /**
@@ -267,7 +352,13 @@ export function applyFocusClaim(
     expiresAt: now + leaseMs,
   })
   const cur = nextPresence.get(userId) ?? { userId, ts: now }
-  nextPresence.set(userId, { ...cur, focusedCell: msg.cellId, ts: now })
+  const { selection, ...rest } = cur
+  nextPresence.set(userId, {
+    ...rest,
+    focusedCell: msg.cellId,
+    ...(cur.focusedCell === msg.cellId && selection ? { selection } : {}),
+    ts: now,
+  })
   return {
     locks: nextLocks,
     presence: nextPresence,
@@ -311,7 +402,7 @@ export function applyFocusRelease(
   nextLocks.delete(msg.cellId)
   const cur = nextPresence.get(userId)
   if (cur && cur.focusedCell === msg.cellId) {
-    nextPresence.set(userId, { userId, ts: now })
+    nextPresence.set(userId, clearFocusedPresence(cur, now))
   }
   return {
     locks: nextLocks,
@@ -321,6 +412,53 @@ export function applyFocusRelease(
       { t: "presence", users: Array.from(nextPresence.values()) },
     ],
     emitTo: [],
+  }
+}
+
+export function applyPresenceUpdate(
+  presence: ReadonlyMap<string, PresenceState>,
+  userId: string,
+  msg: ClientPresenceUpdate,
+  now: number,
+): { presence: Map<string, PresenceState>; emit: ProjectDoServerMessage[] } {
+  const nextPresence = clone(presence)
+  const before = nextPresence.get(userId)
+  const next: PresenceState = { ...(before ?? { userId, ts: now }), userId, ts: now }
+
+  if ("currentFileId" in msg) {
+    if (typeof msg.currentFileId === "string") {
+      next.currentFileId = msg.currentFileId
+    } else {
+      delete next.currentFileId
+    }
+  }
+  if ("focusedCell" in msg) {
+    if (typeof msg.focusedCell === "string") {
+      // Focus is lock-bearing and must be granted only by focus.claim.
+      // presence.update may keep/refresh the existing focused cell, but it
+      // cannot acquire a new one by itself.
+      if (next.focusedCell !== msg.focusedCell) delete next.selection
+    } else {
+      delete next.focusedCell
+      delete next.selection
+    }
+  }
+  if ("selection" in msg) {
+    if (msg.selection && next.focusedCell) {
+      next.selection = msg.selection
+    } else {
+      delete next.selection
+    }
+  }
+
+  if (samePresence(before, next)) {
+    return { presence: nextPresence, emit: [] }
+  }
+
+  nextPresence.set(userId, next)
+  return {
+    presence: nextPresence,
+    emit: [{ t: "presence", users: Array.from(nextPresence.values()) }],
   }
 }
 
@@ -371,18 +509,24 @@ export function applyDisconnect(
 /** Sweep expired leases. Returns the leases that were dropped. */
 export function sweepExpiredLeases(
   locks: ReadonlyMap<string, LockState>,
+  presence: ReadonlyMap<string, PresenceState>,
   now: number,
-): { locks: Map<string, LockState>; emit: ProjectDoServerMessage[] } {
+): { locks: Map<string, LockState>; presence: Map<string, PresenceState>; emit: ProjectDoServerMessage[] } {
   const next = clone(locks)
+  const nextPresence = clone(presence)
   const emit: ProjectDoServerMessage[] = []
   for (const [cellId, lock] of next) {
     if (lock.expiresAt > now) continue
     next.delete(cellId)
+    const cur = nextPresence.get(lock.userId)
+    if (cur?.focusedCell === cellId) {
+      nextPresence.set(lock.userId, clearFocusedPresence(cur, now))
+    }
     emit.push({
       t: "lock.released",
       cellId,
       by: { userId: lock.userId, ts: now },
     })
   }
-  return { locks: next, emit }
+  return { locks: next, presence: nextPresence, emit }
 }

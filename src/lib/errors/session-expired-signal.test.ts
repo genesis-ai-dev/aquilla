@@ -1,4 +1,4 @@
-// Tests for the session-expired signal module (FRO-293).
+// Tests for the session-expired signal module (AQU-293).
 //
 // Verifies:
 //  1. notifySessionExpired fires handlers registered via onSessionExpired.

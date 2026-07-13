@@ -1,5 +1,5 @@
 /**
- * FRO-307: Tests for report-problem payload assembly and consent-off path.
+ * AQU-307: Tests for report-problem payload assembly and consent-off path.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import * as analyticsConsent from "@/lib/analytics-consent"

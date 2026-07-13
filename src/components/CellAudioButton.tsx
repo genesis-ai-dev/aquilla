@@ -1,7 +1,7 @@
 // src/components/CellAudioButton.tsx
 // Compact ▶/⏸ button. The audio controller is owned by the parent EditorRow
 // so the button and the waveform stay in lock-step on play / pause / seek.
-// FRO-238: aria-label mirrors title so screen-readers and test selectors work.
+// AQU-238: aria-label mirrors title so screen-readers and test selectors work.
 
 import { AlertCircle, CloudDownload, CloudOff, FileQuestion, Pause, Play, Trash2 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"

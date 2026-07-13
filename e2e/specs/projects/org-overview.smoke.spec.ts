@@ -38,10 +38,9 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   const filterInput = alice.locator('input[aria-label="Filter projects by name"]')
   await expect(filterInput).toBeVisible({ timeout: 5_000 })
 
-  // 4. Status filter buttons (All / Active / Stalled / Overdue).
-  //    Multiple "All" / "Active" buttons may exist across the page; scope to first.
+  // 4. Status filter buttons (All / Stalled / Overdue).
   await expect(alice.getByRole("button", { name: "All" }).first()).toBeVisible({ timeout: 3_000 })
-  await expect(alice.getByRole("button", { name: "Active" }).first()).toBeVisible({ timeout: 3_000 })
+  await expect(alice.getByRole("button", { name: "Stalled" }).first()).toBeVisible({ timeout: 3_000 })
 
   // 5. The new project's card is visible.
   await expect(alice.getByText(name).first()).toBeVisible({ timeout: 5_000 })

@@ -1,4 +1,4 @@
-// FRO-408 — AI Settings panel: every field must actually persist, not just
+// AQU-408 — AI Settings panel: every field must actually persist, not just
 // "AI instructions". Prior bug: `buildCompletionSettings` (the merge function
 // the Save Changes handler funnels every completion-settings edit through)
 // omitted top_k / contextSize / useOnlyValidatedExamples / main_chat_language /
@@ -139,9 +139,11 @@ async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
   })
 }
 
+// AQU-501: AI Instructions / Advanced LLM fields live in the "AI & completion"
+// sub-menu pane — deep-link straight there via `?section=`.
 function renderSettings() {
   return render(
-    <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings`]}>
+    <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings?section=ai`]}>
       <Routes>
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
       </Routes>
@@ -155,7 +157,7 @@ beforeEach(() => {
   lastUpdateProjectArg = null
 })
 
-describe("ProjectSettings — AI Settings persistence (FRO-408)", () => {
+describe("ProjectSettings — AI Settings persistence (AQU-408)", () => {
   it("persists Top K, context window, validated-only, and example format on Save", async () => {
     renderSettings()
 

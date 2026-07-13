@@ -29,7 +29,7 @@ test("search panel Passages mode toggle changes active mode", async ({ alice }) 
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Open the search panel. FRO-308: the toolbar "Search & replace" button was
+  // Open the search panel. AQU-308: the toolbar "Search & replace" button was
   // replaced by the dock rail Search tab; the full ParallelPassagesPanel
   // dialog opens from the dock panel's "Open full search panel" button.
   await alice.getByRole("button", { name: "Search", exact: true }).click()

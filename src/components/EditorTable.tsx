@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
+import React, { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
 import {
   LegendList,
   type LegendListRef,
@@ -15,14 +15,22 @@ import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
-import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
+import {
+  type CellFootnoteDetails,
+  type CellStore,
+  useCellIds,
+  useCellStoreVersion,
+  useCellView,
+} from "@/hooks/useActiveCellStore"
+import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
+import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { getCellPref, setCellPref } from "@/lib/store/audio-cell-prefs"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy } from "@/lib/parsers/types"
-import { sortByLens, hasTiming } from "@/lib/timeline/derive"
+import { hasTiming } from "@/lib/timeline/derive"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform } from "@/lib/sync/role-policy"
-import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { needsAttention, needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
@@ -37,6 +45,7 @@ import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
+import { useRailIdleHide } from "@/hooks/useRailIdleHide"
 import { CellExpansion } from "./CellExpansion"
 import { tokenizeWords } from "@/lib/audio/timings"
 import { useCellAudio } from "@/hooks/useCellAudio"
@@ -65,12 +74,19 @@ import { CellVoicePanel } from "./cell/CellVoicePanel"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
 // popover (FRO-237). The component itself is no longer in the overflow popover.
 import { getUnsupportedReason } from "./CellAudioRecordButton"
+// AQU-513: plain file-picker upload next to the mic — works on mobile too.
+import { CellAudioUploadButton } from "./CellAudioUploadButton"
 import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice } from "@/lib/audio/voices"
 import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { looksLikeUuid } from "@/lib/uuid"
 import { isPerfLogEnabled } from "@/lib/perf-log"
+import {
+  type DirectionMode,
+  type TextDirection,
+  resolveTextDirection,
+} from "@/lib/text-direction"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { ViolationPopover, type ViolationAnchor } from "./ViolationPopover"
 import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
@@ -103,6 +119,12 @@ import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { hasMeaningfulRichText, prepareReadOnlyRichTextHtml } from "@/lib/richtext/editor-content"
 import { findTermMatches } from "@/lib/richtext/terminology-chip-plugin"
+import {
+  useCellPresence,
+  type CellPresencePeer,
+  type ProjectPresenceStore,
+  type TargetPresenceSelection,
+} from "@/lib/sync/presence-store"
 
 // Per-row render counter. Always accumulated when perf logging is on (cheap)
 // but NOT auto-logged — render logs would flood the console and push the
@@ -114,10 +136,69 @@ import { findTermMatches } from "@/lib/richtext/terminology-chip-plugin"
 const rowRenders = new Map<string, number>()
 const ESTIMATED_ROW_HEIGHT_PX = 140
 const LEGEND_LIST_DRAW_DISTANCE_PX = 240
+const EMPTY_CONCEPTS: Concept[] = []
 
 function clampIndex(index: number, length: number): number {
   if (length <= 0) return 0
   return Math.max(0, Math.min(length - 1, index))
+}
+
+function applyRowOverlays(
+  cell: CellData,
+  options: {
+    audioEntry?: CellAudioEntry
+    backtranslationText?: string
+    projectId?: string | null
+  },
+): CellData {
+  let next = cell
+
+  if (options.audioEntry) {
+    const attachments: NonNullable<CellData["attachments"]> = {}
+    for (const [audioId, attachment] of Object.entries(options.audioEntry.attachments)) {
+      attachments[audioId] = {
+        url: attachment.url,
+        type: "audio",
+        ...(attachment.voiceId ? { voiceId: attachment.voiceId } : {}),
+        ...(attachment.referenceAudioId ? { referenceAudioId: attachment.referenceAudioId } : {}),
+        ...(attachment.durationMs != null ? { durationMs: attachment.durationMs } : {}),
+      }
+    }
+    next = {
+      ...next,
+      attachments,
+      selectedAudioId: options.audioEntry.selectedAudioId ?? undefined,
+      selectedGeneratedVoiceAudioId: options.audioEntry.selectedGeneratedVoiceAudioId ?? undefined,
+      audioTimings: options.audioEntry.audioTimings as NonNullable<CellData["audioTimings"]>,
+    }
+  }
+
+  if (typeof options.backtranslationText === "string") {
+    next = {
+      ...next,
+      backtranslation: options.backtranslationText,
+      backtranslationForText: next.translated,
+    }
+  } else if (!next.backtranslation && options.projectId) {
+    try {
+      const raw = localStorage.getItem(`bt:${options.projectId}:${next.id}`)
+      if (raw) {
+        const { btText, targetEventId } = JSON.parse(raw) as {
+          btText: string
+          targetEventId: string
+        }
+        next = {
+          ...next,
+          backtranslation: btText,
+          backtranslationForText: targetEventId === next.targetEventId ? next.translated : "",
+        }
+      }
+    } catch {
+      // Ignore private-browsing/quota/parse failures. Server hydration can retry.
+    }
+  }
+
+  return next
 }
 
 function areNumberArraysEqual(a: number[], b: number[]): boolean {
@@ -341,9 +422,19 @@ function ValidationHistoryTimeline({
 const EMPTY_EXAMPLES: ScoredPair[] = []
 const EMPTY_INFRACTIONS: RuleInfraction[] = []
 const EMPTY_HIGHLIGHTS: ReturnType<typeof buildHighlightsFromExamples> = []
+const EMPTY_EXTRACTED_FOOTNOTES: ExtractedFootnote[] = []
+const EMPTY_CELL_FOOTNOTE_DETAILS: CellFootnoteDetails = {
+  sourceFootnotes: EMPTY_EXTRACTED_FOOTNOTES,
+  targetFootnotes: EMPTY_EXTRACTED_FOOTNOTES,
+  sourceCount: 0,
+  targetCount: 0,
+  hasFootnotes: false,
+}
 const SELECTION_DRAG_THRESHOLD_PX = 3
 const SELECTION_EDGE_SCROLL_ZONE_PX = 56
 const SELECTION_EDGE_SCROLL_STEP_PX = 22
+
+export type BacktranslationActionSource = "read-back" | "refresh" | "regenerate"
 
 export interface EditorTableHandle {
   scrollToCellIndex: (index: number) => void
@@ -384,7 +475,7 @@ export interface AudioLensContext {
 
 interface EditorTableProps {
   project: ProjectRecord
-  cells: CellData[]
+  cellStore: CellStore
   username: string
   /** When set, each row shows the Audio-lens strip (speaker chip + generate). */
   audioLens?: AudioLensContext | null
@@ -403,7 +494,8 @@ interface EditorTableProps {
    *  refetches the cells projection. `committedEventId` is the event id the
    *  commit was assigned (known only here, before the projection round-trip);
    *  the parent's auto-BT pins to it so the BT isn't instantly stale. */
-  onCellCommitted?: (cellId: string, committedEventId?: string) => void | Promise<void>
+  onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void | Promise<void>
+  getPendingTargetEventId?: (cellId: string) => string | null
   /** Optimistic local patch fired BEFORE the outbox enqueue so the editor's
    *  rule infractions + per-cell UI re-derive instantly without waiting for
    *  the projection round-trip. The follow-up `onCellCommitted` -> revalidate
@@ -412,12 +504,16 @@ interface EditorTableProps {
   /** Map of cellId → presence holder label. When present, the cell editor
    *  goes read-only with an "Alice is editing" banner. */
   cellLockHolders?: ReadonlyMap<string, string>
+  /** Project-wide presence store fed by the existing ProjectSync DO. Rows
+   *  subscribe per-cell so target cursor motion does not rerender the table. */
+  presenceStore?: ProjectPresenceStore | null
   /** Cell ids whose remote value changed while this client held the focus
    *  lock — surfaces the discard-and-reload banner. */
   cellsWithRemoteChange?: ReadonlySet<string>
   /** Parent-managed focus claim/release (per-cell). */
   onClaimCell?: (cellId: string) => void
   onReleaseCell?: (cellId: string) => void
+  onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
   /** Drop the "remote-changed-while-editing" flag for a cell. */
   onAckRemoteChange?: (cellId: string) => void
   isCompletionConfigured: boolean
@@ -440,9 +536,10 @@ interface EditorTableProps {
   // pass-through, never consumed above the row.
   isBacktranslationConfigured?: boolean
   /** Generate the cell's back-translation with the configured LLM. */
-  onBacktranslate?: (cell: CellData) => void
+  onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
+  backtranslationByCellId?: ReadonlyMap<string, string>
   /** Called when user saves a BT edit. Parent emits `cell.backtranslation.set`. */
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   /** On-demand statistical gloss (corpus-derived, never persisted) for the BT
@@ -455,8 +552,10 @@ interface EditorTableProps {
   onSeekToCue?: (cellId: string) => void
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
-  sourceTextDirection: "ltr" | "rtl"
-  targetTextDirection: "ltr" | "rtl"
+  sourceDirectionMode?: DirectionMode
+  targetDirectionMode?: DirectionMode
+  sourceTextDirection: TextDirection
+  targetTextDirection: TextDirection
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
   // onAiSetupNeeded/onOpenRecording moved to EditorActionsContext (FRO perf
@@ -521,25 +620,28 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cells, username, isCompletionConfigured, isCompletionAvailable,
+  project, cellStore, username, isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews,
   onCompleteSingle, onCompleteBatch, healthMap,
   infractions = new Map(), rules = [],
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
+  backtranslationByCellId,
   onSaveBacktranslation, getStatisticalBt,
   cellOpenCommentCount,
   activeCueIndex, onSeekToCue,
-  lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
+  lineNumbersEnabled, cellLabelsEnabled, sourceDirectionMode = "auto", targetDirectionMode = "auto", sourceTextDirection, targetTextDirection,
   isAnonymous, onJumpToCell,
   audioLens, onOpenAudioSetup,
   onAttachMediaFile, onAttachMediaUrl,
   orderedBy,
   onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
   onCellCommitted,
+  getPendingTargetEventId,
   onOptimisticEdit,
   cellLockHolders,
+  presenceStore,
   cellsWithRemoteChange,
-  onClaimCell, onReleaseCell, onAckRemoteChange,
+  onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   staleCellIds,
   upstreamStaleCellIds,
   getTokenForFile,
@@ -554,7 +656,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onVisibleFootnotesChange,
   onFootnoteCreated,
 }, ref) {
-  const { canEdit, canValidate, readOnlyLabel } = useEditorCapabilities(project)
+  const { canEdit, canValidate, canEditSource, readOnlyLabel } = useEditorCapabilities(project)
   // Probe mic permission once (shared across all rows) so the help affordance
   // on CellAudioRecordButton activates when the user has blocked the mic.
   const { micDenied } = useMicPermission(audioLens !== null)
@@ -567,7 +669,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const [hoveredFootnote, setHoveredFootnote] = useState<{ cellId: string; index: number } | null>(null)
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
-  const cellsRef = useRef(cells)
+  const displayCellIds = useCellIds(cellStore, orderedBy, !!audioLens)
+  const displayCellIdsRef = useRef<readonly string[]>(displayCellIds)
   const selectionDragRef = useRef<{
     pointerId: number
     anchorIndex: number
@@ -582,19 +685,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const selectionPointerYRef = useRef<number | null>(null)
   const previousBodyUserSelectRef = useRef<string | null>(null)
 
-  useEffect(() => {
-    cellsRef.current = cells
-  }, [cells])
+  displayCellIdsRef.current = displayCellIds
 
   // Durable cell audio (AD-2 cell.audio.* grammar). Per-file read; overlay each
-  // cell's attachments + selected clips onto CellData so the existing audio
-  // controllers (which read cell.attachments / selectedAudioId) light up.
-  const audioFileId = cells[0]?.fileId ?? null
+  // visible row's attachments + selected clips at render time, rather than
+  // cloning the entire active file into audio-enriched CellData objects.
+  const audioFileId = cellStore.getFileId()
   const { byCellId: audioByCellId } = useFileAudioAttachments(project.id, audioFileId)
-  const cellsWithAudio = useMemo(
-    () => mergeCellsWithAudio(cells, audioByCellId),
-    [cells, audioByCellId],
-  )
 
   // Timeline-segment-model (Scope A): the rendered row list. For a `'time'`-
   // ordered file the Text/Audio toggle is a medium-LAYER switch — Text layer
@@ -603,26 +700,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // (no filter, no reorder), so existing projects are untouched.
   //
   // NOTE: only the virtual row list is filtered here. Index-based voice paths
-  // (getVoiceTakeCells / cellsRef) intentionally stay on the full cell list;
-  // combined-voice-by-index on a time-ordered media layer is a known Part-B
-  // limitation, not exercised by Scope A's single-clip media import.
+  // Combined-voice range lookup resolves through the active store at call time
+  // so the editor does not keep a second full CellData[] just for audio.
   const isTimeOrdered = orderedBy === "time"
-  const displayCells = useMemo(() => {
-    if (!isTimeOrdered) return cellsWithAudio
-    const wantMedia = !!audioLens
-    const filtered = cellsWithAudio.filter((c) =>
-      wantMedia ? c.medium === "media" : (c.medium ?? "text") !== "media"
-    )
-    return sortByLens(filtered, "time")
-  }, [cellsWithAudio, isTimeOrdered, audioLens])
-  const displayCellsRef = useRef(displayCells)
-  displayCellsRef.current = displayCells
+  const cellStoreVersion = useCellStoreVersion(cellStore)
 
   useEffect(() => {
     if (!activeEditorCellId) return
-    if (displayCells.some((cell) => cell.id === activeEditorCellId)) return
+    if (displayCellIds.includes(activeEditorCellId)) return
     setActiveEditorCellId(null)
-  }, [activeEditorCellId, displayCells])
+  }, [activeEditorCellId, displayCellIds])
 
   const handleActivateEditor = useCallback((cellId: string) => {
     setActiveEditorCellId(cellId)
@@ -653,7 +740,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   // FRO-251: per-file, per-side font size. Persisted in localStorage keyed by
   // fileId; adjusted from the View settings (eye) menu in the header.
-  const editorFileId = cells[0]?.fileId ?? null
+  const editorFileId = audioFileId
   const { source: sourceFontSize, target: targetFontSize } = useFileFontSizes(editorFileId)
 
   const setListScrollElement = useCallback((node: unknown) => {
@@ -661,35 +748,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [])
   const getListQueryRoot = useCallback(() => parentRef.current ?? listRootRef.current, [])
 
-  // FRO-250: sticky chapter indicator. Derives the "current section" label from
-  // Legend List's first visible item so the reader always knows which chapter/
-  // section they're in without scrolling back to a section heading.
-  const sectionByIndex = useMemo(() => {
-    const out: string[] = []
-    let lastLabel = ""
-    for (const cell of displayCells) {
-      const firstRef = cell.globalReferences?.find((r) => r && r.trim().length > 0)
-      if (firstRef) {
-        const colon = firstRef.indexOf(":")
-        lastLabel = (colon >= 0 ? firstRef.slice(0, colon) : firstRef).trim()
-      } else if (cell.section?.trim()) {
-        lastLabel = cell.section.trim()
-      }
-      out.push(lastLabel)
-    }
-    return out
-  }, [displayCells])
-
   useEffect(() => {
-    setFirstVisibleIndex((current) => clampIndex(current, displayCells.length))
+    setFirstVisibleIndex((current) => clampIndex(current, displayCellIds.length))
     setViewableIndexes((current) => {
-      const next = current.filter((index) => index >= 0 && index < displayCells.length)
+      const next = current.filter((index) => index >= 0 && index < displayCellIds.length)
       return next.length === current.length ? current : next
     })
-  }, [displayCells.length])
+  }, [displayCellIds.length])
 
   const clampCellIndex = useCallback((index: number) => {
-    const last = cellsRef.current.length - 1
+    const last = displayCellIdsRef.current.length - 1
     if (last < 0) return -1
     return Math.max(0, Math.min(last, index))
   }, [])
@@ -698,9 +766,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // at the end. Legend List may recycle/mount the destination row a frame or
   // two after scrollToIndex, so retry briefly until the DOM node exists.
   const focusCellEditorByIndex = useCallback((index: number) => {
-    const list = displayCellsRef.current
+    const list = displayCellIdsRef.current
     if (index < 0 || index >= list.length) return
-    const targetId = list[index].id
+    const targetId = list[index]
     setActiveEditorCellId(targetId)
     void listRef.current?.scrollToIndex({
       index,
@@ -737,7 +805,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   useImperativeHandle(ref, () => ({
     scrollToCellIndex(index: number) {
-      if (index >= 0 && index < displayCells.length) {
+      if (index >= 0 && index < displayCellIds.length) {
         void listRef.current?.scrollToIndex({
           index,
           viewPosition: 0.5,
@@ -759,15 +827,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         window.setTimeout(() => el.classList.remove("codex-search-flash"), 1800)
       })
     },
-  }), [displayCells.length, focusCellEditorByIndex, getListQueryRoot])
+  }), [displayCellIds.length, focusCellEditorByIndex, getListQueryRoot])
 
   // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.
   // The wrapper div has tabIndex={0} so it can receive programmatic focus.
   const focusGridRowByIndex = useCallback((index: number) => {
-    const list = displayCellsRef.current
+    const list = displayCellIdsRef.current
     if (index < 0 || index >= list.length) return
-    const targetId = list[index].id
+    const targetId = list[index]
     void listRef.current?.scrollToIndex({
       index,
       viewPosition: 0.5,
@@ -795,14 +863,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // Resolve a navigation request from a cell editor (Up/Down/Tab) to the
   // adjacent cell and focus it. Out-of-range steps (top/bottom edge) no-op.
   const handleNavigateCell = useCallback((cellId: string, direction: "prev" | "next") => {
-    const idx = displayCellsRef.current.findIndex((c) => c.id === cellId)
+    const idx = displayCellIdsRef.current.indexOf(cellId)
     if (idx < 0) return
     focusCellEditorByIndex(direction === "next" ? idx + 1 : idx - 1)
   }, [focusCellEditorByIndex])
 
   // FRO-297: Esc from a cell editor — commit-and-return to grid row focus.
   const handleEscapeToGrid = useCallback((cellId: string) => {
-    const idx = displayCellsRef.current.findIndex((c) => c.id === cellId)
+    const idx = displayCellIdsRef.current.indexOf(cellId)
     if (idx < 0) return
     focusGridRowByIndex(idx)
   }, [focusGridRowByIndex])
@@ -810,13 +878,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // FRO-297: Arrow-key (or j/k) navigation within the grid (row focused, not TipTap).
   // This is called from the row's own keydown when focus is on the grid row wrapper.
   const handleGridRowKeyNav = useCallback((cellId: string, direction: "prev" | "next") => {
-    const idx = displayCellsRef.current.findIndex((c) => c.id === cellId)
+    const idx = displayCellIdsRef.current.indexOf(cellId)
     if (idx < 0) return
     focusGridRowByIndex(direction === "next" ? idx + 1 : idx - 1)
   }, [focusGridRowByIndex])
 
   const selectRangeByIndexes = useCallback((anchorIndex: number, focusIndex: number) => {
-    const list = displayCellsRef.current
+    const list = displayCellIdsRef.current
     if (list.length === 0) return
     const anchor = clampIndex(anchorIndex, list.length)
     const focus = clampIndex(focusIndex, list.length)
@@ -828,13 +896,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const end = focus >= anchor
       ? Math.min(focus, anchor + MAX_SELECTED - 1)
       : anchor
-    const ids = list.slice(start, end + 1).map((c) => c.id)
-    setSelection(ids, list[anchor]?.id ?? ids[0] ?? null)
+    const ids = list.slice(start, end + 1)
+    setSelection(ids, list[anchor] ?? ids[0] ?? null)
   }, [])
 
   const getIndexAtClientY = useCallback((clientY: number) => {
     const scrollEl = parentRef.current ?? listRootRef.current
-    const list = displayCellsRef.current
+    const list = displayCellIdsRef.current
     if (!scrollEl || list.length === 0) return -1
 
     const root = getListQueryRoot()
@@ -979,8 +1047,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const selectedIds = getSelectedIds()
     const isAdditive = e.metaKey || e.ctrlKey
     const isAlreadySelected = selectedIds.has(cellId)
+    const ids = displayCellIdsRef.current
     const anchorId = getSelectionAnchorId()
-    const anchorIndex = displayCellsRef.current.findIndex((cell) => cell.id === anchorId)
+    const anchorIndex = anchorId ? ids.indexOf(anchorId) : -1
     // FRO-348: range-select must be an explicit Shift-click. Previously a
     // plain click on any unselected cell silently extended the range from
     // the old anchor whenever *something* was already selected — no
@@ -993,8 +1062,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
     selectionDragRef.current = {
       pointerId: e.pointerId,
-      anchorIndex: clampIndex(startIndex, displayCellsRef.current.length),
-      lastIndex: clampIndex(rowIndex, displayCellsRef.current.length),
+      anchorIndex: clampIndex(startIndex, ids.length),
+      lastIndex: clampIndex(rowIndex, ids.length),
       startX: e.clientX,
       startY: e.clientY,
       didDrag: false,
@@ -1058,12 +1127,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
-      const selected = cells.filter((c) => dragCells.current.has(c.id))
+      const selectedIds = displayCellIdsRef.current.filter((id) => dragCells.current.has(id))
+      const selected = cellStore.getCellsByIds(selectedIds)
       onCompleteBatch(selected)
     }
     isDragging.current = false
     dragCells.current = new Set()
-  }, [cells, onCompleteBatch])
+  }, [cellStore, onCompleteBatch])
 
   // Stable drag handlers keyed by cellId. Inline closures per row would mint
   // a fresh function every render and defeat React.memo on MemoizedRow.
@@ -1075,60 +1145,49 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (isDragging.current) dragCells.current.add(cellId)
   }, [])
   const getVoiceTakeCells = useCallback((startIndex: number, count: number) => {
-    return cellsRef.current.slice(startIndex, startIndex + count)
-  }, [])
+    return cellStore.getCellsByIds(displayCellIdsRef.current.slice(startIndex, startIndex + count))
+  }, [cellStore])
 
-  const currentSectionLabel = sectionByIndex[firstVisibleIndex] ?? ""
+  const firstVisibleCellId = displayCellIds[firstVisibleIndex] ?? null
+  const currentSectionLabel = firstVisibleCellId ? cellStore.getSectionLabelForCellId(firstVisibleCellId) : ""
 
   // Parallel-bibles sidebar tracking: report the first visible row's canonical
   // ref as the user scrolls. Keyed on the derived ref string
   // so the effect only fires on actual row changes, not every scrolled pixel.
-  const firstVisibleRef = displayCells[firstVisibleIndex]?.group || null
+  const firstVisibleRef = useMemo(() => {
+    if (!firstVisibleCellId) return null
+    return cellStore.getCellView(firstVisibleCellId)?.group || null
+  }, [cellStore, cellStoreVersion, firstVisibleCellId])
   useEffect(() => {
     onVisibleRefChange?.(firstVisibleRef)
   }, [firstVisibleRef, onVisibleRefChange])
 
-  const footnoteNumberOffsets = useMemo(() => {
-    const offsets = new Map<string, { source: number; target: number }>()
-    const countsByScope = new Map<string, { source: number; target: number }>()
-
-    for (const cell of displayCells) {
-      const scopeKey = footnoteScopeKey(cell)
-      const counts = countsByScope.get(scopeKey) ?? { source: 0, target: 0 }
-      offsets.set(cell.id, { source: counts.source, target: counts.target })
-      counts.source += countNumericFootnotes(cell.original ?? "")
-      counts.target += countNumericFootnotes(cell.translated ?? "")
-      countsByScope.set(scopeKey, counts)
-    }
-
-    return offsets
-  }, [displayCells])
-
   const visibleFootnoteEntries = useMemo<VisibleFootnoteEntry[]>(() => {
-    if (!onVisibleFootnotesChange || displayCells.length === 0) return []
+    if (!onVisibleFootnotesChange || displayCellIds.length === 0) return []
 
     const indexes = viewableIndexes.length > 0 ? viewableIndexes : [firstVisibleIndex]
     return indexes
       .map((index) => {
-        const cell = displayCells[index]
+        const cellId = displayCellIds[index]
+        const cell = cellId ? cellStore.getCellView(cellId) : null
         if (!cell) return null
-        const sourceFootnotes = extractUsfmFootnotes(cell.original ?? "")
-        const targetFootnotes = extractUsfmFootnotes(cell.translated ?? "")
-        if (sourceFootnotes.length === 0 && targetFootnotes.length === 0) return null
+        const offsets = cellStore.getFootnoteOffsets(cell.id)
+        const footnotes = cellStore.getCellFootnotes(cell.id)
+        if (!footnotes.hasFootnotes) return null
         return {
           cellId: cell.id,
           cellLabel: cell.cellLabel || String(index + 1),
           cellRef: humanFootnoteCellRef(cell),
           rowIndex: index,
-          sourceFootnotes,
-          targetFootnotes,
+          sourceFootnotes: footnotes.sourceFootnotes,
+          targetFootnotes: footnotes.targetFootnotes,
           activeFootnoteIndex: hoveredFootnote?.cellId === cell.id ? hoveredFootnote.index : null,
           isDocx: (cell.fileId ?? "").endsWith(".docx"),
-          numberOffset: footnoteNumberOffsets.get(cell.id)?.target ?? 0,
+          numberOffset: offsets.target,
         }
       })
       .filter((entry): entry is VisibleFootnoteEntry => entry !== null)
-  }, [displayCells, firstVisibleIndex, footnoteNumberOffsets, hoveredFootnote, onVisibleFootnotesChange, viewableIndexes])
+  }, [cellStore, cellStoreVersion, displayCellIds, firstVisibleIndex, hoveredFootnote, onVisibleFootnotesChange, viewableIndexes])
 
   useEffect(() => {
     onVisibleFootnotesChange?.(visibleFootnoteEntries)
@@ -1140,23 +1199,40 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const handleFirstVisibleItemChanged = useCallback((info: {
     index: number
-    item: CellData
+    item: string
     key: string
   }) => {
-    setFirstVisibleIndex(clampIndex(info.index, displayCells.length))
-  }, [displayCells.length])
+    setFirstVisibleIndex(clampIndex(info.index, displayCellIds.length))
+  }, [displayCellIds.length])
 
-  const handleViewableItemsChanged = useCallback((info: OnViewableItemsChangedInfo<CellData>) => {
+  const handleViewableItemsChanged = useCallback((info: OnViewableItemsChangedInfo<string>) => {
     const next = info.viewableItems
       .map((item) => item.index)
-      .filter((index) => index >= 0 && index < displayCells.length)
+      .filter((index) => index >= 0 && index < displayCellIds.length)
       .sort((a, b) => a - b)
     setViewableIndexes((current) => areNumberArraysEqual(current, next) ? current : next)
-  }, [displayCells.length])
+  }, [displayCellIds.length])
 
-  const renderListItem = useCallback(({ item: cell, index }: LegendListRenderItemProps<CellData>) => {
-    const untimedInTimeLens = isTimeOrdered && !hasTiming(cell)
+  const getFootnoteDetails = useCallback(
+    (cellId: string) => cellStore.getCellFootnotes(cellId),
+    [cellStore],
+  )
+
+  const renderListItem = useCallback(({ item: cellId, index }: LegendListRenderItemProps<string>) => {
+    const audioEntry = audioByCellId.get(cellId)
+    const backtranslationText = backtranslationByCellId?.get(cellId)
     return (
+      <CellStoreRow
+        cellId={cellId}
+        cellStore={cellStore}
+        audioEntry={audioEntry}
+        backtranslationText={backtranslationText}
+        projectId={project.id}
+      >
+        {(cell) => {
+          const untimedInTimeLens = isTimeOrdered && !hasTiming(cell)
+          const footnoteOffsets = cellStore.getFootnoteOffsets(cell.id)
+          return (
       <div
         data-cell-id={cell.id}
         data-index={index}
@@ -1181,12 +1257,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           username={username}
           editable={canEdit}
           canValidate={canValidate}
+          canEditSource={canEditSource}
           onCellCommitted={onCellCommitted}
+          getPendingTargetEventId={getPendingTargetEventId}
           onOptimisticEdit={onOptimisticEdit}
           lockHolderLabel={cellLockHolders?.get(cell.id) ?? null}
+          presenceStore={presenceStore}
           remoteChangedWhileFocused={cellsWithRemoteChange?.has(cell.id) ?? false}
           onClaimCell={onClaimCell}
           onReleaseCell={onReleaseCell}
+          onTargetPresenceSelection={onTargetPresenceSelection}
           onAckRemoteChange={onAckRemoteChange}
           isCompletionConfigured={isCompletionConfigured}
           isCompletionAvailable={isCompletionAvailable}
@@ -1204,12 +1284,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onBacktranslate={onBacktranslate}
           onSaveBacktranslation={onSaveBacktranslation}
           getStatisticalBt={getStatisticalBt}
+          getFootnoteDetails={getFootnoteDetails}
           cellOpenCommentCount={cellOpenCommentCount}
           activeCueIndex={activeCueIndex}
           onSeekToCue={onSeekToCue}
           rowIndex={index}
           lineNumbersEnabled={lineNumbersEnabled}
           cellLabelsEnabled={cellLabelsEnabled}
+          sourceDirectionMode={sourceDirectionMode}
+          targetDirectionMode={targetDirectionMode}
           sourceTextDirection={sourceTextDirection}
           targetTextDirection={targetTextDirection}
           gridCols={gridCols}
@@ -1242,20 +1325,27 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           footnoteViewMode={footnoteViewMode}
           onFootnoteHoverChange={setHoveredFootnote}
           onFootnoteCreated={onFootnoteCreated}
-          sourceFootnoteNumberOffset={footnoteNumberOffsets.get(cell.id)?.source ?? 0}
-          targetFootnoteNumberOffset={footnoteNumberOffsets.get(cell.id)?.target ?? 0}
+          sourceFootnoteNumberOffset={footnoteOffsets.source}
+          targetFootnoteNumberOffset={footnoteOffsets.target}
         />
       </div>
+          )
+        }}
+      </CellStoreRow>
     )
   }, [
     activeCueIndex,
     activeEditorCellId,
     assignmentsByCellId,
+    audioByCellId,
     audioLens,
+    backtranslationByCellId,
     backtranslating,
     backtranslationErrors,
     canEdit,
+    canEditSource,
     canValidate,
+    cellStore,
     cellLockHolders,
     cellOpenCommentCount,
     cellsWithRemoteChange,
@@ -1263,7 +1353,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     completing,
     errors,
     examples,
-    footnoteNumberOffsets,
     footnotePanelActive,
     footnoteViewMode,
     getTokenForFile,
@@ -1299,6 +1388,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onFootnoteCreated,
     onJumpToCell,
     onOpenAudioSetup,
+    getPendingTargetEventId,
     onOptimisticEdit,
     onProjectChanged,
     onReleaseCell,
@@ -1310,13 +1400,19 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     ruleMap,
     showFootnotesInline,
     sourceFontSize,
+    sourceDirectionMode,
     sourceTextDirection,
     staleCellIds,
     upstreamStaleCellIds,
     targetFontSize,
+    targetDirectionMode,
     targetTextDirection,
     username,
   ])
+  const listExtraData = useMemo(
+    () => ({ cellStoreVersion, renderListItem }),
+    [cellStoreVersion, renderListItem],
+  )
 
   return (
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
@@ -1358,15 +1454,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         </div>
       </div>
 
-      {displayCells.length > 0 ? (
+      {displayCellIds.length > 0 ? (
         <div ref={listRootRef} className="flex min-h-0 flex-1">
           <LegendList
             ref={listRef}
             refScrollView={setListScrollElement}
-            data={displayCells}
+            data={displayCellIds}
+            dataVersion={cellStoreVersion}
             renderItem={renderListItem}
-            extraData={renderListItem}
-            keyExtractor={(cell) => cell.id}
+            extraData={listExtraData}
+            keyExtractor={(cellId) => cellId}
             estimatedItemSize={ESTIMATED_ROW_HEIGHT_PX}
             drawDistance={LEGEND_LIST_DRAW_DISTANCE_PX}
             recycleItems
@@ -1386,7 +1483,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         ) : (
           <div className="flex-1">
             <EmptyState
-              className="h-full border-0 bg-transparent py-10"
+              variant="inline"
+              className="h-full py-10"
               icon={audioLens ? Music : FileText}
               title={audioLens ? "No media segments yet" : "No text segments in this file"}
               description={
@@ -1403,6 +1501,33 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     </div>
   )
 })
+
+interface CellStoreRowProps {
+  cellId: string
+  cellStore: CellStore
+  audioEntry?: CellAudioEntry
+  backtranslationText?: string
+  projectId?: string | null
+  children: (cell: CellData) => React.ReactNode
+}
+
+function CellStoreRow({
+  cellId,
+  cellStore,
+  audioEntry,
+  backtranslationText,
+  projectId,
+  children,
+}: CellStoreRowProps) {
+  const cell = useCellView(cellStore, cellId)
+  const hydratedCell = useMemo(() => {
+    if (!cell) return null
+    return applyRowOverlays(cell, { audioEntry, backtranslationText, projectId })
+  }, [audioEntry, backtranslationText, cell, projectId])
+
+  if (!hydratedCell) return null
+  return <>{children(hydratedCell)}</>
+}
 
 /**
  * Memoized row wrapper. Owns every per-cell derivation that used to live in
@@ -1426,6 +1551,9 @@ interface MemoizedRowProps {
   editable: boolean
   /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
   canValidate: boolean
+  /** True when the user may edit SOURCE text (source.cell.commit): cloud
+   *  project_lead+ (500) on a non-live-linked project. See canEditSource. */
+  canEditSource: boolean
   /** Phase 5 / AD-9: source has advanced since this target was last committed.
    *  Resolved once per file by the parent (membership look-up) so this prop
    *  is just a stable boolean — preserves the row's React.memo invariant. */
@@ -1434,12 +1562,15 @@ interface MemoizedRowProps {
    *  hop changed). Same "stable boolean, resolved by the parent" shape as
    *  `isStaleSource` above. */
   isUpstreamStaleSource: boolean
-  onCellCommitted?: (cellId: string, committedEventId?: string) => void | Promise<void>
+  onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void | Promise<void>
+  getPendingTargetEventId?: (cellId: string) => string | null
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
+  presenceStore?: ProjectPresenceStore | null
   remoteChangedWhileFocused: boolean
   onClaimCell?: (cellId: string) => void
   onReleaseCell?: (cellId: string) => void
+  onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
   onAckRemoteChange?: (cellId: string) => void
   isCompletionConfigured: boolean
   isCompletionAvailable: boolean
@@ -1454,17 +1585,20 @@ interface MemoizedRowProps {
   isBacktranslationConfigured?: boolean
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
-  onBacktranslate?: (cell: CellData) => void
+  onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   getStatisticalBt?: (translatedText: string) => string
+  getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   cellOpenCommentCount?: Map<string, number>
   activeCueIndex?: number
   onSeekToCue?: (cellId: string) => void
   rowIndex: number
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
-  sourceTextDirection: "ltr" | "rtl"
-  targetTextDirection: "ltr" | "rtl"
+  sourceDirectionMode: DirectionMode
+  targetDirectionMode: DirectionMode
+  sourceTextDirection: TextDirection
+  targetTextDirection: TextDirection
   gridCols: "grid-cols-[44px_1fr_1fr]"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
@@ -1537,15 +1671,16 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     isEditorActive,
     onActivateEditor,
     onDeactivateEditor,
-    project, username, editable, canValidate, isCompletionConfigured, isCompletionAvailable,
+    project, username, editable, canValidate, canEditSource, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
+    getFootnoteDetails,
     onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
-    sourceTextDirection, targetTextDirection, isAnonymous,
+    sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
-    onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
-    onClaimCell, onReleaseCell, onAckRemoteChange,
+    onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+    onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
     isStaleSource,
     isUpstreamStaleSource,
     assigneeLabel,
@@ -1633,6 +1768,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         username={username}
         editable={editable}
         canValidate={canValidate}
+        canEditSource={canEditSource}
         isStaleSource={isStaleSource}
         isUpstreamStaleSource={isUpstreamStaleSource}
         isCompletionConfigured={isCompletionConfigured}
@@ -1654,12 +1790,15 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onBacktranslate={onBacktranslate}
         onSaveBacktranslation={onSaveBacktranslation}
         getStatisticalBt={getStatisticalBt}
+        getFootnoteDetails={getFootnoteDetails}
         openCommentCount={openCommentCount}
         isActiveCue={isActiveCue}
         onSeekToCue={onSeekToCue}
         rowIndex={rowIndex}
         lineNumbersEnabled={lineNumbersEnabled}
         cellLabelsEnabled={cellLabelsEnabled}
+        sourceDirectionMode={sourceDirectionMode}
+        targetDirectionMode={targetDirectionMode}
         sourceTextDirection={sourceTextDirection}
         targetTextDirection={targetTextDirection}
         gridCols={gridCols}
@@ -1683,11 +1822,14 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         getAlignmentModel={getAlignmentModel}
         onAlignmentSeedChange={onAlignmentSeedChange}
         onCellCommitted={onCellCommitted}
+        getPendingTargetEventId={getPendingTargetEventId}
         onOptimisticEdit={onOptimisticEdit}
         lockHolderLabel={lockHolderLabel}
+        presenceStore={presenceStore}
         remoteChangedWhileFocused={remoteChangedWhileFocused}
         onClaimCell={onClaimCell}
         onReleaseCell={onReleaseCell}
+        onTargetPresenceSelection={onTargetPresenceSelection}
         onAckRemoteChange={onAckRemoteChange}
         sourceFontSize={sourceFontSize}
         targetFontSize={targetFontSize}
@@ -1716,6 +1858,10 @@ interface EditorRowProps {
   editable: boolean
   /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
   canValidate: boolean
+  /** True when the user may edit SOURCE text (source.cell.commit): cloud
+   *  project_lead+ (500) on a non-live-linked project. Surfaces the per-cell
+   *  "Edit source" affordance. See useProjectPermissions.canEditSource. */
+  canEditSource: boolean
   /** Phase 5 / AD-9 — true when the source has advanced since the last
    *  target commit. Renders a small warning badge next to the validation
    *  status. Computed once-per-file by the parent. */
@@ -1724,12 +1870,15 @@ interface EditorRowProps {
    *  upstream chain hop changed). Renders the violet/dotted second tone.
    *  Same once-per-file computation shape as `isStaleSource`. */
   isUpstreamStaleSource: boolean
-  onCellCommitted?: (cellId: string, committedEventId?: string) => void
+  onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void
+  getPendingTargetEventId?: (cellId: string) => string | null
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
+  presenceStore?: ProjectPresenceStore | null
   remoteChangedWhileFocused: boolean
   onClaimCell?: (cellId: string) => void
   onReleaseCell?: (cellId: string) => void
+  onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
   onAckRemoteChange?: (cellId: string) => void
   isCompletionConfigured: boolean
   isCompletionAvailable: boolean
@@ -1752,9 +1901,10 @@ interface EditorRowProps {
   isBacktranslationConfigured?: boolean
   isBacktranslating?: boolean
   backtranslationError?: string
-  onBacktranslate?: (cell: CellData) => void
+  onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   getStatisticalBt?: (translatedText: string) => string
+  getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   /** FRO-207: Lazily returns the interlinear alignment model. */
   getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
   /** FRO-207: Called when user confirms/invalidates an alignment. */
@@ -1774,8 +1924,10 @@ interface EditorRowProps {
   rowIndex: number
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
-  sourceTextDirection: "ltr" | "rtl"
-  targetTextDirection: "ltr" | "rtl"
+  sourceDirectionMode: DirectionMode
+  targetDirectionMode: DirectionMode
+  sourceTextDirection: TextDirection
+  targetTextDirection: TextDirection
   gridCols: "grid-cols-[44px_1fr_1fr]"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
@@ -2011,49 +2163,18 @@ function defaultFootnoteRef(cell: CellData): string {
   return ""
 }
 
-function footnoteScopeKey(cell: CellData): string {
-  const candidates = [
-    ...(cell.globalReferences ?? []),
-    cell.group,
-    cell.context,
-    cell.cellLabel,
-  ].filter(Boolean)
-
-  for (const candidate of candidates) {
-    const parsed = parseFootnoteChapterScope(String(candidate))
-    if (parsed) return `${cell.fileId}:${parsed}`
-  }
-
-  return `${cell.fileId}:${cell.section || cell.context || "__file__"}`
-}
-
 function humanFootnoteCellRef(cell: CellData): string {
   const value = (cell.group || cell.context || "").trim()
   if (!value || looksLikeUuid(value)) return ""
   return value
 }
 
-function parseFootnoteChapterScope(value: string): string | null {
-  const canonical = value.match(/\b([1-3]?\s?[A-Z][A-Z0-9]{1,4})\s+(\d+):\d+/i)
-  if (canonical) return `${canonical[1].replace(/\s+/g, "").toUpperCase()}:${canonical[2]}`
-  const chapterOnly = value.match(/\b(\d+):\d+\b/)
-  if (chapterOnly) return `chapter:${chapterOnly[1]}`
-  return null
-}
-
-function countNumericFootnotes(text: string): number {
-  return extractUsfmFootnotes(text).filter((footnote) => {
-    const caller = footnote.caller.trim()
-    return caller === "" || caller === "+" || caller === "-" || /^\d+$/.test(caller)
-  }).length
-}
-
 function footnoteMarkerOptions(
-  cell: CellData,
+  targetText: string,
   anchor: FootnoteInsertionAnchor | null,
   numberOffset: number,
 ): Record<FootnoteMarkerStyle, AddFootnoteMarkerOption> {
-  const targetFootnotes = extractUsfmFootnotes(cell.translated ?? "")
+  const targetFootnotes = extractUsfmFootnotes(targetText)
   const insertionIndex = anchor?.plainPosition ?? Number.POSITIVE_INFINITY
   const targetFootnotesBeforeInsertion = targetFootnotes.filter((footnote) => footnote.index < insertionIndex)
   const numberedPreview = numberOffset + targetFootnotesBeforeInsertion.length + 1
@@ -2192,6 +2313,194 @@ function SanitizedRichHtml({ html }: { html: string }) {
       dangerouslySetInnerHTML={innerHtml}
     />
   )
+}
+
+interface RemotePresenceOverlayItem {
+  key: string
+  kind: "selection" | "caret" | "label"
+  username: string
+  color: string
+  style: React.CSSProperties
+}
+
+function RemoteTargetPresenceOverlay({
+  contentRef,
+  peers,
+}: {
+  contentRef: React.RefObject<HTMLElement | null>
+  peers: CellPresencePeer[]
+}) {
+  const [items, setItems] = useState<RemotePresenceOverlayItem[]>([])
+
+  useLayoutEffect(() => {
+    const root = contentRef.current
+    const container = root?.parentElement
+    if (!root || !container || peers.length === 0) {
+      setItems((current) => current.length === 0 ? current : [])
+      return
+    }
+
+    const next: RemotePresenceOverlayItem[] = []
+    const containerRect = container.getBoundingClientRect()
+    for (const peer of peers) {
+      const selection = peer.selection
+      if (!selection || selection.side !== "target") continue
+      const anchor = Math.max(0, selection.anchor)
+      const head = Math.max(0, selection.head)
+      const start = Math.min(anchor, head)
+      const end = Math.max(anchor, head)
+      const caretRect = rectForCaretOffset(root, end)
+      if (start !== end) {
+        const range = rangeForPlainOffsets(root, start, end)
+        if (range) {
+          Array.from(range.getClientRects()).forEach((rect, index) => {
+            if (rect.width <= 0 || rect.height <= 0) return
+            next.push({
+              key: `${peer.peerId}-selection-${index}`,
+              kind: "selection",
+              username: peer.username,
+              color: peer.color,
+              style: {
+                left: rect.left - containerRect.left,
+                top: rect.top - containerRect.top,
+                width: rect.width,
+                height: rect.height,
+                backgroundColor: peer.color,
+              },
+            })
+          })
+        }
+      }
+      if (caretRect) {
+        const left = caretRect.left - containerRect.left
+        const top = caretRect.top - containerRect.top
+        const height = Math.max(16, caretRect.height)
+        next.push({
+          key: `${peer.peerId}-caret`,
+          kind: "caret",
+          username: peer.username,
+          color: peer.color,
+          style: {
+            left,
+            top,
+            height,
+            backgroundColor: peer.color,
+          },
+        })
+        next.push({
+          key: `${peer.peerId}-label`,
+          kind: "label",
+          username: peer.username,
+          color: peer.color,
+          style: {
+            left: left + 3,
+            top: Math.max(0, top - 18),
+            backgroundColor: peer.color,
+          },
+        })
+      }
+    }
+    setItems(next)
+  }, [contentRef, peers])
+
+  if (items.length === 0) return null
+
+  return (
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
+      {items.map((item) => {
+        if (item.kind === "selection") {
+          return (
+            <span
+              key={item.key}
+              className="absolute rounded-[2px] opacity-20"
+              style={item.style}
+            />
+          )
+        }
+        if (item.kind === "caret") {
+          return (
+            <span
+              key={item.key}
+              className="absolute w-0.5 rounded-full"
+              style={item.style}
+            />
+          )
+        }
+        return (
+          <span
+            key={item.key}
+            className="absolute max-w-28 truncate rounded px-1 py-px text-[10px] font-medium leading-4 text-white shadow-sm"
+            style={item.style}
+          >
+            {item.username}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+function rangeForPlainOffsets(root: HTMLElement, start: number, end: number): Range | null {
+  const startPos = textNodePositionForOffset(root, start)
+  const endPos = textNodePositionForOffset(root, end)
+  if (!startPos || !endPos) return null
+  const range = document.createRange()
+  range.setStart(startPos.node, startPos.offset)
+  range.setEnd(endPos.node, endPos.offset)
+  return range
+}
+
+function rectForCaretOffset(root: HTMLElement, offset: number): DOMRect | null {
+  const collapsed = rangeForPlainOffsets(root, offset, offset)
+  const collapsedRect = firstUsableRect(collapsed)
+  if (collapsedRect) return collapsedRect
+
+  const before = offset > 0 ? rangeForPlainOffsets(root, offset - 1, offset) : null
+  const beforeRect = firstUsableRect(before)
+  if (beforeRect) {
+    return new DOMRect(beforeRect.right, beforeRect.top, 0, beforeRect.height)
+  }
+
+  const after = rangeForPlainOffsets(root, offset, offset + 1)
+  const afterRect = firstUsableRect(after)
+  if (afterRect) {
+    return new DOMRect(afterRect.left, afterRect.top, 0, afterRect.height)
+  }
+
+  return null
+}
+
+function firstUsableRect(range: Range | null): DOMRect | null {
+  if (!range) return null
+  for (const rect of Array.from(range.getClientRects())) {
+    if (rect.height > 0) return rect
+  }
+  const rect = range.getBoundingClientRect()
+  return rect.height > 0 ? rect : null
+}
+
+function textNodePositionForOffset(
+  root: HTMLElement,
+  targetOffset: number,
+): { node: Text; offset: number } | null {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement
+      if (parent?.closest("[data-presence-ignore]")) return NodeFilter.FILTER_REJECT
+      return NodeFilter.FILTER_ACCEPT
+    },
+  })
+  let remaining = Math.max(0, targetOffset)
+  let lastText: Text | null = null
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text
+    lastText = node
+    const length = node.data.length
+    if (remaining <= length) return { node, offset: remaining }
+    remaining -= length
+  }
+  if (lastText) return { node: lastText, offset: lastText.data.length }
+  return null
 }
 
 function TargetRichHtml({
@@ -2467,22 +2776,23 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
 
 function EditorRow({
   project, cell, isEditorActive, onActivateEditor, onDeactivateEditor,
-  username, editable, canValidate, isCompletionConfigured, isCompletionAvailable, isLoading,
+  username, editable, canValidate, canEditSource, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, highlights, error, health,
   cellInfractions, waivedInfractions, ruleMap,
   onCompleteSingle,
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate, onSaveBacktranslation,
   getStatisticalBt,
+  getFootnoteDetails,
   openCommentCount,
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
-  rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
+  rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, micDenied,
   audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, onAskAiFromSelection,
-  onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
-  onClaimCell, onReleaseCell, onAckRemoteChange,
+  onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+  onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
   isUpstreamStaleSource,
   getTokenForFile,
@@ -2505,8 +2815,7 @@ function EditorRow({
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
   const { onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording } = useEditorActions()
-  const hasTranslatedText = Boolean(cell.translated?.trim())
-  const showCompletionOverlay = isLoading && !hasTranslatedText
+  const remoteCellPresence = useCellPresence(presenceStore, cell.id)
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<ViolationAnchor | null>(null)
   const [examplesExpanded, setExamplesExpanded] = useState(false)
@@ -2532,6 +2841,15 @@ function EditorRow({
   // Controls the confirm dialog shown before creating the draft concept.
   const [showAddConceptDialog, setShowAddConceptDialog] = useState(false)
   const pendingTargetEventIdRef = useRef<string | null>(cell.targetEventId ?? null)
+  // Source-edit affordance (project_lead+ on non-live projects). Editing the
+  // SOURCE lane emits source.cell.commit — the template-owner correction that
+  // propagates to downstream linked projects. `sourceDraft` is a LOCAL optimistic
+  // hold of the just-committed text (kept out of the target-only optimistic-shadow
+  // machinery in useCells) shown until the projection round-trips.
+  const [sourceEditing, setSourceEditing] = useState(false)
+  const [sourceDraft, setSourceDraft] = useState<{ value: string; valueHtml: string } | null>(null)
+  const pendingSourceEventIdRef = useRef<string | null>(cell.sourceEventId ?? null)
+  const sourceColRef = useRef<HTMLDivElement | null>(null)
   // RES-4: local error state for enqueue failures (IDB quota, role errors).
   // Surfaces a compact inline message below the editor instead of swallowing.
   /** voice-chip drag-over state: the voiceId being dragged over this cell's audio area */
@@ -2549,6 +2867,7 @@ function EditorRow({
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false)
   const rowRef = useRef<HTMLDivElement | null>(null)
   const translatedEditorRef = useRef<TranslatedEditorHandle | null>(null)
+  const targetReadContentRef = useRef<HTMLDivElement | null>(null)
   const pendingFootnoteAnchorRef = useRef<FootnoteInsertionAnchor | null>(null)
   const [activeFootnoteIndex, setActiveFootnoteIndex] = useState<number | null>(null)
   const [addFootnoteOpen, setAddFootnoteOpen] = useState(false)
@@ -2557,13 +2876,41 @@ function EditorRow({
     ref: "",
     text: "",
   })
-  const allFootnotes = useMemo(() => ({
-    sourceFootnotes: extractUsfmFootnotes(cell.original ?? ""),
-    targetFootnotes: extractUsfmFootnotes(cell.translated ?? ""),
-  }), [cell.original, cell.translated])
+  const [localTargetDraft, setLocalTargetDraft] = useState<{ value: string; valueHtml?: string } | null>(null)
+  const [expanded, setExpanded] = useState(false)
+  const [expansionTab, setExpansionTab] = useState<string>("backtranslation")
+  const [btAlignmentOpen, setBtAlignmentOpen] = useState(false)
+  const hasSourceFootnoteMarker = (cell.original ?? "").includes("\\f")
+  const visibleTranslated = localTargetDraft?.value ?? cell.translated
+  const visibleTranslatedHtml = localTargetDraft?.valueHtml ?? cell.translatedHtml
+  const hasTranslatedText = Boolean(visibleTranslated?.trim())
+  const showCompletionOverlay = isLoading && !hasTranslatedText
+  const sourceCellDirection = useMemo(
+    () => resolveTextDirection(sourceDirectionMode, cell.originalHtml ?? cell.original, sourceTextDirection),
+    [sourceDirectionMode, sourceTextDirection, cell.originalHtml, cell.original],
+  )
+  const targetCellDirection = useMemo(
+    () => resolveTextDirection(
+      targetDirectionMode,
+      showCompletionOverlay ? (completionPreview ?? "") : (visibleTranslatedHtml ?? visibleTranslated),
+      targetTextDirection,
+    ),
+    [targetDirectionMode, targetTextDirection, showCompletionOverlay, completionPreview, visibleTranslatedHtml, visibleTranslated],
+  )
+  const hasTargetFootnoteMarker = (visibleTranslated ?? "").includes("\\f")
+  const mayHaveFootnotes = hasSourceFootnoteMarker || hasTargetFootnoteMarker
+  const showFootnotesInExpansion = footnoteViewMode === "off" && mayHaveFootnotes
+  const shouldHydrateFootnotes =
+    showFootnotesInline ||
+    (expanded && expansionTab === "footnotes" && showFootnotesInExpansion)
+  const allFootnotes = useMemo(
+    () => shouldHydrateFootnotes ? getFootnoteDetails(cell.id) : EMPTY_CELL_FOOTNOTE_DETAILS,
+    [cell.id, cell.original, visibleTranslated, getFootnoteDetails, shouldHydrateFootnotes],
+  )
   const sourceDisplayFootnotes = useMemo(() => {
+    if (!shouldHydrateFootnotes || !hasSourceFootnoteMarker) return EMPTY_EXTRACTED_FOOTNOTES
     const segments = segmentUsfmForDisplay(cell.original ?? "")
-    if (!segments) return []
+    if (!segments) return EMPTY_EXTRACTED_FOOTNOTES
     return segments
       .filter((segment): segment is UsfmNoteSegment => segment.kind === "note")
       .map((note) => ({
@@ -2573,16 +2920,21 @@ function EditorRow({
         ref: note.ref,
         text: note.text,
       }))
-  }, [cell.original])
+  }, [cell.original, hasSourceFootnoteMarker, shouldHydrateFootnotes])
   const sourceDetailFootnotes = allFootnotes.sourceFootnotes.length > 0
     ? allFootnotes.sourceFootnotes
     : sourceDisplayFootnotes
-  const sourceFootnotes = showFootnotesInline ? allFootnotes.sourceFootnotes : []
-  const targetFootnotes = showFootnotesInline ? allFootnotes.targetFootnotes : []
+  const sourceFootnotes = showFootnotesInline ? allFootnotes.sourceFootnotes : EMPTY_EXTRACTED_FOOTNOTES
+  const targetFootnotes = showFootnotesInline ? allFootnotes.targetFootnotes : EMPTY_EXTRACTED_FOOTNOTES
   const hasInlineFootnotes = sourceFootnotes.length > 0 || targetFootnotes.length > 0
-  const hasAnyFootnotes = sourceDetailFootnotes.length > 0 || allFootnotes.targetFootnotes.length > 0
-  const showFootnotesInExpansion = footnoteViewMode === "off" && hasAnyFootnotes
   const isDocxFile = (cell.fileId ?? "").endsWith(".docx")
+  const terminologyConcepts = project.terminology ?? EMPTY_CONCEPTS
+
+  useEffect(() => {
+    if (!localTargetDraft) return
+    if ((cell.translated ?? "") !== localTargetDraft.value) return
+    setLocalTargetDraft(null)
+  }, [cell.translated, localTargetDraft])
 
   useEffect(() => {
     if (cell.targetEventId) pendingTargetEventIdRef.current = cell.targetEventId
@@ -2682,7 +3034,7 @@ function EditorRow({
     }
     return out
   }, [cellInfractions, waivedInfractions, waivedRuleIds, ruleSeverity])
-  const targetHasRichFormatting = hasMeaningfulRichText(cell.translatedHtml)
+  const targetHasRichFormatting = hasMeaningfulRichText(visibleTranslatedHtml)
 
   // Editor commit path. The plain TipTap editor (TranslatedEditor) calls
   // this on idle/blur/release with the current `{value, valueHtml}` snapshot.
@@ -2718,16 +3070,19 @@ function EditorRow({
     // `checkRulesForCell` for this one cell on the next render — no other
     // cell's cached infractions are invalidated. The server projection
     // arrives via `onCellCommitted` -> revalidate and overwrites this.
+    setLocalTargetDraft({ value, valueHtml })
     onOptimisticEdit?.(cell.id, { value, valueHtml })
     setWriteError(null)
-    // RACE-3/QW-2: use the pending event id (the last event WE enqueued for this
-    // cell) as parentId rather than the projection value. The projection row may
-    // lag by a round-trip when a second idle-commit fires before the read-back
-    // confirms; chaining from the projection value would make it a sibling of
-    // our own earlier event and dead-letter it. pendingTargetEventIdRef is
-    // updated from cell.targetEventId whenever the projection confirms (effect
-    // at line ~1621), so it stays correct once the server catches up.
-    const parentId = pendingTargetEventIdRef.current ?? cell.sourceEventId ?? null
+    // RACE-3/QW-2: use the last event id we enqueued for this cell as parentId
+    // rather than the lagging projection value. The workspace-level getter
+    // survives Legend List row remounts; the row-local ref covers repeated
+    // commits while this exact row instance remains mounted.
+    const parentId =
+      getPendingTargetEventId?.(cell.id) ??
+      pendingTargetEventIdRef.current ??
+      cell.targetEventId ??
+      cell.sourceEventId ??
+      null
     emitTargetCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
@@ -2741,7 +3096,7 @@ function EditorRow({
       pendingTargetEventIdRef.current = eventId
       // Pass the just-assigned event id: the auto-BT in the parent pins to it
       // so the BT describes THIS commit, not the lagging projection head.
-      void onCellCommitted?.(cell.id, eventId)
+      void onCellCommitted?.(cell.id, eventId, parentId)
     }).catch((err) => {
       // RES-4/M1-3: enqueue failure (IDB quota, private-mode, InsufficientRoleError)
       // must be loud. Revert the optimistic patch so the cell doesn't show
@@ -2749,13 +3104,83 @@ function EditorRow({
       console.error("[editor-commit] enqueue failed:", err)
       const msg = err instanceof Error ? err.message : "Could not save — please try again"
       setWriteError(msg)
+      setLocalTargetDraft(null)
       // Revert the optimistic patch to the last confirmed projection value.
       onOptimisticEdit?.(cell.id, {
         value: cell.translated ?? "",
         valueHtml: cell.translatedHtml ?? "",
       })
     })
-  }, [editable, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.translated, cell.translatedHtml, cell.sourceEventId, username, onCellCommitted, onOptimisticEdit, lockHolderLabel, checkLockHolder])
+  }, [editable, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder])
+
+  // Source-edit commit path. The inline source editor (a plain TranslatedEditor)
+  // calls this on idle/blur with the current source `{value, valueHtml}`. We emit
+  // a `source.cell.commit` chained off the source row's head (AD-2). No AD-9 pin —
+  // source rows are the pin target, not the pinned. The server enforces the
+  // PROJECT_LEAD floor and the live-mode mirror lock; `enqueueEvent` also mirrors
+  // the role floor client-side (InsufficientRoleError).
+  const handleSourceCommit = useCallback(({ value, valueHtml }: { value: string; valueHtml: string }) => {
+    if (!canEditSource || !project.id) return
+    // Belt-and-suspenders role-mirror (canEditSource already encodes ≥500), in
+    // case a role downgrade hasn't propagated to the capability yet.
+    if (!canPerform("source.cell.commit", project.syncRole?.level ?? null)) {
+      console.warn("[source-edit] aborting: role too low for source.cell.commit")
+      return
+    }
+    // Optimistic local hold so the source column shows the new text immediately
+    // (cleared by the effect below once cell.original round-trips).
+    setSourceDraft({ value, valueHtml })
+    setWriteError(null)
+    const parentId = pendingSourceEventIdRef.current ?? cell.sourceEventId ?? null
+    emitSourceCellCommit({
+      projectId: project.id,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      parentId,
+      value,
+      valueHtml,
+      author: username,
+    }).then((eventId) => {
+      pendingSourceEventIdRef.current = eventId
+      void onCellCommitted?.(cell.id)
+    }).catch((err) => {
+      console.error("[source-edit] enqueue failed:", err)
+      const msg = err instanceof Error ? err.message : "Could not save source edit — please try again"
+      setWriteError(msg)
+      setSourceDraft(null)
+    })
+  }, [canEditSource, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.sourceEventId, username, onCellCommitted])
+
+  // Adopt the projection's source head as the next chain parent — for both our
+  // own confirmed commits and remote source commits (mirror-sync / peer leads).
+  useEffect(() => {
+    if (cell.sourceEventId) pendingSourceEventIdRef.current = cell.sourceEventId
+  }, [cell.sourceEventId])
+
+  // Clear the optimistic source draft once the server projection carries it.
+  useEffect(() => {
+    if (sourceDraft && (cell.original ?? "") === sourceDraft.value) setSourceDraft(null)
+  }, [cell.original, sourceDraft])
+
+  // Focus the inline source editor when entering edit mode (mirrors the target
+  // editor's focus effect, but scoped to the source column so it can't grab the
+  // target ProseMirror).
+  useEffect(() => {
+    if (!sourceEditing) return
+    let attempts = 0
+    let frame = window.requestAnimationFrame(function focusEditor() {
+      const pm = sourceColRef.current?.querySelector<HTMLElement>(".ProseMirror")
+      if (!pm) {
+        if (attempts < 8) {
+          attempts += 1
+          frame = window.requestAnimationFrame(focusEditor)
+        }
+        return
+      }
+      if (document.activeElement !== pm) pm.focus()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [sourceEditing])
 
   // Terminology apply (spec 2c): REPLACE the active target selection with the
   // chosen rendering. The Apply affordance is only surfaced when there was a
@@ -2765,7 +3190,7 @@ function EditorRow({
   // there is no selection (defensive fallback), we append so the translator
   // can still chain multiple terms. Uses the same commit path as keyboard edits.
   const handleTermApply = useCallback((rendering: string) => {
-    const existing = cell.translated ?? ""
+    const existing = visibleTranslated ?? ""
     const selected = targetSelectionTextRef.current
     let next: string
     if (selected && existing.includes(selected)) {
@@ -2775,7 +3200,7 @@ function EditorRow({
       next = trimmed ? `${trimmed} ${rendering}` : rendering
     }
     handleEditorCommit({ value: next, valueHtml: next })
-  }, [cell.translated, handleEditorCommit])
+  }, [visibleTranslated, handleEditorCommit])
 
   const captureFootnoteAnchor = useCallback(() => {
     pendingFootnoteAnchorRef.current = translatedEditorRef.current?.getFootnoteInsertionAnchor() ?? null
@@ -2784,7 +3209,7 @@ function EditorRow({
   const openAddFootnoteDialog = useCallback((defaults?: AddFootnoteDialogDefaults) => {
     if (!pendingFootnoteAnchorRef.current) captureFootnoteAnchor()
     const anchor = pendingFootnoteAnchorRef.current
-    const markerOptions = footnoteMarkerOptions(cell, anchor, targetFootnoteNumberOffset)
+    const markerOptions = footnoteMarkerOptions(visibleTranslated ?? "", anchor, targetFootnoteNumberOffset)
     const markerStyle = defaults?.markerStyle ?? footnoteMarkerStyleFromCaller(defaults?.caller)
     setAddFootnoteDefaults({
       caller: defaults?.caller ?? "+",
@@ -2801,7 +3226,7 @@ function EditorRow({
       markerOptions,
     })
     setAddFootnoteOpen(true)
-  }, [captureFootnoteAnchor, cell, targetFootnoteNumberOffset])
+  }, [captureFootnoteAnchor, cell, visibleTranslated, targetFootnoteNumberOffset])
 
   const handleAddFootnote = useCallback((value: AddFootnoteDialogValue) => {
     const marker = createUsfmFootnoteMarker(value)
@@ -2811,14 +3236,14 @@ function EditorRow({
     ) ?? false
 
     if (!inserted) {
-      const next = `${cell.translated ?? ""}${marker}`
+      const next = `${visibleTranslated ?? ""}${marker}`
       handleEditorCommit({ value: next, valueHtml: next })
     }
 
     pendingFootnoteAnchorRef.current = null
     onFootnoteCreated?.()
     setAddFootnoteOpen(false)
-  }, [cell.translated, handleEditorCommit, onFootnoteCreated])
+  }, [visibleTranslated, handleEditorCommit, onFootnoteCreated])
 
   const handleCreateTargetFootnote = useCallback((sourceFootnote: ExtractedFootnote) => {
     pendingFootnoteAnchorRef.current = null
@@ -2931,14 +3356,14 @@ function EditorRow({
   // Recomputes naturally as the preview streams in and as the committed text /
   // BT verdict changes on later renders.
   const preAcceptanceWarnings = useMemo(() => {
-    const completionText = isLoading ? (completionPreview ?? "") : (cell.translated ?? "")
+    const completionText = isLoading ? (completionPreview ?? "") : (visibleTranslated ?? "")
     if (!completionText.trim()) return []
     return detectPreAcceptanceWarnings(
       completionText,
       cell.original ?? "",
-      project.terminology ?? [],
+      terminologyConcepts,
     )
-  }, [isLoading, completionPreview, cell.translated, cell.original, project.terminology])
+  }, [isLoading, completionPreview, visibleTranslated, cell.original, terminologyConcepts])
 
   // FRO-204: Chip click handler for terminology chips in the target (TranslatedEditor).
   // Records whether the target editor had a non-empty text selection at click time
@@ -2979,9 +3404,13 @@ function EditorRow({
 
   const editorFocusedRef = useRef(false)
   const requestTargetEdit = useCallback(() => {
-    if (!editable || isLoading) return
+    if (!editable || isLoading || lockHolderLabel) return
     onActivateEditor(cell.id)
-  }, [editable, isLoading, onActivateEditor, cell.id])
+  }, [editable, isLoading, lockHolderLabel, onActivateEditor, cell.id])
+
+  const handleTargetPresenceSelection = useCallback((selection: TargetPresenceSelection | null) => {
+    onTargetPresenceSelection?.(cell.id, selection)
+  }, [cell.id, onTargetPresenceSelection])
 
   const handleEditorFocus = useCallback(() => {
     editorFocusedRef.current = true
@@ -3040,10 +3469,10 @@ function EditorRow({
 
   // Detect formatting loss: source has inline style marks that the target doesn't.
   const sourceHasFormatting = Boolean(cell.originalHtml && /<(b|strong|i|em|u|s|strike|del|code)\b/i.test(cell.originalHtml))
-  const targetHtml = cell.translatedHtml ?? ""
+  const targetHtml = visibleTranslatedHtml ?? ""
   const targetHasFormatting = /<(b|strong|i|em|u|s|strike|del|code)\b/i.test(targetHtml)
   const showFormattingLossWarning =
-    sourceHasFormatting && !targetHasFormatting && cell.translated.trim().length > 0
+    sourceHasFormatting && !targetHasFormatting && visibleTranslated.trim().length > 0
 
   const healthValue = health ?? (cell.status === "validated" ? 100 : 0)
 
@@ -3164,7 +3593,7 @@ function EditorRow({
     vs === "others" ? "text-muted-foreground/60" :
     "text-muted-foreground/30"
 
-  const hasContent = Boolean(cell.translated && cell.translated.trim())
+  const hasContent = Boolean(visibleTranslated && visibleTranslated.trim())
 
   // AD-14 amendment 2026-06-04: use server-derived confidence score from
   // healthMap when available (set by the confidence overlay in ProjectWorkspace
@@ -3223,15 +3652,16 @@ function EditorRow({
   const [hasFocusWithin, setHasFocusWithin] = useState(false)
   const [isTapSelected, setIsTapSelected] = useState(false)
   const hoverLeaveTimerRef = useRef<number | null>(null)
+  // AQU-354: does a rail control specifically hold focus? Used to pin the rail
+  // open (an in-progress interaction must never be idle-collapsed).
+  const [railHasFocus, setRailHasFocus] = useState(false)
 
   // ── Expansion state ───────────────────────────────────────────────────────
-  const [expanded, setExpanded] = useState(false)
-  const [expansionTab, setExpansionTab] = useState<string>("backtranslation")
   const alignmentModelForExpansion = useMemo(() => {
-    if (!expanded || expansionTab !== "backtranslation") return null
-    if (!cell.original.trim() || !cell.translated.trim()) return null
+    if (!btAlignmentOpen || !expanded || expansionTab !== "backtranslation") return null
+    if (!cell.original.trim() || !visibleTranslated.trim()) return null
     return getAlignmentModel?.() ?? null
-  }, [cell.original, cell.translated, expanded, expansionTab, getAlignmentModel])
+  }, [btAlignmentOpen, cell.original, visibleTranslated, expanded, expansionTab, getAlignmentModel])
 
   // History tab: fetch the D1 event log on demand only when the History tab is
   // visible. `cell.history` from useCells is intentionally empty (EMPTY_HISTORY)
@@ -3253,7 +3683,7 @@ function EditorRow({
 
   // ── Compute attention signals for chevron + tab dots ──────────────────────
   const isBtStale = Boolean(
-    cell.backtranslation && cell.backtranslationForText !== cell.translated,
+    cell.backtranslation && cell.backtranslationForText !== visibleTranslated,
   )
   const transcriptText = useMemo(() => {
     if (!cellAudioTimings || cellAudioTimings.length === 0) return ""
@@ -3263,8 +3693,8 @@ function EditorRow({
     if (!hasAudio || !transcriptText) return true
     const norm = (s: string) =>
       s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").trim().replace(/\s+/g, " ")
-    return norm(transcriptText) === norm(cell.translated)
-  }, [hasAudio, transcriptText, cell.translated])
+    return norm(transcriptText) === norm(visibleTranslated)
+  }, [hasAudio, transcriptText, visibleTranslated])
   const transcriptNeedsAttention =
     hasAudio &&
     Boolean(cellAudioTimings && cellAudioTimings.length > 0) &&
@@ -3303,7 +3733,21 @@ function EditorRow({
     }
   }, [expansionTab, showFootnotesInExpansion])
 
-  const railRevealed = isHovering || hasFocusWithin || isTapSelected || expanded
+  useEffect(() => {
+    if (!expanded || expansionTab !== "backtranslation") setBtAlignmentOpen(false)
+  }, [expanded, expansionTab])
+
+  // AQU-354: reveal the rail on the ephemeral triggers, but idle-collapse it
+  // after a short pause so it stops covering the "changed elsewhere while you
+  // were editing" conflict banner (whose Discard button sits under the rail).
+  // Pins (expansion open, a rail control focused, a rail popover open) keep the
+  // rail visible so an in-progress interaction is never yanked away.
+  const railRevealTriggered = isHovering || hasFocusWithin || isTapSelected
+  const railPinned = expanded || railHasFocus || showMicDeniedHelp || showGenerateConfirm
+  const { revealed: railRevealed, registerActivity: registerRailActivity } = useRailIdleHide({
+    revealTriggered: railRevealTriggered,
+    pinned: railPinned,
+  })
 
   // ── BT tab edit state ─────────────────────────────────────────────────────
   const [btEditing, setBtEditing] = useState(false)
@@ -3314,9 +3758,9 @@ function EditorRow({
   // persisted as the cell's back-translation.
   const [btStatsOpen, setBtStatsOpen] = useState(false)
   const statisticalGloss = useMemo(() => {
-    if (!btStatsOpen || !cell.translated.trim()) return ""
-    return getStatisticalBt?.(cell.translated) ?? ""
-  }, [btStatsOpen, cell.translated, getStatisticalBt])
+    if (!btStatsOpen || !visibleTranslated.trim()) return ""
+    return getStatisticalBt?.(visibleTranslated) ?? ""
+  }, [btStatsOpen, visibleTranslated, getStatisticalBt])
 
   // When editing starts, seed the input with the current BT text.
   const handleBtEditStart = useCallback(() => {
@@ -3352,6 +3796,8 @@ function EditorRow({
       hoverLeaveTimerRef.current = null
     }
     setIsHovering(true)
+    // AQU-354: a fresh hover re-summons the rail if it had idle-collapsed.
+    registerRailActivity()
   }
   const handleRowMouseLeave = () => {
     if (hoverLeaveTimerRef.current !== null) window.clearTimeout(hoverLeaveTimerRef.current)
@@ -3360,7 +3806,11 @@ function EditorRow({
       hoverLeaveTimerRef.current = null
     }, 120)
   }
-  const handleRowFocusCapture = () => setHasFocusWithin(true)
+  const handleRowFocusCapture = () => {
+    setHasFocusWithin(true)
+    // AQU-354: focusing anything in the row re-summons an idle-collapsed rail.
+    registerRailActivity()
+  }
   const handleRowBlurCapture = (e: React.FocusEvent) => {
     const next = e.relatedTarget as Node | null
     if (next && rowRef.current?.contains(next)) return
@@ -3384,6 +3834,8 @@ function EditorRow({
     // doesn't surprise the user with a stale bulk action target.
     clearSelection()
     setIsTapSelected((p) => !p)
+    // AQU-354: a tap re-summons the rail if it had idle-collapsed.
+    registerRailActivity()
   }
 
   /**
@@ -3519,6 +3971,7 @@ function EditorRow({
         // focus-visible:outline shows a subtle ring when navigating by
         // keyboard so the focused row is clear to sighted keyboard users.
         data-grid-row
+        data-cell-expanded={expanded ? "true" : undefined}
         tabIndex={0}
         aria-label={`${cellRef} cell`}
         className={cn(
@@ -3689,15 +4142,16 @@ function EditorRow({
         ) : (
           <div
             data-showcase="editor.source"
+            ref={sourceColRef}
             className={cn(
               "relative flex flex-col transition-opacity",
               isSynthBusy && "opacity-70",
             )}
-            dir={sourceTextDirection}
+            dir={sourceCellDirection}
             aria-label="Source text"
             data-cell-type="source"
             style={{ fontSize: `${sourceFontSize}px`, lineHeight: "1.6" }}
-            onMouseUp={(onAddConceptFromSelection || onAskAiFromSelection) ? handleSourceMouseUp : undefined}
+            onMouseUp={(!sourceEditing && (onAddConceptFromSelection || onAskAiFromSelection)) ? handleSourceMouseUp : undefined}
           >
             {/* Source-selection toolbar. Appears when source text is selected:
                 "Ask AI" pushes the selection into the agent as a context chip,
@@ -3706,7 +4160,7 @@ function EditorRow({
             {sourceSelection && (
               <SourceSelectionToolbar
                 sourceSelection={sourceSelection}
-                concepts={project.terminology ?? []}
+                concepts={terminologyConcepts}
                 onAskAi={handleAskAiFromSelection}
                 onAddToTermbase={onAddConceptFromSelection ? handleAddSelectionToTermbase : undefined}
                 onTermApply={handleTermApply}
@@ -3724,18 +4178,51 @@ function EditorRow({
                   </span>
                 </AppTooltip>
               )}
+              {/* Source-edit affordance (project_lead+, non-live projects). Emits
+                  source.cell.commit — the template-owner correction that propagates
+                  downstream. Read-only source stays the default; editing is explicit. */}
+              {canEditSource && (
+                <AppTooltip content={sourceEditing ? "Done editing source" : "Edit source text"}>
+                  <button
+                    type="button"
+                    aria-label={sourceEditing ? "Done editing source" : "Edit source text"}
+                    aria-pressed={sourceEditing}
+                    onClick={() => setSourceEditing((v) => !v)}
+                    className={cn(
+                      "ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors",
+                      sourceEditing
+                        ? "bg-primary/10 text-primary"
+                        : "text-muted-foreground/50 opacity-0 hover:bg-muted/60 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
+                    )}
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                </AppTooltip>
+              )}
             </div>
             <SourceReferenceAttachments metadata={cell.metadata} />
-            {cell.originalHtml ? (
-              <SanitizedRichHtml html={cell.originalHtml} />
+            {sourceEditing ? (
+              <TranslatedEditor
+                cellId={`${cell.id}::source`}
+                initialPlain={sourceDraft?.value ?? cell.original}
+                initialHtml={sourceDraft?.valueHtml ?? cell.originalHtml}
+                onCommit={handleSourceCommit}
+                onBlur={() => setSourceEditing(false)}
+                editable
+                ariaLabel="Edit source text"
+                placeholder="Source text…"
+                className="w-full rounded-lg ring-1 ring-primary/30 focus-within:ring-primary/50"
+              />
+            ) : (sourceDraft?.valueHtml || cell.originalHtml) ? (
+              <SanitizedRichHtml html={sourceDraft?.valueHtml || cell.originalHtml || ""} />
             ) : (
               <UsfmSourceText
-                text={cell.original}
+                text={sourceDraft?.value ?? cell.original}
                 highlights={highlights}
                 ranges={sourceRanges}
                 showEvidence={examplesExpanded}
                 onRangeClick={openInlineRule}
-                concepts={project.terminology ?? []}
+                concepts={terminologyConcepts}
                 onTermApply={handleTermApply}
                 footnotePanelActive={footnotePanelActive}
                 footnoteNumberOffset={sourceFootnoteNumberOffset}
@@ -3761,7 +4248,7 @@ function EditorRow({
             "relative flex flex-col pl-3 pr-9 transition-opacity",
             isSynthBusy && "opacity-70",
           )}
-          dir={targetTextDirection}
+          dir="ltr"
           style={{ fontSize: `${targetFontSize}px`, lineHeight: "1.6" }}
         >
           {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
@@ -3826,18 +4313,22 @@ function EditorRow({
                 "relative flex min-h-[40px] flex-1 flex-col rounded-lg px-2 py-1.5 transition-colors",
                 hasInlineFootnotes && "min-h-0 py-0.5",
                 "hover:bg-muted/60 focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
-                !cell.translated?.trim() && "bg-muted/40",
+                !visibleTranslated?.trim() && "bg-muted/40",
               )}
             >
                 {isEditorActive ? (
                   <TranslatedEditor
                     ref={translatedEditorRef}
                     cellId={cell.id}
-                    initialPlain={cell.translated}
-                    initialHtml={cell.translatedHtml}
+                    initialPlain={visibleTranslated}
+                    initialHtml={visibleTranslatedHtml}
                     onCommit={handleEditorCommit}
                     onFocus={handleEditorFocus}
                     onBlur={handleEditorBlurOuter}
+                    onSelectionChange={handleTargetPresenceSelection}
+                    textDirection={targetCellDirection}
+                    directionMode={targetDirectionMode}
+                    lang={project.targetLanguage || undefined}
                     className={cn(
                       "w-full",
                       showCompletionOverlay && "opacity-30 transition-opacity",
@@ -3855,7 +4346,7 @@ function EditorRow({
                     remoteChangedDuringEdit={remoteChangedWhileFocused}
                     onDiscardLocal={handleDiscardLocalAndReload}
                     onNavigateCell={onNavigateCell}
-                    terminologyConcepts={project.terminology ?? []}
+                    terminologyConcepts={terminologyConcepts}
                     onTermChipClick={handleTermChipClick}
                     footnoteNumberOffset={targetFootnoteNumberOffset}
                     showFootnoteTooltips={!footnotePanelActive}
@@ -3873,12 +4364,14 @@ function EditorRow({
                     aria-readonly={!editable || isLoading || Boolean(lockHolderLabel)}
                     aria-label={editorAriaLabel}
                     data-target-read-view
-                    tabIndex={editable && !isLoading ? 0 : undefined}
+                    dir={targetCellDirection}
+                    lang={project.targetLanguage || undefined}
+                    tabIndex={editable && !isLoading && !lockHolderLabel ? 0 : undefined}
                     className={cn(
-                      "min-h-[40px] w-full whitespace-pre-wrap rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
+                      "relative min-h-[40px] w-full whitespace-pre-wrap rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
                       "focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-1",
                       showCompletionOverlay && "opacity-30 transition-opacity",
-                      !cell.translated?.trim() && "text-muted-foreground/60",
+                      !visibleTranslated?.trim() && "text-muted-foreground/60",
                     )}
                     onClick={(event) => {
                       event.stopPropagation()
@@ -3894,30 +4387,37 @@ function EditorRow({
                     {lockHolderLabel && (
                       <div
                         aria-live="polite"
+                        data-presence-ignore
                         className="pointer-events-none absolute right-1 top-1 z-10 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400"
                       >
                         {lockHolderLabel} is editing
                       </div>
                     )}
-                    {targetHasRichFormatting && cell.translatedHtml ? (
-                      <TargetRichHtml
-                        html={cell.translatedHtml}
-                        footnotePanelActive={footnotePanelActive}
-                        footnoteNumberOffset={targetFootnoteNumberOffset}
-                      />
-                    ) : cell.translated?.trim() ? (
-                      <TargetReadText
-                        text={cell.translated}
-                        ranges={targetRanges}
-                        concepts={project.terminology ?? []}
-                        onRangeClick={openInlineRule}
-                        onTermChipClick={handleTermChipClick}
-                        footnotePanelActive={footnotePanelActive}
-                        footnoteNumberOffset={targetFootnoteNumberOffset}
-                      />
-                    ) : (
-                      <span aria-hidden="true" className="block min-h-[1.6em]" />
-                    )}
+                    <div ref={targetReadContentRef}>
+                      {targetHasRichFormatting && visibleTranslatedHtml ? (
+                        <TargetRichHtml
+                          html={visibleTranslatedHtml}
+                          footnotePanelActive={footnotePanelActive}
+                          footnoteNumberOffset={targetFootnoteNumberOffset}
+                        />
+                      ) : visibleTranslated?.trim() ? (
+                        <TargetReadText
+                          text={visibleTranslated}
+                          ranges={targetRanges}
+                          concepts={terminologyConcepts}
+                          onRangeClick={openInlineRule}
+                          onTermChipClick={handleTermChipClick}
+                          footnotePanelActive={footnotePanelActive}
+                          footnoteNumberOffset={targetFootnoteNumberOffset}
+                        />
+                      ) : (
+                        <span aria-hidden="true" className="block min-h-[1.6em]" />
+                      )}
+                    </div>
+                    <RemoteTargetPresenceOverlay
+                      contentRef={targetReadContentRef}
+                      peers={remoteCellPresence}
+                    />
                   </div>
                 )}
               {/* FRO-204: Terminology chip popover — controlled via termChipState.
@@ -3928,7 +4428,7 @@ function EditorRow({
                   the popover body; the BaseUI Popover controlled-open + external
                   anchor positions it on the clicked chip. */}
               {termChipState && (() => {
-                const concepts = project.terminology ?? []
+                const concepts = terminologyConcepts
                 const onApply = targetHasSelectionRef.current
                   ? (rendering: string) => { handleTermApply(rendering); setTermChipState(null) }
                   : undefined
@@ -3959,7 +4459,7 @@ function EditorRow({
                     /* Streaming preview flows top-down like normal cell
                        text — same metrics as TipTap underneath so the
                        handoff at isLoading=false has no visible jump. */
-                    <p className="whitespace-pre-wrap px-2 py-1 leading-relaxed text-foreground/90">
+                    <p className="whitespace-pre-wrap px-2 py-1 leading-relaxed text-foreground/90" dir={targetCellDirection}>
                       {completionPreview}
                       <span
                         aria-hidden
@@ -3989,11 +4489,11 @@ function EditorRow({
                 editable={editable}
                 isDocx={isDocxFile}
                 onSave={(footnoteIndex, newText) => {
-                  const updated = spliceFootnoteText(cell.translated ?? "", footnoteIndex, newText)
+                  const updated = spliceFootnoteText(visibleTranslated ?? "", footnoteIndex, newText)
                   handleEditorCommit({ value: updated, valueHtml: updated })
                 }}
                 onDelete={(footnoteIndex) => {
-                  const updated = deleteFootnote(cell.translated ?? "", footnoteIndex)
+                  const updated = deleteFootnote(visibleTranslated ?? "", footnoteIndex)
                   handleEditorCommit({ value: updated, valueHtml: updated })
                 }}
                 onCreateTarget={handleCreateTargetFootnote}
@@ -4059,7 +4559,17 @@ function EditorRow({
             are position:relative with auto z-index, so the row's local z-10
             doesn't escape the sticky header's z-10 context). */}
         <div className="pointer-events-none absolute right-2 top-0.5 z-20 flex">
-          <div className="pointer-events-auto">
+          <div
+            className="pointer-events-auto"
+            // AQU-354: track focus landing on / leaving a rail control so the
+            // idle auto-hide never collapses the rail while it is being used.
+            onFocusCapture={() => setRailHasFocus(true)}
+            onBlurCapture={(e) => {
+              const next = e.relatedTarget as Node | null
+              if (next && e.currentTarget.contains(next)) return
+              setRailHasFocus(false)
+            }}
+          >
             <CellActionRail
               revealed={railRevealed}
               expanded={expanded}
@@ -4098,7 +4608,7 @@ function EditorRow({
                     // FRO-278: if the cell already has human text, confirm
                     // before letting the AI overwrite it. Empty cells proceed
                     // immediately (byte-identical to previous behavior).
-                    if (cell.translated.trim()) {
+                    if (visibleTranslated.trim()) {
                       setShowGenerateConfirm(true)
                     } else {
                       onCompleteSingle(cell)
@@ -4178,6 +4688,20 @@ function EditorRow({
                 )
               })()}
 
+              {/* AQU-513: file-picker upload next to the mic — a plain
+                  <input type="file"> so phone browsers can attach an
+                  existing wav/mp3/m4a recording without a desktop. Same
+                  gating as the mic (no audio yet, editable). */}
+              {!hasAudio && editable && (
+                <CellAudioUploadButton
+                  projectId={project.id}
+                  fileId={cell.fileId}
+                  cellId={cell.id}
+                  username={username}
+                  disabled={!editable}
+                />
+              )}
+
               {hasAudio && (
                 <RailButton
                   icon={
@@ -4203,10 +4727,10 @@ function EditorRow({
                 />
               )}
 
-              {cell.translated.trim().length > 0 && (
+              {visibleTranslated.trim().length > 0 && (
                 <CellTtsButton
                   cellId={cell.id}
-                  text={cell.translated}
+                  text={visibleTranslated}
                   original={cell.original}
                   context={cell.context}
                   cellLabel={cell.cellLabel}
@@ -4283,7 +4807,7 @@ function EditorRow({
               value: "health",
               icon: <Activity className="h-3 w-3" />,
               label: "Staleness",
-              content: (
+              renderContent: () => (
                 <div className="space-y-1.5 py-3 text-xs text-muted-foreground">
                   <p>
                     <span className="font-medium text-foreground">{cell.endorsementCount ?? 0}</span>
@@ -4303,7 +4827,7 @@ function EditorRow({
               icon: <FileText className="h-3 w-3" />,
               label: "Back-translation",
               attentionDot: isBtStale ? "amber" : undefined,
-              content: (
+              renderContent: () => (
                 <div className="flex flex-col gap-2.5">
                   {/* ── Header: a calm label + a quiet explainer. The controls
                       stay subdued so the reading below is the focus, not the
@@ -4329,7 +4853,7 @@ function EditorRow({
                             <button
                               type="button"
                               disabled={!isBacktranslationConfigured || isBacktranslating}
-                              onClick={() => onBacktranslate?.(cell)}
+                              onClick={() => onBacktranslate?.(cell, "regenerate")}
                               aria-label="Regenerate the back-translation"
                               className="inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                             >
@@ -4364,7 +4888,7 @@ function EditorRow({
                   </div>
 
                   {/* ── Body ────────────────────────────────────────────────── */}
-                  {cell.translated.trim().length === 0 ? (
+                  {visibleTranslated.trim().length === 0 ? (
                     <div className="flex flex-col items-center gap-1.5 rounded-xl bg-muted/40 px-3 py-6 text-center">
                       <FileText className="h-4 w-4 text-muted-foreground/40" />
                       <p className="text-xs text-muted-foreground">Translate this cell to read it back.</p>
@@ -4382,8 +4906,8 @@ function EditorRow({
                           {editable && (
                             <button
                               type="button"
-                              onClick={() => onBacktranslate?.(cell)}
-                              disabled={!isBacktranslationConfigured || isBacktranslating || cell.translated.trim().length === 0}
+                              onClick={() => onBacktranslate?.(cell, "refresh")}
+                              disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
                               className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 transition-colors hover:bg-amber-500/25 dark:text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
@@ -4448,8 +4972,8 @@ function EditorRow({
                         <>
                           <button
                             type="button"
-                            onClick={() => onBacktranslate?.(cell)}
-                            disabled={!isBacktranslationConfigured || isBacktranslating || cell.translated.trim().length === 0}
+                            onClick={() => onBacktranslate?.(cell, "read-back")}
+                            disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
                             className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             {isBacktranslating ? (
@@ -4474,7 +4998,7 @@ function EditorRow({
                   {/* ── Statistical reference — collapsed by default. A rough
                       corpus-derived gloss kept as a cross-check on the AI
                       reading; local-only, never saved as the cell's BT. ──── */}
-                  {cell.translated.trim().length > 0 && getStatisticalBt && !btEditing && (
+                  {visibleTranslated.trim().length > 0 && getStatisticalBt && !btEditing && (
                     <div className="rounded-lg border border-border/60">
                       <button
                         type="button"
@@ -4505,14 +5029,30 @@ function EditorRow({
                     </div>
                   )}
                   {/* ── FRO-207: Interlinear alignment panel ──────────────── */}
-                  {alignmentModelForExpansion && cell.original.trim() && cell.translated.trim() && (
-                    <InterlinearAlignmentPanel
-                      sourceText={cell.original}
-                      targetText={cell.translated}
-                      alignmentModel={alignmentModelForExpansion}
-                      confirmedSeeds={project.alignmentSeeds ?? []}
-                      onSeedChange={onAlignmentSeedChange ?? (() => undefined)}
-                    />
+                  {cell.original.trim() && visibleTranslated.trim() && getAlignmentModel && !btEditing && (
+                    <div className="rounded-lg border border-border/60">
+                      <button
+                        type="button"
+                        onClick={() => setBtAlignmentOpen((v) => !v)}
+                        aria-expanded={btAlignmentOpen}
+                        className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                      >
+                        <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", btAlignmentOpen && "rotate-90")} />
+                        Alignment
+                        <span className="font-normal text-muted-foreground/60">— word-level source/target view</span>
+                      </button>
+                      {btAlignmentOpen && alignmentModelForExpansion && (
+                        <div data-aquilla-alignment-panel className="px-2.5 pb-2.5">
+                          <InterlinearAlignmentPanel
+                            sourceText={cell.original}
+                            targetText={visibleTranslated}
+                            alignmentModel={alignmentModelForExpansion}
+                            confirmedSeeds={project.alignmentSeeds ?? []}
+                            onSeedChange={onAlignmentSeedChange ?? (() => undefined)}
+                          />
+                        </div>
+                      )}
+                    </div>
                   )}
                   {backtranslationError && (
                     <p className="text-xs text-destructive">{backtranslationError}</p>
@@ -4524,18 +5064,18 @@ function EditorRow({
               value: "footnotes",
               icon: <NotebookPen className="h-3 w-3" />,
               label: "Footnotes",
-              content: (
+              renderContent: () => (
                 <FootnoteInline
                   sourceFootnotes={sourceDetailFootnotes}
                   targetFootnotes={allFootnotes.targetFootnotes}
                   editable={editable}
                   isDocx={isDocxFile}
                   onSave={(footnoteIndex, newText) => {
-                    const updated = spliceFootnoteText(cell.translated ?? "", footnoteIndex, newText)
+                    const updated = spliceFootnoteText(visibleTranslated ?? "", footnoteIndex, newText)
                     handleEditorCommit({ value: updated, valueHtml: updated })
                   }}
                   onDelete={(footnoteIndex) => {
-                    const updated = deleteFootnote(cell.translated ?? "", footnoteIndex)
+                    const updated = deleteFootnote(visibleTranslated ?? "", footnoteIndex)
                     handleEditorCommit({ value: updated, valueHtml: updated })
                   }}
                   onCreateTarget={handleCreateTargetFootnote}
@@ -4554,7 +5094,7 @@ function EditorRow({
                 : (hasAudio || hasGeneratedVoice)
                   ? "emerald"
                   : undefined,
-              content: (
+              renderContent: () => (
                 <div
                   className={cn(
                     "flex flex-col gap-3 rounded-xl transition-colors",
@@ -4602,10 +5142,10 @@ function EditorRow({
                         <CellTranscriptPreview
                           ref={transcriptPreviewRef}
                           timings={cellAudioTimings}
-                          cellText={cell.translated}
+                          cellText={visibleTranslated}
                           cellId={cell.id}
                           alignedToCellText={
-                            tokenizeWords(cell.translated).length === cellAudioTimings.length
+                            tokenizeWords(visibleTranslated).length === cellAudioTimings.length
                           }
                           editable={editable}
                           onRetranscribe={handleTranscribe}
@@ -4678,10 +5218,10 @@ function EditorRow({
                       {generatedVoiceTimings && generatedVoiceTimings.length > 0 && (
                         <CellTranscriptPreview
                           timings={generatedVoiceTimings}
-                          cellText={cell.translated}
+                          cellText={visibleTranslated}
                           cellId={cell.id}
                           alignedToCellText={
-                            tokenizeWords(cell.translated).length === generatedVoiceTimings.length
+                            tokenizeWords(visibleTranslated).length === generatedVoiceTimings.length
                           }
                           editable={editable}
                           onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
@@ -4737,7 +5277,7 @@ function EditorRow({
                     : "amber"
                   : undefined,
               disabled: cellInfractions.length === 0 && waivedInfractions.length === 0,
-              content: (
+              renderContent: () => (
                 <div className="flex flex-col gap-1.5">
                   {cellInfractions.length === 0 && waivedInfractions.length === 0 ? (
                     <p className="py-3 text-center text-xs text-muted-foreground">
@@ -4806,7 +5346,7 @@ function EditorRow({
               value: "history",
               icon: <HistoryIcon className="h-3 w-3" />,
               label: "History",
-              content: (
+              renderContent: () => (
                 <div className="flex flex-col gap-2">
                   {isHistoryLoading ? (
                     <p className="py-3 text-center text-xs text-muted-foreground">

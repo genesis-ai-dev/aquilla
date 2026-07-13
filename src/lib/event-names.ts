@@ -1,5 +1,5 @@
 /**
- * FRO-267: Funnel instrumentation — canonical event-name constants.
+ * AQU-267: Funnel instrumentation — canonical event-name constants.
  *
  * All events flow through posthog.capture() which is already consent-gated
  * at the posthog.ts module level (opt_out_capturing_by_default=true until the

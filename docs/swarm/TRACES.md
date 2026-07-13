@@ -43,10 +43,10 @@ STATUS: OPEN | CLAIMED | DONE
 - [DONE] (tsv-corruption) FIXED by W12 @ `25f4302`: `exporters/tsv.ts` now RFC-4180-quotes fields with `"`/tab/newline (import was already quote-aware). Round-trip TSV assertions flipped to clean. TSV now round-trips losslessly like CSV.
 - [NOTE] (tmx-untranslated) TMX drops untranslated (empty-target) cells — inherent to TMX (TM-exchange format). Not a bug; document only.
 
-## FRO-206 drill-down gaps
+## AQU-206 drill-down gaps
 - [OPEN] (drilldown-cells) TerminologyPage passes `cells=[]` to TerminologyTermDetail; occurrences list is empty until a follow-up wires useCells for the active file (or all project files). To pick up: import useCells + useProject in TerminologyPage, fetch cells for each file, map CellData[] into the detail prop. — `src/components/TerminologyPage.tsx` (drill-down guard, ~L650), `src/components/TerminologyTermDetail.tsx`
 - [OPEN] (drilldown-username) TerminologyPage passes `username="local"` to TerminologyTermDetail. Wire the real auth username (useIdentity / useProjectSettings) before shipping. — `src/components/TerminologyPage.tsx`
-- [RESOLVED] (drilldown-canEdit) now passes canEdit={canEditCells} (syncRole>=400 or local). TerminologyPage passes `canEdit={true}` unconditionally. FRO-208 is adding role-gating to TerminologyPage; once that lands, pass `permissions.canEditContent` here too. — `src/components/TerminologyPage.tsx`
+- [RESOLVED] (drilldown-canEdit) now passes canEdit={canEditCells} (syncRole>=400 or local). TerminologyPage passes `canEdit={true}` unconditionally. AQU-208 is adding role-gating to TerminologyPage; once that lands, pass `permissions.canEditContent` here too. — `src/components/TerminologyPage.tsx`
 
 ## Quality / hardening (pick up opportunistically)
 - [OPEN] (lastEditAt) `buildCellData` drops `lastEditAt` from CellRow → CellData; forward it (one-line client change) so recency-sorted views (Living Memory) work without server changes. — `src/hooks/useCells.ts`
@@ -56,9 +56,9 @@ STATUS: OPEN | CLAIMED | DONE
 ## License caution (judgment call baked in)
 - Aquilla is a COMMERCIAL product. Do NOT copy GPL/copyleft code (e.g. MateCat filters are LGPL). Implement CAT formats from the OPEN SPECS (OASIS XLIFF 1.2/2.0, LISA TMX 1.4b, TBX, SRX) or from Apache-2.0/MIT sources (e.g. Okapi is Apache-2.0). When in doubt, reimplement from spec.
 
-## FRO-203 auto-BT (statistical BT on every target commit)
+## AQU-203 auto-BT (statistical BT on every target commit)
 - [DONE] (fro203-stat-bt-core) Statistical BT now fires automatically on every target commit. `src/lib/completion/bt-auto.ts` adds `buildStatisticalBt` + `shouldAutoRecomputeBt`. `ProjectWorkspace.tsx` wires auto-BT in `handleCellCommitted` (hand-typed EditorTable commits) and `commitCompletedCell` (AI completion commits). LLM polish remains opt-in via `runBacktranslation`. Seed wiring: preferred→+3, admitted→+1, forbidden→-3 (pre-existing code confirmed). `applyOptimisticTargetEditWithCapture` intercepts EditorTable's optimistic edit to capture which cell was last committed.
-- [DEFERRED-OK] (fro203-editortable-wiring) SWARM-TODO(FRO-203): EditorTable's `onCellCommitted` prop currently has signature `() => void` — it does NOT pass the committed cell or translated text. The current workaround captures the cell via `applyOptimisticTargetEditWithCapture` (intercepted at the `onOptimisticEdit` prop). If a more reliable signal is needed (e.g. for concurrent multi-cell edits), change `onCellCommitted` to `(cellId: string, translatedText: string) => void` in EditorTable.tsx (line ~343, ~1197, ~1386, all call sites). ProjectWorkspace.tsx would then receive the cell data directly in `handleCellCommitted`. NOT done now — EditorTable.tsx is forbidden for this agent. — `src/components/EditorTable.tsx:343`
+- [DEFERRED-OK] (fro203-editortable-wiring) SWARM-TODO(AQU-203): EditorTable's `onCellCommitted` prop currently has signature `() => void` — it does NOT pass the committed cell or translated text. The current workaround captures the cell via `applyOptimisticTargetEditWithCapture` (intercepted at the `onOptimisticEdit` prop). If a more reliable signal is needed (e.g. for concurrent multi-cell edits), change `onCellCommitted` to `(cellId: string, translatedText: string) => void` in EditorTable.tsx (line ~343, ~1197, ~1386, all call sites). ProjectWorkspace.tsx would then receive the cell data directly in `handleCellCommitted`. NOT done now — EditorTable.tsx is forbidden for this agent. — `src/components/EditorTable.tsx:343`
 
 ## Deferred — BT + Terminology v1-core (built 2026-05-31, main `e16759a`; scoped-out tails)
 Both features shipped to spec for v1-core. These tails were deliberately deferred (design: `docs/superpowers/specs/2026-05-31-bt-terminology-design.md`). None block the demo.
@@ -79,8 +79,8 @@ Both features shipped to spec for v1-core. These tails were deliberately deferre
 - [OPEN] (fro180-group-detach) Revoke-all removes the direct project_members row only; spec (members-and-sharing.md) wants group-detach too. Result dialog hints at remaining non-removable paths. Needs group-management surface — follow-up issue filed. — auth-worker/src/routes/project-members.ts, src/components/ProjectMembersPage.tsx
 - [OPEN] (fro233-mixed-runs) DOCX export: mixed-format paragraphs collapse to dominant (first text-bearing) run's rPr. Full fidelity needs import-time per-run text→format map stored alongside cells. — src/lib/export/exporters/docx.ts (SWARM-TODO in header)
 - [RESOLVED 2026-06-09] (org-settings-floor) Premise was partly stale: the client floor was already MAINTAINER(600) (ORG_SETTINGS_WRITE_MIN_ROLE), and below-floor callers were blocked before the optimistic apply. The real gap was forbidden/error PATCH responses never reverting the optimistic write ("a refresh will revert" comment with no refresh call). Fixed: rollback to pre-write snapshot + refresh on forbidden/error; floor guard comment; useOrgSettings.test.ts covers floor, blocked-no-apply, and rollback. — src/hooks/useOrgSettings.ts (commit 6573e81)
-- [OPEN] (userules-patchshared) useRules.ts calls patchShared fire-and-forget; rejections silently dropped (same fail-loud gap FRO-255 closed in useProjectSettings). — src/hooks/useRules.ts
-- [OPEN] (pw-stale-floor-comments) ProjectWorkspace.tsx ~:2124/:2180 still carry stale "mismatch" notes about the 500/600 floor — now fixed by FRO-255; update comments opportunistically. — src/components/ProjectWorkspace.tsx
+- [OPEN] (userules-patchshared) useRules.ts calls patchShared fire-and-forget; rejections silently dropped (same fail-loud gap AQU-255 closed in useProjectSettings). — src/hooks/useRules.ts
+- [OPEN] (pw-stale-floor-comments) ProjectWorkspace.tsx ~:2124/:2180 still carry stale "mismatch" notes about the 500/600 floor — now fixed by AQU-255; update comments opportunistically. — src/components/ProjectWorkspace.tsx
 - [OPEN] (fro173-backfill-decision) PRODUCT DECISION: legacy GitLab audio EXISTS and was deliberately deferred by the importer. Backfill = scripts/migrate-all.ts --audio --apply (canary --only <gitlabId> first; needs GitLab LFS access + SYNC_SECRET_KEY + staging worker). Full evidence: docs/swarm/AUDIO-GAP-FRO173.md.
 
 ## PD5 carry-forwards (2026-06-09 overnight run)
@@ -93,17 +93,17 @@ Both features shipped to spec for v1-core. These tails were deliberately deferre
 
 ---
 
-## PD6 wave (2026-06-10) — FRO-262/263/264 [re-append; first append was clobbered by concurrent session]
+## PD6 wave (2026-06-10) — AQU-262/263/264 [re-append; first append was clobbered by concurrent session]
 
 Orchestration: docs/swarm/PD6-ORCHESTRATION.md. Base main@cfd4470 → promoted main@9628782 (--no-ff).
-- [DONE] FRO-262 tour copy + org-switcher step (743c78e) — UI-QA PASS.
-- [DONE] FRO-263 hero subtitle centering + .aq-blitz-verse same-reset fix (de03d11) — UI-QA PASS.
-- [DONE] FRO-264 team edit button/no-wipe rename/project links (a25de34) + server description in
+- [DONE] AQU-262 tour copy + org-switcher step (743c78e) — UI-QA PASS.
+- [DONE] AQU-263 hero subtitle centering + .aq-blitz-verse same-reset fix (de03d11) — UI-QA PASS.
+- [DONE] AQU-264 team edit button/no-wipe rename/project links (a25de34) + server description in
   getOrgGroupDetail (db0a005) — UI-QA PARTIAL: description-prefill not live-verified (user's own
   dev stack held :8788, browser hit old server — which DID verify the defensive no-wipe path);
   server half covered by groups-read.test.ts. Sub-600 gating not live-verified (pre-existing gate,
   restyle-only change). Follow-up QA: re-check prefill once deployed.
-- [DONE] Orchestrator fix 7cdb650: rls-backstop.test.ts TS7022 (UXA FRO-289 file) broke
+- [DONE] Orchestrator fix 7cdb650: rls-backstop.test.ts TS7022 (UXA AQU-289 file) broke
   `cd auth-worker && tsc --noEmit` on main — 3-line annotation.
 - [DONE] (pd6-syncworker-tsc-debt) `cd sync-worker && npx tsc --noEmit` was RED on main with ~60
   errors in TEST files only (CellRow/EventRow/CellsFtsRow not assignable to Record<string,unknown>
@@ -114,24 +114,24 @@ Orchestration: docs/swarm/PD6-ORCHESTRATION.md. Base main@cfd4470 → promoted m
 
 ---
 
-## UXA swarm (2026-06-10) — UX Journey Audit, FRO-265..298 — CONVERGED
+## UXA swarm (2026-06-10) — UX Journey Audit, AQU-265..298 — CONVERGED
 
 All 34 issues Fixed + promoted to main (final UI-QA on 7d934fd; punchlist 6c63e85).
 Orchestration: docs/swarm/UXA-ORCHESTRATION.md. Open follow-ups:
 
 - [OPEN] (uxa-deploy-migrations) Migrations NOT applied to live Neon: db/postgres 0034_rls_backstop,
-  0035_backfill_validation_count_threshold (FRO-279 backfill), 0036_files_soft_delete, 0037_cells_ai_drafted;
+  0035_backfill_validation_count_threshold (AQU-279 backfill), 0036_files_soft_delete, 0037_cells_ai_drafted;
   auth-worker 0034_ai_usage_daily. Apply via scripts/neon-migrate.ts; CI ledger check flags until applied.
-- [OPEN] (uxa-rls-staging) FRO-289 RLS: PGlite can't test role-level policy enforcement — verify on a
+- [OPEN] (uxa-rls-staging) AQU-289 RLS: PGlite can't test role-level policy enforcement — verify on a
   staging Neon branch (runtime role + policies) before trusting; rollback = per-table DISABLE RLS.
-- [OPEN] (uxa-284-env) FRO-284 mention emails need RESEND_API_KEY/EMAIL_FROM/BASE_URL in sync-worker env.
-- [OPEN] (uxa-265-enforce) FRO-265 AI caps ship LOG-ONLY (AI_BUDGET_ENFORCE unset); flip to "true" after
+- [OPEN] (uxa-284-env) AQU-284 mention emails need RESEND_API_KEY/EMAIL_FROM/BASE_URL in sync-worker env.
+- [OPEN] (uxa-265-enforce) AQU-265 AI caps ship LOG-ONLY (AI_BUDGET_ENFORCE unset); flip to "true" after
   sizing thresholds (defaults: user 500/day, global 5000/day).
 - [OPEN] (uxa-dev-jwt-mismatch) Pre-existing dev-env bug: auth-worker vs sync-worker JWT secrets differ in
-  .dev.vars → all sync API calls 401 on the dev stack; blocked full UI-QA of FRO-272 restore + FRO-279/280
+  .dev.vars → all sync API calls 401 on the dev stack; blocked full UI-QA of AQU-272 restore + AQU-279/280
   aggregate %. Fix .dev.vars parity; re-verify those two flows.
 - [OPEN] (uxa-validation-history-dead) ValidationHistoryTimeline is dead UI (validationHistory always []);
-  EditorTable was locked during FRO-298 — delete in a follow-up.
+  EditorTable was locked during AQU-298 — delete in a follow-up.
 - [OPEN] (uxa-283-joinpage-prewarn) JoinPage doesn't pre-warn on invite email mismatch (server now enforces;
   user learns via 403) — small UX follow-up.
 - [NOTE] (uxa-291-rescue-stash) Stash "rescue: foreign media-timeline WIP found in fro-291 worktree" is
@@ -139,42 +139,42 @@ Orchestration: docs/swarm/UXA-ORCHESTRATION.md. Open follow-ups:
 
 ## 2026-07-01 — Swarm: Prototype Debugging (Biblica demo bugs)
 - Base: main tip `77cd6abb7` (main is live/moving; re-verify before promotion). Integration: `swarm/proto-debug-integration`.
-- Surface-mapping: 2 Explore agents completed (FRO-457, FRO-458); 2 died on mid-turn process exit (FRO-455, FRO-460) → re-mapped in-process via grep.
-- Collision found+resolved: FRO-455 & FRO-460 both could touch `ProjectWorkspace.tsx` → serialized (455 wave 1 forbidden from it; 460 wave 2).
-- Wave 1 dispatched (sonnet, isolated worktrees off integration tip): FRO-455 (a20c9007), FRO-457 (aebd06ec), FRO-458 (a78dcf9e). All 3 claimed → Dispatched, assigned Ryder.
-- Wave 2 (pending wave-1 merge): FRO-460 Bible-resources default (needs brainstorming/design).
-- 2026-07-01 · WS D · FRO-460 → integration `02fdf5861` (ff) · root tsc ✅ · vitest 394f/3230 ✅ (ONE flaky fail on first run, 0 on two re-runs — known happy-dom teardown flakiness, not a regression). Bible-resources default: auto-enable when flag-unset + scripture-file + MAINTAINER+; card surfaced. Adversarial-verify wf + live UI-QA running.
-- 2026-07-01 · **FRO-460 adversarial-verify wf = FIX-FIRST (HIGH)**: settings-hydration race — auto-enable effect reads `bibleResourcesEnabled` before the async settings GET hydrates, so an explicit server `false` reads as `undefined` on first render → effect fires → overrides opt-out (trust violation). Also: on-load PATCH bumps version + stamps updatedBy to the opener; hint copy shown regardless of role; effect untested. → FRO-460 back to Dispatched; finisher a16ecacd gating effect on `hasFetched`. Live UI-QA (acf6e4df) still running — its check#3 (toggle OFF→reload→stays OFF) should confirm the race empirically.
-- 2026-07-01 · **FRO-460 live UI-QA CONFIRMS the race** (independent of the adversarial wf): Check3 (toggle OFF→Save→back-to-editor) FAILED deterministically ×2 — Settings-save remounts ProjectWorkspace, resetting the instance-scoped fired-ref; remounted minimalProjectRecord + fresh useProjectSettings read `undefined` while server holds `false` → auto-enable re-writes `true` in ~0.5s. Normal opt-out path, not an edge case. Checks 1/2/4/5 PASS. Finisher a16ecacd hasFetched-gate fixes exactly this (effect waits for settings GET → sees real false). After fix: focused live re-QA of Check3 required before promote.
-- 2026-07-01 · **FRO-460 focused re-QA FAILED ×2** — settingsHasFetched gate insufficient; multi-instance remount race (stale in-flight refresh flips hasFetched against transient/stale value → unrequested true PATCH overrides explicit OFF, server false→true v44/v46). Secondary (auto-enable-genuinely-unset) PASS. ROOT ISSUE: persist-on-load effect is race-prone by design → correct fix = DERIVE-ON-READ (explicit ?? isScripture at consumers + server aquifer gate), no write-on-load. 3 gate attempts failed. FRO-460 → Dispatched; escalating scope decision to user (descope to safe discoverability half vs derive-on-read redesign). FRO-455/457/458 verified & green, held on dirty main.
-- 2026-07-01 · **FRO-460 derive-on-read adversarial wf = PROMOTE** (correctness CONFIRMED sev-none; regression REFUTED sev-low). Trust invariant (explicit false wins) holds client+server; all consumers read derived value; server gate short-circuits explicit before the bounded+indexed files.kind query (idx_files_project_active, fails-closed); nothing writes on load. Regression lens inverted derivation → 6/8 tests failed (non-vacuous). 3 LOW/semantic follow-ups (non-blocking): (1) test assert exact false payload, (2) route-level explicit-false+scripture→404 test, (3) no affordance to reset to derived default. Independent live-QA running to close explicit-OFF empirically.
-- 2026-07-01 · **FRO-460 derive-on-read independent live-QA: 4/4 PASS**. Check1 (explicit OFF respected) PASS ×2 hard-reload+nav — server false, version frozen @51, ZERO unrequested writes (the invariant that failed 3× is now solid). Check2 scripture-default-on no-write (settings stayed v0). Check3 non-scripture off no-write. Check4 explicit-on 200. Trust invariant SOLID. NON-BLOCKING display race found: ProjectSettings switch transiently paints checked (~2-5s, rarely >5s) for server-false scripture project — seededRef baseline locks pre-hydration undefined → derived-true; never persists/writes. Dispatched finisher ae774a30 to fix display (gate baseline seed on hasFetched / read hydrated value); self-verifying live. Then re-gate + promote FRO-460.
+- Surface-mapping: 2 Explore agents completed (AQU-457, AQU-458); 2 died on mid-turn process exit (AQU-455, AQU-460) → re-mapped in-process via grep.
+- Collision found+resolved: AQU-455 & AQU-460 both could touch `ProjectWorkspace.tsx` → serialized (455 wave 1 forbidden from it; 460 wave 2).
+- Wave 1 dispatched (sonnet, isolated worktrees off integration tip): AQU-455 (a20c9007), AQU-457 (aebd06ec), AQU-458 (a78dcf9e). All 3 claimed → Dispatched, assigned Ryder.
+- Wave 2 (pending wave-1 merge): AQU-460 Bible-resources default (needs brainstorming/design).
+- 2026-07-01 · WS D · AQU-460 → integration `02fdf5861` (ff) · root tsc ✅ · vitest 394f/3230 ✅ (ONE flaky fail on first run, 0 on two re-runs — known happy-dom teardown flakiness, not a regression). Bible-resources default: auto-enable when flag-unset + scripture-file + MAINTAINER+; card surfaced. Adversarial-verify wf + live UI-QA running.
+- 2026-07-01 · **AQU-460 adversarial-verify wf = FIX-FIRST (HIGH)**: settings-hydration race — auto-enable effect reads `bibleResourcesEnabled` before the async settings GET hydrates, so an explicit server `false` reads as `undefined` on first render → effect fires → overrides opt-out (trust violation). Also: on-load PATCH bumps version + stamps updatedBy to the opener; hint copy shown regardless of role; effect untested. → AQU-460 back to Dispatched; finisher a16ecacd gating effect on `hasFetched`. Live UI-QA (acf6e4df) still running — its check#3 (toggle OFF→reload→stays OFF) should confirm the race empirically.
+- 2026-07-01 · **AQU-460 live UI-QA CONFIRMS the race** (independent of the adversarial wf): Check3 (toggle OFF→Save→back-to-editor) FAILED deterministically ×2 — Settings-save remounts ProjectWorkspace, resetting the instance-scoped fired-ref; remounted minimalProjectRecord + fresh useProjectSettings read `undefined` while server holds `false` → auto-enable re-writes `true` in ~0.5s. Normal opt-out path, not an edge case. Checks 1/2/4/5 PASS. Finisher a16ecacd hasFetched-gate fixes exactly this (effect waits for settings GET → sees real false). After fix: focused live re-QA of Check3 required before promote.
+- 2026-07-01 · **AQU-460 focused re-QA FAILED ×2** — settingsHasFetched gate insufficient; multi-instance remount race (stale in-flight refresh flips hasFetched against transient/stale value → unrequested true PATCH overrides explicit OFF, server false→true v44/v46). Secondary (auto-enable-genuinely-unset) PASS. ROOT ISSUE: persist-on-load effect is race-prone by design → correct fix = DERIVE-ON-READ (explicit ?? isScripture at consumers + server aquifer gate), no write-on-load. 3 gate attempts failed. AQU-460 → Dispatched; escalating scope decision to user (descope to safe discoverability half vs derive-on-read redesign). AQU-455/457/458 verified & green, held on dirty main.
+- 2026-07-01 · **AQU-460 derive-on-read adversarial wf = PROMOTE** (correctness CONFIRMED sev-none; regression REFUTED sev-low). Trust invariant (explicit false wins) holds client+server; all consumers read derived value; server gate short-circuits explicit before the bounded+indexed files.kind query (idx_files_project_active, fails-closed); nothing writes on load. Regression lens inverted derivation → 6/8 tests failed (non-vacuous). 3 LOW/semantic follow-ups (non-blocking): (1) test assert exact false payload, (2) route-level explicit-false+scripture→404 test, (3) no affordance to reset to derived default. Independent live-QA running to close explicit-OFF empirically.
+- 2026-07-01 · **AQU-460 derive-on-read independent live-QA: 4/4 PASS**. Check1 (explicit OFF respected) PASS ×2 hard-reload+nav — server false, version frozen @51, ZERO unrequested writes (the invariant that failed 3× is now solid). Check2 scripture-default-on no-write (settings stayed v0). Check3 non-scripture off no-write. Check4 explicit-on 200. Trust invariant SOLID. NON-BLOCKING display race found: ProjectSettings switch transiently paints checked (~2-5s, rarely >5s) for server-false scripture project — seededRef baseline locks pre-hydration undefined → derived-true; never persists/writes. Dispatched finisher ae774a30 to fix display (gate baseline seed on hasFetched / read hydrated value); self-verifying live. Then re-gate + promote AQU-460.
 
 ## §PD7 (2026-07-06) — Prototype Debugging Urgent/High batch (13 issues, promoted dev@0189d3971)
 
 Deferred/open tails, honestly traced:
-- **FRO-361 happy path unverified live**: dev stack's cell-completion route (auth-worker routes/chat.ts
+- **AQU-361 happy path unverified live**: dev stack's cell-completion route (auth-worker routes/chat.ts
   completion path) has no `OPENROUTER_BASE_URL` override, so mock-openrouter can't serve it keyless —
   only the failure-banner path was live-verified. DX gap: add the override like the Agent/chat route.
-- **FRO-360 "Omni voice" hover string**: not present anywhere in this tree — likely prod/main divergence;
+- **AQU-360 "Omni voice" hover string**: not present anywhere in this tree — likely prod/main divergence;
   labels now derive from the same provider resolution the synthesis call uses. Follow-up chip: NewVoiceModal
   still offers only Gemini/Clone (orphaned 4-provider CharacterModal exists).
-- **FRO-366 original symptom never reproduced**: the intermittent "list won't scroll" couldn't be triggered
+- **AQU-366 original symptom never reproduced**: the intermittent "list won't scroll" couldn't be triggered
   live (real wheel-scroll works); shipped overscroll-contain + structural regression tests as hardening.
-- **FRO-414 root attribution**: regular-chat spend is recorded under org 0 by design/accident
+- **AQU-414 root attribution**: regular-chat spend is recorded under org 0 by design/accident
   (auth-worker routes/chat.ts hardcodes orgId=0) — labels are now honest, but real per-org chat attribution
   needs a product decision + creditGuard change (chip task_7bc10238).
-- **FRO-334 residual server gap**: AiInstructionsStep/AiModelsStep persist via IDB/localStorage-only paths
+- **AQU-334 residual server gap**: AiInstructionsStep/AiModelsStep persist via IDB/localStorage-only paths
   that never reach the maintainer-gated PATCH /settings — client gating closes the UI, but the write path
   itself has no server floor to hit. Needs a follow-up (route the checklist saves through the gated PATCH).
-- **FRO-347 legacy route**: the single-project invite preview (`/invite-preview/:token` family) has the same
+- **AQU-347 legacy route**: the single-project invite preview (`/invite-preview/:token` family) has the same
   no-`used_by`-check bug the multi route had (fixer chip spawned).
-- **FRO-346 org-level removal**: org-member removal routes do NOT yet send the DO eject (project-member
+- **AQU-346 org-level removal**: org-member removal routes do NOT yet send the DO eject (project-member
   routes only); org removal cascades access loss without the live kick.
 - **scripts/e2e-up.ts**: same `env:`-vs-`--var` wrangler bug dev-stack.ts had (vars never reach c.env) —
   chip spawned.
-- **New issue filed from QA**: FRO-481 — viewer role can open/interact with the full Import dialog
+- **New issue filed from QA**: AQU-481 — viewer role can open/interact with the full Import dialog
   (server rejects; affordance honesty gap).
-- **QA cadence lesson**: three rounds were needed for FRO-347 (server logic → client Authorization header →
+- **QA cadence lesson**: three rounds were needed for AQU-347 (server logic → client Authorization header →
   browser HTTP-cache of the anonymous 410). "Server returns the right thing" ≠ "the UI shows it" —
   the live-UI gate caught both inert halves; unit suites alone would have shipped them broken.

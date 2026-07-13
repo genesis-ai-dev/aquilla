@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { Languages, Sparkles, Wand2, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
+import { type CellStore, useCellStoreVersion } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { Button } from "@/components/ui/button"
@@ -24,7 +25,7 @@ import { canPerform } from "@/lib/sync/role-policy"
 
 interface Props {
   project: ProjectRecord
-  cells: CellData[]
+  cellStore: CellStore
   session: FrontierSession | null
   username: string
   completeSingle?: (cell: CellData) => Promise<void> | void
@@ -34,14 +35,14 @@ interface Props {
   /** Synthesize the selected cells as one continuous clip + slice per cell. */
   onVoiceTogether?: (cells: CellData[]) => Promise<void> | void
   /**
-   * FRO-186: called when the user clicks "Harmonize…" on the selection bar.
+   * AQU-186: called when the user clicks "Harmonize…" on the selection bar.
    * Receives the subset of selected cells that have at least one active
    * fix-review proposal. The parent opens FixReviewPanel in multi-cell scope.
    * Optional — when absent the button is not rendered.
    */
   onHarmonize?: (cells: CellData[]) => void
   /**
-   * FRO-186: whether the current user has the harmonize_min_role.
+   * AQU-186: whether the current user has the harmonize_min_role.
    * When false, the button is disabled (server is still authoritative).
    */
   canHarmonize?: boolean
@@ -53,8 +54,9 @@ type Running =
   | { kind: "validate" }
   | { kind: "voice" }
 
-export function SelectionBar({ project, cells, username, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true }: Props) {
+export function SelectionBar({ project, cellStore, username, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true }: Props) {
   const selected = useSelectedIds()
+  const cellStoreVersion = useCellStoreVersion(cellStore)
   const [running, setRunning] = useState<Running>({ kind: "idle" })
   const [toastMsg, setToastMsg] = useState<string | null>(null)
 
@@ -81,9 +83,8 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
   }, [])
 
   const selectedCells = useMemo(() => {
-    const wanted = selected
-    return cells.filter((c) => wanted.has(c.id)).slice(0, MAX_SELECTED)
-  }, [cells, selected])
+    return cellStore.getCellsByIds(selected).slice(0, MAX_SELECTED)
+  }, [cellStore, cellStoreVersion, selected])
 
   const missingCount = useMemo(
     () => selectedCells.filter((c) => !c.translated.trim() && c.original?.trim()).length,
@@ -106,7 +107,7 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
     () => selectedCells.filter((c) => c.type !== "paratext" && c.translated.trim()).length,
     [selectedCells],
   )
-  // FRO-186: cells with at least one infraction or fix proposal — v1 minimum:
+  // AQU-186: cells with at least one infraction or fix proposal — v1 minimum:
   // show affordance when ≥ 1 selected cell has a translated value (proxy for
   // "may have violations"; real infraction data wires in when worker lands).
   const harmonizableCount = useMemo(
@@ -194,7 +195,7 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
     }
   }, [selectedCells, username, unvalidatableCount, isBusy, project.id])
 
-  // FRO-365: viewers (and any role below the lowest gated action here —
+  // AQU-365: viewers (and any role below the lowest gated action here —
   // REVIEWER 300, the validate floor) get no selection affordance at all.
   // canPerform fails OPEN when the role is unknown (local/legacy projects
   // with no syncRole), so this only suppresses the bar for a KNOWN
@@ -327,7 +328,7 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
           </span>
         )}
       </Button>
-      {/* FRO-186: Harmonize affordance — appears when ≥ 1 selected cell has a
+      {/* AQU-186: Harmonize affordance — appears when ≥ 1 selected cell has a
           translation (v1 minimum per spec). Disabled when canHarmonize=false
           (role too low) or onHarmonize callback not provided. */}
       {onHarmonize != null && harmonizableCount > 0 && (

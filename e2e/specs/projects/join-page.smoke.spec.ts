@@ -15,7 +15,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("join page with invalid token shows error state and Back to projects", async ({ alice }) => {
   await alice.goto("/join/invalid-token-e2e-test")
-  await alice.waitForLoadState("networkidle")
 
   // Card header shows "Joining Project".
   await expect(alice.getByText(/Joining Project/i).first()).toBeVisible({ timeout: 10_000 })

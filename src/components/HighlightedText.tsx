@@ -41,18 +41,18 @@ export function HighlightedText({
     return map
   }, [highlights])
 
-  const sortedRanges = useMemo(
-    () => [...ranges].sort((a, b) => a.start - b.start),
-    [ranges],
+  const displayRanges = useMemo(
+    () => normalizeDisplayRanges(text, ranges),
+    [ranges, text],
   )
 
-  if (highlights.length === 0 && ranges.length === 0) return <span>{text}</span>
+  if (highlights.length === 0 && displayRanges.length === 0) return <span>{text}</span>
 
   // First split into chunks honoring ranges; then in non-ranged chunks apply
   // token-level evidence highlights when showEvidence is true.
   const chunks: Array<{ text: string; start: number; range?: RangeHighlight }> = []
   let cursor = 0
-  for (const r of sortedRanges) {
+  for (const r of displayRanges) {
     if (r.start > cursor) chunks.push({ text: text.slice(cursor, r.start), start: cursor })
     chunks.push({ text: text.slice(r.start, r.end), start: r.start, range: r })
     cursor = r.end
@@ -86,6 +86,19 @@ export function HighlightedText({
       })}
     </span>
   )
+}
+
+function normalizeDisplayRanges(text: string, ranges: RangeHighlight[]): RangeHighlight[] {
+  const length = text.length
+  const out: RangeHighlight[] = []
+  for (const range of ranges) {
+    const start = Math.max(0, Math.min(length, range.start))
+    const end = Math.max(0, Math.min(length, range.end))
+    if (start >= end) continue
+    out.push({ ...range, start, end })
+  }
+  out.sort((a, b) => a.start - b.start || b.end - a.end)
+  return out
 }
 
 function EvidenceTokens({ text, highlightMap }: { text: string; highlightMap: Map<string, number> }) {

@@ -1,4 +1,4 @@
-// FRO-180: Per-project members management — atomic revoke-all endpoint.
+// AQU-180: Per-project members management — atomic revoke-all endpoint.
 //
 // This file adds only the NEW endpoint that projects.ts doesn't already have:
 //
@@ -141,7 +141,7 @@ projectMembers.post(
       removed = true
     }
 
-    // FRO-346: when the direct row was removed AND no other grant path
+    // AQU-346: when the direct row was removed AND no other grant path
     // remains, eject the user's live WS sessions + denylist their
     // still-valid sync tokens. Skipped when an org/group/creator path still
     // confers access — they are still a member via that path. Best-effort.

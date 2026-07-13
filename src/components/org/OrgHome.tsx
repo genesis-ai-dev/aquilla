@@ -7,16 +7,27 @@ import { useActiveOrg } from "@/context/OrgContext"
 import type { OrgSummary } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { portfolioActivityStatus } from "@/lib/project-status"
+import { ProjectDeadlineStatuses } from "@/components/ProjectStatus"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
 import { WorkloadRollup } from "./WorkloadRollup"
 import { UsageRollup } from "./UsageRollup"
 import { CreditsPanel } from "./CreditsPanel"
+import {
+  SectionVisibilityBadge,
+  SectionVisibilityGate,
+  sectionTintClass,
+} from "./SectionVisibilityBadge"
+import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
+import { ROLE, roleDisplayText } from "@/lib/frontier/roles"
+import { RoleLabel } from "@/components/RoleLabel"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import { OrgSetupChecklist } from "./OrgSetupChecklist"
+import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import {
   Select,
@@ -27,6 +38,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Button, buttonVariants } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import {
   InputGroup,
   InputGroupAddon,
@@ -34,12 +46,79 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { Skeleton } from "@/components/ui/skeleton"
 import { FolderPlus, Search, X, Building2 } from "lucide-react"
 
-const STALE_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000
+function ProjectRowSkeleton() {
+  return (
+    <div className="flex items-center gap-4 p-4">
+      <div className="min-w-0 flex-1 space-y-2">
+        <Skeleton className="h-4 w-1/3" />
+        <Skeleton className="h-1.5 w-full rounded-full" />
+        <Skeleton className="h-1.5 w-full rounded-full" />
+      </div>
+      <div className="shrink-0 space-y-2 text-right">
+        <Skeleton className="ml-auto h-3 w-16" />
+        <Skeleton className="ml-auto h-3 w-16" />
+      </div>
+    </div>
+  )
+}
+
+function OrgHomeSkeleton({ isAllOrgs }: { isAllOrgs: boolean }) {
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="h-[88px] space-y-2 rounded-2xl border bg-card p-4">
+            <Skeleton className="h-3 w-16" />
+            <Skeleton className="h-6 w-10" />
+          </div>
+        ))}
+      </div>
+      {isAllOrgs ? (
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+          <section className="rounded-2xl border bg-card">
+            <div className="border-b px-4 py-3">
+              <Skeleton className="h-5 w-28" />
+            </div>
+            <div className="divide-y">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <ProjectRowSkeleton key={i} />
+              ))}
+            </div>
+          </section>
+          <section className="rounded-2xl border bg-card">
+            <div className="border-b px-4 py-3">
+              <Skeleton className="h-5 w-20" />
+            </div>
+            <div className="divide-y">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <ProjectRowSkeleton key={i} />
+              ))}
+            </div>
+          </section>
+        </div>
+      ) : (
+        <div className="rounded-2xl border divide-y">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <ProjectRowSkeleton key={i} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 
 type ActivityStatus = "not-started" | "stalled" | "active"
+
+/** @deprecated Import portfolioActivityStatus from @/lib/project-status */
+export function activityStatus(p: PortfolioProject, now: number): ActivityStatus {
+  return portfolioActivityStatus(p, now)
+}
 
 type StatusFilter = "all" | "stalled" | "overdue"
 
@@ -123,17 +202,6 @@ function isProjectLens(value: string | null | undefined): value is ProjectLens {
   return PROJECT_LENS_VALUES.includes(value as ProjectLens)
 }
 
-/**
- * A project that has never been edited and has no translated cells hasn't
- * stalled — it just hasn't started yet. "Stalled" is reserved for projects
- * that had activity and then went quiet for 14+ days.
- */
-export function activityStatus(p: PortfolioProject, now: number): ActivityStatus {
-  if (p.lastEditAt == null && p.filledCells === 0) return "not-started"
-  if (p.lastEditAt == null || now - p.lastEditAt > STALE_THRESHOLD_MS) return "stalled"
-  return "active"
-}
-
 function averagePct(projects: PortfolioProjectRow[], readPct: (project: PortfolioProjectRow) => number): number {
   return projects.length > 0 ? projects.reduce((sum, project) => sum + readPct(project), 0) / projects.length : 0
 }
@@ -143,7 +211,7 @@ function orgDisplayName(org: OrgSummary): string {
 }
 
 function roleLabel(org: OrgSummary): string {
-  return org.role.name.replace(/_/g, " ")
+  return roleDisplayText(org.role.name)
 }
 
 function formatShortDate(value: number | null): string {
@@ -171,34 +239,62 @@ function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, 
 // Shared column template for the project table so the header row and the data
 // rows always line up. Name flexes; the metric + date columns are fixed-width.
 // Kept compact so the Name column survives inside the narrow all-orgs panel.
-const PROJECT_TABLE_COLS = "grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_4rem_6rem]"
+// Audio column is 5rem (not 4rem) to fit the "Has Audio" header (AQU-489/490
+// terminology parity) without wrapping.
+const PROJECT_TABLE_COLS = "grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_5rem_5.5rem_6rem]"
 
 /**
  * The org/portfolio project list as a compact table — one row per project with
- * aligned Translated / Validated / Audio / Updated columns — instead of a stack
- * of full-width progress-bar cards. Rows stay `<Link>`s so cmd-click still opens
- * a project in a new tab. Wrapped in `overflow-x-auto` so the fixed columns can
- * scroll rather than squash on a narrow viewport.
+ * aligned Translated / Validated / Has Audio / Updated columns — instead of a
+ * stack of full-width progress-bar cards. Rows stay `<Link>`s so cmd-click
+ * still opens a project in a new tab. Wrapped in `overflow-x-auto` so the
+ * fixed columns can scroll rather than squash on a narrow viewport.
+ *
+ * AQU-489: column headers ARE the visible label for each number (no hover
+ * required to identify what a figure means); the header tooltips below are
+ * retained as EXTRA detail only. "Has Audio" (not bare "Audio") mirrors the
+ * ProjectOverview.tsx relabel from AQU-490 — this table has no per-medium
+ * validation figure to show (server doesn't track one; see AQU-490's
+ * in-code note there), so unlike ProjectOverview there is no separate
+ * "Audio Validated" column here — just the coverage figure, honestly named.
+ *
+ * SWARM-TODO(AQU-489): verify live — open the org home / all-organizations
+ * projects table and confirm each column header ("Translated", "Validated",
+ * "Has Audio") reads as a permanent visible label with NO hover required;
+ * hovering a header may show extra detail (a one-line tooltip) but the
+ * meaning must already be legible from the header text alone. Then open a
+ * single project's overview (ProjectOverview.tsx Progress card) and confirm
+ * the same three terms — plus "Audio Validated" — are used identically
+ * (not "Audio" bare, not "Approved" instead of "Validated").
  */
 function ProjectTable({
   projects,
   now,
   showOrg,
+  roleByProjectId,
 }: {
   projects: PortfolioProjectRow[]
   now: number
   showOrg: boolean
+  roleByProjectId?: Map<string, CloudProjectSummary["role"]>
 }) {
   return (
     <div className="overflow-x-auto">
-      <div className="min-w-[32rem]">
+      <div className="min-w-[39rem]">
         <div
           className={`grid ${PROJECT_TABLE_COLS} gap-x-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground`}
         >
           <span>Name</span>
-          <span className="whitespace-nowrap text-right">Translated</span>
-          <span className="whitespace-nowrap text-right">Validated</span>
-          <span className="whitespace-nowrap text-right">Audio</span>
+          <AppTooltip content="Percentage of cells with target-language content filled in.">
+            <span className="whitespace-nowrap text-right">Translated</span>
+          </AppTooltip>
+          <AppTooltip content="Percentage of cells marked validated by a reviewer.">
+            <span className="whitespace-nowrap text-right">Validated</span>
+          </AppTooltip>
+          <AppTooltip content="Percentage of cells that have at least one audio recording attached. This is coverage, not validation — audio-specific validation isn't tracked yet (see AQU-490).">
+            <span className="whitespace-nowrap text-right">Has Audio</span>
+          </AppTooltip>
+          <span className="whitespace-nowrap text-right">Role</span>
           <span className="whitespace-nowrap text-right">Updated</span>
         </div>
         <div className="divide-y">
@@ -206,6 +302,7 @@ function ProjectTable({
             const tpct = Math.round(translatedPct(p) * 100)
             const pct = Math.round(validatedPct(p) * 100)
             const apct = Math.round(audioPct(p) * 100)
+            const role = roleByProjectId?.get(p.id)
             const status = activityStatus(p, now)
             const dstatus = deadlineStatus(p, now)
             return (
@@ -217,20 +314,11 @@ function ProjectTable({
                 <span className="flex min-w-0 items-center gap-2">
                   <span className="truncate font-medium">{p.name}</span>
                   {showOrg && p.orgName && (
-                    <span className="max-w-[8rem] shrink-0 truncate rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    <Badge variant="secondary" className="max-w-[8rem] shrink-0 truncate">
                       {p.orgName}
-                    </span>
+                    </Badge>
                   )}
-                  {dstatus === "overdue" && (
-                    <span className="shrink-0 rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-medium text-destructive">
-                      Overdue
-                    </span>
-                  )}
-                  {dstatus === "soon" && (
-                    <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
-                      Due soon
-                    </span>
-                  )}
+                  <ProjectDeadlineStatuses deadline={dstatus} className="shrink-0" />
                 </span>
 
                 <span className="text-right font-medium tabular-nums text-foreground" aria-label={`${tpct}% translated`}>
@@ -241,6 +329,9 @@ function ProjectTable({
                 </span>
                 <span className="text-right tabular-nums text-muted-foreground" aria-label={`${apct}% audio`}>
                   {apct}%
+                </span>
+                <span className="truncate text-right text-xs text-muted-foreground">
+                  {role?.name ? <RoleLabel name={role.name} /> : "—"}
                 </span>
                 <span
                   className={`truncate text-right text-xs ${
@@ -263,11 +354,11 @@ function ProjectTable({
 }
 
 /**
- * FRO-335 / FRO-475: projects reachable only via a project-level grant (an
+ * AQU-335 / AQU-475: projects reachable only via a project-level grant (an
  * invite accept or bulk-add) into an org the caller isn't a member of.
  * Shared across both the active-org and all-orgs views so a zero-org guest
  * never lands on an empty dashboard. `orgLabel` annotates each row with the
- * host org — FRO-473: the accessible-projects endpoint now joins `orgName`,
+ * host org — AQU-473: the accessible-projects endpoint now joins `orgName`,
  * so the label falls back to "Org #N" only on older servers/absent data.
  */
 function SharedWithYouSection({
@@ -292,11 +383,11 @@ function SharedWithYouSection({
             >
               <p className="flex-1 min-w-0 truncate font-medium">{p.name}</p>
               {label && (
-                <span className="shrink-0 truncate rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                <Badge variant="secondary" className="shrink-0 truncate">
                   {label}
-                </span>
+                </Badge>
               )}
-              <span className="shrink-0 text-xs text-muted-foreground">{p.role.name}</span>
+              <RoleLabel name={p.role.name} className="shrink-0 text-xs text-muted-foreground" />
             </Link>
           )
         })}
@@ -311,11 +402,21 @@ export function OrgHome() {
   const navigate = useNavigate()
   const jwt = session?.jwt ?? null
 
+  // AQU-486: per-section visibility chrome for Team workload / Team usage
+  // (both gated by the AQU-485 memberProgressViewMinRole floor — they're both
+  // per-member productivity views) and the credits panel (a static
+  // maintainer-only floor hardcoded in CreditsPanel; no org-setting backs it
+  // yet, so its badge is informational only, with no advanced toggle).
+  const orgSettings = useOrgSettings(activeOrgId, activeOrg?.role?.level)
+  const canEditVisibility = canEditRosterProgressFloor(activeOrg?.role?.level)
+  const memberProgressReady = orgSettings.hasFetched
+  const memberProgressViewerRole = activeOrg?.role?.level ?? null
+
   const [projects, setProjects] = useState<PortfolioProjectRow[]>([])
-  // FRO-335: accessible-project rows supply direct/group/org role attribution
+  // AQU-335: accessible-project rows supply direct/group/org role attribution
   // and identify projects shared from orgs the portfolio endpoint can't see.
   const [accessibleProjects, setAccessibleProjects] = useState<CloudProjectSummary[]>([])
-  // FRO-326: unredeemed invites addressed to the caller's email — without
+  // AQU-326: unredeemed invites addressed to the caller's email — without
   // this card, an invite whose link never arrived is undiscoverable in-app.
   const [pendingInvites, setPendingInvites] = useState<MyPendingInvite[]>([])
   const [loading, setLoading] = useState(false)
@@ -402,7 +503,7 @@ export function OrgHome() {
     return () => { cancelled = true }
   }, [jwt, activeOrgId, activeOrg?.name, isAllOrgs, orgLoading, orgs])
 
-  // FRO-335: surface cross-org grants on the Projects page too — otherwise a user
+  // AQU-335: surface cross-org grants on the Projects page too — otherwise a user
   // whose only project arrived via an invite link sees an empty dashboard.
   useEffect(() => {
     if (!jwt) {
@@ -420,7 +521,7 @@ export function OrgHome() {
     return () => { cancelled = true }
   }, [jwt, orgs, activeOrgId, orgLoading])
 
-  // FRO-326: received-invites surface. Org-independent (matched by email).
+  // AQU-326: received-invites surface. Org-independent (matched by email).
   useEffect(() => {
     if (!jwt) { setPendingInvites([]); return }
     let cancelled = false
@@ -473,7 +574,7 @@ export function OrgHome() {
   const overdueCount = projects.filter((p) => deadlineStatus(p, now) === "overdue").length
   const avgAudioPct =
     projects.length > 0 ? projects.reduce((sum, p) => sum + audioPct(p), 0) / projects.length : 0
-  // FRO-475: in all-orgs mode there's no single activeOrgId to compare
+  // AQU-475: in all-orgs mode there's no single activeOrgId to compare
   // against — classify by org membership alone so a project reached purely
   // via a project-level grant (zero orgs, or a grant in an org the caller
   // doesn't belong to) still surfaces instead of vanishing into an empty
@@ -484,6 +585,7 @@ export function OrgHome() {
     activeOrgId,
     isAllOrgs ? "all-orgs" : "active-org",
   ).sharedWithMe
+  const roleByProjectId = new Map(accessibleProjects.map((project) => [project.id, project.role]))
 
   const orgSummaries: OrgPortfolioSummary[] = orgs
     .map((org) => {
@@ -545,6 +647,17 @@ export function OrgHome() {
   })
   const visible = sortProjectsByLens(filteredProjects, projectLens, now)
 
+  const statusFilteredProjects = projects.filter((p) => {
+    switch (statusFilter) {
+      case "stalled":
+        return activityStatus(p, now) === "stalled"
+      case "overdue":
+        return deadlineStatus(p, now) === "overdue"
+      default:
+        return true
+    }
+  })
+
   return (
     <AppShell
       sidebar={<OrgSidebar />}
@@ -554,9 +667,7 @@ export function OrgHome() {
           {activeOrgId != null ? (
             <ProjectCreateDialog orgId={activeOrgId} onCreated={handleCreated} />
           ) : (
-            <span className="rounded-full border bg-muted/40 px-3 py-1 text-xs text-muted-foreground">
-              Select an organization to create a project
-            </span>
+            <Badge variant="outline">Select an organization to create a project</Badge>
           )}
         </div>
       }
@@ -565,19 +676,12 @@ export function OrgHome() {
         <Page size="wide">
           <PageHeader title={workspaceLabel} />
           {isPageLoading ? (
-            <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className="h-[88px] animate-pulse rounded-2xl border bg-card" />
-                ))}
-              </div>
-              <div className="h-64 animate-pulse rounded-2xl border bg-card" />
-            </div>
+            <OrgHomeSkeleton isAllOrgs={isAllOrgs} />
           ) : error ? (
             <p className="text-sm text-destructive">{error}</p>
           ) : (
             <div className="space-y-6">
-              {/* FRO-326: received invites — the user has been invited but
+              {/* AQU-326: received invites — the user has been invited but
                   hasn't accepted yet. Without this, an invite whose email/link
                   never arrived is undiscoverable in-app. */}
               {pendingInvites.length > 0 && (
@@ -591,7 +695,7 @@ export function OrgHome() {
                             {inv.projects.map((p) => p.projectName).join(", ")}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            Invited by {inv.createdBy} as {inv.role.name.replace(/_/g, " ")}
+                            Invited by {inv.createdBy} as <RoleLabel name={inv.role.name} />
                             {inv.expiresAt ? ` · expires ${new Date(inv.expiresAt).toLocaleDateString()}` : ""}
                           </p>
                         </div>
@@ -660,13 +764,15 @@ export function OrgHome() {
 
                       {orgSummaries.length === 0 ? (
                         <EmptyState
-                          className="border-0 bg-transparent py-10"
+                          variant="inline"
+                          className="py-10"
                           icon={Building2}
                           title="No organizations yet."
                         />
                       ) : visibleOrgSummaries.length === 0 ? (
                         <EmptyState
-                          className="border-0 bg-transparent py-10"
+                          variant="inline"
+                          className="py-10"
                           icon={Search}
                           title="No matching organizations."
                         />
@@ -682,9 +788,9 @@ export function OrgHome() {
                               <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-2">
                                   <p className="truncate font-medium">{orgDisplayName(summary.org)}</p>
-                                  <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                  <Badge variant="secondary" className="shrink-0">
                                     {roleLabel(summary.org)}
-                                  </span>
+                                  </Badge>
                                 </div>
                                 <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
                                   <span>{summary.projectCount} project{summary.projectCount === 1 ? "" : "s"}</span>
@@ -783,23 +889,25 @@ export function OrgHome() {
 
                       {projects.length === 0 ? (
                         <EmptyState
-                          className="border-0 bg-transparent py-10"
+                          variant="inline"
+                          className="py-10"
                           icon={FolderPlus}
                           title="No projects yet."
                         />
                       ) : visible.length === 0 ? (
                         <EmptyState
-                          className="border-0 bg-transparent py-10"
+                          variant="inline"
+                          className="py-10"
                           icon={Search}
                           title={projectQuery ? "No matching projects." : currentProjectLens.empty}
                         />
                       ) : (
-                        <ProjectTable projects={visible} now={now} showOrg />
+                        <ProjectTable projects={visible} now={now} showOrg roleByProjectId={roleByProjectId} />
                       )}
                     </section>
                   </div>
 
-                  {/* FRO-475: projects reachable only via a project-level grant
+                  {/* AQU-475: projects reachable only via a project-level grant
                       (no org membership at all, or a grant in an org the caller
                       isn't a member of) are invisible to getPortfolios() — which
                       only knows about the caller's org memberships. Without this,
@@ -828,84 +936,7 @@ export function OrgHome() {
                     />
                   </div>
 
-                  {/* Filter bar */}
-                  {projects.length > 0 && (
-                    <div className="flex w-full flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden">
-                      <InputGroup className="h-9 min-w-[12rem] flex-[1_1_13rem] max-w-52">
-                        <InputGroupAddon>
-                          <Search />
-                        </InputGroupAddon>
-                        <InputGroupInput
-                          type="text"
-                          value={projectQuery}
-                          onChange={(e) => setProjectQuery(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Escape") e.currentTarget.blur()
-                          }}
-                          placeholder="Filter projects…"
-                          aria-label="Filter projects by name"
-                          autoCorrect="off"
-                          autoCapitalize="none"
-                          spellCheck={false}
-                        />
-                        {projectQuery && (
-                          <InputGroupAddon align="inline-end">
-                            <InputGroupButton
-                              type="button"
-                              size="icon-xs"
-                              aria-label="Clear project filter"
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => setProjectQuery("")}
-                            >
-                              <X />
-                            </InputGroupButton>
-                          </InputGroupAddon>
-                        )}
-                      </InputGroup>
-                      <div className={projectControlGroupClassName}>
-                        <div className="flex items-center gap-2" aria-label="Project status filter">
-                          <span className="text-xs font-medium text-muted-foreground">Status</span>
-                          <div className="flex items-center gap-1">
-                            {STATUS_FILTERS.map((f) => (
-                              <Button
-                                key={f.value}
-                                type="button"
-                                size="xs"
-                                variant={statusFilter === f.value ? "default" : "secondary"}
-                                onClick={() => setStatusFilter(f.value)}
-                                aria-pressed={statusFilter === f.value}
-                              >
-                                {f.label}
-                              </Button>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2" aria-label="Project sort">
-                          <span className="text-xs font-medium text-muted-foreground">Sort by</span>
-                          <Select
-                            items={PROJECT_LENSES.map((lens) => ({ value: lens.value, label: lens.label }))}
-                            value={projectLens}
-                            onValueChange={handleProjectLensChange}
-                          >
-                            <SelectTrigger aria-label="Sort projects" size="sm" className="min-w-40 bg-background">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectGroup>
-                                {PROJECT_LENSES.map((lens) => (
-                                  <SelectItem key={lens.value} value={lens.value}>
-                                    {lens.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectGroup>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Project directory */}
+                  {/* Status filter + admin-style project table */}
                   {projects.length === 0 ? (
                     <EmptyState
                       icon={FolderPlus}
@@ -922,33 +953,108 @@ export function OrgHome() {
                         </div>
                       }
                     />
-                  ) : visible.length === 0 ? (
-                    <EmptyState
-                      className="border-0 bg-transparent py-6"
-                      icon={Search}
-                      title="No matching projects."
-                    />
                   ) : (
-                    <div className="overflow-hidden rounded-2xl border bg-card">
-                      <ProjectTable projects={visible} now={now} showOrg={false} />
+                    <div className="flex flex-col gap-3">
+                      <div className="flex flex-wrap items-center gap-1" aria-label="Project status filter">
+                        {STATUS_FILTERS.map((f) => (
+                          <Button
+                            key={f.value}
+                            type="button"
+                            size="xs"
+                            variant={statusFilter === f.value ? "default" : "secondary"}
+                            onClick={() => setStatusFilter(f.value)}
+                            aria-pressed={statusFilter === f.value}
+                          >
+                            {f.label}
+                          </Button>
+                        ))}
+                      </div>
+
+                      <OrgProjectsDataTable
+                        projects={statusFilteredProjects}
+                        now={now}
+                        roleByProjectId={roleByProjectId}
+                        initialLens={projectLens}
+                        emptyTitle={
+                          statusFilter === "stalled"
+                            ? "No stalled projects."
+                            : statusFilter === "overdue"
+                              ? "No overdue projects."
+                              : "No projects yet."
+                        }
+                      />
                     </div>
                   )}
 
-                  {/* FRO-335: cross-org projects (invite-link / bulk-add grants).
+                  {/* AQU-335: cross-org projects (invite-link / bulk-add grants).
                       Listed separately — they're not part of this org's portfolio,
                       but hiding them made them unreachable from every nav surface. */}
                   <SharedWithYouSection projects={sharedProjects} />
                 </>
               )}
 
-              {jwt && !isAllOrgs && activeOrgId != null && <WorkloadRollup jwt={jwt} orgId={activeOrgId} />}
-              {jwt && !isAllOrgs && activeOrgId != null && <UsageRollup jwt={jwt} orgId={activeOrgId} />}
               {jwt && !isAllOrgs && activeOrgId != null && (
-                <CreditsPanel
-                  jwt={jwt}
-                  orgId={activeOrgId}
-                  orgRoleLevel={activeOrg?.role.level ?? 0}
-                />
+                <SectionVisibilityGate
+                  minRole={orgSettings.memberProgressViewMinRole}
+                  viewerRoleLevel={memberProgressViewerRole}
+                  ready={memberProgressReady}
+                >
+                  <div
+                    className={cn(
+                      "relative rounded-2xl",
+                      sectionTintClass(orgSettings.memberProgressViewMinRole),
+                    )}
+                    data-testid="section-team-workload"
+                  >
+                    <SectionVisibilityBadge
+                      minRole={orgSettings.memberProgressViewMinRole}
+                      canEdit={canEditVisibility}
+                      onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
+                      description="Who can see each teammate's assignment progress on this org's overview."
+                      className="absolute right-4 top-4 z-10"
+                    />
+                    <WorkloadRollup jwt={jwt} orgId={activeOrgId} />
+                  </div>
+                </SectionVisibilityGate>
+              )}
+              {jwt && !isAllOrgs && activeOrgId != null && (
+                <SectionVisibilityGate
+                  minRole={orgSettings.memberProgressViewMinRole}
+                  viewerRoleLevel={memberProgressViewerRole}
+                  ready={memberProgressReady}
+                >
+                  <div
+                    className={cn(
+                      "relative rounded-2xl",
+                      sectionTintClass(orgSettings.memberProgressViewMinRole),
+                    )}
+                    data-testid="section-team-usage"
+                  >
+                    <SectionVisibilityBadge
+                      minRole={orgSettings.memberProgressViewMinRole}
+                      canEdit={canEditVisibility}
+                      onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
+                      description="Who can see each teammate's usage on this org's overview."
+                      className="absolute right-4 top-4 z-10"
+                    />
+                    <UsageRollup jwt={jwt} orgId={activeOrgId} />
+                  </div>
+                </SectionVisibilityGate>
+              )}
+              {jwt && !isAllOrgs && activeOrgId != null && (
+                <SectionVisibilityGate minRole={ROLE.MAINTAINER} viewerRoleLevel={activeOrg?.role?.level ?? null}>
+                  <div
+                    className={cn("relative rounded-2xl", sectionTintClass(ROLE.MAINTAINER))}
+                    data-testid="section-credits"
+                  >
+                    <SectionVisibilityBadge minRole={ROLE.MAINTAINER} className="absolute right-4 top-4 z-10" />
+                    <CreditsPanel
+                      jwt={jwt}
+                      orgId={activeOrgId}
+                      orgRoleLevel={activeOrg?.role.level ?? 0}
+                    />
+                  </div>
+                </SectionVisibilityGate>
               )}
             </div>
           )}

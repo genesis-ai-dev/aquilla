@@ -1,5 +1,5 @@
 /**
- * FRO-310: Preview panel — shows parsed cells before the upload is committed.
+ * AQU-310: Preview panel — shows parsed cells before the upload is committed.
  *
  * Displayed between "file selected" and "upload starts". The user sees:
  *  - file name(s) + cell count(s)
@@ -7,7 +7,7 @@
  *  - Confirm button → triggers the actual bulk upload
  *  - Cancel button → returns to the upload screen without any network calls
  *
- * FRO-430: After Confirm is clicked the panel switches to an in-progress view
+ * AQU-430: After Confirm is clicked the panel switches to an in-progress view
  * that shows upload phase text and a progress bar (when counts are available).
  * The Confirm button is disabled and shows a spinner label so the import is
  * never mistaken for "doing nothing".
@@ -25,17 +25,17 @@ export interface PreviewPanelProps {
   /** Called when the user cancels — parent returns to the upload screen. */
   onCancel: () => void
   /**
-   * FRO-430: Live upload phase string from the parent (e.g. "Uploading foo.docx…").
+   * AQU-430: Live upload phase string from the parent (e.g. "Uploading foo.docx…").
    * When provided, shown instead of a generic "Uploading…" label during in-flight.
    */
   uploadPhase?: string
   /**
-   * FRO-430: Cell-level upload progress from the parent. Drives the progress bar.
+   * AQU-430: Cell-level upload progress from the parent. Drives the progress bar.
    * When provided alongside a non-zero total, a determinate bar is rendered.
    */
   uploadProgress?: { count: number; total: number } | null
   /**
-   * FRO-430 (fix): a commit error surfaced from the parent. When set, it is shown
+   * AQU-430 (fix): a commit error surfaced from the parent. When set, it is shown
    * above the actions so a failed import is never mistaken for success or a hang —
    * the Confirm/Cancel buttons remain so the user can retry or back out.
    */
@@ -60,7 +60,7 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
     }
   }
 
-  // FRO-430: after Confirm is clicked, show an in-progress view so the upload is
+  // AQU-430: after Confirm is clicked, show an in-progress view so the upload is
   // never mistaken for doing nothing (the preview cell list disappears, replaced
   // by phase text + optional progress bar).
   if (confirming) {

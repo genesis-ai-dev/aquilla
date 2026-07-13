@@ -140,11 +140,11 @@ describe("parseProjectWsMessage", () => {
     ).toEqual({ t: "event.stale", id: "x", reason: "parent mismatch" })
   })
 
-  it("parses member.removed (FRO-346 eject frame)", () => {
+  it("parses member.removed (AQU-346 eject frame)", () => {
     // WHY: the DO sends this to a removed member right before closing their
     // socket. If the parser drops it (returns null), the workspace never
     // re-fetches the project and the removed user keeps an apparently-live
-    // editor until token expiry — the exact bug FRO-346 fixes.
+    // editor until token expiry — the exact bug AQU-346 fixes.
     expect(
       parseProjectWsMessage(
         JSON.stringify({ t: "member.removed", project: "p", userId: "bob" }),
@@ -156,12 +156,36 @@ describe("parseProjectWsMessage", () => {
     ).toBeNull()
   })
 
+  it("parses project settings and bulk-import progress invalidations", () => {
+    expect(
+      parseProjectWsMessage(JSON.stringify({
+        t: "project.settings.updated", project: "p1", version: 4,
+      })),
+    ).toEqual({ t: "project.settings.updated", project: "p1", version: 4 })
+    expect(
+      parseProjectWsMessage(JSON.stringify({
+        t: "file.progress.updated", project: "p1", file: "f1", fileCreated: true,
+      })),
+    ).toEqual({ t: "file.progress.updated", project: "p1", file: "f1", fileCreated: true })
+    expect(
+      parseProjectWsMessage(JSON.stringify({
+        t: "file.progress.updated", project: "p1", file: "f1",
+      })),
+    ).toBeNull()
+  })
+
   it("parses presence", () => {
     const msg = parseProjectWsMessage(
       JSON.stringify({
         t: "presence",
         users: [
-          { userId: "alice", focusedCell: "c1", ts: 100 },
+          {
+            userId: "alice",
+            focusedCell: "c1",
+            currentFileId: "file-1",
+            selection: { side: "target", anchor: 2, head: 5 },
+            ts: 100,
+          },
           { userId: "bob", ts: 200 },
         ],
       }),
@@ -170,6 +194,8 @@ describe("parseProjectWsMessage", () => {
     if (msg?.t === "presence") {
       expect(msg.users).toHaveLength(2)
       expect(msg.users[0].focusedCell).toBe("c1")
+      expect(msg.users[0].currentFileId).toBe("file-1")
+      expect(msg.users[0].selection).toEqual({ side: "target", anchor: 2, head: 5 })
       expect(msg.users[1].focusedCell).toBeUndefined()
     }
   })
@@ -196,7 +222,7 @@ describe("parseProjectWsMessage", () => {
     expect(parseProjectWsMessage(JSON.stringify({ t: "presence", users: "wrong" }))).toBeNull()
   })
 
-  it("parses link.upstream-changed (FRO-479 push accelerator)", () => {
+  it("parses link.upstream-changed (AQU-479 push accelerator)", () => {
     const msg = parseProjectWsMessage(
       JSON.stringify({
         t: "link.upstream-changed",
@@ -423,7 +449,7 @@ describe("isOwnWriteEcho", () => {
   })
 })
 
-describe("createLinkUpstreamChangedHandler (FRO-479 push accelerator)", () => {
+describe("createLinkUpstreamChangedHandler (AQU-479 push accelerator)", () => {
   function frame(
     overrides: Partial<Extract<ProjectWsServerMessage, { t: "link.upstream-changed" }>> = {},
   ): Extract<ProjectWsServerMessage, { t: "link.upstream-changed" }> {

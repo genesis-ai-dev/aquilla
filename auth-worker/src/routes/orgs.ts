@@ -12,6 +12,7 @@ import {
   addGroupMember,
   attachGroupProject,
   bumpOrgActivity,
+  canViewRoster,
   createGroup,
   createOrgForUser,
   deleteGroup,
@@ -22,6 +23,7 @@ import {
   getOrgGroupDetail,
   getOrgPortfolio,
   getOrgPortfolios,
+  getRosterViewMinRole,
   groupExistsInOrg,
   listEffectiveMembersForOrg,
   listOrgGroups,
@@ -191,8 +193,11 @@ orgs.get("/:orgId/members/:userId/access", async (c) => {
 })
 
 /**
- * GET /api/v2/orgs/:orgId/assignments/workload — per-assignee open workload +
- * derived progress across the org's active projects. Maintainer+ (managers).
+ * GET /api/v2/orgs/:orgId/assignments/workload — every open assignment across
+ * the org's active projects, with project + progress attribution (AQU-494:
+ * one row per assignment, not aggregated by assignee, so the manager can see
+ * which project each assignment belongs to and remove any one of them).
+ * Maintainer+ (managers).
  */
 orgs.get("/:orgId/assignments/workload", async (c) => {
   const user = c.get("user")
@@ -202,8 +207,8 @@ orgs.get("/:orgId/assignments/workload", async (c) => {
   if (role == null || role < ROLE.MAINTAINER) {
     return c.json({ error: "org role >= maintainer required" }, 403)
   }
-  const workload = await getOrgAssignmentWorkload(c.env, orgId)
-  return c.json({ workload })
+  const assignments = await getOrgAssignmentWorkload(c.env, orgId)
+  return c.json({ assignments })
 })
 
 /**
@@ -223,7 +228,7 @@ orgs.get("/:orgId/assignments/mine", async (c) => {
 
 /**
  * GET /api/v2/orgs/:orgId/members-matrix — effective members for every project
- * the caller can access in the org, in ONE request (FRO-218). Replaces the
+ * the caller can access in the org, in ONE request (AQU-218). Replaces the
  * client's per-project /:projectId/members fan-out that flooded the connection
  * pool and 500'd the page. Any org member.
  */
@@ -250,7 +255,15 @@ orgs.get("/:orgId/members-matrix", async (c) => {
   })
 })
 
-/** GET /api/v2/orgs/:orgId/members — caller must be an org member. */
+/**
+ * GET /api/v2/orgs/:orgId/members — caller must be an org member.
+ *
+ * AQU-485: additionally gated by the org's configured rosterViewMinRole
+ * (default MAINTAINER=600). A member whose effective role is below the
+ * floor gets a distinct 403 (`error: "roster hidden by org policy"`,
+ * `rosterHidden: true`) rather than the member list — the caller must not
+ * be able to infer the roster or its size from this response.
+ */
 orgs.get("/:orgId/members", async (c) => {
   const user = c.get("user")
   const orgId = parseInt(c.req.param("orgId"), 10)
@@ -258,6 +271,11 @@ orgs.get("/:orgId/members", async (c) => {
 
   const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "not an org member" }, 403)
+
+  const rosterMinRole = await getRosterViewMinRole(c.env, orgId)
+  if (!canViewRoster(role, rosterMinRole)) {
+    return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
+  }
 
   const members = await listOrgMembersWithUsers(c.env, orgId)
   await bumpOrgActivity(c.env, user.id, orgId)

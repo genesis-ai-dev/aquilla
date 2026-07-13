@@ -30,9 +30,16 @@ interface Props {
   onSetOverride: (id: BuiltinCheckId, override: AlgorithmicCheckOverride) => void
   onHarmonize?: (rule: TranslationRule, violationCount: number) => void
   canHarmonize?: boolean
+  /**
+   * AQU-480: overriding a built-in check's severity/enabled state persists to
+   * project_settings (MAINTAINER-gated). Below that floor the write silently
+   * 403s, so disable the controls. Defaults true so non-gated callers are
+   * unaffected.
+   */
+  canManage?: boolean
 }
 
-export function BuiltinChecksList({ builtinRules, infractions, onSetOverride, onHarmonize, canHarmonize = true }: Props) {
+export function BuiltinChecksList({ builtinRules, infractions, onSetOverride, onHarmonize, canHarmonize = true, canManage = true }: Props) {
   const counts = useMemo(() => {
     const c = new Map<string, number>()
     for (const cellInfractions of infractions.values()) {
@@ -90,12 +97,14 @@ export function BuiltinChecksList({ builtinRules, infractions, onSetOverride, on
               <Select
                 items={SEVERITY_OPTIONS}
                 value={rule.severity}
+                disabled={!canManage}
                 onValueChange={(v) => onSetOverride(checkId, {
                   enabled: rule.enabled,
                   severity: (v ?? rule.severity) as "major" | "minor",
                 })}
               >
-                <SelectTrigger size="sm" className="text-xs" aria-label={`${def.name} severity`}>
+                <SelectTrigger size="sm" className="text-xs" aria-label={`${def.name} severity`}
+                  title={!canManage ? "Only maintainers and owners can change built-in checks" : undefined}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -111,6 +120,7 @@ export function BuiltinChecksList({ builtinRules, infractions, onSetOverride, on
               <Switch
                 size="sm"
                 checked={rule.enabled}
+                disabled={!canManage}
                 aria-label={`${def.name} enabled`}
                 onCheckedChange={(checked) => onSetOverride(checkId, {
                   enabled: checked,

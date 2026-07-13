@@ -1,5 +1,5 @@
 /**
- * FRO-288: Batch-validate and focus-lock renewal unit tests.
+ * AQU-288: Batch-validate and focus-lock renewal unit tests.
  *
  * These tests cover the pure-logic parts of the batch-validate wiring:
  *   1. Only cells in the active file with a targetEventId are included.
@@ -8,7 +8,7 @@
  *   4. When the role is null/undefined (unknown), canPerform returns true (fail-open).
  *
  * The focus-lock renewal and takeover tests live in useFocusLock.test.tsx
- * (FRO-288 additions at the bottom of that file).
+ * (AQU-288 additions at the bottom of that file).
  */
 
 import { describe, it, expect } from "vitest"
@@ -28,7 +28,7 @@ function filterValidatableCells(cells: Cell[], activeFileId: string): Cell[] {
   return cells.filter((c) => c.fileId === activeFileId && !!c.targetEventId)
 }
 
-describe("FRO-288: batch-validate cell filter", () => {
+describe("AQU-288: batch-validate cell filter", () => {
   const FILE_A = "file-a"
   const FILE_B = "file-b"
 
@@ -60,7 +60,7 @@ describe("FRO-288: batch-validate cell filter", () => {
   })
 })
 
-describe("FRO-288: batch-validate role guard (canPerform)", () => {
+describe("AQU-288: batch-validate role guard (canPerform)", () => {
   // cell.validate requires REVIEWER (300) per role-policy.ts.
 
   it("allows REVIEWER (300) to validate", () => {

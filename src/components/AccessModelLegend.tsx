@@ -5,6 +5,15 @@
  * Shown below the matrix header on demand (controlled by MembersMatrixView).
  */
 
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+
 interface AccessModelLegendProps {
   /** When true the legend body is visible. */
   open: boolean
@@ -61,41 +70,37 @@ export function AccessModelLegend({ open, onToggle }: AccessModelLegendProps) {
       </button>
 
       {open && (
-        <div className="px-3 pb-3 pt-1 space-y-3">
+        <div className="flex flex-col gap-3 px-3 pb-3 pt-1">
           {/* Grant-path table */}
-          <table className="w-full border-collapse text-[11px]">
-            <thead>
-              <tr className="border-b">
-                <th className="pb-1 pr-3 text-left font-medium text-muted-foreground w-6">
-                  Badge
-                </th>
-                <th className="pb-1 pr-3 text-left font-medium text-muted-foreground w-24">
-                  Grant path
-                </th>
-                <th className="pb-1 text-left font-medium text-muted-foreground">
-                  Meaning
-                </th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-6">Badge</TableHead>
+                <TableHead className="w-24">Grant path</TableHead>
+                <TableHead>Meaning</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {GRANT_PATHS.map((p) => (
-                <tr key={p.badge} className="border-b last:border-0">
-                  <td className="py-1.5 pr-3">
+                <TableRow key={p.badge}>
+                  <TableCell>
                     <span
-                      className={`inline-flex h-4 w-4 items-center justify-center rounded text-[9px] font-bold ${p.badgeClass}`}
+                      className={`inline-flex size-4 items-center justify-center rounded text-[9px] font-bold ${p.badgeClass}`}
                     >
                       {p.badge}
                     </span>
-                  </td>
-                  <td className="py-1.5 pr-3 font-medium whitespace-nowrap">{p.label}</td>
-                  <td className="py-1.5 text-muted-foreground">{p.description}</td>
-                </tr>
+                  </TableCell>
+                  <TableCell className="font-medium">{p.label}</TableCell>
+                  <TableCell className="whitespace-normal text-muted-foreground">
+                    {p.description}
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
 
           {/* Max-wins rule */}
-          <div className="rounded-md border bg-background px-3 py-2 space-y-0.5">
+          <div className="flex flex-col gap-0.5 rounded-md border bg-background px-3 py-2">
             <p className="font-medium">Effective role = max-wins</p>
             <p className="text-muted-foreground">
               A person's effective role on a project is the highest role they hold

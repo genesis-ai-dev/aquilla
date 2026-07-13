@@ -1,6 +1,6 @@
 // Phase v1.x: ParallelPassagesPanel — project-wide FTS5-backed search dialog.
 //
-// Replace mode (FRO-177): inline diff preview before applying.
+// Replace mode (AQU-177): inline diff preview before applying.
 // Scope toggle works: "file" filters client-side on the activeFileId after
 // the project-wide fetch; "project" returns all hits.
 
@@ -49,7 +49,7 @@ export interface ReplaceAllPayload {
   findQuery: string
   replaceQuery: string
   /**
-   * Always false — the "Retain my validations" checkbox was removed (FRO-286).
+   * Always false — the "Retain my validations" checkbox was removed (AQU-286).
    * Replacing text advances the cell's chain head; per Q25 (event-anchored
    * validation) prior validations drop automatically and must be re-reviewed.
    * Field kept for backward compat with the ProjectWorkspace call site.
@@ -82,7 +82,7 @@ interface ParallelPassagesPanelProps {
   onSelect?: (result: WorkspaceSearchResult, query: string) => void | Promise<void>
 
   /**
-   * FRO-177: Replace mode commit handler. Called when the user clicks
+   * AQU-177: Replace mode commit handler. Called when the user clicks
    * "Replace All" or "Replace this cell". The panel has computed the diffs;
    * the caller owns the actual event-emit path.
    *

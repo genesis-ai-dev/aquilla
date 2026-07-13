@@ -2,6 +2,7 @@ import { useState } from "react"
 import {
   AlertTriangle,
   Clock,
+  Lock,
   Mail,
   UsersRound,
   X,
@@ -23,6 +24,7 @@ import { OrgInviteByEmail } from "@/components/org/OrgInviteByEmail"
 import { MemberAccessRow } from "@/components/org/MemberAccessPanel"
 import { ExternalCollaboratorsSection } from "@/components/org/ExternalCollaboratorsSection"
 import { ROLE, ORG_ROLE_PICKER, roleName } from "@/lib/frontier/roles"
+import { RoleLabel } from "@/components/RoleLabel"
 import { formatRelativeTime } from "@/lib/time/relative"
 import type { OrgMemberProject, PendingOrgInvite } from "@/lib/frontier/orgs"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -130,9 +132,9 @@ interface MembersPageContentProps {
 function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
   const callerUserId = null // FrontierSession has no userId; server enforces self-block.
   const { activeOrg } = useActiveOrg()
-  // FRO-326: the External-collaborators governance view is maintainer+ only.
+  // AQU-326: the External-collaborators governance view is maintainer+ only.
   const canGovern = (activeOrg?.role.level ?? 0) >= ROLE.MAINTAINER
-  const { members, isLoading: membersLoading, error: membersError, add, remove, listMemberProjects, refresh } =
+  const { members, isLoading: membersLoading, error: membersError, rosterHidden, add, remove, listMemberProjects, refresh } =
     useOrgMembers(orgId)
   const { projects: accessibleProjects, refresh: refreshProjects } = useAccessibleProjects()
   const [removeTarget, setRemoveTarget] = useState<{ userId: number; username: string } | null>(null)
@@ -192,12 +194,24 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
           <p className="text-xs text-destructive">{membersError}</p>
         )}
 
-        {membersLoading && members.length === 0 ? (
+        {membersLoading && members.length === 0 && !rosterHidden ? (
           <Section title="Roster">
             <div className="flex items-center justify-center py-8 text-muted-foreground">
               <Spinner className="mr-2" />
               <span className="text-sm">Loading members…</span>
             </div>
+          </Section>
+        ) : rosterHidden ? (
+          // AQU-485: the org's rosterViewMinRole policy hides the roster (and
+          // count) from this caller. Render a distinct "hidden" state — never
+          // an empty roster, which would falsely imply zero members.
+          <Section title="Roster">
+            <EmptyState
+              variant="inline"
+              icon={Lock}
+              title="Roster hidden"
+              description="This organization has restricted who can view the member list. Ask an owner or maintainer if you need access."
+            />
           </Section>
         ) : (
           <>
@@ -270,7 +284,7 @@ interface RosterProps {
   add: (username: string, role: number) => Promise<unknown>
   remove: (userId: number) => Promise<void>
   callerUserId: number | null
-  /** FRO-427: the current user's org-level role, forwarded to MemberAccessRow
+  /** AQU-427: the current user's org-level role, forwarded to MemberAccessRow
    *  so the Revoke button can be disabled-with-explanation for low roles. */
   callerOrgRoleLevel: number | null
   onRequestRemove: (userId: number, username: string) => void
@@ -293,7 +307,7 @@ function RosterWithProjectChips({
         <MembersPanel
           members={panelMembers}
           roleOptions={ORG_ROLE_OPTIONS}
-          defaultRole={ROLE.MAINTAINER}
+          newMemberDefaultRole={ROLE.MAINTAINER}
           callerUserId={callerUserId}
           callerMaxRole={ROLE.MAINTAINER}
           scopedUserSearch={false}
@@ -397,9 +411,7 @@ function PendingInviteRow({
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="font-medium truncate">{invite.projectName}</span>
           <span className="text-muted-foreground">·</span>
-          <span className="capitalize text-muted-foreground">
-            {invite.role.name.replace(/_/g, " ")}
-          </span>
+          <RoleLabel name={invite.role.name} className="text-muted-foreground" />
           {invite.email ? (
             <AppTooltip content="Targeted invite: sign-up form will be prefilled with this email">
               <span className="rounded bg-blue-500/15 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 text-[9px] font-mono">

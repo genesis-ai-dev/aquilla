@@ -1,4 +1,4 @@
-// Tests for the Translation Notes TSV parser (FRO-179)
+// Tests for the Translation Notes TSV parser (AQU-179)
 
 import { describe, it, expect } from "vitest"
 import { parseTnTsv } from "./translation-notes"

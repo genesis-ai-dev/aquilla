@@ -1,7 +1,7 @@
 # UI Glossary — Codex Web App
 
 Canonical names for concepts that appear in the UI, plus the approved verb table
-for user-facing approval/status actions. Introduced by FRO-290.
+for user-facing approval/status actions. Introduced by AQU-290.
 
 **Rule:** if a term or verb is on this list, use it everywhere in user-facing
 strings (labels, tooltips, aria-labels, descriptions, dialog text). Never use
@@ -65,4 +65,4 @@ The lint guard test `src/components/ui-jargon-guard.test.ts` enforces this.
 
 | Date | Change | Issue |
 |---|---|---|
-| 2026-06-10 | Initial glossary; applied copy pass across src/components + src/pages | FRO-290 |
+| 2026-06-10 | Initial glossary; applied copy pass across src/components + src/pages | AQU-290 |

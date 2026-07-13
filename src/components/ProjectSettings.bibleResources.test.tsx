@@ -1,4 +1,4 @@
-// FRO-460 — Bible resources derive-on-read UI tests.
+// AQU-460 — Bible resources derive-on-read UI tests.
 //
 // Why these tests exist: the prior design persisted `bibleResourcesEnabled`
 // via a load-time effect, which silently re-enabled an explicit OFF (a trust
@@ -34,7 +34,7 @@ function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
 }
 
 let currentProject: ProjectRecord = makeProject()
-// FRO-460 display-race: lets a test simulate the two-phase hydration where
+// AQU-460 display-race: lets a test simulate the two-phase hydration where
 // `project.bibleResourcesEnabled` is still `undefined` because the settings
 // GET hasn't resolved yet. Defaults to true (hydrated) so the other tests in
 // this file — which don't care about the race — keep their prior behavior.
@@ -81,7 +81,7 @@ vi.mock("@/hooks/useCompletionSettings", () => ({
 vi.mock("@/lib/completion/completion-service", () => ({
   fetchModels: vi.fn().mockResolvedValue([]),
   resolveProvider: vi.fn(() => "frontier"),
-  // FRO-478: ProjectSettings now transitively imports events-emit.ts (via
+  // AQU-478: ProjectSettings now transitively imports events-emit.ts (via
   // UpstreamChangesPanel) → src/lib/ab/feedback.ts, which reads this export
   // at module-eval time.
   FRONTIER_CHAT_URL: "https://api.aquilla.app/chat/api/v1/chat/completions",
@@ -111,9 +111,12 @@ vi.mock("@/lib/metrics/use-post-edit-metrics", () => ({
   }),
 }))
 
+// AQU-501: Bible resources lives in the "General" sub-menu pane — deep-link
+// straight to it via the `?section=` search param so these tests don't have
+// to click through the settings index first.
 function renderSettings() {
   return render(
-    <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings`]}>
+    <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings?section=general`]}>
       <Routes>
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
       </Routes>
@@ -126,7 +129,7 @@ beforeEach(() => {
   currentHasFetched = true
 })
 
-describe("ProjectSettings — Bible resources (FRO-460 derive-on-read)", () => {
+describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
   it("scripture project, setting UNSET -> switch shows ON (derived default), not dirty", () => {
     currentProject = makeProject({
       files: [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "", cellCount: 1 }],
@@ -171,7 +174,7 @@ describe("ProjectSettings — Bible resources (FRO-460 derive-on-read)", () => {
     expect(screen.getByRole("button", { name: /save changes/i })).toBeTruthy()
   })
 
-  // FRO-460 display-race (live-QA finding): `project.bibleResourcesEnabled`
+  // AQU-460 display-race (live-QA finding): `project.bibleResourcesEnabled`
   // hydrates in two async phases in the real hook — `useProject`'s minimal
   // record resolves first WITHOUT the field (undefined), then a later
   // settings GET fills it in. If the component's baseline seed locks onto
@@ -192,7 +195,7 @@ describe("ProjectSettings — Bible resources (FRO-460 derive-on-read)", () => {
 
     const rerenderSettings = () =>
       rerender(
-        <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings`]}>
+        <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings?section=general`]}>
           <Routes>
             <Route path="/project/:id/settings" element={<ProjectSettings />} />
           </Routes>

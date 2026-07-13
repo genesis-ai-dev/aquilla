@@ -93,7 +93,7 @@ describe("VoiceLibraryPanel (selector)", () => {
     expect(screen.getByText("MMS")).toBeTruthy()
   })
 
-  // FRO-360: cast voices minted on subtitle import (buildCastAdditions) carry
+  // AQU-360: cast voices minted on subtitle import (buildCastAdditions) carry
   // no `provider` of their own — they must display the PROJECT's configured
   // engine, not a hardcoded "Gemini".
   it("shows the project's configured provider for a voice with no provider of its own (imported cast)", () => {
@@ -129,12 +129,12 @@ describe("VoiceLibraryPanel (selector)", () => {
   })
 })
 
-// FRO-365: viewer/below-floor character-CRUD gating. Character writes flow
+// AQU-365: viewer/below-floor character-CRUD gating. Character writes flow
 // through PUT/PATCH /projects/:id/settings, which the server gates at
 // maintainer (600) — the panel must mirror that floor client-side so a
 // below-floor user (a) doesn't get a "New voice" / row-menu affordance that
 // silently no-ops or false-echoes into localStorage, and (b) sees why.
-describe("VoiceLibraryPanel — FRO-365 role gating", () => {
+describe("VoiceLibraryPanel — AQU-365 role gating", () => {
   function setupWithRole(roleLevel: number | null) {
     const onSettingsChange = vi.fn()
     const narrator = makeVoice()

@@ -52,7 +52,7 @@ export function RenameSuggestionsDialog({ open, onOpenChange, suggestions, onApp
                     <span className="text-muted-foreground">→</span>
                     <span className="font-medium">{s.suggestedName}</span>
                   </div>
-                  {s.suggestedCorpus && (
+                  {s.suggestedCorpus && s.suggestedCorpus !== s.currentCorpus && (
                     <div className="text-xs text-muted-foreground">
                       Corpus: {s.currentCorpus ?? "—"} → {s.suggestedCorpus}
                     </div>

@@ -1,9 +1,9 @@
-import type { CellData } from "@/hooks/useCells"
+import type { CellSummary } from "@/hooks/useActiveCellStore"
 import { HealthRing } from "./HealthRing"
 import { DecayBreakdown } from "./DecayBreakdown"
 
 interface StatusBarProps {
-  cells: CellData[]
+  cells: readonly CellSummary[]
   projectHealth: number
   /** Per-cell decay health 0-100, keyed by cell id. Drives the breakdown. */
   healthMap: Map<string, number>

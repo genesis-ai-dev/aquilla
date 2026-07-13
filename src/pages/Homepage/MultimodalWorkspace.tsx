@@ -12,15 +12,14 @@ import { HealthRing } from "@/components/HealthRing"
 type Mode = "text" | "audio" | "video" | "image" | "story"
 
 const VERSE = {
-  ref: "John 3:16",
+  ref: "Sample 1.1",
   sourceLang: "English · source",
   source:
-    "For God so loved the world, that he gave his only Son, that whoever believes in him should not perish but have eternal life.",
+    "Every voice deserves to be heard in its own language.",
   targetLang: "Spanish · draft",
   targetTag: "es",
-  // Reina-Valera (public domain) — an accurate, recognizable rendering.
   target:
-    "Porque de tal manera amó Dios al mundo, que ha dado a su Hijo unigénito, para que todo aquel que en él cree no se pierda, mas tenga vida eterna.",
+    "Cada voz merece ser escuchada en su propio idioma.",
 }
 
 const MODES: { id: Mode; label: string; icon: React.ReactNode }[] = [
@@ -32,11 +31,11 @@ const MODES: { id: Mode; label: string; icon: React.ReactNode }[] = [
 ]
 
 const MODE_NOTE: Record<Mode, React.ReactNode> = {
-  text: <>One verse, written. <span className="aq-mono">live rules + back-translation as you type.</span></>,
-  audio: <>The same verse, spoken. <span className="aq-mono">record oral renderings, verse by verse.</span></>,
-  video: <>The same verse, captioned. <span className="aq-mono">subtitles and dubs synced to video playback.</span></>,
-  image: <>The same verse, on an image. <span className="aq-mono">coming soon — caption overlays for scripture art and slides.</span></>,
-  story: <>The same verse, retold. <span className="aq-mono">coming soon — oral-first story panels for listening communities.</span></>,
+  text: <>One line, written. <span className="aq-mono">live rules + back-translation as you type.</span></>,
+  audio: <>The same line, spoken. <span className="aq-mono">record oral renderings, line by line.</span></>,
+  video: <>The same line, captioned. <span className="aq-mono">subtitles and dubs synced to video playback.</span></>,
+  image: <>The same line, on an image. <span className="aq-mono">coming soon — caption overlays for graphics and slides.</span></>,
+  story: <>The same line, retold. <span className="aq-mono">coming soon — oral-first story panels for listening communities.</span></>,
 }
 
 export function MultimodalWorkspace({ theme = "dark" }: { theme?: "light" | "dark" }) {
@@ -155,15 +154,15 @@ function TextPanel({ theme }: { theme: "light" | "dark" }) {
 /* ── Audio panel: verse-by-verse oral capture ───────────────────────────── */
 function AudioPanel({ theme }: { theme: "light" | "dark" }) {
   const rows = [
-    { ref: "3:16", dur: "0:12", health: 91, seed: "amor del mundo entero", rec: false },
-    { ref: "3:17", dur: "0:09", health: 78, seed: "no para condenar al mundo", rec: false },
-    { ref: "3:18", dur: "—", health: 0, seed: "el que en el cree no es condenado", rec: true },
+    { ref: "1.1", dur: "0:12", health: 91, seed: "cada voz merece ser escuchada", rec: false },
+    { ref: "1.2", dur: "0:09", health: 78, seed: "en su propio idioma", rec: false },
+    { ref: "1.3", dur: "—", health: 0, seed: "hoy mismo en cualquier idioma", rec: true },
   ]
   return (
     <div className="aq-panel">
       <div className="aq-cell-head" style={{ marginBottom: 14 }}>
         <span className="aq-cell-lang"><IconMic /> Oral rendering · Spanish</span>
-        <span>verse by verse</span>
+        <span>line by line</span>
       </div>
       {rows.map((r) => (
         <div className="aq-verse-row" key={r.ref}>
@@ -176,7 +175,7 @@ function AudioPanel({ theme }: { theme: "light" | "dark" }) {
               <span style={{ fontSize: 12.5, color: "var(--aq-blue-soft)" }}>Recording…</span>
             </span>
           ) : (
-            <Waveform progress={r.ref === "3:16" ? 0.62 : 0.2} active={false} seed={r.seed} height={30} variant="blue" theme={theme} />
+            <Waveform progress={r.ref === "1.1" ? 0.62 : 0.2} active={false} seed={r.seed} height={30} variant="blue" theme={theme} />
           )}
           {r.rec ? (
             <span className="aq-mono aq-dur" style={{ color: "var(--aq-blue-soft)" }}>0:04</span>
@@ -193,7 +192,7 @@ function AudioPanel({ theme }: { theme: "light" | "dark" }) {
         </div>
       ))}
       <p style={{ marginTop: 16, fontSize: 13.5, color: "var(--aq-faint)", lineHeight: 1.5 }}>
-        Text and audio live in the same cell. Edit the words, and the recording is right there beside them — for communities where Scripture is heard before it is read.
+        Text and audio live in the same cell. Edit the words, and the recording is right there beside them — for communities where audio comes first, before text.
       </p>
     </div>
   )
@@ -202,9 +201,9 @@ function AudioPanel({ theme }: { theme: "light" | "dark" }) {
 /* ── Video panel: translated captions synced to playback ────────────────── */
 function VideoPanel() {
   const cues = [
-    "Porque de tal manera amó Dios al mundo,",
-    "que ha dado a su Hijo unigénito,",
-    "para que todo aquel que en él cree… tenga vida eterna.",
+    "Cada voz merece ser escuchada",
+    "en su propio idioma —",
+    "hoy mismo, en cualquier medio.",
   ]
   const [cue, setCue] = useState(0)
   const [prog, setProg] = useState(0)
@@ -236,9 +235,8 @@ function VideoPanel() {
         </div>
         <div className="aq-video-bar"><i style={{ width: `${prog * 100}%` }} /></div>
       </div>
-      {/* SWARM-TODO(homepage-copy): "JESUS Film" brand name — confirm capitalization/trademark usage is correct */}
       <p style={{ marginTop: 16, fontSize: 13.5, color: "var(--aq-faint)", lineHeight: 1.5 }}>
-        Sermons, the <span style={{ color: "var(--aq-dim)" }}>JESUS Film</span>, scripted lessons — caption and dub them against the same source text and the same project memory, with timings that stay in sync.
+        Training videos, lectures, scripted content — caption and dub them against the same source text and the same project memory, with timings that stay in sync.
       </p>
     </div>
   )
@@ -247,9 +245,9 @@ function VideoPanel() {
 /* ── Image panel: captions + embedded text in any language ──────────────── */
 function ImagePanel() {
   const langs = [
-    { tag: "ES", text: "Porque de tal manera amó Dios al mundo…" },
-    { tag: "FR", text: "Car Dieu a tant aimé le monde…" },
-    { tag: "EN", text: "For God so loved the world…" },
+    { tag: "ES", text: "Cada voz merece ser escuchada…" },
+    { tag: "FR", text: "Chaque voix mérite d'être entendue…" },
+    { tag: "EN", text: "Every voice deserves to be heard…" },
   ]
   const [i, setI] = useState(0)
   return (
@@ -262,7 +260,7 @@ function ImagePanel() {
         <div>
           <h4 className="aq-display" style={{ fontSize: 22 }}>Captions &amp; embedded text <span style={{ fontSize: 13, fontWeight: 400, color: "var(--aq-faint)" }}>(coming soon)</span></h4>
           <p style={{ marginTop: 12, fontSize: 14.5, color: "var(--aq-dim)", lineHeight: 1.55 }}>
-            Translate caption overlays for memory verses, scripture art, and lesson slides. This mode is exploratory — shape it early by sharing your use case.
+            Translate caption overlays for quote cards, marketing graphics, and lesson slides. This mode is exploratory — shape it early by sharing your use case.
           </p>
           <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
             {langs.map((l, idx) => (
@@ -286,9 +284,9 @@ function ImagePanel() {
 /* ── Story panel: oral-first story strip ────────────────────────────────── */
 function StoryPanel() {
   const panels = [
-    { n: 1, art: <StoryGlobe />, cap: "Dios creó el mundo y lo amó." },
-    { n: 2, art: <StoryGift />, cap: "Entregó a su único Hijo." },
-    { n: 3, art: <StoryDawn />, cap: "Todo el que cree vivirá para siempre." },
+    { n: 1, art: <StoryGlobe />, cap: "Todos tienen algo que decir." },
+    { n: 2, art: <StoryGift />, cap: "Pero no siempre en el idioma correcto." },
+    { n: 3, art: <StoryDawn />, cap: "Ahora, cada voz puede llegar más lejos." },
   ]
   return (
     <div className="aq-panel">

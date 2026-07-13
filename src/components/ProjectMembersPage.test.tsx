@@ -1,4 +1,4 @@
-// FRO-180: Unit tests for ProjectMembersPage surface.
+// AQU-180: Unit tests for ProjectMembersPage surface.
 //
 // Why these tests exist:
 //   - Route is reachable at /project/:id/members without crashing
@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectMembersPage } from "./ProjectMembersPage"
+import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 
 // ─── Mocks ────────────────────────────────────────────────────────────────
 
@@ -35,22 +36,31 @@ const mockMembers = [
       { source: "org" as const, level: 100, name: "viewer" },
     ],
   },
+  {
+    userId: 4,
+    username: "erin",
+    role: { level: 400, name: "contributor", source: "group" as const },
+    secondarySources: [],
+  },
 ]
 
 const mockRefresh = vi.fn().mockResolvedValue(undefined)
 const mockAdd = vi.fn().mockResolvedValue(mockMembers[0])
 const mockRemove = vi.fn().mockResolvedValue(undefined)
 
+const mockUseProjectMembers = vi.fn(() => ({
+  members: mockMembers,
+  isLoading: false,
+  error: null,
+  rosterHidden: false,
+  refresh: mockRefresh,
+  add: mockAdd,
+  remove: mockRemove,
+  changeRole: mockAdd,
+}))
+
 vi.mock("@/hooks/useProjectMembers", () => ({
-  useProjectMembers: () => ({
-    members: mockMembers,
-    isLoading: false,
-    error: null,
-    refresh: mockRefresh,
-    add: mockAdd,
-    remove: mockRemove,
-    changeRole: mockAdd,
-  }),
+  useProjectMembers: () => mockUseProjectMembers(),
 }))
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -122,6 +132,25 @@ describe("ProjectMembersPage", () => {
     // bob is via org, carol has a secondary org source
     const orgBadges = screen.getAllByText("via org")
     expect(orgBadges.length).toBeGreaterThanOrEqual(1)
+  })
+
+  // AQU-488: a first-time PM must be able to tell this list is scoped to
+  // THIS project (not the whole org) without asking anyone.
+  it("labels the members list with an explicit project scope", () => {
+    renderPage()
+    expect(screen.getByText("Members of this project")).toBeInTheDocument()
+  })
+
+  // AQU-488: every row must indicate how that person has access — direct
+  // project invite, org membership, or team — not just org-sourced ones.
+  it("labels each row with its access path (direct invite / org / team)", () => {
+    renderPage()
+    // alice + carol are direct (override) grants
+    expect(screen.getAllByText("direct invite").length).toBeGreaterThanOrEqual(2)
+    // bob is org-sourced
+    expect(screen.getAllByText("via org").length).toBeGreaterThanOrEqual(1)
+    // erin has access via a team (group) grant
+    expect(screen.getByText("via team")).toBeInTheDocument()
   })
 
   it("shows secondary sources for members with multiple paths", () => {
@@ -253,5 +282,125 @@ describe("ProjectMembersPage", () => {
     await waitFor(() => {
       expect(mockAdd).toHaveBeenCalledWith("dave", 400)
     })
+  })
+})
+
+describe("partitionMembers (AQU-454)", () => {
+  const mk = (
+    userId: number,
+    username: string,
+    source: ProjectMember["role"]["source"],
+    secondary: ProjectMember["secondarySources"] = [],
+  ): ProjectMember => ({
+    userId,
+    username,
+    role: { level: 100, name: "viewer", source },
+    secondarySources: secondary,
+  })
+
+  it("keeps direct, group, and creator members in the project bucket", () => {
+    const { projectMembers, orgAccessMembers } = partitionMembers([
+      mk(1, "direct", "override"),
+      mk(2, "group", "group"),
+      mk(3, "creator", "creator"),
+    ])
+    expect(projectMembers.map((m) => m.username)).toEqual(["direct", "group", "creator"])
+    expect(orgAccessMembers).toHaveLength(0)
+  })
+
+  it("routes org-baseline-only members to the org bucket", () => {
+    const { projectMembers, orgAccessMembers } = partitionMembers([mk(1, "orgonly", "org")])
+    expect(projectMembers).toHaveLength(0)
+    expect(orgAccessMembers.map((m) => m.username)).toEqual(["orgonly"])
+  })
+
+  it("treats a member with a secondary project path as a project member", () => {
+    // Winning path is org (e.g. org owner) but they also hold a direct grant —
+    // they belong on the team, not the org-access list.
+    const { projectMembers, orgAccessMembers } = partitionMembers([
+      mk(1, "ownerplus", "org", [{ source: "override", level: 400, name: "contributor" }]),
+    ])
+    expect(projectMembers.map((m) => m.username)).toEqual(["ownerplus"])
+    expect(orgAccessMembers).toHaveLength(0)
+  })
+
+  it("preserves order within each bucket", () => {
+    const { projectMembers, orgAccessMembers } = partitionMembers([
+      mk(1, "a", "override"),
+      mk(2, "b", "org"),
+      mk(3, "c", "override"),
+      mk(4, "d", "org"),
+    ])
+    expect(projectMembers.map((m) => m.username)).toEqual(["a", "c"])
+    expect(orgAccessMembers.map((m) => m.username)).toEqual(["b", "d"])
+  })
+})
+
+describe("ProjectMembersPage — AQU-454 roster sectioning", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("sections org-baseline members under a distinct heading", () => {
+    renderPage()
+    // bob (source: org) is the only org-baseline member in the mock roster.
+    expect(screen.getByText("Project members")).toBeInTheDocument()
+    const orgSection = screen.getByTestId("org-access-members")
+    expect(orgSection).toHaveTextContent("Organization members with access")
+    expect(orgSection).toHaveTextContent("bob")
+    // alice/carol (direct grants) must NOT be inside the org-access section.
+    expect(orgSection).not.toHaveTextContent("alice")
+    expect(orgSection).not.toHaveTextContent("carol")
+  })
+
+  it("omits the org-access section when every member has a project grant", () => {
+    mockUseProjectMembers.mockReturnValueOnce({
+      members: [mockMembers[0], mockMembers[2]], // alice + carol, both direct
+      isLoading: false,
+      error: null,
+      rosterHidden: false,
+      refresh: mockRefresh,
+      add: mockAdd,
+      remove: mockRemove,
+      changeRole: mockAdd,
+    })
+    renderPage()
+    expect(screen.queryByTestId("org-access-members")).not.toBeInTheDocument()
+    expect(screen.getByText("Current members")).toBeInTheDocument()
+  })
+})
+
+describe("ProjectMembersPage — AQU-485 roster visibility", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  // The whole point of AQU-485's project-level gate is that a below-floor
+  // caller must not see the member list OR the add-member form (which would
+  // imply an editable roster exists) — rendering "no members" instead would
+  // be a lie (the roster is hidden, not empty).
+  it("renders a 'Roster hidden' state instead of the member list when rosterHidden is true", async () => {
+    mockUseProjectMembers.mockReturnValueOnce({
+      members: [],
+      isLoading: false,
+      error: null,
+      rosterHidden: true,
+      refresh: mockRefresh,
+      add: mockAdd,
+      remove: mockRemove,
+      changeRole: mockAdd,
+    })
+
+    renderPage()
+
+    expect(screen.getByText(/roster hidden/i)).toBeInTheDocument()
+    expect(screen.queryByText("alice")).not.toBeInTheDocument()
+    expect(screen.queryByPlaceholderText("Aquilla username")).not.toBeInTheDocument()
+  })
+
+  it("renders the normal member list when rosterHidden is false (control)", () => {
+    renderPage()
+    expect(screen.queryByText(/roster hidden/i)).not.toBeInTheDocument()
+    expect(screen.getByText("alice")).toBeInTheDocument()
   })
 })

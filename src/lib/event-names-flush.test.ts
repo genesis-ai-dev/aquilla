@@ -1,5 +1,5 @@
 /**
- * FRO-267: Unit tests for outbox-flush quarantine instrumentation.
+ * AQU-267: Unit tests for outbox-flush quarantine instrumentation.
  *
  * Kept separate from event-names.test.ts because that file mocks
  * "./sync/outbox" (needed for events-emit tests) which conflicts with the

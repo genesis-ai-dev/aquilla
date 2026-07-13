@@ -6,7 +6,7 @@
 // EditorRow can wire data (Yjs handles, callbacks) without this component
 // growing 30 props.
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react"
 import { cn } from "@/lib/utils"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 
@@ -17,8 +17,8 @@ export interface CellExpansionTab {
   label: string
   /** Tiny dot in the corner indicating the tab needs attention. */
   attentionDot?: "amber" | "emerald" | "red"
-  /** Tab body. */
-  content: React.ReactNode
+  /** Lazily renders the tab body. Only called for the active tab. */
+  renderContent: () => React.ReactNode
   disabled?: boolean
 }
 
@@ -41,6 +41,36 @@ export function CellExpansion({
   open, tab, onTabChange, tabs, onClose, className,
 }: Props) {
   const wrapperRef = useRef<HTMLDivElement | null>(null)
+  const activeTab = tabs.find((t) => t.value === tab && !t.disabled)
+    ?? tabs.find((t) => !t.disabled)
+    ?? null
+  const renderedTab = activeTab?.value ?? tab
+  const enabledTabs = tabs.filter((t) => !t.disabled)
+
+  function handleTabListKeyDown(e: ReactKeyboardEvent<HTMLElement>) {
+    if (enabledTabs.length === 0) return
+
+    const focusedValue = (e.target as HTMLElement | null)
+      ?.closest<HTMLElement>("[data-cell-detail-tab-trigger]")
+      ?.dataset.cellDetailTabTrigger
+    const currentValue = focusedValue ?? renderedTab
+    const currentIndex = Math.max(0, enabledTabs.findIndex((t) => t.value === currentValue))
+    let nextIndex: number | null = null
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") nextIndex = (currentIndex + 1) % enabledTabs.length
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") nextIndex = (currentIndex - 1 + enabledTabs.length) % enabledTabs.length
+    else if (e.key === "Home") nextIndex = 0
+    else if (e.key === "End") nextIndex = enabledTabs.length - 1
+    if (nextIndex == null) return
+
+    e.preventDefault()
+    const nextValue = enabledTabs[nextIndex].value
+    onTabChange(nextValue)
+    window.requestAnimationFrame(() => {
+      wrapperRef.current
+        ?.querySelector<HTMLElement>(`[data-cell-detail-tab-trigger="${nextValue}"]`)
+        ?.focus()
+    })
+  }
 
   // Esc to close. Listen on the wrapper so we don't compete with global Esc
   // handlers when the panel isn't focused.
@@ -48,7 +78,7 @@ export function CellExpansion({
     if (!open) return
     const el = wrapperRef.current
     if (!el) return
-    const handler = (e: KeyboardEvent) => {
+    const handler = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation()
         onClose?.()
@@ -57,6 +87,11 @@ export function CellExpansion({
     el.addEventListener("keydown", handler)
     return () => el.removeEventListener("keydown", handler)
   }, [open, onClose])
+
+  useEffect(() => {
+    if (!open || !activeTab || activeTab.value === tab) return
+    onTabChange(activeTab.value)
+  }, [activeTab, onTabChange, open, tab])
 
   if (!open) return null
 
@@ -77,15 +112,16 @@ export function CellExpansion({
       // row-level handlers (e.g. selection toggling).
       onClick={(e) => e.stopPropagation()}
     >
-      <Tabs value={tab} onValueChange={onTabChange} className="flex flex-col">
+      <Tabs value={renderedTab} onValueChange={onTabChange} className="flex flex-col">
         <div className="flex items-center justify-between px-2 py-1.5">
-          <TabsList>
+          <TabsList onKeyDownCapture={handleTabListKeyDown}>
             {tabs.map((t) => (
               <TabsTrigger
                 key={t.value}
                 value={t.value}
                 disabled={t.disabled}
                 attentionDot={t.attentionDot}
+                data-cell-detail-tab-trigger={t.value}
               >
                 <span className="inline-flex h-3 w-3 items-center justify-center">{t.icon}</span>
                 <span className="hidden sm:inline">{t.label}</span>
@@ -94,11 +130,13 @@ export function CellExpansion({
           </TabsList>
         </div>
 
-        {tabs.map((t) => (
-          <TabsContent key={t.value} value={t.value} className="px-3 py-3">
-            {t.content}
+        {activeTab && (
+          <TabsContent key={activeTab.value} value={activeTab.value} className="px-3 py-3">
+            <div data-cell-detail-tab={activeTab.value}>
+              {activeTab.renderContent()}
+            </div>
           </TabsContent>
-        ))}
+        )}
       </Tabs>
     </div>
   )

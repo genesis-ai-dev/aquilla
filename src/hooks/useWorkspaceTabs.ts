@@ -19,6 +19,7 @@ interface PersistedState {
 interface UseWorkspaceTabsArgs {
   projectId: string
   fileIds: readonly string[]
+  filesReady?: boolean
   activeFileId: string | null
   setActiveFileId: (fileId: string | null) => void
 }
@@ -80,36 +81,56 @@ function newTabId(): string {
   return `tab-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
+function sameTab(a: WorkspaceTab, b: WorkspaceTab): boolean {
+  return a.id === b.id && a.fileId === b.fileId && a.sectionLabel === b.sectionLabel
+}
+
+function reconcileTabs(
+  tabs: WorkspaceTab[],
+  activeFileId: string | null,
+  fileIds: readonly string[],
+  filesReady: boolean,
+): WorkspaceTab[] {
+  const existing = filesReady ? new Set(fileIds) : null
+  let next = existing ? tabs.filter((tab) => existing.has(tab.fileId)) : tabs
+
+  if (
+    activeFileId &&
+    (!existing || existing.has(activeFileId)) &&
+    !next.some((tab) => tab.fileId === activeFileId)
+  ) {
+    next = [...next, { id: newTabId(), fileId: activeFileId }]
+  }
+
+  return next.length === tabs.length && next.every((tab, index) => sameTab(tab, tabs[index]!))
+    ? tabs
+    : next
+}
+
 export function useWorkspaceTabs({
   projectId,
   fileIds,
+  filesReady = true,
   activeFileId,
   setActiveFileId,
 }: UseWorkspaceTabsArgs): UseWorkspaceTabsReturn {
-  const [tabs, setTabs] = useState<WorkspaceTab[]>(() => readState(projectId).tabs)
+  const [tabs, setTabs] = useState<WorkspaceTab[]>(() =>
+    reconcileTabs(readState(projectId).tabs, activeFileId, fileIds, filesReady),
+  )
 
   // Reload from storage when the project changes.
   useEffect(() => {
-    setTabs(readState(projectId).tabs)
+    setTabs(reconcileTabs(readState(projectId).tabs, activeFileId, fileIds, filesReady))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId])
 
-  // Prune tabs whose file no longer exists in the project.
+  // Prune tabs whose file no longer exists in the project, but only once the
+  // project file list is actually loaded. During refresh the URL can already
+  // point at a file while `fileIds` is still empty; treating that loading state
+  // as authoritative briefly deletes the open tab and leaves an unclosable book.
   useEffect(() => {
-    const existing = new Set(fileIds)
-    setTabs((prev) => {
-      const next = prev.filter((t) => existing.has(t.fileId))
-      return next.length === prev.length ? prev : next
-    })
-  }, [fileIds])
-
-  // When the URL points at a file, ensure it has a tab.
-  useEffect(() => {
-    if (!activeFileId) return
-    setTabs((prev) => {
-      if (prev.some((t) => t.fileId === activeFileId)) return prev
-      return [...prev, { id: newTabId(), fileId: activeFileId }]
-    })
-  }, [activeFileId])
+    setTabs((prev) => reconcileTabs(prev, activeFileId, fileIds, filesReady))
+  }, [activeFileId, fileIds, filesReady])
 
   // Persist tabs + the most recent activeFileId. Co-locating the write keeps
   // a single storage key per project and ensures readLastActiveFileId (#38

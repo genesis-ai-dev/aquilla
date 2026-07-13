@@ -1,4 +1,4 @@
-// FRO-192: ProjectAssignedToMe tests — pickup list rendering + jump.
+// AQU-192: ProjectAssignedToMe tests — pickup list rendering + jump.
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
@@ -91,6 +91,10 @@ describe("ProjectAssignedToMe", () => {
     expect(screen.getByText("Genesis")).toBeTruthy()
   })
 
+  // AQU-495 regression: this is the mechanism that makes the sidebar "My
+  // assignments" panel update live after a create — ProjectWorkspace.tsx
+  // increments `assignmentsRefreshKey` from AssignModal's `onAssigned`
+  // callback, which flows into this `refreshKey` prop.
   it("re-fetches when refreshKey increments", async () => {
     mockGetMyAssignments.mockResolvedValue([makeAssignment()])
     const { rerender } = render(

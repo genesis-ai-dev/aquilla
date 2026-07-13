@@ -1,6 +1,6 @@
-// FRO-335: partition the caller's accessible projects into "this org" vs
+// AQU-335: partition the caller's accessible projects into "this org" vs
 // "shared with you". A project_members row created by a magic-link invite
-// accept (or bulk-add, FRO-323) can point at a project in an org the caller
+// accept (or bulk-add, AQU-323) can point at a project in an org the caller
 // does NOT belong to. Every dashboard surface is scoped to the active org, so
 // those projects were URL-accessible but unreachable from any nav surface.
 //
@@ -30,7 +30,7 @@ export function partitionSharedProjects(
   const myOrgIds = new Set(myOrgs.map((o) => o.id))
 
   if (scope === "all-orgs") {
-    // FRO-475: the all-orgs aggregate is built from getPortfolios(), which
+    // AQU-475: the all-orgs aggregate is built from getPortfolios(), which
     // only knows about orgs the caller is a MEMBER of. A project reached
     // purely via a project-level invite (no org membership at all) never
     // appears there — so here "shared with me" = accessible projects whose

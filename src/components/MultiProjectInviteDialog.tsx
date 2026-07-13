@@ -14,12 +14,14 @@ import {
   ROLE,
   PROJECT_ROLE_OPTIONS,
   roleName,
+  roleDisplayText,
   type RoleLevel,
 } from "@/lib/frontier/roles"
 import { addProjectMember, lookupUser } from "@/lib/frontier/members"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead"
+import { RoleLabel } from "@/components/RoleLabel"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
 interface MultiProjectInviteDialogProps {
@@ -34,7 +36,7 @@ interface MultiProjectInviteDialogProps {
 }
 
 /**
- * FRO-322: Unified add-to-projects dialog.
+ * AQU-322: Unified add-to-projects dialog.
  *
  * - Username mode (existing Aquilla user): multi-select projects, pick a
  *   role per project, hit Invite. Each project gets a direct membership grant
@@ -71,8 +73,6 @@ export function MultiProjectInviteDialog({
 
   const selectedIds = useMemo(() => Object.keys(selections), [selections])
   const isEmailMode = recipient.mode === "email"
-  const canSubmit =
-    !busy && recipient.raw.trim().length > 0 && selectedIds.length > 0 && Boolean(session?.jwt)
   // Email mode: no server action — guide the operator to per-project Share panels.
   const canShowEmailGuide = isEmailMode && selectedIds.length > 0
 
@@ -93,7 +93,18 @@ export function MultiProjectInviteDialog({
   }
 
   async function handleInvite() {
-    if (!session?.jwt) return
+    if (!session?.jwt) {
+      setTopError("Sign in to invite collaborators.")
+      return
+    }
+    if (!recipient.raw.trim()) {
+      setTopError("Enter a username or email.")
+      return
+    }
+    if (selectedIds.length === 0) {
+      setTopError("Select at least one project.")
+      return
+    }
     setBusy(true)
     setTopError(null)
     setPerProjectError({})
@@ -236,7 +247,7 @@ export function MultiProjectInviteDialog({
                           <Select
                             items={roleChoices.map((r) => ({
                               value: String(r.level),
-                              label: r.name,
+                              label: roleDisplayText(r.name),
                             }))}
                             value={String(selections[p.id])}
                             onValueChange={(v) =>
@@ -255,7 +266,7 @@ export function MultiProjectInviteDialog({
                               <SelectGroup>
                                 {roleChoices.map((r) => (
                                   <SelectItem key={r.level} value={String(r.level)}>
-                                    {r.name}
+                                    <RoleLabel name={r.name} />
                                   </SelectItem>
                                 ))}
                               </SelectGroup>
@@ -284,7 +295,7 @@ export function MultiProjectInviteDialog({
                   <>
                     {" "}— roles:{" "}
                     {[...new Set(selectedIds.map((id) => selections[id]!))]
-                      .map((lvl) => roleName(lvl))
+                      .map((lvl) => roleDisplayText(roleName(lvl)))
                       .join(", ")}
                   </>
                 )}
@@ -292,7 +303,7 @@ export function MultiProjectInviteDialog({
             )}
           </Field>
 
-          {/* FRO-322: email-mode guide — direct operator to per-project Share panels */}
+          {/* AQU-322: email-mode guide — direct operator to per-project Share panels */}
           {canShowEmailGuide && (
             <div className="rounded border bg-muted/30 p-3 space-y-2 text-xs">
               <p className="font-medium text-muted-foreground">
@@ -331,7 +342,7 @@ export function MultiProjectInviteDialog({
               {done ? "Close" : "Cancel"}
             </Button>
             {!isEmailMode && (
-              <Button onClick={handleInvite} disabled={!canSubmit}>
+              <Button onClick={handleInvite} disabled={busy}>
                 {busy ? (
                   <>
                     <Spinner className="mr-1" />

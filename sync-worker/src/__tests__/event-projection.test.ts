@@ -312,14 +312,14 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
       makeEvent('cell.validate', { editEventId: 'evt-commit-id' }),
       stmts,
     )
-    // FRO-292: validator UPSERT + ai_drafted clear + cells.validated recompute
+    // AQU-292: validator UPSERT + ai_drafted clear + cells.validated recompute
     // + endorsement_count recompute + files counters recompute.
     expect(stmts).toHaveLength(5)
     expect(recorded[0].sql).toContain('INSERT INTO cell_validators')
     // 0012: columns are (project_id, file_id, cell_id, event_id, username, decided_ts) — no is_active
     expect(recorded[0].sql).toContain('event_id')
     expect(recorded[0].sql).not.toContain('is_active')
-    // FRO-292: ai_drafted cleared before the validated recompute so the
+    // AQU-292: ai_drafted cleared before the validated recompute so the
     // file counter reflects the final state correctly.
     expect(recorded[1].sql).toContain('SET ai_drafted = 0')
     expect(recorded[2].sql).toContain('UPDATE cells')
@@ -350,6 +350,72 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
     expect(recorded[1].sql).toContain('SET validated')
     expect(recorded[2].sql).toContain('SET endorsement_count')
     expect(recorded[3].sql).toContain('UPDATE files SET cell_count')
+  })
+})
+
+describe('buildEventProjectionStmts — cell.audio.validate / cell.audio.unvalidate (AQU-508)', () => {
+  it('cell.audio.validate emits a single cell_audio approve UPDATE keyed by audio_id', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: AquillaStatement[] = []
+    const touches = buildEventProjectionStmts(
+      db,
+      makeEvent('cell.audio.validate', { audioId: 'a1' }),
+      stmts,
+    )
+    // Audio validation touches only cell_audio — no chain head, no counters.
+    expect(touches).toEqual(['cell_audio'])
+    expect(stmts).toHaveLength(1)
+    expect(recorded[0].sql).toContain('UPDATE cell_audio SET approved = 1')
+    expect(recorded[0].sql).toContain('approved_by = ?')
+    expect(recorded[0].sql).toContain('approved_ts = ?')
+    // Bound: author, serverTs, project, file, cell, audioId.
+    expect(recorded[0].args).toEqual(['alice', 2000, 'proj-1', 'file-a', 'cell-1', 'a1'])
+  })
+
+  it('cell.audio.unvalidate clears approval (approved = 0, approver nulled)', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('cell.audio.unvalidate', { audioId: 'a1' }),
+      stmts,
+    )
+    expect(stmts).toHaveLength(1)
+    expect(recorded[0].sql).toContain('UPDATE cell_audio SET approved = 0')
+    expect(recorded[0].sql).toContain('approved_by = NULL')
+    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'a1'])
+  })
+
+  it('is not chain-mutating', () => {
+    expect(isChainMutatingKind('cell.audio.validate')).toBe(false)
+    expect(isChainMutatingKind('cell.audio.unvalidate')).toBe(false)
+  })
+
+  it('round-trips against real Postgres: validate sets approved=1, unvalidate clears it', async () => {
+    const { db, rows } = await makeTestDb({
+      cell_audio: [
+        {
+          project_id: 'proj-1', file_id: 'file-a', cell_id: 'cell-1', audio_id: 'a1',
+          slot: 'recording', url: 'frontier-audio://a1.wav', selected: 1, deleted: 0,
+          event_id: 'ae1', created_ts: 1,
+        },
+      ],
+    })
+
+    const approveStmts: AquillaStatement[] = []
+    buildEventProjectionStmts(db, makeEvent('cell.audio.validate', { audioId: 'a1' }), approveStmts)
+    await db.batch(approveStmts)
+    let audio = await rows<{ approved: number; approved_by: string | null; approved_ts: number | null }>('cell_audio')
+    expect(audio[0].approved).toBe(1)
+    expect(audio[0].approved_by).toBe('alice')
+    expect(audio[0].approved_ts).toBe(2000)
+
+    const clearStmts: AquillaStatement[] = []
+    buildEventProjectionStmts(db, makeEvent('cell.audio.unvalidate', { audioId: 'a1' }), clearStmts)
+    await db.batch(clearStmts)
+    audio = await rows('cell_audio')
+    expect(audio[0].approved).toBe(0)
+    expect(audio[0].approved_by).toBeNull()
   })
 })
 
@@ -669,6 +735,9 @@ describe('isChainMutatingKind', () => {
     'cell.audio.attach': false,
     'cell.audio.select': false,
     'cell.audio.remove': false,
+    // AQU-508: audio validation is non-chain-mutating (only flips cell_audio.approved).
+    'cell.audio.validate': false,
+    'cell.audio.unvalidate': false,
     'file.create': false,
     'file.rename': false,
     'file.delete': false,
@@ -685,12 +754,12 @@ describe('isChainMutatingKind', () => {
     'cast.assign': false,
     'cell.retime': false,
     'file.video.set': false,
-    // FRO-476: mirror events replicate an ordering the upstream already
+    // AQU-476: mirror events replicate an ordering the upstream already
     // arbitrated — see CHAIN_MUTATING_KINDS's doc comment.
     'source.cell.mirror': false,
     'file.mirror': false,
     'link.cursor.advance': false,
-    // FRO-478: repin is non-chain-mutating — it does not compete for the
+    // AQU-478: repin is non-chain-mutating — it does not compete for the
     // chain slot (guarded instead by expectedTargetEventId in the SQL).
     'target.cell.repin': false,
   }

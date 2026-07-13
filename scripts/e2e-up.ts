@@ -337,16 +337,13 @@ async function main(): Promise<void> {
     cwd: AUTH_WORKER_DIR,
     port: IDENTITY_PORT,
     label: "identity",
-    env: {
-      ...HYPERDRIVE_ENV,
-      SYNC_WORKER_URL: `http://127.0.0.1:${SYNC_WORKER_PORT}`,
-      ENVIRONMENT: "development",
-    },
+    env: { ...HYPERDRIVE_ENV },
     // ADMIN_EMAILS: site-admin identity is by account email; the admin-console
     // specs need alice to be a platform admin. Her seeded email is
     // alice@example.test (e2e/helpers/seed.ts). WRANGLER_LOCAL=1 + the unset
     // ADMIN_REQUIRE_ELEVATION here keep the step-up off so the console opens.
     // OPENROUTER_* point the agent/chat loops at the scripted mock above.
+    // SYNC_WORKER_URL/ENVIRONMENT let identity reach the isolated sync worker.
     extraArgs: [
       "--persist-to", PERSIST_DIR,
       "--var", "WRANGLER_LOCAL:1",
@@ -354,6 +351,8 @@ async function main(): Promise<void> {
       "--var", "ADMIN_EMAILS:alice@example.test",
       "--var", `OPENROUTER_BASE_URL:http://127.0.0.1:${OPENROUTER_MOCK_PORT}/api/v1`,
       "--var", "OPENROUTER_API_KEY:mock",
+      "--var", `SYNC_WORKER_URL:http://127.0.0.1:${SYNC_WORKER_PORT}`,
+      "--var", "ENVIRONMENT:development",
     ],
     logFile: openLogFile(logFiles.identity),
     streamToParent: VERBOSE,

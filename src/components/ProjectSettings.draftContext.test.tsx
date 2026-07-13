@@ -75,7 +75,7 @@ vi.mock("@/hooks/useCompletionSettings", () => ({
 vi.mock("@/lib/completion/completion-service", () => ({
   fetchModels: vi.fn().mockResolvedValue([]),
   resolveProvider: vi.fn(() => "frontier"),
-  // FRO-478: ProjectSettings now transitively imports events-emit.ts (via
+  // AQU-478: ProjectSettings now transitively imports events-emit.ts (via
   // UpstreamChangesPanel) → src/lib/ab/feedback.ts, which reads this export
   // at module-eval time.
   FRONTIER_CHAT_URL: "https://api.aquilla.app/chat/api/v1/chat/completions",
@@ -107,9 +107,11 @@ vi.mock("@/lib/metrics/use-post-edit-metrics", () => ({
 
 // ─── Render helper ───────────────────────────────────────────────────────────
 
+// AQU-501: Draft Context lives in the "AI & completion" sub-menu pane —
+// deep-link straight there via `?section=`.
 function renderSettings() {
   return render(
-    <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings`]}>
+    <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings?section=ai`]}>
       <Routes>
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
       </Routes>

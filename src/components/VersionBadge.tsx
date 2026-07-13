@@ -18,25 +18,36 @@ const isProd = BRANCH === "main" || BRANCH === "production"
 const label = isProd ? `v${VERSION} · ${SHA}` : `v${VERSION} · ${BRANCH} · ${SHA}`
 const title = `${label}\nbuild: ${BRANCH}@${SHA}`
 
-// Routes that render a full-height left rail (via <AppShell/>). There the version
-// lives in-flow at the rail's foot (<VersionTag/>), so the floating badge must
-// stand down or it duplicates that tag and paints over the rail's bottom controls
-// (the account switcher, Settings, the voice library, …).
-//   /                            — org overview          (OrgHome)
-//   /projects, /projects/:id     — org project list / detail
-//   /teams, /teams/:groupId      — org team list / detail
-//   /members                     — org members
-//   /project/:id                 — workspace
-//   /project/:id/file/:fileId    — workspace with a file open
-// The other /project/* pages (rules, comments, settings) and /settings are centred
-// and leave the corner free, so they keep the floating badge.
-function hasLeftRail(pathname: string): boolean {
+// Routes where AppShell / LeftDock already render <VersionTag/> in the left-rail
+// footer. The floating <VersionBadge/> must stand down there or it stacks on top
+// of the in-rail tag and covers the account switcher / report button.
+export function hasChromeVersionTag(pathname: string): boolean {
   const segs = pathname.split("/").filter(Boolean)
   if (segs.length === 0) return true // "/" — org overview
-  if (segs[0] === "projects" || segs[0] === "teams" || segs[0] === "members") return true
-  if (segs[0] === "project" && segs.length >= 2) {
-    return segs.length === 2 || segs[2] === "file"
+
+  const root = segs[0]
+
+  // Org-level AppShell pages (OrgSidebar + footer VersionTag).
+  if (
+    root === "projects" ||
+    root === "teams" ||
+    root === "members" ||
+    root === "assigned" ||
+    root === "preferences" ||
+    root === "settings" ||
+    root === "admin"
+  ) {
+    return true
   }
+
+  // Project workspace (LeftDock footer VersionTag) — every /project/* route except
+  // centred shells that don't mount the dock (settings, debug dumps).
+  if (root === "project" && segs.length >= 2) {
+    if (segs.length >= 3 && segs[2] === "settings") return false
+    if (segs.includes("debug")) return false
+    return true
+  }
+
   return false
 }
 
@@ -108,7 +119,7 @@ export function VersionTag() {
 export function VersionBadge() {
   const { pathname } = useLocation()
   const { copied, copy } = useCopyBuildInfo()
-  if (hasLeftRail(pathname)) return null
+  if (hasChromeVersionTag(pathname)) return null
 
   return (
     <Tooltip>

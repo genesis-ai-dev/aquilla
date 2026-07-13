@@ -962,6 +962,8 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     enabled = true,
   } = opts
   const store = useMemo(() => new CellStore(), [])
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (typeof window !== "undefined") (window as any).__cellStore = store
   const [isLoading, setIsLoading] = useState(false)
   const [isError, setIsError] = useState(false)
   const projectRef = useRef(projectId)

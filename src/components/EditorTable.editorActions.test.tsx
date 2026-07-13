@@ -19,6 +19,10 @@ import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 
+vi.mock("@/hooks/useMicPermission", () => ({
+  useMicPermission: () => ({ micDenied: true }),
+}))
+
 // happy-dom has no real layout engine, so the real LegendList may decide no
 // rows are visible. Replace it with a trivial "render every row" stand-in —
 // good enough for a single-cell wiring test and independent of layout.
@@ -164,5 +168,17 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     // A moment for the row to mount before asserting absence.
     await screen.findByText("bonjour")
     expect(screen.queryByRole("button", { name: "Add comment" })).not.toBeInTheDocument()
+  })
+
+  it("raises and unclamps the row while microphone-permission help is open", async () => {
+    renderTable({ onOpenRecording: vi.fn() })
+
+    const micButton = await screen.findByRole("button", {
+      name: "Microphone access blocked — click for help",
+    })
+    fireEvent.click(micButton)
+
+    expect(screen.getByRole("tooltip", { name: /microphone blocked/i })).toBeInTheDocument()
+    expect(micButton.closest("[data-grid-row]")).toHaveClass("z-30", "overflow-visible")
   })
 })

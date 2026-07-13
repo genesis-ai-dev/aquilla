@@ -4033,7 +4033,12 @@ function EditorRow({
           // Flat row in a continuous list: tinted by hover/selection overlays,
           // not shadows. Depth is gone by design — the Linear model reserves
           // elevation for floating layers.
-          "group relative grid gap-2 overflow-hidden px-4 py-2 transition-colors duration-150 ease-out",
+          "group relative grid gap-2 px-4 py-2 transition-colors duration-150 ease-out",
+          // The mic-permission help is anchored in the action rail. While it
+          // is open, this row must become its own higher stacking layer and
+          // allow the popover to escape the row; otherwise neighbouring rows
+          // and the sticky table header paint above it.
+          showMicDeniedHelp ? "z-30 overflow-visible" : "overflow-hidden",
           hasInlineFootnotes && "gap-y-1 py-1.5",
           // Keyboard-focus ring for the grid row (only when focused directly,
           // not via a child element — :focus-visible + :not(:focus-within:not(:focus))).

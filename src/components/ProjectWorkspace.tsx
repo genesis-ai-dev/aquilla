@@ -74,6 +74,8 @@ import {
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
 import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitFileVideoSet } from "@/lib/sync/events-emit"
+import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
+import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
 import { canPerform, canOpenAssignUi } from "@/lib/sync/role-policy"
@@ -1492,10 +1494,9 @@ export function ProjectWorkspace() {
   // retrieval primitive every other AD-13 consumer will (AD-14 decay
   // endorsement included).
   //
-  // Both fall back to the in-memory index if the server fetch fails for
-  // any reason (offline, JWT issue, etc.) — losing retrieval makes the
-  // copilot zero-shot, which is a worse generation but still better than
-  // failing the whole completion.
+  // A failed request yields no examples rather than falling back to an
+  // unreviewed local corpus. The draft may proceed zero-shot, but the trust
+  // boundary around approved retrieval remains intact.
   const branchingSearch = useCallback(
     async (
       query: string,
@@ -1513,6 +1514,7 @@ export function ProjectWorkspace() {
           query,
           jwt,
           topK: limit,
+          validatedOnly: true,
           excludeCellId: excludeId,
         })
         return res.results.map((r) => ({
@@ -1550,6 +1552,7 @@ export function ProjectWorkspace() {
           jwt,
           topK: hits,
           radius,
+          validatedOnly: true,
         })
         // Map server `Passage` → existing `PassageHit` shape. Drops
         // `hitCellId` (derivable from cells.find(c => c.hit)) and
@@ -1571,7 +1574,7 @@ export function ProjectWorkspace() {
     [project?.id, activeFileId, getTokenForFile],
   )
 
-  const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string) => {
+  const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string, provenance: AiDraftProvenance) => {
     if (!project?.id) return
     // FRO-365: defense-in-depth — the selection-island Translate button and
     // the header "Run AI completions"/"Complete all" actions are already
@@ -1591,7 +1594,7 @@ export function ProjectWorkspace() {
     // bounce) chains a *revert* event with the pre-gen text onto the
     // gen — producing the "two events at 5:08, second one identical to
     // 2:28" history pattern.
-    applyOptimisticTargetEdit(cell.id, { value: text })
+    applyOptimisticTargetEdit(cell.id, { value: text, aiDrafted: true })
     // RACE-3/QW-2: use the pending event id for this cell (last AI-completion
     // commit we enqueued) as parentId, falling back to the projection value.
     // This prevents a second rapid completion commit from becoming a sibling
@@ -1610,6 +1613,7 @@ export function ProjectWorkspace() {
       // track ai_drafted on the cell row. A human edit (no aiSuggestion)
       // will clear it on the next commit.
       aiSuggestion: true,
+      aiDraft: provenance,
     })
     pendingCompletionEventIdRef.current.set(cell.id, eventId)
     rememberPendingTargetCommit(cell.id, eventId, parentId)
@@ -1622,7 +1626,7 @@ export function ProjectWorkspace() {
     // confirms; the WS event.applied also pokes the same cell (coalesced).
     revalidateCellStats(cell.id)
     revalidateCell(cell.id)
-  }, [project?.id, applyOptimisticTargetEdit, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell])
+  }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
   /**
    * AD-2 sibling promotion: emit a new target-cell commit whose parentId is
@@ -2476,6 +2480,16 @@ export function ProjectWorkspace() {
               }
               if (!msg.cell || msg.project !== pid) return
               const ownWrite = isOwnWriteEcho(msg, currentUsername)
+              // Validation state has two projections: `cells.validated` drives
+              // progress, while `cell_validators` identifies who approved the
+              // current edit. Refresh the audit row from the applied-event echo
+              // for both local and remote writes so the per-cell button cannot
+              // remain visually stale after the progress count turns green.
+              // The committing handler's earlier refresh can race the app-shell
+              // outbox drain; this frame only arrives after projection commits.
+              if (msg.kind === "cell.validate" || msg.kind === "cell.unvalidate") {
+                revalidateCellStats(msg.cell)
+              }
               // Targeted single-cell refetch — avoids re-streaming every
               // cell in the file for one remote change. Falls back to a
               // full revalidate inside useCells on error.
@@ -2640,6 +2654,7 @@ export function ProjectWorkspace() {
     getTokenForFile,
     revalidateCells,
     revalidateCell,
+    revalidateCellStats,
     currentUsername,
     refresh,
     clearPresenceStaleTimer,
@@ -3359,7 +3374,7 @@ export function ProjectWorkspace() {
       if (!project?.id || !activeFileId) return
       if (!canPerform("cell.validate", project.syncRole?.level ?? null)) return
       const validatable = cellSummaries.filter(
-        (c) => c.fileId === activeFileId && !!c.targetEventId,
+        (c) => c.fileId === activeFileId && isBulkValidationEligible(c),
       )
       if (validatable.length === 0) return
       void (async () => {

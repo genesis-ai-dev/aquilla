@@ -13,6 +13,7 @@ import {
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
 import {
@@ -3386,6 +3387,7 @@ function EditorRow({
     }
     const editEventId = cell.targetEventId ?? pendingTargetEventIdRef.current
     if (!project.id || !editEventId) return
+    setOptimisticSelfValidation(validated)
     const emit = validated ? emitCellValidate : emitCellUnvalidate
     void emit({
       projectId: project.id,
@@ -3396,6 +3398,7 @@ function EditorRow({
     }).then(() => {
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
+      setOptimisticSelfValidation(null)
       console.warn(`[${validated ? "validate" : "unvalidate"}] emit failed:`, err)
       // FRO-274: surface enqueue failure inline.
       setWriteError("Couldn't save this change locally — copy your text and reload.")
@@ -3542,10 +3545,31 @@ function EditorRow({
     void transcribeCell({ cell, session: rowSession, projectId: project.id, language: project.targetLanguage })
   }, [cell, rowSession, project.id, project.targetLanguage])
 
-  const vs = cell.validationStatus
   const [validationPopoverOpen, setValidationPopoverOpen] = useState(false)
-  const isSelfValidated = cell.activeValidators.includes(username)
-  const hasValidatorInfo = cell.activeValidators.length > 0 || cell.validationHistory.length > 1
+  const authoritativeSelfValidated = cell.activeValidators.includes(username)
+  const [optimisticSelfValidation, setOptimisticSelfValidation] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (optimisticSelfValidation !== null && authoritativeSelfValidated === optimisticSelfValidation) {
+      setOptimisticSelfValidation(null)
+    }
+  }, [authoritativeSelfValidated, optimisticSelfValidation])
+  const isSelfValidated = optimisticSelfValidation ?? authoritativeSelfValidated
+  const displayedValidators = useMemo(() => {
+    if (optimisticSelfValidation === null) return cell.activeValidators
+    if (optimisticSelfValidation) {
+      return cell.activeValidators.includes(username)
+        ? cell.activeValidators
+        : [...cell.activeValidators, username]
+    }
+    return cell.activeValidators.filter((validator) => validator !== username)
+  }, [cell.activeValidators, optimisticSelfValidation, username])
+  const validationRequirement = readValidationCount(project)
+  const vs = optimisticSelfValidation === true
+    ? displayedValidators.length >= validationRequirement ? "full-self" : "self"
+    : optimisticSelfValidation === false
+      ? displayedValidators.length >= validationRequirement ? "full-others" : displayedValidators.length > 0 ? "others" : "none"
+      : cell.validationStatus
+  const hasValidatorInfo = displayedValidators.length > 0 || cell.validationHistory.length > 1
 
   // Gate Base UI's auto-toggle: clicks on an unvalidated cell should validate
   // (not open the popover), and hovers should only open when there's actually
@@ -4039,10 +4063,10 @@ function EditorRow({
                     <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                       Validated by
                     </li>
-                    {cell.activeValidators.length === 0 ? (
+                    {displayedValidators.length === 0 ? (
                       <li className="px-1 py-1 text-xs text-muted-foreground">No active validators</li>
                     ) : (
-                      cell.activeValidators.map((v) => (
+                      displayedValidators.map((v) => (
                         <li key={v} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
                           <span className="truncate">{v}{v === username ? " (you)" : ""}</span>
                           {v === username && canValidate && (
@@ -4297,13 +4321,23 @@ function EditorRow({
               the floating action rail a lane of its own instead of letting it
               cover the first line of target text. The cast/character label
               lives here (left side), not squished into the line-number pill. */}
-          <div className="mb-1 flex h-4 items-center text-xs text-muted-foreground" dir="ltr">
+          <div className="mb-1 flex h-4 items-center justify-between gap-2 text-xs text-muted-foreground" dir="ltr">
             {showCellLabel && (
               <AppTooltip content={labelText} disabled={!labelText}>
                 <span className="max-w-[60%] truncate">
                   {labelText}
                 </span>
               </AppTooltip>
+            )}
+            {cell.aiDrafted && (
+              <Badge
+                variant="outline"
+                className="ml-auto h-4 shrink-0 gap-1 border-amber-500/40 bg-amber-500/10 px-1.5 text-[9px] font-medium text-amber-700 dark:text-amber-300"
+                aria-label="AI draft — individual human review required"
+              >
+                <Sparkles className="size-2.5" />
+                AI draft · review required
+              </Badge>
             )}
           </div>
           <div className="flex flex-1 flex-col">
@@ -4809,18 +4843,18 @@ function EditorRow({
             {
               value: "health",
               icon: <Activity className="h-3 w-3" />,
-              label: "Staleness",
+              label: "Retrieval support",
               renderContent: () => (
                 <div className="space-y-1.5 py-3 text-xs text-muted-foreground">
                   <p>
                     <span className="font-medium text-foreground">{cell.endorsementCount ?? 0}</span>
-                    {" "}endorsement{(cell.endorsementCount ?? 0) === 1 ? "" : "s"} · health{" "}
+                    {" "}endorsement{(cell.endorsementCount ?? 0) === 1 ? "" : "s"} · support{" "}
                     <span className="font-medium text-foreground">{healthValue}%</span>
                   </p>
                   <p>
                     {cellNeedsAttention
-                      ? "Needs attention — nearby context cells haven't been validated yet."
-                      : "No attention needed — enough nearby context is validated."}
+                      ? "Lower retrieval support — review terminology and context closely."
+                      : "Better retrieval support — human review is still required."}
                   </p>
                 </div>
               ),

@@ -129,7 +129,7 @@ function TextPanel({ theme }: { theme: "light" | "dark" }) {
               <HealthRing health={health} size={18} strokeWidth={2.5}>
                 {health >= 67 ? <IconCheckTiny /> : null}
               </HealthRing>
-              {health}% confidence
+              {health}% support
             </span>
             <button
               className="aq-play"

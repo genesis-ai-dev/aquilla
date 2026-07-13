@@ -158,12 +158,16 @@ beforeEach(() => {
 })
 
 describe("ProjectSettings — AI Settings persistence (AQU-408)", () => {
-  it("persists Top K, context window, validated-only, and example format on Save", async () => {
+  it("persists Top K and context while locking retrieval to approved examples", async () => {
     renderSettings()
 
     fireEvent.change(screen.getByLabelText(/examples retrieved/i), { target: { value: "17" } })
     await pickSelectOption(/context window/i, /large — chapter/i)
-    fireEvent.click(screen.getByRole("checkbox", { name: /validated/i }))
+    const approvedOnly = screen.getByRole("checkbox", { name: /approved examples only/i })
+    expect(approvedOnly.getAttribute("aria-checked")).toBe("true")
+    expect(
+      approvedOnly.hasAttribute("data-disabled") || approvedOnly.getAttribute("aria-disabled") === "true",
+    ).toBe(true)
 
     const saveBtn = screen.getByRole("button", { name: /save changes/i })
     fireEvent.click(saveBtn)

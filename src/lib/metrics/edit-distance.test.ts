@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { levenshteinDistance, normalizedEditDistance } from "./edit-distance"
+import { levenshteinDistance, levenshteinOperations, normalizedEditDistance } from "./edit-distance"
 
 describe("levenshteinDistance", () => {
   it("returns 0 for identical strings", () => {
@@ -63,5 +63,13 @@ describe("normalizedEditDistance", () => {
   it("normalizes by max length, not sum", () => {
     // distance("ab", "b") = 1, max("ab","b") = 2 → 0.5
     expect(normalizedEditDistance("ab", "b")).toBeCloseTo(0.5, 5)
+  })
+})
+
+describe("levenshteinOperations", () => {
+  it("separates insertions, deletions, and substitutions", () => {
+    expect(levenshteinOperations("cat", "cart")).toEqual({ insertions: 1, deletions: 0, substitutions: 0 })
+    expect(levenshteinOperations("cart", "cat")).toEqual({ insertions: 0, deletions: 1, substitutions: 0 })
+    expect(levenshteinOperations("cat", "cut")).toEqual({ insertions: 0, deletions: 0, substitutions: 1 })
   })
 })

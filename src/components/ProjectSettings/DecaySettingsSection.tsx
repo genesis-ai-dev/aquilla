@@ -32,12 +32,13 @@ export function DecaySettingsSection({
   return (
     <details className="rounded-lg border p-3">
       <AppTooltip content={disabledTooltip} disabled={!disabled}>
-        <summary className="cursor-pointer text-sm font-medium">Staleness &amp; health</summary>
+        <summary className="cursor-pointer text-sm font-medium">Retrieval support</summary>
       </AppTooltip>
       <div className="mt-3 space-y-4">
         <p className="text-xs text-muted-foreground">
-          Cell health is a confidence score derived from validated neighboring cells in the
-          example-retrieval graph. Cells that are far from validated neighbors are considered stale.
+          This support signal measures proximity to approved neighboring cells in the retrieval
+          graph. It can prioritize review, but it is not a translation-quality score and never
+          removes the human-review requirement.
         </p>
 
         <FieldGroup>
@@ -57,7 +58,7 @@ export function DecaySettingsSection({
               }}
             />
             <FieldDescription>
-              Propagation radius from validated cells. Larger values let confidence
+              Propagation radius from approved cells. Larger values let support
               ripple further through the retrieval graph. Default {DEFAULT_MAX_HOPS}.
             </FieldDescription>
           </Field>
@@ -78,7 +79,7 @@ export function DecaySettingsSection({
               }}
             />
             <FieldDescription>
-              Staleness above this threshold shows the cell&apos;s &quot;needs attention&quot; marker (0–1). Default {DECAY_DEFAULTS.decayWarnThreshold}.
+              Low support beyond this threshold shows the cell&apos;s review-priority marker (0–1). Default {DECAY_DEFAULTS.decayWarnThreshold}.
             </FieldDescription>
           </Field>
         </FieldGroup>

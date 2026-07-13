@@ -124,6 +124,20 @@ export type CommentScope =
   | { kind: 'file'; fileId: string }
   | { kind: 'project' }
 
+export interface AiDraftProvenance {
+  model: string
+  provider: string
+  promptVersion: string
+  exampleIds: string[]
+  generatedAt: number
+  mode: 'single' | 'batch' | 'paragraph' | 'agent'
+  projectState: {
+    sourceLanguage: string
+    targetLanguage: string
+    approvedExampleCount: number
+  }
+}
+
 // Payload shape per event kind. Using an interface (not Record) so that
 // EventPayloads[K] gives type-safe lookups without `as` casts.
 export interface EventPayloads {
@@ -187,6 +201,8 @@ export interface EventPayloads {
      * field are treated as human-authored (ai_drafted = 0).
      */
     ai_suggestion?: true
+    /** Reproducibility and effort-analysis context for the original draft. */
+    ai_draft?: AiDraftProvenance
     /**
      * Translation agent provenance: id of the agent_runs row whose staged
      * proposal produced this commit (always paired with ai_suggestion). Links

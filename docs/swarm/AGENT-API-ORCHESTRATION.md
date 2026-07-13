@@ -122,6 +122,9 @@ pattern; do not invent one). CLAUDE.md's "workers still run on D1" is stale.
 | 2026-07-13 | swarm/agent-api-w1b-changesets | merged 49d855bae | engine + 0055 migration + provenance; 9 tests |
 | 2026-07-13 | swarm/agent-api-w1c-reads | merged 93b692742 | add/add conflicts resolved: errors.ts unioned (externalError alias), stubs split (api-credentials-db.ts); 14 tests |
 | 2026-07-13 | GATE | GREEN | sync-worker tsc clean; 76 files / 788 tests pass |
+| 2026-07-13 | swarm/agent-api-w1a-credentials | merged 549804917 | schema.sql union conflict resolved; 11 tests; pre-existing invites.test.ts failure noted |
+| 2026-07-13 | swarm/agent-api-w1d-reconcile | merged 6bfa5b206 | stubs deleted, real db/shared wired; 788/788 green; userId string→number conversion at token-bridge boundary |
+| 2026-07-13 | WAVE 2 DISPATCHED | — | w2a-mcp (opus), w2b-import (opus), w2c-approval (sonnet) in .worktrees/w2{a,b,c}-* off 6bfa5b206 |
 
 INCIDENT LOG: first W1-B/W1-C merge accidentally ran in the MAIN worktree on dev
 (orchestrator cwd reset between tool calls). Recovered: merge --abort + hard reset

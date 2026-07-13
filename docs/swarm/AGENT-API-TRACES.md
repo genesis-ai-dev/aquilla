@@ -140,3 +140,16 @@ fresh agent to pick up. Orchestrator: drain into wave briefs or sub-issues.
   ("PARITY VIOLATION — prepare lacks a role/membership gate"). Fix: resolve the
   live role in `handlePrepare` and require >= VIEWER (or CONTRIBUTOR, to match the
   commit floor) before staging; then flip the `it.fails` to a plain `it`.
+
+## W3-C cold-start (gate 10) — findings
+
+- Cold-start PASSED with zero mcp-tools.ts changes: a simulated stranger agent
+  (sync-worker/src/__tests__/external-coldstart.test.ts) completed
+  discover -> read -> prepare -> confirm -> verify -> history in both act and
+  ask modes using only the tools/list catalog + returned payloads.
+- GAP (behavior, not docs): provenance `channel` is stamped `'rest'` even for
+  MCP-originated commits — mcp-handlers.ts delegates to changesets-route via a
+  synthetic REST request and buildProvenance (external/commit.ts) hardcodes
+  `channel: 'rest'`. Spec (docs/AGENT-API.md §2) defines `"mcp" | "rest"`.
+  Fix would need the channel threaded from the MCP adapter into commit; left
+  unfixed here (behavior change outside W3-C's documentation-only remit).

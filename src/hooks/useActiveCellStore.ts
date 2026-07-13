@@ -27,6 +27,19 @@ const EMPTY_FOOTNOTE_DETAILS: CellFootnoteDetails = Object.freeze({
 
 export type CellViewModel = CellData
 
+// AQU-538 (slice 2): one source, N target lanes; `''` is the default lane.
+// `CellRow.targetLang` (slice 1) carries the lane; source rows and every
+// pre-lane target row are `''`. This store keys ONE target per cell per view,
+// so we filter target rows to the active lane before pairing — identical to
+// useCells' `laneOf`. Non-active-lane target rows are retained (see
+// `otherLaneTargetRows`) so the cache stays lane-complete and switching lane
+// re-derives the view instantly without a refetch. N=1 (only default-lane
+// rows) is byte-identical: the filter keeps everything.
+/** The lane a row belongs to. Source rows and default-lane targets → `''`. */
+function laneOf(row: CellRow): string {
+  return row.targetLang ?? ""
+}
+
 export interface CellSummary {
   id: string
   fileId: string
@@ -134,6 +147,12 @@ interface RuntimeContext {
   username: string
   requiredValidations: number
   auditStats: ReadonlyMap<string, CellAuditStats>
+  /**
+   * AQU-538: the active target LANE the view renders. `''`/undefined = the
+   * default lane (byte-identical to pre-lane behaviour). Optional so existing
+   * `setRuntime` callers that predate lanes keep compiling; normalized to `''`.
+   */
+  lane?: string
 }
 
 interface PendingOverlay {
@@ -159,6 +178,7 @@ export class CellStore {
     username: "local",
     requiredValidations: 1,
     auditStats: EMPTY_STATS,
+    lane: "",
   }
 
   private order: string[] = []
@@ -167,6 +187,10 @@ export class CellStore {
   private indexById = new Map<string, number>()
   private sourceById = new Map<string, CellRow>()
   private targetById = new Map<string, CellRow>()
+  // AQU-538: target rows for NON-active lanes, retained verbatim so `toRows()`
+  // (and thus the IDB cache + delta merges) stays lane-complete. They never
+  // enter the paired view (`targetById`/`order`). Always empty for N=1.
+  private otherLaneTargetRows: CellRow[] = []
   private pendingOverlay = new Map<string, PendingOverlay>()
   private pendingProgressEventIds: string[] = []
   private optimisticEdits = new Map<string, OptimisticEdit>()
@@ -192,9 +216,19 @@ export class CellStore {
   private derivedCache: DerivedCache = { baseVersion: -1, summaries: [], textPairs: [] }
 
   setRuntime(next: RuntimeContext): void {
+    const nextLane = next.lane ?? ""
     const statsChanged = this.ctx.auditStats !== next.auditStats
     const userChanged = this.ctx.username !== next.username || this.ctx.requiredValidations !== next.requiredValidations
-    this.ctx = next
+    const laneChanged = (this.ctx.lane ?? "") !== nextLane
+    this.ctx = { ...next, lane: nextLane }
+    if (laneChanged) {
+      // AQU-538: re-partition the already-loaded rows against the new active
+      // lane. `toRows()` retains every lane's rows, so switching lane re-derives
+      // the view (and per-lane progress) instantly, with no refetch. N=1 never
+      // reaches here — the hook always passes `''`.
+      this.replaceRows(this.toRows(), { full: true, maxServerSeq: this.maxServerSeq })
+      return
+    }
     if (statsChanged || userChanged) {
       this.bumpAllCells()
       this.rebuildDerivedIndexes()
@@ -210,6 +244,7 @@ export class CellStore {
     this.indexById = new Map()
     this.sourceById = new Map()
     this.targetById = new Map()
+    this.otherLaneTargetRows = []
     this.pendingOverlay = new Map()
     this.pendingProgressEventIds = []
     this.optimisticEdits = new Map()
@@ -505,6 +540,8 @@ export class CellStore {
     const targetById = new Map<string, CellRow>()
     const sourceOrder: string[] = []
     const targetOrder: string[] = []
+    const otherLaneTargetRows: CellRow[] = []
+    const lane = this.ctx.lane ?? ""
 
     for (const row of rows) {
       if (row.side === "source") {
@@ -514,6 +551,12 @@ export class CellStore {
         }
         sourceById.set(row.cellId, row)
       } else {
+        // AQU-538: only the active lane's target participates in the paired
+        // view; other-lane rows are retained (toRows) but never keyed/rendered.
+        if (laneOf(row) !== lane) {
+          otherLaneTargetRows.push(row)
+          continue
+        }
         if (!targetById.has(row.cellId)) targetOrder.push(row.cellId)
         targetById.set(row.cellId, row)
         changedIds.add(row.cellId)
@@ -537,6 +580,7 @@ export class CellStore {
     this.targetOrder = targetOrder
     this.sourceById = sourceById
     this.targetById = targetById
+    this.otherLaneTargetRows = otherLaneTargetRows
     this.indexById = new Map(order.map((id, index) => [id, index]))
     const liveIds = new Set(order)
     for (const id of this.footnoteCache.keys()) {
@@ -564,6 +608,9 @@ export class CellStore {
       const row = this.targetById.get(id)
       if (row) rows.push(row)
     }
+    // AQU-538: keep non-active-lane target rows so the cache + delta merges
+    // stay lane-complete. Empty for N=1, so byte-identical there.
+    for (const row of this.otherLaneTargetRows) rows.push(row)
     return rows
   }
 
@@ -689,9 +736,17 @@ export class CellStore {
   }
 
   replaceRowsForCell(cellId: string, rows: CellRow[]): void {
-    const bySide = new Map(rows.map((row) => [row.side, row]))
-    const source = bySide.get("source")
-    const target = bySide.get("target")
+    const lane = this.ctx.lane ?? ""
+    const source = rows.find((row) => row.side === "source")
+    // AQU-538: a targeted refetch can return this cell's rows across multiple
+    // lanes. Only the active-lane target keys the paired view; other-lane rows
+    // replace this cell's retained rows so the cache stays lane-complete. For
+    // N=1 every target is lane `''`, so this is the old side-only replacement.
+    const target = rows.find((row) => row.side === "target" && laneOf(row) === lane)
+    this.otherLaneTargetRows = this.otherLaneTargetRows.filter((row) => row.cellId !== cellId)
+    for (const row of rows) {
+      if (row.side === "target" && laneOf(row) !== lane) this.otherLaneTargetRows.push(row)
+    }
     if (source) {
       this.sourceById.set(cellId, source)
       if (!this.sourceOrder.includes(cellId)) this.sourceOrder.push(cellId)
@@ -910,6 +965,13 @@ export interface UseActiveCellStoreOptions {
   auditStats?: ReadonlyMap<string, CellAuditStats>
   getToken?: (fileId: string) => Promise<string | null>
   enabled?: boolean
+  /**
+   * AQU-538: the active target LANE to render. `''` (default) pairs the
+   * default-lane target for each cell — byte-identical to the pre-lane view.
+   * Switching lane re-derives the view against that lane's target rows (all
+   * lanes are already loaded, so no refetch is needed).
+   */
+  lane?: string
 }
 
 export interface UseActiveCellStoreResult {
@@ -930,6 +992,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     auditStats = EMPTY_STATS,
     getToken,
     enabled = true,
+    lane = "",
   } = opts
   const store = useMemo(() => new CellStore(), [])
   const [isLoading, setIsLoading] = useState(false)
@@ -950,8 +1013,12 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   tokenFetcherRef.current = getToken
 
   useEffect(() => {
-    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats })
-  }, [auditStats, fileId, projectId, requiredValidations, store, username])
+    // AQU-538: `lane` flows through here; setRuntime re-partitions the loaded
+    // rows against it on change (instant lane switch, no refetch). This effect
+    // is defined before the (projectId, fileId, enabled) reload effect, so on a
+    // lane change the store's active lane is updated before any fetch runs.
+    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, lane })
+  }, [auditStats, fileId, lane, projectId, requiredValidations, store, username])
 
   const doFetch = useCallback(async (soft = false) => {
     const pid = projectRef.current

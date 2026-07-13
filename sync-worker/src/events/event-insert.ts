@@ -45,6 +45,12 @@ export interface EventInsertRow {
   serverTs: number
 }
 
+// AQU-533: `events.provenance` (JSONB, nullable) is INTENTIONALLY omitted from
+// the column list below. Every write through this canonical insert — in-app,
+// mirror, import — leaves it NULL. Only the external Agent-API changeset commit
+// path stamps provenance, and it does so out-of-band with a targeted UPDATE
+// AFTER the events land (see sync-worker/src/external/commit.ts). Keeping it out
+// of the hot insert preserves byte-identical behaviour for every existing test.
 export const EVENT_INSERT_SQL = `WITH bump AS (
   INSERT INTO project_seq_counters (project_id, last_seq)
   VALUES (?, COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1)

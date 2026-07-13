@@ -1,4 +1,4 @@
-// Tests for server-side enforcement of harmonize_min_role (FRO-186).
+// Tests for server-side enforcement of harmonize_min_role (AQU-186).
 //
 // A target.cell.commit with harmonize_origin payload is the cell.commit.harmonize
 // variant per AD-2. The server enforces harmonize_min_role from project_settings:

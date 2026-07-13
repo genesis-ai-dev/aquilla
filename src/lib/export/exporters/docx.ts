@@ -1,6 +1,6 @@
 // Client-side DOCX export with translation injection.
 //
-// FRO-233: Export formats that preserve paragraph/heading structure from the
+// AQU-233: Export formats that preserve paragraph/heading structure from the
 // imported DOCX side-car. The server-side export route serves the raw DOCX
 // bytes for files with format="docx" (X-Export-Mode: raw-sidecar). The client
 // then uses JSZip to open the DOCX, substitutes translations paragraph-by-
@@ -14,7 +14,7 @@
 //   3. MIXED-FORMAT paragraphs (multiple differently-formatted runs) are
 //      collapsed to a single run carrying the dominant run's formatting.
 //
-// SWARM-TODO (FRO-233): Mixed-format paragraphs — a paragraph with e.g.
+// SWARM-TODO (AQU-233): Mixed-format paragraphs — a paragraph with e.g.
 //   "Hello <bold>world</bold> today" contains two differently-formatted runs.
 //   After injection the entire translated paragraph gets the first run's rPr,
 //   so the bold mid-paragraph emphasis is lost. Fixing this requires tracking a
@@ -25,7 +25,7 @@
 // What is NOT achievable in this slice:
 // - Mixed-format per-run preservation within a single translated paragraph
 //   (see SWARM-TODO above)
-// - PPTX (separate issue FRO-152a)
+// - PPTX (separate issue AQU-152a)
 // - Files > 512 KB at import time (no side-car stored; falls back to 501)
 //
 // HONESTY: this does not fully meet "export preserves formatting" for mixed
@@ -233,7 +233,7 @@ function extractDominantRpr(p: Element): Element | null {
  *   - <w:pPr> (paragraph/heading style, spacing, etc.)
  *   - The dominant run's <w:rPr> (bold, italic, font-size, font family, …)
  *
- * SWARM-TODO (FRO-233): For mixed-format paragraphs (multiple differently-
+ * SWARM-TODO (AQU-233): For mixed-format paragraphs (multiple differently-
  * formatted runs) the entire translated paragraph receives only the dominant
  * (first text-bearing) run's rPr. Per-run inline formatting for non-dominant
  * runs is not preserved. See file header for details.

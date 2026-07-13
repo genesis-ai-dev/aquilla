@@ -1,5 +1,5 @@
 /**
- * FRO-316: Spreadsheet parser for CSV and XLSX files.
+ * AQU-316: Spreadsheet parser for CSV and XLSX files.
  *
  * CSV: re-exports parseCsvRows from csv-bilingual (no dependency).
  * XLSX: zero-dependency approach — XLSX is a ZIP archive; we unzip using the
@@ -303,7 +303,7 @@ export async function parseXlsxToSheets(buffer: ArrayBuffer): Promise<Spreadshee
 // ─── Column mapping types ────────────────────────────────────────────────────
 
 /**
- * FRO-316: User-configured column mapping for a spreadsheet sheet.
+ * AQU-316: User-configured column mapping for a spreadsheet sheet.
  * `null` = "not mapped / ignore".
  */
 export interface ColumnMapping {
@@ -405,7 +405,7 @@ export function mappedRowsToStrings(rows: MappedRow[]): TranslatableString[] {
   }))
 }
 
-// ─── FRO-439: Cast-name / camera-angle splitter ──────────────────────────────
+// ─── AQU-439: Cast-name / camera-angle splitter ──────────────────────────────
 
 /**
  * Come and See encodes camera angle inside the character-label string:
@@ -456,7 +456,7 @@ export function splitCastName(raw: string): SplitCastName {
   return { voice, cameraState }
 }
 
-// ─── Cell-label template generation (FRO-314) ────────────────────────────────
+// ─── Cell-label template generation (AQU-314) ────────────────────────────────
 
 /**
  * Generate a downloadable CSV template for cell-label / cast import.
@@ -472,7 +472,7 @@ export function generateLabelTemplate(refs: string[]): string {
   return BOM + [header, ...rows].join("\r\n") + "\r\n"
 }
 
-// ─── Paired source+target import (FRO-315) ───────────────────────────────────
+// ─── Paired source+target import (AQU-315) ───────────────────────────────────
 
 /** Minimal source cell descriptor for matching (mirrors SourceCellRef from import.ts). */
 export interface MatchableSourceCell {

@@ -130,6 +130,39 @@ describe("events-emit", () => {
       expect(ev.payload.value).toBe("hello")
       expect(ev.payload.valueHtml).toBe("<p>hello</p>")
       expect(ev.payload.sourceEventId).toBe("src-event-1")
+      // AQU-538: no targetLang input → the field is OMITTED entirely, so
+      // default-lane events stay byte-identical to pre-lane events.
+      expect("targetLang" in ev.payload).toBe(false)
+    })
+
+    it("AQU-538: includes targetLang in the payload for a non-default lane", async () => {
+      await emitTargetCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        parentId: "src-head",
+        value: "bonjour",
+        targetLang: "fr",
+        author: "alice",
+      })
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"target.cell.commit">
+      expect(ev.payload.targetLang).toBe("fr")
+    })
+
+    it("AQU-538: an explicit empty-string targetLang is omitted (default lane)", async () => {
+      await emitTargetCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        parentId: "src-head",
+        value: "hallo",
+        targetLang: "",
+        author: "alice",
+      })
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"target.cell.commit">
+      expect("targetLang" in ev.payload).toBe(false)
     })
 
     it("accepts null parentId for first-ever commit (genesis-shape fallback)", async () => {

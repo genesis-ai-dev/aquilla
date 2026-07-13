@@ -59,7 +59,7 @@ export async function fetchStaleSourceCells(
 }
 
 /**
- * FRO-476: full response — staleCellIds + tombstonedCellIds + behindSeq.
+ * AQU-476: full response — staleCellIds + tombstonedCellIds + behindSeq.
  * `useStaleSourceCells` uses this to also expose the new fields; callers
  * that only need membership can keep using `fetchStaleSourceCells` above.
  */

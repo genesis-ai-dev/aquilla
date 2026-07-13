@@ -2,7 +2,7 @@ import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
- * FRO-326 — both halves of membership visibility:
+ * AQU-326 — both halves of membership visibility:
  *
  * A. Received invites: an email-targeted invite must be discoverable on the
  *    invitee's dashboard ("Pending invitations" card → /join/:token
@@ -42,7 +42,7 @@ test("targeted invite surfaces in bob's inbox; after accept, alice sees and revo
   await expect(inbox.getByText(name)).toBeVisible()
   await inbox.getByRole("link", { name: /Review & accept/i }).click()
 
-  // JoinPage confirmation (FRO-335) → explicit accept → workspace.
+  // JoinPage confirmation (AQU-335) → explicit accept → workspace.
   await bob.getByRole("button", { name: /Accept invitation/i }).click({ timeout: 10_000 })
   await bob.waitForURL(/\/project\//, { timeout: 15_000 })
 

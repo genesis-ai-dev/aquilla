@@ -7,7 +7,7 @@
 //   POST /api/v2/auth/register
 //   POST /api/v2/auth/token
 //   GET  /api/v2/auth/me
-//   PATCH /api/v2/auth/me      (preferences only; username/password blocked — FRO-436)
+//   PATCH /api/v2/auth/me      (preferences only; username/password blocked — AQU-436)
 //   GET  /api/v2/auth/activity-log
 //   POST /api/v2/auth/password-reset/request
 //   POST /api/v2/auth/password-reset/verify
@@ -170,7 +170,7 @@ app.route("/api/v2/orgs", orgsRoutes)
 app.route("/api/v2/admin", adminRoutes)
 // Project-settings + source-linking surfaces are mounted as siblings to
 // the main projects router so they live in their own files without colliding.
-// FRO-180: project-members revoke-all endpoint (new file, doesn't touch projects.ts).
+// AQU-180: project-members revoke-all endpoint (new file, doesn't touch projects.ts).
 app.route("/api/v2/projects", projectMembersRoutes)
 app.route("/api/v2/projects", projectSettingsRoutes)
 app.route("/api/v2/projects", sourceLinkingRoutes)

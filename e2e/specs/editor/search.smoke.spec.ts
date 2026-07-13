@@ -12,7 +12,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *
  * Tests:
  *  1. The panel opens via the dock rail Search tab → "Open full search panel".
- *     (FRO-308 replaced the old toolbar "Search & replace" button with a
+ *     (AQU-308 replaced the old toolbar "Search & replace" button with a
  *     Search tab in the left dock; the full ParallelPassagesPanel dialog now
  *     opens from the dock panel's "Open full search panel" button or ⌘F.)
  *  2. The search input accepts text and returns "No results" for a garbage query.

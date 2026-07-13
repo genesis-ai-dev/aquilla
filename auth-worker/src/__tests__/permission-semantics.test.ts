@@ -1,5 +1,5 @@
 /**
- * FRO-138: Permission Semantics — derived from code, locked in with tests.
+ * AQU-138: Permission Semantics — derived from code, locked in with tests.
  *
  * Covers the full access-control journey:
  *   sign-up → invite to org → grant project → create team → add project/users
@@ -29,7 +29,7 @@
  *   - maintainer(600)+ required to create/rename/delete groups and manage group membership
  *   - owner(700) required to add/remove org members
  *   - maintainer(600)+ required to create project (into a specific org)
- *   - project_lead(500)+ required to delete a file projection (raised from 400 by FRO-271)
+ *   - project_lead(500)+ required to delete a file projection (raised from 400 by AQU-271)
  *   - maintainer(600)+ required to set deadline
  *   - owner(700) required to archive / restore project
  */

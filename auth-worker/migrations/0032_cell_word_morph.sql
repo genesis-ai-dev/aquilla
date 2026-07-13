@@ -1,4 +1,4 @@
--- Migration 0032: add cell_word_morph table for Macula Hebrew + Greek import (FRO-178)
+-- Migration 0032: add cell_word_morph table for Macula Hebrew + Greek import (AQU-178)
 --
 -- Macula imports populate this table with per-word morphology: lemma, morph code,
 -- Strong's numbers. The workspace's lemma/morph hover popover reads from this table.

@@ -3,7 +3,7 @@
 //
 //   - by ref:   incoming rows carry canonical refs ("GEN 1:1") matched against
 //               the file's cells (CellData.group) — same mechanism as the
-//               eBible → target import (FRO-191).
+//               eBible → target import (AQU-191).
 //   - by order: Nth data row → Nth cell of the file. Fallback for spreadsheets
 //               with no ref column. The review screen shows the cell's source
 //               text beside each incoming row so misalignment is visible

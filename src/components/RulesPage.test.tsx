@@ -1,9 +1,9 @@
 /**
- * RulesPage.test.tsx — FRO-186 regression guard + FRO-291 delete-confirm guard.
+ * RulesPage.test.tsx — AQU-186 regression guard + AQU-291 delete-confirm guard.
  *
- * FRO-186: Verifies that the "Harmonize all (N)" trigger in BuiltinChecksList renders
+ * AQU-186: Verifies that the "Harmonize all (N)" trigger in BuiltinChecksList renders
  * with N > 0 when validated project cells contain real violations.
- * FRO-291: Verifies that rule delete is gated by checkbox-confirm dialog.
+ * AQU-291: Verifies that rule delete is gated by checkbox-confirm dialog.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -49,7 +49,7 @@ vi.mock("@/hooks/useLivingMemory", () => ({
 // Expose a project stub so useRules sees a real builtinRules array.
 // We use the real resolveBuiltinRules path, but short-circuit the hook's
 // refresh / patch helpers so they don't need IDB.
-// userRulesStub and deleteRuleMock are controllable per-test for FRO-291 tests.
+// userRulesStub and deleteRuleMock are controllable per-test for AQU-291 tests.
 let userRulesStub: TranslationRule[] = []
 const deleteRuleMock = vi.fn()
 vi.mock("@/hooks/useRules", async (importOriginal) => {
@@ -134,7 +134,7 @@ function renderRulesPage() {
 
 // ── tests ──────────────────────────────────────────────────────────────────
 
-describe("RulesPage infraction derivation (FRO-186)", () => {
+describe("RulesPage infraction derivation (AQU-186)", () => {
   beforeEach(async () => {
     cellsStub = []
     userRulesStub = []
@@ -188,7 +188,7 @@ describe("RulesPage infraction derivation (FRO-186)", () => {
   })
 })
 
-// ── FRO-291: rule delete confirmation guard ────────────────────────────────
+// ── AQU-291: rule delete confirmation guard ────────────────────────────────
 
 function makeUserRule(overrides: Partial<TranslationRule> = {}): TranslationRule {
   return {
@@ -202,7 +202,7 @@ function makeUserRule(overrides: Partial<TranslationRule> = {}): TranslationRule
   } as TranslationRule
 }
 
-describe("RulesPage rule delete confirm (FRO-291)", () => {
+describe("RulesPage rule delete confirm (AQU-291)", () => {
   beforeEach(async () => {
     cellsStub = []
     userRulesStub = []

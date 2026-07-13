@@ -229,7 +229,7 @@ describe("cqrs outbox", () => {
     expect(rows[0].status).toBe("pending") // still pending
   })
 
-  // FRO-274: quarantineOutboxEvents immediately sets status=failed without
+  // AQU-274: quarantineOutboxEvents immediately sets status=failed without
   // burning the full retry budget. peekOutboxBatch still returns the quarantined
   // record (inspector visibility); peekPendingOutboxBatch excludes it so the
   // flusher skips it.

@@ -1,8 +1,8 @@
-// FRO-268 — Characterization tests: originally frozen the OLD (wrong) behavior
-// where validationCount was ignored.  FRO-279 has landed: tests below now
+// AQU-268 — Characterization tests: originally frozen the OLD (wrong) behavior
+// where validationCount was ignored.  AQU-279 has landed: tests below now
 // assert the CORRECT threshold-aware behavior.
 //
-// Key fix (audit F-B1 → FRO-279):
+// Key fix (audit F-B1 → AQU-279):
 //   `project_settings.validationCount` is NOW read by sync-worker.  The
 //   `cells.validated` flag is set to 1 only when COUNT(*) >= validationCount in
 //   `cell_validators` for the current chain head.
@@ -14,7 +14,7 @@
 //     )
 //
 // Tests that previously pinned the wrong behavior are now updated (intentionally
-// flipped per FRO-279 scope).  Grep "CHARACTERIZATION (audit F-B1)" to find
+// flipped per AQU-279 scope).  Grep "CHARACTERIZATION (audit F-B1)" to find
 // every assertion that was updated.
 
 import { describe, it, expect, vi } from 'vitest'
@@ -142,7 +142,7 @@ async function validateAndRead(db: AquillaDb, validator: string, evtId: string) 
 
 // ── Core behavior: COUNT(*) >= validationCount threshold ────────────────────
 
-describe('FRO-279: cells.validated respects validationCount threshold', () => {
+describe('AQU-279: cells.validated respects validationCount threshold', () => {
   // N=1 (default): 1 endorsement → validated=1 (byte-identical to old behavior)
   it('cell becomes validated=1 after exactly one endorsement (no settings, default N=1)', async () => {
     const { db } = await makeTestDb()
@@ -153,7 +153,7 @@ describe('FRO-279: cells.validated respects validationCount threshold', () => {
     expect(Number(row?.validated)).toBe(1)
   })
 
-  // CHARACTERIZATION (audit F-B1) — FLIPPED by FRO-279:
+  // CHARACTERIZATION (audit F-B1) — FLIPPED by AQU-279:
   // Old: server ignored validationCount; 1 endorsement always flipped validated.
   // New: with validationCount=2, 1 endorsement must NOT flip validated.
   it('cell stays validated=0 after ONE endorsement when validationCount=2', async () => {
@@ -164,11 +164,11 @@ describe('FRO-279: cells.validated respects validationCount threshold', () => {
     // Only one validator endorses
     const row = await validateAndRead(db, 'bob', 'evt-char-val-count2-single')
 
-    // FRO-279: threshold=2, only 1 endorser → NOT validated yet.
+    // AQU-279: threshold=2, only 1 endorser → NOT validated yet.
     expect(Number(row?.validated)).toBe(0)
   })
 
-  // CHARACTERIZATION (audit F-B1) — FLIPPED by FRO-279:
+  // CHARACTERIZATION (audit F-B1) — FLIPPED by AQU-279:
   // Old: server ignored validationCount; 1 endorsement always flipped validated.
   // New: with validationCount=5, 1 endorsement must NOT flip validated.
   it('cell stays validated=0 after ONE endorsement when validationCount=5', async () => {
@@ -178,7 +178,7 @@ describe('FRO-279: cells.validated respects validationCount threshold', () => {
 
     const row = await validateAndRead(db, 'carol', 'evt-char-val-count5-single')
 
-    // FRO-279: threshold=5, only 1 endorser → NOT validated.
+    // AQU-279: threshold=5, only 1 endorser → NOT validated.
     expect(Number(row?.validated)).toBe(0)
   })
 
@@ -252,9 +252,9 @@ describe('FRO-279: cells.validated respects validationCount threshold', () => {
   })
 })
 
-// ── FRO-279: N=2 full workflow ────────────────────────────────────────────
+// ── AQU-279: N=2 full workflow ────────────────────────────────────────────
 
-describe('FRO-279: N=2 threshold — full validate/unvalidate lifecycle', () => {
+describe('AQU-279: N=2 threshold — full validate/unvalidate lifecycle', () => {
   it('1st endorsement does NOT flip validated; 2nd endorsement DOES flip it', async () => {
     const { db } = await makeTestDb()
     await seedFileAndCell(db, 'alice')

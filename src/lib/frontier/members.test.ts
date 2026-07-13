@@ -70,7 +70,7 @@ describe("listProjectMembers", () => {
   });
 });
 
-describe("fetchOrgMembersMatrix (FRO-218)", () => {
+describe("fetchOrgMembersMatrix (AQU-218)", () => {
   // The whole point of this endpoint is ONE request for the matrix instead of
   // one-per-project. Guard that the client issues a single org-scoped call and
   // keys the result by projectId for cell lookup.

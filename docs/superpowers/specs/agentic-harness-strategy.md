@@ -3,7 +3,7 @@
 Status: DRAFT v2 (adversarial design loop + 3 independent reviews, 2026-06-11)
 Owner: Ryder
 Inputs: AI chat feature investigation (2026-06-11), UX-JOURNEY-AUDIT-2026-06-10
-(F-B2, FRO-265), positioning per `src/pages/Homepage/Homepage.tsx` (the
+(F-B2, AQU-265), positioning per `src/pages/Homepage/Homepage.tsx` (the
 canonical POSITIONING.md is not committed to this repo — fix or re-point).
 
 ## 0. Verdict from the design loop
@@ -219,7 +219,7 @@ reusable for this.
 ### 5.3 Proposals, never writes — and who may Apply
 
 Write-shaped tools emit **proposal cards**; Apply routes through existing
-mutation paths — cell edits through the FRO-247 clock-fenced write path
+mutation paths — cell edits through the AQU-247 clock-fenced write path
 (`useCells` writeSeqRef — confirmed present), terminology through the
 Concept store, comments through the comments API.
 

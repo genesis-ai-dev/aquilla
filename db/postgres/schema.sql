@@ -124,7 +124,7 @@ CREATE TABLE projects (
     -- deliberate reactivation required to edit. DISTINCT from archived_at
     -- (Trash): inactive projects remain visible in the list but block edits.
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    -- FRO-476: link metadata (migration 0050). mode distinguishes a one-time
+    -- AQU-476: link metadata (migration 0050). mode distinguishes a one-time
     -- snapshot ('clone', detach-snapshot applied at birth) from a subscribed
     -- link ('live', mirror sync keeps it current). NULL = legacy/self-contained.
     source_link_mode     TEXT,
@@ -324,10 +324,10 @@ CREATE TABLE files (
     updated_at     BIGINT,
     meta           TEXT NOT NULL DEFAULT '{}',
     filled_count   INTEGER NOT NULL DEFAULT 0,
-    -- FRO-272: soft-delete tombstone. NULL = active; epoch-ms = tombstoned.
+    -- AQU-272: soft-delete tombstone. NULL = active; epoch-ms = tombstoned.
     -- Cells + audio retained; R2 wipe deferred (see migration 0036).
     deleted_at     BIGINT DEFAULT NULL,
-    -- FRO-292: target cells currently marked ai_drafted=1 (machine-drafted, not yet
+    -- AQU-292: target cells currently marked ai_drafted=1 (machine-drafted, not yet
     -- human-edited or validated). Recomputed by fileCountersRecomputeStmt on every
     -- target.cell.commit or cell.validate projection. Forward-only: 0 for all cells
     -- predating migration 0037.
@@ -352,7 +352,7 @@ CREATE TABLE cells (
     word_count        INTEGER NOT NULL DEFAULT 0,
     content_hash      TEXT,
     endorsement_count INTEGER NOT NULL DEFAULT 0,
-    -- FRO-292: 1 when this target cell was machine-drafted (ai_suggestion=true on the
+    -- AQU-292: 1 when this target cell was machine-drafted (ai_suggestion=true on the
     -- committing event) and has not yet been human-edited or validated. Cleared to 0
     -- by any subsequent human target.cell.commit or cell.validate. Forward-only:
     -- historical commits without the ai_suggestion field default to 0.
@@ -369,7 +369,7 @@ CREATE TABLE cells (
     -- future keys (gif/video/audio attachments, etc.) need no schema change.
     metadata          JSONB,
     source_location   TEXT,
-    -- FRO-476: mirror provenance (migration 0050). Set on a downstream's
+    -- AQU-476: mirror provenance (migration 0050). Set on a downstream's
     -- source-side row by source.cell.mirror — the upstream event id/seq this
     -- row currently reflects (monotonic apply-guard key, see link-sync.ts) and,
     -- if the upstream deleted the cell, when this row was tombstoned (never
@@ -377,9 +377,16 @@ CREATE TABLE cells (
     upstream_event_id TEXT,
     upstream_seq      BIGINT,
     tombstoned_at     BIGINT,
+    -- AQU-538: target-language lane (migration 0054). '' = the file's single
+    -- configured target language (every pre-lane row, and the default lane for
+    -- projects that never add a second language — N=1 back-compat). Source-side
+    -- rows are ALWAYS '' (the source is shared by all lanes; that is the point
+    -- of the TMS-style model). Non-'' lanes are BCP-47-ish tags chosen by the
+    -- add-a-language flow; the projection treats the value as opaque.
+    target_lang       TEXT NOT NULL DEFAULT '',
     -- Replaces SQLite FTS5. Maintained automatically; no triggers needed.
     value_tsv         tsvector GENERATED ALWAYS AS (to_tsvector('simple', value)) STORED,
-    PRIMARY KEY (project_id, file_id, cell_id, side)
+    PRIMARY KEY (project_id, file_id, cell_id, side, target_lang)
 );
 
 -- AQU-517: compact derived progress. One file row plus one row per meaningful
@@ -544,7 +551,7 @@ CREATE TABLE checkpoints (
     r2_key     TEXT NOT NULL
 );
 
--- Migration 0032: per-word morphology for Macula Hebrew + Greek (FRO-178)
+-- Migration 0032: per-word morphology for Macula Hebrew + Greek (AQU-178)
 CREATE TABLE cell_word_morph (
     project_id  TEXT NOT NULL,
     file_id     TEXT NOT NULL,
@@ -578,7 +585,7 @@ CREATE INDEX idx_cells_last_edit ON cells(project_id, file_id, side, last_edit_a
 CREATE INDEX idx_cells_pair_lookup ON cells(project_id, cell_id, side);
 CREATE INDEX idx_cells_source_basis ON cells(source_event_id);
 CREATE INDEX idx_cells_validated ON cells(project_id, file_id, side, validated);
--- FRO-476: mirror provenance lookup (only mirrored rows carry this).
+-- AQU-476: mirror provenance lookup (only mirrored rows carry this).
 CREATE INDEX idx_cells_upstream_event ON cells(upstream_event_id) WHERE upstream_event_id IS NOT NULL;
 -- FTS replacement: GIN over the generated tsvector.
 CREATE INDEX idx_cells_value_tsv ON cells USING GIN (value_tsv);
@@ -621,7 +628,7 @@ CREATE INDEX idx_projects_source_project ON projects(source_project_id) WHERE so
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_username ON users(username);
 
--- FRO-265: AI budget counters (0034_ai_usage_daily.sql)
+-- AQU-265: AI budget counters (0034_ai_usage_daily.sql)
 CREATE TABLE IF NOT EXISTS ai_usage_daily (
   user_id       INTEGER     NOT NULL,
   date_utc      DATE        NOT NULL,

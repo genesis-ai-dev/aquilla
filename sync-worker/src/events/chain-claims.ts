@@ -35,6 +35,33 @@ export function parentKeyOf(parentId: string | null | undefined): string {
   return parentId ?? GENESIS_PARENT_KEY
 }
 
+/**
+ * AQU-538 lanes: chain slots are per-LANE for non-default target lanes.
+ *
+ * Two lanes' first commits on the same cell both chain on the same source
+ * head (the first `target.cell.commit` uses the source row's event_id as its
+ * parent — see events-emit.ts), so without lane qualification the second
+ * lane would lose the (project, file, cell, parent) claim and its projection
+ * would be silently gated out.
+ *
+ * The default lane ('' / absent `targetLang`) keeps the EXACT legacy key so
+ * every historical claim row, replay, and pre-lane client stays
+ * byte-identical — including today's deliberate cross-side competition on a
+ * shared parent. `@lane:` cannot collide with an event-id prefix (ids are
+ * UUIDs) or with GENESIS_PARENT_KEY.
+ *
+ * The same composed key MUST be used by all three arbitration sites — the
+ * live claim (handlers/cell-events.ts), rebuild.ts's in-memory childKey, and
+ * isWinningChild's sibling filter — or replay diverges from live.
+ */
+export function laneQualifiedParentKey(
+  parentId: string | null | undefined,
+  targetLang: string | undefined,
+): string {
+  const base = parentKeyOf(parentId)
+  return targetLang ? `${base}@lane:${targetLang}` : base
+}
+
 /** One AD-2 chain slot: (project, file, cell, parent). */
 export interface ChainSlot {
   projectId: string

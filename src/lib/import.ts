@@ -63,7 +63,7 @@ export interface EBibleProgress {
 }
 
 // ---------------------------------------------------------------------------
-// eBible → target column (FRO-191)
+// eBible → target column (AQU-191)
 // ---------------------------------------------------------------------------
 
 /**
@@ -348,7 +348,7 @@ export interface ImportContext {
   /** Aborts the in-flight upload (dialog close / cancel). */
   signal?: AbortSignal
   /**
-   * FRO-287: Books (or files) the user chose to skip on collision.
+   * AQU-287: Books (or files) the user chose to skip on collision.
    * Keys are USFM bookCodes (uppercase, e.g. "GEN") for Paratext imports, or
    * normalised file names (lowercase trimmed) for single-file imports.
    * `importParatextProject`, `importParatextAsTarget`, and `importFile` all
@@ -395,7 +395,7 @@ export async function importFile(
     return { refs: [ref], speakerPairs: [] }
   }
 
-  // FRO-287: single-file skip — key is normalized file name (lowercase trimmed).
+  // AQU-287: single-file skip — key is normalized file name (lowercase trimmed).
   const fileNameKey = file.name.trim().toLowerCase()
   if (ctx.skipKeys?.has(fileNameKey)) {
     return { refs: [], speakerPairs: [] }
@@ -406,7 +406,7 @@ export async function importFile(
   const speakerPairs: { cellId: string; speaker: string | undefined }[] = []
 
   for (const result of results) {
-    // FRO-287: per-result skip — key is normalized display name (for USFM parsed
+    // AQU-287: per-result skip — key is normalized display name (for USFM parsed
     // results the name is the book display name; fall back to bookCode key too).
     const resultNameKey = result.name.trim().toLowerCase()
     const resultCodeKey = result.bookCode?.toUpperCase()
@@ -1164,7 +1164,7 @@ export interface ParatextBookPlan {
 
 /** A fully client-side-parsed Paratext project: everything the preview screen
  *  needs, and everything the commit phase uploads. Nothing has touched the
- *  network when this exists (FRO-310 preview-before-confirm). */
+ *  network when this exists (AQU-310 preview-before-confirm). */
 export interface ParatextPlan {
   project: ParatextProject
   books: ParatextBookPlan[]
@@ -1252,7 +1252,7 @@ export async function commitParatextProject(
       phase: "save", book: book.displayName, booksDone: done, booksTotal: total,
       cellsDone: cellsUploaded, cellsTotal,
     })
-    // FRO-287 / preview toggles: honour skip decisions.
+    // AQU-287 / preview toggles: honour skip decisions.
     if (isSkipped(book.bookId)) {
       skipped.push({ book: book.displayName, reason: "skipped by user" })
       done++
@@ -1334,7 +1334,7 @@ export async function importParatextAsTarget(
       phase: "save", book: bookPlan.displayName, booksDone: done, booksTotal: total,
       cellsDone: cellsUploaded, cellsTotal,
     })
-    // FRO-287 / preview toggles: honour skip decisions.
+    // AQU-287 / preview toggles: honour skip decisions.
     if (isSkipped(bookPlan.bookId)) {
       skipped.push({ book: bookPlan.displayName, reason: "skipped by user" })
       done++

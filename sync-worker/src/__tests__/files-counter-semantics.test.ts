@@ -1,4 +1,4 @@
-// FRO-268 — Characterization tests: freeze files.filled_count / approved_count
+// AQU-268 — Characterization tests: freeze files.filled_count / approved_count
 // counter semantics as of today so later counter changes are intentional.
 //
 // Covers (audit F-B1 / §3.5 §3.6):

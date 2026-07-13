@@ -280,7 +280,7 @@ export function CellTtsButton({
 
   // A3: when no audio exists the button will GENERATE (not play), so the label
   // must say so. "Hear translation" falsely implies existing audio is ready.
-  // FRO-360: name the ENGINE that will actually run, not just the voice —
+  // AQU-360: name the ENGINE that will actually run, not just the voice —
   // `provider` above is the same voice.provider ?? resolveTtsProvider(...)
   // resolution generateAndAttachCellVoice/synthesizeForCell use, so the label
   // can't drift from the real synthesis path.

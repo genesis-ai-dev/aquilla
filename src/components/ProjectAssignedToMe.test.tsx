@@ -1,4 +1,4 @@
-// FRO-192: ProjectAssignedToMe tests — pickup list rendering + jump.
+// AQU-192: ProjectAssignedToMe tests — pickup list rendering + jump.
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"

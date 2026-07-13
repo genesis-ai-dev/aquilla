@@ -26,7 +26,7 @@ export function MemberAccessRow({
   userId: number
   username: string
   /**
-   * FRO-427: The current user's org-level role. When provided, the "Revoke
+   * AQU-427: The current user's org-level role. When provided, the "Revoke
    * direct grant" button is disabled with an explanation for callers who lack
    * MAINTAINER (600) — instead of a silent no-op or a raw server 403. The
    * server requires MAINTAINER (600) to remove a project member
@@ -44,7 +44,7 @@ export function MemberAccessRow({
   const [error, setError] = useState<string | null>(null)
   const [revoking, setRevoking] = useState<string | null>(null)
 
-  // FRO-427: callers with role < MAINTAINER (600) cannot revoke direct grants
+  // AQU-427: callers with role < MAINTAINER (600) cannot revoke direct grants
   // (matches the server gate in projects.ts DELETE /members).
   const canRevoke =
     callerOrgRoleLevel == null ? true : callerOrgRoleLevel >= ROLE.MAINTAINER
@@ -158,7 +158,7 @@ function AccessProjectRow({
 }: {
   p: ProjectAccessBreakdown
   revoking: boolean
-  /** FRO-427: whether the current user may revoke direct grants. */
+  /** AQU-427: whether the current user may revoke direct grants. */
   canRevoke: boolean
   callerOrgRoleLevel: number | null
   onRevokeDirect: () => void

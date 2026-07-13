@@ -1,5 +1,5 @@
 /**
- * FRO-427 — Permission-denial affordance helpers.
+ * AQU-427 — Permission-denial affordance helpers.
  *
  * When a gated action fails, the user must see a human-readable explanation —
  * never a silent no-op. This module provides:

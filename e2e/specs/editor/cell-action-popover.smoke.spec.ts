@@ -10,7 +10,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 /**
  * Cell action rail — direct icon buttons (no ⋯ overflow popover).
  *
- * FRO-237: mic is a direct rail button (aria-label="Record audio").
+ * AQU-237: mic is a direct rail button (aria-label="Record audio").
  * Comments, TTS, and play-audio are also direct rail icons; the down-caret
  * opens the expanded row panel for lower-frequency actions.
  */

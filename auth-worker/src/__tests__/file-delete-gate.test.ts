@@ -1,10 +1,10 @@
 /**
- * FRO-271 — File-delete gate: raised from contributor(400) to project_lead(500).
+ * AQU-271 — File-delete gate: raised from contributor(400) to project_lead(500).
  *
  * Hard-deletes files rows and wipes all R2 audio; contributors must not be
  * able to destroy data they cannot recover.
  *
- * Characterization tests (flipping the FRO-268 pinned 400-level assumption):
+ * Characterization tests (flipping the AQU-268 pinned 400-level assumption):
  *   - contributor (400) → 403
  *   - project_lead (500) → 200 (no R2 in test env — DELETE completes against PG only)
  */
@@ -43,7 +43,7 @@ async function seedWorld() {
   ).run()
 }
 
-describe("FRO-271: file DELETE gate — project_lead(500)+ required", () => {
+describe("AQU-271: file DELETE gate — project_lead(500)+ required", () => {
   beforeEach(async () => {
     await seedWorld()
   })

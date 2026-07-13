@@ -1,4 +1,4 @@
-// FRO-478: linked-project creation flow tests.
+// AQU-478: linked-project creation flow tests.
 //
 // Verifies: picking the "Linked target" shape shows the upstream picker +
 // clone/live + consumes choice, and submitting calls createCloudProject →

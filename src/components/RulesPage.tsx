@@ -56,11 +56,11 @@ export function RulesPage() {
   const { userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(project, refresh, patchShared)
   const { cells: validatedCells } = useLivingMemory({ projectId: id ?? "" })
 
-  // FRO-291: pending delete confirmation state.
+  // AQU-291: pending delete confirmation state.
   const [pendingDeleteRuleId, setPendingDeleteRuleId] = useState<string | null>(null)
   const pendingDeleteRule = pendingDeleteRuleId ? userRules.find((r) => r.id === pendingDeleteRuleId) ?? null : null
 
-  // FRO-186: harmonize sweep panel state.
+  // AQU-186: harmonize sweep panel state.
   const [harmonizeRule, setHarmonizeRule] = useState<TranslationRule | null>(null)
   const [harmonizeProposal, setHarmonizeProposal] = useState<FixProposal | null>(null)
 
@@ -122,7 +122,7 @@ export function RulesPage() {
     setHarmonizeProposal(null)
   }
 
-  // FRO-186: derive per-cell infractions for builtin checks over the project
+  // AQU-186: derive per-cell infractions for builtin checks over the project
   // scope (all validated cells from useLivingMemory, up to MAX_FILES=40 files).
   // Scope rationale: FixReviewPanel's multi-cell harmonize sweep targets the
   // whole project, so infraction counts must be project-wide.
@@ -163,7 +163,7 @@ export function RulesPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* FRO-186: Harmonize sweep panel (multi-cell FixReviewPanel). */}
+      {/* AQU-186: Harmonize sweep panel (multi-cell FixReviewPanel). */}
       {harmonizeRule && harmonizeProposal && (
         <FixReviewPanel
           open={true}
@@ -288,7 +288,7 @@ export function RulesPage() {
         </Card>
       </main>
 
-      {/* FRO-291: checkbox-confirm before deleting a rule */}
+      {/* AQU-291: checkbox-confirm before deleting a rule */}
       <ConfirmActionDialog
         open={pendingDeleteRuleId !== null}
         onOpenChange={(v) => { if (!v) setPendingDeleteRuleId(null) }}

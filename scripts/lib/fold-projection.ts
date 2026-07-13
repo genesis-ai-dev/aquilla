@@ -20,7 +20,7 @@
 // or backtranslations — so cells/validators are only ever added or updated,
 // never removed. Any other kind throws (fail loud) rather than silently drop.
 
-import { contentHash, CHAIN_MUTATING_KINDS } from "../../sync-worker/src/events/event-projection"
+import { contentHash, CHAIN_MUTATING_KINDS, laneOfEvent } from "../../sync-worker/src/events/event-projection"
 
 export interface FoldEvent {
   id: string
@@ -48,10 +48,16 @@ function countWords(text: string): number {
   return t ? t.split(/\s+/).length : 0
 }
 
-const cellKey = (projectId: string, fileId: string, cellId: string, side: string) =>
-  `${projectId}\0${fileId}\0${cellId}\0${side}`
-const childKey = (e: FoldEvent) =>
-  `${e.projectId}\0${e.fileId ?? ""}\0${e.cellId ?? ""}\0${e.parentId ?? "<null>"}`
+const cellKey = (projectId: string, fileId: string, cellId: string, side: string, lane = "") =>
+  `${projectId}\0${fileId}\0${cellId}\0${side}\0${lane}`
+// AQU-538 lanes: the AD-2 slot is lane-qualified for non-default target lanes,
+// mirroring the live claim (chain-claims.ts laneQualifiedParentKey) and
+// isWinningChild. Default-lane events keep the legacy key byte-for-byte.
+const childKey = (e: FoldEvent) => {
+  const lane = laneOfEvent(e.kind, e.payload)
+  const laneSuffix = lane ? `@lane:${lane}` : ""
+  return `${e.projectId}\0${e.fileId ?? ""}\0${e.cellId ?? ""}\0${e.parentId ?? "<null>"}${laneSuffix}`
+}
 
 /**
  * Fold one project's events into final projection rows. Events may arrive in
@@ -131,6 +137,7 @@ function apply(e: FoldEvent, s: State): void {
         file_id: e.fileId,
         cell_id: cellId,
         side: "source",
+        target_lang: "",
         value,
         value_html: (p.valueHtml as string) ?? null,
         type: (p.type as string) ?? null,
@@ -156,7 +163,9 @@ function apply(e: FoldEvent, s: State): void {
     case "target.cell.commit": {
       if (!e.fileId || !e.cellId) throw new Error(`${e.kind} ${e.id} missing fileId/cellId`)
       const value = (p.value as string) ?? ""
-      const key = cellKey(e.projectId, e.fileId, e.cellId, "target")
+      // AQU-538: each target lane folds into its own row ('' = default lane).
+      const lane = laneOfEvent(e.kind, p)
+      const key = cellKey(e.projectId, e.fileId, e.cellId, "target", lane)
       const existing = s.cells.get(key)
       // UPSERT: first commit INSERTs the target row (start_ms/end_ms/type/etc.
       // default null since the client never emits target.cell.create); later
@@ -166,6 +175,7 @@ function apply(e: FoldEvent, s: State): void {
         file_id: e.fileId,
         cell_id: e.cellId,
         side: "target",
+        target_lang: lane,
         type: null,
         canonical_ref: null,
         anchor_cell_id: null,

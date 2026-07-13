@@ -10,7 +10,7 @@
  * linguistically meaningful, but Levenshtein on characters is deterministic,
  * dependency-free, and good enough for trend-over-time views.
  *
- * APPROXIMATION NOTE (FRO-311): true post-edit magnitude uses word-level
+ * APPROXIMATION NOTE (AQU-311): true post-edit magnitude uses word-level
  * HTER or TER. Character-level NED overestimates distance for languages with
  * rich morphology and underestimates for languages with long compound words.
  * This is a pragmatic first version; a word-level variant is left as

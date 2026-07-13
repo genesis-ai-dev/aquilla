@@ -1,5 +1,5 @@
 /**
- * FRO-277 — Persist partial-import report.
+ * AQU-277 — Persist partial-import report.
  *
  * WHY: When a Paratext import skips books (e.g. 16 of 66) the dialog used to
  * immediately call onImported + close, destroying the skip report before the
@@ -26,7 +26,7 @@ vi.mock("@/lib/import", () => ({
   importEBible: vi.fn(),
   importMacula: vi.fn(),
   importTranslationNotes: vi.fn(),
-  // FRO-310: ParatextChoice parses on mount (prepare) and uploads on confirm (commit).
+  // AQU-310: ParatextChoice parses on mount (prepare) and uploads on confirm (commit).
   prepareParatextProject: vi.fn(),
   commitParatextProject: vi.fn(),
   importParatextAsTarget: vi.fn(),
@@ -82,7 +82,7 @@ function setupParatextMocks(skipped: { book: string; reason: string }[]) {
   vi.mocked(detectParatextProject).mockReturnValue({
     sfmEntries: [{ name: "GEN.usfm", file: mockFile }],
   } as never)
-  // FRO-310: the preview screen renders from the prepared plan before any upload.
+  // AQU-310: the preview screen renders from the prepared plan before any upload.
   vi.mocked(prepareParatextProject).mockResolvedValue({
     project: { settings: { language: "hbo" }, bookNames: new Map(), books: [] },
     books: [
@@ -131,7 +131,7 @@ async function navigateToRunSource() {
   })
 }
 
-describe("FRO-277 — partial import holds dialog open", () => {
+describe("AQU-277 — partial import holds dialog open", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     // Stub clipboard
@@ -207,7 +207,7 @@ describe("FRO-277 — partial import holds dialog open", () => {
     expect(text).toContain("unrecognized book code RUT")
   })
 
-  it("FRO-310: preview gates the upload — commit fires only on confirm, with unchecked books excluded", async () => {
+  it("AQU-310: preview gates the upload — commit fires only on confirm, with unchecked books excluded", async () => {
     setupParatextMocks([])
     render(<ImportDialog {...baseProps} />)
 

@@ -13,7 +13,7 @@ interface FileActionMenuProps {
   onClose: () => void
   onRename: () => void
   onMove: () => void
-  /** FRO-271: Optional — only shown for project_lead+ (level >= 500). */
+  /** AQU-271: Optional — only shown for project_lead+ (level >= 500). */
   onDelete?: () => void
   /** Optional. Present only for file types we can export back to source
    *  format with round-trip fidelity (USFM today). */

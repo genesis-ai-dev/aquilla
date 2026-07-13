@@ -1,6 +1,6 @@
 // Phase 5 / AD-9. Fetches the set of cell ids whose source has advanced
 // since the translator's last commit (the AD-9 pointer-comparison query
-// run server-side). Extended FRO-476 §6/§7: also surfaces tombstoned cell
+// run server-side). Extended AQU-476 §6/§7: also surfaces tombstoned cell
 // ids + the link-level `behindSeq` probe, and fires the mirror sync
 // lazy-pull trigger (POST /link/sync, fire-and-forget) alongside the
 // stale-source fetch — the cheap place to catch a dormant live-linked
@@ -38,18 +38,18 @@ export interface UseStaleSourceCellsOptions {
 export interface UseStaleSourceCellsResult {
   /** Membership set of cell ids whose source has advanced since commit. */
   staleCellIds: ReadonlySet<string>
-  /** FRO-476: membership set of cell ids whose upstream source was deleted. */
+  /** AQU-476: membership set of cell ids whose upstream source was deleted. */
   tombstonedCellIds: ReadonlySet<string>
   /**
-   * FRO-477: membership set of cell ids whose ANCESTRY is stale (design
+   * AQU-477: membership set of cell ids whose ANCESTRY is stale (design
    * spec §6's inherited-staleness walk) — distinct from `staleCellIds`
    * (direct, single-hop). Renders as a second, visually distinct badge
    * tone in `StaleSourceIndicator`.
    */
   upstreamStaleCellIds: ReadonlySet<string>
-  /** FRO-476: link-level "you have unmirrored upstream changes" probe. */
+  /** AQU-476: link-level "you have unmirrored upstream changes" probe. */
   behindSeq: BehindSeq | null
-  /** FRO-477: link-level "an ancestor further upstream is behind ITS
+  /** AQU-477: link-level "an ancestor further upstream is behind ITS
    *  upstream" signal (§6 step 3) — banner-level, not per-cell. */
   ancestorBehind: boolean
   isLoading: boolean
@@ -63,16 +63,16 @@ export interface UseStaleSourceCellsResult {
   syncNow: () => Promise<void>
 }
 
-// SWARM-TODO(FRO-476): verify the lazy-pull trigger end to end — create
+// SWARM-TODO(AQU-476): verify the lazy-pull trigger end to end — create
 // project A (import a small USFM), create project B linked live to A via
 // POST /api/v2/projects/:B/link-source { sourceProjectId: A, mode: 'live' },
 // open a file in B in the app (or call useStaleSourceCells directly) and
 // confirm (via network tab / a DB read) that
 // POST /api/v1/projects/:B/link/sync fires and B's source cells populate.
 
-// SWARM-TODO(FRO-477): verify the target-consumption chain + inherited
+// SWARM-TODO(AQU-477): verify the target-consumption chain + inherited
 // staleness end to end in the real dev stack (no UI exists yet to CREATE
-// the link with consumes='target'/gate — use the API directly per FRO-476's
+// the link with consumes='target'/gate — use the API directly per AQU-476's
 // TODO above, extended one hop):
 //   1. Create project A (English) — import a small USFM/VTT with 2+ cells,
 //      at least one with startMs/endMs (a timed VTT cell) and a cast label
@@ -201,7 +201,7 @@ export function useStaleSourceCells(
       }
       tokenAttemptsRef.current = 0
       if (triggerSync) {
-        // FRO-476 §7: lazy-pull trigger — not awaited here (never delays the
+        // AQU-476 §7: lazy-pull trigger — not awaited here (never delays the
         // stale-source read below), but QA-BUG-3: schedule ONE delayed
         // re-fetch after it settles so the post-sync truth lands without a
         // manual reload (the read below can race the mirror commit and show
@@ -278,7 +278,7 @@ export function useStaleSourceCells(
     }
   }, [doFetch])
 
-  // QA-BUG-2 (FRO-479 push accelerator): awaitable "sync then revalidate".
+  // QA-BUG-2 (AQU-479 push accelerator): awaitable "sync then revalidate".
   // The `link.upstream-changed` push handler calls this instead of the
   // fire-and-forget path inside `doFetch` — it needs to know when the mirror
   // sync has actually landed so it can ALSO revalidate cells (the mirrored

@@ -129,11 +129,11 @@ interface TranslatedEditorProps {
    * Optional managed terminology concepts. When provided, active concepts are
    * highlighted with a tiny status-tinted chip at the top-right of each match.
    * Defaults to undefined (feature off) so other call sites are unaffected.
-   * Chip click exposes `data-source-term` for FRO-204 (TermLookupPopover).
+   * Chip click exposes `data-source-term` for AQU-204 (TermLookupPopover).
    */
   terminologyConcepts?: Concept[]
   /**
-   * FRO-204: Called when the user clicks a term chip in the editor.
+   * AQU-204: Called when the user clicks a term chip in the editor.
    * Receives the sourceTerm string and the chip DOM element as an anchor.
    * The caller is responsible for opening TermLookupPopover.
    */
@@ -145,13 +145,13 @@ interface TranslatedEditorProps {
   /** Called when the user hovers a rendered target footnote marker. */
   onFootnoteHover?: (index: number | null) => void
   /**
-   * FRO-297: Accessible label for the target editor textbox.
+   * AQU-297: Accessible label for the target editor textbox.
    * Should include the cell reference and validation state,
    * e.g. "GEN 1:1 — validated". Announced by screen readers.
    */
   ariaLabel?: string
   /**
-   * FRO-297: Called when the user presses Escape while editing.
+   * AQU-297: Called when the user presses Escape while editing.
    * The editor commits any pending changes (via blur) and signals
    * the parent to return focus to the grid row wrapper.
    */
@@ -312,7 +312,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     ],
     editorProps: {
       attributes: {
-        // FRO-297: expose explicit textbox role + accessible label so screen
+        // AQU-297: expose explicit textbox role + accessible label so screen
         // readers announce "GEN 1:1 — validated, editing" instead of the
         // generic ProseMirror contenteditable. aria-multiline signals that
         // Enter creates a new line, not submits (consistent with TipTap usage).
@@ -398,10 +398,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       // Cell navigation. Tab/Shift+Tab always step cells; Up/Down step cells
       // only at the first/last visual line so the caret can still move between
       // wrapped lines within a multi-line cell. Left/Right are untouched.
-      // FRO-297: Escape commits pending work (via blur) and signals the parent
+      // AQU-297: Escape commits pending work (via blur) and signals the parent
       // to return keyboard focus to the grid-row wrapper, exiting edit mode.
       handleKeyDown(view, event) {
-        // FRO-297: Esc — commit-and-exit back to grid focus.
+        // AQU-297: Esc — commit-and-exit back to grid focus.
         if (event.key === "Escape") {
           event.preventDefault()
           // Blur the editor — this triggers the onBlur commit path so any
@@ -636,7 +636,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   // hydrates as `-->`. Comparing editor.getText() against the raw `initialPlain`
   // would misread that load-time normalization as a user edit and emit a
   // phantom revision on the next blur, corrupting files just by opening them.
-  // Seed once per editor instance (one editor per cellId). (FRO-216)
+  // Seed once per editor instance (one editor per cellId). (AQU-216)
   const lastHydratedPlainRef = useRef(initialPlain)
   useEffect(() => {
     if (!editor) return
@@ -886,7 +886,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         onKeyDownCapture={handleEditorKeyDownCapture}
         onClick={(e) => {
           const target = e.target as HTMLElement
-          // FRO-204: term chip click → open TermLookupPopover via caller
+          // AQU-204: term chip click → open TermLookupPopover via caller
           if (onTermChipClick) {
             const chip = target.closest(".term-chip[data-source-term]")
             if (chip) {

@@ -1,4 +1,4 @@
-// FRO-346: POST /admin/projects/:projectId/member-removed — identity calls
+// AQU-346: POST /admin/projects/:projectId/member-removed — identity calls
 // this after deleting a project_members row so the live ProjectSync DO can
 // eject the removed user's sockets and denylist their still-valid tokens.
 //

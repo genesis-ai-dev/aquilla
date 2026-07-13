@@ -115,7 +115,7 @@ Contract wired exactly as Slice A specified:
   per file `fetchAllFileCells(side:"source")`, hashing each row's `value` with the shared
   `@/lib/dcs/content-hash` djb2 → `Map<cellId,{ eventId: row.eventId, contentHash, fileId }>` =
   the `CurrentCell` shape. Token minted via `buildFileScopedTokenFetcher` (project-scoped; any
-  fileId works for reads), same pattern as the FRO-478 Upstream-changes panel.
+  fileId works for reads), same pattern as the AQU-478 Upstream-changes panel.
 - Cursor advanced with `buildCursor(newEntry, cursor.trackMode)` and persisted via
   `useProjectSettings().patch({ dcsUpstream })`. `applyDelta` ctx = `{ repo: newEntry.fullName,
   sha: newEntry.commitSha }` — matches `import-dcs.ts`'s `dcsEventId(fullName, commitSha, cellId)`.

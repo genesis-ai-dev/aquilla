@@ -7,7 +7,7 @@ import {
   _resetDbForTesting, addSession, sessionKey,
 } from "@/lib/frontier/session-store"
 
-// useAccounts clears the React Query cache on account switch (FRO-212), so it
+// useAccounts clears the React Query cache on account switch (AQU-212), so it
 // needs a QueryClientProvider — same as the app root in main.tsx.
 const wrapper = ({ children }: { children: ReactNode }) => (
   <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>

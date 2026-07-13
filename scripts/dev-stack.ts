@@ -80,7 +80,7 @@ const DEFAULT_VITE_PORT = 5173
 // work end-to-end locally with a deterministic model.
 const MOCK_LLM_PORT = Number(process.env.DEV_STACK_MOCK_LLM_PORT) || 9456
 
-// D1→Neon migration (FRO-146): auth-worker + sync-worker bind HYPERDRIVE and
+// D1→Neon migration (AQU-146): auth-worker + sync-worker bind HYPERDRIVE and
 // swap AQUILLA_PG for a Postgres shim (see auth-worker/src/index.ts). Under
 // `wrangler dev --local`, Hyperdrive is emulated against a real Postgres given
 // by WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_<BINDING>. Without it the
@@ -481,6 +481,26 @@ async function reconcilePgSchema(
       patched.push(`added column ${name}.${col.name}`)
     }
   }
+  // AQU-538 (migration 0054): the cells PK gained the target_lang lane. The
+  // generic loop above adds the column, but a drifted container still carries
+  // the 4-column PK — and Postgres rejects `ON CONFLICT (…, target_lang)`
+  // without a matching unique constraint, 500-ing every commit. Rebuild the
+  // PK in place; all pre-lane rows carry '' so the 5-column key is trivially
+  // unique. Idempotent (skipped once target_lang is in the PK).
+  const { rows: pkCols } = await client.query(
+    `SELECT a.attname FROM pg_index i
+     JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+     WHERE i.indrelid = 'cells'::regclass AND i.indisprimary`,
+  )
+  if (!(pkCols as { attname: string }[]).some((r) => r.attname === "target_lang")) {
+    await run(
+      `ALTER TABLE cells DROP CONSTRAINT cells_pkey;
+       ALTER TABLE cells ADD PRIMARY KEY (project_id, file_id, cell_id, side, target_lang)`,
+      "rebuilding the cells primary key with target_lang (migration 0054)",
+    )
+    patched.push("rebuilt cells PK with target_lang")
+  }
+
   if (patched.length) {
     console.log(
       `[dev-stack] local Postgres schema patched from db/postgres/schema.sql: ${patched.join(", ")}`,
@@ -574,7 +594,7 @@ async function main(): Promise<void> {
     // list only carries the real company emails. The email step-up gate is
     // already bypassed under WRANGLER_LOCAL=1 (middleware/platform-admin.ts).
     // Mirrors e2e-up.ts, which allowlists alice@example.test the same way.
-    // FRO-346: SYNC_WORKER_URL + ENVIRONMENT used to be passed via `env:`
+    // AQU-346: SYNC_WORKER_URL + ENVIRONMENT used to be passed via `env:`
     // (process env) like WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE
     // above — but unlike that Hyperdrive var, these two ARE read from
     // `c.env` by application code (types.ts SYNC_WORKER_URL, ENVIRONMENT),

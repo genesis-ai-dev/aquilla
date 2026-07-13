@@ -11,7 +11,7 @@ export interface LookedUpUser {
 
 /**
  * Resolve a username to a user id. Trimmed, exact-match-first, then
- * unambiguous case-insensitive fallback (FRO-457 + hardening):
+ * unambiguous case-insensitive fallback (AQU-457 + hardening):
  *
  *   1. Trim, then try `WHERE username = ?` (exact). A hit is returned
  *      immediately — this alone fixes the original bug (a leading/trailing
@@ -84,7 +84,7 @@ export async function searchUsersByPrefix(
 }
 
 /**
- * FRO-321: Scoped prefix search — only surfaces users that share an org or
+ * AQU-321: Scoped prefix search — only surfaces users that share an org or
  * project with the caller. Out-of-scope exact-match lookup is handled
  * separately by lookupUserByUsername (which does not confirm-or-deny on miss).
  *

@@ -1,4 +1,4 @@
-// FRO-289: RLS backstop — shim identity threading + SQL helper tests.
+// AQU-289: RLS backstop — shim identity threading + SQL helper tests.
 //
 // What we test here:
 //   1. withUser() causes SET LOCAL app.user_id to be set per transaction —

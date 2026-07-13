@@ -1,5 +1,5 @@
 /**
- * FRO-316: Column mapping UI for spreadsheet imports.
+ * AQU-316: Column mapping UI for spreadsheet imports.
  *
  * Shown after the user selects a CSV or XLSX file. They choose:
  *   - which column is the source text (required)

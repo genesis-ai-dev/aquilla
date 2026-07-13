@@ -10,7 +10,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 /**
  * Living Memory — shell-owned navigation back to the editor.
  *
- * FRO-254 moved Living Memory inside the ProjectWorkspace shell
+ * AQU-254 moved Living Memory inside the ProjectWorkspace shell
  * (/project/:id/memory renders ProjectWorkspace with the memory surface in
  * the center). The page's own "Back to project" button was removed —
  * LivingMemoryPage.tsx: "no back button: shell owns nav". Navigation back to

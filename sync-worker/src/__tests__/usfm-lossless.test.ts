@@ -1,4 +1,4 @@
-// Unit tests for the sync-worker's usfm-lossless helpers (FRO-276).
+// Unit tests for the sync-worker's usfm-lossless helpers (AQU-276).
 // hasIntraVerseMarkers + countLossyVerses — mirrors src/lib/parsers/usfm-lossless.test.ts.
 import { describe, it, expect } from "vitest"
 import {
@@ -7,7 +7,7 @@ import {
   parseUsfmLossless,
 } from "../lib/usfm-lossless"
 
-describe("hasIntraVerseMarkers (FRO-276)", () => {
+describe("hasIntraVerseMarkers (AQU-276)", () => {
   it("returns false for plain prose verse text", () => {
     expect(hasIntraVerseMarkers("In the beginning God created the heavens and the earth.")).toBe(false)
     expect(hasIntraVerseMarkers("The earth was without form.\n")).toBe(false)
@@ -44,7 +44,7 @@ describe("hasIntraVerseMarkers (FRO-276)", () => {
   })
 })
 
-describe("countLossyVerses (FRO-276)", () => {
+describe("countLossyVerses (AQU-276)", () => {
   const footnoteUsfm = `\\id MAT
 \\c 1
 \\v 4 ...\\f + \\fr 1:4 \\ft (Ruth 4:19,20)\\f*

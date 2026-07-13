@@ -1,5 +1,5 @@
 /**
- * RuleEditor — plain-language inline rule editor (FRO-195).
+ * RuleEditor — plain-language inline rule editor (AQU-195).
  *
  * Used for BOTH create and edit. Renders inline inside RulesSurface (no dialog).
  * Features:

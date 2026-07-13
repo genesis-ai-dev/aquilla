@@ -1,4 +1,4 @@
-// Phase 2c-gamma → FRO-174 → FRO-211: useCompletion drives the LLM stream and
+// Phase 2c-gamma → AQU-174 → AQU-211: useCompletion drives the LLM stream and
 // reports per-cell completion status. Both single-cell and batch completions
 // auto-commit the generated text as an *unvalidated* cell; review happens
 // through the validation workflow (the gutter validation circle), not an inline
@@ -222,7 +222,7 @@ export function useCompletion(
         validated_pair_count: validatedPairs.length,
         rule_count: (rules ?? []).filter((r) => r.enabled).length,
       })
-      // FRO-211: auto-commit like the batch path. The cell lands unvalidated
+      // AQU-211: auto-commit like the batch path. The cell lands unvalidated
       // and flows through the validation workflow — no inline accept/reject.
       const llmAuthor = effectiveSettings.model || "frontier-default"
       await commitCompletedCell?.(cell, result, llmAuthor)
@@ -249,7 +249,7 @@ export function useCompletion(
   // missing/malformed in the response fall through to single-cell completion;
   // the batch as a whole does not fail.
   //
-  // FRO-235: Integrated with batch-completion progress store. The banner shows
+  // AQU-235: Integrated with batch-completion progress store. The banner shows
   // progress and exposes a Stop button. Abort semantics:
   //   - cancelBatchCompletion() sets the cancel flag AND calls AbortController.abort().
   //   - The driver checks isBatchCompletionCancelled() before each chunk.
@@ -273,7 +273,7 @@ export function useCompletion(
       max_cells_per_call: MAX_CELLS_PER_CALL,
     })
 
-    // FRO-235 fix: resetBatchCompletionState supersedes any live run (cancels it)
+    // AQU-235 fix: resetBatchCompletionState supersedes any live run (cancels it)
     // and returns a fresh run ID. Every flag check, increment, and the
     // finally-clear pass this ID so a stale run cannot affect us.
     const runId = resetBatchCompletionState(cells.length)
@@ -353,7 +353,7 @@ export function useCompletion(
           briefSummary,
         })
 
-        // FRO-361: a sub-batch call gets one retry before it's given up on.
+        // AQU-361: a sub-batch call gets one retry before it's given up on.
         // Most failures here are transient (timeout, 5xx, flaky network) and
         // a single retry clears the large majority without materially
         // slowing the run.
@@ -366,7 +366,7 @@ export function useCompletion(
               settings: effectiveSettings, session, messages,
               stream: true,
               onChunk: (full) => consumeFull(full),
-              // FRO-235 fix: getBatchCompletionSignal(runId) returns an
+              // AQU-235 fix: getBatchCompletionSignal(runId) returns an
               // already-aborted signal when this run has been superseded.
               signal: getBatchCompletionSignal(runId),
               // Model A/B: one batch request drafts every cell in the chunk; the
@@ -400,7 +400,7 @@ export function useCompletion(
         if (lastErr) {
           if (lastErr instanceof DOMException && lastErr.name === "AbortError") break
 
-          // FRO-361: sub-batch failed twice (original + one retry). Skip this
+          // AQU-361: sub-batch failed twice (original + one retry). Skip this
           // chunk — mark its still-uncommitted cells as errored — and CONTINUE
           // to the next chunk rather than abandoning the rest of the file.
           // The overall run reports the failure via the progress summary
@@ -423,7 +423,7 @@ export function useCompletion(
 
         consumeFull(result)
 
-        // FRO-235 fix: only commit and increment done when this run is still
+        // AQU-235 fix: only commit and increment done when this run is still
         // live. If superseded between the await and here, skip commits so the
         // cancelled run does not persist AI text or inflate run B's counter.
         if (isBatchCompletionCancelled(runId)) {
@@ -442,7 +442,7 @@ export function useCompletion(
             if (commitCompletedCell) {
               await commitCompletedCell(cell, text, llmAuthor)
             }
-            // FRO-235 fix: after await, re-check — another Start could have
+            // AQU-235 fix: after await, re-check — another Start could have
             // superseded us during the commit. If so, do not increment or clear.
             if (isBatchCompletionCancelled(runId)) {
               setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
@@ -455,7 +455,7 @@ export function useCompletion(
               }
               break
             }
-            // FRO-211: clear state once committed — no inline review step.
+            // AQU-211: clear state once committed — no inline review step.
             setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
             setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
             incrementBatchCompletionDone(runId)
@@ -492,7 +492,7 @@ export function useCompletion(
       if (!isBatchCompletionCancelled(runId)) {
         for (const cell of fallbackQueue) {
           if (isBatchCompletionCancelled(runId)) break
-          // FRO-235 fix: thread the batch signal into completeSingle so it is
+          // AQU-235 fix: thread the batch signal into completeSingle so it is
           // visible to Stop during a batch. getBatchCompletionSignal(runId)
           // returns an already-aborted signal if this run has been superseded.
           await completeSingle(cell, getBatchCompletionSignal(runId))
@@ -509,7 +509,7 @@ export function useCompletion(
         }
       }
     } finally {
-      // FRO-235 fix: clearBatchCompletionProgress(runId) is a no-op when runId
+      // AQU-235 fix: clearBatchCompletionProgress(runId) is a no-op when runId
       // !== _currentRunId — a finishing run A cannot null run B's banner.
       clearBatchCompletionProgress(runId)
       memMark(`completeBatch.end(${cells.length}c)`)

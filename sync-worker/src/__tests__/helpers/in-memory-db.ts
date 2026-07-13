@@ -93,6 +93,9 @@ export interface CellRow {
   file_id: string
   cell_id: string
   side: 'source' | 'target'
+  /** AQU-538: target-language lane. '' (or absent, for legacy fixtures) =
+   *  default lane; always ''/absent on source rows. */
+  target_lang?: string
   value: string
   value_html?: string | null
   type?: string | null
@@ -177,6 +180,11 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
     )
   }
 
+  /** AQU-538: '' and absent are the same (default) lane. */
+  function laneOf(c: CellRow): string {
+    return c.target_lang ?? ''
+  }
+
   /** Extract the quoted kinds from an `... AND kind IN ('a', 'b', ...) ...` clause. */
   function parseKindList(sql: string): Set<string> {
     const match = sql.match(/kind IN \(([^)]*)\)/)
@@ -220,9 +228,10 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
     // ── AD-2 first-child-of-parent lookup ───────────────────────────────
     // SQL filters by chain-mutating kinds (see event-projection.ts
     // CHAIN_MUTATING_KINDS). The fake extracts the kinds from the IN(...)
-    // clause to keep itself in sync with the source.
+    // clause to keep itself in sync with the source. AQU-538: the SELECT
+    // returns kind + payload so isWinningChild can lane-filter in JS.
     if (
-      /^SELECT id, server_seq FROM events WHERE project_id = \? AND file_id = \? AND cell_id = \? AND parent_id IS NULL AND kind IN \([^)]*\) ORDER BY server_seq ASC, id ASC LIMIT 1$/.test(
+      /^SELECT id, server_seq, kind, payload FROM events WHERE project_id = \? AND file_id = \? AND cell_id = \? AND parent_id IS NULL AND kind IN \([^)]*\) ORDER BY server_seq ASC, id ASC LIMIT 100$/.test(
         normalized,
       )
     ) {
@@ -230,13 +239,14 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       const fid = args[1] as string
       const cid = args[2] as string
       const kinds = parseKindList(normalized)
-      const matches = db.events
+      return db.events
         .filter((e) => e.project_id === pid && e.file_id === fid && e.cell_id === cid && e.parent_id === null && kinds.has(e.kind))
         .sort((a, b) => (a.server_seq - b.server_seq) || a.id.localeCompare(b.id))
-      return matches.length ? [{ id: matches[0].id, server_seq: matches[0].server_seq }] : []
+        .slice(0, 100)
+        .map((e) => ({ id: e.id, server_seq: e.server_seq, kind: e.kind, payload: e.payload }))
     }
     if (
-      /^SELECT id, server_seq FROM events WHERE project_id = \? AND file_id = \? AND cell_id = \? AND parent_id = \? AND kind IN \([^)]*\) ORDER BY server_seq ASC, id ASC LIMIT 1$/.test(
+      /^SELECT id, server_seq, kind, payload FROM events WHERE project_id = \? AND file_id = \? AND cell_id = \? AND parent_id = \? AND kind IN \([^)]*\) ORDER BY server_seq ASC, id ASC LIMIT 100$/.test(
         normalized,
       )
     ) {
@@ -245,10 +255,11 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       const cid = args[2] as string
       const parent = args[3] as string
       const kinds = parseKindList(normalized)
-      const matches = db.events
+      return db.events
         .filter((e) => e.project_id === pid && e.file_id === fid && e.cell_id === cid && e.parent_id === parent && kinds.has(e.kind))
         .sort((a, b) => (a.server_seq - b.server_seq) || a.id.localeCompare(b.id))
-      return matches.length ? [{ id: matches[0].id, server_seq: matches[0].server_seq }] : []
+        .slice(0, 100)
+        .map((e) => ({ id: e.id, server_seq: e.server_seq, kind: e.kind, payload: e.payload }))
     }
 
     // ── Idempotency probe: existing event row ───────────────────────────
@@ -590,7 +601,7 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
     // timecode-aware and older column lists. The hasTimecodes check below conditionally
     // includes start_ms/end_ms in the returned rows.
     if (
-      /^SELECT cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, endorsement_count/.test(
+      /^SELECT cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, endorsement_count/.test(
         normalized,
       )
     ) {
@@ -621,6 +632,7 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
         .map((c) => ({
           cell_id: c.cell_id,
           side: c.side,
+          target_lang: laneOf(c),
           value: c.value,
           value_html: c.value_html ?? null,
           type: c.type ?? null,
@@ -660,14 +672,17 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       return []
     }
 
-    // ── Single-cell DELETE scoped by side (event-projection *.cell.delete) ─
-    if (/^DELETE FROM cells WHERE project_id = \? AND file_id = \? AND cell_id = \? AND side = \?$/.test(normalized)) {
+    // ── Single-cell DELETE scoped by side + lane (event-projection *.cell.delete) ─
+    // AQU-538: the delete targets one (side, target_lang) row; the optional
+    // chain-claims EXISTS gate is ignored (claim treated as held).
+    if (/^DELETE FROM cells WHERE project_id = \? AND file_id = \? AND cell_id = \? AND side = \? AND target_lang = \?/.test(normalized)) {
       const pid = args[0] as string
       const fid = args[1] as string
       const cid = args[2] as string
       const side = args[3] as string
+      const lane = args[4] as string
       db.cells = db.cells.filter(
-        (c) => !(c.project_id === pid && c.file_id === fid && c.cell_id === cid && c.side === side),
+        (c) => !(c.project_id === pid && c.file_id === fid && c.cell_id === cid && c.side === side && laneOf(c) === lane),
       )
       return []
     }
@@ -741,27 +756,36 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       return []
     }
 
-    // ── INSERT cells (target.cell.commit UPSERT — literal 'target' in VALUES) ─
-    // Bind order: 0=project_id, 1=file_id, 2=cell_id, 3=value, 4=value_html,
-    //             5=event_id, 6=source_event_id, 7=last_editor, 8=last_edit_at,
-    //             9=word_count, 10=content_hash
-    if (/^INSERT INTO cells \(\s*project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash\s*\) VALUES \(\?, \?, \?, 'target',/.test(
+    // ── INSERT cells (target.cell.commit UPSERT — literal 'target', lane bind) ─
+    // Production shape (event-projection.ts commit case): INSERT … SELECT with
+    // an optional chain-claims EXISTS gate. The fake ignores the gate (treats
+    // the claim as held — same as it always has).
+    // Bind order: 0=project_id, 1=file_id, 2=cell_id, 3=target_lang, 4=value,
+    //             5=value_html, 6=event_id, 7=source_event_id, 8=last_editor,
+    //             9=last_edit_at, 10=word_count, 11=content_hash, 12=ai_drafted
+    if (/^INSERT INTO cells \(\s*project_id, file_id, cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash, ai_drafted\s*\) SELECT \?, \?, \?, 'target', \?,/.test(
       normalized,
     )) {
       const projectId = args[0] as string
       const fileId = args[1] as string
       const cellId = args[2] as string
-      const value = args[3] as string
-      const valueHtml = args[4] as string | null
-      const eventId = args[5] as string
-      const sourceEventId = args[6] as string | null
-      const lastEditor = args[7] as string | null
-      const lastEditAt = args[8] as number
-      const wordCount = args[9] as number
-      const contentHash = args[10] as string | null
+      const lane = args[3] as string
+      const value = args[4] as string
+      const valueHtml = args[5] as string | null
+      const eventId = args[6] as string
+      const sourceEventId = args[7] as string | null
+      const lastEditor = args[8] as string | null
+      const lastEditAt = args[9] as number
+      const wordCount = args[10] as number
+      const contentHash = args[11] as string | null
 
       const existing = db.cells.find(
-        (c) => c.project_id === projectId && c.file_id === fileId && c.cell_id === cellId && c.side === 'target',
+        (c) =>
+          c.project_id === projectId &&
+          c.file_id === fileId &&
+          c.cell_id === cellId &&
+          c.side === 'target' &&
+          laneOf(c) === lane,
       )
       if (!existing) {
         db.cells.push({
@@ -769,6 +793,7 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
           file_id: fileId,
           cell_id: cellId,
           side: 'target',
+          target_lang: lane,
           value,
           value_html: valueHtml,
           type: null,
@@ -800,31 +825,44 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
     // Prefix-match intentional: the production query always appends start_ms, end_ms after
     // content_hash, so matching only through content_hash lets this handler cover both
     // the timecode-carrying (new) and legacy (old) column lists without forking.
-    if (/^INSERT INTO cells \(\s*project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash/.test(
+    // AQU-538: target_lang sits between side and value. It is a bind on the
+    // per-event create path (`SELECT ?, ?, ?, ?, ?, …`) and a literal '' on the
+    // bulk-import fast path (`VALUES (?, ?, ?, ?, '', …`, source-only).
+    if (/^INSERT INTO cells \(\s*project_id, file_id, cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash/.test(
       normalized,
     )) {
       const hasTimecodes = normalized.includes('start_ms') && normalized.includes('end_ms')
+      const laneIsLiteral = /\(\?, \?, \?, \?, '',/.test(normalized)
+      // Bind index of `value`; everything after shifts with it.
+      const v = laneIsLiteral ? 4 : 5
       const row: CellRow = {
         project_id: args[0] as string,
         file_id: args[1] as string,
         cell_id: args[2] as string,
         side: args[3] as 'source' | 'target',
-        value: args[4] as string,
-        value_html: args[5] as string | null,
-        type: args[6] as string | null,
-        canonical_ref: args[7] as string | null,
-        anchor_cell_id: args[8] as string | null,
-        event_id: args[9] as string,
+        target_lang: laneIsLiteral ? '' : (args[4] as string),
+        value: args[v] as string,
+        value_html: args[v + 1] as string | null,
+        type: args[v + 2] as string | null,
+        canonical_ref: args[v + 3] as string | null,
+        anchor_cell_id: args[v + 4] as string | null,
+        event_id: args[v + 5] as string,
         source_event_id: null,
-        last_editor: args[10] as string | null,
-        last_edit_at: args[11] as number,
+        last_editor: args[v + 6] as string | null,
+        last_edit_at: args[v + 7] as number,
         validated: 0,
-        word_count: args[12] as number,
-        content_hash: args[13] as string | null,
-        start_ms: hasTimecodes ? (args[14] as number | null) : null,
-        end_ms: hasTimecodes ? (args[15] as number | null) : null,
+        word_count: args[v + 8] as number,
+        content_hash: args[v + 9] as string | null,
+        start_ms: hasTimecodes ? (args[v + 10] as number | null) : null,
+        end_ms: hasTimecodes ? (args[v + 11] as number | null) : null,
       }
-      const existing = findCell(row.project_id, row.file_id, row.cell_id)
+      const existing = db.cells.find(
+        (c) =>
+          c.project_id === row.project_id &&
+          c.file_id === row.file_id &&
+          c.cell_id === row.cell_id &&
+          laneOf(c) === laneOf(row),
+      )
       if (!existing) {
         db.cells.push(row)
       } else {
@@ -912,7 +950,8 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
     }
 
     // ── UPDATE cells (reorder) ──────────────────────────────────────────
-    if (/^UPDATE cells SET anchor_cell_id = \?, event_id = \?, last_editor = \?, last_edit_at = \? WHERE project_id = \? AND file_id = \? AND cell_id = \?$/.test(
+    // AQU-538: side + lane scoped; the optional chain-claims gate is ignored.
+    if (/^UPDATE cells SET anchor_cell_id = \?, event_id = \?, last_editor = \?, last_edit_at = \? WHERE project_id = \? AND file_id = \? AND cell_id = \? AND side = \? AND target_lang = \?/.test(
       normalized,
     )) {
       const anchor = args[0] as string | null
@@ -922,7 +961,11 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       const projectId = args[4] as string
       const fileId = args[5] as string
       const cellId = args[6] as string
-      const cell = findCell(projectId, fileId, cellId)
+      const side = args[7] as string
+      const lane = args[8] as string
+      const cell = db.cells.find(
+        (c) => c.project_id === projectId && c.file_id === fileId && c.cell_id === cellId && c.side === side && laneOf(c) === lane,
+      )
       if (cell) {
         cell.anchor_cell_id = anchor
         cell.event_id = eventId

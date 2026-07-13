@@ -39,7 +39,7 @@ async function makeAuthedPage(
       }
     }, ownOrg.id)
   }
-  // RootRedirect (FRO-172) hard-replaces "/" with /homepage when the aq_hint
+  // RootRedirect (AQU-172) hard-replaces "/" with /homepage when the aq_hint
   // cookie is absent — always true for a fresh context — and that document
   // navigation destroys injectSession's evaluate mid-flight ("Execution
   // context was destroyed"). Pre-set the hint cookie so the SPA stays on "/"
@@ -47,7 +47,7 @@ async function makeAuthedPage(
   await ctx.addCookies([
     { name: "aq_hint", value: "1", url: baseURL ?? "http://127.0.0.1:5173" },
   ])
-  // FRO-244: the "Project setup" checklist auto-opens as a modal sheet on the
+  // AQU-244: the "Project setup" checklist auto-opens as a modal sheet on the
   // first workspace visit to any incomplete project, making the page inert.
   // Its localStorage key is per-project (codex.setupAutoShown.<id>) so it
   // can't be pre-seeded for projects a test creates later — patch getItem at

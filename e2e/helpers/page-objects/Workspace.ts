@@ -9,7 +9,7 @@ export class Workspace {
   }
 
   async importFile(filePath: string): Promise<void> {
-    // FRO-244 auto-opens the "Project setup" checklist sheet once per fresh
+    // AQU-244 auto-opens the "Project setup" checklist sheet once per fresh
     // project, and the modal sheet intercepts workspace clicks. Pre-mark it
     // as already-shown for this project, then dismiss it if it beat us to it.
     const projectId = this.page.url().match(/\/project\/([^/?#]+)/)?.[1]
@@ -42,7 +42,7 @@ export class Workspace {
     const chooseFilesBtn = this.page.getByRole("button", { name: /Choose Files/i })
     await expect(chooseFilesBtn).toBeVisible({ timeout: 5_000 })
     await chooseFilesBtn.locator('input[type="file"]').setInputFiles(filePath)
-    // FRO-310: selecting a file now lands on a Preview panel (parsed cells +
+    // AQU-310: selecting a file now lands on a Preview panel (parsed cells +
     // counts) instead of starting the upload immediately. Confirm it to kick
     // off the actual bulk upload.
     const confirmBtn = this.page.getByRole("button", { name: /Confirm import/i })
@@ -196,7 +196,7 @@ export class Workspace {
     await moreBtn.click()
   }
 
-  /** FRO-331: view settings live in the header overflow menu. */
+  /** AQU-331: view settings live in the header overflow menu. */
   async openViewSettingsMenu(): Promise<void> {
     await this.openHeaderOverflowMenu()
     await this.page.getByRole("menuitem", { name: /View settings/i }).click()
@@ -211,7 +211,7 @@ export class Workspace {
     await this.page.getByRole("menuitem", { name: /^Export$/i }).click()
   }
 
-  /** FRO-331: next unfinished lives in the header overflow menu. */
+  /** AQU-331: next unfinished lives in the header overflow menu. */
   async jumpNextUnfinished(): Promise<void> {
     await this.openHeaderOverflowMenu()
     await this.page.getByRole("menuitem", { name: /Next unfinished/i }).click()

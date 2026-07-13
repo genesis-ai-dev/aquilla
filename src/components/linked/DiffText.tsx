@@ -1,4 +1,4 @@
-// Inline old→new word diff for a review-panel cell (FRO-478).
+// Inline old→new word diff for a review-panel cell (AQU-478).
 
 import { wordDiff } from "@/lib/text/word-diff"
 

@@ -11,7 +11,7 @@
 //      source event_id pointer; after detach the local source IS the upstream
 //      snapshot, so the pointer matches and all markers clear naturally.
 //
-// FRO-478: extended to also display the link's mode/consumes/gate/cursor
+// AQU-478: extended to also display the link's mode/consumes/gate/cursor
 // state (read-only — creation/mode are set at link time, not editable here).
 // Detach itself is unchanged.
 
@@ -37,8 +37,8 @@ export interface SourceLinkSectionProps {
   projectId: string
   /** Upstream source project id — only show when non-null. */
   sourceProjectId: string
-  /** FRO-476/478: link mode — 'clone' | 'live'. Null/undefined ⇒ legacy link
-   *  (pre-FRO-476) or unknown — rendered as "live" per the server's own
+  /** AQU-476/478: link mode — 'clone' | 'live'. Null/undefined ⇒ legacy link
+   *  (pre-AQU-476) or unknown — rendered as "live" per the server's own
    *  default-to-live-behavior fallback (COALESCE reasoning in stale-source-route.ts). */
   sourceLinkMode?: "clone" | "live" | null
   sourceLinkConsumes?: "source" | "target" | null
@@ -126,7 +126,7 @@ export function SourceLinkSection({
               {sourceProjectId}
             </code>
           </div>
-          {/* FRO-478: mode/consumes/gate/cursor state, read-only — set at
+          {/* AQU-478: mode/consumes/gate/cursor state, read-only — set at
               link/creation time, not editable from here. */}
           <div className="flex flex-wrap items-center gap-1.5 text-xs">
             <Badge variant={sourceLinkMode === "clone" ? "secondary" : "default"}>

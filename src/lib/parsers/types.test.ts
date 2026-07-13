@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { projectHasScriptureFiles, resolveBibleResourcesEnabled, type FileType } from "./types"
 
-// FRO-460 derive-on-read: the effective Bible-resources value must never be
+// AQU-460 derive-on-read: the effective Bible-resources value must never be
 // computed by writing a default on load. These tests encode the trust
 // invariant the redesign exists for — an explicit OFF is respected even for
 // a scripture project — plus the plain default-on-for-scripture behavior.

@@ -10,7 +10,7 @@
 // orphans the cells write). Per repro: scripts/usfm-e2e-batch.ts at
 // CONCURRENCY=4 failed 56/276; at CONCURRENCY=1 it passed 276/276.
 //
-// FRO-135 regression: after the D1→Postgres migration the import path must
+// AQU-135 regression: after the D1→Postgres migration the import path must
 // actually land cells in the `cells` projection table (not just the events
 // table). The DB write-path uses Postgres syntax throughout (ON CONFLICT,
 // extract(epoch from now()), $1 placeholders via the shim) — these tests
@@ -200,12 +200,12 @@ describe('POST /import — server_seq is race-safe', () => {
   })
 })
 
-// FRO-135: after D1→Postgres migration, cells must actually land in the
+// AQU-135: after D1→Postgres migration, cells must actually land in the
 // projection table, not just the events log. Progress advances past 0% only
 // when the server confirms accepted > 0; the response "accepted" count must
 // match the actual rows in `cells`. This verifies the full write path on
 // PGlite (real Postgres engine) — an SQLite-ism in the SQL would fail here.
-describe('POST /import — cells land in Postgres projection (FRO-135)', () => {
+describe('POST /import — cells land in Postgres projection (AQU-135)', () => {
   it('file.create → files row created; source.cell.create → cells rows created', async () => {
     const token = await leadToken()
     const { db, rows } = await makeTestDb()
@@ -222,7 +222,7 @@ describe('POST /import — cells land in Postgres projection (FRO-135)', () => {
     // Server reports accepted = cell count (not counting file.create).
     expect(body.accepted).toBe(CELL_COUNT)
 
-    // FRO-135 guard: cells must exist in the projection table.
+    // AQU-135 guard: cells must exist in the projection table.
     // On SQLite-ism bugs (e.g. wrong ON CONFLICT syntax, bad placeholders)
     // the DB write fails and this assertion would catch it.
     const cellRows = await rows('cells')
@@ -232,7 +232,7 @@ describe('POST /import — cells land in Postgres projection (FRO-135)', () => {
     expect(cellRows.every((c: any) => c.file_id === FILE_ID)).toBe(true)
 
     // files row must exist with accurate cell_count (deferred recompute runs
-    // once at the end of the batch — FRO-135 fix).
+    // once at the end of the batch — AQU-135 fix).
     const fileRows = await rows('files')
     expect(fileRows).toHaveLength(1)
     expect(fileRows[0]).toMatchObject({
@@ -246,7 +246,7 @@ describe('POST /import — cells land in Postgres projection (FRO-135)', () => {
     // BATCH_LIMIT = 100; each cell produces 2 stmts (event + cells INSERT);
     // file.create adds 2 more; the deferred counter recompute adds 1 trailing stmt.
     // A batch of 60 cells = 2 + 120 + 1 = 123 stmts, spanning 2 db.batch() calls.
-    // Guards that multi-batch imports don't stall at 0% (FRO-135).
+    // Guards that multi-batch imports don't stall at 0% (AQU-135).
     const token = await leadToken()
     const { db, rows } = await makeTestDb()
 

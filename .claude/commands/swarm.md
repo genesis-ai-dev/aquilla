@@ -18,9 +18,12 @@ success state. **Do not manufacture work.**
 
 ## Constants
 
-- Linear team: `FrontierR&D` (id `de0f5d29-418f-4f62-ade7-02f77974c598`)
+- Linear team: `Aquilla` (id `de0f5d29-418f-4f62-ade7-02f77974c598`)
 - Per-issue lifecycle: `.claude/commands/issue.md` — the contract every agent follows.
-- Status pipeline: `Backlog → Todo → Dispatched → Fixed → Ready for Review → Ready for QA` *(terminal)*.
+- Status pipeline: `Triage → Backlog → Todo → Dispatched → Fixed → Ready for Review → Ready for QA` *(terminal)*.
+  - **`Triage`** (id `086173c5-e3e4-4f37-93d5-ae2f069ab6a6`) = the **human / HITL queue** (decisions,
+    reviews, human-implementation, un-vetted issues). **The swarm never touches it** — intake is `Todo` only.
+  - **`Todo`** (id `a3c6383f-3893-4691-a75a-b4add1ff1ce1`) = agent-ready (AFK), the swarm's only intake.
   - **`Dispatched`** (id `539bcf69-8c7a-4282-93d0-5631430b66ed`) = "Dev/AI has begun work; if it
     stalls it may be eligible to be picked up again." It is the swarm's **claim/lock**: an issue in
     `Dispatched` is owned by a live agent and MUST NOT be picked up by another agent or a `/swarm` re-run.
@@ -40,19 +43,27 @@ success state. **Do not manufacture work.**
 
 ## Step 0 — Resolve the project
 
-1. `list_projects` (team FrontierR&D). Fuzzy-match `$ARGUMENTS` (minus flags) against project
+1. `list_projects` (team Aquilla). Fuzzy-match `$ARGUMENTS` (minus flags) against project
    names. If exactly one matches, use it. If several, **ask which one** — never guess.
 2. Record the project id + name. Announce: *"Swarming project **<name>** (id …)."*
 
 ## Step 1 — Build the backlog
 
-1. `list_issues` for the project. Eligible = status `Backlog` or `Todo` and **not**
-   `Done`/`Canceled`/`Duplicate`/`Fixed`/`Ready for Review`/`Ready for QA`.
-   **Treat `Dispatched` issues as already-claimed locks — skip them** (another live agent or a
-   concurrent `/swarm` owns them). If a `Dispatched` issue is clearly **stale** (no live agent this
-   session, no recent activity), it is eligible to be reclaimed: revert it to `Todo` first (record why
-   in §M), then treat it as normal `Todo`.
-2. For each, capture: FRO-###, title, priority, estimate, the rough surface/files it touches
+1. `list_issues` for the project. **Eligible = status `Todo` only** (`a3c6383f-3893-4691-a75a-b4add1ff1ce1`) —
+   this is the agent-ready (AFK) queue and the swarm's sole intake (see `AGENTS.md` → "Agent-ready vs.
+   human-in-the-loop").
+   - **NEVER touch `Triage`** (`086173c5-…`). That is the human / HITL queue — decisions, reviews, and
+     human-implementation work live there and are out of scope for the swarm. Do not pick up, decompose,
+     or re-status a Triage issue. If a `Todo` issue turns out to actually need a human decision, move it
+     **back to `Triage`** (record why in §M) rather than swarming it.
+   - **`Backlog` is not eligible** — it is agent-ready-but-deferred. If the maintainer wants Backlog work
+     drained, they promote it to `Todo` first. (Note this in the report if the queue looks thin because
+     work is parked in Backlog.)
+   - **Treat `Dispatched` issues as already-claimed locks — skip them** (another live agent or a
+     concurrent `/swarm` owns them). If a `Dispatched` issue is clearly **stale** (no live agent this
+     session, no recent activity), it is eligible to be reclaimed: revert it to `Todo` first (record why
+     in §M), then treat it as normal `Todo`.
+2. For each, capture: AQU-###, title, priority, estimate, the rough surface/files it touches
    (skim the description), and any `blocked-by`/parent relations.
 3. **Exclude and record why** (in §EXCLUDED of ORCHESTRATION.md): issues whose primary file is
    **dirty in main right now** (run `git status` — these are another actor's in-flight work and
@@ -129,13 +140,13 @@ success, per `/issue`.)
 
 Per-agent worktree:
 ```bash
-git worktree add -b swarm/fro-### "$ROOT/.worktrees/fro-###" swarm/<project-slug>-integration
-ln -sfn "$ROOT/node_modules" "$ROOT/.worktrees/fro-###/node_modules"
+git worktree add -b swarm/aqu-### "$ROOT/.worktrees/aqu-###" swarm/<project-slug>-integration
+ln -sfn "$ROOT/node_modules" "$ROOT/.worktrees/aqu-###/node_modules"
 ```
 
 **Each brief MUST be fully self-contained** (the agent has no memory of this conversation) and include:
 - **Worktree path** (work ONLY here; `cd` here first) and its branch.
-- **The task = run the `/issue` lifecycle for FRO-###**: read `.claude/commands/issue.md` and follow it
+- **The task = run the `/issue` lifecycle for AQU-###**: read `.claude/commands/issue.md` and follow it
   for this issue. The orchestrator has already moved it to **`Dispatched`** and assigned it to you — do
   not re-claim; just restate repro/acceptance, fix surgically (systematic-debugging for bugs /
   brainstorming for improvements), verify, reconcile the spec (Step 2.5), then move the issue
@@ -144,7 +155,7 @@ ln -sfn "$ROOT/node_modules" "$ROOT/.worktrees/fro-###/node_modules"
 - **Files you OWN** (the issue's surface) and **FORBIDDEN files** (every other wave member's surface +
   recorded protected paths) — explicit lists.
 - **Verify before committing:** `npx tsc -b --noEmit` → 0; `npx vitest run` → green incl. new tests
-  (+ sync-worker tsc/test if touched). Then `git add -A && git commit -m "FRO-###: …"`.
+  (+ sync-worker tsc/test if touched). Then `git add -A && git commit -m "AQU-###: …"`.
 - **Hard limits:** do NOT push, do NOT deploy, do NOT promote, do NOT run the shared dev stack.
   Live-UI verification is centralized (Step 6) — instead leave a precise **SWARM-TODO** in the code
   and in your report saying exactly what to click to verify.
@@ -164,7 +175,7 @@ records pass/fail. Only **then** is an issue's Fixed transition trustworthy. App
 ## Step 7 — Merge & promote (orchestrator only)
 
 Per completed, verified agent branch:
-1. In the integration worktree: `git merge swarm/fro-### --no-edit`. On conflict, **keep both
+1. In the integration worktree: `git merge swarm/aqu-### --no-edit`. On conflict, **keep both
    sides** when both are additive (union route tables, switch cases, FileType unions — don't overwrite).
 2. Verify on integration: `npx tsc -b --noEmit && npx vitest run` (+ worker tests if touched).
    Record date · WS · branch · sha · tsc · vitest in §M.

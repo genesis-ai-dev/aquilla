@@ -55,6 +55,7 @@ import { handleBranchingSearchPassagesRequest } from "./events/branching-search-
 import { handleCommentsReadRequest } from "./events/comments-read-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
+import { handleExternalMcpRequest } from "./external/mcp-route"
 export { ProjectSync } from "./project-do"
 // Inert legacy DO class — kept exported so deploys don't trip the
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
@@ -307,6 +308,10 @@ export default {
     // AQU-533: Agent API changeset engine (external command layer).
     const externalChangesetsResponse = await handleExternalChangesetsRequest(request, env, ctx)
     if (externalChangesetsResponse) return withCors(externalChangesetsResponse, request)
+
+    // AQU-533: Agent API remote MCP server (tools-only, streamable HTTP).
+    const externalMcpResponse = await handleExternalMcpRequest(request, env, ctx)
+    if (externalMcpResponse) return withCors(externalMcpResponse, request)
 
     const projectSyncResponse = routeProjectSync(request, env)
     if (projectSyncResponse) return projectSyncResponse

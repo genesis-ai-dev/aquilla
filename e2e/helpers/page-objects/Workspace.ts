@@ -204,6 +204,22 @@ export class Workspace {
     await expect(this.validationToggle(index)).toHaveAttribute("aria-pressed", "true", { timeout: 10_000 })
   }
 
+  /** Remove the current user's validation and wait for the row state to settle. */
+  async unvalidateCell(index: number): Promise<void> {
+    const row = this.cellRow(index)
+    const validationButton = this.validationToggle(index)
+    await row.hover()
+    await expect(validationButton).toHaveAttribute("aria-pressed", "true", { timeout: 10_000 })
+    await validationButton.click()
+
+    const removeButton = this.page.locator(
+      '[data-tooltip="Remove your validation"] button, button[aria-label="Remove your validation"]',
+    )
+    await expect(removeButton).toBeVisible({ timeout: 8_000 })
+    await removeButton.click()
+    await expect(validationButton).toHaveAttribute("aria-pressed", "false", { timeout: 15_000 })
+  }
+
   /** Validate a cell and assert the emerald indicator appears.
    *
    * The health button uses Base UI's Popover with openOnHover — hover events

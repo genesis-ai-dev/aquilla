@@ -65,8 +65,7 @@ import { readValidationCount, readValidationCountAudio } from "@/lib/progress/re
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { useAccounts } from "@/hooks/useAccounts"
-import { AccountSwitcher } from "@/components/AccountSwitcher"
+import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
 import { usePostEditMetrics } from "@/lib/metrics/use-post-edit-metrics"
 import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSection"
 
@@ -227,11 +226,6 @@ export function ProjectSettings() {
 
   // AQU-311: AI post-edit metrics
   const { session } = useFrontierSession()
-  // For the shared-settings permission error: name the active account and, if
-  // another account is already logged in, offer a one-click switch (the common
-  // "signed into my translator account instead of my admin account" case).
-  const { sessions, activate } = useAccounts()
-  const otherSessions = useMemo(() => sessions.filter((s) => !s.active), [sessions])
   const isCloudProject = !!(project?.syncRole)
   const metricsFiles = useMemo(
     () => (project?.files ?? []).map((f) => ({ id: f.id, name: f.name })),
@@ -979,39 +973,10 @@ export function ProjectSettings() {
         )}
 
         {permissionBlocked && (
-          <div
-            role="alert"
-            className="flex flex-col gap-2 rounded border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm"
-          >
-            <p className="text-destructive">
-              You're signed in as{" "}
-              <span className="font-medium">{session?.username ?? "local"}</span>
-              {session?.email ? ` (${session.email})` : ""}, which doesn't have
-              permission to change shared settings (needs Maintainer or higher).
-            </p>
-            {otherSessions.length > 0 ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-muted-foreground">Switch account:</span>
-                {otherSessions.map((s) => (
-                  <Button
-                    key={s.key}
-                    size="sm"
-                    variant="outline"
-                    onClick={() => activate(s.key)}
-                  >
-                    Switch to {s.username}
-                  </Button>
-                ))}
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">
-                  Have another account? Add or switch:
-                </span>
-                <AccountSwitcher variant="header" />
-              </div>
-            )}
-          </div>
+          <PermissionDeniedAlert
+            action="change shared settings"
+            requiredRole="Maintainer or higher"
+          />
         )}
         {sharedConflict && (
           <div

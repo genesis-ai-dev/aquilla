@@ -28,6 +28,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
 import {
   revokeAllProjectAccess, partitionMembers, type RevokeAllResult,
 } from "@/lib/frontier/members"
@@ -153,6 +154,10 @@ export function MembersTab({
   const [newRole, setNewRole] = useState<number>(ROLE.CONTRIBUTOR)
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
+  // AQU-560: when the add is refused for lack of permission, surface the
+  // enriched account-identity + switch-user alert instead of the bare message
+  // (the denial is usually "you're on the wrong account").
+  const [addForbidden, setAddForbidden] = useState(false)
 
   // Revoke-all state
   const [revokeTarget, setRevokeTarget] = useState<ProjectMember | null>(null)
@@ -162,6 +167,7 @@ export function MembersTab({
     if (!trimmed) return
     setAdding(true)
     setAddError(null)
+    setAddForbidden(false)
     try {
       const result = await add(trimmed, newRole)
       if (!result) {
@@ -170,7 +176,9 @@ export function MembersTab({
       }
       setNewUsername("")
     } catch (e) {
-      setAddError(toUserFacingError(e, "project").message)
+      const uf = toUserFacingError(e, "project")
+      setAddForbidden(uf.category === "forbidden")
+      setAddError(uf.message)
     } finally {
       setAdding(false)
     }
@@ -401,6 +409,7 @@ export function MembersTab({
             onChange={(e) => {
               setNewUsername(e.target.value)
               setAddError(null)
+              setAddForbidden(false)
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter") void handleAdd()
@@ -438,9 +447,14 @@ export function MembersTab({
             {adding ? "Adding…" : "Add"}
           </Button>
         </div>
-        {addError && (
+        {addForbidden ? (
+          <PermissionDeniedAlert
+            action="add members to this project"
+            requiredRole="Maintainer or higher"
+          />
+        ) : addError ? (
           <p className="text-xs text-destructive">{addError}</p>
-        )}
+        ) : null}
       </div>
 
       {/* Revoke-all dialog */}

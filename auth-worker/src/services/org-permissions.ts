@@ -922,6 +922,25 @@ async function fetchPortfolioLanes(env: Env, orgIds: number[]): Promise<Map<stri
       entry.lastEditAt = entry.lastEditAt == null ? updatedAt : Math.max(entry.lastEditAt, updatedAt)
     }
   }
+  // AQU-538: union in REGISTERED lanes that have no progress rows yet — a PM
+  // who just added a language must see its 0% chip immediately, not after the
+  // first translation lands. The denominator is borrowed from the '' row
+  // (source-cell count is lane-independent); no '' row means the project has
+  // no progress rows at all and the registered lane stays 0/0.
+  for (const row of settingsRows.results ?? []) {
+    const registered = readTargetLanes(row.settings)
+    if (registered.length === 0) continue
+    let lanes = acc.get(row.project_id)
+    if (!lanes) {
+      lanes = new Map()
+      acc.set(row.project_id, lanes)
+    }
+    const denominator = lanes.get("")?.totalCells ?? 0
+    for (const lane of registered) {
+      if (lane === "" || lanes.has(lane)) continue
+      lanes.set(lane, { lane, totalCells: denominator, filledCells: 0, validatedCells: 0, lastEditAt: null })
+    }
+  }
   for (const [projectId, lanes] of acc) {
     byProject.set(
       projectId,
@@ -929,6 +948,18 @@ async function fetchPortfolioLanes(env: Env, orgIds: number[]): Promise<Map<stri
     )
   }
   return byProject
+}
+
+/** Parse settings.targetLanes defensively (the blob is app-written JSON). */
+function readTargetLanes(settings: string | null): string[] {
+  if (!settings) return []
+  try {
+    const parsed = JSON.parse(settings) as { targetLanes?: unknown }
+    if (!Array.isArray(parsed.targetLanes)) return []
+    return parsed.targetLanes.filter((l): l is string => typeof l === "string" && l !== "")
+  } catch {
+    return []
+  }
 }
 
 /** Per-project rollup over the org's non-archived projects (derive-on-read, one GROUP BY). */

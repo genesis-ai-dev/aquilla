@@ -19,7 +19,11 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { CellHistoryEntry } from "@/lib/parsers/types"
 import { fetchCellHistory } from "@/lib/sync/history-read"
 import type { CellHistoryEvent } from "@/lib/sync/history-read-types"
-import { subscribeToOutbox } from "@/lib/sync/outbox"
+import {
+  getOutboxRecordsForCell,
+  subscribeToOutbox,
+  type OutboxRecord,
+} from "@/lib/sync/outbox"
 
 export interface UseCellEditHistoryOptions {
   enabled: boolean
@@ -131,6 +135,37 @@ function mapEventsToEntries(
   return entries
 }
 
+function mapOutboxToEntries(records: OutboxRecord[]): CellHistoryEntry[] {
+  const entries: CellHistoryEntry[] = []
+  for (const record of records) {
+    const event = record.event
+    if (event.kind !== "target.cell.commit" && event.kind !== "source.cell.commit") continue
+    const payload = event.payload as { value?: string; ai_suggestion?: true }
+    entries.push({
+      timestamp: new Date(event.clientTs || record.enqueuedAt).toISOString(),
+      value: payload.value ?? "",
+      source: payload.ai_suggestion ? "llm" : "human",
+      author: event.author,
+      validated: false,
+      eventId: event.id,
+      isStale: false,
+      syncState: record.status === "failed" ? "failed" : "pending",
+    })
+  }
+  return entries
+}
+
+function mergeHistoryEntries(
+  serverEntries: CellHistoryEntry[],
+  localEntries: CellHistoryEntry[],
+): CellHistoryEntry[] {
+  const serverIds = new Set(serverEntries.flatMap((entry) => entry.eventId ? [entry.eventId] : []))
+  return [
+    ...serverEntries,
+    ...localEntries.filter((entry) => !entry.eventId || !serverIds.has(entry.eventId)),
+  ].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+}
+
 export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEditHistoryResult {
   const { enabled, projectId, fileId, cellId, limit, getTokenForFile, currentEventId } = opts
 
@@ -169,6 +204,14 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
     setIsLoading(true)
     setIsError(false)
     try {
+      // IndexedDB is the local durability point. Show those commits even when
+      // auth, network, or server projection is temporarily unavailable.
+      const localEntries = mapOutboxToEntries(
+        await getOutboxRecordsForCell(pid, fid, cid),
+      )
+      if (generationRef.current !== gen) return
+      setHistory(localEntries)
+
       const token = await tokenFetcherRef.current(fid)
       if (!token) {
         if (generationRef.current !== gen) return
@@ -178,7 +221,10 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
       }
       const rows = await fetchCellHistory(pid, fid, cid, token, { limit: limitRef.current })
       if (generationRef.current !== gen) return
-      setHistory(mapEventsToEntries(rows, headRef.current))
+      setHistory(mergeHistoryEntries(
+        mapEventsToEntries(rows, headRef.current),
+        localEntries,
+      ))
       setIsLoading(false)
     } catch (err) {
       if (generationRef.current !== gen) return
@@ -216,8 +262,8 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
   // Auto-revalidate when the local outbox changes — covers the case where the
   // user commits/validates/unvalidates this cell from the same window: the
   // remove-after-flush notification triggers a refetch so the drawer keeps up.
-  // Debounced to coalesce burst notifications and to give the server projection
-  // a beat to land after the flusher posts the event.
+  // A short debounce coalesces batch writes while keeping a newly durable
+  // local entry effectively immediate. Server entries de-duplicate by id.
   useEffect(() => {
     if (!enabledRef.current) return
     let timer: number | null = null
@@ -226,7 +272,7 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
       timer = window.setTimeout(() => {
         timer = null
         void doFetch()
-      }, 400)
+      }, 50)
     })
     return () => {
       if (timer !== null) window.clearTimeout(timer)

@@ -332,6 +332,48 @@ export async function getOutboxRecords(ids: readonly string[]): Promise<OutboxRe
   }
 }
 
+/**
+ * Return every locally durable event for one cell, oldest first. History uses
+ * this instead of a capped global peek so a busy project cannot push the
+ * current cell's unflushed commit outside an arbitrary batch window.
+ */
+export async function getOutboxRecordsForCell(
+  projectId: string,
+  fileId: string,
+  cellId: string,
+): Promise<OutboxRecord[]> {
+  try {
+    const db = await openDb()
+    return await new Promise((resolve, reject) => {
+      const records: OutboxRecord[] = []
+      const tx = db.transaction(STORE, "readonly")
+      tx.onerror = () => reject(tx.error ?? new Error("cell outbox lookup failed"))
+      const store = tx.objectStore(STORE)
+      const index = store.index("enqueuedAt")
+      const request = index.openCursor()
+      request.onsuccess = () => {
+        const cursor = request.result
+        if (!cursor) {
+          resolve(records)
+          return
+        }
+        const record = cursor.value as OutboxRecord
+        const event = record.event
+        if (
+          event.projectId === projectId &&
+          event.fileId === fileId &&
+          event.cellId === cellId
+        ) {
+          records.push(record)
+        }
+        cursor.continue()
+      }
+    })
+  } catch {
+    return []
+  }
+}
+
 /** Oldest-first rows with status `pending` only, at most `limit`. Used by the flusher. */
 export async function peekPendingOutboxBatch(limit: number): Promise<OutboxRecord[]> {
   const all = await peekOutboxBatch(limit + 50) // fetch extra to filter

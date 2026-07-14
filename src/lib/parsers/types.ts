@@ -600,6 +600,8 @@ export interface CellHistoryEntry {
    * chain head; everything not on that walk is a stale branch.
    */
   isStale?: boolean
+  /** Local outbox state; absent once the server history has acknowledged it. */
+  syncState?: "pending" | "failed"
 }
 
 export interface CommentMessage {

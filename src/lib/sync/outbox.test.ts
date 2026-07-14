@@ -9,6 +9,7 @@ import {
   outboxPendingCount,
   outboxFailedCount,
   peekPendingOutboxBatch,
+  getOutboxRecordsForCell,
   quarantineOutboxEvents,
   resetOutboxConnectionForTests,
   OUTBOX_MAX_ATTEMPTS,
@@ -55,6 +56,15 @@ describe("cqrs outbox", () => {
     expect(peek[0].lastError).toBe(null)
     await removeOutboxEvents(["e1"])
     expect(await outboxPendingCount()).toBe(0)
+  })
+
+  it("reads every durable outbox event scoped to one cell", async () => {
+    await enqueueOutboxEvent(sample)
+    await enqueueOutboxEvent({ ...sample, id: "other-cell", cellId: "other" })
+    await enqueueOutboxEvent({ ...sample, id: "other-file", fileId: "other" })
+
+    const records = await getOutboxRecordsForCell("p", "f", "c")
+    expect(records.map((record) => record.id)).toEqual(["e1"])
   })
 
   it("markOutboxAttempt records attempts and lastError on existing rows", async () => {

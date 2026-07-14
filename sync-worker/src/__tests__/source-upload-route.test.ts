@@ -2,7 +2,7 @@
 // Uploads original .docx to SNAPSHOTS R2 bucket and upserts file_source_blobs.
 
 import { describe, it, expect } from "vitest"
-import { handleSourceUploadRequest, sourceObjectKey } from "../events/source-upload-route"
+import { handleSourceUploadRequest, sourceObjectKey, MAX_SOURCE_BYTES } from "../events/source-upload-route"
 import { makeTestDb } from "./helpers/pg-test-db"
 import { makeTestToken } from "./helpers/auth"
 
@@ -93,6 +93,52 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
       env,
     )
     expect(res).toBeNull()
+  })
+
+  // WHY: the handler buffers the whole body into memory (arrayBuffer) before
+  // writing to R2. Without a cap, an oversize (or hostile) upload can exhaust
+  // memory / write an unbounded object. Reject early on the advertised size.
+  it("returns 413 when Content-Length exceeds the cap (before buffering)", async () => {
+    const token = await makeTestToken(SECRET, { projectId: "p1", fileId: "f1", role: 500 })
+    const SNAPSHOTS = makeStubBucket()
+    const env = { SNAPSHOTS, AQUILLA_PG: {} as any, SYNC_SECRET_KEY: SECRET } as any
+
+    const req = new Request("https://x/api/v1/projects/p1/files/f1/source", {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Source-Format": "docx",
+        "Content-Length": String(MAX_SOURCE_BYTES + 1),
+      },
+      body: new Uint8Array([0x50, 0x4b]),
+    })
+    const res = await handleSourceUploadRequest(req, env)
+    expect(res?.status).toBe(413)
+    // Rejected before touching R2 — nothing was written.
+    expect(SNAPSHOTS._allKeys()).toHaveLength(0)
+  })
+
+  it("still accepts an at-cap upload (boundary is exclusive of the over-cap case)", async () => {
+    const { db } = await makeTestDb({
+      projects: [{ id: "p1", name: "Test Project", created_by: 1 }],
+      files: [{ id: "f1", project_id: "p1", name: "test.docx", event_id: "ev1" }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "p1", fileId: "f1", role: 500 })
+    const SNAPSHOTS = makeStubBucket()
+    const env = { SNAPSHOTS, AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET } as any
+
+    const req = new Request("https://x/api/v1/projects/p1/files/f1/source", {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Source-Format": "docx",
+        // Exactly at the cap must NOT be rejected — only strictly-over is 413.
+        "Content-Length": String(MAX_SOURCE_BYTES),
+      },
+      body: new Uint8Array([0x50, 0x4b, 0x03, 0x04]),
+    })
+    const res = await handleSourceUploadRequest(req, env)
+    expect(res?.status).toBe(200)
   })
 
   it("returns 403 for a token with role below PROJECT_LEAD (500)", async () => {

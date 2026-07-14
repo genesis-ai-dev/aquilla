@@ -10,7 +10,12 @@
 // re-applying. Ask-mode confirmations are consumed exactly once.
 
 import { errorResponse, toErrorResponse } from './errors'
-import { cellKey, type PlanImportCommand, type SetTranslationCommand } from './commands'
+import {
+  cellKey,
+  requiredRoleForCommand,
+  type PlanImportCommand,
+  type SetTranslationCommand,
+} from './commands'
 import { resolveCellStates } from './preconditions'
 import { loadChangeset } from './store'
 import { mintInternalSyncToken } from './token-bridge'
@@ -19,6 +24,15 @@ import { handleEventsWriteRequest } from '../events/route'
 import type { RawEvent } from '../events/types'
 import type { ChangesetReceipt, ChangesetWarning, ExternalEnv, StoredChangeset } from './types'
 import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
+
+/** Provenance channel for the commit request. MCP-originated commits arrive via
+ *  a synthetic in-process Request carrying `x-aquilla-channel: mcp`
+ *  (mcp-handlers.ts); everything else is a direct REST call. Only these two
+ *  values are accepted — an unknown/absent header defaults to 'rest'. */
+function readChannel(request: Request): 'mcp' | 'rest' {
+  return request.headers.get('x-aquilla-channel') === 'mcp' ? 'mcp' : 'rest'
+}
 
 function bearer(request: Request): string | null {
   const h = request.headers.get('Authorization') ?? ''
@@ -68,6 +82,17 @@ export async function handleCommit(
     return errorResponse('plan_stale', 'changeset is stale — prepare a new plan')
   }
   // status === 'staged' from here.
+
+  // ── Live role/membership precheck (§2) ────────────────────────────────────
+  // Resolve the caller's CURRENT role and require the floor of the command kinds
+  // being committed. The /events perimeter re-checks per-event roles as the
+  // backstop, but resolving here first means a member removed after prepare is
+  // denied cleanly (permission_denied) instead of half-applying at the perimeter.
+  const requiredRole = Math.max(...cs.commands.map(requiredRoleForCommand))
+  const resolvedRole = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
+  if (!resolvedRole || resolvedRole.level < requiredRole) {
+    return errorResponse('permission_denied', 'insufficient project role to commit this changeset')
+  }
 
   // ── Expiry ────────────────────────────────────────────────────────────────
   if (new Date(cs.expiresAt).getTime() < Date.now()) {
@@ -207,7 +232,7 @@ export async function handleCommit(
     origin: 'agent',
     human_authority: { user_id: cs.createdByUserId, credential_id: cs.credentialId },
     agent: agentMeta,
-    channel: 'rest',
+    channel: readChannel(request),
     autonomy_mode: cs.autonomyMode,
     changeset_id: cs.id,
     ...(confirmationId ? { confirmation_id: confirmationId } : {}),
@@ -272,7 +297,7 @@ function buildProvenance(
     origin: 'agent',
     human_authority: { user_id: cs.createdByUserId, credential_id: cs.credentialId },
     agent: readAgentMeta(request),
-    channel: 'rest',
+    channel: readChannel(request),
     autonomy_mode: cs.autonomyMode,
     changeset_id: cs.id,
     ...(confirmationId ? { confirmation_id: confirmationId } : {}),

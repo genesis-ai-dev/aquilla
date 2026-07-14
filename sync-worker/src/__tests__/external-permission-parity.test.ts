@@ -16,17 +16,15 @@
 //   2. a credential scoped to project A can never touch project B, including
 //      through the MCP tools/call adapter.
 //
-// PARITY VIOLATION FOUND (see the dedicated `describe` block below): prepare
-// (POST .../changesets) has NO role/membership gate — only credential
-// project/org SCOPE is checked (assertCredentialScope in token-bridge.ts).
-// A credential whose owning user is not a project member at all (no
-// project_members / group / org / creator path — role resolves to null) can
-// still stage a changeset and receive the server-computed effect summary
-// (cell existence, added/modified counts). In-app, a non-member has zero
-// access to a project. That test is marked `it.fails` with the SPEC-CORRECT
-// assertion (403 permission_denied) — it documents the bug rather than
-// encoding the current (wrong) 200 as the expectation. Production code is
-// untouched by this file.
+// PARITY VIOLATION (now FIXED — see the dedicated `describe` block below):
+// prepare (POST .../changesets) previously had NO role/membership gate — only
+// credential project/org SCOPE was checked (assertCredentialScope in
+// token-bridge.ts). handlePrepare now resolves the LIVE role via
+// resolveProjectRoleShared and requires the floor of the command kind being
+// staged (SetTranslation → CONTRIBUTOR, PlanImport → PROJECT_LEAD), the same
+// floor its commit hits at the /events perimeter. A non-member (role resolves
+// to null) or a below-floor member is denied at prepare, so the effect summary
+// no longer leaks.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -200,35 +198,37 @@ describe('permission parity — reads require VIEWER (100)+', () => {
 // /events perimeter that commit.ts routes through — role-policy.ts is the
 // single source of truth this test is checked against.)
 
-describe('permission parity — commit SetTranslation requires CONTRIBUTOR (400)+', () => {
+describe('permission parity — SetTranslation requires CONTRIBUTOR (400)+ at prepare AND commit', () => {
   it.each(ROLES)('role=$name (level=$level)', async ({ level }) => {
     const { token } = await seedRoleCredential(tdb, level)
 
-    // Prepare always succeeds today regardless of role (see the dedicated
-    // violation block below) — used here only to obtain a changeset to commit.
-    const { body: prep } = await prepareChangeset(tdb, token, [
+    const prep = await prepareChangeset(tdb, token, [
       { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hello' },
     ])
 
-    const { status, body } = await commitChangeset(tdb, token, prep.changeset.id)
-    if (level !== null && level >= ROLE.CONTRIBUTOR) {
-      expect(status).toBe(200)
-      expect(body.receipt.appliedCount).toBe(1)
-    } else {
-      expect(status).toBe(403)
-      expect(body.error.code).toBe('permission_denied')
+    // Prepare now enforces the SAME floor as commit (target.cell.commit →
+    // CONTRIBUTOR): a plan the caller could never commit is denied at staging.
+    if (level === null || level < ROLE.CONTRIBUTOR) {
+      expect(prep.status).toBe(403)
+      expect(prep.body.error.code).toBe('permission_denied')
+      return
     }
+
+    expect(prep.status).toBe(200)
+    const { status, body } = await commitChangeset(tdb, token, prep.body.changeset.id)
+    expect(status).toBe(200)
+    expect(body.receipt.appliedCount).toBe(1)
   })
 })
 
 // ── 3. commit PlanImport → PROJECT_LEAD floor ───────────────────────────────
 // (per REQUIRED_ROLE['file.create'] / ['source.cell.create'] = ROLE.PROJECT_LEAD)
 
-describe('permission parity — commit PlanImport requires PROJECT_LEAD (500)+', () => {
+describe('permission parity — PlanImport requires PROJECT_LEAD (500)+ at prepare AND commit', () => {
   it.each(ROLES)('role=$name (level=$level)', async ({ level }) => {
     const { token } = await seedRoleCredential(tdb, level)
 
-    const { body: prep } = await prepareChangeset(tdb, token, [
+    const prep = await prepareChangeset(tdb, token, [
       {
         kind: 'PlanImport',
         fileName: `Import-${level ?? 'none'}.usfm`,
@@ -237,14 +237,19 @@ describe('permission parity — commit PlanImport requires PROJECT_LEAD (500)+',
       },
     ])
 
-    const { status, body } = await commitChangeset(tdb, token, prep.changeset.id)
-    if (level !== null && level >= ROLE.PROJECT_LEAD) {
-      expect(status).toBe(200)
-      expect(body.receipt.appliedCount).toBeGreaterThan(0)
-    } else {
-      expect(status).toBe(403)
-      expect(body.error.code).toBe('permission_denied')
+    // Prepare now enforces the SAME floor as commit (file.create /
+    // source.cell.create → PROJECT_LEAD): below-floor callers are denied at
+    // staging, not left with a plan they can never commit.
+    if (level === null || level < ROLE.PROJECT_LEAD) {
+      expect(prep.status).toBe(403)
+      expect(prep.body.error.code).toBe('permission_denied')
+      return
     }
+
+    expect(prep.status).toBe(200)
+    const { status, body } = await commitChangeset(tdb, token, prep.body.changeset.id)
+    expect(status).toBe(200)
+    expect(body.receipt.appliedCount).toBeGreaterThan(0)
   })
 })
 
@@ -291,7 +296,7 @@ function fakeR2() {
 // operations that a non-member should never be able to complete, per the
 // task brief. Prepare is the one exception — see the violation block below.
 
-describe('permission parity — non-member is denied every operation (except the documented prepare gap)', () => {
+describe('permission parity — non-member is denied every operation', () => {
   it('search / read_content / read_history all 403 permission_denied', async () => {
     const { token } = await seedRoleCredential(tdb, null)
     for (const path of [
@@ -307,14 +312,16 @@ describe('permission parity — non-member is denied every operation (except the
     }
   })
 
-  it('commit (any command kind) is 403 permission_denied', async () => {
+  it('prepare (any command kind) is 403 permission_denied — no changeset is staged', async () => {
     const { token } = await seedRoleCredential(tdb, null)
-    const { body: prep } = await prepareChangeset(tdb, token, [
+    const prep = await prepareChangeset(tdb, token, [
       { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'x' },
     ])
-    const { status, body } = await commitChangeset(tdb, token, prep.changeset.id)
-    expect(status).toBe(403)
-    expect(body.error.code).toBe('permission_denied')
+    expect(prep.status).toBe(403)
+    expect(prep.body.error.code).toBe('permission_denied')
+    // The leak is closed: nothing was staged, so no effect summary was returned.
+    expect(prep.body.changeset).toBeUndefined()
+    expect(await tdb.rows('changesets')).toHaveLength(0)
   })
 
   it('artifact upload is 403 permission_denied', async () => {
@@ -333,32 +340,27 @@ describe('permission parity — non-member is denied every operation (except the
   })
 })
 
-// ── PARITY VIOLATION: prepare has no role/membership gate ──────────────────
+// ── PARITY VIOLATION FIXED: prepare now has a role/membership gate ──────────
 //
-// handlePrepare (sync-worker/src/external/prepare.ts) authenticates the
-// credential and calls assertCredentialScope (token-bridge.ts) — which only
-// compares cred.projectId/orgId against the target project's id/org, NOT
-// membership. It never calls resolveProjectRoleShared. A credential minted
-// for a user who is not a project member by ANY path (no project_members row,
-// no group grant, no org membership, not the creator) can still POST
-// .../changesets and receive a 200 with the server-computed effect summary
-// (which cell exists, added-vs-modified counts) for a project they have zero
-// in-app visibility into. Every other exposed operation in this file (reads,
-// commit, artifact upload) correctly resolves the LIVE role and denies
-// non-members. This is the one gap in this matrix.
-//
-// Marked `it.fails` with the SPEC-CORRECT assertion so this documents the bug
-// rather than encoding the current (wrong) 200 as expected behavior. No
-// production code is changed by this test file.
-describe('PARITY VIOLATION — prepare lacks a role/membership gate (documented, not fixed)', () => {
-  it.fails('non-member credential should NOT be able to prepare a changeset (currently succeeds)', async () => {
+// handlePrepare (sync-worker/src/external/prepare.ts) previously authenticated
+// the credential and checked only assertCredentialScope (project/org scope),
+// never resolving live membership — so a non-member with a project-scoped
+// credential could stage a changeset and receive the server-computed effect
+// summary (cell existence, added-vs-modified counts) for a project they had
+// zero in-app visibility into. handlePrepare now resolves the LIVE role via
+// resolveProjectRoleShared and requires the floor of the command kind being
+// staged (SetTranslation → CONTRIBUTOR, PlanImport → PROJECT_LEAD), closing
+// the leak. This test asserts the fix.
+describe('parity — prepare enforces a role/membership gate (fixed)', () => {
+  it('non-member credential is denied at prepare (no summary leak)', async () => {
     const { token } = await seedRoleCredential(tdb, null)
     const { status, body } = await prepareChangeset(tdb, token, [
       { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'x' },
     ])
-    // SPEC-CORRECT expectation (currently false — actual is 200/staged):
     expect(status).toBe(403)
     expect(body.error?.code).toBe('permission_denied')
+    expect(body.changeset).toBeUndefined()
+    expect(body.summary).toBeUndefined()
   })
 })
 

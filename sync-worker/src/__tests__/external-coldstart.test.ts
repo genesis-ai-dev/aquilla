@@ -327,6 +327,9 @@ describe('cold start — act mode (gate 10)', () => {
       expect(prov.autonomy_mode).toBe('act')
       expect(prov.changeset_id).toBe(prep.changesetId)
       expect(prov.human_authority).toEqual({ user_id: String(USER_ID), credential_id: CRED_ACT })
+      // This commit was driven over MCP (confirm_changeset), so the provenance
+      // channel must reflect that — not the REST default.
+      expect(prov.channel).toBe('mcp')
     }
   })
 })

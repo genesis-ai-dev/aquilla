@@ -13,8 +13,10 @@ import { errorResponse } from './errors'
 import { handlePrepare } from './prepare'
 import { handleCommit } from './commit'
 import { loadChangeset, changesetToResponse } from './store'
+import { ROLE } from '../events/role-policy'
 import type { ExternalEnv } from './types'
 import { validateApiCredential } from '../../../db/shared/api-credentials'
+import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 
 const ROUTE_RE =
   /^\/api\/v1\/external\/projects\/([^/]+)\/changesets(?:\/([^/]+)(?:\/(commit|discard))?)?$/
@@ -40,6 +42,12 @@ async function handleGet(
   if (cred.credentialId !== cs.credentialId) {
     return errorResponse('permission_denied', 'credential did not create this changeset')
   }
+  // Live-role resolution on every call (§2): a viewer floor to read the plan,
+  // so a user removed from the project after prepare can no longer see it.
+  const role = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
+  if (!role || role.level < ROLE.VIEWER) {
+    return errorResponse('permission_denied', 'no project membership')
+  }
   const approvalUrl = `${env.BASE_URL ?? ''}/approve/${cs.id}`
   return Response.json({ changeset: changesetToResponse(cs), approvalUrl })
 }
@@ -59,6 +67,13 @@ async function handleDiscard(
   if (!cs) return errorResponse('not_found', `changeset ${id} not found`)
   if (cred.credentialId !== cs.credentialId) {
     return errorResponse('permission_denied', 'credential did not create this changeset')
+  }
+  // Live-role resolution on every call (§2): the credential owner must still
+  // resolve SOME role on the project — a user removed after prepare cannot
+  // discard, matching every other lifecycle op.
+  const role = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
+  if (!role) {
+    return errorResponse('permission_denied', 'no project membership')
   }
   if (cs.status === 'committed') {
     return errorResponse('validation_failed', 'cannot discard a committed changeset')

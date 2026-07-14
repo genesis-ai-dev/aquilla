@@ -20,6 +20,8 @@ vi.mock('partyserver', () => ({
 
 import { handleExternalMcpRequest } from '../external/mcp-route'
 import { MCP_TOOLS } from '../external/mcp-tools'
+import { PLAN_IMPORT_MAX_CELLS } from '../external/commands'
+import { MAX_ARTIFACT_BYTES } from '../external/artifacts-route'
 import { mintApiToken } from '../../../db/shared/api-credentials'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 
@@ -242,8 +244,16 @@ describe('MCP tools/call — reads', () => {
     const { payload } = toolPayload(((await res.json()) as any).result)
     const p = payload as any
     expect(p.credentialMode).toBe('act')
-    expect(p.commandKinds).toEqual(['SetTranslation'])
+    // Both command kinds are now reported (PlanImport merged post-Wave-1).
+    expect(p.commandKinds).toEqual(['SetTranslation', 'PlanImport'])
     expect(p.limits.changesetExpirySeconds).toBe(3600) // CHANGESET_TTL_MS / 1000
+    // Every number is imported from its owning module — no invented values.
+    expect(p.limits.planImportMaxCells).toBe(PLAN_IMPORT_MAX_CELLS)
+    expect(p.limits.maxArtifactBytes).toBe(MAX_ARTIFACT_BYTES)
+    // PlanImport is truthfully reported as REST-only (no MCP staging tool yet).
+    expect(p.planImport.stagingChannels).toEqual(['rest'])
+    expect(p.planImport.mcpStagingTool).toBeNull()
+    expect(p.planImport.maxCellsPerChangeset).toBe(PLAN_IMPORT_MAX_CELLS)
     expect(p.errorCodes).toContain('confirmation_required')
   })
 

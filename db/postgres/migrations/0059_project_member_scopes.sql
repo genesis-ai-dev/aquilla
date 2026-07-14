@@ -1,4 +1,4 @@
--- 0057_project_member_scopes.sql — AQU-553 (Slice 5): lane-scoped reviewer
+-- 0059_project_member_scopes.sql — AQU-553 (Slice 5): lane-scoped reviewer
 -- permissions. ADDITIVE restrictions layered on top of a member's role floor.
 --
 -- Semantics:

@@ -98,6 +98,40 @@ export async function createProjectServerSide(
   return (await r.json()) as CreatedProject
 }
 
+/** POST /api/v2/projects/:projectId/invites — mint a share-link invite
+ * (caller needs project_lead+). Pass an email to email-bind it. */
+export async function createProjectInvite(
+  jwt: string,
+  projectId: string,
+  opts: { email?: string; role?: number } = {},
+): Promise<{ token: string }> {
+  const r = await fetch(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/invites`,
+    {
+      method: "POST",
+      headers: authHeaders(jwt),
+      body: JSON.stringify(opts),
+    },
+  )
+  if (!r.ok) throw new Error(`createProjectInvite failed: HTTP ${r.status} — ${await r.text()}`)
+  return (await r.json()) as { token: string }
+}
+
+/** POST /api/v2/orgs/:orgId/invites — mint an org invite (owner-only). */
+export async function createOrgInvite(
+  jwt: string,
+  orgId: number,
+  opts: { email?: string; role?: number } = {},
+): Promise<{ token: string }> {
+  const r = await fetch(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/invites`, {
+    method: "POST",
+    headers: authHeaders(jwt),
+    body: JSON.stringify(opts),
+  })
+  if (!r.ok) throw new Error(`createOrgInvite failed: HTTP ${r.status} — ${await r.text()}`)
+  return (await r.json()) as { token: string }
+}
+
 /** POST /api/v2/projects/:projectId/members — add a user to a project. */
 export async function addProjectMember(
   jwt: string,

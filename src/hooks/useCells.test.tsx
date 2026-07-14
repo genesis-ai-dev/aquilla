@@ -142,6 +142,20 @@ vi.mock("@/lib/video/vtt-generator", async (importOriginal) => {
   }
 })
 
+// Spy on peekOutboxBatch so the debounce test can count calls without
+// intercepting real IDB behaviour (all other outbox functions remain real).
+let peekOutboxBatchCallCount = 0
+vi.mock("@/lib/sync/outbox", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/sync/outbox")>()
+  return {
+    ...actual,
+    peekOutboxBatch: async (...args: Parameters<typeof actual.peekOutboxBatch>) => {
+      peekOutboxBatchCallCount++
+      return actual.peekOutboxBatch(...args)
+    },
+  }
+})
+
 import { useCells } from "./useCells"
 import type { CellAuditStats } from "./useCellsAuditStats"
 
@@ -177,6 +191,7 @@ beforeEach(() => {
   delete streamMeta.maxServerSeq
   delete streamMeta.perPage
   vtt.calls = 0
+  peekOutboxBatchCallCount = 0
 })
 
 describe("useCells (Phase 2a, D1-backed)", () => {
@@ -880,6 +895,55 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     expect(result.current.cells[0].translated).toBe("Hola")
     expect(result.current.cells[0].original).toBe("Hello")
   })
+
+  it("applyOptimisticTargetEdits patches all cells in the batch and leaves untouched cells unchanged (FRO-IMPORT-OPT)", async () => {
+    // Three cells: c1, c2, c3. We patch c1 and c2; c3 must remain untouched.
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "Source 1" }),
+      makeRow({ cellId: "c1", side: "target", value: "" }),
+      makeRow({ cellId: "c2", side: "source", value: "Source 2" }),
+      makeRow({ cellId: "c2", side: "target", value: "" }),
+      makeRow({ cellId: "c3", side: "source", value: "Source 3" }),
+      makeRow({ cellId: "c3", side: "target", value: "existing" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({
+        projectId: "proj-a",
+        fileId: "file-x",
+        username: "alice",
+        getToken,
+        enabled: true,
+      }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(3))
+    expect(result.current.cells.find((c) => c.id === "c1")?.translated).toBe("")
+    expect(result.current.cells.find((c) => c.id === "c2")?.translated).toBe("")
+    expect(result.current.cells.find((c) => c.id === "c3")?.translated).toBe("existing")
+
+    // Apply the bulk patch in a SINGLE act — the whole batch produces one rebuild.
+    act(() => {
+      result.current.applyOptimisticTargetEdits([
+        { cellId: "c1", value: "a" },
+        { cellId: "c2", value: "b" },
+      ])
+    })
+
+    // c1 and c2 carry the imported translations and are marked pending.
+    const c1 = result.current.cells.find((c) => c.id === "c1")
+    const c2 = result.current.cells.find((c) => c.id === "c2")
+    const c3 = result.current.cells.find((c) => c.id === "c3")
+
+    expect(c1?.translated).toBe("a")
+    expect(c1?.hasPendingEdit).toBe(true)
+    expect(c2?.translated).toBe("b")
+    expect(c2?.hasPendingEdit).toBe(true)
+
+    // c3 is completely untouched — proves the batch is surgical.
+    expect(c3?.translated).toBe("existing")
+
+    // No extra refetch fired.
+    expect(fetchAllMock).toHaveBeenCalledTimes(1)
+  })
 })
 
 // ── M2-1 conditional refetch (?since= delta) ────────────────────────────────
@@ -1426,5 +1490,76 @@ describe("useCells (AQU-538, target lanes)", () => {
     // view would still read "hola").
     await waitFor(() => expect(result.current.cells[0].translated).toBe("nuevo"))
     expect(result.current.cells[0].hasPendingEdit).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// FRO-IMPORT-OPT: pending-overlay refresh is debounced to coalesce drain bursts
+// ---------------------------------------------------------------------------
+describe("FRO-IMPORT-OPT: outbox subscription debounce", () => {
+  let enqueue: typeof import("@/lib/sync/outbox").enqueueOutboxEvent
+  let resetConn: typeof import("@/lib/sync/outbox").resetOutboxConnectionForTests
+
+  beforeEach(async () => {
+    const outboxMod = await import("@/lib/sync/outbox")
+    enqueue = outboxMod.enqueueOutboxEvent
+    resetConn = outboxMod.resetOutboxConnectionForTests
+    await resetConn()
+    await new Promise<void>((resolve) => {
+      const d = indexedDB.deleteDatabase("aquilla-cqrs-outbox")
+      d.onsuccess = () => resolve()
+      d.onerror = () => resolve()
+      d.onblocked = () => resolve()
+    })
+    fetchAllMock.mockReset()
+    fetchByIdsMock.mockReset()
+    fetchByIdsMock.mockResolvedValue([])
+    sideCache = null
+    peekOutboxBatchCallCount = 0
+  })
+
+  it("coalesces a burst of 20 outbox notifications into a single peekOutboxBatch call", async () => {
+    const { CQRS_SCHEMA_VERSION } = await import("@/lib/sync/outbox-types")
+
+    fetchAllMock.mockResolvedValue([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "tgt" }),
+    ])
+
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
+    )
+
+    // Wait for initial mount refresh to complete.
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+
+    // Reset the counter AFTER mount so we only count subscription-driven calls.
+    peekOutboxBatchCallCount = 0
+
+    // Fire 20 outbox notifications in a tight burst by enqueuing distinct events.
+    // Each enqueueOutboxEvent calls notifyOutboxChanged() synchronously after the
+    // IDB write, which fires the subscription callback immediately.
+    await act(async () => {
+      for (let i = 0; i < 20; i++) {
+        await enqueue({
+          id: `burst-ev-${i}`,
+          schemaVersion: CQRS_SCHEMA_VERSION,
+          kind: "target.cell.commit",
+          projectId: "proj-a",
+          fileId: "file-x",
+          cellId: "c1",
+          author: "alice",
+          payload: { value: `burst-${i}` },
+          clientTs: Date.now(),
+        })
+      }
+    })
+
+    // Wait past the 50ms debounce window for the coalesced refresh to fire.
+    await new Promise<void>((resolve) => setTimeout(resolve, 60))
+
+    // The entire burst of 20 notifications must have triggered exactly ONE
+    // peekOutboxBatch call (not 20).
+    expect(peekOutboxBatchCallCount).toBe(1)
   })
 })

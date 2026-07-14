@@ -5,7 +5,7 @@
  * The user provides a CSV/XLSX where each row has a source text AND a target
  * translation. These are matched against existing source cells by canonical ref
  * (same mechanism as eBible → target, AQU-191) and the target column is
- * populated via bulkUploadTargetCommits.
+ * populated via enqueueTargetCommits.
  *
  * Flow:
  *   1. User selects a CSV or XLSX file

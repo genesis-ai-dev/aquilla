@@ -407,6 +407,11 @@ export interface UseCellsResult {
    *  re-derive instantly (no round-trip wait). The follow-up server fetch
    *  (`revalidate()`) overwrites this with the authoritative projection. */
   applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => void
+  /** Bulk version of applyOptimisticTargetEdit. Stamps optimistic shadows for
+   *  every cell in the batch and calls rebuildFromCache ONCE at the end,
+   *  instead of once per cell (O(N) not O(N²)). Used by the bulk-import path
+   *  so imported cells don't flicker on flush-before-refetch. */
+  applyOptimisticTargetEdits: (patches: { cellId: string; value: string; valueHtml?: string }[]) => void
   isLoading: boolean
   isError: boolean
 }
@@ -1018,10 +1023,19 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       if (overlayChanged) pendingOverlayRef.current = next
       if (overlayChanged || shadowChanged) rebuildFromCache()
     }
-    void refresh()
-    const unsub = subscribeToOutbox(refresh)
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null
+    const scheduleRefresh = () => {
+      if (refreshTimer !== null) return
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null
+        void refresh()
+      }, 50) // coalesce a drain burst into one read+rebuild
+    }
+    void refresh() // immediate first paint on mount / file change
+    const unsub = subscribeToOutbox(scheduleRefresh)
     return () => {
       cancelled = true
+      if (refreshTimer !== null) clearTimeout(refreshTimer)
       unsub()
     }
     // AQU-538: `lane` recomputes the overlay so a queued edit in the previous
@@ -1254,5 +1268,47 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     [rebuildFromCache],
   )
 
-  return { cells, revalidate, revalidateCell, applyOptimisticTargetEdit, isLoading, isError }
+  /** Bulk optimistic patch for imported translations. Stamps shadows for every
+   *  cellId (so flush-before-refetch can't flicker them back), mutates rowsRef in
+   *  place, and rebuilds ONCE. Shadows are cleared by clearConfirmedShadows when
+   *  a server fetch confirms the value (see revalidateCells reconciliation). */
+  const applyOptimisticTargetEdits = useCallback(
+    (patches: { cellId: string; value: string; valueHtml?: string }[]) => {
+      if (patches.length === 0) return
+      const rows = rowsRef.current
+      for (const patch of patches) {
+        const seq = ++writeSeqRef.current
+        optimisticEditsRef.current.set(patch.cellId, { value: patch.value, valueHtml: patch.valueHtml, seq })
+        cellFreshnessRef.current.set(patch.cellId, seq)
+        let touched = false
+        for (let i = 0; i < rows.length; i++) {
+          const r = rows[i]
+          if (r.cellId !== patch.cellId || r.side !== "target") continue
+          rows[i] = { ...r, value: patch.value, valueHtml: patch.valueHtml ?? null }
+          touched = true
+          break
+        }
+        if (!touched) {
+          const src = rows.find((r) => r.cellId === patch.cellId && r.side === "source")
+          if (!src) continue
+          rows.push({
+            ...src,
+            side: "target",
+            value: patch.value,
+            valueHtml: patch.valueHtml ?? null,
+            eventId: "",
+            sourceEventId: src.eventId,
+            lastEditor: usernameRef.current,
+            lastEditAt: Date.now(),
+            validated: false,
+            wordCount: patch.value.trim() ? patch.value.trim().split(/\s+/).length : 0,
+          })
+        }
+      }
+      rebuildFromCache()
+    },
+    [rebuildFromCache],
+  )
+
+  return { cells, revalidate, revalidateCell, applyOptimisticTargetEdit, applyOptimisticTargetEdits, isLoading, isError }
 }

@@ -32,7 +32,7 @@ import {
 import { buildBilingualPlan, type SourceVerse } from "./parsers/paratext-pairing"
 import type { ParatextSettings } from "./parsers/paratext"
 import { usxToUsfm, looksLikeUsx } from "./parsers/usx"
-import { bulkUploadTargetCommits, bulkUploadMorphRows, type MorphRow, type TargetCommit } from "./sync/bulk-import"
+import { enqueueTargetCommits, bulkUploadMorphRows, type MorphRow, type TargetCommit } from "./sync/bulk-import"
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
@@ -259,7 +259,7 @@ export async function applyEBibleTargetImport(
         value: c.incomingText,
       }))
 
-    await bulkUploadTargetCommits({
+    await enqueueTargetCommits({
       projectId: ctx.projectId,
       fileId,
       author: ctx.author,
@@ -298,11 +298,10 @@ export interface TnProgress {
 }
 
 /**
- * Encode an ArrayBuffer to a base64 string. Used to capture binary source
- * blobs (DOCX, PPTX) as the round-trip side-car — the same mechanism USFM
- * uses for text. The server stores this in `file_source_blobs.raw_source`
- * (a TEXT column); the export route decodes it to reconstruct the original
- * file with translations substituted.
+ * Encode an ArrayBuffer to a base64 string. Retained because the acceptance
+ * parity suite imports it; the DOCX/PPTX import path no longer base64-encodes
+ * source bytes — it uploads the raw bytes to R2 via
+ * PUT …/files/{fileId}/source (see `rawBytes` below).
  */
 export function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer)
@@ -321,6 +320,10 @@ export interface ImportResult {
    *  translations substituted. */
   rawSource?: string
   rawSourceFormat?: string
+  /** Raw binary bytes for binary formats (DOCX, PPTX). Uploaded directly to R2
+   *  via PUT …/files/{fileId}/source instead of being base64-encoded in the
+   *  import event payload. Not subject to the old 512 KB cap. */
+  rawBytes?: ArrayBuffer
   /** USFM book code (\id), when known. Persisted on the file projection so the
    *  sidebar can group + order by canonical book. */
   bookCode?: string
@@ -929,6 +932,7 @@ export async function emitParsedFile(
     cells,
     rawSource: result.rawSource,
     rawSourceFormat: result.rawSourceFormat,
+    rawBytes: result.rawBytes,
     getToken: ctx.getToken,
     onProgress: ctx.onCellEnqueued,
     signal: ctx.signal,
@@ -1396,7 +1400,7 @@ export async function importParatextAsTarget(
         signal: ctx.signal,
       })
 
-      await bulkUploadTargetCommits({
+      await enqueueTargetCommits({
         projectId: ctx.projectId,
         fileId,
         author: ctx.author,
@@ -1456,23 +1460,14 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
     case "docx": {
       const buffer = await file.arrayBuffer()
       const strings = await extractDocxStrings(buffer)
-      // Preserve raw bytes as the round-trip side-car so a future server-side
-      // DOCX serializer can inject translations back into the original markup.
-      // Guard: D1 TEXT rows are capped at ~1 MB; skip side-car for files above
-      // 512 KB (base64 overhead ~1.37×) to avoid exceeding that limit.
-      const rawSource = buffer.byteLength <= 512 * 1024
-        ? arrayBufferToBase64(buffer)
-        : undefined
-      return [{ name: file.name, strings, rawSource, rawSourceFormat: rawSource ? "docx" : undefined }]
+      // Upload raw bytes to R2 via PUT …/files/{fileId}/source (no 512 KB cap).
+      return [{ name: file.name, strings, rawBytes: buffer, rawSourceFormat: "docx" }]
     }
     case "pptx": {
       const buffer = await file.arrayBuffer()
       const strings = await extractPptxStrings(buffer)
-      // Same side-car strategy as DOCX above.
-      const rawSource = buffer.byteLength <= 512 * 1024
-        ? arrayBufferToBase64(buffer)
-        : undefined
-      return [{ name: file.name, strings, rawSource, rawSourceFormat: rawSource ? "pptx" : undefined }]
+      // Upload raw bytes to R2 via PUT …/files/{fileId}/source (no 512 KB cap).
+      return [{ name: file.name, strings, rawBytes: buffer, rawSourceFormat: "pptx" }]
     }
     case "xliff": {
       const text = await file.text()

@@ -1,4 +1,4 @@
--- 0055_cells_target_lang.sql
+-- 0057_cells_target_lang.sql
 --
 -- AQU-538: TMS-style project data model, slice 1 — the target-language lane
 -- dimension on `cells`. See
@@ -16,7 +16,7 @@
 -- NOT applied automatically to live Neon branches. Apply by hand per
 -- auth-worker/wrangler.toml's documented procedure:
 --   set -a; . ./.env; set +a
---   npx tsx scripts/pg.ts db/postgres/migrations/0055_cells_target_lang.sql
+--   npx tsx scripts/pg.ts db/postgres/migrations/0057_cells_target_lang.sql
 -- (Fresh databases pick this up from schema.sql; the dev-stack reconcile
 -- also performs this exact upgrade on drifted local containers — see
 -- scripts/dev-stack.ts reconcilePgSchema.)

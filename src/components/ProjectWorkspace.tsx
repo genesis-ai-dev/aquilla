@@ -70,6 +70,7 @@ import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll } from "@/lib/audio/batch-audio"
 import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { useOutbox } from "@/context/OutboxContext"
+import { useReconcileOnDrain } from "@/hooks/useReconcileOnDrain"
 import {
   setCqrsOutboxBridge,
   buildFileScopedTokenFetcher,
@@ -94,11 +95,13 @@ import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-dia
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose, ListChecks, Loader2 } from "lucide-react"
 import { AgentDockPanel } from "./AgentDockPanel"
 import { agentSessionStore } from "@/lib/agent/session-store"
 import { AgentWorkbench } from "./agent/AgentWorkbench"
 import type { ContextChip } from "@/lib/agent/context-chip"
+import { CheckFindingsDrawer, checkScopeSummary } from "./CheckFindingsDrawer"
+import { runDeterministicCheck, type CheckRunResult } from "@/lib/check/deterministic-check"
 import { SearchDockPanel } from "./SearchDockPanel"
 import { SearchResultsView } from "./search/SearchResultsView"
 import { LeftDock, type DockTab } from "./LeftDock"
@@ -268,6 +271,19 @@ export function shouldSelfHealZeroFileLink(args: {
   return true
 }
 
+/**
+ * A deterministic check run describes ONE file's cells. If the user switches
+ * files while the (async) run is in flight, its result must not be committed —
+ * it would clobber the now-active file's state with the prior file's findings.
+ * Apply a result only when it still matches the currently-active file.
+ */
+export function shouldApplyCheckResult(
+  resultFileId: string | null,
+  activeFileId: string | null,
+): boolean {
+  return resultFileId != null && resultFileId === activeFileId
+}
+
 const PRESENCE_LOCK_STALE_CLEAR_MS = 31_000
 
 function sameStringMap(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>): boolean {
@@ -334,6 +350,10 @@ export function ProjectWorkspace() {
 
   const [selectedFileId, setSelectedFileId] = useState<string | null>(routeFileId ?? null)
   const activeFileId = routeFileId ?? selectedFileId
+  // Latest active file, readable from async callbacks that outlive a file
+  // switch (e.g. runCheck) without capturing a stale closure value.
+  const activeFileIdRef = useRef<string | null>(activeFileId)
+  activeFileIdRef.current = activeFileId
 
   const setActiveFileId = useCallback((fileId: string | null) => {
     if (!projectId) return
@@ -656,6 +676,11 @@ export function ProjectWorkspace() {
   }, [searchParams])
   const [commentsCellId, setCommentsCellId] = useState<string | null>(null)
   const [historyCellId, setHistoryCellId] = useState<string | null>(null)
+  // Phase 0.5 deterministic "Check file" (agentic-harness strategy §4, no
+  // LLM). Findings are session-local: held here, never persisted or synced.
+  const [checkOpen, setCheckOpen] = useState(false)
+  const [checkRunning, setCheckRunning] = useState(false)
+  const [checkResult, setCheckResult] = useState<CheckRunResult | null>(null)
   const [parallelOpen, setParallelOpen] = useState(false)
   const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
@@ -922,6 +947,7 @@ export function ProjectWorkspace() {
     revalidate: revalidateCells,
     revalidateCell,
     applyOptimisticTargetEdit,
+    applyOptimisticTargetEdits,
     isLoading: cellsLoading,
   } = useActiveCellStore({
     projectId: project?.id ?? null,
@@ -947,6 +973,18 @@ export function ProjectWorkspace() {
   }, [activeFileId, cellStore, cellStoreVersion, localFileProgress, project?.id])
   const getActiveCells = useCallback(() => cellStore.getAllCellViews(), [cellStore])
   const getActiveCell = useCallback((cellId: string) => cellStore.getCellView(cellId), [cellStore])
+
+  // FRO-IMPORT-OPT: when the active file's queued target commits finish draining
+  // to the server, do ONE soft refetch to reconcile the read model and clear the
+  // optimistic shadows an import left behind (no per-cell fan-out).
+  const activeFilePendingCommits = useMemo(
+    () =>
+      outboxRecords.filter(
+        (r) => r.event.fileId === activeFileId && r.event.kind === "target.cell.commit",
+      ).length,
+    [outboxRecords, activeFileId],
+  )
+  useReconcileOnDrain(activeFilePendingCommits, activeFileId, revalidateCells)
 
   // QA-BUG-1: zero-file self-heal for live-linked projects. The lazy-pull
   // trigger in useStaleSourceCells only fires once a FILE is open — a
@@ -2295,6 +2333,39 @@ export function ProjectWorkspace() {
     editorRef.current?.flashCell(pending.cellId, "")
   }, [activeFileId, cellStore, cellStoreVersion])
 
+  // Phase 0.5: run the deterministic check over the open file's cells.
+  // Scope = the open file (the editor's working unit; chapters only exist as
+  // sidebar section labels). Pure + chunked — no network, no LLM.
+  const runCheck = useCallback(async () => {
+    if (!activeFileId || checkRunning) return
+    // One aside panel at a time (matches the existing drawer pattern).
+    setDrawerRuleId(null)
+    setCommentsCellId(null)
+    setHistoryCellId(null)
+    setCheckOpen(true)
+    setCheckRunning(true)
+    try {
+      const result = await runDeterministicCheck({
+        fileId: activeFileId,
+        cells: readAtVersion(cellStoreVersion, getActiveCells),
+        rules,
+        concepts: project?.terminology ?? [],
+      })
+      // Bail if the active file changed mid-run — don't clobber the new file's
+      // state with this (now stale) file's findings.
+      if (!shouldApplyCheckResult(result.fileId, activeFileIdRef.current)) return
+      setCheckResult(result)
+    } finally {
+      setCheckRunning(false)
+    }
+  }, [activeFileId, checkRunning, cellStoreVersion, getActiveCells, rules, project?.terminology])
+
+  // A check run describes one file's cells; switching files invalidates it.
+  useEffect(() => {
+    setCheckResult(null)
+    setCheckOpen(false)
+  }, [activeFileId])
+
   // FRO-192: jump to the first cell matching an assignment's scopeLabel.
   // Uses the same globalReferences prefix match as assignmentsByCellId build.
   const jumpToScopeLabel = useCallback((scopeLabel: string) => {
@@ -2453,8 +2524,6 @@ export function ProjectWorkspace() {
   // large import landing) tears the socket down and recreates it.
   const projectFilesRef = useRef(projectFiles)
   projectFilesRef.current = projectFiles
-  const activeFileIdRef = useRef<string | null>(activeFileId)
-  activeFileIdRef.current = activeFileId
   const presenceStaleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const clearPresenceStaleTimer = useCallback(() => {
@@ -3529,7 +3598,8 @@ export function ProjectWorkspace() {
     lens === "audio" ||
     drawerRuleId !== null ||
     recordingCellId !== null ||
-    exportOpen
+    exportOpen ||
+    checkOpen
   const legacyCells = useMemo(
     () => legacyCellsNeeded ? readAtVersion(cellStoreVersion, getActiveCells) : EMPTY_CELL_DATA,
     [cellStoreVersion, getActiveCells, legacyCellsNeeded],
@@ -4118,6 +4188,36 @@ export function ProjectWorkspace() {
               </>
             ) : null}
 
+            {/* Phase 0.5: deterministic "Check file" entry point. Title doubles
+                as the last-run summary so the result is visible at the button. */}
+            {project && centerSurface === "editor" && activeFileId && (
+              <button
+                type="button"
+                onClick={() => void runCheck()}
+                disabled={checkRunning}
+                className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent disabled:opacity-60"
+                title={
+                  checkResult
+                    ? `Last check: ${checkResult.totalFindingCount} issue${checkResult.totalFindingCount === 1 ? "" : "s"} · ${checkScopeSummary(checkResult)} · ${new Date(checkResult.ranAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
+                    : "Check the open file against the project's rules and term base"
+                }
+                aria-label="Check file"
+                data-testid="check-file-button"
+              >
+                {checkRunning
+                  ? <Loader2 className="h-3 w-3 animate-spin" />
+                  : <ListChecks className="h-3 w-3" />}
+                Check file
+                {checkResult && !checkRunning && (
+                  <span className={checkResult.totalFindingCount > 0
+                    ? "rounded-full bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/50 dark:text-amber-300"
+                    : "rounded-full bg-green-100 px-1.5 text-[10px] font-semibold text-green-800 dark:bg-green-900/50 dark:text-green-300"}>
+                    {checkResult.totalFindingCount}
+                  </span>
+                )}
+              </button>
+            )}
+
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
 
             {/* FRO-331: hidden trigger — opened from ⋯ menu; keeps RTL hint anchored here. */}
@@ -4574,6 +4674,20 @@ export function ProjectWorkspace() {
                 if (projectId) writeTnSidebarVisible(projectId, next)
               }}
             />
+            {checkOpen && (
+              <CheckFindingsDrawer
+                result={checkResult}
+                running={checkRunning}
+                cells={legacyCells}
+                onClose={() => setCheckOpen(false)}
+                onNavigateToCell={jumpToCellId}
+                onOpenComments={(cellId) => {
+                  // Reuse the existing comments drawer; one aside at a time.
+                  setCheckOpen(false)
+                  setCommentsCellId(cellId)
+                }}
+              />
+            )}
             {drawerRuleId && (
               <RuleDrawer
                 rule={drawerRule}
@@ -4760,7 +4874,8 @@ export function ProjectWorkspace() {
             fileName={activeFile?.name ?? "this file"}
             cells={fileTargetCells}
             getToken={getTokenForFile}
-            onImported={() => revalidateCells()}
+            applyOptimisticTargetEdits={applyOptimisticTargetEdits}
+            onImported={() => { /* reconciliation handled by drain-complete effect (next task) */ }}
           />
         </Suspense>
       )}

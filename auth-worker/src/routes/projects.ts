@@ -1118,11 +1118,14 @@ projects.get("/invite-preview/:token", async (c) => {
   }
 
   const project = await c.env.AQUILLA_PG.prepare(
-    `SELECT id, name, org_id, created_by, archived_at
-     FROM projects WHERE id = ?`,
+    `SELECT p.id, p.name, p.org_id, p.created_by, p.archived_at,
+            o.name AS org_name
+     FROM projects p
+     LEFT JOIN organizations o ON o.id = p.org_id
+     WHERE p.id = ?`,
   )
     .bind(invite.project_id)
-    .first<ProjectRow>()
+    .first<ProjectRow & { org_name: string | null }>()
   if (!project) {
     return c.json({ error: "Project not found" }, 404)
   }
@@ -1130,9 +1133,20 @@ projects.get("/invite-preview/:token", async (c) => {
     return c.json({ error: "Project is archived" }, 410)
   }
 
+  // Who invited you (AQU-471): safe to expose to token holders — the page
+  // already shows the project name, and the name helps the recipient trust
+  // the link. Null when the inviter's account no longer exists.
+  const inviter = await c.env.AQUILLA_PG.prepare(
+    "SELECT COALESCE(display_name, username) AS name FROM users WHERE id = ?",
+  )
+    .bind(invite.created_by)
+    .first<{ name: string | null }>()
+
   return c.json({
     projectId: invite.project_id,
     projectName: project.name,
+    orgName: project.org_name ?? null,
+    invitedBy: inviter?.name ?? null,
     role: {
       level: invite.role_level,
       name: roleNameFor(invite.role_level),

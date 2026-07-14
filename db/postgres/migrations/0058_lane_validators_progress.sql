@@ -1,9 +1,9 @@
--- 0056_lane_validators_progress.sql
+-- 0058_lane_validators_progress.sql
 --
 -- AQU-538: TMS-style project data model, slice 2 — carry the target-language
 -- lane into the per-cell validator records and the per-file/section progress
 -- rollups. See docs/superpowers/specs/2026-07-11-project-data-model-decision.md
--- and migration 0055 (the lane dimension on `cells`).
+-- and migration 0057 (the lane dimension on `cells`).
 --
 -- A user's standing validation is per-lane: validating a cell in lane A must
 -- not touch lane B's validated flag, and the same user may hold validations on
@@ -15,7 +15,7 @@
 -- NOT applied automatically to live Neon branches. Apply by hand per
 -- auth-worker/wrangler.toml's documented procedure:
 --   set -a; . ./.env; set +a
---   npx tsx scripts/pg.ts db/postgres/migrations/0056_lane_validators_progress.sql
+--   npx tsx scripts/pg.ts db/postgres/migrations/0058_lane_validators_progress.sql
 -- (Fresh databases pick this up from schema.sql; the dev-stack reconcile
 -- also performs this exact upgrade on drifted local containers — see
 -- scripts/dev-stack.ts reconcilePgSchema.)

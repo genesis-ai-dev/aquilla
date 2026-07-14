@@ -15,7 +15,7 @@
  */
 
 import { v7 as uuidv7 } from "uuid"
-import { enqueueOutboxEvent } from "./outbox"
+import { enqueueOutboxEvent, enqueueOutboxEvents } from "./outbox"
 import { getCqrsOutboxBridge } from "./cqrs-bridge"
 import { canPerform, requiredRoleFor, ROLE } from "./role-policy"
 import {
@@ -138,6 +138,26 @@ export async function enqueueEvent<K extends OutboxEventKind>(
     event as unknown as Parameters<typeof enqueueOutboxEvent>[0],
   )
   return { event, eventId: event.id }
+}
+
+/** Build + bulk-enqueue many typed events in one outbox transaction.
+ *  Mirrors enqueueEvent's role gate per input, then writes the whole batch at
+ *  once via enqueueOutboxEvents (one notify → one overlay rebuild). */
+export async function enqueueEvents<K extends OutboxEventKind>(
+  inputs: BuildEventInput<K>[],
+): Promise<{ event: OutboxRawEvent<K>; eventId: string }[]> {
+  if (inputs.length === 0) return []
+  const roleLevel = getCqrsOutboxBridge()?.roleLevel ?? null
+  const events = inputs.map((input) => {
+    if (!canPerform(input.kind, roleLevel) && roleLevel != null) {
+      throw new InsufficientRoleError(input.kind, roleLevel, requiredRoleFor(input.kind) ?? 0)
+    }
+    return buildRawEvent(input)
+  })
+  await enqueueOutboxEvents(
+    events as unknown as Parameters<typeof enqueueOutboxEvents>[0],
+  )
+  return events.map((event) => ({ event, eventId: event.id }))
 }
 
 // ── Convenience builders for common writer flows ──────────────────────────

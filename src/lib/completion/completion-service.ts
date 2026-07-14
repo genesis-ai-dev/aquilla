@@ -525,12 +525,14 @@ export async function complete(options: CompleteOptions): Promise<string> {
   const provider = resolveProvider(effectiveSettings)
   const { url, headers } = await buildRequestTarget(provider, effectiveSettings, options.session)
 
-  // The Frontier worker's SSE proxy drops OpenRouter content chunks that
-  // straddle `reader.read()` boundaries (fixed in the worker but not yet
-  // deployed), which surfaces as an empty completion. Force non-streaming
-  // for `frontier` until the worker fix ships; custom providers (BYO-key)
-  // still stream normally.
-  const useStream = options.stream === true && provider !== "frontier"
+  // Frontier streams again (Phase 0, 2026-06-11). History: the original
+  // chat-worker SSE proxy parsed and re-emitted frames, dropping OpenRouter
+  // content chunks that straddled `reader.read()` boundaries — that proxy was
+  // replaced by a byte-identical passthrough when chat folded into
+  // aquilla-identity (2026-05-26; the Phase 0 usage tee is also an identity
+  // transform), and consumeStream below buffers split frames correctly. The
+  // old `provider !== "frontier"` guard outlived the bug it worked around.
+  const useStream = options.stream === true
 
   // Frontier only: attribute this spend to the project being edited (see
   // activeProjectIdFromPath). Custom OpenAI-compatible endpoints may reject

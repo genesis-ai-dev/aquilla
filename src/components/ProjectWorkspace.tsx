@@ -269,6 +269,19 @@ export function shouldSelfHealZeroFileLink(args: {
   return true
 }
 
+/**
+ * A deterministic check run describes ONE file's cells. If the user switches
+ * files while the (async) run is in flight, its result must not be committed —
+ * it would clobber the now-active file's state with the prior file's findings.
+ * Apply a result only when it still matches the currently-active file.
+ */
+export function shouldApplyCheckResult(
+  resultFileId: string | null,
+  activeFileId: string | null,
+): boolean {
+  return resultFileId != null && resultFileId === activeFileId
+}
+
 const PRESENCE_LOCK_STALE_CLEAR_MS = 31_000
 
 function sameStringMap(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>): boolean {
@@ -313,6 +326,10 @@ export function ProjectWorkspace() {
 
   const [selectedFileId, setSelectedFileId] = useState<string | null>(routeFileId ?? null)
   const activeFileId = routeFileId ?? selectedFileId
+  // Latest active file, readable from async callbacks that outlive a file
+  // switch (e.g. runCheck) without capturing a stale closure value.
+  const activeFileIdRef = useRef<string | null>(activeFileId)
+  activeFileIdRef.current = activeFileId
 
   const setActiveFileId = useCallback((fileId: string | null) => {
     if (!projectId) return
@@ -928,7 +945,7 @@ export function ProjectWorkspace() {
       ).length,
     [outboxRecords, activeFileId],
   )
-  useReconcileOnDrain(activeFilePendingCommits, revalidateCells)
+  useReconcileOnDrain(activeFilePendingCommits, activeFileId, revalidateCells)
 
   // QA-BUG-1: zero-file self-heal for live-linked projects. The lazy-pull
   // trigger in useStaleSourceCells only fires once a FILE is open — a
@@ -2248,6 +2265,9 @@ export function ProjectWorkspace() {
         rules,
         concepts: project?.terminology ?? [],
       })
+      // Bail if the active file changed mid-run — don't clobber the new file's
+      // state with this (now stale) file's findings.
+      if (!shouldApplyCheckResult(result.fileId, activeFileIdRef.current)) return
       setCheckResult(result)
     } finally {
       setCheckRunning(false)
@@ -2418,8 +2438,6 @@ export function ProjectWorkspace() {
   // large import landing) tears the socket down and recreates it.
   const projectFilesRef = useRef(projectFiles)
   projectFilesRef.current = projectFiles
-  const activeFileIdRef = useRef<string | null>(activeFileId)
-  activeFileIdRef.current = activeFileId
   const presenceStaleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const clearPresenceStaleTimer = useCallback(() => {

@@ -16,7 +16,7 @@ describe("ProjectPresenceStore", () => {
         userId: "alice",
         currentFileId: "file-1",
         focusedCell: "cell-1",
-        selection: { side: "target", anchor: 0, head: 0 },
+        selection: { side: "target", anchor: 0, head: 0, draftText: "H" },
         ts: 1,
       },
     ])
@@ -28,6 +28,7 @@ describe("ProjectPresenceStore", () => {
       side: "target",
       anchor: 0,
       head: 0,
+      draftText: "H",
     })
 
     store.applyPresenceFrame([
@@ -35,7 +36,7 @@ describe("ProjectPresenceStore", () => {
         userId: "alice",
         currentFileId: "file-1",
         focusedCell: "cell-1",
-        selection: { side: "target", anchor: 2, head: 4 },
+        selection: { side: "target", anchor: 2, head: 4, draftText: "Hello" },
         ts: 2,
       },
     ])
@@ -47,6 +48,7 @@ describe("ProjectPresenceStore", () => {
       side: "target",
       anchor: 2,
       head: 4,
+      draftText: "Hello",
     })
   })
 

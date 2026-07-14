@@ -11,6 +11,7 @@ import type { OutboxRawEvent, OutboxEventKind } from "./project-do-types"
 
 /** Default lease in ms. */
 export const PROJECT_DO_DEFAULT_LEASE_MS = 30_000
+export const PROJECT_DO_MAX_PRESENCE_DRAFT_LENGTH = 16_384
 
 export interface PresenceState {
   userId: string
@@ -24,6 +25,8 @@ export interface PresenceSelection {
   side: "target"
   anchor: number
   head: number
+  /** Ephemeral, bounded text used to render a live remote caret. */
+  draftText?: string
 }
 
 export interface LockState {
@@ -274,14 +277,22 @@ function isPresenceSelection(value: unknown): value is PresenceSelection {
     typeof v.anchor === "number" &&
     Number.isFinite(v.anchor) &&
     typeof v.head === "number" &&
-    Number.isFinite(v.head)
+    Number.isFinite(v.head) &&
+    (v.draftText === undefined ||
+      (typeof v.draftText === "string" &&
+        v.draftText.length <= PROJECT_DO_MAX_PRESENCE_DRAFT_LENGTH))
   )
 }
 
 function sameSelection(a: PresenceSelection | undefined, b: PresenceSelection | undefined): boolean {
   if (!a && !b) return true
   if (!a || !b) return false
-  return a.side === b.side && a.anchor === b.anchor && a.head === b.head
+  return (
+    a.side === b.side &&
+    a.anchor === b.anchor &&
+    a.head === b.head &&
+    a.draftText === b.draftText
+  )
 }
 
 function samePresence(a: PresenceState | undefined, b: PresenceState | undefined): boolean {

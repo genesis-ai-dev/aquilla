@@ -5,6 +5,12 @@ export interface TargetPresenceSelection {
   side: "target"
   anchor: number
   head: number
+  /**
+   * Ephemeral plain-text snapshot used only to position the remote caret over
+   * what the collaborator is currently typing. Durable cell content still
+   * flows through target.cell.commit; this is never written to the event log.
+   */
+  draftText?: string
 }
 
 export interface PresenceUserSnapshot {
@@ -38,7 +44,12 @@ function sameSelection(
 ): boolean {
   if (!a && !b) return true
   if (!a || !b) return false
-  return a.side === b.side && a.anchor === b.anchor && a.head === b.head
+  return (
+    a.side === b.side &&
+    a.anchor === b.anchor &&
+    a.head === b.head &&
+    a.draftText === b.draftText
+  )
 }
 
 function sameUser(a: PresenceUserSnapshot | undefined, b: PresenceUserSnapshot | undefined): boolean {

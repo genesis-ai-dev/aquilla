@@ -42,14 +42,20 @@ describe("parseProjectDoClientMessage", () => {
       t: "presence.update",
       currentFileId: "file-1",
       focusedCell: "cell-1",
-      selection: { side: "target", anchor: 2, head: 5 },
+      selection: { side: "target", anchor: 2, head: 5, draftText: "hello" },
     }))
     expect(m).toEqual({
       t: "presence.update",
       currentFileId: "file-1",
       focusedCell: "cell-1",
-      selection: { side: "target", anchor: 2, head: 5 },
+      selection: { side: "target", anchor: 2, head: 5, draftText: "hello" },
     })
+  })
+  it("rejects oversized presence drafts", () => {
+    expect(parseProjectDoClientMessage(JSON.stringify({
+      t: "presence.update",
+      selection: { side: "target", anchor: 0, head: 0, draftText: "x".repeat(16_385) },
+    }))).toBeNull()
   })
   it("parses outbox.event", () => {
     const ev: OutboxRawEvent = {

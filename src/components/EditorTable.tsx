@@ -2817,6 +2817,16 @@ function EditorRow({
   // keeps them out of MemoizedRow's React.memo compare surface.
   const { onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording } = useEditorActions()
   const remoteCellPresence = useCellPresence(presenceStore, cell.id)
+  // A focus lock admits one active writer. Prefer its newest ephemeral draft
+  // so the read surface and remote caret advance together between commits.
+  const remoteDraftText = useMemo(() => {
+    let latest: CellPresencePeer | null = null
+    for (const peer of remoteCellPresence) {
+      if (peer.selection?.draftText === undefined) continue
+      if (!latest || peer.lastSeenAt > latest.lastSeenAt) latest = peer
+    }
+    return latest?.selection?.draftText
+  }, [remoteCellPresence])
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<ViolationAnchor | null>(null)
   const [examplesExpanded, setExamplesExpanded] = useState(false)
@@ -4465,17 +4475,12 @@ function EditorRow({
                       requestTargetEdit()
                     }}
                   >
-                    {lockHolderLabel && (
-                      <div
-                        aria-live="polite"
-                        data-presence-ignore
-                        className="pointer-events-none absolute right-1 top-1 z-10 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400"
-                      >
-                        {lockHolderLabel} is editing
-                      </div>
-                    )}
                     <div ref={targetReadContentRef}>
-                      {targetHasRichFormatting && visibleTranslatedHtml ? (
+                      {remoteDraftText !== undefined ? (
+                        <span data-remote-presence-draft>
+                          {remoteDraftText || "\u200b"}
+                        </span>
+                      ) : targetHasRichFormatting && visibleTranslatedHtml ? (
                         <TargetRichHtml
                           html={visibleTranslatedHtml}
                           footnotePanelActive={footnotePanelActive}

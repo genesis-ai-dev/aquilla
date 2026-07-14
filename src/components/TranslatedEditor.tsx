@@ -14,8 +14,8 @@
 //                 `cell.sourceEventId` (AD-9 staleness pin).
 //
 // Lock model (AD-1): the parent owns the WS focus lock via `useFocusLock`
-// and passes `heldByLabel` here. When that's set the editor is read-only
-// and shows the "Alice is editing" affordance.
+// and passes `heldByLabel` here. When that's set the editor is read-only;
+// collaborator identity is rendered on the live remote caret by the parent.
 
 import { useEditor, EditorContent, type Editor as TiptapEditor } from "@tiptap/react"
 import { BubbleMenu } from "@tiptap/react/menus"
@@ -54,6 +54,8 @@ import {
 /** Window before a quiet keystroke pause counts as a commit-worthy idle. */
 export const COMMIT_IDLE_MS = 1_200
 const PRESENCE_SELECTION_THROTTLE_MS = 120
+/** Keep presence frames lightweight even if a malformed/imported cell is huge. */
+export const MAX_PRESENCE_DRAFT_LENGTH = 16_384
 
 export interface TranslatedEditorCommit {
   /** Plain-text value derived from editor content. */
@@ -100,7 +102,7 @@ interface TranslatedEditorProps {
   textDirection?: TextDirection
   directionMode?: DirectionMode
   lang?: string
-  /** "Alice is editing" — when present, the editor is read-only and the banner shows. */
+  /** Remote lock holder — when present, the editor is read-only. */
   heldByLabel?: string | null
   infractions?: RuleInfraction[]
   ruleSeverity?: Map<string, "major" | "minor">
@@ -268,8 +270,16 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     const { selection, doc } = editorInstance.state
     const anchor = pmPositionToPlainPosition(doc, selection.anchor)
     const head = pmPositionToPlainPosition(doc, selection.head)
-    const next: TargetPresenceSelection = { side: "target", anchor, head }
-    const key = `${next.side}:${next.anchor}:${next.head}`
+    const text = editorInstance.getText()
+    const next: TargetPresenceSelection = {
+      side: "target",
+      anchor,
+      head,
+      // Oversized cells still get live caret/selection presence, but wait for
+      // the durable commit before broadcasting their full text.
+      ...(text.length <= MAX_PRESENCE_DRAFT_LENGTH ? { draftText: text } : {}),
+    }
+    const key = `${next.side}:${next.anchor}:${next.head}:${next.draftText ?? ""}`
     if (key === lastSelectionKeyRef.current) return
     lastSelectionKeyRef.current = key
     onSelectionChangeRef.current?.(next)
@@ -766,14 +776,6 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
 
   return (
     <div className={cn("relative", compactHeight ? "" : "h-full")}>
-      {heldByLabel && (
-        <div
-          aria-live="polite"
-          className="pointer-events-none absolute right-1 top-1 z-10 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400"
-        >
-          {heldByLabel} is editing
-        </div>
-      )}
       {remoteChangedDuringEdit && onDiscardLocal && (
         <div className="mb-1 flex items-center justify-between gap-2 rounded-xl bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 dark:bg-amber-950 dark:text-amber-300">
           <span>This cell changed elsewhere while you were editing.</span>

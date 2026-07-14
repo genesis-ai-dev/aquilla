@@ -183,7 +183,7 @@ describe("parseProjectWsMessage", () => {
             userId: "alice",
             focusedCell: "c1",
             currentFileId: "file-1",
-            selection: { side: "target", anchor: 2, head: 5 },
+            selection: { side: "target", anchor: 2, head: 5, draftText: "hello" },
             ts: 100,
           },
           { userId: "bob", ts: 200 },
@@ -195,9 +195,23 @@ describe("parseProjectWsMessage", () => {
       expect(msg.users).toHaveLength(2)
       expect(msg.users[0].focusedCell).toBe("c1")
       expect(msg.users[0].currentFileId).toBe("file-1")
-      expect(msg.users[0].selection).toEqual({ side: "target", anchor: 2, head: 5 })
+      expect(msg.users[0].selection).toEqual({
+        side: "target", anchor: 2, head: 5, draftText: "hello",
+      })
       expect(msg.users[1].focusedCell).toBeUndefined()
     }
+  })
+
+  it("rejects oversized presence drafts", () => {
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence",
+      users: [{
+        userId: "alice",
+        focusedCell: "c1",
+        selection: { side: "target", anchor: 0, head: 0, draftText: "x".repeat(16_385) },
+        ts: 100,
+      }],
+    }))).toBeNull()
   })
 
   it("parses lock.claimed + lock.released", () => {

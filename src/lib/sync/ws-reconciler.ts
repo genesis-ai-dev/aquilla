@@ -42,6 +42,8 @@
 import type { OutboxRawEvent, OutboxEventKind } from "./outbox-types"
 import type { TargetPresenceSelection } from "./presence-store"
 
+const MAX_PRESENCE_DRAFT_LENGTH = 16_384
+
 export interface PresenceUser {
   userId: string
   focusedCell?: string
@@ -465,7 +467,9 @@ function isTargetPresenceSelection(value: unknown): value is TargetPresenceSelec
     typeof v.anchor === "number" &&
     Number.isFinite(v.anchor) &&
     typeof v.head === "number" &&
-    Number.isFinite(v.head)
+    Number.isFinite(v.head) &&
+    (v.draftText === undefined ||
+      (typeof v.draftText === "string" && v.draftText.length <= MAX_PRESENCE_DRAFT_LENGTH))
   )
 }
 

@@ -1,6 +1,6 @@
 // Phase 2c-β: verify the new plain-TipTap editor commits via the onCommit
-// callback (no Y.Doc) and surfaces the "Alice is editing" affordance + the
-// remote-changed banner.
+// callback (no Y.Doc), remains read-only under a remote lock, and surfaces
+// the remote-changed banner.
 
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { render, fireEvent, cleanup, act } from "@testing-library/react"
@@ -73,8 +73,8 @@ describe("TranslatedEditor — plain TipTap commit path", () => {
     vi.useRealTimers()
   })
 
-  it("shows the 'Alice is editing' label when heldByLabel is set, and is read-only", async () => {
-    const { container, getByText } = render(
+  it("is read-only without rendering a warning pill when heldByLabel is set", async () => {
+    const { container, queryByText } = render(
       <TranslatedEditor
         cellId="cell-a"
         initialPlain="hello"
@@ -83,7 +83,7 @@ describe("TranslatedEditor — plain TipTap commit path", () => {
       />,
     )
     await new Promise((r) => setTimeout(r, 0))
-    expect(getByText(/Alice is editing/)).toBeTruthy()
+    expect(queryByText(/Alice is editing/)).toBeNull()
     // The editor should be set non-editable; TipTap reflects this via
     // contentEditable="false" on the rendered ProseMirror node.
     const pm = container.querySelector(".ProseMirror") as HTMLElement

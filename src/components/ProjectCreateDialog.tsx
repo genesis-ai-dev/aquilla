@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
 import { v4 as uuid } from "uuid"
-import { Info } from "lucide-react"
+import { Info, Plus, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -31,7 +31,11 @@ import {
 } from "@/components/ui/tooltip"
 import { createProject } from "@/lib/store/project-index"
 import { createCloudProject } from "@/lib/sync/cloud-projects"
-import { fetchProjectSettings, patchProjectSettings } from "@/lib/sync/project-settings"
+import {
+  fetchProjectSettings,
+  patchProjectSettings,
+  PROJECT_SETTINGS_VERSION_INITIAL,
+} from "@/lib/sync/project-settings"
 import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectsForNavigation } from "@/hooks/useAccessibleProjects"
@@ -80,6 +84,19 @@ type ProjectShape = "self-contained" | "source-only" | "linked-target"
  */
 const FIELD_CLASS = "h-9 px-3 focus-visible:ring-2 focus-visible:ring-ring/35"
 
+/** Same cap as LanguagesSection's lane registry (settings.targetLanes entries). */
+const MAX_EXTRA_LANGUAGE_LENGTH = 64
+
+/**
+ * AQU-538 creation fix (spec §5): the self-contained shape's target field
+ * becomes multi-entry — first/primary stays the project's targetLanguage,
+ * the rest land in settings.targetLanes via a follow-up PATCH after create.
+ * That PATCH is best-effort: the project itself is already created and
+ * should not be rolled back if it fails.
+ */
+const EXTRA_LANGUAGES_WARNING =
+  "Project created; adding extra languages failed — add them in Settings → Languages."
+
 /** AQU-478: clone vs live — "a checkbox, not a fork" per the design spec §9.2. */
 type LinkMode = "clone" | "live"
 /** Which upstream lane becomes this project's source: sibling-language case
@@ -118,6 +135,11 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
   const { projects: linkableProjects } = useProjectsForNavigation()
   const [open, setOpen] = useState(false)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
+  // Self-contained shape only (spec §5 "creation fix"): extra target
+  // languages beyond the primary one, applied as settings.targetLanes after
+  // the project itself is created.
+  const [extraLanguages, setExtraLanguages] = useState<string[]>([])
+  const [submitWarning, setSubmitWarning] = useState<string | null>(null)
 
   const upstreamOptions = useMemo(
     () => linkableProjects.filter((p) => !p.archivedAt),
@@ -137,6 +159,7 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
     validators: { onSubmit: projectSchema },
     onSubmit: async ({ value }) => {
       clearSubmitError()
+      setSubmitWarning(null)
 
       const jwt = session?.jwt
       if (!jwt) {
@@ -153,6 +176,9 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
         files: [],
         members: [{ userId: session.username, role: "owner" }],
       }
+
+      let extraLanguagesFailed = false
+      const extrasToApply = value.shape === "self-contained" ? extraLanguages : []
 
       try {
         await createCloudProject(jwt, { id: project.id, name: project.name, orgId })
@@ -175,6 +201,26 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
             await triggerLinkSync(jwt, project.id)
           }
         }
+
+        if (extrasToApply.length > 0) {
+          // Best-effort: fetch the fresh settings version (the row may have
+          // just been created above, or the seed write may have failed and
+          // left it absent — either way we need the CURRENT version, not a
+          // hardcoded 0). A failure here never rolls back the project.
+          try {
+            const current = await fetchProjectSettings(jwt, project.id)
+            const result = await patchProjectSettings(
+              jwt,
+              project.id,
+              { targetLanes: extrasToApply },
+              current?.version ?? PROJECT_SETTINGS_VERSION_INITIAL,
+            )
+            if (result.kind !== "ok") extraLanguagesFailed = true
+          } catch (err) {
+            console.warn("[project-create] extra languages write failed (non-fatal):", err)
+            extraLanguagesFailed = true
+          }
+        }
       } catch (err) {
         console.error("[project-create] failed:", err)
         setSubmitError(err instanceof Error ? err.message : "Failed to create project. Please try again.")
@@ -187,11 +233,21 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
         project_shape: value.shape,
         source_language: project.sourceLanguage,
         target_language: project.targetLanguage,
+        extra_target_languages: extrasToApply.length,
       })
       onCreated(project)
       form.reset()
       clearSubmitError()
-      setOpen(false)
+      setExtraLanguages([])
+
+      if (extraLanguagesFailed) {
+        // The project exists and onCreated already fired — leave the dialog
+        // open just long enough for the warning to be readable rather than
+        // rolling anything back.
+        setSubmitWarning(EXTRA_LANGUAGES_WARNING)
+      } else {
+        setOpen(false)
+      }
     },
   })
 
@@ -199,6 +255,12 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
     if (open) return
     form.reset()
     clearSubmitError()
+    setSubmitWarning(null)
+    // Functional no-op when already empty: `setExtraLanguages([])` would mint a
+    // fresh array every run, re-render, and (because `clearSubmitError` from
+    // useSubmitError is a new closure each render, and is in this effect's deps)
+    // re-fire the effect forever. Returning the same ref when empty breaks that.
+    setExtraLanguages((prev) => (prev.length === 0 ? prev : []))
   }, [open, form, clearSubmitError])
 
   function pickShape(next: ProjectShape) {
@@ -283,7 +345,9 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
                         return (
                           <Field data-invalid={invalid}>
                             <div className="flex items-center gap-1.5">
-                              <FieldLabel htmlFor="target">Target language</FieldLabel>
+                              <FieldLabel htmlFor="target">
+                                {shape === "self-contained" ? "Target language(s)" : "Target language"}
+                              </FieldLabel>
                               <LanguageFieldHint />
                             </div>
                             <Input
@@ -297,6 +361,13 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
                               aria-invalid={invalid}
                             />
                             {invalid && <FieldError errors={field.state.meta.errors} />}
+                            {shape === "self-contained" && (
+                              <ExtraTargetLanguages
+                                primaryLanguage={field.state.value}
+                                languages={extraLanguages}
+                                onChange={setExtraLanguages}
+                              />
+                            )}
                           </Field>
                         )
                       }}
@@ -474,6 +545,11 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
                 {submitError}
               </FieldError>
             )}
+            {submitWarning && (
+              <p role="status" className="text-xs text-amber-600" data-testid="create-extra-lang-warning">
+                {submitWarning}
+              </p>
+            )}
           </DialogBody>
 
           <form.Subscribe
@@ -643,6 +719,105 @@ function AddAsLaneRecommendation({
           {message}
         </p>
       )}
+    </div>
+  )
+}
+
+/**
+ * AQU-538 creation fix (spec §5): a lightweight tag list for extra target
+ * languages on the self-contained shape. The primary target-language input
+ * stays put above this — that value remains the project's required
+ * targetLanguage; entries added here become settings.targetLanes after
+ * create. Validation mirrors ProjectSettings/LanguagesSection.tsx's "add a
+ * lane" (trim, <=64 chars, case-insensitive dedupe — including against the
+ * primary language, which isn't itself a lane).
+ */
+function ExtraTargetLanguages({
+  primaryLanguage,
+  languages,
+  onChange,
+}: {
+  primaryLanguage: string
+  languages: string[]
+  onChange: (next: string[]) => void
+}) {
+  const [input, setInput] = useState("")
+  const [error, setError] = useState<string | null>(null)
+
+  function handleAdd() {
+    const trimmed = input.trim()
+    if (!trimmed) {
+      setError("Enter a language tag.")
+      return
+    }
+    if (trimmed.length > MAX_EXTRA_LANGUAGE_LENGTH) {
+      setError(`Must be ${MAX_EXTRA_LANGUAGE_LENGTH} characters or fewer.`)
+      return
+    }
+    const lower = trimmed.toLowerCase()
+    if (lower === primaryLanguage.trim().toLowerCase()) {
+      setError("This is already the primary target language.")
+      return
+    }
+    if (languages.some((l) => l.toLowerCase() === lower)) {
+      setError("Already added.")
+      return
+    }
+    setError(null)
+    onChange([...languages, trimmed])
+    setInput("")
+  }
+
+  return (
+    <div className="mt-2 flex flex-col gap-2">
+      <p className="text-xs text-muted-foreground">
+        Optional — add more target languages for this project (e.g. dialect variants
+        or parallel drafts of the same source).
+      </p>
+      {languages.length > 0 && (
+        <ul className="flex flex-wrap gap-1.5">
+          {languages.map((lang) => (
+            <li
+              key={lang}
+              data-testid={`create-extra-lang-chip-${lang}`}
+              className="flex items-center gap-1 rounded-full border bg-muted px-2 py-0.5 text-xs"
+            >
+              {lang}
+              <button
+                type="button"
+                aria-label={`Remove ${lang}`}
+                className="text-muted-foreground hover:text-foreground"
+                onClick={() => onChange(languages.filter((l) => l !== lang))}
+              >
+                <X className="h-3 w-3" aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex items-center gap-2">
+        <Input
+          data-testid="create-extra-lang-input"
+          className={`${FIELD_CLASS} flex-1`}
+          value={input}
+          onChange={(e) => {
+            setInput(e.target.value)
+            setError(null)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault()
+              handleAdd()
+            }
+          }}
+          placeholder="e.g. fr-CA"
+        />
+        <Button type="button" variant="secondary" size="sm" data-testid="create-extra-lang-add" onClick={handleAdd}>
+          <Plus className="mr-1 h-3.5 w-3.5" />
+          Add
+        </Button>
+      </div>
+      {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   )
 }

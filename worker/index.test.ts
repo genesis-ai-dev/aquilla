@@ -7,7 +7,12 @@ const SPA_HTML = `<!doctype html><html><head>
   <title>Aquilla</title>
   <meta property="og:title" content="Aquilla" />
   <meta property="og:description" content="Aquilla — translators, lifted." />
-  <meta property="og:image" content="https://aquilla.app/aquilla-og.png" />
+  <meta property="og:image" content="https://aquilla.app/aquilla-og-1200x630.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Aquilla — translators, lifted." />
+  <meta name="twitter:image" content="https://aquilla.app/aquilla-og-1200x630.png" />
+  <meta name="twitter:image:alt" content="Aquilla — translators, lifted." />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Aquilla" />
   <meta name="twitter:description" content="Aquilla — translators, lifted." />
@@ -132,8 +137,26 @@ describe("worker/index — routing", () => {
     expect(html).toContain(`<meta name="twitter:title" content="You're invited to collaborate on Aquilla" />`)
     expect(html).toContain(`<title>You're invited to collaborate on Aquilla</title>`)
     expect(html).toContain(`content="Join your team's translation project on Aquilla — translators, lifted."`)
-    // Image is left untouched — only the brand OG image exists.
-    expect(html).toContain(`<meta property="og:image" content="https://aquilla.app/aquilla-og.png" />`)
+    // AQU-471: unfurl image swaps to the dedicated invite OG image (generic by
+    // design — no org/project/inviter names leak to link scrapers).
+    expect(html).toContain(`<meta property="og:image" content="https://aquilla.app/aquilla-invite-og-1200x630.png" />`)
+    expect(html).toContain(`<meta name="twitter:image" content="https://aquilla.app/aquilla-invite-og-1200x630.png" />`)
+    expect(html).toContain(`<meta property="og:image:alt" content="You're invited to collaborate on Aquilla" />`)
+    expect(html).not.toContain("aquilla-og-1200x630.png")
+  })
+
+  it("GET /join-org/:token rewrites social meta the same way (AQU-471)", async () => {
+    const { default: worker } = await import("./index")
+    const env = {
+      ASSETS: {
+        fetch: async (): Promise<Response> =>
+          new Response(SPA_HTML, { status: 200, headers: { "Content-Type": "text/html" } }),
+      },
+    }
+    const res = await worker.fetch(new Request("https://aquilla.app/join-org/abc123"), env)
+    const html = await res.text()
+    expect(html).toContain(`<title>You're invited to collaborate on Aquilla</title>`)
+    expect(html).toContain(`<meta property="og:image" content="https://aquilla.app/aquilla-invite-og-1200x630.png" />`)
   })
 
   it("GET /join/:token leaves a non-HTML asset (e.g. hashed JS) untouched", async () => {

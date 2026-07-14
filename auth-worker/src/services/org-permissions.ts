@@ -824,24 +824,18 @@ function mapPortfolioRow(r: PortfolioDbRow): PortfolioRow {
 
 /** Per-project rollup over the org's non-archived projects (derive-on-read, one GROUP BY). */
 export async function getOrgPortfolio(env: Env, orgId: number): Promise<PortfolioRow[]> {
-  // Perf (dashboard 15s timeout fix): both heavy pieces are hoisted into
-  // MATERIALIZED CTEs so they run exactly once.
-  //  - ps: settings blobs run to ~6 MB; extracting the AQU-523 language pair
-  //    inline re-parsed that JSON on every file-fan-out row (~100x per
-  //    project). MATERIALIZED fences the planner from pulling the extraction
-  //    back up into the join.
+  // Perf (dashboard 15s timeout fix):
+  //  - The AQU-523 language pair reads the STORED generated columns on
+  //    project_settings (migration 0036) — never (settings::jsonb)->>'…'
+  //    inline: settings blobs run to ~6 MB and the inline extraction
+  //    re-parsed that JSON on every file-fan-out row (~100x per project).
   //  - au: the previous 3 correlated cell_audio subqueries re-scanned and
-  //    re-sorted cell_audio (~300k rows) per project; one grouped pass
-  //    replaces them. Both join 1:1 on project_id, so MAX() collapses the
-  //    file fan-out without affecting the SUMs.
+  //    re-sorted cell_audio (~300k rows) per project; one MATERIALIZED
+  //    grouped pass replaces them. It joins 1:1 on project_id, so MAX()
+  //    collapses the file fan-out without affecting the SUMs (same for the
+  //    1:1 project_settings join).
   const rows = await env.AQUILLA_PG.prepare(
-    `WITH ps AS MATERIALIZED (
-       SELECT project_id,
-              (settings::jsonb)->>'sourceLanguage' AS source_language,
-              (settings::jsonb)->>'targetLanguage' AS target_language
-         FROM project_settings
-        WHERE project_id IN (SELECT id FROM projects WHERE org_id = ?)
-     ), au AS MATERIALIZED (
+    `WITH au AS MATERIALIZED (
        SELECT ca.project_id,
               COUNT(DISTINCT ca.cell_id) AS audio_cells,
               COUNT(DISTINCT ca.cell_id) FILTER (WHERE ca.selected = 1 AND ca.approved = 1)
@@ -865,12 +859,12 @@ export async function getOrgPortfolio(env: Env, orgId: number): Promise<Portfoli
             COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms
        FROM projects p
        LEFT JOIN files f ON f.project_id = p.id
-       LEFT JOIN ps ON ps.project_id = p.id
+       LEFT JOIN project_settings ps ON ps.project_id = p.id
        LEFT JOIN au ON au.project_id = p.id
       WHERE p.org_id = ? AND p.archived_at IS NULL
       GROUP BY p.id, p.name
       ORDER BY LOWER(p.name)`,
-  ).bind(orgId, orgId, orgId).all<PortfolioDbRow>()
+  ).bind(orgId, orgId).all<PortfolioDbRow>()
   return (rows.results ?? []).map(mapPortfolioRow)
 }
 
@@ -879,17 +873,11 @@ export async function getOrgPortfolios(env: Env, orgIds: number[]): Promise<OrgP
   const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
   if (uniqueOrgIds.length === 0) return []
   const placeholders = uniqueOrgIds.map(() => "?").join(", ")
-  // See getOrgPortfolio for why ps/au are MATERIALIZED CTEs (dashboard
-  // 15s-timeout fix: parse settings JSON once per project, aggregate
-  // cell_audio in one pass instead of 3 correlated subqueries per project).
+  // See getOrgPortfolio for the perf shape (dashboard 15s-timeout fix):
+  // generated language columns instead of inline jsonb extraction, and one
+  // MATERIALIZED cell_audio pass instead of 3 correlated subqueries.
   const rows = await env.AQUILLA_PG.prepare(
-    `WITH ps AS MATERIALIZED (
-       SELECT project_id,
-              (settings::jsonb)->>'sourceLanguage' AS source_language,
-              (settings::jsonb)->>'targetLanguage' AS target_language
-         FROM project_settings
-        WHERE project_id IN (SELECT id FROM projects WHERE org_id IN (${placeholders}))
-     ), au AS MATERIALIZED (
+    `WITH au AS MATERIALIZED (
        SELECT ca.project_id,
               COUNT(DISTINCT ca.cell_id) AS audio_cells,
               COUNT(DISTINCT ca.cell_id) FILTER (WHERE ca.selected = 1 AND ca.approved = 1)
@@ -913,12 +901,12 @@ export async function getOrgPortfolios(env: Env, orgIds: number[]): Promise<OrgP
             COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms
        FROM projects p
        LEFT JOIN files f ON f.project_id = p.id
-       LEFT JOIN ps ON ps.project_id = p.id
+       LEFT JOIN project_settings ps ON ps.project_id = p.id
        LEFT JOIN au ON au.project_id = p.id
       WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL
       GROUP BY p.org_id, p.id, p.name
       ORDER BY p.org_id, LOWER(p.name)`,
-  ).bind(...uniqueOrgIds, ...uniqueOrgIds, ...uniqueOrgIds).all<PortfolioDbRow>()
+  ).bind(...uniqueOrgIds, ...uniqueOrgIds).all<PortfolioDbRow>()
   return (rows.results ?? []).map((r) => ({ ...mapPortfolioRow(r), orgId: r.org_id }))
 }
 

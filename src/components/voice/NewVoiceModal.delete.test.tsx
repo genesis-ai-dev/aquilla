@@ -1,5 +1,5 @@
 /**
- * NewVoiceModal.delete.test.tsx — FRO-291 delete-confirm guard.
+ * NewVoiceModal.delete.test.tsx — AQU-291 delete-confirm guard.
  *
  * Verifies that the voice delete action is gated by the checkbox-confirm
  * dialog: instant delete is blocked; cancel preserves the voice; onDelete
@@ -69,7 +69,7 @@ function renderModal({
 
 // ── Tests ─────────────────────────────────────────────────────────────────
 
-describe("NewVoiceModal delete confirm (FRO-291)", () => {
+describe("NewVoiceModal delete confirm (AQU-291)", () => {
   let onDeleteMock: Mock<() => void>
 
   beforeEach(() => {

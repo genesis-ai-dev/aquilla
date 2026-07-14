@@ -27,7 +27,7 @@ const CHAPTER_2 = path.resolve(__dirname, "../../fixtures/chapter-2.md")
  * buttons → clicks the sparkle on the first file → undo toast appears.
  */
 test("per-file Apply rename suggestion sparkle renames one file and shows undo toast", async ({ alice }) => {
-  // Two sequential FRO-310 import flows (preview → confirm → projection wait)
+  // Two sequential AQU-310 import flows (preview → confirm → projection wait)
   // plus project creation routinely exceed the 30s harness budget under load.
   test.slow()
   const dash = new Dashboard(alice)

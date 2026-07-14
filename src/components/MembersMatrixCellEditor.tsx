@@ -58,7 +58,7 @@ type Status = "idle" | "submitting" | "error"
  * override is exactly the "system did something behind your back" failure.
  * The popover names the source so the operator knows where to go to edit.
  */
-/** FRO-170 vocabulary labels for each grant-path source. */
+/** AQU-170 vocabulary labels for each grant-path source. */
 const SOURCE_LABEL: Record<string, string> = {
   override: "direct",
   group: "via group",

@@ -66,7 +66,7 @@ A `Concept` is one source headword + `renderings: { rendering, status }[]` where
 
 A new component that replaces the card body currently rendered by `TerminologyPage` on the
 `/project/:id/terminology` route (which already renders inside the `ProjectWorkspace`
-shell, per FRO-254). Two-column, editor-skinned, **one row per concept**:
+shell, per AQU-254). Two-column, editor-skinned, **one row per concept**:
 
 - **Left cell — source headword.** Lightweight inline-editable (contenteditable/input),
   no TipTap. Skinned to match editor row typography/spacing.

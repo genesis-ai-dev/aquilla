@@ -84,6 +84,24 @@ export function alignChunks(
 }
 
 /**
+ * Plain-text offset span [start, end) of the word active at time `t`, or null
+ * if no word is active (or the span is empty). Used by the read-only "karaoke
+ * while listening" renderer (KaraokeReadText) so the highlight follows playback
+ * even when the cell is not being actively edited. The editor path uses
+ * findActiveTimingIndex directly and paints via the ProseMirror plugin.
+ */
+export function activeWordRange(
+  timings: WordTiming[] | undefined,
+  t: number,
+): { start: number; end: number } | null {
+  const idx = findActiveTimingIndex(timings, t)
+  if (idx < 0 || !timings) return null
+  const w = timings[idx]
+  if (w.end <= w.start) return null
+  return { start: w.start, end: w.end }
+}
+
+/**
  * Find the index of the timing whose [t0, t1) contains `t`. Returns -1 if no
  * word is active at that time. O(log n) — assumes timings are sorted by t0
  * and non-overlapping (which both Whisper and forced aligners produce).

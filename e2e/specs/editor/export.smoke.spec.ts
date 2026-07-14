@@ -34,7 +34,7 @@ test("export dialog opens and downloads a TSV file for the open file", async ({ 
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // 1. Open the export dialog from the header overflow menu (FRO-331).
+  // 1. Open the export dialog from the header overflow menu (AQU-331).
   await ws.openExportDialog()
 
   // The dialog should appear with the title "Export".

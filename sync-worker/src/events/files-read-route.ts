@@ -60,7 +60,7 @@ interface FileSummary {
   filledCount: number
   wordCount: number
   lastEditAt: number | null
-  /** FRO-272: epoch-ms when this file was soft-deleted, or null if active. */
+  /** AQU-272: epoch-ms when this file was soft-deleted, or null if active. */
   deletedAt: number | null
 }
 

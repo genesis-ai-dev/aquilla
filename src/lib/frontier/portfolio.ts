@@ -10,7 +10,7 @@ export interface PortfolioProject {
   /** Target cells with content: the "translated" count (distinct from validated). */
   filledCells: number
   /**
-   * FRO-292: target cells that were machine-drafted (AI completion path) and have
+   * AQU-292: target cells that were machine-drafted (AI completion path) and have
    * not yet been human-edited or validated. 0 for projects predating this marker —
    * historical AI commits are indistinguishable from human edits (forward-only).
    */
@@ -26,6 +26,31 @@ export interface PortfolioProject {
   validatedAudioCells: number
   recordedMs: number
   deadlineAt: string | null
+  /**
+   * AQU-523: the project's source/target language, surfaced on the org /
+   * all-orgs project list so the pair is visible at a glance (the
+   * single-project overview already shows it). Null when unset — the server
+   * normalizes the empty-settings default to null so the client never renders
+   * a blank/broken "→".
+   */
+  sourceLanguage: string | null
+  targetLanguage: string | null
+}
+
+/**
+ * AQU-523: format a project's language pair for display, e.g. "Greek → Bambara".
+ * Trims and treats empty strings as unset. Returns just the one known language
+ * when only one side is set, and null when neither is — callers render nothing
+ * in that case rather than a broken "→" or empty label.
+ */
+export function languagePairLabel(p: {
+  sourceLanguage?: string | null
+  targetLanguage?: string | null
+}): string | null {
+  const source = p.sourceLanguage?.trim() || null
+  const target = p.targetLanguage?.trim() || null
+  if (source && target) return `${source} → ${target}`
+  return target ?? source ?? null
 }
 
 export interface OrgPortfolio {
@@ -64,7 +89,7 @@ export function translatedPct(p: PortfolioProject): number {
 }
 
 /**
- * FRO-292: fraction of cells that are AI-drafted and awaiting human review, 0..1.
+ * AQU-292: fraction of cells that are AI-drafted and awaiting human review, 0..1.
  * 0 for projects that predate the provenance marker (forward-only, honest).
  */
 export function aiDraftedPct(p: PortfolioProject): number {

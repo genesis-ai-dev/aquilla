@@ -1,5 +1,5 @@
 /**
- * RuleSuggestFromEditsDialog — FRO-198
+ * RuleSuggestFromEditsDialog — AQU-198
  *
  * Mines the user's actual edits (repeated corrections, recent edits, validated
  * pairs), runs them through the LLM, and shows drafts in the generic
@@ -137,7 +137,7 @@ export function RuleSuggestFromEditsDialog({
   async function handleCommit(accepted: number[]) {
     setCommitting(true)
     try {
-      // FRO-455: this loop calls onAdd (= useRules.addRule) once per accepted
+      // AQU-455: this loop calls onAdd (= useRules.addRule) once per accepted
       // suggestion, and correctness now depends on addRule fully awaiting its
       // shared-settings (D1 project_settings) write before resolving — see
       // useRules.ts addRule for the fix. Previously addRule fired that write

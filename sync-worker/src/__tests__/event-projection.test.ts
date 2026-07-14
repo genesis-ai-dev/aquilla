@@ -312,14 +312,14 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
       makeEvent('cell.validate', { editEventId: 'evt-commit-id' }),
       stmts,
     )
-    // FRO-292: validator UPSERT + ai_drafted clear + cells.validated recompute
+    // AQU-292: validator UPSERT + ai_drafted clear + cells.validated recompute
     // + endorsement_count recompute + files counters recompute.
     expect(stmts).toHaveLength(5)
     expect(recorded[0].sql).toContain('INSERT INTO cell_validators')
     // 0012: columns are (project_id, file_id, cell_id, event_id, username, decided_ts) — no is_active
     expect(recorded[0].sql).toContain('event_id')
     expect(recorded[0].sql).not.toContain('is_active')
-    // FRO-292: ai_drafted cleared before the validated recompute so the
+    // AQU-292: ai_drafted cleared before the validated recompute so the
     // file counter reflects the final state correctly.
     expect(recorded[1].sql).toContain('SET ai_drafted = 0')
     expect(recorded[2].sql).toContain('UPDATE cells')
@@ -754,12 +754,12 @@ describe('isChainMutatingKind', () => {
     'cast.assign': false,
     'cell.retime': false,
     'file.video.set': false,
-    // FRO-476: mirror events replicate an ordering the upstream already
+    // AQU-476: mirror events replicate an ordering the upstream already
     // arbitrated — see CHAIN_MUTATING_KINDS's doc comment.
     'source.cell.mirror': false,
     'file.mirror': false,
     'link.cursor.advance': false,
-    // FRO-478: repin is non-chain-mutating — it does not compete for the
+    // AQU-478: repin is non-chain-mutating — it does not compete for the
     // chain slot (guarded instead by expectedTargetEventId in the SQL).
     'target.cell.repin': false,
   }

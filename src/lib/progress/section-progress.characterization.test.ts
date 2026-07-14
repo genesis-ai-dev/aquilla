@@ -1,14 +1,14 @@
-// FRO-280 — Post-migration tests: section-progress now consumes the server
+// AQU-280 — Post-migration tests: section-progress now consumes the server
 // `validated` flag rather than re-deriving the threshold client-side.
 //
 // Finding (audit F-P2, §3.6 / F-B1, §3.5):
 //   `section-progress.ts:48-49` was THE ONLY place in the client that honored
-//   `validationCount` locally.  FRO-280 replaces that with:
+//   `validationCount` locally.  AQU-280 replaces that with:
 //     if (cell.validated !== undefined ? cell.validated : vCount >= validationCount)
 //   so the server-projected threshold gate is authoritative.
 //
 // These tests were characterization tests (frozen as "CHARACTERIZATION (audit F-P2)")
-// that documented the old threshold-aware local derivation.  After FRO-280 the
+// that documented the old threshold-aware local derivation.  After AQU-280 the
 // tests are flipped: they now document the new server-flag-first behavior.
 //
 // The multi-level bar (textValidationLevels) still derives from
@@ -34,9 +34,9 @@ function mkCell(
   } as any
 }
 
-// ── Server-flag-first derivation (post FRO-280) ───────────────────────────────
+// ── Server-flag-first derivation (post AQU-280) ───────────────────────────────
 
-describe("FRO-280: computeSectionProgress consumes server validated flag", () => {
+describe("AQU-280: computeSectionProgress consumes server validated flag", () => {
   // When the server flag is present, validationCount is irrelevant for textValidated.
   it("cell with validated=true counts as validated regardless of validationCount", () => {
     const cells = [

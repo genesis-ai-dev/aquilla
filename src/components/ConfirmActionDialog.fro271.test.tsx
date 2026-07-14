@@ -1,5 +1,5 @@
 /**
- * FRO-271 — ConfirmActionDialog: truthful delete copy + variant.
+ * AQU-271 — ConfirmActionDialog: truthful delete copy + variant.
  *
  * When the dialog is opened for file deletion it should:
  *   1. Show the truthful "permanently deletes" copy (not the old "not deleted from disk" lie).
@@ -16,7 +16,7 @@ const FILE_NAME = "GEN"
 const DESCRIPTION = `Delete "${FILE_NAME}"? This permanently deletes the file's cells and all recorded audio for it. This cannot be undone.`
 const CHECKBOX_LABEL = "I understand this permanently deletes all cells and audio for this file."
 
-describe("ConfirmActionDialog — FRO-271 file-delete copy", () => {
+describe("ConfirmActionDialog — AQU-271 file-delete copy", () => {
   function renderDialog(overrides: Partial<Parameters<typeof ConfirmActionDialog>[0]> = {}) {
     const onConfirm = vi.fn()
     const onOpenChange = vi.fn()

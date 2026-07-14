@@ -1,8 +1,8 @@
 name: Web CI
 
-# FRO-219: This workflow gates every PR with `pnpm run build` (i.e. `tsc -b && vite build`),
+# AQU-219: This workflow gates every PR with `pnpm run build` (i.e. `tsc -b && vite build`),
 # the same chain the deploy uses. A plain `tsc --noEmit` does NOT catch project-reference /
-# erasableSyntaxOnly violations (see FRO-213 for a real example that reached main before this
+# erasableSyntaxOnly violations (see AQU-213 for a real example that reached main before this
 # was in place). Running the full build on every PR is fast enough (<2 min); no separate
 # push-only shortcut is needed. Do NOT replace `pnpm run build` with `tsc --noEmit`.
 #
@@ -79,7 +79,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # FRO-219: must stay as `pnpm run build` (tsc -b chain), never `tsc --noEmit`.
+      # AQU-219: must stay as `pnpm run build` (tsc -b chain), never `tsc --noEmit`.
       - run: pnpm run build
 
   schema-migrations:

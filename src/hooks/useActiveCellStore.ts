@@ -8,7 +8,7 @@ import { mergeCellsDelta, readCellsCache, writeCellsCache } from "@/lib/sync/cel
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { sortByLens } from "@/lib/timeline/derive"
-import type { OrderedBy } from "@/lib/parsers/types"
+import type { OrderedBy, RuleWaiver } from "@/lib/parsers/types"
 import type { FileProgressResponse, ProgressCounts } from "@/lib/progress/file-progress-resource"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
@@ -49,6 +49,7 @@ export interface CellSummary {
   sourceEventId?: string
   targetEventId?: string
   targetSourceEventId?: string | null
+  aiDrafted?: boolean
   lastEditAt?: number
   startTime?: number
   endTime?: number
@@ -140,6 +141,7 @@ interface PendingOverlay {
   value: string
   valueHtml?: string
   eventId?: string
+  aiDrafted?: boolean
 }
 
 interface OptimisticEdit extends PendingOverlay {
@@ -172,6 +174,14 @@ export class CellStore {
   private optimisticEdits = new Map<string, OptimisticEdit>()
   private freshnessFloors = new Map<string, number>()
   private cellVersionById = new Map<string, number>()
+  // Feeds per-cell versions from one store-lifetime counter that reset() never
+  // rewinds. useSyncExternalStore bails out when getCellVersion returns a value
+  // the row already rendered with, so a version number may never be reused: a
+  // per-cell counter that restarts at 0 on reset() can silently re-inflate
+  // (bumpAllCells on audit-stats churn notifies only the audit-changed cells)
+  // and land a real data change on an already-seen number — the row then stays
+  // stale until remount.
+  private versionCounter = 0
   private cellListeners = new Map<string, Set<() => void>>()
   private listListeners = new Set<() => void>()
   private allListeners = new Set<() => void>()
@@ -192,18 +202,44 @@ export class CellStore {
   private derivedCache: DerivedCache = { baseVersion: -1, summaries: [], textPairs: [] }
 
   setRuntime(next: RuntimeContext): void {
-    const statsChanged = this.ctx.auditStats !== next.auditStats
+    const prevStats = this.ctx.auditStats
+    const statsChanged = prevStats !== next.auditStats
     const userChanged = this.ctx.username !== next.username || this.ctx.requiredValidations !== next.requiredValidations
     this.ctx = next
     if (statsChanged || userChanged) {
-      this.bumpAllCells()
+      // Invariant: a per-cell version bump is ALWAYS paired with a per-cell
+      // emit of the same set. Editor rows read useSyncExternalStore over
+      // getCellVersion; a bump without an emit lets a parent-driven render
+      // consume the new version number with the data of that moment, and any
+      // later same-version data change looks like "no change" to React — the
+      // row then stays stale until remount. The old bumpAllCells()-but-emit-
+      // only-the-changed-cells shape here was exactly that: audit-stats churn
+      // during a batch silently inflated every cell's version.
+      if (userChanged) {
+        this.bumpAllCells()
+        this.rebuildDerivedIndexes()
+        this.emit(this.order)
+        return
+      }
+      const changed = diffChangedAuditCellIds(prevStats, next.auditStats)
+      this.bumpCells(changed)
+      this.fileVersion++
       this.rebuildDerivedIndexes()
-      this.emitAll()
+      if (changed.size > 0) {
+        this.emit(changed) // per-cell + list + all listeners
+      } else {
+        this.emitAll()
+      }
     }
   }
 
   reset(projectId: string | null, fileId: string | null): void {
     this.ctx = { ...this.ctx, projectId, fileId }
+    // Rows still subscribed to the outgoing cells must hear about the reset —
+    // emitAll() alone only wakes subscribeAll consumers (footer/table shell),
+    // and a per-cell subscriber left unnotified keeps rendering the old file's
+    // content until something else touches its cell.
+    const clearedIds = this.order
     this.order = []
     this.sourceOrder = []
     this.targetOrder = []
@@ -221,7 +257,7 @@ export class CellStore {
     this.rebuildDerivedIndexes()
     this.listVersion++
     this.fileVersion++
-    this.emitAll()
+    this.emit(clearedIds)
   }
 
   subscribeList = (listener: () => void): (() => void) => {
@@ -446,6 +482,7 @@ export class CellStore {
       sourceEventId: view.sourceEventId,
       targetEventId: view.targetEventId,
       targetSourceEventId: view.targetSourceEventId,
+      aiDrafted: view.aiDrafted,
       lastEditAt: view.lastEditAt,
       startTime: view.startTime,
       endTime: view.endTime,
@@ -619,7 +656,10 @@ export class CellStore {
     const changed = symmetricChangedKeys(
       this.pendingOverlay,
       next,
-      (a, b) => a.value === b.value && a.valueHtml === b.valueHtml && a.eventId === b.eventId,
+      (a, b) => a.value === b.value
+        && a.valueHtml === b.valueHtml
+        && a.eventId === b.eventId
+        && a.aiDrafted === b.aiDrafted,
     )
     if (changed.size === 0) return
     this.pendingOverlay = next
@@ -654,10 +694,20 @@ export class CellStore {
 
     const existing = this.targetById.get(cellId)
     if (existing) {
-      this.targetById.set(cellId, { ...existing, value: patch.value, valueHtml: patch.valueHtml ?? null })
+      this.targetById.set(cellId, { ...existing, value: patch.value, valueHtml: patch.valueHtml ?? null, aiDrafted: patch.aiDrafted ?? false })
     } else {
       const source = this.sourceById.get(cellId)
-      if (!source) return
+      // No source row (mid-refetch/reset window): the shadow written above is
+      // still live data that getCellView overlays, so fall through to the
+      // bump + emit below — an early return here left the write invisible to
+      // the subscribed row (stale until remount) while the footer moved on.
+      if (!source) {
+        this.rebuildDerivedIndexes()
+        this.bumpCells([cellId])
+        this.fileVersion++
+        this.emit([cellId])
+        return
+      }
       this.targetById.set(cellId, {
         ...source,
         side: "target",
@@ -668,6 +718,7 @@ export class CellStore {
         lastEditor: this.ctx.username,
         lastEditAt: Date.now(),
         validated: false,
+        aiDrafted: patch.aiDrafted ?? false,
         wordCount: patch.value.trim() ? patch.value.trim().split(/\s+/).length : 0,
       })
       if (!this.targetOrder.includes(cellId)) this.targetOrder.push(cellId)
@@ -751,14 +802,31 @@ export class CellStore {
       cell.translated = pending.value
       if (pending.valueHtml !== undefined) cell.translatedHtml = pending.valueHtml
       cell.status = deriveStatus(pending.value, false)
+      cell.aiDrafted = pending.aiDrafted ?? false
       cell.hasPendingEdit = true
     }
     const optimistic = this.optimisticEdits.get(cell.id)
     if (optimistic) {
       cell.translated = optimistic.value
-      if (optimistic.valueHtml !== undefined) cell.translatedHtml = optimistic.valueHtml
+      // The optimistic value is authoritative for BOTH text and html. When an
+      // edit carries no valueHtml (e.g. an AI completion commits plain `text`),
+      // clear translatedHtml so the editor's html-first hydration falls back to
+      // the fresh plain text instead of re-showing the stale prior html.
+      cell.translatedHtml = optimistic.valueHtml
       cell.status = deriveStatus(optimistic.value, false)
+      cell.aiDrafted = optimistic.aiDrafted ?? false
       cell.hasPendingEdit = true
+    }
+    if (pending || optimistic) {
+      // The overlay changed `translated`/`status`; recompute validationStatus
+      // from the overlaid text so the row's aria/ring can't keep reporting
+      // "empty" (or a stale validator state) while showing the fresh value.
+      cell.validationStatus = deriveValidationStatus(
+        cell.status,
+        cell.activeValidators,
+        this.ctx.username,
+        this.ctx.requiredValidations,
+      )
     }
   }
 
@@ -875,7 +943,7 @@ export class CellStore {
 
   private bumpCells(ids: Iterable<string>): void {
     for (const id of ids) {
-      this.cellVersionById.set(id, (this.cellVersionById.get(id) ?? 0) + 1)
+      this.cellVersionById.set(id, ++this.versionCounter)
     }
   }
 
@@ -916,7 +984,7 @@ export interface UseActiveCellStoreResult {
   store: CellStore
   revalidate: () => void
   revalidateCell: (cellId: string) => void
-  applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string }) => void
+  applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => void
   isLoading: boolean
   isError: boolean
 }
@@ -932,6 +1000,8 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     enabled = true,
   } = opts
   const store = useMemo(() => new CellStore(), [])
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (typeof window !== "undefined") (window as any).__cellStore = store
   const [isLoading, setIsLoading] = useState(false)
   const [isError, setIsError] = useState(false)
   const projectRef = useRef(projectId)
@@ -1135,13 +1205,18 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         if (kind !== "target.cell.commit" && kind !== "target.cell.create") continue
         const cellId = record.event.cellId
         if (!cellId) continue
-        const payload = record.event.payload as { value?: string; valueHtml?: string }
+        const payload = record.event.payload as { value?: string; valueHtml?: string; ai_suggestion?: true }
         if (failed) {
           if (typeof payload.value === "string") store.clearOptimisticIfValue(cellId, payload.value)
           continue
         }
         if (typeof payload.value !== "string") continue
-        next.set(cellId, { value: payload.value, valueHtml: payload.valueHtml, eventId: record.event.id })
+        next.set(cellId, {
+          value: payload.value,
+          valueHtml: payload.valueHtml,
+          eventId: record.event.id,
+          aiDrafted: payload.ai_suggestion === true,
+        })
       }
       store.setPendingOverlay(next)
       store.setPendingProgressEventIds(pendingProgressEventIds)
@@ -1234,7 +1309,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   }, [doFetch, refreshCellsCacheFromStore, store])
   revalidateCellRef.current = revalidateCell
 
-  const applyOptimisticTargetEdit = useCallback((cellId: string, patch: { value: string; valueHtml?: string }) => {
+  const applyOptimisticTargetEdit = useCallback((cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => {
     store.applyOptimisticTargetEdit(cellId, patch)
   }, [store])
 
@@ -1280,18 +1355,34 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   return { store, revalidate, revalidateCell, applyOptimisticTargetEdit, isLoading, isError }
 }
 
+/**
+ * Anchor a store read to a version counter so the React Compiler keys the
+ * surrounding memo on the version. The compiler infers memoization deps from
+ * the values REFERENCED in the computation and DISCARDS manual dep arrays —
+ * `useMemo(() => store.read(), [store, version])` compiles to a cache guarded
+ * only by `store`, so the read is frozen at its mount-time value and the row
+ * stays stale forever while the store (and footer) move on. Routing every
+ * version-keyed read through this function makes the version an operand the
+ * compiler must track.
+ */
+export function readAtVersion<T>(version: number, read: () => T): T {
+  if (Number.isNaN(version)) throw new Error("unreachable: version counters are integers")
+  return read()
+}
+
 export function useCellIds(store: CellStore, orderedBy?: OrderedBy, mediaLayer = false): readonly string[] {
   const version = useSyncExternalStore(store.subscribeList, store.getListVersion, () => 0)
-  return useMemo(() => store.getCellIdsForLens(orderedBy, mediaLayer), [mediaLayer, orderedBy, store, version])
+  return useMemo(
+    () => readAtVersion(version, () => store.getCellIdsForLens(orderedBy, mediaLayer)),
+    [mediaLayer, orderedBy, store, version],
+  )
 }
 
 export function useCellView(store: CellStore, cellId: string): CellViewModel | null {
-  const version = useSyncExternalStore(
-    (listener) => store.subscribeCell(cellId, listener),
-    () => store.getCellVersion(cellId),
-    () => 0,
-  )
-  return useMemo(() => store.getCellView(cellId), [cellId, store, version])
+  const subscribe = useCallback((listener: () => void) => store.subscribeCell(cellId, listener), [store, cellId])
+  const getSnapshot = useCallback(() => store.getCellVersion(cellId), [store, cellId])
+  const version = useSyncExternalStore(subscribe, getSnapshot, () => 0)
+  return useMemo(() => readAtVersion(version, () => store.getCellView(cellId)), [cellId, store, version])
 }
 
 export function useCellStoreVersion(store: CellStore): number {
@@ -1300,7 +1391,7 @@ export function useCellStoreVersion(store: CellStore): number {
 
 export function useCellStoreViews(store: CellStore): CellViewModel[] {
   const version = useCellStoreVersion(store)
-  return useMemo(() => store.getAllCellViews(), [store, version])
+  return useMemo(() => readAtVersion(version, () => store.getAllCellViews()), [store, version])
 }
 
 function deriveStatus(translated: string, validated: boolean): CellData["status"] {
@@ -1327,6 +1418,53 @@ function sameStringArray(a: readonly string[], b: readonly string[]): boolean {
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
   return true
+}
+
+function waiversEqual(a: readonly RuleWaiver[], b: readonly RuleWaiver[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].ruleId !== b[i].ruleId || a[i].reason !== b[i].reason
+      || a[i].waivedAt !== b[i].waivedAt || a[i].waivedBy !== b[i].waivedBy) return false
+  }
+  return true
+}
+
+function auditStatsEqual(a: CellAuditStats | undefined, b: CellAuditStats | undefined): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return (
+    a.editCount === b.editCount &&
+    a.contentHash === b.contentHash &&
+    a.lastEditAt === b.lastEditAt &&
+    a.lastEditEventId === b.lastEditEventId &&
+    sameStringArray(a.activeValidators, b.activeValidators) &&
+    waiversEqual(a.waivers, b.waivers)
+  )
+}
+
+/**
+ * Cell ids whose audit-stats entry actually changed between two stats maps.
+ * Targeted single-cell refetches produce a `new Map(prev)` that shares entry
+ * references for every untouched cell, so the `prevStats === nextStats` fast
+ * path skips them in O(1) and only the genuinely-changed cell is value-compared
+ * — keeping the per-cell emit set small even on Bible-sized files.
+ */
+function diffChangedAuditCellIds(
+  prev: ReadonlyMap<string, CellAuditStats>,
+  next: ReadonlyMap<string, CellAuditStats>,
+): Set<string> {
+  const changed = new Set<string>()
+  if (prev === next) return changed
+  for (const [id, nextStats] of next) {
+    const prevStats = prev.get(id)
+    if (prevStats === nextStats) continue
+    if (!auditStatsEqual(prevStats, nextStats)) changed.add(id)
+  }
+  for (const id of prev.keys()) {
+    if (!next.has(id)) changed.add(id)
+  }
+  return changed
 }
 
 function symmetricChangedKeys<T>(

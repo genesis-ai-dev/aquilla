@@ -9,7 +9,7 @@ const STORAGE_KEY = "codex-color-theme"
 const DEFAULT: ColorTheme = "blue"
 
 export const COLOR_THEMES: { id: ColorTheme; label: string; swatch: string }[] = [
-  { id: "blue", label: "Blue", swatch: "oklch(0.78 0.07 245)" },
+  { id: "blue", label: "Blue", swatch: "oklch(0.72 0.12 250)" },
   { id: "warm", label: "Warm", swatch: "oklch(0.80 0.085 85)" },
   { id: "sage", label: "Sage", swatch: "oklch(0.78 0.07 150)" },
   { id: "rose", label: "Rose", swatch: "oklch(0.78 0.08 20)" },
@@ -29,9 +29,10 @@ function read(): ColorTheme {
 }
 
 function apply(theme: ColorTheme): void {
-  const html = document.documentElement
-  if (theme === DEFAULT) html.removeAttribute("data-color-theme")
-  else html.setAttribute("data-color-theme", theme)
+  // Always set the attribute — including for the "blue" default. Blue now has an
+  // explicit tinted preset in index.css; if we removed the attribute for blue it
+  // would fall through to the near-neutral base :root chrome and read grey. (AQU-362)
+  document.documentElement.setAttribute("data-color-theme", theme)
 }
 
 export function ColorThemeProvider({ children }: { children: ReactNode }) {

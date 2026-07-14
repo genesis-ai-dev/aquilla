@@ -36,7 +36,7 @@ test("next unfinished button advances past validated cell or shows all-done stat
   await ws.editCell(0, "Fini")
   await ws.validateCell(0)
 
-  // Next unfinished lives in the header overflow menu (FRO-331).
+  // Next unfinished lives in the header overflow menu (AQU-331).
   await ws.jumpNextUnfinished()
 
   // Either we scrolled to the next cell or (all finished) the click no-oped.

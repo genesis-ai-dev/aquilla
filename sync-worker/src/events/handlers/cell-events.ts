@@ -49,7 +49,7 @@ export interface HandleCellEventOptions {
    */
   deferFileCounters?: boolean
   /**
-   * FRO-279: project-level threshold for cells.validated.
+   * AQU-279: project-level threshold for cells.validated.
    * Forwarded to buildEventProjectionStmts for cell.validate / cell.unvalidate.
    * Default 1 (N=1 projects: byte-identical behavior).
    */

@@ -26,7 +26,7 @@ Serialized, same component. Order (user-fixed): **AQU-493 → 499 → 500 → 49
 
 ## Surface (shared context, injected into every brief)
 - **Primary file:** `src/components/org/ProjectOverview.tsx` (837 lines @ base).
-  - Progress card (validation/audio tiles + bars): ~lines 511–594. `TODO(FRO-168)` @542 = AQU-490 hook.
+  - Progress card (validation/audio tiles + bars): ~lines 511–594. `TODO(AQU-168)` @542 = AQU-490 hook.
   - Per-file breakdown table: ~lines 596–650. Rows sorted `b.cellCount - a.cellCount`, capped `FILE_ROW_CAP`.
     Row render @617–631: `{f.filledCount}/{f.approvedCount}/{f.cellCount} · {f.wordCount}w` (AQU-492).
 - **Test:** `src/components/org/ProjectOverview.test.tsx`. File row shape:

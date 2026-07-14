@@ -102,22 +102,31 @@ export function fileCountersRecomputeStmt(
 ): AquillaStatement {
   return db
     .prepare(
-      `UPDATE files SET
-        cell_count = (SELECT COUNT(DISTINCT cell_id) FROM cells WHERE project_id = ? AND file_id = ?),
-        approved_count = (SELECT COUNT(*) FROM cells WHERE project_id = ? AND file_id = ? AND validated = 1),
-        filled_count = (SELECT COUNT(*) FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target' AND TRIM(value) != ''),
-        word_count = (SELECT COALESCE(SUM(word_count), 0) FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target'),
-        last_edit_at = (SELECT MAX(last_edit_at) FROM cells WHERE project_id = ? AND file_id = ?),
-        ai_drafted_count = (SELECT COUNT(*) FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target' AND ai_drafted = 1),
-        updated_at = ?
-      WHERE id = ? AND project_id = ?`,
+      `WITH counters AS (
+         SELECT COUNT(DISTINCT cell_id)::integer AS cell_count,
+                COUNT(*) FILTER (WHERE validated = 1)::integer AS approved_count,
+                COUNT(*) FILTER (
+                  WHERE side = 'target' AND TRIM(value) != ''
+                )::integer AS filled_count,
+                COALESCE(SUM(word_count) FILTER (WHERE side = 'target'), 0)::integer AS word_count,
+                MAX(last_edit_at) AS last_edit_at,
+                COUNT(*) FILTER (
+                  WHERE side = 'target' AND ai_drafted = 1
+                )::integer AS ai_drafted_count
+           FROM cells
+          WHERE project_id = ? AND file_id = ?
+       )
+       UPDATE files SET cell_count = counters.cell_count,
+         approved_count = counters.approved_count,
+         filled_count = counters.filled_count,
+         word_count = counters.word_count,
+         last_edit_at = counters.last_edit_at,
+         ai_drafted_count = counters.ai_drafted_count,
+         updated_at = ?
+        FROM counters
+       WHERE files.id = ? AND files.project_id = ?`,
     )
     .bind(
-      projectId, fileId,
-      projectId, fileId,
-      projectId, fileId,
-      projectId, fileId,
-      projectId, fileId,
       projectId, fileId,
       serverTs,
       fileId, projectId,
@@ -241,7 +250,7 @@ export function buildEventProjectionStmts(
      */
     chainGate?: ChainSlot
     /**
-     * FRO-279: project-level threshold for cells.validated.
+     * AQU-279: project-level threshold for cells.validated.
      * `cells.validated` flips to 1 when the cell has at least this many
      * current-head validators. Default 1 (N=1 projects: byte-identical behavior).
      */
@@ -392,7 +401,7 @@ export function buildEventProjectionStmts(
       if (event.kind === 'target.cell.commit') {
         const tp = p as EventPayloads['target.cell.commit']
         const sourceEventId = tp.sourceEventId ?? null
-        // FRO-292: set ai_drafted=1 when the commit carries ai_suggestion, clear to 0
+        // AQU-292: set ai_drafted=1 when the commit carries ai_suggestion, clear to 0
         // on any human commit (ai_suggestion absent). Human edit reclassifies the cell.
         const aiDrafted = tp.ai_suggestion ? 1 : 0
 
@@ -610,7 +619,7 @@ export function buildEventProjectionStmts(
         )
       }
 
-      // FRO-292: validation supersedes AI-drafted status. Once a reviewer
+      // AQU-292: validation supersedes AI-drafted status. Once a reviewer
       // validates a cell, it moves to "Validated" — the "AI-drafted awaiting
       // review" label no longer applies regardless of the commit provenance.
       // Clear ai_drafted = 0 on cell.validate so the file counter reflects
@@ -630,7 +639,7 @@ export function buildEventProjectionStmts(
       // CURRENT chain head (`cells.event_id`). A cell is "validated" when
       // the number of current-head validators meets the project threshold.
       //
-      // FRO-279: threshold is `opts.validationCount` (default 1). N=1
+      // AQU-279: threshold is `opts.validationCount` (default 1). N=1
       // projects are byte-identical to the old COUNT(*) > 0 behavior.
       // The threshold is bound as a parameter so no SQL string interpolation.
       const validationThreshold = Math.max(1, opts?.validationCount ?? 1)
@@ -972,7 +981,7 @@ case 'cell.audio.attach': {
     }
 
     case 'file.delete': {
-      // FRO-272: replay-safe soft-delete tombstone. Mirrors handlers/file-delete-restore.ts.
+      // AQU-272: replay-safe soft-delete tombstone. Mirrors handlers/file-delete-restore.ts.
       // Idempotent on double-delete (WHERE deleted_at IS NULL).
       if (!event.fileId) {
         throw new Error(`file.delete event ${event.id} is missing fileId`)
@@ -990,7 +999,7 @@ case 'cell.audio.attach': {
     }
 
     case 'file.restore': {
-      // FRO-272: replay-safe restore. Mirrors handlers/file-delete-restore.ts.
+      // AQU-272: replay-safe restore. Mirrors handlers/file-delete-restore.ts.
       // Idempotent on double-restore (WHERE deleted_at IS NOT NULL).
       if (!event.fileId) {
         throw new Error(`file.restore event ${event.id} is missing fileId`)
@@ -1185,11 +1194,11 @@ case 'cell.audio.attach': {
     }
 
     case 'cast.assign': {
-      // FRO-438: non-chain-mutating label assignment. Merges cast_name into
+      // AQU-438: non-chain-mutating label assignment. Merges cast_name into
       // cells.metadata JSONB without touching value, event_id, or validated.
       // Applies to the SOURCE-side row (the cell's canonical reference lives
       // on the source side); the same cell_id lookup works for both sides.
-      // FRO-439: also updates camera_state column when cameraState is present
+      // AQU-439: also updates camera_state column when cameraState is present
       // in the payload, so angle-embedded labels are split cleanly on import.
       const p = event.payload as EventPayloads['cast.assign']
       if (!event.fileId || !event.cellId) {
@@ -1221,7 +1230,7 @@ case 'cell.audio.attach': {
             .bind(event.projectId, event.fileId, event.cellId),
         )
       }
-      // FRO-439: optionally update camera_state when the payload carries it.
+      // AQU-439: optionally update camera_state when the payload carries it.
       // Null clears the column; undefined = not provided = no-op.
       if (p.cameraState !== undefined) {
         stmts.push(
@@ -1271,7 +1280,7 @@ case 'cell.audio.attach': {
     }
 
     case 'source.cell.mirror': {
-      // FRO-476: advance a downstream source cell to match the upstream.
+      // AQU-476: advance a downstream source cell to match the upstream.
       // UPSERT (the target.cell.commit INSERT…ON CONFLICT shape), NOT the
       // UPDATE-only source.cell.commit shape — mirrors routinely hit cells
       // with no local row yet (new upstream cells post-seed, first-ever
@@ -1408,7 +1417,7 @@ case 'cell.audio.attach': {
     }
 
     case 'file.mirror': {
-      // FRO-476: downstream `files` row for an upstream file created
+      // AQU-476: downstream `files` row for an upstream file created
       // post-seed. Idempotent upsert — no per-cell fold can conjure the file
       // row, so the mirror sync emits this explicitly for any new upstream
       // file id it hasn't seen. Not chain-mutating; no monotonic guard needed
@@ -1455,7 +1464,7 @@ case 'cell.audio.attach': {
     }
 
     case 'link.cursor.advance': {
-      // FRO-476: pure audit-trail record — no cells/files projection. The
+      // AQU-476: pure audit-trail record — no cells/files projection. The
       // events row itself (already inserted by the caller) IS the record;
       // this case exists only so the exhaustiveness check + dispatch table
       // stay complete. Nothing to add to `stmts`.
@@ -1463,7 +1472,7 @@ case 'cell.audio.attach': {
     }
 
     case 'target.cell.repin': {
-      // FRO-478: "accept upstream change as-is." Updates ONLY the target
+      // AQU-478: "accept upstream change as-is." Updates ONLY the target
       // row's source_event_id — value, event_id (chain head), validated,
       // and endorsement_count are all deliberately untouched (spec §7:
       // "validators are the scarce bilingual experts; a stale flag plus an
@@ -1551,7 +1560,7 @@ export function buildFileVideoSetStmt(
  * `cells.event_id`). Validation and file-level events don't move the
  * chain pointer, so they're excluded from the AD-2 guard.
  *
- * FRO-476: `source.cell.mirror` is deliberately NOT in this set. A mirror
+ * AQU-476: `source.cell.mirror` is deliberately NOT in this set. A mirror
  * replicates an ordering the UPSTREAM already arbitrated — running it
  * through the downstream's first-child claims would let an older sync's
  * fold win the chain slot over a newer one's, stranding a cell on stale

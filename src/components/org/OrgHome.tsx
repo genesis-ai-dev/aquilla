@@ -6,7 +6,7 @@ import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
 import type { OrgSummary } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, languagePairLabel, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { portfolioActivityStatus } from "@/lib/project-status"
 import { ProjectDeadlineStatuses } from "@/components/ProjectStatus"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
@@ -311,14 +311,24 @@ function ProjectTable({
                 to={`/projects/${p.id}`}
                 className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-3 px-4 py-2.5 text-sm transition-colors hover:bg-muted/50`}
               >
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className="truncate font-medium">{p.name}</span>
-                  {showOrg && p.orgName && (
-                    <Badge variant="secondary" className="max-w-[8rem] shrink-0 truncate">
-                      {p.orgName}
-                    </Badge>
+                <span className="flex min-w-0 flex-col">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate font-medium">{p.name}</span>
+                    {showOrg && p.orgName && (
+                      <Badge variant="secondary" className="max-w-[8rem] shrink-0 truncate">
+                        {p.orgName}
+                      </Badge>
+                    )}
+                    <ProjectDeadlineStatuses deadline={dstatus} className="shrink-0" />
+                  </span>
+                  {/* AQU-523: source → target language pair beneath the name, so
+                      the org / all-orgs list shows it at a glance (matching the
+                      single-project overview). Rendered only when known. */}
+                  {languagePairLabel(p) && (
+                    <span className="truncate text-xs text-muted-foreground" aria-label="Source and target language">
+                      {languagePairLabel(p)}
+                    </span>
                   )}
-                  <ProjectDeadlineStatuses deadline={dstatus} className="shrink-0" />
                 </span>
 
                 <span className="text-right font-medium tabular-nums text-foreground" aria-label={`${tpct}% translated`}>
@@ -354,11 +364,11 @@ function ProjectTable({
 }
 
 /**
- * FRO-335 / FRO-475: projects reachable only via a project-level grant (an
+ * AQU-335 / AQU-475: projects reachable only via a project-level grant (an
  * invite accept or bulk-add) into an org the caller isn't a member of.
  * Shared across both the active-org and all-orgs views so a zero-org guest
  * never lands on an empty dashboard. `orgLabel` annotates each row with the
- * host org — FRO-473: the accessible-projects endpoint now joins `orgName`,
+ * host org — AQU-473: the accessible-projects endpoint now joins `orgName`,
  * so the label falls back to "Org #N" only on older servers/absent data.
  */
 function SharedWithYouSection({
@@ -413,10 +423,10 @@ export function OrgHome() {
   const memberProgressViewerRole = activeOrg?.role?.level ?? null
 
   const [projects, setProjects] = useState<PortfolioProjectRow[]>([])
-  // FRO-335: accessible-project rows supply direct/group/org role attribution
+  // AQU-335: accessible-project rows supply direct/group/org role attribution
   // and identify projects shared from orgs the portfolio endpoint can't see.
   const [accessibleProjects, setAccessibleProjects] = useState<CloudProjectSummary[]>([])
-  // FRO-326: unredeemed invites addressed to the caller's email — without
+  // AQU-326: unredeemed invites addressed to the caller's email — without
   // this card, an invite whose link never arrived is undiscoverable in-app.
   const [pendingInvites, setPendingInvites] = useState<MyPendingInvite[]>([])
   const [loading, setLoading] = useState(false)
@@ -503,7 +513,7 @@ export function OrgHome() {
     return () => { cancelled = true }
   }, [jwt, activeOrgId, activeOrg?.name, isAllOrgs, orgLoading, orgs])
 
-  // FRO-335: surface cross-org grants on the Projects page too — otherwise a user
+  // AQU-335: surface cross-org grants on the Projects page too — otherwise a user
   // whose only project arrived via an invite link sees an empty dashboard.
   useEffect(() => {
     if (!jwt) {
@@ -521,7 +531,7 @@ export function OrgHome() {
     return () => { cancelled = true }
   }, [jwt, orgs, activeOrgId, orgLoading])
 
-  // FRO-326: received-invites surface. Org-independent (matched by email).
+  // AQU-326: received-invites surface. Org-independent (matched by email).
   useEffect(() => {
     if (!jwt) { setPendingInvites([]); return }
     let cancelled = false
@@ -574,7 +584,7 @@ export function OrgHome() {
   const overdueCount = projects.filter((p) => deadlineStatus(p, now) === "overdue").length
   const avgAudioPct =
     projects.length > 0 ? projects.reduce((sum, p) => sum + audioPct(p), 0) / projects.length : 0
-  // FRO-475: in all-orgs mode there's no single activeOrgId to compare
+  // AQU-475: in all-orgs mode there's no single activeOrgId to compare
   // against — classify by org membership alone so a project reached purely
   // via a project-level grant (zero orgs, or a grant in an org the caller
   // doesn't belong to) still surfaces instead of vanishing into an empty
@@ -681,7 +691,7 @@ export function OrgHome() {
             <p className="text-sm text-destructive">{error}</p>
           ) : (
             <div className="space-y-6">
-              {/* FRO-326: received invites — the user has been invited but
+              {/* AQU-326: received invites — the user has been invited but
                   hasn't accepted yet. Without this, an invite whose email/link
                   never arrived is undiscoverable in-app. */}
               {pendingInvites.length > 0 && (
@@ -907,7 +917,7 @@ export function OrgHome() {
                     </section>
                   </div>
 
-                  {/* FRO-475: projects reachable only via a project-level grant
+                  {/* AQU-475: projects reachable only via a project-level grant
                       (no org membership at all, or a grant in an org the caller
                       isn't a member of) are invisible to getPortfolios() — which
                       only knows about the caller's org memberships. Without this,
@@ -986,7 +996,7 @@ export function OrgHome() {
                     </div>
                   )}
 
-                  {/* FRO-335: cross-org projects (invite-link / bulk-add grants).
+                  {/* AQU-335: cross-org projects (invite-link / bulk-add grants).
                       Listed separately — they're not part of this org's portfolio,
                       but hiding them made them unreachable from every nav surface. */}
                   <SharedWithYouSection projects={sharedProjects} />

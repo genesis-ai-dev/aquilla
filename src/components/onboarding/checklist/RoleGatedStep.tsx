@@ -4,14 +4,14 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { roleName, roleDisplayText } from "@/lib/frontier/roles"
 
 /**
- * FRO-334: gates a Project Setup checklist step's body on the caller's
+ * AQU-334: gates a Project Setup checklist step's body on the caller's
  * resolved project role (AD-12 max-wins, `project.syncRole.level`).
  *
  * Pattern source: `aquilla-specs/05-user-stories/customize-ai-settings.md`
  * Persona section — below-floor roles see the step rendered **read-only**
  * with an explanatory tooltip naming the required role, never hidden and
  * never fronted by a 403 popup. Mirrors `DisabledFieldTooltip` (used by
- * ProjectSettings.tsx for the same FRO-255 floor) but wraps a whole step
+ * ProjectSettings.tsx for the same AQU-255 floor) but wraps a whole step
  * body rather than a single field, since a checklist step is a cluster of
  * inputs/buttons rather than one control.
  *
@@ -20,15 +20,15 @@ import { roleName, roleDisplayText } from "@/lib/frontier/roles"
  *     server floor on the actual write path (`POST /:projectId/members`,
  *     `INVITE_MIN_ROLE` in auth-worker/src/types.ts).
  *   - Instructions / voice & transcription → MAINTAINER (600), matching
- *     FRO-255's `EDIT_ROLE_FLOOR` in useProjectSettings.ts and the server's
+ *     AQU-255's `EDIT_ROLE_FLOOR` in useProjectSettings.ts and the server's
  *     `SETTINGS_WRITE_MIN_ROLE` on `PUT/PATCH /:projectId/settings` — the
  *     endpoint these values are eventually synced through. NOTE: the spec
  *     (`customize-ai-settings.md`) documents project_lead (500) for most
- *     settings; FRO-255 deliberately raised the client+server floor to
+ *     settings; AQU-255 deliberately raised the client+server floor to
  *     maintainer (600) for the *shared* project_settings row. We follow the
  *     already-shipped 600 here for consistency rather than reopening that
- *     decision — flagged as a spec/doc divergence in the FRO-334 report.
- *     SWARM-TODO(FRO-334): AiInstructionsStep/AiModelsStep currently persist
+ *     decision — flagged as a spec/doc divergence in the AQU-334 report.
+ *     SWARM-TODO(AQU-334): AiInstructionsStep/AiModelsStep currently persist
  *     via `useSaveCompletionSettings`/`patchProject` (IndexedDB only) and
  *     never call the gated server endpoint at all — this UI gate closes the
  *     visible path, but the underlying write has no server-side floor to hit

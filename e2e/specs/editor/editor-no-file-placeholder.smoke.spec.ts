@@ -2,7 +2,7 @@ import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
- * CellAreaPlaceholder — empty-state variants (FRO-149).
+ * CellAreaPlaceholder — empty-state variants (AQU-149).
  *
  * Two cases:
  *   A. Project has ZERO files → show "No files yet" + "Import a file" CTA button.

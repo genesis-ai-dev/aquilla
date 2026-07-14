@@ -11,8 +11,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * Cell details expansion panel.
  *
  * Each cell row has a chevron button (aria-label "Open cell details") that
- * expands an inline panel with five tabs: Staleness, BT, Recording, Issues,
- * History (EditorTable.tsx tabs array — "Decay" was renamed "Staleness").
+ * expands an inline panel with five tabs: Retrieval support, BT, Recording,
+ * Issues, History.
  *
  * The chevron is in the CellActionRail — it has `alwaysShowChevron` set, which
  * means it stays at opacity-30 (partially visible) even when the row isn't
@@ -45,7 +45,7 @@ test("cell details panel expands and shows all five tabs", async ({ alice }) => 
   await expect(panel).toBeVisible({ timeout: 5_000 })
 
   // 3. All five tabs should be present (they render as role="tab").
-  for (const tabName of ["Staleness", "Back-translation", "Recording", "Issues", "History"]) {
+  for (const tabName of ["Retrieval support", "Back-translation", "Recording", "Issues", "History"]) {
     await expect(panel.getByRole("tab", { name: tabName })).toBeVisible({ timeout: 3_000 })
   }
 

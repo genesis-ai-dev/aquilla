@@ -1,5 +1,5 @@
 /**
- * FRO-348: the round "select cell" control at the source/target divider
+ * AQU-348: the round "select cell" control at the source/target divider
  * (rendered by handleSelectionPointerDown in EditorTable.tsx) silently
  * upgraded a plain click into a range-select whenever *any* other cell was
  * already selected — no Shift needed, no visual confirmation before the
@@ -188,7 +188,7 @@ function selectCheckbox(cellId: string) {
   return btn
 }
 
-describe("EditorTable — selection targeting (FRO-348)", () => {
+describe("EditorTable — selection targeting (AQU-348)", () => {
   afterEach(() => {
     clearSelection()
   })
@@ -241,5 +241,11 @@ describe("EditorTable — selection targeting (FRO-348)", () => {
     pointerDown(selectCheckbox("1"))
     pointerDown(selectCheckbox("3"), { metaKey: true })
     expect(new Set(getSelectedIds())).toEqual(new Set(["1", "3"]))
+  })
+
+  it("reserves source-column space for the divider control", () => {
+    renderTable([makeCell("1")])
+
+    expect(screen.getByLabelText("Source text")).toHaveClass("pr-4")
   })
 })

@@ -17,7 +17,7 @@ export function SignInStep({
   onNext: () => void
   onBack: () => void
   /**
-   * FRO-282: called instead of onNext when the user completes a LOGIN (not
+   * AQU-282: called instead of onNext when the user completes a LOGIN (not
    * signup). The wizard can inspect existing orgs/projects and skip the
    * Name + Project steps for returning users.
    */

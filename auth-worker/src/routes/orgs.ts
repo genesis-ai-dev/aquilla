@@ -228,7 +228,7 @@ orgs.get("/:orgId/assignments/mine", async (c) => {
 
 /**
  * GET /api/v2/orgs/:orgId/members-matrix — effective members for every project
- * the caller can access in the org, in ONE request (FRO-218). Replaces the
+ * the caller can access in the org, in ONE request (AQU-218). Replaces the
  * client's per-project /:projectId/members fan-out that flooded the connection
  * pool and 500'd the page. Any org member.
  */
@@ -524,6 +524,7 @@ orgs.post("/:orgId/invites", zValidator("json", createOrgInviteBody), async (c) 
       email,
       joinUrl,
       org?.name ?? "an organization",
+      { invitedBy: user.username },
     ).catch((err) => console.warn("[org-invites] invite email failed:", err))
     try {
       c.executionCtx.waitUntil(emailPromise)

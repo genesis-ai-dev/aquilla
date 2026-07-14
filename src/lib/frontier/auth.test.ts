@@ -33,7 +33,7 @@ describe("login", () => {
 describe("login with email resolves canonical username from JWT sub", () => {
   beforeEach(async () => { await clearSession(); vi.restoreAllMocks(); });
 
-  it("stores the username from JWT sub, not the email the user typed — FRO-134", async () => {
+  it("stores the username from JWT sub, not the email the user typed — AQU-134", async () => {
     // Simulate server returning a JWT whose `sub` is the canonical username
     // even though the client sent an email as the login identifier.
     // Header.Payload.Signature — payload: { "sub": "alice", "iat": 0, "exp": 9999999999 }

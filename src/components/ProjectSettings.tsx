@@ -65,6 +65,8 @@ import { readValidationCount, readValidationCountAudio } from "@/lib/progress/re
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useAccounts } from "@/hooks/useAccounts"
+import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { usePostEditMetrics } from "@/lib/metrics/use-post-edit-metrics"
 import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSection"
 
@@ -137,7 +139,7 @@ interface Baseline {
   validationNamedUsers: string[]
   allowSelfValidation: boolean
   harmonize_min_role: "project_lead" | "maintainer"
-  /** FRO-460: EXPLICIT persisted value only. `undefined` = no explicit choice
+  /** AQU-460: EXPLICIT persisted value only. `undefined` = no explicit choice
    *  yet — the effective (displayed) state is derived via
    *  `resolveBibleResourcesEnabled`, not defaulted here. */
   bibleResourcesEnabled: boolean | undefined
@@ -163,7 +165,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     llmHealthPenalty: project.completionSettings?.llmHealthPenalty ?? 0.1,
     top_k: project.completionSettings?.top_k ?? 15,
     contextSize: project.completionSettings?.contextSize ?? "medium",
-    useOnlyValidatedExamples: project.completionSettings?.useOnlyValidatedExamples ?? false,
+    useOnlyValidatedExamples: true,
     main_chat_language: project.completionSettings?.main_chat_language ?? "",
     fewShotExampleFormat: project.completionSettings?.fewShotExampleFormat ?? "source-and-target",
     autoSyncEnabled: project.syncSettings?.autoSync.enabled ?? false,
@@ -174,7 +176,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     validationNamedUsers: project.validationNamedUsers ?? [],
     allowSelfValidation: project.allowSelfValidation ?? true,
     harmonize_min_role: project.harmonize_min_role ?? "project_lead",
-    // FRO-460: preserve "unset" — do NOT default to false here, that would
+    // AQU-460: preserve "unset" — do NOT default to false here, that would
     // make an unset scripture project look explicitly off in the diff/baseline.
     bibleResourcesEnabled: project.bibleResourcesEnabled,
     decaySettings: project.decaySettings,
@@ -223,8 +225,13 @@ export function ProjectSettings() {
   // yields graceful empty/403 states.
   const { org } = useOrg()
 
-  // FRO-311: AI post-edit metrics
+  // AQU-311: AI post-edit metrics
   const { session } = useFrontierSession()
+  // For the shared-settings permission error: name the active account and, if
+  // another account is already logged in, offer a one-click switch (the common
+  // "signed into my translator account instead of my admin account" case).
+  const { sessions, activate } = useAccounts()
+  const otherSessions = useMemo(() => sessions.filter((s) => !s.active), [sessions])
   const isCloudProject = !!(project?.syncRole)
   const metricsFiles = useMemo(
     () => (project?.files ?? []).map((f) => ({ id: f.id, name: f.name })),
@@ -244,7 +251,7 @@ export function ProjectSettings() {
     enabled: isCloudProject && !!id,
   })
 
-  // FRO-478: file-scoped sync-token minter for the Upstream-changes panel
+  // AQU-478: file-scoped sync-token minter for the Upstream-changes panel
   // (mirrors ProjectWorkspace's getTokenForFile — per-file JWTs, cached).
   const getTokenForUpstreamPanel = useMemo(
     () => buildFileScopedTokenFetcher(getJwt, id ?? "", {}),
@@ -281,7 +288,7 @@ export function ProjectSettings() {
   const [llmHealthPenalty, setLlmHealthPenalty] = useState(0.1)
   const [topK, setTopK] = useState(15)
   const [contextSize, setContextSize] = useState<ContextSize>("medium")
-  const [useOnlyValidatedExamples, setUseOnlyValidatedExamples] = useState(false)
+  const [useOnlyValidatedExamples, setUseOnlyValidatedExamples] = useState(true)
   const [fewShotExampleFormat, setFewShotExampleFormat] = useState<"source-and-target" | "target-only">("source-and-target")
   const [mainChatLanguage, setMainChatLanguage] = useState("")
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false)
@@ -291,9 +298,9 @@ export function ProjectSettings() {
   const [validationRoleFloor, setValidationRoleFloor] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
   const [validationNamedUsers, setValidationNamedUsers] = useState<string[]>([])
   const [allowSelfValidation, setAllowSelfValidation] = useState(true)
-  // FRO-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
+  // AQU-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
   const [harmonizeMinRole, setHarmonizeMinRole] = useState<"project_lead" | "maintainer">("project_lead")
-  // FRO-460: EXPLICIT persisted value only — `undefined` means no explicit
+  // AQU-460: EXPLICIT persisted value only — `undefined` means no explicit
   // choice yet. The switch displays the DERIVED effective value (see render);
   // this state only ever holds what will be persisted on Save.
   const [bibleResourcesEnabled, setBibleResourcesEnabled] = useState<boolean | undefined>(undefined)
@@ -334,7 +341,7 @@ export function ProjectSettings() {
     setLlmHealthPenalty(b.llmHealthPenalty)
     setTopK(b.top_k)
     setContextSize(b.contextSize)
-    setUseOnlyValidatedExamples(b.useOnlyValidatedExamples)
+    setUseOnlyValidatedExamples(true)
     setFewShotExampleFormat(b.fewShotExampleFormat)
     setMainChatLanguage(b.main_chat_language)
     setAutoSyncEnabled(b.autoSyncEnabled)
@@ -363,7 +370,7 @@ export function ProjectSettings() {
     seededRef.current = true
   }, [project, applyBaseline])
 
-  // FRO-460 display-race fix: `project.bibleResourcesEnabled` hydrates in two
+  // AQU-460 display-race fix: `project.bibleResourcesEnabled` hydrates in two
   // async phases — `useProject`'s minimal record resolves first WITHOUT the
   // field (undefined), then its own `useProjectSettings` GET fills it in. If
   // the baseline seed above (which runs on first non-null `project`) lands
@@ -471,7 +478,18 @@ export function ProjectSettings() {
   const [discardOpen, setDiscardOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  // FRO-408: success message reflects the actual delta saved (a brief
+  // Distinct from `saveError`: a shared-settings save blocked by the active
+  // account's role. Rendered as an enriched inline alert (names the account,
+  // offers an account switch) rather than the bare header string.
+  const [permissionBlocked, setPermissionBlocked] = useState(false)
+  // Clear the permission alert when the active account changes (e.g. the user
+  // clicks "switch account" in the alert itself) or the current account gains
+  // edit permission — otherwise the stale alert re-renders and misattributes the
+  // denial to the newly-active, possibly-authorized account.
+  useEffect(() => {
+    setPermissionBlocked(false)
+  }, [session?.username, canEditShared])
+  // AQU-408: success message reflects the actual delta saved (a brief
   // enumeration of which fields changed), not a generic "Saved". Auto-dismisses
   // like the sibling `conflictBy` notice above. The modal/page itself stays
   // open on save — only an explicit "Save and close" leaves it.
@@ -535,8 +553,9 @@ export function ProjectSettings() {
     if (!id || !baseline) return false
     setSaving(true)
     setSaveError(null)
+    setPermissionBlocked(false)
     setSavedMessage(null)
-    // FRO-408: track which fields actually changed so the success message can
+    // AQU-408: track which fields actually changed so the success message can
     // reflect the real delta saved, instead of a generic "Saved" that implies
     // everything on the page was written.
     const changedFieldLabels: string[] = []
@@ -618,11 +637,14 @@ export function ProjectSettings() {
           return false
         }
         if (out.kind === "blocked") {
-          setSaveError(
-            out.reason === "offline"
-              ? "You're offline. Reconnect to save shared fields."
-              : "You don't have permission to change shared settings.",
-          )
+          if (out.reason === "offline") {
+            setSaveError("You're offline. Reconnect to save shared fields.")
+          } else {
+            // Permission (role) block — surface the enriched alert that names
+            // the active account and offers an account switch, instead of the
+            // bare "You don't have permission…" header string.
+            setPermissionBlocked(true)
+          }
           return false
         }
         if (out.kind === "error") {
@@ -673,7 +695,7 @@ export function ProjectSettings() {
       // updated IDB record. We don't await it — the form is already correct.
       refresh()
 
-      // FRO-408 acceptance criterion: the success message reflects the actual
+      // AQU-408 acceptance criterion: the success message reflects the actual
       // delta saved (a brief enumeration of which fields changed), and the
       // page/modal stays open afterward — callers decide separately whether
       // to also navigate away (see handleSaveAndClose).
@@ -728,7 +750,7 @@ export function ProjectSettings() {
   const hasGitOrigin = project?.origin?.kind === "git"
   const hasSourceLink = typeof project?.sourceProjectId === "string" && !!project.sourceProjectId
 
-  // FRO-478: only meaningful for a LIVE link (a clone never drifts from its
+  // AQU-478: only meaningful for a LIVE link (a clone never drifts from its
   // upstream — see the mirror-sync short-circuit in stale-source-route.ts).
   const hasLiveSourceLink = hasSourceLink && project?.sourceLinkMode !== "clone"
 
@@ -762,7 +784,14 @@ export function ProjectSettings() {
   ]
 
   // ── Search filter ──────────────────────────────────────────────────────────
-  const [searchQuery, setSearchQuery] = useState("")
+  // AQU-522: the settings search is deep-linkable via `?q=<term>` so callers can
+  // point a user straight at a buried section. The Gemini/TTS key lives in the
+  // Voice section far down the page; "open audio setup" affordances navigate to
+  // `…/settings?q=gemini`, which filters to the Voice card so the key entry is
+  // visible immediately with nothing to hunt for or scroll past. Seeded once on
+  // mount; the box stays user-editable/clearable afterward.
+  const [searchParams] = useSearchParams()
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get("q") ?? "")
   const lowerQuery = searchQuery.trim().toLowerCase()
   const visibleSections = lowerQuery
     ? ALL_SECTIONS.filter(
@@ -839,9 +868,8 @@ export function ProjectSettings() {
     .filter((g) => g.sectionIds.length > 0)
 
   // Navigation between the index and a pane is a plain in-page Link to
-  // `?section=<id>` (read here via useSearchParams) — no new route, App.tsx
+  // `?section=<id>` (read via `searchParams` above) — no new route, App.tsx
   // untouched, and the pane is deep-linkable / back-button friendly.
-  const [searchParams] = useSearchParams()
   const activeGroupId = searchParams.get("section")
   const activeGroup = visibleGroups.find((g) => g.id === activeGroupId) ?? null
   // An unknown/stale group id (e.g. its only section just became invisible)
@@ -950,6 +978,41 @@ export function ProjectSettings() {
           <BackLink to="?" label="Settings" />
         )}
 
+        {permissionBlocked && (
+          <div
+            role="alert"
+            className="flex flex-col gap-2 rounded border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm"
+          >
+            <p className="text-destructive">
+              You're signed in as{" "}
+              <span className="font-medium">{session?.username ?? "local"}</span>
+              {session?.email ? ` (${session.email})` : ""}, which doesn't have
+              permission to change shared settings (needs Maintainer or higher).
+            </p>
+            {otherSessions.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-muted-foreground">Switch account:</span>
+                {otherSessions.map((s) => (
+                  <Button
+                    key={s.key}
+                    size="sm"
+                    variant="outline"
+                    onClick={() => activate(s.key)}
+                  >
+                    Switch to {s.username}
+                  </Button>
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">
+                  Have another account? Add or switch:
+                </span>
+                <AccountSwitcher variant="header" />
+              </div>
+            )}
+          </div>
+        )}
         {sharedConflict && (
           <div
             role="alert"
@@ -1059,7 +1122,7 @@ export function ProjectSettings() {
                     <p className="text-xs text-muted-foreground">
                       Scholarly reference data from bibletranslation.org in Search and the agent.
                     </p>
-                    {/* FRO-460 derive-on-read: nothing is written just by viewing this
+                    {/* AQU-460 derive-on-read: nothing is written just by viewing this
                         page — the hint below only describes what's already true. */}
                     {bibleResourcesEnabled === undefined && projectHasScriptureFiles(project?.files) && (
                       <p className="text-xs text-muted-foreground">
@@ -1186,13 +1249,13 @@ export function ProjectSettings() {
                   <Checkbox
                     id="validated-only"
                     className="mt-1"
-                    checked={useOnlyValidatedExamples}
-                    onCheckedChange={(checked) => setUseOnlyValidatedExamples(checked)}
+                    checked
+                    disabled
                   />
                   <div>
-                    <FieldLabel htmlFor="validated-only">Validated examples only</FieldLabel>
+                    <FieldLabel htmlFor="validated-only">Approved examples only</FieldLabel>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      When on, only human-validated cells are used as reference examples — unvalidated results are excluded.
+                      Drafting always retrieves human-validated project translations. Raw machine drafts never enter the trusted example pool.
                     </p>
                   </div>
                 </div>
@@ -1525,7 +1588,7 @@ export function ProjectSettings() {
           </div>
         )}
 
-        {/* FRO-186: Harmonization settings — harmonize_min_role floor. */}
+        {/* AQU-186: Harmonization settings — harmonize_min_role floor. */}
         {sectionsToRender.some((s) => s.id === "section-validation") && (
           <Card>
             <CardHeader>

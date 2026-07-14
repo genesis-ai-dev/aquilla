@@ -183,7 +183,7 @@ The agent is never stuck: miss in L1 → `docs()` → miss in L2 → mine
 harness-runtime decisions: typed frames (`assistant_delta`, `code_start`,
 `code_result`, `proposal`, `usage`, `done`, `error`), iteration cap (default 8),
 token ceiling, abort-on-disconnect, Haiku-by-default with Sonnet escalation for
-judgment-heavy runs, all behind `runAiGuard()` (allowlist + budgets, FRO-265).
+judgment-heavy runs, all behind `runAiGuard()` (allowlist + budgets, AQU-265).
 The sandbox executes the model's JS against the three functions (`sql`, `emit`,
 `docs`) — no network, no other globals.
 
@@ -208,7 +208,7 @@ spec's trust ladder: by default the agent's `emit()` calls are **staged** — th
 user sees the diff-summary card and clicks Apply (one click, then events POST
 with the user's sync token). A per-user "auto-apply for my own drafts" toggle
 covers the tight drafting loop. Either way `ai_suggestion: true` +
-`agent_run_id` mark provenance, and `ai_drafted` surfaces it to PMs (FRO-292).
+`agent_run_id` mark provenance, and `ai_drafted` surfaces it to PMs (AQU-292).
 
 **UI.** The existing `ChatPanel` grows an agent mode: run timeline (each
 `code_start`/`code_result` as a collapsible step), proposal cards with Apply /

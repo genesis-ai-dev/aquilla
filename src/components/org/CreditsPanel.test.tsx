@@ -107,8 +107,8 @@ describe("CreditsPanel — renders for maintainer when data is present", () => {
   // former "shows enforcement-off notice" test was dropped rather than weakened.
 })
 
-describe("CreditsPanel — FRO-414 regression: each bar binds to its own distinct bucket", () => {
-  // WHY: FRO-414 was reported as "3 of 4 bars echo the same number" — a
+describe("CreditsPanel — AQU-414 regression: each bar binds to its own distinct bucket", () => {
+  // WHY: AQU-414 was reported as "3 of 4 bars echo the same number" — a
   // transposed field mapping would make two bars silently render the same
   // value. Using four DISTINCT fixture numbers means any future swap of
   // day/week or total/agent fields fails loudly instead of coincidentally

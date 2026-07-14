@@ -1,5 +1,5 @@
 /**
- * InterlinearAlignmentPanel — FRO-207 / FRO-240 / FRO-241
+ * InterlinearAlignmentPanel — AQU-207 / AQU-240 / AQU-241
  *
  * Renders source↔target word alignment links for a single cell in the BT
  * expansion tab. Mirrors Paratext's guess→approve interaction:
@@ -12,10 +12,10 @@
  * an AlignmentSeed via the `onSeedChange` callback (parent writes to
  * project-settings so it survives reload and feeds back into the model).
  *
- * FRO-241: When `hasSufficientData` is false the panel shows an "insufficient
+ * AQU-241: When `hasSufficientData` is false the panel shows an "insufficient
  * data" empty state instead of spurious low-confidence suggestions.
  *
- * FRO-240: confirm/reject buttons carry descriptive aria-labels and app tooltips that
+ * AQU-240: confirm/reject buttons carry descriptive aria-labels and app tooltips that
  * explain how the action feeds the interlinear training loop.
  */
 
@@ -131,7 +131,7 @@ function AlignmentRow({
       {/* Action buttons — only when not already decided */}
       {!confirmed && !invalidated && (
         <>
-          {/* FRO-240: tooltip/aria-label explains that confirming teaches the glosser */}
+          {/* AQU-240: tooltip/aria-label explains that confirming teaches the glosser */}
           <AppTooltip
             content={`Confirm: mark "${link.srcToken} -> ${link.tgtToken}" as a correct word-level alignment. Confirmed pairs teach the statistical glosser and improve future back-translations.`}
             className="max-w-xs"
@@ -145,7 +145,7 @@ function AlignmentRow({
               <Check className="h-3 w-3" />
             </button>
           </AppTooltip>
-          {/* FRO-240: tooltip/aria-label explains that invalidating penalizes incorrect suggestions */}
+          {/* AQU-240: tooltip/aria-label explains that invalidating penalizes incorrect suggestions */}
           <AppTooltip
             content={`Reject: mark "${link.srcToken} -> ${link.tgtToken}" as an incorrect alignment. Rejected pairs are penalized so this suggestion won't appear again.`}
             className="max-w-xs"
@@ -178,7 +178,7 @@ export function InterlinearAlignmentPanel({
   confirmedSeeds,
   onSeedChange,
 }: InterlinearAlignmentPanelProps) {
-  // FRO-241: derive whether the model has enough pairs for non-random results.
+  // AQU-241: derive whether the model has enough pairs for non-random results.
   // AlignmentModel.pairCount is the number of (source, target) verse pairs used
   // to train it — read directly from the model so the parent doesn't need to
   // thread an extra prop.
@@ -186,18 +186,18 @@ export function InterlinearAlignmentPanel({
     alignmentModel != null &&
     alignmentModel.pairCount >= MIN_PAIRS_FOR_MEANINGFUL_ALIGNMENT
 
-  // FRO-241: only compute links when there is sufficient data — avoids wasting
+  // AQU-241: only compute links when there is sufficient data — avoids wasting
   // cycles on a model that would only produce noise.
   const links: AlignmentLink[] = useMemo(() => {
     if (!hasSufficientData) return []
     if (!alignmentModel || !sourceText.trim() || !targetText.trim()) return []
-    // FRO-241: threshold raised to CONFIDENCE_HIGH (0.6) so only high-confidence
+    // AQU-241: threshold raised to CONFIDENCE_HIGH (0.6) so only high-confidence
     // alignments are surfaced — low-confidence guesses from a small corpus are
     // suppressed rather than presented as equivalent to confident ones.
     return alignCell(sourceText, targetText, alignmentModel, { threshold: CONFIDENCE_HIGH })
   }, [hasSufficientData, alignmentModel, sourceText, targetText])
 
-  // FRO-241 training loop fix: the amber band (0.3–0.6) was the primary path
+  // AQU-241 training loop fix: the amber band (0.3–0.6) was the primary path
   // for small corpora to feed AlignmentSeeds back — raising the display floor
   // to 0.6 severed it. Keep those links accessible via a collapsed disclosure
   // so confirm/invalidate stays reachable without adding noise to the main view.
@@ -239,13 +239,13 @@ export function InterlinearAlignmentPanel({
     onSeedChange({ srcToken: link.srcToken, tgtToken: link.tgtToken, weight: -1 })
   }
 
-  // FRO-241: insufficient-data empty state — shown instead of junk alignments
+  // AQU-241: insufficient-data empty state — shown instead of junk alignments
   // when the project hasn't translated enough sentences for meaningful signal.
   if (!hasSufficientData) {
     return (
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center gap-1">
-          {/* FRO-241: legend/help tooltip for the Alignment section */}
+          {/* AQU-241: legend/help tooltip for the Alignment section */}
           <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
             Alignment
           </span>
@@ -271,7 +271,7 @@ export function InterlinearAlignmentPanel({
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-1">
-        {/* FRO-241: legend/help tooltip for the Alignment section (FRO-240: explains ✓/✕ controls) */}
+        {/* AQU-241: legend/help tooltip for the Alignment section (AQU-240: explains ✓/✕ controls) */}
         <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           Alignment
         </span>
@@ -303,7 +303,7 @@ export function InterlinearAlignmentPanel({
         </div>
       )}
 
-      {/* FRO-241 training loop fix: collapsed opt-in disclosure for the
+      {/* AQU-241 training loop fix: collapsed opt-in disclosure for the
           amber band (0.3–0.6). Small corpora plateau below 0.6 and can
           never train past it if confirm/invalidate is unreachable. The
           disclosure is closed by default so it adds no visual noise for

@@ -106,21 +106,6 @@ describe("buildBatchPrompt", () => {
     expect(messages[1].content).toContain("<v1>Bonjour</v1>\n<v2>monde</v2>")
   })
 
-  it("appends priorBatch as a final example to carry continuity across sub-batch splits", () => {
-    const messages = buildBatchPrompt({
-      sourceLanguage: "English", targetLanguage: "French",
-      systemPrompt: DEFAULT_SYSTEM_PROMPT,
-      cells: [{ source: "fresh source" }],
-      examples: [],
-      priorBatch: [{ source: "earlier verse", target: "verset précédent" }],
-    })
-    const idxPrior = messages[1].content.indexOf("<v1>earlier verse</v1>")
-    const idxLive = messages[1].content.indexOf("<v1>fresh source</v1>")
-    expect(idxPrior).toBeGreaterThan(-1)
-    expect(idxLive).toBeGreaterThan(idxPrior)
-    expect(messages[1].content).toContain("<v1>verset précédent</v1>")
-  })
-
   it("substitutes language placeholders in the user-supplied system prompt", () => {
     const messages = buildBatchPrompt({
       sourceLanguage: "Greek", targetLanguage: "Spanish",
@@ -337,9 +322,9 @@ describe("complete", () => {
     expect(body.model).toBe("gemma")
   })
 
-  // FRO-414 follow-up: frontier chat invoked from a project route carries the
+  // AQU-414 follow-up: frontier chat invoked from a project route carries the
   // project id so the server bills the spend to that project's org.
-  describe("projectId attribution (FRO-414 follow-up)", () => {
+  describe("projectId attribution (AQU-414 follow-up)", () => {
     afterEach(() => {
       window.history.pushState({}, "", "/")
     })
@@ -692,11 +677,11 @@ describe("buildBatchPrompt with rules and validatedPairs", () => {
 })
 
 // ---------------------------------------------------------------------------
-// FRO-187: v1 AI retrieval-tuning settings defaults & top_k wiring
+// AQU-187: v1 AI retrieval-tuning settings defaults & top_k wiring
 // ---------------------------------------------------------------------------
 
 describe("CompletionSettings v1 retrieval fields", () => {
-  it("FALLBACK_SETTINGS-style defaults: top_k=15, contextSize=medium, useOnlyValidatedExamples=false, main_chat_language empty", () => {
+  it("FALLBACK_SETTINGS-style defaults: top_k=15, contextSize=medium, approved-only examples, main_chat_language empty", () => {
     const settings: CompletionSettings = {
       endpoint: "",
       model: "",
@@ -706,12 +691,12 @@ describe("CompletionSettings v1 retrieval fields", () => {
       // v1 defaults applied explicitly (mirrors FALLBACK_SETTINGS in useCompletion)
       top_k: 15,
       contextSize: "medium",
-      useOnlyValidatedExamples: false,
+      useOnlyValidatedExamples: true,
       main_chat_language: "",
     }
     expect(settings.top_k).toBe(15)
     expect(settings.contextSize).toBe("medium")
-    expect(settings.useOnlyValidatedExamples).toBe(false)
+    expect(settings.useOnlyValidatedExamples).toBe(true)
     expect(settings.main_chat_language).toBe("")
   })
 
@@ -1029,7 +1014,7 @@ describe("buildParagraphPrompt", () => {
 })
 
 describe("activeProjectIdFromPath", () => {
-  // WHY: this is the single attribution point for chat credit spend (FRO-414
+  // WHY: this is the single attribution point for chat credit spend (AQU-414
   // follow-up) — every completion caller runs on a project route, so the URL
   // defines "the project in scope". A wrong match here silently bills the
   // wrong org (or none), so the route shapes are pinned.

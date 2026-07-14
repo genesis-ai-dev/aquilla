@@ -18,7 +18,7 @@ const ROADMAP: { phase: string; tone: string; blurb: string; items: string[] }[]
       "Low-resource language drafting",
       "Real-time guidance & back-translation",
       "Living Memory — fix it once, the system learns",
-      "Confidence & health you can see at a glance",
+      "Review support you can inspect at a glance",
       "Cloud sync & team collaboration",
       "On-device speech capabilities (cloud models also available)",
     ],

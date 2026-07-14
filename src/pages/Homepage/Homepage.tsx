@@ -35,7 +35,7 @@ export function Homepage() {
   // Signed-in visitors (aq_hint=1 cookie — same bit the Worker reads at the
   // edge) go straight into the app at `/`; returning (unsigned-in) users go to
   // /login; brand-new visitors use the "Sign up free" button → /onboarding.
-  // FRO-282: "Open app" is the sign-in entry for returning users — it must
+  // AQU-282: "Open app" is the sign-in entry for returning users — it must
   // NOT send them through the signup wizard.
   const appHref = hasAuthHintCookie() ? "/" : "/login"
 
@@ -237,16 +237,15 @@ export function Homepage() {
         <section className="aq-container aq-section" id="quality">
           <div className="aq-feature aq-rev">
             <div className="aq-feature-copy aq-reveal">
-              <span className="aq-eyebrow">Confidence, not guesswork</span>
-              <h3 className="aq-display" style={{ marginTop: 14 }}>Quality you can see at a glance.</h3>
+              <span className="aq-eyebrow">Evidence, not a quality certificate</span>
+              <h3 className="aq-display" style={{ marginTop: 14 }}>Review support you can inspect.</h3>
               <p>
-                Every cell carries a confidence score that reflects how well it lines up with validated, trusted work
-                around it. The system surfaces what needs a human's attention — so an expert's time goes where it matters
-                instead of re-reading every line.
+                Every cell carries a retrieval-support signal showing how it connects to approved, trusted work around it.
+                The signal helps reviewers prioritize terminology and context checks; it never replaces expert review.
               </p>
               <ul className="aq-feature-list">
-                <li><IconCheck /> A live confidence score on every cell — text <em>and</em> audio</li>
-                <li><IconCheck /> The biggest drags, ranked and one click away</li>
+                <li><IconCheck /> Explainable support evidence for every cell — text <em>and</em> audio</li>
+                <li><IconCheck /> Lower-support work surfaced for closer review</li>
                 <li><IconCheck /> Works whether one expert is steering or a whole team is — no fixed review pipeline</li>
               </ul>
             </div>

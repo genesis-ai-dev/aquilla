@@ -13,11 +13,13 @@ import {
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
 import {
   type CellFootnoteDetails,
   type CellStore,
+  readAtVersion,
   useCellIds,
   useCellStoreVersion,
   useCellView,
@@ -47,7 +49,8 @@ import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
 import { CellExpansion } from "./CellExpansion"
-import { tokenizeWords } from "@/lib/audio/timings"
+import { tokenizeWords, activeWordRange } from "@/lib/audio/timings"
+import { KaraokeReadText } from "./KaraokeReadText"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { useCellEditHistory } from "@/hooks/useCellEditHistory"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
@@ -65,7 +68,6 @@ import {
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
@@ -244,8 +246,10 @@ function SynthStatusBadge({
   // A2: "Open audio setup" must DO something. When the callback is provided we
   // call it (host may already be in audio mode); otherwise we navigate directly
   // to the project settings page which contains the Gemini API key section.
+  // AQU-522: deep-link with `?q=gemini` so the settings search filters to the
+  // Voice card and the key entry is visible immediately (no scrolling/hunting).
   const openVoiceSetup = () =>
-    onOpenAudioSetup ? onOpenAudioSetup() : navigate(`/project/${projectId}/settings`)
+    onOpenAudioSetup ? onOpenAudioSetup() : navigate(`/project/${projectId}/settings?q=gemini`)
   // A4: track whether the user dismissed the popover without fixing the error.
   // Dismissed = popover hidden but cell is still unvoiced — show a muted badge
   // so the row doesn't look falsely clean.
@@ -647,7 +651,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   getTokenForFile,
   getAlignmentModel,
   onAlignmentSeedChange,
-  assignmentsByCellId,
   checkLockHolder,
   showFootnotesInline,
   footnotePanelActive,
@@ -1156,7 +1159,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // so the effect only fires on actual row changes, not every scrolled pixel.
   const firstVisibleRef = useMemo(() => {
     if (!firstVisibleCellId) return null
-    return cellStore.getCellView(firstVisibleCellId)?.group || null
+    return readAtVersion(cellStoreVersion, () => cellStore.getCellView(firstVisibleCellId)?.group || null)
   }, [cellStore, cellStoreVersion, firstVisibleCellId])
   useEffect(() => {
     onVisibleRefChange?.(firstVisibleRef)
@@ -1166,7 +1169,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (!onVisibleFootnotesChange || displayCellIds.length === 0) return []
 
     const indexes = viewableIndexes.length > 0 ? viewableIndexes : [firstVisibleIndex]
-    return indexes
+    return readAtVersion(cellStoreVersion, () => indexes
       .map((index) => {
         const cellId = displayCellIds[index]
         const cell = cellId ? cellStore.getCellView(cellId) : null
@@ -1186,7 +1189,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           numberOffset: offsets.target,
         }
       })
-      .filter((entry): entry is VisibleFootnoteEntry => entry !== null)
+      .filter((entry): entry is VisibleFootnoteEntry => entry !== null))
   }, [cellStore, cellStoreVersion, displayCellIds, firstVisibleIndex, hoveredFootnote, onVisibleFootnotesChange, viewableIndexes])
 
   useEffect(() => {
@@ -1317,8 +1320,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onAlignmentSeedChange={onAlignmentSeedChange}
           sourceFontSize={sourceFontSize}
           targetFontSize={targetFontSize}
-          assigneeLabel={assignmentsByCellId?.get(cell.id)?.username ?? null}
-          assigneeNote={assignmentsByCellId?.get(cell.id)?.scopeLabel ?? null}
           checkLockHolder={checkLockHolder}
           showFootnotesInline={showFootnotesInline}
           footnotePanelActive={footnotePanelActive}
@@ -1336,7 +1337,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [
     activeCueIndex,
     activeEditorCellId,
-    assignmentsByCellId,
     audioByCellId,
     audioLens,
     backtranslationByCellId,
@@ -1632,10 +1632,6 @@ interface MemoizedRowProps {
   sourceFontSize?: number
   /** FRO-251: per-file target-column font size in px. Defaults to 14 when absent. */
   targetFontSize?: number
-  /** FRO-192: username of the assignee for this cell. Null = no assignment. */
-  assigneeLabel?: string | null
-  /** FRO-192: scope label for the assignment tooltip. */
-  assigneeNote?: string | null
   /** RACE-5: ref-backed live lock check — see EditorTableProps.checkLockHolder. */
   checkLockHolder?: (cellId: string) => string | null
   /** FRO-317: when true, USFM \f...\f* footnotes render below each cell. */
@@ -1683,8 +1679,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
     isStaleSource,
     isUpstreamStaleSource,
-    assigneeLabel,
-    assigneeNote,
     checkLockHolder,
     showFootnotesInline,
     footnotePanelActive,
@@ -1833,8 +1827,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onAckRemoteChange={onAckRemoteChange}
         sourceFontSize={sourceFontSize}
         targetFontSize={targetFontSize}
-        assigneeLabel={assigneeLabel}
-        assigneeNote={assigneeNote}
         checkLockHolder={checkLockHolder}
         showFootnotesInline={showFootnotesInline}
         footnotePanelActive={footnotePanelActive}
@@ -1944,10 +1936,6 @@ interface EditorRowProps {
   sourceFontSize?: number
   /** FRO-251: per-file target-column font size in px. Defaults to 14 when absent. */
   targetFontSize?: number
-  /** FRO-192: username of the assignee for this cell. Null = no assignment. */
-  assigneeLabel?: string | null
-  /** FRO-192: scope label for the assignment tooltip. */
-  assigneeNote?: string | null
   /** RACE-5: ref-backed live lock check — see EditorTableProps.checkLockHolder. */
   checkLockHolder?: (cellId: string) => string | null
   /** FRO-317: when true, USFM \f...\f* footnotes render below the cell row. */
@@ -2800,8 +2788,6 @@ function EditorRow({
   onAlignmentSeedChange,
   sourceFontSize = 14,
   targetFontSize = 14,
-  assigneeLabel,
-  assigneeNote,
   checkLockHolder,
   showFootnotesInline,
   footnotePanelActive,
@@ -3094,6 +3080,27 @@ function EditorRow({
       author: username,
     }).then((eventId) => {
       pendingTargetEventIdRef.current = eventId
+      // Restore codex behaviour: a direct human edit auto-validates the cell
+      // ("a human has touched it"). The target.cell.commit above cleared any
+      // prior validators (audit-stats-overlay resets activeValidators on every
+      // edit), so we re-add the current user against the JUST-committed event
+      // id — a cell.validate only sticks when its editEventId matches the
+      // cell's latest edit. cell.validate needs only REVIEWER (≤ the CONTRIBUTOR
+      // floor already required to reach this commit path), so anyone who can
+      // edit can validate; guard defensively anyway. Skip empty commits so
+      // clearing a cell doesn't mark an empty row "validated".
+      if (value.trim() && canValidate && canPerform("cell.validate", project.syncRole?.level ?? null)) {
+        void emitCellValidate({
+          projectId: project.id,
+          fileId: cell.fileId,
+          cellId: cell.id,
+          editEventId: eventId,
+          author: username,
+        }).catch((err) => {
+          // Telemetry-adjacent, non-blocking: the commit already landed.
+          console.warn("[auto-validate] emit failed:", err)
+        })
+      }
       // Pass the just-assigned event id: the auto-BT in the parent pins to it
       // so the BT describes THIS commit, not the lagging projection head.
       void onCellCommitted?.(cell.id, eventId, parentId)
@@ -3111,7 +3118,7 @@ function EditorRow({
         valueHtml: cell.translatedHtml ?? "",
       })
     })
-  }, [editable, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder])
+  }, [editable, canValidate, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder])
 
   // Source-edit commit path. The inline source editor (a plain TranslatedEditor)
   // calls this on idle/blur with the current source `{value, valueHtml}`. We emit
@@ -3386,6 +3393,7 @@ function EditorRow({
     }
     const editEventId = cell.targetEventId ?? pendingTargetEventIdRef.current
     if (!project.id || !editEventId) return
+    setOptimisticSelfValidation(validated)
     const emit = validated ? emitCellValidate : emitCellUnvalidate
     void emit({
       projectId: project.id,
@@ -3396,6 +3404,7 @@ function EditorRow({
     }).then(() => {
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
+      setOptimisticSelfValidation(null)
       console.warn(`[${validated ? "validate" : "unvalidate"}] emit failed:`, err)
       // FRO-274: surface enqueue failure inline.
       setWriteError("Couldn't save this change locally — copy your text and reload.")
@@ -3512,6 +3521,32 @@ function EditorRow({
   ])
   const generatedVoiceController = useCellAudio(project, cellForGeneratedVoice, cell.fileId)
 
+  // AQU-521: karaoke-while-listening for the read-only target view. When a cell
+  // is not being actively edited its target renders as plain text (not a
+  // ProseMirror editor), so the editor's karaoke plugin can't paint the active
+  // word. Compute the active word's plain-text offset span from whichever audio
+  // is playing (recorded take or generated voice) so KaraokeReadText can paint
+  // it as playback advances. Scoped to plain (non-USFM, non-rich) target text —
+  // WordTiming offsets are computed against that plain text.
+  const targetIsPlainText = useMemo(
+    () => !targetHasRichFormatting && segmentUsfmForDisplay(visibleTranslated ?? "") === null,
+    [targetHasRichFormatting, visibleTranslated],
+  )
+  const karaokeReadRange = useMemo(() => {
+    if (!targetIsPlainText) return null
+    if (audioController.isPlaying) {
+      return activeWordRange(cellAudioTimings, audioController.currentTime)
+    }
+    if (generatedVoiceController.isPlaying) {
+      return activeWordRange(generatedVoiceTimings, generatedVoiceController.currentTime)
+    }
+    return null
+  }, [
+    targetIsPlainText, cellAudioTimings, generatedVoiceTimings,
+    audioController.isPlaying, audioController.currentTime,
+    generatedVoiceController.isPlaying, generatedVoiceController.currentTime,
+  ])
+
   // When this cell starts playing, gently bring it into view if it's
   // off-screen. Skips when the user is actively interacting with another cell
   // (focus inside an editable element).
@@ -3542,10 +3577,31 @@ function EditorRow({
     void transcribeCell({ cell, session: rowSession, projectId: project.id, language: project.targetLanguage })
   }, [cell, rowSession, project.id, project.targetLanguage])
 
-  const vs = cell.validationStatus
   const [validationPopoverOpen, setValidationPopoverOpen] = useState(false)
-  const isSelfValidated = cell.activeValidators.includes(username)
-  const hasValidatorInfo = cell.activeValidators.length > 0 || cell.validationHistory.length > 1
+  const authoritativeSelfValidated = cell.activeValidators.includes(username)
+  const [optimisticSelfValidation, setOptimisticSelfValidation] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (optimisticSelfValidation !== null && authoritativeSelfValidated === optimisticSelfValidation) {
+      setOptimisticSelfValidation(null)
+    }
+  }, [authoritativeSelfValidated, optimisticSelfValidation])
+  const isSelfValidated = optimisticSelfValidation ?? authoritativeSelfValidated
+  const displayedValidators = useMemo(() => {
+    if (optimisticSelfValidation === null) return cell.activeValidators
+    if (optimisticSelfValidation) {
+      return cell.activeValidators.includes(username)
+        ? cell.activeValidators
+        : [...cell.activeValidators, username]
+    }
+    return cell.activeValidators.filter((validator) => validator !== username)
+  }, [cell.activeValidators, optimisticSelfValidation, username])
+  const validationRequirement = readValidationCount(project)
+  const vs = optimisticSelfValidation === true
+    ? displayedValidators.length >= validationRequirement ? "full-self" : "self"
+    : optimisticSelfValidation === false
+      ? displayedValidators.length >= validationRequirement ? "full-others" : displayedValidators.length > 0 ? "others" : "none"
+      : cell.validationStatus
+  const hasValidatorInfo = displayedValidators.length > 0 || cell.validationHistory.length > 1
 
   // Gate Base UI's auto-toggle: clicks on an unvalidated cell should validate
   // (not open the popover), and hovers should only open when there's actually
@@ -3923,7 +3979,7 @@ function EditorRow({
         size={22}
         strokeWidth={2}
         className="pointer-events-none"
-        style={{ position: "absolute", inset: 0 }}
+        style={{ position: "absolute", inset: 0, margin: "auto" }}
       />
       <ValidationIcon
         className="relative h-3.5 w-3.5"
@@ -3978,7 +4034,12 @@ function EditorRow({
           // Flat row in a continuous list: tinted by hover/selection overlays,
           // not shadows. Depth is gone by design — the Linear model reserves
           // elevation for floating layers.
-          "group relative grid gap-2 overflow-hidden px-4 py-2 transition-colors duration-150 ease-out",
+          "group relative grid gap-2 px-4 py-2 transition-colors duration-150 ease-out",
+          // The mic-permission help is anchored in the action rail. While it
+          // is open, this row must become its own higher stacking layer and
+          // allow the popover to escape the row; otherwise neighbouring rows
+          // and the sticky table header paint above it.
+          showMicDeniedHelp ? "z-30 overflow-visible" : "overflow-hidden",
           hasInlineFootnotes && "gap-y-1 py-1.5",
           // Keyboard-focus ring for the grid row (only when focused directly,
           // not via a child element — :focus-visible + :not(:focus-within:not(:focus))).
@@ -4039,10 +4100,10 @@ function EditorRow({
                     <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                       Validated by
                     </li>
-                    {cell.activeValidators.length === 0 ? (
+                    {displayedValidators.length === 0 ? (
                       <li className="px-1 py-1 text-xs text-muted-foreground">No active validators</li>
                     ) : (
-                      cell.activeValidators.map((v) => (
+                      displayedValidators.map((v) => (
                         <li key={v} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
                           <span className="truncate">{v}{v === username ? " (you)" : ""}</span>
                           {v === username && canValidate && (
@@ -4094,17 +4155,6 @@ function EditorRow({
           {(isSynthBusy || isSynthError) && (
             <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
           )}
-          {/* FRO-192: assignee avatar chip — shows initials of the member
-              this cell is assigned to. Tooltip = username + scope label. */}
-          {assigneeLabel && (
-            <AppTooltip content={assigneeNote ? `Assigned to ${assigneeLabel} (${assigneeNote})` : `Assigned to ${assigneeLabel}`}>
-              <InitialsAvatar
-                name={assigneeLabel}
-                size="xs"
-                fallbackClassName="bg-indigo-100 text-[8px] uppercase text-indigo-700 ring-1 ring-indigo-300 dark:bg-indigo-900 dark:text-indigo-300 dark:ring-indigo-700"
-              />
-            </AppTooltip>
-          )}
         </div>
 
         {/* Source column. In Audio mode there's no need for source text to
@@ -4144,7 +4194,10 @@ function EditorRow({
             data-showcase="editor.source"
             ref={sourceColRef}
             className={cn(
-              "relative flex flex-col transition-opacity",
+              // The selection control is centered on the physical divider and
+              // protrudes into this column. Reserve enough room for RTL text,
+              // whose first glyph sits against this right edge.
+              "relative flex flex-col pr-4 transition-opacity",
               isSynthBusy && "opacity-70",
             )}
             dir={sourceCellDirection}
@@ -4294,13 +4347,23 @@ function EditorRow({
               the floating action rail a lane of its own instead of letting it
               cover the first line of target text. The cast/character label
               lives here (left side), not squished into the line-number pill. */}
-          <div className="mb-1 flex h-4 items-center text-xs text-muted-foreground" dir="ltr">
+          <div className="mb-1 flex h-4 items-center justify-between gap-2 text-xs text-muted-foreground" dir="ltr">
             {showCellLabel && (
               <AppTooltip content={labelText} disabled={!labelText}>
                 <span className="max-w-[60%] truncate">
                   {labelText}
                 </span>
               </AppTooltip>
+            )}
+            {cell.aiDrafted && (
+              <Badge
+                variant="outline"
+                className="ml-auto h-4 shrink-0 gap-1 border-amber-500/40 bg-amber-500/10 px-1.5 text-[9px] font-medium text-amber-700 dark:text-amber-300"
+                aria-label="AI draft — individual human review required"
+              >
+                <Sparkles className="size-2.5" />
+                AI draft · review required
+              </Badge>
             )}
           </div>
           <div className="flex flex-1 flex-col">
@@ -4401,15 +4464,19 @@ function EditorRow({
                           footnoteNumberOffset={targetFootnoteNumberOffset}
                         />
                       ) : visibleTranslated?.trim() ? (
-                        <TargetReadText
-                          text={visibleTranslated}
-                          ranges={targetRanges}
-                          concepts={terminologyConcepts}
-                          onRangeClick={openInlineRule}
-                          onTermChipClick={handleTermChipClick}
-                          footnotePanelActive={footnotePanelActive}
-                          footnoteNumberOffset={targetFootnoteNumberOffset}
-                        />
+                        karaokeReadRange ? (
+                          <KaraokeReadText text={visibleTranslated} range={karaokeReadRange} />
+                        ) : (
+                          <TargetReadText
+                            text={visibleTranslated}
+                            ranges={targetRanges}
+                            concepts={terminologyConcepts}
+                            onRangeClick={openInlineRule}
+                            onTermChipClick={handleTermChipClick}
+                            footnotePanelActive={footnotePanelActive}
+                            footnoteNumberOffset={targetFootnoteNumberOffset}
+                          />
+                        )
                       ) : (
                         <span aria-hidden="true" className="block min-h-[1.6em]" />
                       )}
@@ -4806,18 +4873,18 @@ function EditorRow({
             {
               value: "health",
               icon: <Activity className="h-3 w-3" />,
-              label: "Staleness",
+              label: "Retrieval support",
               renderContent: () => (
                 <div className="space-y-1.5 py-3 text-xs text-muted-foreground">
                   <p>
                     <span className="font-medium text-foreground">{cell.endorsementCount ?? 0}</span>
-                    {" "}endorsement{(cell.endorsementCount ?? 0) === 1 ? "" : "s"} · health{" "}
+                    {" "}endorsement{(cell.endorsementCount ?? 0) === 1 ? "" : "s"} · support{" "}
                     <span className="font-medium text-foreground">{healthValue}%</span>
                   </p>
                   <p>
                     {cellNeedsAttention
-                      ? "Needs attention — nearby context cells haven't been validated yet."
-                      : "No attention needed — enough nearby context is validated."}
+                      ? "Lower retrieval support — review terminology and context closely."
+                      : "Better retrieval support — human review is still required."}
                   </p>
                 </div>
               ),

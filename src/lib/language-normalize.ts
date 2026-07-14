@@ -7,7 +7,7 @@
  * Purposefully limited scope — exact match after normalization; no fuzzy
  * matching. Covers only the common cases seen in Paratext/eBible imports.
  *
- * FRO-249 — used in ImportDialog.handleChildImported and ProjectWorkspace.handleImported.
+ * AQU-249 — used in ImportDialog.handleChildImported and ProjectWorkspace.handleImported.
  */
 
 /** English name (lowercase) → ISO 639-2/T or 639-1 two-letter code. */

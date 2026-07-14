@@ -5,7 +5,7 @@ interface PendingScroll {
   section: string | null
   /** The group id or null for section-based scroll. */
   group: string | null
-  /** FRO-250/254: the fileId this scroll was requested against. The handler
+  /** AQU-250/254: the fileId this scroll was requested against. The handler
    *  must only consume() when cells belong to this same file — prevents the
    *  globalReferences-prefix fallback from matching the OLD file during a
    *  file-switch and burning the request before the new file's cells arrive. */

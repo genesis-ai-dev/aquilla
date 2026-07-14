@@ -68,6 +68,23 @@ import { Skeleton } from "@/components/ui/skeleton"
 /** Max per-file rows shown on the overview; the rest are counted as "+N more". */
 const FILE_ROW_CAP = 12
 
+type FileProgressSnapshot = Awaited<ReturnType<typeof getFileProgress>>
+type ProgressSection = FileProgressSnapshot["sections"][number]
+
+interface FlatSectionRollup {
+  key: string
+  totalCount: number
+  filledCount: number
+  approvedCount: number
+  filledPct: number
+  approvedPct: number
+}
+
+interface FileRollup {
+  books: BookRollup[] | null
+  sections: FlatSectionRollup[]
+}
+
 function ProjectOverviewSkeleton() {
   return (
     <div className="max-w-5xl space-y-4">
@@ -228,6 +245,45 @@ function MiniRollupBar({ filledPct, approvedPct }: { filledPct: number; approved
   )
 }
 
+function toFlatSectionRollup(section: ProgressSection): FlatSectionRollup {
+  const filledPct = section.totalCount > 0
+    ? Math.round((section.filledCount / section.totalCount) * 100)
+    : 0
+  const approvedPct = section.totalCount > 0
+    ? Math.round((section.validatedCount / section.totalCount) * 100)
+    : 0
+  return {
+    key: section.key,
+    totalCount: section.totalCount,
+    filledCount: section.filledCount,
+    approvedCount: section.validatedCount,
+    filledPct,
+    approvedPct,
+  }
+}
+
+function progressToFileRollup(progress: FileProgressSnapshot): FileRollup {
+  return {
+    books: progressToCanonicalRollup(progress),
+    sections: progress.sections.map(toFlatSectionRollup),
+  }
+}
+
+function FlatSectionRow({ section }: { section: FlatSectionRollup }) {
+  return (
+    <li
+      data-testid="section-row"
+      className="flex w-full items-center gap-2 py-0.5 text-xs"
+    >
+      <span className="w-10 shrink-0 font-medium">{section.key}</span>
+      <MiniRollupBar filledPct={section.filledPct} approvedPct={section.approvedPct} />
+      <span className="text-[10px] tabular-nums text-muted-foreground">
+        {section.filledCount}/{section.approvedCount}/{section.totalCount}
+      </span>
+    </li>
+  )
+}
+
 function ChapterRow({
   chapter,
   loadVerses,
@@ -340,22 +396,19 @@ function BookRow({
 }
 
 /**
- * Nested book › chapter progress rollup shown under a file row once expanded.
- * Verse progress is fetched separately only when a chapter opens.
- * `books === null` means the file's cells carry no parseable
- * canonical reference (AQU-493 detection is generic — see
- * lib/progress/canonical-rollup.ts) — render an explanatory note instead of
- * an empty tree, per the acceptance criteria.
- *
+ * Nested book › chapter progress rollup shown under a file row once expanded,
+ * with a flat section fallback for files whose sections are meaningful but
+ * not chapter-shaped. Verse progress is fetched separately only when a
+ * chapter opens.
  */
 function FileCanonicalRollup({
-  books,
+  rollup,
   loading,
   error,
   onRetry,
   loadVerses,
 }: {
-  books: BookRollup[] | null | undefined
+  rollup: FileRollup | undefined
   loading: boolean
   error: boolean
   onRetry: () => void
@@ -371,17 +424,26 @@ function FileCanonicalRollup({
       </button>
     )
   }
-  if (books === null) {
+  if (!rollup || (rollup.books === null && rollup.sections.length === 0)) {
     return (
       <p className="ml-7 mt-1 text-xs text-muted-foreground">
         No chapter structure detected for this file.
       </p>
     )
   }
-  if (books === undefined || books.length === 0) return null
+  if (rollup.books === null) {
+    return (
+      <ul className="ml-7 mt-1 border-l pl-3" data-testid="flat-section-rollup" aria-label="Section breakdown">
+        {rollup.sections.map((section) => (
+          <FlatSectionRow key={section.key} section={section} />
+        ))}
+      </ul>
+    )
+  }
+  if (rollup.books.length === 0) return null
   return (
     <ul className="ml-7 mt-1 border-l pl-3" data-testid="canonical-rollup-books" aria-label="Chapter breakdown">
-      {books.map((b) => (
+      {rollup.books.map((b) => (
         <BookRow key={b.book} book={b} loadVerses={loadVerses} />
       ))}
     </ul>
@@ -488,16 +550,16 @@ export function ProjectOverview() {
   // copy button).
   const [csvCopied, setCsvCopied] = useState(false)
 
-  // AQU-493: chapter/verse rollup, lazily fetched per file on first expand.
-  // `undefined` = not yet fetched, `null` = fetched but no canonical refs
-  // found (flat-view fallback), `BookRollup[]` = ready to render.
+  // AQU-493/AQU-517: compact progress rollup, lazily fetched per file on
+  // first expand. `undefined` = not yet fetched; loaded values choose between
+  // canonical book/chapter rows, flat section rows, or a true no-structure note.
   const [expandedFileId, setExpandedFileId] = useState<string | null>(null)
-  const [rollups, setRollups] = useState<Record<string, BookRollup[] | null>>({})
+  const [rollups, setRollups] = useState<Record<string, FileRollup>>({})
   const [rollupLoading, setRollupLoading] = useState<Record<string, boolean>>({})
   const [rollupErrors, setRollupErrors] = useState<Record<string, boolean>>({})
   const chapterVerseRequests = useRef(new Map<string, Promise<VerseRollup[]>>())
 
-  // FRO-474: project-only invitees (direct project_members grant, no org
+  // AQU-474: project-only invitees (direct project_members grant, no org
   // membership) have `activeOrgId == null` or an org that doesn't include this
   // project's org. The portfolio endpoint is org-scoped, so fall back to the
   // project's own (server-verified) orgId when it differs from the active
@@ -534,9 +596,9 @@ export function ProjectOverview() {
   // `useProject` is server-verified per-project (not org-scoped): a
   // project-only invitee (no org membership, or org mismatch) still resolves
   // to "ready" here when they hold a direct grant. Redirecting on org
-  // mismatch alone (pre-FRO-474 behavior) sent guests right back to "/".
+  // mismatch alone (pre-AQU-474 behavior) sent guests right back to "/".
   useEffect(() => {
-    // FRO-346: "forbidden" (access revoked) leaves the overview the same way
+    // AQU-346: "forbidden" (access revoked) leaves the overview the same way
     // a missing project does — back to the dashboard.
     if (status === "not-found" || status === "forbidden") {
       navigate("/", { replace: true })
@@ -600,7 +662,7 @@ export function ProjectOverview() {
     try {
       const tok = await fetchSyncToken(jwt, id, file.fileId, { projectName: project?.name })
       const progress = await getFileProgress(id, file.fileId, async () => tok.token)
-      setRollups((r) => ({ ...r, [file.fileId]: progressToCanonicalRollup(progress) }))
+      setRollups((r) => ({ ...r, [file.fileId]: progressToFileRollup(progress) }))
     } catch (e) {
       console.warn("[ProjectOverview] chapter/verse rollup fetch failed:", e)
       setRollupErrors((s) => ({ ...s, [file.fileId]: true }))
@@ -767,7 +829,7 @@ export function ProjectOverview() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section={project?.name ?? "Project"} />}
+      header={<OrgBreadcrumb section={project?.name ?? "Project"} orgId={project?.orgId} />}
       statusBar={null}
       main={
         <div className="h-full overflow-y-auto">
@@ -901,7 +963,7 @@ export function ProjectOverview() {
                           tooltip="Percentage of cells that have at least one audio recording attached. This is coverage, not validation — see 'Audio Validated' for review status."
                         />
                         {/*
-                         * AQU-490 (was TODO(FRO-168)): a distinct audio-VALIDATION metric
+                         * AQU-490 (was TODO(AQU-168)): a distinct audio-VALIDATION metric
                          * is not reachable today. Investigated 2026-07-08:
                          *   - `cells.validated` (db/postgres/schema.sql) is ONE boolean per
                          *     cell, shared by text and audio review — there is no per-medium
@@ -972,7 +1034,7 @@ export function ProjectOverview() {
                           fillClass="bg-sky-500"
                           suffix=" cells"
                         />
-                        {/* TODO: confirm whether legacy GitLab project import populated audio (cell_audio) — see FRO-160 data gap */}
+                        {/* TODO: confirm whether legacy GitLab project import populated audio (cell_audio) — see AQU-160 data gap */}
                       </>
                     )}
                   </div>
@@ -1179,7 +1241,7 @@ export function ProjectOverview() {
                               </div>
                               {isExpanded && (
                                 <FileCanonicalRollup
-                                  books={rollups[f.fileId]}
+                                  rollup={rollups[f.fileId]}
                                   loading={rollupLoading[f.fileId] ?? false}
                                   error={rollupErrors[f.fileId] ?? false}
                                   onRetry={() => void loadFileRollup(f)}
@@ -1385,7 +1447,7 @@ export function ProjectOverview() {
                 </div>
               </SectionVisibilityGate>
 
-              {/* ── Members card (FRO-335) — same add / change-role / revoke
+              {/* ── Members card (AQU-335) — same add / change-role / revoke
                   surface as the in-project members page, so access can be
                   managed from the overview without opening the workspace. ──
                   AQU-486: gated by AQU-485's rosterViewMinRole — the same

@@ -195,9 +195,9 @@ describe("TerminologyPage", () => {
     })
   })
 
-  // ── Delete (FRO-291: gated by checkbox-confirm) ───────────────────────────
+  // ── Delete (AQU-291: gated by checkbox-confirm) ───────────────────────────
 
-  it("does NOT call deleteConcept immediately when delete button is clicked (FRO-291)", async () => {
+  it("does NOT call deleteConcept immediately when delete button is clicked (AQU-291)", async () => {
     const existing = makeConcept()
     const projectWithConcept = makeProjectWithConcepts([existing])
     vi.mocked(useProject).mockReturnValue({
@@ -221,7 +221,7 @@ describe("TerminologyPage", () => {
     await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument())
   })
 
-  it("cancel on confirm dialog leaves data untouched (FRO-291)", async () => {
+  it("cancel on confirm dialog leaves data untouched (AQU-291)", async () => {
     const existing = makeConcept()
     const projectWithConcept = makeProjectWithConcepts([existing])
     vi.mocked(useProject).mockReturnValue({
@@ -247,7 +247,7 @@ describe("TerminologyPage", () => {
     expect(deleteConcept).not.toHaveBeenCalled()
   })
 
-  it("removes a concept after confirm dialog checkbox+confirm (FRO-291)", async () => {
+  it("removes a concept after confirm dialog checkbox+confirm (AQU-291)", async () => {
     const existing = makeConcept()
     const projectWithConcept = makeProjectWithConcepts([existing])
     const projectAfterDelete = makeProjectWithConcepts([])

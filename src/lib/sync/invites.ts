@@ -34,7 +34,7 @@ import { ROLE } from "@/lib/frontier/roles"
  * - "used"         — the link was already redeemed by someone else (single-use)
  * - "time_expired" — the link's expiry date has passed
  * - "expired"      — legacy catch-all for any 410 response without a server
- *                    code field (servers before FRO-429 fix, or unknown 410)
+ *                    code field (servers before AQU-429 fix, or unknown 410)
  * - "invalid"      — 404: the token doesn't exist
  * - "network"      — fetch threw (offline, DNS failure, etc.)
  */
@@ -55,7 +55,7 @@ export type InvitePreviewResult<T> =
  * - "wrong_email"  — 403: this invite was sent to a different address.
  * - "unauthorized" — 401: the caller's session token was rejected. This is
  *   NOT evidence the invite is invalid — surfacing it as "invite dead" is
- *   the FRO-364 bug (a fresh signup's token intermittently 401ing read as a
+ *   the AQU-364 bug (a fresh signup's token intermittently 401ing read as a
  *   permanently broken magic link). Callers should re-prompt auth instead.
  * - "network" — fetch threw.
  * - "server"  — any other non-2xx (500s, unexpected codes).
@@ -215,7 +215,7 @@ export async function previewServerInvite(
  * specified, unblocking /sync-token for this project. Returns a discriminated
  * result on failure (see AcceptFailReason) so callers can distinguish "the
  * invite is really dead" from "the request failed for an unrelated reason"
- * (FRO-364: a 401 here is not evidence of a dead invite).
+ * (AQU-364: a 401 here is not evidence of a dead invite).
  */
 export async function acceptServerInvite(
   jwt: string,
@@ -323,7 +323,7 @@ export interface MultiInvitePreview {
   role: { level: number; name: string }
   expiresAt: string | null
   /**
-   * `usedByCaller` (FRO-347): true when the signed-in caller is this row's
+   * `usedByCaller` (AQU-347): true when the signed-in caller is this row's
    * original redeemer and is still a member — i.e. this preview is a
    * "continue" for a link they already used, not a fresh invite. The server
    * only returns already-used rows at all when this is true for at least one
@@ -358,11 +358,11 @@ export async function previewMultiInvite(
   try {
     // The Authorization header is what lets the server recognize the caller
     // as the token's original redeemer and return 200 usedByCaller instead of
-    // 410 used (FRO-347) — without it, a still-member re-click dead-ends.
+    // 410 used (AQU-347) — without it, a still-member re-click dead-ends.
     const res = await fetch(`${apiUrl}/api/v2/invites/${encodeURIComponent(token)}/preview`, {
       headers: jwt ? { Authorization: `Bearer ${jwt}` } : undefined,
       // A heuristically-cached anonymous 410 must never answer the authed
-      // refetch (FRO-347 QA finding) — bypass the HTTP cache entirely.
+      // refetch (AQU-347 QA finding) — bypass the HTTP cache entirely.
       cache: "no-store",
     })
     if (!res.ok) {
@@ -391,7 +391,7 @@ export async function previewMultiInvite(
 /**
  * POST /api/v2/invites/:token/accept — joiner side; materializes membership
  * in every project. Returns a discriminated result on failure (see
- * AcceptFailReason) — same rationale as acceptServerInvite (FRO-364).
+ * AcceptFailReason) — same rationale as acceptServerInvite (AQU-364).
  */
 export async function acceptMultiInvite(
   jwt: string,
@@ -418,7 +418,7 @@ export async function acceptMultiInvite(
   }
 }
 
-// ── Received invites (FRO-326) ─────────────────────────────────────────────
+// ── Received invites (AQU-326) ─────────────────────────────────────────────
 
 export interface MyPendingInvite {
   token: string
@@ -431,7 +431,7 @@ export interface MyPendingInvite {
 
 /**
  * GET /api/v2/invites/mine — unredeemed, unexpired invites addressed to the
- * caller's account email (FRO-326). Open links carry no recipient identity
+ * caller's account email (AQU-326). Open links carry no recipient identity
  * and never appear here. Returns [] on any failure — the dashboard card
  * simply doesn't render rather than erroring.
  */

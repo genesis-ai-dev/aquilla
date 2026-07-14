@@ -50,7 +50,7 @@ export interface UseProjectsMembersMatrix {
 
 /**
  * Pulls effective members for every accessible project in the org via ONE
- * batched request (FRO-218 — fetchOrgMembersMatrix), then aggregates into a
+ * batched request (AQU-218 — fetchOrgMembersMatrix), then aggregates into a
  * sparse {userId → projectId → role} map for the Matrix view. This replaced a
  * per-project /members fan-out that flooded the backend connection pool and
  * 500'd the page on large orgs.
@@ -128,7 +128,7 @@ export function useProjectsMembersMatrix(): UseProjectsMembersMatrix {
     setError(null);
     try {
       // One batched request returns effective members for every project the
-      // caller can access in the org (FRO-218) — replaces the per-project
+      // caller can access in the org (AQU-218) — replaces the per-project
       // /members fan-out that flooded the backend. Projects absent from the
       // map (e.g. local-only IndexedDB rows with no org binding) get empty
       // cells, matching the old per-project 403→[] collapse. No org context

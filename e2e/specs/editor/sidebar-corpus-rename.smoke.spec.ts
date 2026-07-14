@@ -34,7 +34,7 @@ test("sidebar corpus group can be renamed inline", async ({ alice }) => {
 
   const ws = new Workspace(alice)
   // Import two distinctly-named files. Re-importing the same name now hits
-  // the FRO-287 collision screen (defaults to "skip"), so a second copy of
+  // the AQU-287 collision screen (defaults to "skip"), so a second copy of
   // sample.md would never land — use a different fixture instead.
   await ws.importFile(SAMPLE_MD)
   await ws.importFile(CHAPTER_1_MD)

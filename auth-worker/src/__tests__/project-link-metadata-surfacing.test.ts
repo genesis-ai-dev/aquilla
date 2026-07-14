@@ -1,5 +1,5 @@
-// FRO-478: GET /api/v2/projects and GET /api/v2/projects/:id must surface
-// the FRO-476 link state (sourceProjectId + mode/consumes/gate/cursor on the
+// AQU-478: GET /api/v2/projects and GET /api/v2/projects/:id must surface
+// the AQU-476 link state (sourceProjectId + mode/consumes/gate/cursor on the
 // single-project route). Before this fix neither route selected these
 // columns at all — `CloudProjectSummary`/`ProjectStateResponse` declared
 // `sourceProjectId` and `SourceLinkSection` gated its render on it, but the

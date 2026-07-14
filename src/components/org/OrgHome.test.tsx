@@ -54,7 +54,7 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
 // portfolio-focused assertions below are unaffected.
 vi.mock("@/lib/sync/assignments", () => ({ getWorkload: vi.fn(async () => []) }))
 
-// FRO-335/FRO-416: accessible-projects feed for the "Shared with you" section
+// AQU-335/AQU-416: accessible-projects feed for the "Shared with you" section
 // (and OrgProvider's guest-org derivation). Default empty — the shared-section
 // test overrides it with a foreign-org grant.
 const fetchAccessibleProjectsMock = vi.fn(async (): Promise<unknown[]> => [])
@@ -66,7 +66,7 @@ vi.mock("@/lib/sync/cloud-projects", async (importActual) => {
   }
 })
 
-// FRO-326: pending-invites card data source. Default empty; individual tests
+// AQU-326: pending-invites card data source. Default empty; individual tests
 // override to assert the card renders.
 const listMyPendingInvitesMock = vi.fn(async (): Promise<unknown[]> => [])
 vi.mock("@/lib/sync/invites", () => ({
@@ -143,9 +143,9 @@ describe("OrgHome", () => {
     expect(screen.getByText("New Testament")).toBeInTheDocument()
   })
 
-  // FRO-326: an invite addressed to the user's email must be discoverable
+  // AQU-326: an invite addressed to the user's email must be discoverable
   // in-app — the email/link may never have arrived. Review & accept routes
-  // to the /join/:token confirmation page (explicit accept per FRO-335).
+  // to the /join/:token confirmation page (explicit accept per AQU-335).
   it("renders the Pending invitations card with a Review & accept link", async () => {
     // mockResolvedValue (not ...Once): OrgHome's invite effect can run more than
     // once (e.g. once before orgs load, once after), and a second call returning
@@ -285,10 +285,10 @@ describe("OrgHome", () => {
     expect(screen.getByText("No results.")).toBeInTheDocument()
   })
 
-  // FRO-416: the dashboard's "Shared with you" section (bottom of the org
+  // AQU-416: the dashboard's "Shared with you" section (bottom of the org
   // project list) was the QA repro surface — clicking a shared project
   // "reloaded the page and went nowhere". Root cause was ProjectOverview's
-  // pre-FRO-474 org-mismatch redirect; the section itself must render each
+  // pre-AQU-474 org-mismatch redirect; the section itself must render each
   // shared project as a real client-side <Link> to /projects/:id so the
   // click enters the SPA route (no full-page navigation) and the overview
   // can resolve access server-side. Pins both the section rendering and the
@@ -297,7 +297,7 @@ describe("OrgHome", () => {
     fetchAccessibleProjectsMock.mockResolvedValue([
       // In the caller's own org (id 1) — must stay OUT of the shared section.
       { id: "own-1", name: "Legacy Translation", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] },
-      // Foreign-org grant (viewer via invite) — the FRO-416 repro row.
+      // Foreign-org grant (viewer via invite) — the AQU-416 repro row.
       { id: "p503", name: "Guest Gospel", orgId: 503, orgName: "Host Org", role: { level: 100, name: "viewer", source: "override" }, files: [] },
     ])
 
@@ -375,7 +375,7 @@ describe("OrgHome per-section visibility (AQU-486)", () => {
   })
 })
 
-// FRO-293: signed-out state — no fake-empty dashboard
+// AQU-293: signed-out state — no fake-empty dashboard
 describe("OrgHome signed-out state", () => {
   it("shows a sign-in prompt instead of zero-stat cards when there is no session", async () => {
     // Why: a signed-out user at / must never see '0 Projects / 0% translated' cards
@@ -409,6 +409,7 @@ describe("activityStatus", () => {
   const base: PortfolioProject = {
     id: "p", name: "P", totalCells: 100, validatedCells: 0, filledCells: 0, aiDraftedCells: 0,
     lastEditAt: null, audioCells: 0, validatedAudioCells: 0, recordedMs: 0, deadlineAt: null,
+    sourceLanguage: null, targetLanguage: null,
   }
 
   it("treats a never-edited, never-translated project as not-started, not stalled", () => {

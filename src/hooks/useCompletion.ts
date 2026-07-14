@@ -1,4 +1,4 @@
-// Phase 2c-gamma → FRO-174 → FRO-211: useCompletion drives the LLM stream and
+// Phase 2c-gamma → AQU-174 → AQU-211: useCompletion drives the LLM stream and
 // reports per-cell completion status. Both single-cell and batch completions
 // auto-commit the generated text as an *unvalidated* cell; review happens
 // through the validation workflow (the gutter validation circle), not an inline
@@ -46,11 +46,16 @@ import { memMark } from "@/lib/perf-log"
 import { compressExampleSource, dedupeExamples, dropPrecedingContextDuplicates } from "@/lib/completion/compress-examples"
 import { noteAbAssignment } from "@/lib/ab/feedback"
 import { gatherPrecedingContext, gatherFollowingSource, DEFAULT_DRAFT_CONTEXT, type DraftContextSettings } from "@/lib/completion/draft-context"
+import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 
-// Cap per LLM call. Above this we split sequentially and chain via priorBatch.
+// Cap per LLM call. Above this we split into independent review packages.
 // Tuned for typical context windows; revisit if real selections start brushing
 // up against model limits.
-const MAX_CELLS_PER_CALL = 30
+// Keep generation/review units small enough for a human to inspect as one
+// coherent work package. Research supports 5–10 consecutive items as a useful
+// review unit; larger files still run, but are split into independently
+// reviewable chunks.
+const MAX_CELLS_PER_CALL = 10
 
 // Default settings for projects that haven't customized anything yet.
 // Frontier provider + default system prompt, no custom endpoint.
@@ -66,12 +71,32 @@ export const FALLBACK_COMPLETION_SETTINGS: CompletionSettings = {
   llmHealthPenalty: 0.1,
   top_k: 15,
   contextSize: "medium",
-  useOnlyValidatedExamples: false,
+  useOnlyValidatedExamples: true,
   main_chat_language: "",
   fewShotExampleFormat: "source-and-target",
 }
 
-type CommitCompletedCell = (cell: CellData, text: string, author: string) => Promise<void>
+type CommitCompletedCell = (
+  cell: CellData,
+  text: string,
+  author: string,
+  provenance: AiDraftProvenance,
+) => Promise<void>
+
+const PROMPT_VERSION = "translation-draft-v1"
+
+function promptFingerprint(prompt: string): string {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < prompt.length; index++) {
+    hash ^= prompt.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0")
+}
+
+function uniqueExampleIds(...groups: Array<Array<string | undefined>>): string[] {
+  return Array.from(new Set(groups.flat().filter((id): id is string => Boolean(id))))
+}
 
 /**
  * Passage-mode retrieval for the batch completion path. As of AD-13 the
@@ -124,6 +149,7 @@ export function useCompletion(
     ? { ...effectiveSettings, provider: "custom", endpoint: deviceOverride.endpoint, model: deviceOverride.model || effectiveSettings.model, apiKey: deviceOverride.apiKey }
     : effectiveSettings
   const provider = resolveProvider(resolvedSettings)
+  const modelName = resolvedSettings.model || "frontier-default"
   const { available: frontierAvailable } = useFrontierHealth()
 
   // "Configured" = the user has done the setup. Frontier: signed in.
@@ -142,20 +168,35 @@ export function useCompletion(
     () => typeof allCells === "function" ? allCells() : allCells ?? [],
     [allCells],
   )
+  const draftProvenance = useCallback((
+    mode: AiDraftProvenance["mode"],
+    exampleIds: string[],
+    approvedExampleCount: number,
+  ): AiDraftProvenance => ({
+    model: modelName,
+    provider,
+    promptVersion: `${PROMPT_VERSION}:${promptFingerprint(effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT)}`,
+    exampleIds,
+    generatedAt: Date.now(),
+    mode,
+    projectState: {
+      sourceLanguage,
+      targetLanguage,
+      approvedExampleCount,
+    },
+  }), [effectiveSettings.systemPrompt, modelName, provider, sourceLanguage, targetLanguage])
 
   const completeSingle = useCallback(async (cell: CellData, signal?: AbortSignal) => {
     if (!isConfigured || !isAvailable) return
 
     setCompleting((p) => new Map(p).set(cell.id, "searching"))
-    // top_k controls how many search-retrieved examples are requested.
-    // When useOnlyValidatedExamples is true, skip search-retrieved examples
-    // and rely solely on collectValidatedPairs (validated-only examples).
+    // top_k controls how many approved examples are requested. The injected
+    // search adapter is drafting-specific and enforces validatedOnly=true on
+    // the server; this is not a user-tunable trust boundary.
     const topK = effectiveSettings.top_k ?? 15
     let found: ScoredPair[] = []
     try {
-      if (!effectiveSettings.useOnlyValidatedExamples) {
-        found = await search(cell.original, topK, cell.id)
-      }
+      found = await search(cell.original, topK, cell.id)
     } catch (err) {
       console.warn("[useCompletion] few-shot retrieval failed:", err)
     }
@@ -215,17 +256,26 @@ export function useCompletion(
       })
       posthog.capture("ai translation completed", {
         provider,
-        model: effectiveSettings.model || "frontier-default",
+        model: modelName,
         source_language: sourceLanguage,
         target_language: targetLanguage,
         example_count: found.length,
         validated_pair_count: validatedPairs.length,
         rule_count: (rules ?? []).filter((r) => r.enabled).length,
       })
-      // FRO-211: auto-commit like the batch path. The cell lands unvalidated
+      // AQU-211: auto-commit like the batch path. The cell lands unvalidated
       // and flows through the validation workflow — no inline accept/reject.
-      const llmAuthor = effectiveSettings.model || "frontier-default"
-      await commitCompletedCell?.(cell, result, llmAuthor)
+      const llmAuthor = modelName
+      await commitCompletedCell?.(
+        cell,
+        result,
+        llmAuthor,
+        draftProvenance(
+          "single",
+          uniqueExampleIds(found.map((example) => example.cellId), validatedPairs.map((example) => example.cellId)),
+          corpusCells.filter((candidate) => candidate.status === "validated").length,
+        ),
+      )
       setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
       setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
     } catch (err) {
@@ -240,16 +290,16 @@ export function useCompletion(
       setCompleting((p) => new Map(p).set(cell.id, "error"))
       setErrors((p) => new Map(p).set(cell.id, err instanceof Error ? err.message : "Failed"))
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session, provider, commitCompletedCell, rules, getAllCells, briefSummary, draftContext])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session, provider, modelName, commitCompletedCell, rules, getAllCells, briefSummary, draftContext, draftProvenance])
 
-  // Segmented batch translation: each sub-batch goes out as one <vN>-framed
-  // prompt and the response is demuxed back to cells. LLMs translate a passage
-  // substantially better than the same verses in isolation, so we accept the
-  // alignment risk in exchange for cross-verse context. Cells whose tag is
+  // Segmented batch translation: each small sub-batch goes out as one
+  // <vN>-framed prompt and the response is demuxed back to cells. This preserves
+  // discourse context without claiming that larger joint calls are inherently
+  // higher quality. Cells whose tag is
   // missing/malformed in the response fall through to single-cell completion;
   // the batch as a whole does not fail.
   //
-  // FRO-235: Integrated with batch-completion progress store. The banner shows
+  // AQU-235: Integrated with batch-completion progress store. The banner shows
   // progress and exposes a Stop button. Abort semantics:
   //   - cancelBatchCompletion() sets the cancel flag AND calls AbortController.abort().
   //   - The driver checks isBatchCompletionCancelled() before each chunk.
@@ -265,7 +315,7 @@ export function useCompletion(
 
     posthog.capture("ai batch translation started", {
       provider,
-      model: effectiveSettings.model || "frontier-default",
+      model: modelName,
       source_language: sourceLanguage,
       target_language: targetLanguage,
       cell_count: cells.length,
@@ -273,14 +323,13 @@ export function useCompletion(
       max_cells_per_call: MAX_CELLS_PER_CALL,
     })
 
-    // FRO-235 fix: resetBatchCompletionState supersedes any live run (cancels it)
+    // AQU-235 fix: resetBatchCompletionState supersedes any live run (cancels it)
     // and returns a fresh run ID. Every flag check, increment, and the
     // finally-clear pass this ID so a stale run cannot affect us.
     const runId = resetBatchCompletionState(cells.length)
     memMark(`completeBatch.start(${cells.length}c)`)
     const corpusCells = getAllCells()
 
-    let priorBatch: { source: string; target: string }[] = []
     const fallbackQueue: CellData[] = []
 
     try {
@@ -312,7 +361,7 @@ export function useCompletion(
             score: 1, matchedTokens: [], coverageWeight: 1,
           }))
         )
-        const llmAuthor = effectiveSettings.model || "frontier-default"
+        const llmAuthor = modelName
         for (const c of chunk) {
           setExamples((p) => new Map(p).set(c.id, flatExamples))
           setCompleting((p) => new Map(p).set(c.id, "generating"))
@@ -346,14 +395,13 @@ export function useCompletion(
           systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
           cells: chunk.map((c) => ({ source: c.original })),
           examples: examplesForPrompt,
-          priorBatch: priorBatch.length ? priorBatch : undefined,
           rules,
           validatedPairs: batchValidatedPairs,
           exampleFormat: effectiveSettings.fewShotExampleFormat,
           briefSummary,
         })
 
-        // FRO-361: a sub-batch call gets one retry before it's given up on.
+        // AQU-361: a sub-batch call gets one retry before it's given up on.
         // Most failures here are transient (timeout, 5xx, flaky network) and
         // a single retry clears the large majority without materially
         // slowing the run.
@@ -366,7 +414,7 @@ export function useCompletion(
               settings: effectiveSettings, session, messages,
               stream: true,
               onChunk: (full) => consumeFull(full),
-              // FRO-235 fix: getBatchCompletionSignal(runId) returns an
+              // AQU-235 fix: getBatchCompletionSignal(runId) returns an
               // already-aborted signal when this run has been superseded.
               signal: getBatchCompletionSignal(runId),
               // Model A/B: one batch request drafts every cell in the chunk; the
@@ -400,7 +448,7 @@ export function useCompletion(
         if (lastErr) {
           if (lastErr instanceof DOMException && lastErr.name === "AbortError") break
 
-          // FRO-361: sub-batch failed twice (original + one retry). Skip this
+          // AQU-361: sub-batch failed twice (original + one retry). Skip this
           // chunk — mark its still-uncommitted cells as errored — and CONTINUE
           // to the next chunk rather than abandoning the rest of the file.
           // The overall run reports the failure via the progress summary
@@ -423,7 +471,7 @@ export function useCompletion(
 
         consumeFull(result)
 
-        // FRO-235 fix: only commit and increment done when this run is still
+        // AQU-235 fix: only commit and increment done when this run is still
         // live. If superseded between the await and here, skip commits so the
         // cancelled run does not persist AI text or inflate run B's counter.
         if (isBatchCompletionCancelled(runId)) {
@@ -440,9 +488,21 @@ export function useCompletion(
           const text = filledText.get(i + 1)
           if (text !== undefined) {
             if (commitCompletedCell) {
-              await commitCompletedCell(cell, text, llmAuthor)
+              await commitCompletedCell(
+                cell,
+                text,
+                llmAuthor,
+                draftProvenance(
+                  "batch",
+                  uniqueExampleIds(
+                    passages.flatMap((passage) => passage.cells.map((example) => example.cellId)),
+                    batchValidatedPairs.map((example) => example.cellId),
+                  ),
+                  corpusCells.filter((candidate) => candidate.status === "validated").length,
+                ),
+              )
             }
-            // FRO-235 fix: after await, re-check — another Start could have
+            // AQU-235 fix: after await, re-check — another Start could have
             // superseded us during the commit. If so, do not increment or clear.
             if (isBatchCompletionCancelled(runId)) {
               setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
@@ -455,7 +515,7 @@ export function useCompletion(
               }
               break
             }
-            // FRO-211: clear state once committed — no inline review step.
+            // AQU-211: clear state once committed — no inline review step.
             setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
             setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
             incrementBatchCompletionDone(runId)
@@ -467,18 +527,9 @@ export function useCompletion(
         // If we broke out of the inner loop due to supersession, stop chunks.
         if (isBatchCompletionCancelled(runId)) break
 
-        // Carry the just-translated cells into the next sub-batch as continuity
-        // few-shot.
-        priorBatch = chunk
-          .map((c, i) => {
-            const t = filledText.get(i + 1)
-            return t ? { source: c.original, target: t } : null
-          })
-          .filter((x): x is { source: string; target: string } => x !== null)
-
         posthog.capture("ai batch translation chunk completed", {
           provider,
-          model: effectiveSettings.model || "frontier-default",
+          model: modelName,
           cell_count: chunk.length,
           filled_count: filledText.size,
           fallback_count: chunk.length - filledText.size,
@@ -492,7 +543,7 @@ export function useCompletion(
       if (!isBatchCompletionCancelled(runId)) {
         for (const cell of fallbackQueue) {
           if (isBatchCompletionCancelled(runId)) break
-          // FRO-235 fix: thread the batch signal into completeSingle so it is
+          // AQU-235 fix: thread the batch signal into completeSingle so it is
           // visible to Stop during a batch. getBatchCompletionSignal(runId)
           // returns an already-aborted signal if this run has been superseded.
           await completeSingle(cell, getBatchCompletionSignal(runId))
@@ -509,12 +560,12 @@ export function useCompletion(
         }
       }
     } finally {
-      // FRO-235 fix: clearBatchCompletionProgress(runId) is a no-op when runId
+      // AQU-235 fix: clearBatchCompletionProgress(runId) is a no-op when runId
       // !== _currentRunId — a finishing run A cannot null run B's banner.
       clearBatchCompletionProgress(runId)
       memMark(`completeBatch.end(${cells.length}c)`)
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, completeSingle, commitCompletedCell, rules, getAllCells, briefSummary])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, rules, getAllCells, briefSummary, draftProvenance])
 
   // completeParagraph: draft a whole paragraph group as ONE model call, fan results
   // out to per-cell commits via the existing commitCompletedCell path (D3, D11).
@@ -636,7 +687,7 @@ export function useCompletion(
       }
 
       // 6. Fan out: commit each mapped cell via the EXISTING commitCompletedCell path.
-      const llmAuthor = effectiveSettings.model || "frontier-default"
+      const llmAuthor = modelName
       for (const { cellId, text } of mapped) {
         const cell = groupCells.find((c) => c.id === cellId)
         if (!cell) continue
@@ -651,7 +702,19 @@ export function useCompletion(
           continue
         }
         setPreviews((p) => new Map(p).set(cellId, text))
-        await commitCompletedCell?.(cell, text, llmAuthor)
+        await commitCompletedCell?.(
+          cell,
+          text,
+          llmAuthor,
+          draftProvenance(
+            "paragraph",
+            uniqueExampleIds(
+              passages.flatMap((passage) => passage.cells.map((example) => example.cellId)),
+              validatedPairs.map((example) => example.cellId),
+            ),
+            cells.filter((candidate) => candidate.status === "validated").length,
+          ),
+        )
         committedIds.add(cellId)
         setPreviews((p) => { const m = new Map(p); m.delete(cellId); return m })
         setCompleting((p) => { const m = new Map(p); m.delete(cellId); return m })
@@ -659,7 +722,7 @@ export function useCompletion(
 
       posthog.capture("ai paragraph translation completed", {
         provider,
-        model: effectiveSettings.model || "frontier-default",
+        model: modelName,
         source_language: sourceLanguage,
         target_language: targetLanguage,
         group_size: groupCells.length,
@@ -689,7 +752,7 @@ export function useCompletion(
         setErrors((p) => new Map(p).set(c.id, msg))
       }
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, commitCompletedCell, rules, getAllCells, briefSummary, draftContext])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, getAllCells, briefSummary, draftContext, draftProvenance])
 
   return { completeSingle, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, isConfigured, isAvailable, completing, examples, errors, previews }
 }

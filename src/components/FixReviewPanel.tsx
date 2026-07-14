@@ -14,7 +14,7 @@ interface Props {
   onApply: (selectedCellIds: Set<string>) => void
   onAmendRule: () => void
   /**
-   * FRO-186: when present, a typed-confirmation gate is shown before Apply.
+   * AQU-186: when present, a typed-confirmation gate is shown before Apply.
    * The user must type this exact string (case-sensitive) to enable the
    * Apply button. Per spec: harmonization is irreversible-by-default, so
    * bulk Apply requires typed confirmation of the rule/check name.
@@ -26,7 +26,7 @@ export function FixReviewPanel({ open, rule, proposal, onClose, onApply, onAmend
   const previews = proposal.kind === "none" ? [] : proposal.previews
   const initialSelected = useMemo(() => new Set(previews.map((p) => p.cellId)), [previews])
   const [selected, setSelected] = useState<Set<string>>(initialSelected)
-  // Typed-confirmation state (FRO-186).
+  // Typed-confirmation state (AQU-186).
   const [confirmInput, setConfirmInput] = useState("")
 
   function toggle(id: string) {
@@ -43,7 +43,7 @@ export function FixReviewPanel({ open, rule, proposal, onClose, onApply, onAmend
       ? previews.some((p) => p.source === "cached-regex") ? "Cached regex" : "Batch regex"
       : proposal.kind === "per-cell" ? "Per-cell rewrite" : ""
 
-  // FRO-186: Apply is gated on typed confirmation when confirmPhrase is set.
+  // AQU-186: Apply is gated on typed confirmation when confirmPhrase is set.
   const confirmOk = confirmPhrase == null || confirmInput === confirmPhrase
   const applyDisabled = selected.size === 0 || !confirmOk
 
@@ -96,7 +96,7 @@ export function FixReviewPanel({ open, rule, proposal, onClose, onApply, onAmend
               ))}
             </ul>
 
-            {/* FRO-186: Typed confirmation gate for bulk harmonize Apply. */}
+            {/* AQU-186: Typed confirmation gate for bulk harmonize Apply. */}
             {confirmPhrase != null && (
               <div className="mt-3 space-y-1">
                 <p className="text-xs text-muted-foreground">

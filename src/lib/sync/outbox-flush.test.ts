@@ -555,9 +555,9 @@ describe("flushOutboxBatch", () => {
     expect(onStaleSource).toHaveBeenCalledWith([{ id: "e1", currentSourceEventId: "src-evt-999" }])
   })
 
-  // ── FRO-228: comment.* events without fileId must not be dropped ─────────
+  // ── AQU-228: comment.* events without fileId must not be dropped ─────────
 
-  it("FRO-228: comment.* events with no fileId are POSTed (not dropped) using project sentinel", async () => {
+  it("AQU-228: comment.* events with no fileId are POSTed (not dropped) using project sentinel", async () => {
     // Simulates a comment.resolve on a project-scoped comment that has no fileId.
     const commentEvent: CqrsRawEvent = {
       id: "cmt-resolve-1",
@@ -593,7 +593,7 @@ describe("flushOutboxBatch", () => {
     expect(await outboxPendingCount()).toBe(0)
   })
 
-  it("FRO-228: non-comment events without fileId are still dropped (existing behaviour)", async () => {
+  it("AQU-228: non-comment events without fileId are still dropped (existing behaviour)", async () => {
     // target.cell.commit with no fileId — this is a programmer error and should still be dropped.
     const badCellEvent = makeEvent("bad-cell", undefined)
     await enqueueOutboxEvent(badCellEvent)
@@ -616,7 +616,7 @@ describe("flushOutboxBatch", () => {
   // head, mixing file-scoped events into the batch which 403'd under the
   // sentinel token and got permanently quarantined.
 
-  it("FRO-228 BLOCKER 2: when the oldest record is a no-fileId comment, file-scoped events are NOT included in the same batch", async () => {
+  it("AQU-228 BLOCKER 2: when the oldest record is a no-fileId comment, file-scoped events are NOT included in the same batch", async () => {
     // Force the comment to be the IDB head by giving it a provably earlier enqueuedAt.
     const commentEvent: CqrsRawEvent = {
       id: "proj-comment-head",

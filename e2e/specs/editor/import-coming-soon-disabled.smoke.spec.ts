@@ -6,9 +6,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *
  * ImportDialog.tsx shows a first-level "import type" selector screen
  * (ImportLanding). Macula and Translation Notes graduated to enabled Beta
- * importers (FRO-178/FRO-179/FRO-310); the only remaining coming-soon item
+ * importers (AQU-178/AQU-179/AQU-310); the only remaining coming-soon item
  * is Translation Memory, rendered as a disabled div with:
- *   title="Coming soon — Translation Memory import is tracked in FRO-179"
+ *   title="Coming soon — Translation Memory import is tracked in AQU-179"
  *   class "cursor-not-allowed ... opacity-50"
  *
  * This spec: opens the import dialog, verifies the Translation Memory item
@@ -37,12 +37,12 @@ test("import dialog shows Coming soon items as disabled", async ({ alice }) => {
   await expect(tmDiv).toHaveAttribute("aria-disabled", "true")
   await expect(tmDiv).toHaveClass(/cursor-not-allowed|opacity/)
 
-  // Macula graduated to an enabled Beta importer (FRO-178/FRO-310).
+  // Macula graduated to an enabled Beta importer (AQU-178/AQU-310).
   const maculaBtn = dialog.getByRole("button", { name: /Macula Hebrew \+ Greek/i })
   await expect(maculaBtn).toBeVisible({ timeout: 3_000 })
   await expect(maculaBtn).toBeEnabled()
 
-  // Translation Notes graduated to an enabled Beta importer (FRO-179/FRO-310).
+  // Translation Notes graduated to an enabled Beta importer (AQU-179/AQU-310).
   const notesBtn = dialog.getByRole("button", { name: /Translation Notes TSV/i })
   await expect(notesBtn).toBeVisible({ timeout: 3_000 })
   await expect(notesBtn).toBeEnabled()

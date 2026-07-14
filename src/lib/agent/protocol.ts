@@ -34,6 +34,7 @@ export interface PassageRow {
 }
 
 export interface ExamplePair {
+  cellId?: string
   ref?: string
   source: string
   target: string

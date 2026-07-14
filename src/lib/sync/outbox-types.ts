@@ -58,7 +58,7 @@ export type OutboxEventKind =
   | "assignment.create"
   | "assignment.reassign"
   | "assignment.unassign"
-  // FRO-438: Cast/character label assignment (non-chain-mutating; contributor+).
+  // AQU-438: Cast/character label assignment (non-chain-mutating; contributor+).
   // Writes cast_name into cells.metadata JSONB without touching target text.
   | "cast.assign"
   // Timeline editor: retime a cell (move/stretch). Non-chain-mutating — updates
@@ -66,7 +66,7 @@ export type OutboxEventKind =
   | "cell.retime"
   // Timeline editor: set/clear a file's core video URL (stored in files.meta).
   | "file.video.set"
-  // FRO-478: "accept upstream change as-is" (repin). Non-chain-mutating —
+  // AQU-478: "accept upstream change as-is" (repin). Non-chain-mutating —
   // updates ONLY the target row's source_event_id; validated/endorsement
   // state and value are untouched. Guarded server-side by
   // expectedTargetEventId (silent no-op if a translator re-committed).
@@ -83,6 +83,21 @@ export type CommentScope =
   | { kind: "cell"; fileId: string; cellId: string }
   | { kind: "file"; fileId: string }
   | { kind: "project" }
+
+/** Durable context for reproducing and evaluating one machine draft. */
+export interface AiDraftProvenance {
+  model: string
+  provider: string
+  promptVersion: string
+  exampleIds: string[]
+  generatedAt: number
+  mode: "single" | "batch" | "paragraph" | "agent"
+  projectState: {
+    sourceLanguage: string
+    targetLanguage: string
+    approvedExampleCount: number
+  }
+}
 
 // ── Per-kind payload shapes ───────────────────────────────────────────────
 
@@ -130,25 +145,27 @@ export interface OutboxEventPayloads {
      */
     sourceEventId?: string | null
     /**
-     * FRO-177 / search-and-replace: when true, the cell-service projector
+     * AQU-177 / search-and-replace: when true, the cell-service projector
      * re-anchors prior validations to the new head rather than dropping them
      * (Q25 event-anchoring override). Only set by the replace-all path.
      */
     retain_validations?: boolean
     /**
-     * FRO-177: audit metadata for replace operations. Records the find/replace
+     * AQU-177: audit metadata for replace operations. Records the find/replace
      * query strings for per-cell history display and audit log.
      */
     search_query?: string
     replace_string?: string
     /**
-     * FRO-292 / AI provenance: when true, tags this commit as machine-drafted
+     * AQU-292 / AI provenance: when true, tags this commit as machine-drafted
      * (the `cell.commit.llm-accept` variant per AD-2). Set by the AI completion
      * path (useCompletion → commitCompletedCell). Human edits omit this field
      * entirely — the server projection uses its presence to track `ai_drafted`
      * on the cell row until a human edit or validation clears it.
      */
     ai_suggestion?: true
+    /** Model, prompt, retrieval, and project-state snapshot for this draft. */
+    ai_draft?: AiDraftProvenance
     /**
      * Translation-agent provenance: the agent_runs ledger row this commit
      * came from. Injected server-side at stage time (agent implementation
@@ -165,7 +182,7 @@ export interface OutboxEventPayloads {
      */
     undo_of_agent_run_id?: string
     /**
-     * FRO-186 / harmonization: when present, tags this commit as a harmonize
+     * AQU-186 / harmonization: when present, tags this commit as a harmonize
      * sweep event (`cell.commit.harmonize` variant per AD-2). The server uses
      * this to trigger the AD-14 endorsement-revocation cascade and the
      * harmonize-affected-validation comment thread. Only set by emitCellHarmonize.
@@ -297,10 +314,10 @@ export interface OutboxEventPayloads {
     assignmentId: string
   }
 
-  // FRO-438: Cast/character label assignment.
+  // AQU-438: Cast/character label assignment.
   // Non-chain-mutating: does NOT move cells.event_id, does NOT touch target text.
   // The projection writes castName into cells.metadata.cast_name on the source row.
-  // FRO-439: extended with optional cameraState so an angle-embedded label
+  // AQU-439: extended with optional cameraState so an angle-embedded label
   // ("Mary Magdalene   (on)") can be split on import and both voice + angle
   // are persisted atomically in one event.
   "cast.assign": {
@@ -309,7 +326,7 @@ export interface OutboxEventPayloads {
      */
     castName: string | null
     /**
-     * FRO-439: Optional camera-angle override. When present, the projection
+     * AQU-439: Optional camera-angle override. When present, the projection
      * also updates cells.camera_state. Omitted when no angle was supplied.
      */
     cameraState?: "on" | "mixed" | "off" | null
@@ -325,7 +342,7 @@ export interface OutboxEventPayloads {
     coreMediaUrl: string | null
   }
 
-  // FRO-478: repin ("accept upstream change as-is"). cellId rides on the
+  // AQU-478: repin ("accept upstream change as-is"). cellId rides on the
   // envelope. See sync-worker/src/events/types.ts for the full contract.
   "target.cell.repin": {
     /** The (now-current) source row's event_id to pin the target to. */

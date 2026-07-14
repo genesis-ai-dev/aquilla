@@ -270,7 +270,7 @@ describe("authorize()", () => {
   })
 })
 
-// ── FRO-228 BLOCKER 1: __project__ sentinel for comment.* events ──────────────
+// ── AQU-228 BLOCKER 1: __project__ sentinel for comment.* events ──────────────
 
 describe("authorize() — __project__ sentinel (comment.*)", () => {
   async function makeProjectToken(partial: Partial<SyncTokenClaims> = {}): Promise<string> {
@@ -375,7 +375,7 @@ describe("authorize() — __project__ sentinel (comment.*)", () => {
   })
 })
 
-// ── FRO-228 BLOCKER 2: mixed-batch quarantine regression ──────────────────────
+// ── AQU-228 BLOCKER 2: mixed-batch quarantine regression ──────────────────────
 // This test lives in outbox-flush.test.ts (client-side), but the analogous
 // server-side invariant is: a token scoped to __project__ MUST NOT be accepted
 // for a target.cell.commit event. The tests above cover that. The client-side

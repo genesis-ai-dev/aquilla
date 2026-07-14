@@ -110,7 +110,7 @@ export interface Env {
    *  so streaming routes can open a connection that outlives the Response. */
   PG_CONNECTION_STRING?: string
 
-  // AI budget + allowlist controls (FRO-265).
+  // AI budget + allowlist controls (AQU-265).
   // AI_ALLOWED_MODELS: comma-separated list of permitted OpenRouter model IDs.
   //   Unset → uses the hardcoded default list in lib/ai-budget.ts.
   AI_ALLOWED_MODELS?: string
@@ -221,7 +221,7 @@ export interface SyncTokenClaims {
   fileId: string
   role: number
   /**
-   * FRO-346: role-resolution path that produced `role` (RoleResolution.source).
+   * AQU-346: role-resolution path that produced `role` (RoleResolution.source).
    * `"platform"` marks ADMIN_EMAILS operators — the documented exemption from
    * the sync-worker's live membership re-check on writes (platform access is
    * env-configured, not data-derived, so there is no row to re-check).

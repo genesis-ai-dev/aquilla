@@ -1,4 +1,4 @@
-// FRO-433: Org-level provider API key management.
+// AQU-433: Org-level provider API key management.
 //
 // Displayed inside the org Settings page. Editable only by org maintainer+.
 // The key is stored in OrgWideSettings.orgProviderKeys and synced via the

@@ -318,6 +318,30 @@ export function useProjectSettings(
     return () => window.removeEventListener("aquilla:project-settings-updated", onSettingsUpdated)
   }, [projectId, refresh])
 
+  // Re-fetch on tab focus / visibility regain (AQU-349). Validation-policy
+  // settings (validationCount, validationRoleFloor, …) are PATCHed through the
+  // auth-worker REST API, NOT the sync event log — so no WS `event.applied`
+  // frame ever notifies a connected client that another maintainer changed
+  // them. Without this, an already-open workspace keeps a STALE threshold until
+  // a full page reload: a cell with 1 validation still renders "1/3 confirmed"
+  // after the owner lowered the requirement to 1. `refresh()` re-GETs the
+  // server row; the fresh validationCount overlays onto the ProjectRecord
+  // (useProject) and useCells' threshold effect re-derives the badge. Mirrors
+  // useCells' "refetch on focus is the cheap drift mitigation" for settings.
+  useEffect(() => {
+    if (!projectId || !jwt) return
+    const revalidateOnVisible = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return
+      void refresh()
+    }
+    window.addEventListener("focus", revalidateOnVisible)
+    document.addEventListener("visibilitychange", revalidateOnVisible)
+    return () => {
+      window.removeEventListener("focus", revalidateOnVisible)
+      document.removeEventListener("visibilitychange", revalidateOnVisible)
+    }
+  }, [projectId, jwt, refresh])
+
   // Server values overlay local for keys the server has set (non-empty row).
   const settings: ProjectWideSettings = useMemo(
     () => server && server.version > 0
@@ -386,7 +410,7 @@ export function useProjectSettings(
     // 3. roleLevel === null → unsynced project (server has no record of this
     //    project); apply locally only, no server roundtrip. Same as original.
     // 4. roleLevel < EDIT_ROLE_FLOOR → synced project, below floor. DO NOT apply
-    //    locally — this was the root cause of FRO-255 silent divergence. The
+    //    locally — this was the root cause of AQU-255 silent divergence. The
     //    server would reject, leaving stale IDB data the user can't clear.
     // 5. roleLevel >= EDIT_ROLE_FLOOR → optimistic local apply happens *after*
     //    this block, just before the serialized server write.
@@ -413,7 +437,7 @@ export function useProjectSettings(
 
     if (roleLevel < EDIT_ROLE_FLOOR) {
       // Synced project below floor — do NOT apply locally; the server will
-      // reject and we'd silently diverge (the original FRO-255 bug).
+      // reject and we'd silently diverge (the original AQU-255 bug).
       return { kind: "blocked", reason: "role" }
     }
 
@@ -491,7 +515,7 @@ export function useProjectSettings(
     if (result.kind === "forbidden") {
       // Server rejected the write (role check failed at the API layer). Roll back
       // the optimistic local state we applied above — do not silently retain the
-      // rejected value per FRO-255 acceptance criteria.
+      // rejected value per AQU-255 acceptance criteria.
       void refresh() // revert optimistic overlay by re-fetching truth
       const snapTarget = serverRef.current?.settings ?? {}
       setLocal((prev) => {

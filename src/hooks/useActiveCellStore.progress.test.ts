@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest"
 import type { CellRow } from "@/lib/sync/cells-read-types"
+import type { CellAuditStats } from "./useCellsAuditStats"
 import { CellStore } from "./useActiveCellStore"
+
+function stats(cellId: string, activeValidators: string[]): CellAuditStats {
+  return {
+    cellId,
+    editCount: 0,
+    contentHash: "",
+    lastEditAt: null,
+    lastEditEventId: null,
+    activeValidators,
+    waivers: [],
+  }
+}
 
 function row(
   cellId: string,
@@ -82,6 +95,37 @@ describe("CellStore progress selectors", () => {
     const snapshot = store.getFileProgressSnapshot()
     expect(snapshot?.file.filledCount).toBe(1)
     expect(store.getFileProgressSnapshot()).toBe(snapshot)
+  })
+
+  it("wakes the per-cell listener when that cell's audit stats change, and only that cell", () => {
+    const store = new CellStore()
+    store.reset("project", "file")
+    const base = { projectId: "project", fileId: "file", username: "alice", requiredValidations: 1 }
+    store.setRuntime({ ...base, auditStats: new Map() })
+    store.replaceRows([
+      row("c1", "source", "one", "GEN 1:1"),
+      row("c1", "target", "uno", null, 0),
+      row("c2", "source", "two", "GEN 1:2"),
+      row("c2", "target", "dos", null, 0),
+    ], { full: true })
+
+    let c1 = 0
+    let c2 = 0
+    store.subscribeCell("c1", () => { c1++ })
+    store.subscribeCell("c2", () => { c2++ })
+    const beforeVersion = store.getCellVersion("c1")
+
+    // A validate action refetches audit stats for c1 only; c2 is untouched.
+    store.setRuntime({ ...base, auditStats: new Map([["c1", stats("c1", ["alice"])]]) })
+
+    expect(c1).toBe(1) // row re-renders instead of going stale until refresh
+    expect(c2).toBe(0) // per-keystroke isolation preserved for unrelated rows
+    expect(store.getCellVersion("c1")).toBeGreaterThan(beforeVersion)
+
+    // A fresh-but-value-equal stats map (e.g. a full refetch) must not re-emit.
+    store.setRuntime({ ...base, auditStats: new Map([["c1", stats("c1", ["alice"])]]) })
+    expect(c1).toBe(1)
+    expect(c2).toBe(0)
   })
 
   it("tracks every progress-affecting outbox id independently of text overlays", () => {

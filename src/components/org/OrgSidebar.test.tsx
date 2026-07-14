@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { OrgSidebar } from "./OrgSidebar"
 
-// FRO-474: project-only invitees (direct project_members grant, no org
+// AQU-474: project-only invitees (direct project_members grant, no org
 // membership) have no org-scoped nav surface to reach their shared project.
 // These tests verify the sidebar's "Shared with you" section renders those
 // projects and stays hidden when there's nothing to share.
@@ -44,7 +44,7 @@ beforeEach(() => {
 })
 afterEach(() => vi.clearAllMocks())
 
-describe("OrgSidebar shared-projects nav (FRO-474)", () => {
+describe("OrgSidebar shared-projects nav (AQU-474)", () => {
   it("shows a 'Shared with you' section listing projects outside the user's orgs", async () => {
     // No org membership at all — the canonical project-only-invitee scenario.
     listMyOrgs.mockResolvedValue([])

@@ -10,7 +10,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 /**
  * Rules surface — returning to the editor.
  *
- * FRO-194 moved Rules INSIDE the ProjectWorkspace shell: /project/:id/rules
+ * AQU-194 moved Rules INSIDE the ProjectWorkspace shell: /project/:id/rules
  * swaps only the main content area while the sidebar/header stay mounted.
  * The old standalone RulesPage "Back to Editor" button is gone — the way
  * back to the editor is selecting a file in the always-visible sidebar

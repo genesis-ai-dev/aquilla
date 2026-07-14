@@ -11,7 +11,7 @@ import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs
 import { clearLastLocation, readLastLocation, writeLastLocation } from "@/lib/frontier/last-location-store"
 import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
-import { useActiveCellStore, useCellStoreVersion, type CellStore, type CellSummary } from "@/hooks/useActiveCellStore"
+import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellStore, type CellSummary } from "@/hooks/useActiveCellStore"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { triggerLinkSync } from "@/lib/sync/archive"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
@@ -74,6 +74,8 @@ import {
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
 import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitFileVideoSet } from "@/lib/sync/events-emit"
+import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
+import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
 import { canPerform, canOpenAssignUi } from "@/lib/sync/role-policy"
@@ -90,8 +92,9 @@ import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-dia
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, Mic2, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose } from "lucide-react"
 import { AgentDockPanel } from "./AgentDockPanel"
+import { agentSessionStore } from "@/lib/agent/session-store"
 import { AgentWorkbench } from "./agent/AgentWorkbench"
 import type { ContextChip } from "@/lib/agent/context-chip"
 import { SearchDockPanel } from "./SearchDockPanel"
@@ -106,6 +109,7 @@ import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
 import { EditorModeToggle } from "./EditorModeToggle"
+import { audioLensLabel, audioLensIcon } from "@/lib/editor/audio-lens-label"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
@@ -645,12 +649,31 @@ export function ProjectWorkspace() {
     prevSurfaceRef.current = centerSurface
     if (centerSurface === "agent" && prev !== "agent") {
       dockTabBeforeAgentRef.current = dockTab
-      setDockTab(null)
+      // The file explorer is the workbench's scope picker — open it by
+      // default (the Agent tab itself stays unreachable during the takeover).
+      setDockTab("files")
     } else if (centerSurface !== "agent" && prev === "agent") {
       setDockTab((cur) => cur ?? dockTabBeforeAgentRef.current)
+    } else if (centerSurface === "agent" && dockTab === "agent") {
+      // Restore/route paths can re-land the agent tab mid-takeover; collapse.
+      setDockTab(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- dockTab read on transition only
   }, [centerSurface])
+  // Agent working area (agent-complete follow-up): in the workbench the file
+  // explorer doubles as the SCOPE PICKER — clicking a file designates what the
+  // agent works on instead of opening the editor. Falls back to the editor's
+  // active file until the user picks one; cleared when they leave the surface
+  // (the editor's own focus is the scope again).
+  const [agentScopeFileId, setAgentScopeFileId] = useState<string | null>(null)
+  useEffect(() => {
+    if (centerSurface !== "agent") setAgentScopeFileId(null)
+  }, [centerSurface])
+  const agentScopeFile = useMemo(() => {
+    const id = agentScopeFileId ?? activeFileId
+    return id ? projectFiles.find((f) => f.id === id) ?? null : null
+  }, [agentScopeFileId, activeFileId, projectFiles])
+
   // A source selection the user sent to the agent via "Ask AI". Opens the
   // Agent dock and is inserted into the composer as a context chip.
   const [pendingChip, setPendingChip] = useState<ContextChip | null>(null)
@@ -691,9 +714,11 @@ export function ProjectWorkspace() {
   // page where the Gemini API key can be set. The old implementation called
   // setLens("audio") which is a no-op when already in audio mode. Navigate to
   // project settings instead so the key field is always reachable.
+  // AQU-522: deep-link with `?q=gemini` so settings opens filtered to the Voice
+  // card — the Gemini/TTS key entry is then visible without scrolling to find it.
   const openAudioSetup = useCallback(() => {
     if (!projectId) return
-    navigate(`/project/${projectId}/settings`)
+    navigate(`/project/${projectId}/settings?q=gemini`)
   }, [navigate, projectId])
   const editorRef = useRef<EditorTableHandle>(null)
   const viewSettingsRef = useRef<ViewSettingsMenuHandle>(null)
@@ -870,16 +895,16 @@ export function ProjectWorkspace() {
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
   })
   const cellStoreVersion = useCellStoreVersion(cellStore)
-  const cellSummaries = useMemo(() => cellStore.getAllSummaries(), [cellStore, cellStoreVersion])
-  const localFileProgress = useMemo(() => cellStore.getFileProgressSnapshot(), [cellStore, cellStoreVersion])
+  const cellSummaries = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()), [cellStore, cellStoreVersion])
+  const localFileProgress = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getFileProgressSnapshot()), [cellStore, cellStoreVersion])
   useEffect(() => {
     if (!project?.id || !activeFileId || !localFileProgress) return
-    setLocalFileProgress(
+    readAtVersion(cellStoreVersion, () => setLocalFileProgress(
       project.id,
       activeFileId,
       localFileProgress,
       cellStore.getPendingProgressEventIds(),
-    )
+    ))
   }, [activeFileId, cellStore, cellStoreVersion, localFileProgress, project?.id])
   const getActiveCells = useCallback(() => cellStore.getAllCellViews(), [cellStore])
   const getActiveCell = useCallback((cellId: string) => cellStore.getCellView(cellId), [cellStore])
@@ -1278,7 +1303,7 @@ export function ProjectWorkspace() {
   // VTT blob round-trip.
   const videoCues = useMemo(() => {
     if (!isSubtitleFile || !videoSrc || cellSummaries.length === 0) return []
-    return extractCuesFromCells(cellStore.getAllCellViews())
+    return readAtVersion(cellStoreVersion, () => extractCuesFromCells(cellStore.getAllCellViews()))
   }, [cellStore, cellStoreVersion, cellSummaries.length, isSubtitleFile, videoSrc])
 
   const videoStartOffset = videoAttachment.videoStartOffset ?? 0
@@ -1472,10 +1497,9 @@ export function ProjectWorkspace() {
   // retrieval primitive every other AD-13 consumer will (AD-14 decay
   // endorsement included).
   //
-  // Both fall back to the in-memory index if the server fetch fails for
-  // any reason (offline, JWT issue, etc.) — losing retrieval makes the
-  // copilot zero-shot, which is a worse generation but still better than
-  // failing the whole completion.
+  // A failed request yields no examples rather than falling back to an
+  // unreviewed local corpus. The draft may proceed zero-shot, but the trust
+  // boundary around approved retrieval remains intact.
   const branchingSearch = useCallback(
     async (
       query: string,
@@ -1493,6 +1517,7 @@ export function ProjectWorkspace() {
           query,
           jwt,
           topK: limit,
+          validatedOnly: true,
           excludeCellId: excludeId,
         })
         return res.results.map((r) => ({
@@ -1530,6 +1555,7 @@ export function ProjectWorkspace() {
           jwt,
           topK: hits,
           radius,
+          validatedOnly: true,
         })
         // Map server `Passage` → existing `PassageHit` shape. Drops
         // `hitCellId` (derivable from cells.find(c => c.hit)) and
@@ -1551,7 +1577,7 @@ export function ProjectWorkspace() {
     [project?.id, activeFileId, getTokenForFile],
   )
 
-  const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string) => {
+  const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string, provenance: AiDraftProvenance) => {
     if (!project?.id) return
     // FRO-365: defense-in-depth — the selection-island Translate button and
     // the header "Run AI completions"/"Complete all" actions are already
@@ -1571,7 +1597,7 @@ export function ProjectWorkspace() {
     // bounce) chains a *revert* event with the pre-gen text onto the
     // gen — producing the "two events at 5:08, second one identical to
     // 2:28" history pattern.
-    applyOptimisticTargetEdit(cell.id, { value: text })
+    applyOptimisticTargetEdit(cell.id, { value: text, aiDrafted: true })
     // RACE-3/QW-2: use the pending event id for this cell (last AI-completion
     // commit we enqueued) as parentId, falling back to the projection value.
     // This prevents a second rapid completion commit from becoming a sibling
@@ -1590,6 +1616,7 @@ export function ProjectWorkspace() {
       // track ai_drafted on the cell row. A human edit (no aiSuggestion)
       // will clear it on the next commit.
       aiSuggestion: true,
+      aiDraft: provenance,
     })
     pendingCompletionEventIdRef.current.set(cell.id, eventId)
     rememberPendingTargetCommit(cell.id, eventId, parentId)
@@ -1602,7 +1629,7 @@ export function ProjectWorkspace() {
     // confirms; the WS event.applied also pokes the same cell (coalesced).
     revalidateCellStats(cell.id)
     revalidateCell(cell.id)
-  }, [project?.id, applyOptimisticTargetEdit, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell])
+  }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
   /**
    * AD-2 sibling promotion: emit a new target-cell commit whose parentId is
@@ -2175,7 +2202,7 @@ export function ProjectWorkspace() {
       pendingPresenceJumpRef.current = null
       return
     }
-    const idx = cellStore.findIndexByCellId(pending.cellId)
+    const idx = readAtVersion(cellStoreVersion, () => cellStore.findIndexByCellId(pending.cellId!))
     if (idx < 0) return
     pendingPresenceJumpRef.current = null
     editorRef.current?.scrollToCellIndex(idx)
@@ -2212,7 +2239,7 @@ export function ProjectWorkspace() {
   useEffect(() => {
     const cellId = pendingCellScrollRef.current
     if (!cellId || cellStore.getCellCount() === 0) return
-    const idx = cellStore.findIndexByCellId(cellId)
+    const idx = readAtVersion(cellStoreVersion, () => cellStore.findIndexByCellId(cellId))
     if (idx >= 0) {
       pendingCellScrollRef.current = null
       editorRef.current?.scrollToCellIndex(idx)
@@ -2225,7 +2252,7 @@ export function ProjectWorkspace() {
     : []
   const drawerCellsByFile = useMemo(() => {
     const map = new Map<string, CellData[]>()
-    if (drawerRuleId && activeFileId) map.set(activeFileId, getActiveCells())
+    if (drawerRuleId && activeFileId) map.set(activeFileId, readAtVersion(cellStoreVersion, getActiveCells))
     return map
   }, [activeFileId, cellStoreVersion, drawerRuleId, getActiveCells])
 
@@ -2456,6 +2483,16 @@ export function ProjectWorkspace() {
               }
               if (!msg.cell || msg.project !== pid) return
               const ownWrite = isOwnWriteEcho(msg, currentUsername)
+              // Validation state has two projections: `cells.validated` drives
+              // progress, while `cell_validators` identifies who approved the
+              // current edit. Refresh the audit row from the applied-event echo
+              // for both local and remote writes so the per-cell button cannot
+              // remain visually stale after the progress count turns green.
+              // The committing handler's earlier refresh can race the app-shell
+              // outbox drain; this frame only arrives after projection commits.
+              if (msg.kind === "cell.validate" || msg.kind === "cell.unvalidate") {
+                revalidateCellStats(msg.cell)
+              }
               // Targeted single-cell refetch — avoids re-streaming every
               // cell in the file for one remote change. Falls back to a
               // full revalidate inside useCells on error.
@@ -2620,6 +2657,7 @@ export function ProjectWorkspace() {
     getTokenForFile,
     revalidateCells,
     revalidateCell,
+    revalidateCellStats,
     currentUsername,
     refresh,
     clearPresenceStaleTimer,
@@ -3215,6 +3253,9 @@ export function ProjectWorkspace() {
   }, [project?.id, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex])
 
   const projectNavItems = useMemo(() => {
+    // AQU-353: mirror the header lens toggle's label/icon exactly (see the
+    // "voice-studio" item below).
+    const audioLensTimeOrdered = activeFile ? fileOrderedBy(activeFile) === "time" : false
     const items = [
       { id: "rules", label: "Rules", icon: Scale,
         onClick: () => navigate(`/project/${projectId}/rules`) },
@@ -3227,20 +3268,17 @@ export function ProjectWorkspace() {
         onClick: () => navigate(`/project/${projectId}/comments`) },
       { id: "living-memory", label: "Memory", icon: BookMarked,
         onClick: () => navigate(`/project/${projectId}/memory`) },
-      // SWARM-TODO(voice-a7): "Voice" nav button toggles the Audio/Text lens
-      // (current intentional behavior, fixed in a prior wave to avoid the
-      // one-way-trap). QA now reports this is AMBIGUOUS: users expect a nav
-      // button to navigate to a Voice settings page, not to toggle a lens mode.
-      // Product decision needed:
-      //   Option A: Keep as lens toggle but rename/re-icon it (e.g. "Audio lens"
-      //             with a headphones icon) so it's clear it's a VIEW mode switch.
-      //   Option B: Make "Voice" open a dedicated /project/:id/voice settings page
-      //             (requires adding a route + VoiceStudioPage component) and put
-      //             the lens toggle in the header bar only.
-      //   Option C: Two-step: first click = switch to Audio lens, second click
-      //             while in Audio lens = open voice settings modal.
-      // See: src/components/ProjectWorkspace.tsx (this file), src/App.tsx (routes)
-      { id: "voice-studio", label: "Voice", icon: Mic2,
+      // AQU-353: this sidebar entry toggles the SAME Text/Audio lens as the
+      // header segmented control (EditorModeToggle). It used to be labelled
+      // "Voice" with the Mic2 icon while the header said "Audio", so testers hit
+      // what looked like two different destinations. Both now read the canonical
+      // label/icon from the shared audio-lens helper so they can't drift apart
+      // ("Audio"/Mic2 for cell files, "Media"/AudioWaveform for time-ordered).
+      //
+      // NB: whether a nav *button* toggling a view mode (rather than navigating)
+      // is the right interaction is a separate open question tracked with the
+      // sidebar rework (FRO-308); this change only unifies the naming.
+      { id: "voice-studio", label: audioLensLabel(audioLensTimeOrdered), icon: audioLensIcon(audioLensTimeOrdered),
         onClick: () => {
           const next = lens === "audio" ? "text" : "audio"
           setLens(next)
@@ -3266,7 +3304,7 @@ export function ProjectWorkspace() {
         : []),
     ]
     return items
-  }, [projectId, activeFileId, navigate, openCommentCount, lens, setLens, setDockTab, currentRoleLevel])
+  }, [projectId, activeFileId, activeFile, navigate, openCommentCount, lens, setLens, setDockTab, currentRoleLevel])
 
   // Phase 2c-gamma: countTranscribeTargets/countSynthTargets lived in bulk-audio
   // (Y.Doc-coupled). They're zeroed until the audio-attachment event grammar
@@ -3281,7 +3319,7 @@ export function ProjectWorkspace() {
     if (!frontierSession?.jwt) return
     if (cellSummaries.length === 0) return
     let cancelled = false
-    const cells = getActiveCells()
+    const cells = readAtVersion(cellStoreVersion, getActiveCells)
     void eagerlyPrefetchPeaks({
       cells, project, session: frontierSession, bins: 320,
       isCancelled: () => cancelled,
@@ -3339,7 +3377,7 @@ export function ProjectWorkspace() {
       if (!project?.id || !activeFileId) return
       if (!canPerform("cell.validate", project.syncRole?.level ?? null)) return
       const validatable = cellSummaries.filter(
-        (c) => c.fileId === activeFileId && !!c.targetEventId,
+        (c) => c.fileId === activeFileId && isBulkValidationEligible(c),
       )
       if (validatable.length === 0) return
       void (async () => {
@@ -3401,7 +3439,7 @@ export function ProjectWorkspace() {
     recordingCellId !== null ||
     exportOpen
   const legacyCells = useMemo(
-    () => legacyCellsNeeded ? getActiveCells() : EMPTY_CELL_DATA,
+    () => legacyCellsNeeded ? readAtVersion(cellStoreVersion, getActiveCells) : EMPTY_CELL_DATA,
     [cellStoreVersion, getActiveCells, legacyCellsNeeded],
   )
 
@@ -3754,6 +3792,10 @@ export function ProjectWorkspace() {
             storageKey={projectId}
             activeTab={dockTab}
             onActiveTabChange={(t) => {
+              // While the workbench IS the agent surface, the dock's Agent tab
+              // has nothing to show but a pointer back to it — a wide panel of
+              // dead chrome beside the takeover. Make that state unreachable.
+              if (t === "agent" && centerSurface === "agent") return
               setDockTab(t)
               // Opening the Voices tab puts the editor into the Audio lens so
               // the per-line voice controls show alongside the panel.
@@ -3793,12 +3835,28 @@ export function ProjectWorkspace() {
                 <ExpandableFileList
                   projectId={projectId!}
                   files={project.files}
-                  activeFileId={activeFileId}
+                  activeFileId={centerSurface === "agent" ? (agentScopeFile?.id ?? activeFileId) : activeFileId}
                   fileProgress={fileProgress}
                   suggestionFileIds={suggestionFileIds}
                   validationCount={validationCount}
                   getTokenForFile={getTokenForFile}
-                  onSelectFile={workspaceTabs.openFile}
+                  onSelectFile={(fileId, opts) => {
+                    // Workbench: the explorer designates the agent's working
+                    // area — stay in the takeover, retarget the session, and
+                    // let the model hear about it on the next turn.
+                    if (centerSurface === "agent") {
+                      setAgentScopeFileId(fileId)
+                      const name = projectFiles.find((f) => f.id === fileId)?.name ?? fileId
+                      if (project?.id) {
+                        agentSessionStore(project.id).noteActivity(
+                          "scope",
+                          `The user set the working area to the file "${name}" (:file now resolves to it).`,
+                        )
+                      }
+                      return
+                    }
+                    workspaceTabs.openFile(fileId, opts)
+                  }}
                   onRename={handleRename}
                   onMove={(fileId) => {
                     setMoveTargetId(fileId)
@@ -4256,10 +4314,10 @@ export function ProjectWorkspace() {
               author: currentUsername,
               roleLevel: currentRoleLevel,
               context: {
-                fileId: activeFileId ?? undefined,
-                cellId: focusedCellId ?? undefined,
+                fileId: agentScopeFile?.id ?? undefined,
+                cellId: agentScopeFile?.id === activeFileId ? focusedCellId ?? undefined : undefined,
               },
-              fileName: activeFile?.name,
+              fileName: agentScopeFile?.name,
               currentCell: null,
               rules,
               resolveCell: resolveCellById,

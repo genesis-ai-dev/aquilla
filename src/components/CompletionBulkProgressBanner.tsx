@@ -1,8 +1,8 @@
-// FRO-235: Banner that surfaces batch AI completion progress.
+// AQU-235: Banner that surfaces batch AI completion progress.
 // Subscribes to the completion batch progress store; renders nothing when idle.
 // Mirrors AudioBulkProgressBanner — same visual pattern, different data source.
 //
-// FRO-361: when a run finishes with one or more sub-batches skipped (after
+// AQU-361: when a run finishes with one or more sub-batches skipped (after
 // retry) the store keeps `progress` around with `finished: true` instead of
 // clearing it — so this banner switches to an honest "X of N cells failed"
 // summary instead of quietly disappearing as if the whole file completed.

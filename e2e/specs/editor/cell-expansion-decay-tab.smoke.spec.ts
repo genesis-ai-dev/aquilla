@@ -8,13 +8,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * CellExpansion — "Staleness" tab shows endorsement count and health %.
+ * CellExpansion — "Retrieval support" tab shows endorsement count and support %.
  *
- * EditorTable.tsx's cell expansion panel has a "Staleness" tab (value="health";
- * renamed from "Decay" in the AD-14 derived-confidence rework).
+ * EditorTable.tsx's cell expansion panel has a "Retrieval support" tab (value="health").
  * Switching to it reveals:
- *   - "<N> endorsements · health <N>%"
- *   - "Needs attention" or "No attention needed" message
+ *   - "<N> endorsements · support <N>%"
+ *   - an explicit reminder that the signal prioritizes, but does not replace, review
  *
  * For a fresh unvalidated cell, endorsementCount is 0 and health is low.
  *
@@ -22,7 +21,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * verify endorsement count text appears → verify one of the attention messages
  * is visible.
  */
-test("cell expansion Decay tab shows endorsement count and health", async ({ alice }) => {
+test("cell expansion support tab shows evidence without certifying quality", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `CellDecay ${Date.now()}`
@@ -42,23 +41,19 @@ test("cell expansion Decay tab shows endorsement count and health", async ({ ali
 
   // The expansion panel opens. Don't grab the page's first tablist — the
   // "Open files" editor tab strip is also a tablist and renders before the
-  // expansion. Identify the expansion's tablist by its Staleness tab.
+  // expansion. Identify the expansion's tablist by its Retrieval support tab.
   const panel = alice
     .getByRole("tablist")
-    .filter({ has: alice.getByRole("tab", { name: /Staleness/i }) })
+    .filter({ has: alice.getByRole("tab", { name: /Retrieval support/i }) })
   await expect(panel).toBeVisible({ timeout: 5_000 })
 
-  // Click the "Staleness" tab.
-  const decayTab = panel.getByRole("tab", { name: /Staleness/i })
+  const decayTab = panel.getByRole("tab", { name: /Retrieval support/i })
   await expect(decayTab).toBeVisible({ timeout: 3_000 })
   await decayTab.click()
 
-  // Endorsement count and health % appear.
-  await expect(alice.getByText(/endorsement.*health/i)).toBeVisible({ timeout: 3_000 })
+  await expect(alice.getByText(/endorsement.*support/i)).toBeVisible({ timeout: 3_000 })
 
-  // One of the attention messages is present.
-  const needsAttention = alice.getByText(/Needs attention/i)
-  const noAttention = alice.getByText(/No attention needed/i)
-  const hasAttentionMsg = await needsAttention.isVisible() || await noAttention.isVisible()
-  expect(hasAttentionMsg).toBe(true)
+  const lowerSupport = alice.getByText(/Lower retrieval support/i)
+  const reviewRequired = alice.getByText(/human review is still required/i)
+  expect(await lowerSupport.isVisible() || await reviewRequired.isVisible()).toBe(true)
 })

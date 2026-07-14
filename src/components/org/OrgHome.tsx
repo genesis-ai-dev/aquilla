@@ -46,7 +46,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { AppTooltip, TooltipDelegationBoundary } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import { FolderPlus, Search, X, Building2 } from "lucide-react"
@@ -236,12 +236,16 @@ function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, 
   })
 }
 
-// Shared column template for the project table so the header row and the data
-// rows always line up. Name flexes; the metric + date columns are fixed-width.
-// Kept compact so the Name column survives inside the narrow all-orgs panel.
-// Audio column is 5rem (not 4rem) to fit the "Has Audio" header (AQU-489/490
-// terminology parity) without wrapping.
-const PROJECT_TABLE_COLS = "grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_5rem_5.5rem_6rem]"
+// Shared column template keeps headers and data aligned. The identity cell is
+// flexible; metric/date columns stay fixed. In all-orgs mode the organization
+// remains a compact secondary badge inside that cell and yields space to the
+// project name first. Audio is 5rem to keep "Has Audio" on one line.
+const PROJECT_TABLE_COLS = [
+  "grid-cols-[minmax(0,1fr)_4.5rem_4.5rem]",
+  "@xl/project-table:grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_5rem]",
+  "@2xl/project-table:grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_5rem_5.5rem]",
+  "@3xl/project-table:grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_5rem_5.5rem_6rem]",
+].join(" ")
 
 /**
  * The org/portfolio project list as a compact table — one row per project with
@@ -267,7 +271,7 @@ const PROJECT_TABLE_COLS = "grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_5rem_5.5rem_6
  * the same three terms — plus "Audio Validated" — are used identically
  * (not "Audio" bare, not "Approved" instead of "Validated").
  */
-function ProjectTable({
+export function ProjectTable({
   projects,
   now,
   showOrg,
@@ -279,8 +283,9 @@ function ProjectTable({
   roleByProjectId?: Map<string, CloudProjectSummary["role"]>
 }) {
   return (
-    <div className="overflow-x-auto">
-      <div className="min-w-[39rem]">
+    <TooltipDelegationBoundary>
+      <div data-testid="project-table" className="@container/project-table overflow-hidden">
+        <div className="w-full">
         <div
           className={`grid ${PROJECT_TABLE_COLS} gap-x-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground`}
         >
@@ -292,10 +297,10 @@ function ProjectTable({
             <span className="whitespace-nowrap text-right">Validated</span>
           </AppTooltip>
           <AppTooltip content="Percentage of cells that have at least one audio recording attached. This is coverage, not validation — audio-specific validation isn't tracked yet (see AQU-490).">
-            <span className="whitespace-nowrap text-right">Has Audio</span>
+            <span className="hidden whitespace-nowrap text-right @xl/project-table:block">Has Audio</span>
           </AppTooltip>
-          <span className="whitespace-nowrap text-right">Role</span>
-          <span className="whitespace-nowrap text-right">Updated</span>
+          <span className="hidden whitespace-nowrap text-right @2xl/project-table:block">Role</span>
+          <span className="hidden whitespace-nowrap text-right @3xl/project-table:block">Updated</span>
         </div>
         <div className="divide-y">
           {projects.map((p) => {
@@ -309,14 +314,26 @@ function ProjectTable({
               <Link
                 key={p.id}
                 to={`/projects/${p.id}`}
+                data-project-id={p.id}
                 className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-3 px-4 py-2.5 text-sm transition-colors hover:bg-muted/50`}
               >
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className="truncate font-medium">{p.name}</span>
+                <span data-testid="project-table-identity" className="flex min-w-0 items-center gap-2">
+                  <AppTooltip content={p.name} side="top" delay={300}>
+                    <span data-testid="project-table-name" className="min-w-0 flex-1 truncate font-medium">
+                      {p.name}
+                    </span>
+                  </AppTooltip>
                   {showOrg && p.orgName && (
-                    <Badge variant="secondary" className="max-w-[8rem] shrink-0 truncate">
-                      {p.orgName}
-                    </Badge>
+                    <AppTooltip content={p.orgName} side="top" delay={300}>
+                      <span
+                        data-testid="project-table-organization"
+                        className="inline-flex w-[clamp(4rem,35%,10rem)] min-w-0 flex-none overflow-hidden"
+                      >
+                        <Badge variant="secondary" className="min-w-0 w-full">
+                          <span className="truncate">{p.orgName}</span>
+                        </Badge>
+                      </span>
+                    </AppTooltip>
                   )}
                   <ProjectDeadlineStatuses deadline={dstatus} className="shrink-0" />
                 </span>
@@ -327,14 +344,14 @@ function ProjectTable({
                 <span className="text-right tabular-nums text-muted-foreground" aria-label={`${pct}% validated`}>
                   {pct}%
                 </span>
-                <span className="text-right tabular-nums text-muted-foreground" aria-label={`${apct}% audio`}>
+                <span className="hidden text-right tabular-nums text-muted-foreground @xl/project-table:block" aria-label={`${apct}% audio`}>
                   {apct}%
                 </span>
-                <span className="truncate text-right text-xs text-muted-foreground">
+                <span className="hidden truncate text-right text-xs text-muted-foreground @2xl/project-table:block">
                   {role?.name ? <RoleLabel name={role.name} /> : "—"}
                 </span>
                 <span
-                  className={`truncate text-right text-xs ${
+                  className={`hidden truncate text-right text-xs @3xl/project-table:block ${
                     status === "stalled" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
                   }`}
                 >
@@ -348,8 +365,9 @@ function ProjectTable({
             )
           })}
         </div>
+        </div>
       </div>
-    </div>
+    </TooltipDelegationBoundary>
   )
 }
 
@@ -738,7 +756,7 @@ export function OrgHome() {
                   </div>
 
                   <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-                    <section className="rounded-2xl border bg-card">
+                    <section data-testid="organizations-panel" className="rounded-2xl border bg-card">
                       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
                         <div>
                           <h2 className="text-base font-semibold">Organizations</h2>
@@ -804,7 +822,7 @@ export function OrgHome() {
                       )}
                     </section>
 
-                    <section className="rounded-2xl border bg-card">
+                    <section data-testid="projects-panel" className="rounded-2xl border bg-card">
                       <div className="space-y-3 border-b px-4 py-3">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>

@@ -524,6 +524,7 @@ orgs.post("/:orgId/invites", zValidator("json", createOrgInviteBody), async (c) 
       email,
       joinUrl,
       org?.name ?? "an organization",
+      { invitedBy: user.username },
     ).catch((err) => console.warn("[org-invites] invite email failed:", err))
     try {
       c.executionCtx.waitUntil(emailPromise)

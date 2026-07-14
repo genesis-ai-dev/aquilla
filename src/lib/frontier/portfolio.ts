@@ -26,6 +26,31 @@ export interface PortfolioProject {
   validatedAudioCells: number
   recordedMs: number
   deadlineAt: string | null
+  /**
+   * AQU-523: the project's source/target language, surfaced on the org /
+   * all-orgs project list so the pair is visible at a glance (the
+   * single-project overview already shows it). Null when unset — the server
+   * normalizes the empty-settings default to null so the client never renders
+   * a blank/broken "→".
+   */
+  sourceLanguage: string | null
+  targetLanguage: string | null
+}
+
+/**
+ * AQU-523: format a project's language pair for display, e.g. "Greek → Bambara".
+ * Trims and treats empty strings as unset. Returns just the one known language
+ * when only one side is set, and null when neither is — callers render nothing
+ * in that case rather than a broken "→" or empty label.
+ */
+export function languagePairLabel(p: {
+  sourceLanguage?: string | null
+  targetLanguage?: string | null
+}): string | null {
+  const source = p.sourceLanguage?.trim() || null
+  const target = p.targetLanguage?.trim() || null
+  if (source && target) return `${source} → ${target}`
+  return target ?? source ?? null
 }
 
 export interface OrgPortfolio {

@@ -234,6 +234,71 @@
    OUTSIDE @layer base so they win against the unlayered brand stylesheet
    injected at runtime by branding/apply-theme.ts. */
 
+  /* Blue is the DEFAULT color theme. It gets an explicit tinted preset here
+     (rather than falling through to the near-neutral base :root chrome) so that
+     (a) "Blue" actually reads blue instead of grey, and (b) its chrome tint is
+     consistent with Warm/Sage/Rose — no jarring white-vs-tinted jump on switch.
+     Blue needs a touch more chroma than the others because a cool hue reads less
+     colourful than warm/green/rose at equal chroma. (AQU-362) */
+  html[data-color-theme="blue"] {
+    --surface: oklch(0.955 0.016 250);
+    --background: oklch(0.955 0.016 250);
+    --card: oklch(0.955 0.016 250);
+    --secondary: oklch(0.955 0.016 250);
+    --sidebar: oklch(0.955 0.016 250);
+    --foreground: oklch(0.34 0.020 255);
+    --card-foreground: oklch(0.34 0.020 255);
+    --popover: oklch(0.97 0.012 250);
+    --popover-foreground: oklch(0.34 0.020 255);
+    --primary: oklch(0.74 0.12 250);
+    --primary-foreground: oklch(0.28 0.04 255);
+    --secondary-foreground: oklch(0.40 0.024 255);
+    --muted: oklch(0.925 0.016 250);
+    --muted-foreground: oklch(0.52 0.020 255);
+    --accent: oklch(0.89 0.045 250);
+    --accent-foreground: oklch(0.38 0.08 255);
+    --destructive-foreground: oklch(0.97 0.01 250);
+    --border: oklch(0.88 0.018 250);
+    --input: oklch(0.92 0.016 250);
+    --ring: oklch(0.70 0.11 250);
+    --sidebar-foreground: oklch(0.34 0.020 255);
+    --sidebar-primary: oklch(0.74 0.12 250);
+    --sidebar-primary-foreground: oklch(0.28 0.04 255);
+    --sidebar-accent: oklch(0.89 0.045 250);
+    --sidebar-accent-foreground: oklch(0.38 0.08 255);
+    --sidebar-border: oklch(0.88 0.018 250);
+    --sidebar-ring: oklch(0.70 0.11 250);
+  }
+  html.dark[data-color-theme="blue"] {
+    --surface: oklch(0.30 0.014 250);
+    --background: oklch(0.30 0.014 250);
+    --card: oklch(0.30 0.014 250);
+    --secondary: oklch(0.30 0.014 250);
+    --sidebar: oklch(0.30 0.014 250);
+    --foreground: oklch(0.92 0.010 250);
+    --card-foreground: oklch(0.92 0.010 250);
+    --popover: oklch(0.34 0.016 250);
+    --popover-foreground: oklch(0.92 0.010 250);
+    --primary: oklch(0.78 0.11 250);
+    --primary-foreground: oklch(0.22 0.04 255);
+    --secondary-foreground: oklch(0.88 0.012 250);
+    --muted: oklch(0.34 0.014 250);
+    --muted-foreground: oklch(0.66 0.016 250);
+    --accent: oklch(0.38 0.05 250);
+    --accent-foreground: oklch(0.82 0.11 250);
+    --destructive-foreground: oklch(0.95 0.01 250);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.74 0.10 250);
+    --sidebar-foreground: oklch(0.92 0.010 250);
+    --sidebar-primary: oklch(0.78 0.11 250);
+    --sidebar-primary-foreground: oklch(0.22 0.04 255);
+    --sidebar-accent: oklch(0.38 0.05 250);
+    --sidebar-accent-foreground: oklch(0.82 0.11 250);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.74 0.10 250);
+  }
+
 html[data-color-theme="warm"] {
     --surface: oklch(0.928 0.008 90);
     --background: oklch(0.928 0.008 90);

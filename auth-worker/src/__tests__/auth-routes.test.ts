@@ -273,4 +273,78 @@ describe("POST /api/v2/auth/register", () => {
     )
     expect(dup.status).toBe(409)
   })
+
+  it("rejects a username whose lowercased form already exists (AQU-340)", async () => {
+    const first = await app.request(
+      "/api/v2/auth/register",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: "Ryan",
+          email: "ryan@example.com",
+          password: "pw1abcdef",
+        }),
+      },
+      env,
+    )
+    expect(first.status).toBe(200)
+
+    // A different casing of the same name must be treated as a duplicate.
+    for (const twin of ["ryan", "RYAN", "RYaN"]) {
+      const dup = await app.request(
+        "/api/v2/auth/register",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: twin,
+            email: `${twin}-alt@example.com`,
+            password: "pw2abcdef",
+          }),
+        },
+        env,
+      )
+      expect(dup.status).toBe(409)
+    }
+
+    // Exactly one row exists, and it preserves the casing the user first typed.
+    const rows = await env.AQUILLA_PG.prepare(
+      "SELECT username FROM users WHERE LOWER(username) = 'ryan'",
+    ).all<{ username: string }>()
+    expect(rows.results).toHaveLength(1)
+    expect(rows.results[0].username).toBe("Ryan")
+  })
+
+  it("rejects an email whose lowercased form already exists (AQU-340)", async () => {
+    const first = await app.request(
+      "/api/v2/auth/register",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: "casey",
+          email: "Casey@Example.com",
+          password: "pw1abcdef",
+        }),
+      },
+      env,
+    )
+    expect(first.status).toBe(200)
+
+    const dup = await app.request(
+      "/api/v2/auth/register",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: "casey2",
+          email: "casey@example.com",
+          password: "pw2abcdef",
+        }),
+      },
+      env,
+    )
+    expect(dup.status).toBe(409)
+  })
 })

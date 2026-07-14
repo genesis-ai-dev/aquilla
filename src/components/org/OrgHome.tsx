@@ -241,10 +241,10 @@ function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, 
 // remains a compact secondary badge inside that cell and yields space to the
 // project name first. Audio is 5rem to keep "Has Audio" on one line.
 const PROJECT_TABLE_COLS = [
-  "grid-cols-[minmax(0,1fr)_4.5rem_4.5rem]",
-  "@xl/project-table:grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_5rem]",
-  "@2xl/project-table:grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_5rem_5.5rem]",
-  "@3xl/project-table:grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_5rem_5.5rem_6rem]",
+  "grid-cols-[minmax(12rem,2fr)_minmax(4.5rem,1fr)_minmax(4.5rem,1fr)]",
+  "@xl/project-table:grid-cols-[minmax(16rem,2.5fr)_repeat(3,minmax(4.5rem,1fr))]",
+  "@2xl/project-table:grid-cols-[minmax(16rem,2.5fr)_repeat(3,minmax(4.5rem,1fr))_minmax(5.5rem,1fr)]",
+  "@3xl/project-table:grid-cols-[minmax(16rem,2.5fr)_repeat(3,minmax(4.5rem,1fr))_minmax(5.5rem,1fr)_minmax(6rem,1fr)]",
 ].join(" ")
 
 /**
@@ -289,7 +289,15 @@ export function ProjectTable({
         <div
           className={`grid ${PROJECT_TABLE_COLS} gap-x-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground`}
         >
-          <span>Name</span>
+          <span
+            className={cn(
+              "min-w-0",
+              showOrg && "grid grid-cols-[minmax(7rem,1fr)_minmax(6rem,10rem)] gap-x-3",
+            )}
+          >
+            <span>{showOrg ? "Project" : "Name"}</span>
+            {showOrg && <span className="text-right">Organization</span>}
+          </span>
           <AppTooltip content="Percentage of cells with target-language content filled in.">
             <span className="whitespace-nowrap text-right">Translated</span>
           </AppTooltip>
@@ -317,33 +325,63 @@ export function ProjectTable({
                 data-project-id={p.id}
                 className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-3 px-4 py-2.5 text-sm transition-colors hover:bg-muted/50`}
               >
-                <span data-testid="project-table-identity" className="flex min-w-0 flex-col">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <AppTooltip content={p.name} side="top" delay={300}>
-                      <span data-testid="project-table-name" className="min-w-0 flex-1 truncate font-medium">
-                        {p.name}
+                <span
+                  data-testid="project-table-identity"
+                  className={cn(
+                    "min-w-0",
+                    showOrg && p.orgName
+                      ? "grid grid-cols-[minmax(7rem,1fr)_minmax(6rem,10rem)] items-start gap-x-3"
+                      : "flex items-start",
+                  )}
+                >
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span data-testid="project-table-name" className="min-w-0 truncate font-medium">
+                      {p.name}
+                    </span>
+                    {/* AQU-523: source → target language pair beneath the name, so
+                        the org / all-orgs list shows it at a glance (matching the
+                        single-project overview). Rendered only when known. */}
+                    {(languagePairLabel(p) || dstatus) && (
+                      <span
+                        data-testid="project-table-metadata"
+                        className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
+                      >
+                        {languagePairLabel(p) && (
+                          <span className="truncate" aria-label="Source and target language">
+                            {languagePairLabel(p)}
+                          </span>
+                        )}
+                        <ProjectDeadlineStatuses
+                          deadline={dstatus}
+                          className="shrink-0"
+                          testId="project-table-deadline-status"
+                        />
                       </span>
-                    </AppTooltip>
-                    {showOrg && p.orgName && (
-                      <AppTooltip content={p.orgName} side="top" delay={300}>
-                        <span
-                          data-testid="project-table-organization"
-                          className="inline-flex w-[clamp(4rem,35%,10rem)] min-w-0 flex-none overflow-hidden"
-                        >
-                          <Badge variant="secondary" className="min-w-0 w-full">
-                            <span className="truncate">{p.orgName}</span>
-                          </Badge>
-                        </span>
-                      </AppTooltip>
                     )}
-                    <ProjectDeadlineStatuses deadline={dstatus} className="shrink-0" />
                   </span>
-                  {/* AQU-523: source → target language pair beneath the name, so
-                      the org / all-orgs list shows it at a glance (matching the
-                      single-project overview). Rendered only when known. */}
-                  {languagePairLabel(p) && (
-                    <span className="truncate text-xs text-muted-foreground" aria-label="Source and target language">
-                      {languagePairLabel(p)}
+                  {showOrg && p.orgName && (
+                    <span className="flex min-w-0 items-center justify-end">
+                      <span
+                        data-testid="project-table-organization"
+                        data-org-name={p.orgName}
+                        className="group/org relative inline-flex min-w-0 max-w-40 justify-self-end"
+                      >
+                        <Badge
+                          variant="secondary"
+                          className="min-w-0 max-w-full justify-start transition-opacity duration-100 group-hover/org:opacity-0"
+                        >
+                          <span className="min-w-0 flex-1 truncate">
+                            {p.orgName}
+                          </span>
+                        </Badge>
+                        <Badge
+                          aria-hidden="true"
+                          variant="secondary"
+                          className="pointer-events-none absolute top-0 right-0 max-w-96 origin-right scale-x-95 justify-start opacity-0 shadow-sm transition-[opacity,transform] duration-150 group-hover/org:scale-x-100 group-hover/org:opacity-100"
+                        >
+                          <span className="truncate">{p.orgName}</span>
+                        </Badge>
+                      </span>
                     </span>
                   )}
                 </span>

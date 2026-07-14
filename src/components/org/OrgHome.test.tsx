@@ -141,7 +141,7 @@ describe("ProjectTable", () => {
     audioCells: 10,
     validatedAudioCells: 0,
     recordedMs: 0,
-    deadlineAt: null,
+    deadlineAt: "2020-01-01",
     sourceLanguage: null,
     targetLanguage: null,
   }
@@ -153,22 +153,23 @@ describe("ProjectTable", () => {
       </MemoryRouter>,
     )
 
-    expect(screen.queryByText("Organization")).not.toBeInTheDocument()
+    expect(screen.getByText("Organization")).toBeInTheDocument()
     const identity = screen.getByTestId("project-table-identity")
     const projectName = screen.getByTestId("project-table-name")
     const organization = screen.getByTestId("project-table-organization")
+    const metadata = screen.getByTestId("project-table-metadata")
+    const deadlineStatus = screen.getByTestId("project-table-deadline-status")
     expect(projectName).toHaveTextContent(project.name)
     expect(organization).toHaveTextContent(project.orgName)
     expect(identity).toContainElement(projectName)
     expect(identity).toContainElement(organization)
-    expect(projectName).toHaveClass("flex-1")
-    expect(projectName).toHaveAttribute("data-slot", "tooltip-trigger")
-    expect(organization).toHaveAttribute("data-slot", "tooltip-trigger")
-    expect(organization).toHaveClass(
-      "w-[clamp(4rem,35%,10rem)]",
-      "flex-none",
-      "overflow-hidden",
-    )
+    expect(projectName).not.toHaveAttribute("data-slot", "tooltip-trigger")
+    expect(organization).not.toHaveAttribute("data-slot", "tooltip-trigger")
+    expect(identity).toHaveClass("grid-cols-[minmax(7rem,1fr)_minmax(6rem,10rem)]")
+    expect(organization).toHaveClass("relative", "max-w-40")
+    expect(organization).toHaveAttribute("data-org-name", project.orgName)
+    expect(metadata).toContainElement(deadlineStatus)
+    expect(organization).not.toContainElement(deadlineStatus)
     expect(screen.getByTestId("project-table")).toHaveClass("overflow-hidden")
     expect(screen.getByTestId("project-table")).not.toHaveClass("overflow-x-auto")
   })

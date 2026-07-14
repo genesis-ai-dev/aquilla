@@ -70,9 +70,11 @@ export function PrimaryActionButton({ ctx, run }: Props) {
             {/* AQU-358: label this menu so it reads as the *actions* menu (run,
                 import, export, validate…), distinct from the neighbouring ⋯ menu
                 which holds project/view settings. Two adjacent "more" affordances
-                were indistinguishable without this. */}
-            <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                were indistinguishable without this. DropdownMenuLabel maps to
+                Base UI's Menu.GroupLabel, which throws unless it is inside a
+                Menu.Group — so it lives within the group, not as its sibling. */}
             <DropdownMenuGroup>
+              <DropdownMenuLabel>Actions</DropdownMenuLabel>
               {primary.map((a) => (
                 <ActionMenuItem
                   key={a.id}

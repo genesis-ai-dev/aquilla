@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { getOrgPortfolios } from "../services/org-permissions"
+import type { Env } from "../types"
 
 describe("GET /api/v2/orgs/:orgId/portfolio", () => {
   it("returns per-project rollup (validated cells + last activity) for org projects", async () => {
@@ -198,11 +199,13 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
 })
 
 describe("POST /api/v2/orgs/portfolio", () => {
-  it("runs one database aggregate per unique organization", async () => {
+  it("runs one set-based database aggregate for all unique organizations", async () => {
     const all = vi.fn().mockResolvedValue({ results: [] })
     const aggregateOrgBinds: unknown[][] = []
+    const preparedQueries: string[] = []
     const prepare = vi.fn((query: string) => ({
       bind: (...args: unknown[]) => {
+        preparedQueries.push(query)
         if (query.includes("WITH au AS MATERIALIZED")) aggregateOrgBinds.push(args)
         return { all }
       },
@@ -211,7 +214,11 @@ describe("POST /api/v2/orgs/portfolio", () => {
 
     await getOrgPortfolios(fakeEnv, [2, 1, 2])
 
-    expect(aggregateOrgBinds).toEqual([[2, 2], [1, 1]])
+    expect(aggregateOrgBinds).toEqual([[2, 1, 2, 1]])
+    const settingsQuery = preparedQueries.find((query) => query.includes("FROM project_settings ps"))
+    expect(settingsQuery).toContain("ps.validation_count")
+    expect(settingsQuery).toContain("ps.target_lanes")
+    expect(settingsQuery).not.toContain("ps.settings AS settings")
   })
 
   it("returns one bounded portfolio per requested organization", async () => {

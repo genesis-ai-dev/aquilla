@@ -191,7 +191,11 @@ CREATE TABLE project_settings (
     -- (settings::jsonb)->>'…' inline (org-dashboard timeout, see
     -- getOrgPortfolio in auth-worker/src/services/org-permissions.ts).
     source_language TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'sourceLanguage') STORED,
-    target_language TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'targetLanguage') STORED
+    target_language TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'targetLanguage') STORED,
+    -- AQU-575: compact portfolio projections. Never load the multi-MB settings
+    -- blob merely to read validationCount or targetLanes.
+    validation_count TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCount') STORED,
+    target_lanes JSONB GENERATED ALWAYS AS ((settings::jsonb)->'targetLanes') STORED
 );
 
 CREATE TABLE org_settings (

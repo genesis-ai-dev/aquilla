@@ -853,18 +853,18 @@ interface LaneDbRow {
   updated_at: number | string | null
 }
 
+interface PortfolioSettingsDbRow {
+  project_id: string
+  validation_count: number | string | null
+  target_lanes: unknown
+}
+
 /** Endorsement threshold at which a cell counts as validated, per the project's settings (default 1, cap 15). */
-function readValidationCounts(settingsRows: Array<{ project_id: string; settings: string | null }>): Map<string, number> {
+function readValidationCounts(settingsRows: PortfolioSettingsDbRow[]): Map<string, number> {
   const out = new Map<string, number>()
   for (const row of settingsRows) {
-    let threshold = 1
-    try {
-      const parsed = row.settings ? (JSON.parse(row.settings) as { validationCount?: unknown }) : null
-      const value = Math.floor(Number(parsed?.validationCount))
-      if (Number.isFinite(value)) threshold = Math.min(MAX_VALIDATION_LEVEL, Math.max(1, value))
-    } catch {
-      threshold = 1
-    }
+    const value = Math.floor(Number(row.validation_count))
+    const threshold = Number.isFinite(value) ? Math.min(MAX_VALIDATION_LEVEL, Math.max(1, value)) : 1
     out.set(row.project_id, threshold)
   }
   return out
@@ -906,11 +906,13 @@ async function fetchPortfolioLanes(env: Env, orgIds: number[]): Promise<Map<stri
         WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL AND fsp.scope = 'file'`,
     ).bind(...orgIds).all<LaneDbRow>(),
     env.AQUILLA_PG.prepare(
-      `SELECT ps.project_id AS project_id, ps.settings AS settings
+      `SELECT ps.project_id AS project_id,
+              ps.validation_count AS validation_count,
+              ps.target_lanes AS target_lanes
          FROM project_settings ps
          JOIN projects p ON p.id = ps.project_id
         WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL`,
-    ).bind(...orgIds).all<{ project_id: string; settings: string | null }>(),
+    ).bind(...orgIds).all<PortfolioSettingsDbRow>(),
   ])
   const thresholds = readValidationCounts(settingsRows.results ?? [])
   // Accumulate one lane entry per (project, target_lang).
@@ -936,7 +938,7 @@ async function fetchPortfolioLanes(env: Env, orgIds: number[]): Promise<Map<stri
   // (source-cell count is lane-independent); no '' row means the project has
   // no progress rows at all and the registered lane stays 0/0.
   for (const row of settingsRows.results ?? []) {
-    const registered = readTargetLanes(row.settings)
+    const registered = readTargetLanes(row.target_lanes)
     if (registered.length === 0) continue
     let lanes = acc.get(row.project_id)
     if (!lanes) {
@@ -958,16 +960,14 @@ async function fetchPortfolioLanes(env: Env, orgIds: number[]): Promise<Map<stri
   return byProject
 }
 
-/** Parse settings.targetLanes defensively (the blob is app-written JSON). */
-function readTargetLanes(settings: string | null): string[] {
-  if (!settings) return []
-  try {
-    const parsed = JSON.parse(settings) as { targetLanes?: unknown }
-    if (!Array.isArray(parsed.targetLanes)) return []
-    return parsed.targetLanes.filter((l): l is string => typeof l === "string" && l !== "")
-  } catch {
-    return []
+/** Parse the generated target_lanes projection defensively across PG adapters. */
+function readTargetLanes(raw: unknown): string[] {
+  let value = raw
+  if (typeof raw === "string") {
+    try { value = JSON.parse(raw) } catch { return [] }
   }
+  if (!Array.isArray(value)) return []
+  return value.filter((lane): lane is string => typeof lane === "string" && lane !== "")
 }
 
 /** Per-project rollup over the org's non-archived projects (derive-on-read, one GROUP BY). */
@@ -1021,21 +1021,45 @@ export async function getOrgPortfolio(env: Env, orgId: number): Promise<Portfoli
 export async function getOrgPortfolios(env: Env, orgIds: number[]): Promise<OrgPortfolioRow[]> {
   const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
   if (uniqueOrgIds.length === 0) return []
-  // Keep the HTTP request batched, but bound each database aggregate to one
-  // organization. At production data volume, combining several orgs into one
-  // MATERIALIZED audio aggregate can exceed the worker/Hyperdrive request's
-  // resource envelope. The observed platform-level 503 bypassed Hono's CORS
-  // middleware, so browsers reported a misleading CORS / "Failed to fetch"
-  // error. The same per-org query already powers the working individual-org
-  // view. Run it sequentially so one request uses one bounded database
-  // operation at a time instead of recreating the client-side connection-pool
-  // fan-out this endpoint replaced.
-  const rows: OrgPortfolioRow[] = []
-  for (const orgId of uniqueOrgIds) {
-    const projects = await getOrgPortfolio(env, orgId)
-    rows.push(...projects.map((project) => ({ ...project, orgId })))
-  }
-  return rows
+  const placeholders = uniqueOrgIds.map(() => "?").join(", ")
+  // One set-based aggregate keeps the request to a fixed number of database
+  // round trips regardless of organization count. The expensive cell_audio
+  // scan is still bounded to projects in the authorized org set. Lane metadata
+  // uses the small generated project_settings projections, so this no longer
+  // transfers/parses hundreds of MB of full settings blobs for large accounts.
+  const rows = await env.AQUILLA_PG.prepare(
+    `WITH au AS MATERIALIZED (
+       SELECT ca.project_id,
+              COUNT(DISTINCT ca.cell_id) AS audio_cells,
+              COUNT(DISTINCT ca.cell_id) FILTER (WHERE ca.selected = 1 AND ca.approved = 1)
+                AS validated_audio_cells,
+              COALESCE(SUM(ca.duration_ms) FILTER (WHERE ca.selected = 1), 0) AS recorded_ms
+         FROM cell_audio ca
+        WHERE ca.deleted = 0
+          AND ca.project_id IN (SELECT id FROM projects WHERE org_id IN (${placeholders}))
+        GROUP BY ca.project_id
+     )
+     SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
+            COALESCE(SUM(f.cell_count), 0)          AS total_cells,
+            COALESCE(SUM(f.approved_count), 0)      AS validated_cells,
+            COALESCE(SUM(f.filled_count), 0)        AS filled_cells,
+            COALESCE(SUM(f.ai_drafted_count), 0)    AS ai_drafted_cells,
+            MAX(f.last_edit_at)                     AS last_edit_at,
+            MAX(ps.source_language)                 AS source_language,
+            MAX(ps.target_language)                 AS target_language,
+            COALESCE(MAX(au.audio_cells), 0)           AS audio_cells,
+            COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,
+            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms
+       FROM projects p
+       LEFT JOIN files f ON f.project_id = p.id
+       LEFT JOIN project_settings ps ON ps.project_id = p.id
+       LEFT JOIN au ON au.project_id = p.id
+      WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL
+      GROUP BY p.org_id, p.id, p.name
+      ORDER BY p.org_id, LOWER(p.name)`,
+  ).bind(...uniqueOrgIds, ...uniqueOrgIds).all<PortfolioDbRow>()
+  const lanesByProject = await fetchPortfolioLanes(env, uniqueOrgIds)
+  return (rows.results ?? []).map((row) => ({ ...mapPortfolioRow(row, lanesByProject), orgId: row.org_id }))
 }
 
 export interface ProjectAccessBreakdown {

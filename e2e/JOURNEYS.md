@@ -47,6 +47,7 @@
 | Settings    | Settings sync between two browsers                   | _gap — Plan 2_                                                |        |
 | Settings    | Settings persist across reload                       | `e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts`    |   ✅   |
 | Settings    | Preferences page Privacy section renders             | `e2e/specs/orgs/preferences.smoke.spec.ts`                    |   ✅   |
+| Settings    | Appearance theme selection persists without accent presets | `e2e/specs/orgs/preferences-theme.smoke.spec.ts`          |   ✅   |
 | Export      | Export to each supported format                      | `e2e/specs/editor/export.smoke.spec.ts` + `export-format-switch.smoke.spec.ts` (partial — all format radio buttons covered) | ✅ |
 | Editor      | Formatting bubble menu (bold/italic/underline/strikethrough/code) | `e2e/specs/editor/formatting-bubble-menu.smoke.spec.ts` + `formatting-inline-code-toggle.smoke.spec.ts` + `formatting-underline-strikethrough.smoke.spec.ts` | ✅ |
 | Editor      | Formatting loss warning when source has bold/italic   | `e2e/specs/editor/formatting-loss-warning.smoke.spec.ts`      |   ✅   |

@@ -10,8 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Page, PageHeader, Section } from "@/components/ui/page"
 import { NavList, NavRow, BackLink } from "@/components/ui/nav-list"
-import { ThemeToggle, useThemeMode } from "@/branding/ThemeMode"
-import { ColorThemePicker } from "@/branding/ColorTheme"
+import { useThemeMode, type ThemeMode } from "@/branding/ThemeMode"
 import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
 import { PersonalProviderSection } from "@/components/settings/PersonalProviderSection"
@@ -38,6 +37,12 @@ import {
 const RAIL_OPTIONS: { id: DockRailPosition; label: string }[] = [
   { id: "left", label: "Left rail" },
   { id: "top", label: "Top bar" },
+]
+
+const THEME_OPTIONS: { id: ThemeMode; label: string }[] = [
+  { id: "system", label: "System" },
+  { id: "light", label: "Light" },
+  { id: "dark", label: "Dark" },
 ]
 
 /** Single-line fields rendered as text inputs, in render order. */
@@ -94,37 +99,33 @@ function WorkspaceSection() {
 }
 
 /**
- * Appearance — theme (light/dark/system) + accent color, using the existing
- * branding components unchanged.
+ * Appearance settings stay device-scoped and deliberately separate from the
+ * source/target text direction and other project-specific display settings.
  */
 function AppearanceSection() {
-  const { mode } = useThemeMode()
-  const modeLabel = mode === "system" ? "System" : mode === "dark" ? "Dark" : "Light"
+  const { mode, setMode } = useThemeMode()
 
   return (
     <Section title="Appearance" description="How the workspace looks on this device.">
-      <div className="space-y-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <p className="text-sm font-medium text-foreground">Theme</p>
-            <p className="text-xs text-muted-foreground">
-              Cycle between light, dark, and following your system. Currently {modeLabel.toLowerCase()}.
-            </p>
-          </div>
-          <ThemeToggle className="shrink-0" />
-        </div>
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <p className="text-sm font-medium text-foreground">Accent color</p>
-            <p className="text-xs text-muted-foreground">
-              The highlight color used across the workspace.
-            </p>
-          </div>
-          <div className="shrink-0 pt-0.5">
-            <ColorThemePicker />
-          </div>
-        </div>
-      </div>
+      <Field>
+        <FieldLabel className="text-sm font-medium">Theme</FieldLabel>
+        <FieldDescription>
+          Follow your system appearance or choose a theme for this device.
+        </FieldDescription>
+        <Tabs
+          value={mode}
+          onValueChange={(value) => setMode(value as ThemeMode)}
+          className="gap-0"
+        >
+          <TabsList aria-label="Theme">
+            {THEME_OPTIONS.map(({ id, label }) => (
+              <TabsTrigger key={id} value={id}>
+                {label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      </Field>
     </Section>
   )
 }

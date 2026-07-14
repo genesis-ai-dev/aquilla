@@ -80,7 +80,21 @@ Integration branch: `swarm/wt-integration` (worktree `.worktrees/wt-integration`
 7. auth-worker orgs.ts 114-124: AQU-347 still-member check compares BIGINT used_by ===
    caller.id — string/number width mismatch would break the re-click UX (fails safe).
 
+## Promotion record
+
+- 2026-07-14: e2e smoke 3/3 shards green on integration tip (pre-minor-fixes).
+- 2026-07-14: wt/minor-fixes merged (all 7 findings addressed; finding-4 resolved via
+  rollback-on-throw keeping optimistic-first render per existing test intent). Re-gate:
+  root 21 baseline failures only; sync-worker 873/873; auth-worker 678/678; tsc clean.
+- 2026-07-14: origin/dev f99f716cd (settings-language 0054 + org-permissions refactor,
+  i.e. main's 5 commits absorbed) merged back into integration; clean; gate green.
+- User decisions: fix minors then push (done); magical-kare held until aqu-538 lands —
+  wt/magical-kare-rebased stays parked, re-rebase over dev after aqu-538 merges.
+
 ## TRACES (open TODOs for next agent/session)
+
+- projects.ts has the same latent BIGINT-vs-number used_by comparison pattern that
+  orgs.ts finding-7 fixed — mirror isSameUserId there (flagged by fixer, out of scope).
 
 - import-sdbh.ts must call enqueueTargetCommits after #2 lands (verify in review panel).
 - docs/docx-r2-roundtrip-spec branch carries a stale plan copy; superseded by 1b558ef08 revision landing in #4. Delete branch after #4.

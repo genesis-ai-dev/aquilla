@@ -1,7 +1,8 @@
 import { env } from "cloudflare:test"
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
+import { getOrgPortfolios } from "../services/org-permissions"
 
 describe("GET /api/v2/orgs/:orgId/portfolio", () => {
   it("returns per-project rollup (validated cells + last activity) for org projects", async () => {
@@ -193,5 +194,55 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     // Validated: only c1 (selected + approved). c3's approved take is no longer
     // selected, so the re-record correctly drops it back to needs-re-validation.
     expect(pa.validatedAudioCells).toBe(1)
+  })
+})
+
+describe("POST /api/v2/orgs/portfolio", () => {
+  it("runs one database aggregate per unique organization", async () => {
+    const all = vi.fn().mockResolvedValue({ results: [] })
+    const aggregateOrgBinds: unknown[][] = []
+    const prepare = vi.fn((query: string) => ({
+      bind: (...args: unknown[]) => {
+        if (query.includes("WITH au AS MATERIALIZED")) aggregateOrgBinds.push(args)
+        return { all }
+      },
+    }))
+    const fakeEnv = { AQUILLA_PG: { prepare } } as unknown as Env
+
+    await getOrgPortfolios(fakeEnv, [2, 1, 2])
+
+    expect(aggregateOrgBinds).toEqual([[2, 2], [1, 1]])
+  })
+
+  it("returns one bounded portfolio per requested organization", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1), (2, 'Waha', 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (2, 1, 700, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1), ('pb', 'Luke', 2, 1)",
+    ).run()
+
+    const res = await app.request(
+      "/api/v2/orgs/portfolio",
+      {
+        method: "POST",
+        headers: { ...authHeader(await jwtFor("wendi")), "Content-Type": "application/json" },
+        body: JSON.stringify({ orgIds: [2, 1, 2] }),
+      },
+      env,
+    )
+
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      portfolios: Array<{ orgId: number; projects: Array<{ id: string; name: string }> }>
+    }
+    expect(body.portfolios).toEqual([
+      { orgId: 2, projects: [expect.objectContaining({ id: "pb", name: "Luke" })] },
+      { orgId: 1, projects: [expect.objectContaining({ id: "pa", name: "John" })] },
+    ])
   })
 })

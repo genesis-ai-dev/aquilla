@@ -1021,43 +1021,21 @@ export async function getOrgPortfolio(env: Env, orgId: number): Promise<Portfoli
 export async function getOrgPortfolios(env: Env, orgIds: number[]): Promise<OrgPortfolioRow[]> {
   const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
   if (uniqueOrgIds.length === 0) return []
-  const placeholders = uniqueOrgIds.map(() => "?").join(", ")
-  // See getOrgPortfolio for the perf shape (dashboard 15s-timeout fix):
-  // generated language columns instead of inline jsonb extraction, and one
-  // MATERIALIZED cell_audio pass instead of 3 correlated subqueries.
-  const rows = await env.AQUILLA_PG.prepare(
-    `WITH au AS MATERIALIZED (
-       SELECT ca.project_id,
-              COUNT(DISTINCT ca.cell_id) AS audio_cells,
-              COUNT(DISTINCT ca.cell_id) FILTER (WHERE ca.selected = 1 AND ca.approved = 1)
-                AS validated_audio_cells,
-              COALESCE(SUM(ca.duration_ms) FILTER (WHERE ca.selected = 1), 0) AS recorded_ms
-         FROM cell_audio ca
-        WHERE ca.deleted = 0
-          AND ca.project_id IN (SELECT id FROM projects WHERE org_id IN (${placeholders}))
-        GROUP BY ca.project_id
-     )
-     SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
-            COALESCE(SUM(f.cell_count), 0)          AS total_cells,
-            COALESCE(SUM(f.approved_count), 0)      AS validated_cells,
-            COALESCE(SUM(f.filled_count), 0)        AS filled_cells,
-            COALESCE(SUM(f.ai_drafted_count), 0)    AS ai_drafted_cells,
-            MAX(f.last_edit_at)                     AS last_edit_at,
-            MAX(ps.source_language)                 AS source_language,
-            MAX(ps.target_language)                 AS target_language,
-            COALESCE(MAX(au.audio_cells), 0)           AS audio_cells,
-            COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,
-            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms
-       FROM projects p
-       LEFT JOIN files f ON f.project_id = p.id
-       LEFT JOIN project_settings ps ON ps.project_id = p.id
-       LEFT JOIN au ON au.project_id = p.id
-      WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL
-      GROUP BY p.org_id, p.id, p.name
-      ORDER BY p.org_id, LOWER(p.name)`,
-  ).bind(...uniqueOrgIds, ...uniqueOrgIds).all<PortfolioDbRow>()
-  const lanesByProject = await fetchPortfolioLanes(env, uniqueOrgIds)
-  return (rows.results ?? []).map((r) => ({ ...mapPortfolioRow(r, lanesByProject), orgId: r.org_id }))
+  // Keep the HTTP request batched, but bound each database aggregate to one
+  // organization. At production data volume, combining several orgs into one
+  // MATERIALIZED audio aggregate can exceed the worker/Hyperdrive request's
+  // resource envelope. The observed platform-level 503 bypassed Hono's CORS
+  // middleware, so browsers reported a misleading CORS / "Failed to fetch"
+  // error. The same per-org query already powers the working individual-org
+  // view. Run it sequentially so one request uses one bounded database
+  // operation at a time instead of recreating the client-side connection-pool
+  // fan-out this endpoint replaced.
+  const rows: OrgPortfolioRow[] = []
+  for (const orgId of uniqueOrgIds) {
+    const projects = await getOrgPortfolio(env, orgId)
+    rows.push(...projects.map((project) => ({ ...project, orgId })))
+  }
+  return rows
 }
 
 export interface ProjectAccessBreakdown {

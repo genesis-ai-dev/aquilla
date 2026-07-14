@@ -107,6 +107,12 @@ export interface ServerInviteAccepted {
 export interface ServerInvitePreview {
   projectId: string
   projectName: string
+  /** Workspace/org the project lives in (AQU-471). Optional so previews from
+   * servers predating the field still parse; null for org-less projects. */
+  orgName?: string | null
+  /** Display name (fallback username) of whoever minted the invite (AQU-471).
+   * Optional for old servers; null when the inviter account is gone. */
+  invitedBy?: string | null
   role: { level: number; name: string }
   expiresAt: string | null
   /** Non-null when the invite was minted for a specific email — used by
@@ -322,6 +328,8 @@ export interface MultiInvitePreview {
   token: string
   role: { level: number; name: string }
   expiresAt: string | null
+  /** Who minted the token (AQU-471). Optional for old servers. */
+  invitedBy?: string | null
   /**
    * `usedByCaller` (AQU-347): true when the signed-in caller is this row's
    * original redeemer and is still a member — i.e. this preview is a
@@ -333,7 +341,14 @@ export interface MultiInvitePreview {
    * future "Welcome back" variant of the confirm card can distinguish the
    * two cases without another round-trip.
    */
-  projects: { projectId: string; projectName: string; archived: boolean; usedByCaller?: boolean }[]
+  projects: {
+    projectId: string
+    projectName: string
+    /** Workspace/org of this project (AQU-471). Optional for old servers. */
+    orgName?: string | null
+    archived: boolean
+    usedByCaller?: boolean
+  }[]
 }
 
 export interface MultiInviteAccepted {

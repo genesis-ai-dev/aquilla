@@ -26,6 +26,62 @@ async function seedWorld(): Promise<void> {
   ).run()
 }
 
+describe("project invite previews carry inviter + org (AQU-471)", () => {
+  beforeEach(seedWorld)
+
+  it("single-project preview returns invitedBy and orgName", async () => {
+    const created = await app.request(
+      "/api/v2/projects/pa/invites",
+      { method: "POST", headers: authHeader(await jwtFor("wendi")), body: JSON.stringify({}) },
+      env,
+    )
+    const { token } = (await created.json()) as { token: string }
+    const preview = await app.request(`/api/v2/projects/invite-preview/${token}`, {}, env)
+    expect(preview.status).toBe(200)
+    expect(await preview.json()).toMatchObject({
+      projectName: "Kilisusu NT",
+      orgName: "Come and See",
+      invitedBy: "Wendi M.",
+    })
+  })
+
+  it("single-project preview tolerates an org-less project", async () => {
+    const created = await app.request(
+      "/api/v2/projects/solo/invites",
+      { method: "POST", headers: authHeader(await jwtFor("wendi")), body: JSON.stringify({}) },
+      env,
+    )
+    const { token } = (await created.json()) as { token: string }
+    const preview = await app.request(`/api/v2/projects/invite-preview/${token}`, {}, env)
+    expect(preview.status).toBe(200)
+    expect(await preview.json()).toMatchObject({ orgName: null, invitedBy: "Wendi M." })
+  })
+
+  it("multi-project preview returns invitedBy and per-project orgName", async () => {
+    const created = await app.request(
+      "/api/v2/invites/multi",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("wendi")),
+        body: JSON.stringify({ projectIds: ["pa", "solo"] }),
+      },
+      env,
+    )
+    expect(created.status).toBe(200)
+    const { token } = (await created.json()) as { token: string }
+    const preview = await app.request(`/api/v2/invites/${token}/preview`, {}, env)
+    expect(preview.status).toBe(200)
+    const body = (await preview.json()) as {
+      invitedBy: string
+      projects: { projectId: string; orgName: string | null }[]
+    }
+    expect(body.invitedBy).toBe("Wendi M.")
+    const byId = new Map(body.projects.map((p) => [p.projectId, p.orgName]))
+    expect(byId.get("pa")).toBe("Come and See")
+    expect(byId.get("solo")).toBeNull()
+  })
+})
+
 describe("GET /api/v2/orgs/invite-preview/:token (public, AQU-471)", () => {
   beforeEach(seedWorld)
 

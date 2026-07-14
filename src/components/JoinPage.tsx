@@ -192,6 +192,18 @@ export function JoinPage() {
   // single-project token actually arrives via the multi endpoint — see the
   // preview effect above — so the "kind: multi, length 1" case is the common
   // real-world path and must not say "each"; AQU-337).
+  // Workspace shared by every project in a multi-invite (the common case);
+  // null when orgs differ or the server predates orgName (AQU-471).
+  const multiOrgName =
+    preview?.kind === "multi"
+      ? (() => {
+          const names = new Set(
+            preview.data.projects.map((p) => p.orgName ?? null).filter((n) => n != null),
+          )
+          return names.size === 1 ? [...names][0] : null
+        })()
+      : null
+
   const previewSummary =
     preview?.kind === "single" ? (
       <InviteSummary
@@ -203,11 +215,15 @@ export function JoinPage() {
         ]}
         roleName={preview.data.role.name}
         email={preview.data.email}
+        orgName={preview.data.orgName ?? null}
+        invitedBy={preview.data.invitedBy ?? null}
       />
     ) : preview?.kind === "multi" ? (
       <InviteSummary
         projects={preview.data.projects}
         roleName={preview.data.role.name}
+        orgName={multiOrgName}
+        invitedBy={preview.data.invitedBy ?? null}
       />
     ) : previewLoading ? (
       <div className="flex items-center gap-2 py-1">
@@ -424,15 +440,33 @@ export function InviteSummary({
   projects,
   roleName,
   email,
+  orgName,
+  invitedBy,
 }: {
   projects: InviteSummaryProject[]
   roleName: string
   email?: string | null
+  /** Workspace/org the invite belongs to (AQU-471). For a multi-invite this is
+   * the org shared by every project, or null when they differ / are org-less. */
+  orgName?: string | null
+  /** Display name of whoever minted the invite (AQU-471); null/undefined hides
+   * the "Invited by" prefix. */
+  invitedBy?: string | null
 }) {
   const role = <RoleLabel name={roleName} />
   const emailSuffix = email ? (
     <>
       {" "}— invitation sent to <span className="font-mono">{email}</span>
+    </>
+  ) : null
+  const workspaceSuffix = orgName ? (
+    <span className="text-muted-foreground"> in {orgName}</span>
+  ) : null
+  // "Invited by {name} — " prefix, present only when the inviter is known. The
+  // trailing "you'll"/"You'll" flips to keep the sentence grammatical.
+  const inviterPrefix = invitedBy ? (
+    <>
+      Invited by <span className="font-medium">{invitedBy}</span> —{" "}
     </>
   ) : null
 
@@ -446,9 +480,11 @@ export function InviteSummary({
             {p.projectName || p.projectId}
             {p.archived ? " (archived)" : ""}
           </strong>
+          {workspaceSuffix}
         </p>
         <p className="text-xs text-muted-foreground">
-          You'll join as {role}
+          {inviterPrefix}
+          {invitedBy ? "you'll" : "You'll"} join as {role}
           {emailSuffix}.
         </p>
       </div>
@@ -459,7 +495,8 @@ export function InviteSummary({
     <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
       <p className="text-sm">
         You're invited to{" "}
-        <strong className="font-medium">{projects.length} projects</strong>:
+        <strong className="font-medium">{projects.length} projects</strong>
+        {workspaceSuffix}:
       </p>
       <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
         {projects.map((p) => (
@@ -470,7 +507,8 @@ export function InviteSummary({
         ))}
       </ul>
       <p className="text-xs text-muted-foreground">
-        You'll join each as {role}
+        {inviterPrefix}
+        {invitedBy ? "you'll" : "You'll"} join each as {role}
         {emailSuffix}.
       </p>
     </div>

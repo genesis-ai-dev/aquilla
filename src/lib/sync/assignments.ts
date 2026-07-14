@@ -38,6 +38,8 @@ export interface OrgWorkloadAssignment {
   assigneeUserId: number
   username: string | null
   scopeLabel: string
+  /** AQU-538 (§3.5): target-language lane. '' / absent = default lane. */
+  targetLang?: string
   cellsTotal: number
   cellsDone: number
   deadline: string | null
@@ -49,6 +51,8 @@ export interface MyAssignment {
   projectId: string
   scopeKind: string
   scopeLabel: string
+  /** AQU-538 (§3.5): target-language lane. '' / absent = default lane. */
+  targetLang?: string
   deadline: string | null
   note: string | null
   cellsTotal: number
@@ -204,6 +208,11 @@ export interface CreateAssignmentArgs {
   scope: { fileId: string; chapter?: string }[]
   scopeKind: "books" | "chapters"
   scopeLabel: string
+  /**
+   * AQU-538 (§3.5): target-language lane to pin this assignment to. Omit or ''
+   * for the default lane — the field is dropped from the event payload when ''.
+   */
+  targetLang?: string
   deadline?: string | null
   note?: string | null
 }
@@ -227,6 +236,8 @@ export async function createAssignment(args: CreateAssignmentArgs): Promise<stri
       scope: args.scope,
       scopeLabel: args.scopeLabel,
       assigneeUserId: args.assigneeUserId,
+      // AQU-538: omit the lane on the wire when it's the default ('').
+      ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       ...(args.deadline !== undefined ? { deadline: args.deadline } : {}),
       ...(args.note !== undefined ? { note: args.note } : {}),
     },
@@ -250,6 +261,8 @@ export interface CreateBulkFileAssignmentsArgs {
   entries: BulkFileAssignmentEntry[]
   /** One deadline applied to every assignment created by this call (AQU-497). */
   deadline?: string | null
+  /** AQU-538 (§3.5): one lane applied to every assignment in the batch. */
+  targetLang?: string
   note?: string | null
 }
 
@@ -291,6 +304,7 @@ export async function createBulkFileAssignments(
         scope: [{ fileId: entry.fileId }],
         scopeKind: "books",
         scopeLabel: entry.scopeLabel,
+        targetLang: args.targetLang,
         deadline: args.deadline,
         note: args.note,
       }),

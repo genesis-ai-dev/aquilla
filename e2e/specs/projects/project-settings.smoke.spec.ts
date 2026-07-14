@@ -27,6 +27,12 @@ test("project settings keeps synced name read-only and saves source language", a
   await expect(nameInput).toBeDisabled()
   await expect(alice.getByText(/Renaming a synced project isn't supported yet/i)).toBeVisible()
 
+  // AQU-538: the Languages section (target-lane registry) renders in the same
+  // General group as the rest of this test's assertions — one cheap check
+  // that it's present. Full add/switch/translate journey lives in
+  // add-target-language.spec.ts (full suite, too long for the smoke budget).
+  await expect(alice.locator("#section-languages")).toBeVisible({ timeout: 5_000 })
+
   const sourceLanguage = alice.locator("#sl")
   await expect(sourceLanguage).toBeEnabled()
   await sourceLanguage.fill("English (US)")

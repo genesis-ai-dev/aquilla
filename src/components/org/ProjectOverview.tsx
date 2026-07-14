@@ -19,7 +19,8 @@ import { downloadProjectBundle } from "@/lib/sync/export-bundle"
 import { AssignWork } from "./AssignWork"
 import { MembersTab } from "@/components/ProjectMembersPage"
 import { MemberActivityPanel } from "./MemberActivityPanel"
-import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
+import { OverviewLaneTable } from "./OverviewLaneTable"
 import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
 import {
@@ -184,6 +185,32 @@ function StatTile({ label, pct, colorClass, tooltip, display }: {
     </div>
   )
   return tooltip ? <AppTooltip content={tooltip}>{tile}</AppTooltip> : tile
+}
+
+// ── Lane filter pill (AQU-538 §3.3) ───────────────────────────────────────────
+
+function LanePill({ active, onClick, testId, children }: {
+  active: boolean
+  onClick: () => void
+  testId: string
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        "rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors",
+        active
+          ? "border-transparent bg-primary text-primary-foreground"
+          : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+      )}
+    >
+      {children}
+    </button>
+  )
 }
 
 // ── Stat bar ──────────────────────────────────────────────────────────────────
@@ -521,6 +548,19 @@ export function ProjectOverview() {
   const [showAllFiles, setShowAllFiles] = useState(false)
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
 
+  // AQU-538 §3.3: the lane filter pill selection. `null` = "All" — today's
+  // cross-lane behavior, byte-identical (StatTiles read the PortfolioProject
+  // scalars, file drill-down reads with no lane param). A non-null value is a
+  // real lane tag ('' = the default lane) selected from the pill row; the tiles
+  // recompute from that lane's PortfolioLane and the drill-down re-reads with
+  // `?lane=`.
+  const [selectedLaneTag, setSelectedLaneTag] = useState<string | null>(null)
+  // The lane passed to the per-file progress reads. "All" (null) and the
+  // default lane pill both map to '' server-side (the default lane == the
+  // no-param request), so the drill-down only ever diverges for a selected
+  // non-default lane.
+  const fileLane = selectedLaneTag ?? ""
+
   // AQU-498: which teammate's activity detail is expanded in the Team card
   // (null = none selected). Username, not userId, since that's the events
   // log's author key (see MemberActivityPanel's doc comment).
@@ -661,7 +701,7 @@ export function ProjectOverview() {
     setRollupErrors((s) => ({ ...s, [file.fileId]: false }))
     try {
       const tok = await fetchSyncToken(jwt, id, file.fileId, { projectName: project?.name })
-      const progress = await getFileProgress(id, file.fileId, async () => tok.token)
+      const progress = await getFileProgress(id, file.fileId, async () => tok.token, fileLane)
       setRollups((r) => ({ ...r, [file.fileId]: progressToFileRollup(progress) }))
     } catch (e) {
       console.warn("[ProjectOverview] chapter/verse rollup fetch failed:", e)
@@ -669,7 +709,7 @@ export function ProjectOverview() {
     } finally {
       setRollupLoading((s) => ({ ...s, [file.fileId]: false }))
     }
-  }, [jwt, id, project?.name])
+  }, [jwt, id, project?.name, fileLane])
 
   const toggleFileRollup = useCallback((file: FileSummary) => {
     if (expandedFileId === file.fileId) {
@@ -687,7 +727,7 @@ export function ProjectOverview() {
     const request = (async () => {
       if (!jwt) throw new Error("session unavailable")
       const tok = await fetchSyncToken(jwt, id, fileId, { projectName: project?.name })
-      const detail = await getFileSectionProgress(id, fileId, sectionKey, async () => tok.token)
+      const detail = await getFileSectionProgress(id, fileId, sectionKey, async () => tok.token, fileLane)
       return sectionProgressToVerseRollup(detail)
     })().catch((error) => {
       chapterVerseRequests.current.delete(cacheKey)
@@ -695,7 +735,20 @@ export function ProjectOverview() {
     })
     chapterVerseRequests.current.set(cacheKey, request)
     return request
-  }, [id, jwt, project?.name])
+  }, [id, jwt, project?.name, fileLane])
+
+  // AQU-538 §3.3: the per-file rollup + verse caches are lane-agnostic keys, so
+  // switching lanes must drop them (and collapse any open row) — otherwise a
+  // re-expand would show the previous lane's chapter/verse breakdown. Resetting
+  // on `fileLane` keeps the drill-down lane-true. On first mount fileLane is ''
+  // and these are already empty, so this is a no-op for the default view.
+  useEffect(() => {
+    setExpandedFileId(null)
+    setRollups({})
+    setRollupLoading({})
+    setRollupErrors({})
+    chapterVerseRequests.current.clear()
+  }, [fileLane])
 
   const isOwner = (project?.syncRole?.level ?? 0) >= 700
   const canManage = (project?.syncRole?.level ?? 0) >= 600
@@ -724,6 +777,19 @@ export function ProjectOverview() {
   const hasAudio = audio != null && audio.audioCells > 0
   const showText = hasText
   const showAudio = hasAudio
+
+  // AQU-538 §3.3: lane pills + tile recompute. Pills only surface once a project
+  // has more than one lane (N=1 stays byte-identical). `activeLane` is the
+  // PortfolioLane the pills are filtered to (null = "All"); when set, the
+  // Translated/Validated tiles + bars read that lane, and the cross-language
+  // tiles (AI Drafted, audio) grey out — they have no per-lane breakdown.
+  const projectLanes: PortfolioLane[] = audio?.lanes ?? []
+  const showLanePills = projectLanes.length > 1
+  const activeLane: PortfolioLane | null =
+    selectedLaneTag != null ? projectLanes.find((l) => l.lane === selectedLaneTag) ?? null : null
+  const tileTranslatedPct = activeLane ? laneTranslatedPct(activeLane) : audio ? translatedPct(audio) : 0
+  const tileValidatedPct = activeLane ? laneValidatedPct(activeLane) : audio ? validatedPct(audio) : 0
+  const CROSS_LANE_TOOLTIP = "Cross-language stat — not broken down per language."
 
   async function saveDeadline(value: string | null) {
     if (!jwt) return
@@ -938,20 +1004,49 @@ export function ProjectOverview() {
                     <SectionVisibilityBadge minRole={ROLE.VIEWER} />
                   </div>
 
+                  {/* AQU-538 §3.3: lane filter pills — All + one per lane
+                      (default lane labeled with the project's targetLanguage).
+                      Only rendered when the project has >1 lane. */}
+                  {showLanePills && (
+                    <div className="mb-3 flex flex-wrap items-center gap-1.5" data-testid="lane-filter-pills">
+                      <LanePill
+                        active={selectedLaneTag === null}
+                        onClick={() => setSelectedLaneTag(null)}
+                        testId="lane-pill-all"
+                      >
+                        All
+                      </LanePill>
+                      {projectLanes.map((l) => {
+                        const tagId = l.lane === "" ? "default" : l.lane
+                        const label = l.lane === "" ? (project?.targetLanguage || "Default") : l.lane
+                        return (
+                          <LanePill
+                            key={tagId}
+                            active={selectedLaneTag === l.lane}
+                            onClick={() => setSelectedLaneTag(l.lane)}
+                            testId={`lane-pill-${tagId}`}
+                          >
+                            {label}
+                          </LanePill>
+                        )
+                      })}
+                    </div>
+                  )}
+
                   {/* Big-number tiles lead the section */}
                   <div className="flex flex-wrap gap-3 mb-4">
                     {showText && (
                       <>
-                        <StatTile label="Translated" pct={translatedPct(audio)} colorClass="text-amber-600" />
+                        <StatTile label="Translated" pct={tileTranslatedPct} colorClass="text-amber-600" />
                         {audio.aiDraftedCells > 0 && (
                           <StatTile
                             label="AI Drafted"
                             pct={aiDraftedPct(audio)}
-                            colorClass="text-violet-600"
-                            tooltip="Cells drafted by AI (via 'Translate all') that have not yet been human-edited or validated. A human edit or validation will move them into the Translated or Validated counts. Only cells committed after this marker was introduced are tracked — earlier AI commits are indistinguishable from human edits."
+                            colorClass={activeLane ? "text-muted-foreground/60" : "text-violet-600"}
+                            tooltip={activeLane ? CROSS_LANE_TOOLTIP : "Cells drafted by AI (via 'Translate all') that have not yet been human-edited or validated. A human edit or validation will move them into the Translated or Validated counts. Only cells committed after this marker was introduced are tracked — earlier AI commits are indistinguishable from human edits."}
                           />
                         )}
-                        <StatTile label="Validated" pct={validatedPct(audio)} colorClass="text-emerald-600" />
+                        <StatTile label="Validated" pct={tileValidatedPct} colorClass="text-emerald-600" />
                       </>
                     )}
                     {showAudio && (
@@ -959,8 +1054,8 @@ export function ProjectOverview() {
                         <StatTile
                           label="Has Audio"
                           pct={audioPct(audio)}
-                          colorClass="text-sky-600"
-                          tooltip="Percentage of cells that have at least one audio recording attached. This is coverage, not validation — see 'Audio Validated' for review status."
+                          colorClass={activeLane ? "text-muted-foreground/60" : "text-sky-600"}
+                          tooltip={activeLane ? CROSS_LANE_TOOLTIP : "Percentage of cells that have at least one audio recording attached. This is coverage, not validation — see 'Audio Validated' for review status."}
                         />
                         {/*
                          * AQU-490 (was TODO(AQU-168)): a distinct audio-VALIDATION metric
@@ -996,18 +1091,20 @@ export function ProjectOverview() {
                     )}
                   </div>
 
-                  {/* Detail bars below tiles */}
+                  {/* Detail bars below tiles. AQU-538: Translated/Validated
+                      follow the active lane; the cross-language AI/audio bars
+                      only render in the "All" view (no per-lane breakdown). */}
                   <div className="space-y-2.5">
                     {showText && (
                       <>
                         <StatBar
                           label="Translated"
-                          value={audio.filledCells}
-                          total={audio.totalCells}
+                          value={activeLane ? activeLane.filledCells : audio.filledCells}
+                          total={activeLane ? activeLane.totalCells : audio.totalCells}
                           fillClass="bg-amber-500"
                           suffix=" cells"
                         />
-                        {audio.aiDraftedCells > 0 && (
+                        {!activeLane && audio.aiDraftedCells > 0 && (
                           <StatBar
                             label="AI Drafted"
                             value={audio.aiDraftedCells}
@@ -1018,14 +1115,14 @@ export function ProjectOverview() {
                         )}
                         <StatBar
                           label="Validated"
-                          value={audio.validatedCells}
-                          total={audio.totalCells}
+                          value={activeLane ? activeLane.validatedCells : audio.validatedCells}
+                          total={activeLane ? activeLane.totalCells : audio.totalCells}
                           fillClass="bg-emerald-500"
                           suffix=" cells"
                         />
                       </>
                     )}
-                    {showAudio && (
+                    {showAudio && !activeLane && (
                       <>
                         <StatBar
                           label="Has Audio"
@@ -1038,13 +1135,33 @@ export function ProjectOverview() {
                       </>
                     )}
                   </div>
-                  {audio.recordedMs > 0 && (
+                  {!activeLane && audio.recordedMs > 0 && (
                     <p className="mt-3 text-xs text-muted-foreground">
                       {recordedMinutes(audio)} min recorded ·{" "}
                       {Math.round(audioPct(audio) * 100)}% of cells have audio
                     </p>
                   )}
                 </div>
+              )}
+
+              {/* ── Languages / lane table (AQU-538 §3.3) ── */}
+              {/* Rendered only when the project has more than one target
+                  language lane — N=1 projects are byte-identical to before. */}
+              {showLanePills && audio && (
+                <OverviewLaneTable
+                  projectId={id}
+                  orgId={portfolioOrgId}
+                  jwt={jwt}
+                  lanes={projectLanes}
+                  defaultLanguageLabel={project?.targetLanguage || "Default"}
+                  extraLanes={project?.targetLanes ?? []}
+                  files={project?.files ?? []}
+                  roleLevel={project?.syncRole?.level ?? 0}
+                  author={session?.username ?? ""}
+                  canManageLanes={canAssign}
+                  canAddLanguage={canManage}
+                  onChanged={handleAssigned}
+                />
               )}
 
               {/* ── Per-file rows (always fully visible per user decision) ── */}

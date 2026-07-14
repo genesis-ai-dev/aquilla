@@ -6,6 +6,12 @@ export const MAX_VALIDATOR_HISTOGRAM_BUCKET = 15
  * Recompute the file-level progress row from authoritative source/target
  * projection rows. Source rows define the denominator; target-only rows are
  * intentionally ignored to preserve the existing sidebar semantics.
+ *
+ * AQU-538: one row per target-language lane. The denominator (source rows) is
+ * lane-independent, so every lane shares the same total_count; each lane's
+ * filled_count / validator histogram derives from that lane's target rows. The
+ * default lane ('') is ALWAYS produced (via the UNION) so N=1 projects keep a
+ * byte-identical '' row even before any lane exists.
  */
 export function fileProgressRecomputeStmt(
   db: AquillaDb,
@@ -14,25 +20,35 @@ export function fileProgressRecomputeStmt(
   updatedAt: number,
 ): AquillaStatement {
   return db.prepare(
-    `WITH paired AS (
-       SELECT s.cell_id,
+    `WITH lanes AS (
+       SELECT DISTINCT COALESCE(target_lang, '') AS lane
+         FROM cells
+        WHERE project_id = ? AND file_id = ? AND side = 'target'
+       UNION SELECT ''
+     ), paired AS (
+       SELECT lanes.lane AS lane,
+              s.cell_id,
               CASE WHEN TRIM(COALESCE(t.value, '')) <> '' THEN 1 ELSE 0 END AS filled,
               LEAST(COALESCE(t.endorsement_count, 0), ${MAX_VALIDATOR_HISTOGRAM_BUCKET}) AS validator_bucket
          FROM cells s
+         CROSS JOIN lanes
          LEFT JOIN cells t
            ON t.project_id = s.project_id
           AND t.file_id = s.file_id
           AND t.cell_id = s.cell_id
           AND t.side = 'target'
+          AND t.target_lang = lanes.lane
         WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
      ), buckets AS (
-       SELECT validator_bucket, COUNT(*)::integer AS bucket_count
+       SELECT lane, validator_bucket, COUNT(*)::integer AS bucket_count
          FROM paired
-        GROUP BY validator_bucket
+        GROUP BY lane, validator_bucket
      ), summary AS (
-       SELECT COUNT(*)::integer AS total_count,
+       SELECT lane,
+              COUNT(*)::integer AS total_count,
               COALESCE(SUM(filled), 0)::integer AS filled_count
          FROM paired
+        GROUP BY lane
      ), watermark AS (
        SELECT GREATEST(
          COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ? AND file_id = ?), 0),
@@ -40,24 +56,25 @@ export function fileProgressRecomputeStmt(
        )::bigint AS revision
      )
      INSERT INTO file_section_progress (
-       project_id, file_id, scope, section_key, total_count, filled_count,
+       project_id, file_id, scope, section_key, target_lang, total_count, filled_count,
        validator_histogram, revision, updated_at
      )
-     SELECT ?, ?, 'file', '', summary.total_count, summary.filled_count,
+     SELECT ?, ?, 'file', '', summary.lane, summary.total_count, summary.filled_count,
             COALESCE(
               (SELECT jsonb_object_agg(validator_bucket::text, bucket_count)
-                 FROM buckets),
+                 FROM buckets WHERE buckets.lane = summary.lane),
               '{}'::jsonb
             ),
             watermark.revision, ?
        FROM summary CROSS JOIN watermark
-     ON CONFLICT (project_id, file_id, scope, section_key) DO UPDATE SET
+     ON CONFLICT (project_id, file_id, scope, section_key, target_lang) DO UPDATE SET
        total_count = excluded.total_count,
        filled_count = excluded.filled_count,
        validator_histogram = excluded.validator_histogram,
        revision = excluded.revision,
        updated_at = excluded.updated_at`,
   ).bind(
+    projectId, fileId,
     projectId, fileId,
     projectId, fileId, projectId,
     projectId, fileId, updatedAt,
@@ -107,41 +124,51 @@ export function sectionsProgressRecomputeStmt(
        )`
     : ''
 
-  const binds: unknown[] = [projectId, fileId]
+  // AQU-538: lanes CTE up front, then paired WHERE, then (optional)
+  // affectedFilter subquery, then watermark, then the INSERT projection.
+  const binds: unknown[] = [projectId, fileId, projectId, fileId]
   if (uniqueCellIds.length > 0) binds.push(projectId, fileId, ...uniqueCellIds)
   binds.push(projectId, fileId, projectId, projectId, fileId, updatedAt)
 
   return db.prepare(
-    `WITH paired AS (
-       SELECT TRIM(SPLIT_PART(COALESCE(s.canonical_ref, ''), ':', 1)) AS section_key,
+    `WITH lanes AS (
+       SELECT DISTINCT COALESCE(target_lang, '') AS lane
+         FROM cells
+        WHERE project_id = ? AND file_id = ? AND side = 'target'
+       UNION SELECT ''
+     ), paired AS (
+       SELECT lanes.lane AS lane,
+              TRIM(SPLIT_PART(COALESCE(s.canonical_ref, ''), ':', 1)) AS section_key,
               CASE WHEN TRIM(COALESCE(t.value, '')) <> '' THEN 1 ELSE 0 END AS filled,
               LEAST(COALESCE(t.endorsement_count, 0), ${MAX_VALIDATOR_HISTOGRAM_BUCKET}) AS validator_bucket
          FROM cells s
+         CROSS JOIN lanes
          LEFT JOIN cells t
            ON t.project_id = s.project_id
           AND t.file_id = s.file_id
           AND t.cell_id = s.cell_id
           AND t.side = 'target'
+          AND t.target_lang = lanes.lane
         WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
      ), filtered AS (
        SELECT * FROM paired
         WHERE section_key <> ''
         ${affectedFilter}
      ), summaries AS (
-       SELECT section_key,
+       SELECT lane, section_key,
               COUNT(*)::integer AS total_count,
               COALESCE(SUM(filled), 0)::integer AS filled_count
          FROM filtered
-        GROUP BY section_key
+        GROUP BY lane, section_key
      ), histograms AS (
-       SELECT section_key,
+       SELECT lane, section_key,
               jsonb_object_agg(validator_bucket::text, bucket_count) AS validator_histogram
          FROM (
-           SELECT section_key, validator_bucket, COUNT(*)::integer AS bucket_count
+           SELECT lane, section_key, validator_bucket, COUNT(*)::integer AS bucket_count
              FROM filtered
-            GROUP BY section_key, validator_bucket
+            GROUP BY lane, section_key, validator_bucket
          ) bucket_counts
-        GROUP BY section_key
+        GROUP BY lane, section_key
      ), watermark AS (
        SELECT GREATEST(
          COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ? AND file_id = ?), 0),
@@ -149,17 +176,17 @@ export function sectionsProgressRecomputeStmt(
        )::bigint AS revision
      )
      INSERT INTO file_section_progress (
-       project_id, file_id, scope, section_key, total_count, filled_count,
+       project_id, file_id, scope, section_key, target_lang, total_count, filled_count,
        validator_histogram, revision, updated_at
      )
-     SELECT ?, ?, 'section', summaries.section_key,
+     SELECT ?, ?, 'section', summaries.section_key, summaries.lane,
             summaries.total_count, summaries.filled_count,
             COALESCE(histograms.validator_histogram, '{}'::jsonb),
             watermark.revision, ?
        FROM summaries
-       LEFT JOIN histograms USING (section_key)
+       LEFT JOIN histograms USING (lane, section_key)
        CROSS JOIN watermark
-     ON CONFLICT (project_id, file_id, scope, section_key) DO UPDATE SET
+     ON CONFLICT (project_id, file_id, scope, section_key, target_lang) DO UPDATE SET
        total_count = excluded.total_count,
        filled_count = excluded.filled_count,
        validator_histogram = excluded.validator_histogram,
@@ -176,52 +203,68 @@ export function fullProgressRecomputeStmts(
 ): AquillaStatement[] {
   return [
     db.prepare(
-      `WITH paired AS MATERIALIZED (
-         SELECT TRIM(SPLIT_PART(COALESCE(s.canonical_ref, ''), ':', 1)) AS section_key,
+      // AQU-538: per-lane. `lanes` enumerates every target lane present (always
+      // incl. '') so each source cell is paired against that lane's target row;
+      // summaries/histograms group by lane and the upsert keys the 5-col PK.
+      `WITH lanes AS (
+         SELECT DISTINCT COALESCE(target_lang, '') AS lane
+           FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target'
+         UNION SELECT ''
+       ), paired AS MATERIALIZED (
+         SELECT lanes.lane AS lane,
+                TRIM(SPLIT_PART(COALESCE(s.canonical_ref, ''), ':', 1)) AS section_key,
                 CASE WHEN TRIM(COALESCE(t.value, '')) <> '' THEN 1 ELSE 0 END AS filled,
                 LEAST(
                   COALESCE(t.endorsement_count, 0),
                   ${MAX_VALIDATOR_HISTOGRAM_BUCKET}
                 ) AS validator_bucket
            FROM cells s
+           CROSS JOIN lanes
            LEFT JOIN cells t
              ON t.project_id = s.project_id
             AND t.file_id = s.file_id
             AND t.cell_id = s.cell_id
             AND t.side = 'target'
+            AND COALESCE(t.target_lang, '') = lanes.lane
           WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
        ), summaries AS (
-         SELECT 'file'::text AS scope,
+         SELECT lane,
+                'file'::text AS scope,
                 ''::text AS section_key,
                 COUNT(*)::integer AS total_count,
                 COALESCE(SUM(filled), 0)::integer AS filled_count
            FROM paired
+          GROUP BY lane
          UNION ALL
-         SELECT 'section'::text AS scope,
+         SELECT lane,
+                'section'::text AS scope,
                 section_key,
                 COUNT(*)::integer AS total_count,
                 COALESCE(SUM(filled), 0)::integer AS filled_count
            FROM paired
           WHERE section_key <> ''
-          GROUP BY section_key
+          GROUP BY lane, section_key
        ), bucket_counts AS (
-         SELECT ''::text AS section_key,
+         SELECT lane,
+                ''::text AS section_key,
                 validator_bucket,
                 COUNT(*)::integer AS bucket_count
            FROM paired
-          GROUP BY validator_bucket
+          GROUP BY lane, validator_bucket
          UNION ALL
-         SELECT section_key,
+         SELECT lane,
+                section_key,
                 validator_bucket,
                 COUNT(*)::integer AS bucket_count
            FROM paired
           WHERE section_key <> ''
-          GROUP BY section_key, validator_bucket
+          GROUP BY lane, section_key, validator_bucket
        ), histograms AS (
-         SELECT section_key,
+         SELECT lane,
+                section_key,
                 jsonb_object_agg(validator_bucket::text, bucket_count) AS validator_histogram
            FROM bucket_counts
-          GROUP BY section_key
+          GROUP BY lane, section_key
        ), watermark AS (
          SELECT GREATEST(
            COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ? AND file_id = ?), 0),
@@ -229,23 +272,25 @@ export function fullProgressRecomputeStmts(
          )::bigint AS revision
        )
        INSERT INTO file_section_progress (
-         project_id, file_id, scope, section_key, total_count, filled_count,
+         project_id, file_id, scope, section_key, target_lang, total_count, filled_count,
          validator_histogram, revision, updated_at
        )
-       SELECT ?, ?, summaries.scope, summaries.section_key,
+       SELECT ?, ?, summaries.scope, summaries.section_key, summaries.lane,
               summaries.total_count, summaries.filled_count,
               COALESCE(histograms.validator_histogram, '{}'::jsonb),
               watermark.revision, ?
          FROM summaries
-         LEFT JOIN histograms USING (section_key)
+         LEFT JOIN histograms
+           ON histograms.lane = summaries.lane AND histograms.section_key = summaries.section_key
          CROSS JOIN watermark
-       ON CONFLICT (project_id, file_id, scope, section_key) DO UPDATE SET
+       ON CONFLICT (project_id, file_id, scope, section_key, target_lang) DO UPDATE SET
          total_count = excluded.total_count,
          filled_count = excluded.filled_count,
          validator_histogram = excluded.validator_histogram,
          revision = excluded.revision,
          updated_at = excluded.updated_at`,
     ).bind(
+      projectId, fileId,
       projectId, fileId,
       projectId, fileId, projectId,
       projectId, fileId, updatedAt,

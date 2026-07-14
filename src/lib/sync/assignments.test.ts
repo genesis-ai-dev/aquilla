@@ -115,6 +115,38 @@ describe("createAssignment", () => {
     })
   })
 
+  // AQU-538 (§3.5): the lane rides in the payload only when non-'' — the
+  // default lane is omitted on the wire (same convention as every lane field).
+  it("includes targetLang in the payload when non-'', and omits it when '' or absent", async () => {
+    mockFetchSyncToken.mockResolvedValue({ token: "synctoken" } as Awaited<ReturnType<typeof fetchSyncToken>>)
+    const bodies: Record<string, unknown>[] = []
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const parsed = JSON.parse(init.body as string)
+        bodies.push(parsed.events[0].payload)
+        return jsonRes({ accepted: [{ id: parsed.events[0].id }], rejected: [] })
+      }),
+    )
+
+    await createAssignment({
+      jwt: "jwt", projectId: "p1", fileId: "f1", author: "wendi", assigneeUserId: 2,
+      scope: [{ fileId: "f1" }], scopeKind: "books", scopeLabel: "Genesis", targetLang: "es",
+    })
+    await createAssignment({
+      jwt: "jwt", projectId: "p1", fileId: "f1", author: "wendi", assigneeUserId: 2,
+      scope: [{ fileId: "f1" }], scopeKind: "books", scopeLabel: "Genesis", targetLang: "",
+    })
+    await createAssignment({
+      jwt: "jwt", projectId: "p1", fileId: "f1", author: "wendi", assigneeUserId: 2,
+      scope: [{ fileId: "f1" }], scopeKind: "books", scopeLabel: "Genesis",
+    })
+
+    expect(bodies[0].targetLang).toBe("es")
+    expect("targetLang" in bodies[1]).toBe(false)
+    expect("targetLang" in bodies[2]).toBe(false)
+  })
+
   it("throws AssignmentEmitError when the server rejects (e.g. role too low → 403)", async () => {
     mockFetchSyncToken.mockResolvedValue({ token: "synctoken" } as Awaited<ReturnType<typeof fetchSyncToken>>)
     vi.stubGlobal(

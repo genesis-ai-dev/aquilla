@@ -150,6 +150,13 @@ export interface CellCommitInput {
   parentId: string | null
   /** AD-9 staleness pin: source row's `event_id`. Null for target-owned cells. */
   sourceEventId?: string | null
+  /**
+   * AQU-538: target-language lane this commit addresses. Omit (or pass '')
+   * for the file's single configured target language — the default lane;
+   * every pre-lane caller. Non-'' lanes commit to that lane's own row and
+   * chain slot server-side.
+   */
+  targetLang?: string
   value: string
   valueHtml?: string
   author: string
@@ -220,6 +227,9 @@ export async function emitTargetCellCommit(
       ...(input.sourceEventId !== undefined
         ? { sourceEventId: input.sourceEventId }
         : {}),
+      // AQU-538: '' (default lane) is omitted so default-lane events stay
+      // byte-identical to pre-lane events (idempotency ids, replay, history).
+      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
       ...(input.aiSuggestion ? { ai_suggestion: true } : {}),
       ...(input.aiSuggestion && input.aiDraft ? { ai_draft: input.aiDraft } : {}),
       ...(input.searchQuery !== undefined ? { search_query: input.searchQuery } : {}),
@@ -236,6 +246,11 @@ export interface CellValidateInput {
   cellId: string
   /** The target.cell.commit (or target.cell.create) event being validated. */
   editEventId: string
+  /**
+   * AQU-538: the active target LANE. `''`/undefined = default lane and is
+   * OMITTED from the wire payload, so N=1 validations are byte-identical.
+   */
+  targetLang?: string
   author: string
   clientTs?: number
 }
@@ -264,7 +279,11 @@ export async function emitCellValidate(input: CellValidateInput): Promise<string
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { editEventId: input.editEventId },
+    payload: {
+      editEventId: input.editEventId,
+      // AQU-538: '' (default lane) is omitted from the wire.
+      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
+    },
     clientTs: input.clientTs,
   })
   return eventId
@@ -279,7 +298,11 @@ export async function emitCellUnvalidate(input: CellValidateInput): Promise<stri
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { editEventId: input.editEventId },
+    payload: {
+      editEventId: input.editEventId,
+      // AQU-538: '' (default lane) is omitted from the wire.
+      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
+    },
     clientTs: input.clientTs,
   })
   return eventId

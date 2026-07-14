@@ -130,6 +130,69 @@ describe("events-emit", () => {
       expect(ev.payload.value).toBe("hello")
       expect(ev.payload.valueHtml).toBe("<p>hello</p>")
       expect(ev.payload.sourceEventId).toBe("src-event-1")
+      // AQU-538: no targetLang input → the field is OMITTED entirely, so
+      // default-lane events stay byte-identical to pre-lane events.
+      expect("targetLang" in ev.payload).toBe(false)
+    })
+
+    it("AQU-538: includes targetLang in the payload for a non-default lane", async () => {
+      await emitTargetCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        parentId: "src-head",
+        value: "bonjour",
+        targetLang: "fr",
+        author: "alice",
+      })
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"target.cell.commit">
+      expect(ev.payload.targetLang).toBe("fr")
+    })
+
+    it("AQU-538: an explicit empty-string targetLang is omitted (default lane)", async () => {
+      await emitTargetCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        parentId: "src-head",
+        value: "hallo",
+        targetLang: "",
+        author: "alice",
+      })
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"target.cell.commit">
+      expect("targetLang" in ev.payload).toBe(false)
+    })
+
+    it("AQU-538: carries targetLang for a non-default lane", async () => {
+      await emitTargetCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        parentId: "prev",
+        value: "hola",
+        author: "alice",
+        targetLang: "es",
+      })
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"target.cell.commit">
+      expect(ev.payload.targetLang).toBe("es")
+    })
+
+    it("AQU-538: OMITS targetLang for the default lane ('' never crosses the wire)", async () => {
+      await emitTargetCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        parentId: "prev",
+        value: "hello",
+        author: "alice",
+        targetLang: "",
+      })
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"target.cell.commit">
+      expect("targetLang" in ev.payload).toBe(false)
     })
 
     it("accepts null parentId for first-ever commit (genesis-shape fallback)", async () => {
@@ -255,6 +318,49 @@ describe("events-emit", () => {
       })
       const peek = await peekOutboxBatch(10)
       expect(peek[0].event.kind).toBe("cell.unvalidate")
+    })
+
+    it("AQU-538: emitCellValidate carries targetLang for a non-default lane", async () => {
+      await emitCellValidate({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        editEventId: "commit-evt-1",
+        author: "alice",
+        targetLang: "es",
+      })
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"cell.validate">
+      expect(ev.payload.editEventId).toBe("commit-evt-1")
+      expect(ev.payload.targetLang).toBe("es")
+    })
+
+    it("AQU-538: emitCellValidate OMITS targetLang for the default lane", async () => {
+      await emitCellValidate({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        editEventId: "commit-evt-1",
+        author: "alice",
+        targetLang: "",
+      })
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"cell.validate">
+      expect("targetLang" in ev.payload).toBe(false)
+    })
+
+    it("AQU-538: emitCellUnvalidate carries targetLang for a non-default lane", async () => {
+      await emitCellUnvalidate({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        editEventId: "commit-evt-1",
+        author: "alice",
+        targetLang: "es",
+      })
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"cell.unvalidate">
+      expect(ev.payload.targetLang).toBe("es")
     })
   })
 

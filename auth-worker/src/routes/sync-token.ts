@@ -121,6 +121,19 @@ syncToken.post(
       return c.json({ error: "No access to project" }, 403)
     }
 
+    // AQU-553: load the user's lane/file scopes for this project. No rows =
+    // unscoped; the claim is OMITTED entirely in that case so an absent claim
+    // means "exactly today's behavior" on the sync-worker side.
+    const scopeRows = await c.env.AQUILLA_PG.prepare(
+      "SELECT kind, value FROM project_member_scopes WHERE project_id = ? AND user_id = ? ORDER BY kind, value",
+    )
+      .bind(projectId, user.id)
+      .all<{ kind: "lane" | "file"; value: string }>()
+    const scopes = (scopeRows.results ?? []).map((r) => ({
+      kind: r.kind,
+      value: r.value,
+    }))
+
     const now = Math.floor(Date.now() / 1000)
     const claims: SyncTokenClaims = {
       userId: user.id,
@@ -133,6 +146,8 @@ syncToken.post(
       // membership rows to re-check). Every other source is re-verified
       // against the live grant tables on each POST /events flush.
       src: resolved.source,
+      // AQU-553: omit entirely when unscoped (no rows).
+      ...(scopes.length > 0 ? { scopes } : {}),
       aud: "sync",
       iat: now,
       exp: now + SYNC_TOKEN_TTL_SECONDS,

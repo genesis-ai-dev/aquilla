@@ -481,6 +481,61 @@ async function reconcilePgSchema(
       patched.push(`added column ${name}.${col.name}`)
     }
   }
+  // AQU-538 (migration 0054): the cells PK gained the target_lang lane. The
+  // generic loop above adds the column, but a drifted container still carries
+  // the 4-column PK — and Postgres rejects `ON CONFLICT (…, target_lang)`
+  // without a matching unique constraint, 500-ing every commit. Rebuild the
+  // PK in place; all pre-lane rows carry '' so the 5-column key is trivially
+  // unique. Idempotent (skipped once target_lang is in the PK).
+  const { rows: pkCols } = await client.query(
+    `SELECT a.attname FROM pg_index i
+     JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+     WHERE i.indrelid = 'cells'::regclass AND i.indisprimary`,
+  )
+  if (!(pkCols as { attname: string }[]).some((r) => r.attname === "target_lang")) {
+    await run(
+      `ALTER TABLE cells DROP CONSTRAINT cells_pkey;
+       ALTER TABLE cells ADD PRIMARY KEY (project_id, file_id, cell_id, side, target_lang)`,
+      "rebuilding the cells primary key with target_lang (migration 0054)",
+    )
+    patched.push("rebuilt cells PK with target_lang")
+  }
+
+  // AQU-538 (migration 0055): cell_validators and file_section_progress gained
+  // target_lang in their PKs so validations and progress rollups are per-lane.
+  // Same rationale as the cells rebuild above — the generic loop adds the
+  // column, but a drifted container keeps the pre-lane PK and Postgres rejects
+  // the lane-qualified `ON CONFLICT` / upsert. All pre-lane rows carry '' so
+  // the new key is trivially unique. Idempotent (skipped once target_lang is
+  // in the PK).
+  const { rows: validatorPkCols } = await client.query(
+    `SELECT a.attname FROM pg_index i
+     JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+     WHERE i.indrelid = 'cell_validators'::regclass AND i.indisprimary`,
+  )
+  if (!(validatorPkCols as { attname: string }[]).some((r) => r.attname === "target_lang")) {
+    await run(
+      `ALTER TABLE cell_validators DROP CONSTRAINT cell_validators_pkey;
+       ALTER TABLE cell_validators ADD PRIMARY KEY (project_id, file_id, cell_id, target_lang, username)`,
+      "rebuilding the cell_validators primary key with target_lang (migration 0055)",
+    )
+    patched.push("rebuilt cell_validators PK with target_lang")
+  }
+
+  const { rows: progressPkCols } = await client.query(
+    `SELECT a.attname FROM pg_index i
+     JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+     WHERE i.indrelid = 'file_section_progress'::regclass AND i.indisprimary`,
+  )
+  if (!(progressPkCols as { attname: string }[]).some((r) => r.attname === "target_lang")) {
+    await run(
+      `ALTER TABLE file_section_progress DROP CONSTRAINT file_section_progress_pkey;
+       ALTER TABLE file_section_progress ADD PRIMARY KEY (project_id, file_id, scope, section_key, target_lang)`,
+      "rebuilding the file_section_progress primary key with target_lang (migration 0055)",
+    )
+    patched.push("rebuilt file_section_progress PK with target_lang")
+  }
+
   if (patched.length) {
     console.log(
       `[dev-stack] local Postgres schema patched from db/postgres/schema.sql: ${patched.join(", ")}`,

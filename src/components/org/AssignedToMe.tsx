@@ -80,12 +80,16 @@ export function AssignedToMe() {
                 return (
                   <Link
                     key={a.assignmentId}
-                    to={`/project/${a.projectId}`}
+                    to={a.targetLang ? `/project/${a.projectId}?lane=${encodeURIComponent(a.targetLang)}` : `/project/${a.projectId}`}
                     className="block p-4 transition-colors hover:bg-muted/50"
                   >
                     <div className="flex items-center gap-2">
                       <p className="font-medium">{a.scopeLabel}</p>
                       <span className="shrink-0 text-xs text-muted-foreground">{a.projectName}</span>
+                      {/* AQU-538 (§3.5): lane chip when the assignment is pinned to a lane. */}
+                      {a.targetLang && (
+                        <Badge variant="outline" className="shrink-0">{a.targetLang}</Badge>
+                      )}
                       {a.deadline && (
                         <Badge variant="secondary" className="shrink-0">
                           Due {a.deadline}

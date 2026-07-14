@@ -1,12 +1,14 @@
-import { memo, useState } from "react"
+import { memo, useCallback, useRef, useState } from "react"
 import { AlertTriangle, HelpCircle, FolderOpen, Users } from "lucide-react"
 import { useProjectsMembersMatrix } from "@/hooks/useProjectsMembersMatrix"
 import { useOrg } from "@/hooks/useOrg"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { ROLE } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 import { MembersMatrixCellEditor } from "./MembersMatrixCellEditor"
 import { MemberAccessDrillDown } from "./MemberAccessDrillDown"
 import { AccessModelLegend } from "./AccessModelLegend"
+import { MemberLaneScopeEditor } from "./MemberLaneScopeEditor"
 import {
   AppTooltip,
   Tooltip,
@@ -22,8 +24,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { fetchMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
 import type { MatrixMember, MatrixCell } from "@/hooks/useProjectsMembersMatrix"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
+
+/** projectId → scopes, for one member. */
+type MemberScopeMap = Map<string, MemberScope[]>
 
 /**
  * Members × projects scan view, with inline cell editing.
@@ -61,8 +67,49 @@ export function MembersMatrixView() {
   const { matrix, isLoading, error, refresh } = useProjectsMembersMatrix()
   const { state: orgState } = useOrg()
   const orgId = orgState.kind === "success" ? orgState.org.id : null
+  const { session } = useFrontierSession()
+  const jwt = session?.jwt ?? null
   const [selectedMember, setSelectedMember] = useState<SelectedMember | null>(null)
   const [legendOpen, setLegendOpen] = useState(false)
+
+  // AQU-538 §3.4: lane-scope chips per cell. A full per-cell fetch (members ×
+  // projects) would be N×M requests on load — too chatty. Simplest correct
+  // choice: fetch lazily per ROW (one member's scopes across every project
+  // they're in, in parallel) on hover/focus, and cache the result so a
+  // repeat hover is free. `loadedRef` guards against re-firing the batch
+  // while it's in flight or after it's already landed; `scopesByMember`
+  // triggers the re-render once results arrive.
+  const [scopesByMember, setScopesByMember] = useState<Map<number, MemberScopeMap>>(new Map())
+  const loadedRef = useRef<Set<number>>(new Set())
+
+  const ensureScopesLoaded = useCallback(
+    (userId: number, projectIds: string[]) => {
+      if (!jwt || loadedRef.current.has(userId)) return
+      loadedRef.current.add(userId)
+      void Promise.all(
+        projectIds.map(
+          async (pid) => [pid, (await fetchMemberScopes(jwt, pid, userId)) ?? []] as const,
+        ),
+      ).then((entries) => {
+        setScopesByMember((prev) => {
+          const next = new Map(prev)
+          next.set(userId, new Map(entries))
+          return next
+        })
+      })
+    },
+    [jwt],
+  )
+
+  const handleScopesSaved = useCallback((userId: number, projectId: string, saved: MemberScope[]) => {
+    setScopesByMember((prev) => {
+      const next = new Map(prev)
+      const perProject = new Map(next.get(userId) ?? [])
+      perProject.set(projectId, saved)
+      next.set(userId, perProject)
+      return next
+    })
+  }, [])
 
   if (isLoading && !matrix) {
     return (
@@ -156,6 +203,10 @@ export function MembersMatrixView() {
                 onMutated={refresh}
                 isSelected={selectedMember?.userId === m.userId}
                 onSelectMember={setSelectedMember}
+                jwt={jwt}
+                memberScopes={scopesByMember.get(m.userId)}
+                onHoverRow={ensureScopesLoaded}
+                onScopesSaved={handleScopesSaved}
               />
             ))}
           </TableBody>
@@ -220,6 +271,10 @@ const MatrixRow = memo(function MatrixRow({
   onMutated,
   isSelected,
   onSelectMember,
+  jwt,
+  memberScopes,
+  onHoverRow,
+  onScopesSaved,
 }: {
   member: MatrixMember
   projects: CloudProjectSummary[]
@@ -227,13 +282,24 @@ const MatrixRow = memo(function MatrixRow({
   onMutated: () => Promise<void>
   isSelected: boolean
   onSelectMember: (m: { userId: number; username: string } | null) => void
+  /** AQU-538 §3.4 lane-scope chips — see MembersMatrixView's doc comment for
+   * the lazy-per-row-hover fetch strategy. */
+  jwt: string | null
+  memberScopes: MemberScopeMap | undefined
+  onHoverRow: (userId: number, projectIds: string[]) => void
+  onScopesSaved: (userId: number, projectId: string, saved: MemberScope[]) => void
 }) {
   function handleMemberClick() {
     onSelectMember(isSelected ? null : { userId: member.userId, username: member.username })
   }
 
+  function handleRowHover() {
+    if (!memberCells) return
+    onHoverRow(member.userId, [...memberCells.keys()])
+  }
+
   return (
-    <TableRow>
+    <TableRow onMouseEnter={handleRowHover} onFocus={handleRowHover}>
       <TableHead
         scope="row"
         className="sticky left-0 z-10 border-r bg-background font-normal"
@@ -261,6 +327,7 @@ const MatrixRow = memo(function MatrixRow({
         const { label: sourceHint, badge: sourceBadge } = cell
           ? sourceInfo(cell.role.source)
           : { label: "", badge: "" }
+        const scopesForCell = memberScopes?.get(p.id)
         return (
           <MembersMatrixCellEditor
             key={p.id}
@@ -273,12 +340,59 @@ const MatrixRow = memo(function MatrixRow({
             sourceHint={sourceHint}
             sourceBadge={sourceBadge}
             secondarySources={cell?.secondarySources}
+            footer={
+              cell && jwt ? (
+                <MemberLaneScopeEditor
+                  jwt={jwt}
+                  projectId={p.id}
+                  userId={member.userId}
+                  username={member.username}
+                  onSaved={(saved) => onScopesSaved(member.userId, p.id, saved)}
+                  trigger={<LaneScopeChips scopes={scopesForCell} />}
+                />
+              ) : null
+            }
           />
         )
       })}
     </TableRow>
   )
 })
+
+/**
+ * Compact chip row for a member's lane/file scopes on one project. Empty
+ * array (or a project the row-hover fetch hasn't resolved yet) renders a
+ * plain "scopes" affordance so there's still something to click.
+ */
+function LaneScopeChips({ scopes }: { scopes: MemberScope[] | undefined }) {
+  const laneScopes = (scopes ?? []).filter((s) => s.kind === "lane")
+  const fileScopes = (scopes ?? []).filter((s) => s.kind === "file")
+
+  if (!scopes || scopes.length === 0) {
+    return <span>{scopes ? "unscoped" : "scopes"}</span>
+  }
+
+  return (
+    <span className="flex flex-wrap gap-0.5">
+      {laneScopes.map((s) => (
+        <span
+          key={`lane:${s.value}`}
+          className="rounded bg-indigo-500/15 px-1 text-indigo-700 dark:text-indigo-300"
+        >
+          {s.value || "default"}
+        </span>
+      ))}
+      {fileScopes.map((s) => (
+        <span
+          key={`file:${s.value}`}
+          className="rounded bg-purple-500/15 px-1 text-purple-700 dark:text-purple-300"
+        >
+          {s.value}
+        </span>
+      ))}
+    </span>
+  )
+}
 
 /** Color tier for the cell. Designed to read at a glance without legend. */
 function colorForRole(level: number): string {

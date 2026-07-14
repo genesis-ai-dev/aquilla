@@ -141,12 +141,18 @@ export async function handleProgressReadRequest(
   request: Request,
   env: ProgressReadEnv,
 ): Promise<Response | null> {
-  const pathname = new URL(request.url).pathname
+  const url = new URL(request.url)
+  const pathname = url.pathname
   const match = pathname.match(PATH_RE)
   const sectionMatch = pathname.match(SECTION_PATH_RE)
   if ((!match && !sectionMatch) || request.method !== 'GET') return null
   if (!env.SYNC_SECRET_KEY) return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   if (!env.AQUILLA_PG) return new Response('AQUILLA_PG binding not configured', { status: 500 })
+
+  // AQU-538: progress is materialized per target-language lane. Default to the
+  // legacy/default lane ('') so N=1 projects are byte-identical; an explicit
+  // ?lane=<tag> selects a non-default lane's rows.
+  const lane = url.searchParams.get('lane') ?? ''
 
   const routeMatch = sectionMatch ?? match!
   const projectId = decodeURIComponent(routeMatch[1])
@@ -170,13 +176,14 @@ export async function handleProgressReadRequest(
             AND t.file_id = s.file_id
             AND t.cell_id = s.cell_id
             AND t.side = 'target'
+            AND t.target_lang = ?
           WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
             AND BTRIM(CASE
                   WHEN POSITION(':' IN COALESCE(s.canonical_ref, '')) > 0
                     THEN SPLIT_PART(s.canonical_ref, ':', 1)
                   ELSE COALESCE(s.canonical_ref, '')
                 END) = ?`,
-      ).bind(projectId, fileId, sectionKey).all<{
+      ).bind(lane, projectId, fileId, sectionKey).all<{
         canonical_ref: string | null
         target_value: string
         endorsement_count: number | string
@@ -184,11 +191,14 @@ export async function handleProgressReadRequest(
       readValidationCount(env.AQUILLA_PG, projectId),
       env.AQUILLA_PG.prepare(
         `SELECT revision FROM file_section_progress
-          WHERE project_id = ? AND file_id = ? AND scope = 'section' AND section_key = ?`,
-      ).bind(projectId, fileId, sectionKey).first<{ revision: number | string | bigint }>(),
+          WHERE project_id = ? AND file_id = ? AND scope = 'section' AND section_key = ? AND target_lang = ?`,
+      ).bind(projectId, fileId, sectionKey, lane).first<{ revision: number | string | bigint }>(),
     ])
     const revision = Number(revisionRow?.revision) || 0
-    const etag = `"progress:${fileId}:${encodeURIComponent(sectionKey)}:${revision}:v${validationCount}"`
+    // Default lane ('') keeps the legacy etag byte-for-byte; non-default lanes
+    // append a lane segment so caches never cross lanes.
+    const laneTag = lane ? `:lane:${encodeURIComponent(lane)}` : ''
+    const etag = `"progress:${fileId}:${encodeURIComponent(sectionKey)}:${revision}:v${validationCount}${laneTag}"`
     if (request.headers.get('If-None-Match') === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
     }
@@ -214,9 +224,9 @@ export async function handleProgressReadRequest(
       .prepare(
         `SELECT scope, section_key, total_count, filled_count, validator_histogram, revision
            FROM file_section_progress
-          WHERE project_id = ? AND file_id = ?`,
+          WHERE project_id = ? AND file_id = ? AND target_lang = ?`,
       )
-      .bind(projectId, fileId)
+      .bind(projectId, fileId, lane)
       .all<ProgressRow>(),
     readValidationCount(env.AQUILLA_PG, projectId),
   ])
@@ -251,7 +261,8 @@ export async function handleProgressReadRequest(
   // A backfill can replace the rollout fallback without advancing the event
   // sequence. Include the source so clients cannot retain an empty fallback
   // through a false 304 after projection rows appear.
-  const etag = `"progress:${fileId}:${revision}:v${validationCount}:${source === 'projection' ? 'p' : 'f'}"`
+  const laneTag = lane ? `:lane:${encodeURIComponent(lane)}` : ''
+  const etag = `"progress:${fileId}:${revision}:v${validationCount}:${source === 'projection' ? 'p' : 'f'}${laneTag}"`
   if (request.headers.get('If-None-Match') === etag) {
     return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
   }

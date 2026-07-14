@@ -1380,3 +1380,51 @@ describe("FRO-274: quarantined outbox filtering and shadow clear", () => {
     expect(c2After?.hasPendingEdit).toBe(true)
   })
 })
+
+describe("useCells (AQU-538, target lanes)", () => {
+  // A cell with TWO target rows sharing the same cellId but different lanes.
+  // `targetLang` isn't on CellRow yet (slice 1 lands it) — attach it via a
+  // cast, mirroring the hook's own defensive read.
+  function twoLaneRows(): CellRow[] {
+    return [
+      makeRow({ cellId: "c1", side: "source", value: "Source 1" }),
+      makeRow({ cellId: "c1", side: "target", value: "hello" }), // default lane ''
+      { ...makeRow({ cellId: "c1", side: "target", value: "hola", eventId: "e-c1-target-es" }), targetLang: "es" } as CellRow,
+    ]
+  }
+
+  it("renders the ACTIVE lane's target row when a cell has multiple lanes", async () => {
+    fetchAllMock.mockResolvedValue(twoLaneRows())
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-a", fileId: "file-lane", getToken, enabled: true, lane: "es" }),
+    )
+    await waitFor(() => expect(result.current.cells.length).toBe(1))
+    // Only the "es" target row participates in the pair for this view.
+    expect(result.current.cells[0].translated).toBe("hola")
+  })
+
+  it("the default lane ('') shows the default-lane target, not another lane's", async () => {
+    fetchAllMock.mockResolvedValue(twoLaneRows())
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-b", fileId: "file-lane", getToken, enabled: true, lane: "" }),
+    )
+    await waitFor(() => expect(result.current.cells.length).toBe(1))
+    expect(result.current.cells[0].translated).toBe("hello")
+  })
+
+  it("an optimistic edit touches ONLY the active lane's row", async () => {
+    fetchAllMock.mockResolvedValue(twoLaneRows())
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-c", fileId: "file-lane", getToken, enabled: true, lane: "es" }),
+    )
+    await waitFor(() => expect(result.current.cells[0]?.translated).toBe("hola"))
+    act(() => {
+      result.current.applyOptimisticTargetEdit("c1", { value: "nuevo" })
+    })
+    // The "es" view reflects the edit — proving the edit matched the "es"
+    // target row (had it wrongly mutated the default-lane row, the es-filtered
+    // view would still read "hola").
+    await waitFor(() => expect(result.current.cells[0].translated).toBe("nuevo"))
+    expect(result.current.cells[0].hasPendingEdit).toBe(true)
+  })
+})

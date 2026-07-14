@@ -383,9 +383,16 @@ CREATE TABLE cells (
     upstream_event_id TEXT,
     upstream_seq      BIGINT,
     tombstoned_at     BIGINT,
+    -- AQU-538: target-language lane (migration 0054). '' = the file's single
+    -- configured target language (every pre-lane row, and the default lane for
+    -- projects that never add a second language — N=1 back-compat). Source-side
+    -- rows are ALWAYS '' (the source is shared by all lanes; that is the point
+    -- of the TMS-style model). Non-'' lanes are BCP-47-ish tags chosen by the
+    -- add-a-language flow; the projection treats the value as opaque.
+    target_lang       TEXT NOT NULL DEFAULT '',
     -- Replaces SQLite FTS5. Maintained automatically; no triggers needed.
     value_tsv         tsvector GENERATED ALWAYS AS (to_tsvector('simple', value)) STORED,
-    PRIMARY KEY (project_id, file_id, cell_id, side)
+    PRIMARY KEY (project_id, file_id, cell_id, side, target_lang)
 );
 
 -- AQU-517: compact derived progress. One file row plus one row per meaningful
@@ -396,12 +403,13 @@ CREATE TABLE file_section_progress (
     file_id             TEXT NOT NULL,
     scope               TEXT NOT NULL CHECK (scope IN ('file', 'section')),
     section_key         TEXT NOT NULL DEFAULT '',
+    target_lang         TEXT NOT NULL DEFAULT '',
     total_count         INTEGER NOT NULL DEFAULT 0 CHECK (total_count >= 0),
     filled_count        INTEGER NOT NULL DEFAULT 0 CHECK (filled_count >= 0),
     validator_histogram JSONB NOT NULL DEFAULT '{}'::jsonb,
     revision            BIGINT NOT NULL DEFAULT 0,
     updated_at          BIGINT NOT NULL,
-    PRIMARY KEY (project_id, file_id, scope, section_key),
+    PRIMARY KEY (project_id, file_id, scope, section_key, target_lang),
     CHECK (
       (scope = 'file' AND section_key = '') OR
       (scope = 'section' AND section_key <> '')
@@ -411,13 +419,14 @@ CREATE TABLE file_section_progress (
 CREATE INDEX idx_file_section_progress_file_revision ON file_section_progress(project_id, file_id, revision);
 
 CREATE TABLE cell_validators (
-    project_id TEXT NOT NULL,
-    file_id    TEXT NOT NULL,
-    cell_id    TEXT NOT NULL,
-    event_id   TEXT NOT NULL,
-    username   TEXT NOT NULL,
-    decided_ts BIGINT NOT NULL,
-    PRIMARY KEY (project_id, file_id, cell_id, username)
+    project_id  TEXT NOT NULL,
+    file_id     TEXT NOT NULL,
+    cell_id     TEXT NOT NULL,
+    target_lang TEXT NOT NULL DEFAULT '',
+    event_id    TEXT NOT NULL,
+    username    TEXT NOT NULL,
+    decided_ts  BIGINT NOT NULL,
+    PRIMARY KEY (project_id, file_id, cell_id, target_lang, username)
 );
 
 CREATE TABLE cell_waivers (
@@ -500,6 +509,10 @@ CREATE TABLE assignments (
     assignee_user_id BIGINT NOT NULL,
     scope_kind       TEXT NOT NULL,
     scope_label      TEXT NOT NULL,
+    -- AQU-538 (§3.5 / migration 0057): target-language lane this assignment is
+    -- pinned to. '' = the default lane (every pre-lane assignment). Not part of
+    -- the PK — assignment_id stays the key; a lane is a property of the unit.
+    target_lang      TEXT NOT NULL DEFAULT '',
     cells_total      INTEGER NOT NULL DEFAULT 0,
     deadline         TEXT,
     note             TEXT,
@@ -725,6 +738,23 @@ CREATE TABLE IF NOT EXISTS model_ab_events (
 );
 CREATE INDEX IF NOT EXISTS idx_model_ab_events_created ON model_ab_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_ab_events_user ON model_ab_events(user_id);
+
+-- Lane-scoped reviewer permissions (0057_project_member_scopes.sql, AQU-553).
+-- ADDITIVE restrictions on a member's role floor. No rows for a (project,user)
+-- pair = unscoped = today's behavior. 'lane' rows restrict target-side writes
+-- to those lanes (default lane stored as literal ''); 'file' rows restrict
+-- writes to those fileIds. Kinds compose with AND. Enforced in sync-worker
+-- authorize; source/comment/audio/file-level events are never gated. Leads
+-- (role >= 500) must stay unscoped (auth-worker CRUD rejects scoping them).
+CREATE TABLE IF NOT EXISTS project_member_scopes (
+    project_id TEXT NOT NULL,
+    user_id    BIGINT NOT NULL,
+    kind       TEXT NOT NULL CHECK (kind IN ('lane','file')),
+    value      TEXT NOT NULL,
+    created_by TEXT,
+    created_at BIGINT NOT NULL,
+    PRIMARY KEY (project_id, user_id, kind, value)
+);
 
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new

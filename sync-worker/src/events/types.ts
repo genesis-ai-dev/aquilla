@@ -168,6 +168,15 @@ export interface EventPayloads {
   }
 
   // ── Target-side ────────────────────────────────────────────────────────
+  //
+  // AQU-538 lanes: every target-side chain-mutating payload MAY carry
+  // `targetLang` — the target-language lane this event addresses. Absent or
+  // '' = the file's single configured target language (the legacy/default
+  // lane; every pre-lane event). The lane is part of the cells row key
+  // (PRIMARY KEY …, side, target_lang) AND of the AD-2 chain slot for
+  // non-default lanes (see chain-claims.ts laneQualifiedParentKey): two
+  // lanes' first commits both chain on the same source head and must not
+  // compete for one slot. Source-side rows/events never carry a lane.
   'target.cell.create': {
     cellId: string
     anchorCellId?: string | null
@@ -181,10 +190,14 @@ export interface EventPayloads {
     sequenceIndex?: number
     transcription?: string
     cameraState?: string
+    /** AQU-538: target-language lane. Absent/'' = default lane. */
+    targetLang?: string
   }
   'target.cell.commit': {
     value: string
     valueHtml?: string
+    /** AQU-538: target-language lane. Absent/'' = default lane. */
+    targetLang?: string
     /**
      * UUIDv7 of the source row's `event_id` as observed by the editor at
      * commit time. Stored on `cells.source_event_id` and used for AD-9
@@ -232,15 +245,27 @@ export interface EventPayloads {
       parent_proposal_id?: string
     }
   }
-  'target.cell.delete': Record<string, never>
+  'target.cell.delete': {
+    /** AQU-538: target-language lane whose row is deleted. Absent/'' = default lane. */
+    targetLang?: string
+  }
   'target.cell.reorder': {
     anchorCellId: string | null
+    /** AQU-538: target-language lane. Absent/'' = default lane. */
+    targetLang?: string
   }
 
   // ── Validation ─────────────────────────────────────────────────────────
   'cell.validate': {
     /** The target.cell.commit / target.cell.create event being validated. */
     editEventId: string
+    /**
+     * AQU-538: target-language lane of the validated commit. Absent/'' =
+     * default lane — same convention as target.cell.commit. A user's standing
+     * validation is per-lane: validating the same cell in two lanes yields two
+     * cell_validators rows.
+     */
+    targetLang?: string
   }
   'cell.unvalidate': {
     /** The target commit event whose validation is being withdrawn. */
@@ -253,6 +278,11 @@ export interface EventPayloads {
      * caller must have maintainer (600) or above.
      */
     targetUsername?: string
+    /**
+     * AQU-538: target-language lane whose validation is withdrawn. Absent/'' =
+     * default lane — same convention as target.cell.commit.
+     */
+    targetLang?: string
   }
 
   // ── QA rule waivers ────────────────────────────────────────────────────
@@ -383,6 +413,12 @@ export interface EventPayloads {
     scopeLabel: string
     /** Frontier user id of the assignee. */
     assigneeUserId: number
+    /**
+     * AQU-538 (§3.5): target-language lane this assignment is pinned to.
+     * Absent/'' = the default lane (same convention as every other lane field).
+     * Stored on assignments.target_lang; omitted on the wire when ''.
+     */
+    targetLang?: string
     /** Optional ISO date string deadline. */
     deadline?: string | null
     /** Optional instruction note. */
@@ -391,6 +427,12 @@ export interface EventPayloads {
   'assignment.reassign': {
     assignmentId: string
     assigneeUserId: number
+    /**
+     * AQU-538 (§3.5): optionally re-pin the assignment to a different lane.
+     * Absent (undefined) = leave the stored lane untouched — a plain reassign
+     * only changes the assignee. Present (including '') = set the lane.
+     */
+    targetLang?: string
   }
   'assignment.unassign': {
     assignmentId: string

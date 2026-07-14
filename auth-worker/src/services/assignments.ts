@@ -46,6 +46,8 @@ export interface OrgAssignmentRow {
   assigneeUserId: number
   username: string | null
   scopeLabel: string
+  /** AQU-538 (§3.5): target-language lane. '' = default lane. */
+  targetLang: string
   cellsTotal: number
   cellsDone: number
   deadline: string | null
@@ -67,6 +69,7 @@ export async function getOrgAssignmentWorkload(
             a.assignee_user_id AS assignee_user_id,
             u.username         AS assignee_username,
             a.scope_label      AS scope_label,
+            a.target_lang      AS target_lang,
             a.cells_total      AS cells_total,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
             a.deadline         AS deadline,
@@ -87,6 +90,7 @@ export async function getOrgAssignmentWorkload(
       assignee_user_id: number
       assignee_username: string | null
       scope_label: string
+      target_lang: string
       cells_total: number
       cells_done: number
       deadline: string | null
@@ -101,6 +105,7 @@ export async function getOrgAssignmentWorkload(
     assigneeUserId: r.assignee_user_id,
     username: r.assignee_username,
     scopeLabel: r.scope_label,
+    targetLang: r.target_lang ?? "",
     cellsTotal: r.cells_total,
     cellsDone: r.cells_done,
     deadline: r.deadline,
@@ -163,6 +168,8 @@ export interface MyAssignment {
   projectId: string
   scopeKind: string
   scopeLabel: string
+  /** AQU-538 (§3.5): target-language lane. '' = default lane. */
+  targetLang: string
   deadline: string | null
   note: string | null
   cellsTotal: number
@@ -182,6 +189,7 @@ export async function getMyAssignments(
   const rows = await env.AQUILLA_PG.prepare(
     `SELECT a.assignment_id AS assignment_id, a.project_id AS project_id,
             a.scope_kind AS scope_kind, a.scope_label AS scope_label,
+            a.target_lang AS target_lang,
             a.deadline AS deadline, a.note AS note,
             a.cells_total AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done
@@ -196,6 +204,7 @@ export async function getMyAssignments(
       project_id: string
       scope_kind: string
       scope_label: string
+      target_lang: string
       deadline: string | null
       note: string | null
       cells_total: number
@@ -208,6 +217,7 @@ export async function getMyAssignments(
     projectId: r.project_id,
     scopeKind: r.scope_kind,
     scopeLabel: r.scope_label,
+    targetLang: r.target_lang ?? "",
     deadline: r.deadline,
     note: r.note,
     cellsTotal: r.cells_total,
@@ -237,6 +247,7 @@ export async function getMyAssignmentsAcrossOrg(
     `SELECT a.assignment_id AS assignment_id, a.project_id AS project_id,
             p.name AS project_name,
             a.scope_kind AS scope_kind, a.scope_label AS scope_label,
+            a.target_lang AS target_lang,
             a.deadline AS deadline, a.note AS note,
             a.cells_total AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done
@@ -254,6 +265,7 @@ export async function getMyAssignmentsAcrossOrg(
       project_name: string
       scope_kind: string
       scope_label: string
+      target_lang: string
       deadline: string | null
       note: string | null
       cells_total: number
@@ -267,6 +279,7 @@ export async function getMyAssignmentsAcrossOrg(
     projectName: r.project_name,
     scopeKind: r.scope_kind,
     scopeLabel: r.scope_label,
+    targetLang: r.target_lang ?? "",
     deadline: r.deadline,
     note: r.note,
     cellsTotal: r.cells_total,

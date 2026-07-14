@@ -47,6 +47,7 @@ import { handleRebuildFtsRequest } from "./events/rebuild-fts"
 import { handleSearchReadRequest, handleSearchPassagesRequest } from "./events/search-route"
 import { handleStaleSourceRequest } from "./events/stale-source-route"
 import { handleLinkSyncRequest } from "./events/link-sync-route"
+import { handleMergeSiblingRequest } from "./events/merge-sibling-route"
 import { handleLinkCursorBatchesRequest } from "./events/link-cursor-batches-route"
 import { handleValidatorsReadRequest } from "./events/validators-read-route"
 import { handleBranchingSearchRequest } from "./events/branching-search-route"
@@ -252,6 +253,8 @@ export default {
     if (staleSourceResponse) return withCors(staleSourceResponse, request)
     const linkSyncResponse = await handleLinkSyncRequest(request, env)
     if (linkSyncResponse) return withCors(linkSyncResponse, request)
+    const mergeSiblingResponse = await handleMergeSiblingRequest(request, env)
+    if (mergeSiblingResponse) return withCors(mergeSiblingResponse, request)
     const linkCursorBatchesResponse = await handleLinkCursorBatchesRequest(request, env)
     if (linkCursorBatchesResponse) return withCors(linkCursorBatchesResponse, request)
     const commentsReadResponse = await handleCommentsReadRequest(request, env)

@@ -2,9 +2,31 @@ import { FRONTIER_BASE } from "./auth"
 import { fetchWithTimeout } from "./orgs"
 import { UserError } from "@/lib/errors/user-error"
 
+/**
+ * AQU-538: per-target-language-lane rollup for a project. `lane: ''` is the
+ * default lane (the project's configured `targetLanguage`, labeled client-side)
+ * and is present whenever the project has any file-scope progress rows.
+ * `validatedCells` counts cells meeting the project's validation threshold in
+ * that lane; `lastEditAt` is the lane's most recent progress update (null when
+ * the lane has no activity yet).
+ */
+export interface PortfolioLane {
+  lane: string
+  totalCells: number
+  filledCells: number
+  validatedCells: number
+  lastEditAt: number | null
+}
+
 export interface PortfolioProject {
   id: string
   name: string
+  /**
+   * AQU-538: per-lane rollups (default '' lane first). Optional so a client
+   * talking to an older server (no lane dimension) degrades gracefully — treat
+   * absent/empty as "single default lane" using the scalar fields.
+   */
+  lanes?: PortfolioLane[]
   totalCells: number
   validatedCells: number
   /** Target cells with content: the "translated" count (distinct from validated). */
@@ -33,8 +55,8 @@ export interface PortfolioProject {
    * normalizes the empty-settings default to null so the client never renders
    * a blank/broken "→".
    */
-  sourceLanguage: string | null
-  targetLanguage: string | null
+  sourceLanguage?: string | null
+  targetLanguage?: string | null
 }
 
 /**
@@ -86,6 +108,16 @@ export function validatedPct(p: PortfolioProject): number {
 /** translated (has-content) fraction 0..1 (0 when no cells). */
 export function translatedPct(p: PortfolioProject): number {
   return p.totalCells > 0 ? p.filledCells / p.totalCells : 0
+}
+
+/** translated (has-content) fraction 0..1 for a single lane (0 when no cells). */
+export function laneTranslatedPct(lane: PortfolioLane): number {
+  return lane.totalCells > 0 ? lane.filledCells / lane.totalCells : 0
+}
+
+/** validated fraction 0..1 for a single lane (0 when no cells). */
+export function laneValidatedPct(lane: PortfolioLane): number {
+  return lane.totalCells > 0 ? lane.validatedCells / lane.totalCells : 0
 }
 
 /**

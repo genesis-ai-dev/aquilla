@@ -128,6 +128,55 @@ describe("CellStore progress selectors", () => {
     expect(c2).toBe(0)
   })
 
+  it("filters target rows to the active lane and re-derives on lane switch", () => {
+    const store = new CellStore()
+    store.reset("project", "file")
+    store.setRuntime({
+      projectId: "project",
+      fileId: "file",
+      username: "alice",
+      requiredValidations: 1,
+      auditStats: new Map(),
+      lane: "",
+    })
+    // One source cell with a target row in TWO lanes: '' (default) and "fr".
+    const rows: CellRow[] = [
+      row("c1", "source", "hello", "GEN 1:1"),
+      { ...row("c1", "target", "hola", null), targetLang: "" },
+      { ...row("c1", "target", "bonjour", null), targetLang: "fr", eventId: "target-c1-fr" },
+    ]
+    store.replaceRows(rows, { full: true, maxServerSeq: 3 })
+
+    // Default lane: the paired view shows only the default-lane target.
+    expect(store.getCellView("c1")?.translated).toBe("hola")
+    // Non-active-lane rows are retained so the cache stays lane-complete.
+    expect(store.toRows().filter((r) => r.side === "target")).toHaveLength(2)
+
+    // Switching lane re-derives the view instantly (no refetch) from the
+    // already-loaded rows.
+    store.setRuntime({
+      projectId: "project",
+      fileId: "file",
+      username: "alice",
+      requiredValidations: 1,
+      auditStats: new Map(),
+      lane: "fr",
+    })
+    expect(store.getCellView("c1")?.translated).toBe("bonjour")
+    expect(store.toRows().filter((r) => r.side === "target")).toHaveLength(2)
+
+    // Back to default: the default-lane target is shown again.
+    store.setRuntime({
+      projectId: "project",
+      fileId: "file",
+      username: "alice",
+      requiredValidations: 1,
+      auditStats: new Map(),
+      lane: "",
+    })
+    expect(store.getCellView("c1")?.translated).toBe("hola")
+  })
+
   it("tracks every progress-affecting outbox id independently of text overlays", () => {
     const store = new CellStore()
     store.setPendingProgressEventIds(["commit-1", "validate-1", "validate-1"])

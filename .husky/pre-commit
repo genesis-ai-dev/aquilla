@@ -16,8 +16,11 @@ bt=$(printf '%s' "$branch" | grep -oiE 'aqu-[0-9]+' | head -1 | tr '[:lower:]' '
 [ -z "$bt" ] && exit 0
 
 # Tickets referenced by commits already on this branch (vs origin/main).
+# `|| true`: husky runs hooks with `sh -e`, and grep exits 1 when it selects
+# nothing — i.e. on every clean single-ticket branch — which turned this
+# warn-only guard into a hard commit blocker. Guarantee the promise above.
 others=$(git log --pretty=%s origin/main..HEAD 2>/dev/null \
-  | grep -oiE 'AQU-[0-9]+' | tr '[:lower:]' '[:upper:]' | sort -u | grep -v "^${bt}$")
+  | grep -oiE 'AQU-[0-9]+' | tr '[:lower:]' '[:upper:]' | sort -u | grep -v "^${bt}$" || true)
 
 if [ -n "$others" ]; then
   echo "[pre-commit] ⚠ branch '$branch' (ticket $bt) already has commits for OTHER tickets:"

@@ -1,9 +1,15 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { bulkUploadSource, type BulkImportCell } from "./bulk-import"
+import * as sourceUpload from "./source-upload"
 
 // Stub syncWorkerHttpOrigin so no VITE env lookup is needed.
 vi.mock("./sync-worker-url", () => ({
   syncWorkerHttpOrigin: () => "https://sync.example",
+}))
+
+// Stub source-upload so rawBytes tests don't need a real worker.
+vi.mock("./source-upload", () => ({
+  uploadSourceOriginal: vi.fn().mockResolvedValue(undefined),
 }))
 
 function makeCell(i: number): BulkImportCell {
@@ -19,6 +25,7 @@ describe("bulkUploadSource", () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+    vi.clearAllMocks()
   })
 
   it("throws if getToken returns null", async () => {
@@ -307,5 +314,52 @@ describe("bulkUploadSource", () => {
 
     expect(bodies.at(-1)?.complete).toBe(true)
     expect(bodies.filter((body) => body.complete)).toHaveLength(1)
+  })
+
+  it("calls uploadSourceOriginal once with correct args when rawBytes is provided", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ accepted: 1, fileId: "f1" }), { status: 200 }),
+    ) as typeof fetch
+
+    const rawBytes = new ArrayBuffer(4)
+    await bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: "test.docx" },
+      cells: [makeCell(0)],
+      rawBytes,
+      rawSourceFormat: "docx",
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+
+    const uploadMock = vi.mocked(sourceUpload.uploadSourceOriginal)
+    expect(uploadMock).toHaveBeenCalledTimes(1)
+    expect(uploadMock).toHaveBeenCalledWith({
+      projectId: "p1",
+      fileId: "f1",
+      bytes: rawBytes,
+      format: "docx",
+      getToken: expect.any(Function),
+    })
+  })
+
+  it("does NOT call uploadSourceOriginal when rawBytes is absent (USFM path)", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ accepted: 1, fileId: "f1" }), { status: 200 }),
+    ) as typeof fetch
+
+    await bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: "test.usfm" },
+      cells: [makeCell(0)],
+      rawSource: "\\id GEN",
+      rawSourceFormat: "usfm",
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+
+    expect(vi.mocked(sourceUpload.uploadSourceOriginal)).not.toHaveBeenCalled()
   })
 })

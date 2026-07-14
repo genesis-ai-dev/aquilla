@@ -13,6 +13,7 @@
 
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { enqueueOutboxEvents } from "./outbox"
+import { uploadSourceOriginal } from "./source-upload"
 
 /** Cells per HTTP request. The worker turns each chunk into bounded multi-row
  *  Postgres inserts, keeping request bodies manageable while still amortizing
@@ -93,11 +94,14 @@ export interface BulkUploadArgs {
   fileId: string
   file: BulkImportFileMeta
   cells: BulkImportCell[]
-  /** Raw bytes of the source file for round-trip-fidelity formats (USFM
-   *  today). Sent with the first chunk so the worker can stash it in
-   *  `file_source_blobs` for export. */
+  /** Raw source text for round-trip-fidelity formats (USFM). Sent with the
+   *  first chunk so the worker can stash it in `file_source_blobs`. */
   rawSource?: string
   rawSourceFormat?: string
+  /** Raw binary bytes for binary formats (DOCX, PPTX). Uploaded to R2 via
+   *  PUT …/files/{fileId}/source after the first chunk lands. Not bundled in
+   *  the JSON payload. */
+  rawBytes?: ArrayBuffer
   /** Mints a sync-token scoped to (projectId, fileId). */
   getToken: (fileId: string) => Promise<string | null>
   /** Fired after each chunk lands — drives the progress UI. */
@@ -253,6 +257,19 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   // The first chunk carries file.create (+ side-car raw source) and must land
   // before the rest so the file row exists. Send it alone.
   await sendChunk(offsets[0], true)
+
+  // After the first chunk lands (file.create projected), upload raw binary
+  // bytes to R2 for DOCX/PPTX round-trip. Runs before subsequent chunks so the
+  // source blob is available as soon as any cell is written.
+  if (args.rawBytes && args.rawSourceFormat) {
+    await uploadSourceOriginal({
+      projectId: args.projectId,
+      fileId: args.fileId,
+      bytes: args.rawBytes,
+      format: args.rawSourceFormat as "docx" | "pptx",
+      getToken: args.getToken,
+    })
+  }
 
   // The remaining chunks are independent genesis source.cell.create batches:
   // the /import endpoint allocates each request's server_seq range atomically,

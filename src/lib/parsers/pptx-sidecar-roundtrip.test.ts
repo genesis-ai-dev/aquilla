@@ -1,14 +1,14 @@
 /**
- * AQU-152: PPTX + DOCX side-car round-trip fidelity tests.
+ * AQU-152: PPTX + DOCX extractor fidelity tests.
  *
- * These tests verify that the raw source bytes captured during import
- * (stored as base64 in `rawSource`) decode back to the exact original
- * binary content. This is a prerequisite for the server-side serializer
- * that will inject translations back into the original ZIP structure.
+ * These tests verify the extractor invariant: bytes fed into extractPptxStrings
+ * / extractDocxStrings after a base64 encode→decode round-trip produce identical
+ * strings and source locations as the original bytes.
  *
- * NOTE: These tests do NOT yet cover server-side injection (AQU-152a/b) —
- * that requires a server-side serializer.  They establish the invariant:
- *   import → base64(rawBytes) → base64Decode → originalBytes ≡ rawBytes
+ * NOTE: Raw source bytes are now uploaded directly to R2 (not stored as base64
+ * in D1). These tests do not exercise that upload path — see
+ * src/lib/sync/bulk-import.test.ts for the rawBytes→R2 coverage.
+ * Server-side injection (AQU-152a/b) is not yet covered here.
  */
 
 import { describe, it, expect } from "vitest"

@@ -42,6 +42,7 @@ import { handleMigrateAudioCopyRequest } from "./events/migrate-audio-copy-route
 import { handleMigrateOrgTeamMapsRequest } from "./events/migrate-org-team-maps-route"
 import { handleMigrateGroupsRequest } from "./events/migrate-groups-route"
 import { handleMigrateUsersReadRequest } from "./events/migrate-users-read-route"
+import { handleSourceUploadRequest } from "./events/source-upload-route"
 import { handleExportSourceRequest } from "./events/export-route"
 import { handleExportBundleRequest } from "./events/export-bundle-route"
 import { handleRebuildProjectionRequest } from "./events/rebuild"
@@ -299,6 +300,8 @@ export default {
     if (migrateGroupsResponse) return migrateGroupsResponse
     const migrateUsersReadResponse = await handleMigrateUsersReadRequest(request, env)
     if (migrateUsersReadResponse) return migrateUsersReadResponse
+    const sourceUploadResponse = await handleSourceUploadRequest(request, env)
+    if (sourceUploadResponse) return sourceUploadResponse
     const exportSourceResponse = await handleExportSourceRequest(request, env)
     if (exportSourceResponse) return exportSourceResponse
     const exportBundleResponse = await handleExportBundleRequest(request, env)

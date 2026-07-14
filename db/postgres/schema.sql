@@ -185,7 +185,13 @@ CREATE TABLE project_settings (
     settings   TEXT NOT NULL DEFAULT '{}',
     version    INTEGER NOT NULL DEFAULT 0,
     updated_at TIMESTAMPTZ DEFAULT now(),
-    updated_by BIGINT
+    updated_by BIGINT,
+    -- Language pair extracted from the settings JSON at write time (0054).
+    -- settings blobs run to multiple MB; reads must use these columns, never
+    -- (settings::jsonb)->>'…' inline (org-dashboard timeout, see
+    -- getOrgPortfolio in auth-worker/src/services/org-permissions.ts).
+    source_language TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'sourceLanguage') STORED,
+    target_language TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'targetLanguage') STORED
 );
 
 CREATE TABLE org_settings (

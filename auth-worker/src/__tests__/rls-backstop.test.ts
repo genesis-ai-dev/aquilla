@@ -45,17 +45,33 @@ const RLS_MIGRATION = readFileSync(
   "utf8",
 )
 
+// 0054 replaces the per-row policy predicate with the set-based
+// app_accessible_project_ids() helper (projects-list timeout fix). Loaded on
+// top of 0034 so both functions are testable side by side.
+const RLS_SET_BASED_MIGRATION = readFileSync(
+  path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../db/postgres/migrations/0054_rls_set_based_policies.sql",
+  ),
+  "utf8",
+)
+
 beforeAll(async () => {
-  // Execute the RLS migration into the shared PGlite.
+  // Execute the RLS migrations into the shared PGlite.
   // PGlite will parse CREATE ROLE (idempotent DO block), GRANT, CREATE POLICY,
   // and ENABLE ROW LEVEL SECURITY.  The DDL succeeds; role-level filtering
-  // is not enforced by PGlite but the SQL function is available.
+  // is not enforced by PGlite but the SQL functions are available.
   try {
     await pg.exec(RLS_MIGRATION)
   } catch (e) {
     // If PGlite rejects a specific clause (e.g. FORCE ROW LEVEL SECURITY or
     // policy syntax), log the error and continue — we still get function tests.
     console.warn("[rls-backstop] RLS migration partial failure (expected on some PGlite versions):", String(e))
+  }
+  try {
+    await pg.exec(RLS_SET_BASED_MIGRATION)
+  } catch (e) {
+    console.warn("[rls-backstop] 0054 migration partial failure:", String(e))
   }
 })
 
@@ -334,5 +350,104 @@ describe("project-scoped query visibility (shim-level, function-based)", () => {
       .bind("proj-settings-rls")
       .first<{ ok: boolean }>()
     expect(outsiderAccess?.ok).toBe(false)
+  })
+})
+
+// ─── 6. app_accessible_project_ids() — set-based policy helper (0054) ─────────
+// The 0054 migration rewrites every RLS policy from a per-row
+// app_user_can_access_project(project_id) call (O(rows × 4 subqueries) — the
+// projects-list timeout) to `project_id IN (SELECT app_accessible_project_ids())`,
+// which the planner evaluates once per statement and hashes. These tests pin
+// the new helper to the exact semantics of the old per-row function.
+
+describe("app_accessible_project_ids() SQL function (0054)", () => {
+  const accessibleIds = async (db: PostgresDb): Promise<string[]> => {
+    const r = await db
+      .prepare("SELECT app_accessible_project_ids() AS id")
+      .all<{ id: string }>()
+    return (r.results ?? []).map((row) => row.id).sort()
+  }
+
+  it("returns projects from all four access paths, once each", async () => {
+    await seedUser(120, "sets-user")
+    await seedUser(220, "sets-other")
+    // Path 1: direct member
+    await seedProject("sets-direct", 220)
+    await seedDirectMember("sets-direct", 120, 400)
+    // Path 2: group grant
+    await pg.query(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (230, 'SetsOrg', 220) ON CONFLICT DO NOTHING",
+    )
+    await pg.query(
+      "INSERT INTO groups (id, org_id, name, created_by) VALUES (330, 230, 'SetsTeam', 220) ON CONFLICT DO NOTHING",
+    )
+    await pg.query(
+      "INSERT INTO group_members (group_id, user_id) VALUES (330, 120) ON CONFLICT DO NOTHING",
+    )
+    await seedProject("sets-group", 220)
+    await pg.query(
+      "INSERT INTO group_project_grants (group_id, project_id, role_level) VALUES (330, 'sets-group', 300) ON CONFLICT DO NOTHING",
+    )
+    // Path 3: org-wide membership
+    await pg.query(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (230, 120, 300, 220) ON CONFLICT DO NOTHING",
+    )
+    await seedProject("sets-org", 220, 230)
+    // Path 4: creator; also a direct member of it → must still appear once
+    await seedProject("sets-created", 120)
+    await seedDirectMember("sets-created", 120, 700)
+    // Foreign project — must NOT appear
+    await seedProject("sets-foreign", 220)
+
+    const ids = await accessibleIds(makeShim().withUser(120))
+    expect(ids).toContain("sets-direct")
+    expect(ids).toContain("sets-group")
+    expect(ids).toContain("sets-org")
+    expect(ids).toContain("sets-created")
+    expect(ids).not.toContain("sets-foreign")
+    // UNION dedupes: creator + direct member on the same project = one row
+    expect(ids.filter((id) => id === "sets-created")).toHaveLength(1)
+  })
+
+  it("agrees with app_user_can_access_project() on every seeded project", async () => {
+    const db = makeShim().withUser(120)
+    const ids = new Set(await accessibleIds(db))
+    const all = await db.prepare("SELECT id FROM projects").all<{ id: string }>()
+    for (const { id } of all.results ?? []) {
+      const r = await db
+        .prepare("SELECT app_user_can_access_project($1) AS ok")
+        .bind(id)
+        .first<{ ok: boolean }>()
+      expect(ids.has(id), `mismatch for project ${id}`).toBe(r?.ok)
+    }
+  })
+
+  it("no identity (bare db) → empty set (fail-closed)", async () => {
+    const ids = await accessibleIds(makeShim())
+    expect(ids).toHaveLength(0)
+  })
+
+  it("asAdmin (uid='') → empty set, same fail-closed shape as the old function", async () => {
+    const ids = await accessibleIds(makeShim().asAdmin())
+    expect(ids).toHaveLength(0)
+  })
+
+  it("0054 policies exist on every RLS table and reference the set-based helper", async () => {
+    const r = await pg.query<{ tablename: string; qual: string }>(
+      `SELECT tablename, pg_get_expr(polqual, polrelid) AS qual
+         FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid
+         JOIN pg_tables t ON t.tablename = c.relname
+        WHERE t.schemaname = 'public'`,
+    )
+    const byTable = new Map(r.rows.map((row) => [row.tablename, row.qual]))
+    for (const table of [
+      "cells", "events", "files", "comments",
+      "cell_validators", "cell_audio", "project_settings", "file_section_progress",
+    ]) {
+      const qual = byTable.get(table)
+      expect(qual, `missing policy on ${table}`).toBeTruthy()
+      expect(qual).toContain("app_accessible_project_ids")
+      expect(qual).not.toContain("app_user_can_access_project")
+    }
   })
 })

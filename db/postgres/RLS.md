@@ -1,7 +1,21 @@
 # Row-Level Security backstop — Aquilla Postgres (AQU-289)
 
-Migration: `db/postgres/migrations/0034_rls_backstop.sql`
+Migrations: `db/postgres/migrations/0034_rls_backstop.sql` (initial),
+`db/postgres/migrations/0054_rls_set_based_policies.sql` (set-based policy rewrite — REQUIRED, see below)
 Shim changes: `db/shim/postgres.ts` — `withUser()` / `asAdmin()`
+
+> **⚠ Performance: apply 0054 wherever 0034 is applied.** The original 0034/0053
+> policies call `app_user_can_access_project(project_id)` per candidate row. The
+> function (CTE + 4 EXISTS) cannot be inlined, so wide scans pay
+> `rows × 4 index probes` — measured 650 ms vs 10 ms at just 300 projects × 40
+> files on the canonical schema. In production this made
+> `GET /api/v2/projects` (which loads file projections for every accessible
+> project in one `IN (...)` query) time out for org members with many projects.
+> 0054 recreates every policy as
+> `USING (project_id IN (SELECT app_accessible_project_ids()))` — the subquery
+> is uncorrelated, so the planner evaluates it once per statement and hashes
+> the result. Semantics (four access paths, fail-closed on missing identity)
+> are unchanged and pinned by `auth-worker/src/__tests__/rls-backstop.test.ts`.
 
 ---
 
@@ -20,7 +34,9 @@ Eight project-scoped tables have RLS enabled:
 | `project_settings` | `rls_project_settings_project_access` |
 | `snapshots` | `rls_snapshots_project_access` |
 
-Every policy calls `app_user_can_access_project(project_id)`, which checks all four membership paths (direct / group / org / creator) using `current_setting('app.user_id', true)`.
+Since 0053, `file_section_progress` is also covered (same policy shape).
+
+As of 0054, every policy uses `project_id IN (SELECT app_accessible_project_ids())` — a set-returning helper that computes the caller's full accessible-project set (all four membership paths: direct / group / org / creator, from `current_setting('app.user_id', true)`) **once per statement**. The original scalar helper `app_user_can_access_project(project_id)` still exists for single-project point checks, but must not be used in policies: as a non-inlinable per-row predicate it turns wide scans into `rows × 4 subqueries` (the cause of the 2026-07 projects-list timeouts).
 
 Tables NOT covered by RLS (intentional):
 - Identity/org tables (`users`, `organizations`, `org_members`, `groups`, …) — they are not project-scoped; callers already gate on user identity at the route level.

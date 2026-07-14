@@ -294,16 +294,20 @@ invites.get("/:token/preview", async (c) => {
     return c.json({ error: "Invite already used", code: "used" }, 410)
   }
 
-  // Pull project rows in one shot.
+  // Pull project rows in one shot (org name included so the JoinPage can say
+  // which workspace the invite belongs to — AQU-471).
   const placeholders = invitesForToken.map(() => "?").join(",")
   const projectRows = await c.env.AQUILLA_PG.prepare(
-    `SELECT id, name, org_id, created_by, archived_at
-       FROM projects WHERE id IN (${placeholders})`,
+    `SELECT p.id, p.name, p.org_id, p.created_by, p.archived_at,
+            o.name AS org_name
+       FROM projects p
+       LEFT JOIN organizations o ON o.id = p.org_id
+      WHERE p.id IN (${placeholders})`,
   )
     .bind(...invitesForToken.map((r) => r.project_id))
-    .all<ProjectRow>()
+    .all<ProjectRow & { org_name: string | null }>()
 
-  const byId = new Map<string, ProjectRow>()
+  const byId = new Map<string, ProjectRow & { org_name: string | null }>()
   for (const p of projectRows.results ?? []) byId.set(p.id, p)
 
   // When re-previewing a used-but-still-a-member link, only surface the rows
@@ -320,16 +324,26 @@ invites.get("/:token/preview", async (c) => {
       return {
         projectId: r.project_id,
         projectName: p.name,
+        orgName: p.org_name ?? null,
         archived: p.archived_at != null,
         usedByCaller: callerMembership.get(r.project_id) === true,
       }
     })
     .filter((x): x is NonNullable<typeof x> => x != null)
 
+  // All rows of a multi-invite are minted together by one inviter; sample the
+  // first (AQU-471: "who invited me").
+  const inviter = await c.env.AQUILLA_PG.prepare(
+    "SELECT COALESCE(display_name, username) AS name FROM users WHERE id = ?",
+  )
+    .bind(first.created_by)
+    .first<{ name: string | null }>()
+
   return c.json({
     token,
     role: { level: first.role_level, name: roleNameFor(first.role_level) },
     expiresAt: first.expires_at,
+    invitedBy: inviter?.name ?? null,
     projects,
   })
 })

@@ -74,6 +74,35 @@ describe("JoinPage inline auth", () => {
     expect(navigate).toHaveBeenCalledWith("/project/p1")
   })
 
+  // AQU-471: the landing page must answer "who invited me, to which workspace"
+  // (Biblica pilot feedback) — not just name the project.
+  it("shows the inviter and workspace when the preview carries them", async () => {
+    vi.mocked(previewServerInvite).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        projectId: "p1",
+        projectName: "Kilisusu NT",
+        orgName: "Come and See",
+        invitedBy: "Prabhu",
+        role: { level: 400, name: "contributor" },
+        expiresAt: null,
+        email: null,
+      },
+    })
+    renderJoin()
+    expect(await screen.findByText("Kilisusu NT")).toBeInTheDocument()
+    expect(screen.getByText(/in Come and See/)).toBeInTheDocument()
+    expect(screen.getByText(/invited by/i)).toBeInTheDocument()
+    expect(screen.getByText("Prabhu")).toBeInTheDocument()
+  })
+
+  it("omits the inviter/workspace lines when the server predates them", async () => {
+    // Default previewServerInvite mock has no invitedBy/orgName fields.
+    renderJoin()
+    expect(await screen.findByText("John")).toBeInTheDocument()
+    expect(screen.queryByText(/invited by/i)).not.toBeInTheDocument()
+  })
+
   it("shows a multi-project preview (N projects) when signed out", async () => {
     vi.mocked(previewMultiInvite).mockResolvedValueOnce({
       ok: true,

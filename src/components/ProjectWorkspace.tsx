@@ -91,6 +91,7 @@ import {
   type TargetPresenceSelection,
 } from "@/lib/sync/presence-store"
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
+import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
@@ -2637,6 +2638,7 @@ export function ProjectWorkspace() {
                 return
               }
               if (!msg.cell || msg.project !== pid) return
+              if (msg.file) invalidateCellHistory(pid, msg.file, msg.cell)
               const ownWrite = isOwnWriteEcho(msg, currentUsername)
               // Validation state has two projections: `cells.validated` drives
               // progress, while `cell_validators` identifies who approved the

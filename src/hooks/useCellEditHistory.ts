@@ -24,6 +24,7 @@ import {
   subscribeToOutbox,
   type OutboxRecord,
 } from "@/lib/sync/outbox"
+import { subscribeToCellHistoryInvalidation } from "@/lib/sync/history-invalidation"
 
 export interface UseCellEditHistoryOptions {
   enabled: boolean
@@ -239,46 +240,33 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, fileId, cellId, enabled, limit])
 
+  // Refresh from durable local changes and exact server event.applied frames.
+  // Both sources share one timer, coalescing an outbox write + its WS echo.
+  // Browser focus/visibility is deliberately not an invalidation source: it
+  // caused duplicate, visibly slow reads every time the user switched apps.
   useEffect(() => {
-    if (typeof window === "undefined") return
-    function onFocus() { void doFetch() }
-    function onVis() {
-      if (typeof document !== "undefined" && document.visibilityState === "visible") {
-        void doFetch()
-      }
-    }
-    window.addEventListener("focus", onFocus)
-    if (typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", onVis)
-    }
-    return () => {
-      window.removeEventListener("focus", onFocus)
-      if (typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", onVis)
-      }
-    }
-  }, [doFetch])
-
-  // Auto-revalidate when the local outbox changes — covers the case where the
-  // user commits/validates/unvalidates this cell from the same window: the
-  // remove-after-flush notification triggers a refetch so the drawer keeps up.
-  // A short debounce coalesces batch writes while keeping a newly durable
-  // local entry effectively immediate. Server entries de-duplicate by id.
-  useEffect(() => {
-    if (!enabledRef.current) return
+    if (!enabledRef.current || !projectId || !fileId || !cellId) return
     let timer: number | null = null
-    const unsubscribe = subscribeToOutbox(() => {
+    const schedule = () => {
       if (timer !== null) window.clearTimeout(timer)
       timer = window.setTimeout(() => {
         timer = null
         void doFetch()
-      }, 50)
-    })
+      }, 75)
+    }
+    const unsubscribeOutbox = subscribeToOutbox(schedule)
+    const unsubscribeServer = subscribeToCellHistoryInvalidation(
+      projectId,
+      fileId,
+      cellId,
+      schedule,
+    )
     return () => {
       if (timer !== null) window.clearTimeout(timer)
-      unsubscribe()
+      unsubscribeOutbox()
+      unsubscribeServer()
     }
-  }, [doFetch, enabled])
+  }, [doFetch, enabled, projectId, fileId, cellId])
 
   const revalidate = useCallback(() => {
     void doFetch()

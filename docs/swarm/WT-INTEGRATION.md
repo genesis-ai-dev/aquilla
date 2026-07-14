@@ -49,6 +49,20 @@ Integration branch: `swarm/wt-integration` (worktree `.worktrees/wt-integration`
   worktree .worktrees/baseline-dev). Gate criterion for this run: no NEW failures vs that baseline.
   NOTE: worker suites need per-package `npm install` in each worktree (root node_modules
   symlink is not enough — hono/jwt etc. resolve from worker-local deps).
+- 2026-07-13: wt/salvage (SSE streaming re-enable) → merged. Gate: tsc + completion tests green.
+- 2026-07-13: wt/phase05-check (deterministic check + drawer, 3 commits) → merged. Gate green (103/103 targeted).
+- 2026-07-13: wt/bulk-import-outbox (13 commits incl. SDBH follow-up; bulk method re-implemented
+  on CellStore) → merged clean. Gate green (90/90 targeted incl. ProjectWorkspace suites).
+- 2026-07-13: wt/docx-r2-roundtrip (15 commits, migration dropped) → merged; one import-union
+  conflict in bulk-import.ts. Gate green (71/71 targeted).
+- 2026-07-13: wt/fro471-remainder (6 commits) → merged clean. Gate green (33/33 targeted +
+  auth-worker 671/671).
+- HELD: wt/magical-kare-rebased — rebase complete and green (99/99 branch tests, workers green,
+  zero new root failures) but NOT merged; awaiting user sequencing decision vs live aqu-538.
+- Wave-2 agent followup adopted into backlog: pre-existing red on dev — import.test.ts +
+  import.language.test.ts assert one /import POST but bulkUploadSource now sends a trailing
+  finalize complete:true POST; fix is to filter to content-bearing uploads (pattern already
+  applied in the kare branch's own import tests).
 
 ## TRACES (open TODOs for next agent/session)
 

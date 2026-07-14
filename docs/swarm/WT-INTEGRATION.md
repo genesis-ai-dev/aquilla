@@ -64,6 +64,22 @@ Integration branch: `swarm/wt-integration` (worktree `.worktrees/wt-integration`
   finalize complete:true POST; fix is to filter to content-bearing uploads (pattern already
   applied in the kare branch's own import tests).
 
+## Review-panel findings (2026-07-13, all MINOR, non-blocking — fix as follow-ups)
+
+1. ProjectWorkspace.tsx ~2236: runCheck lacks a generation/cancel guard — mid-check file
+   switch can setCheckResult with the previous file's result (latent; drawer stays closed).
+2. ProjectWorkspace.tsx ~931: useReconcileOnDrain fires one spurious soft revalidate when
+   switching files while another file has pending commits (cosmetic/perf only).
+3. bulk-import.ts ~264: uploadSourceOriginal (R2 blob PUT) has no retry — transient blip
+   aborts the import mid-way (rerun is idempotent). Old sidecar rode chunk-1's retry loop.
+4. FileTargetImportPanel.tsx ~139: optimistic edits applied before enqueue, not rolled back
+   if enqueue throws; double-click can double-submit; trailing "importing" step is dead code.
+5. ExportDialog.tsx ~83: stale copy — still warns about the removed 512KB import cap.
+6. sync-worker source-upload-route.ts 74-88: PUT /files/:id/source has no size cap and
+   buffers the full body (auth-gated to PROJECT_LEAD; add an R2-appropriate bound).
+7. auth-worker orgs.ts 114-124: AQU-347 still-member check compares BIGINT used_by ===
+   caller.id — string/number width mismatch would break the re-click UX (fails safe).
+
 ## TRACES (open TODOs for next agent/session)
 
 - import-sdbh.ts must call enqueueTargetCommits after #2 lands (verify in review panel).

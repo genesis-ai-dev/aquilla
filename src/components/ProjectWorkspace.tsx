@@ -2230,7 +2230,7 @@ export function ProjectWorkspace() {
     try {
       const result = await runDeterministicCheck({
         fileId: activeFileId,
-        cells,
+        cells: readAtVersion(cellStoreVersion, getActiveCells),
         rules,
         concepts: project?.terminology ?? [],
       })
@@ -2238,7 +2238,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, cells, rules, project?.terminology])
+  }, [activeFileId, checkRunning, cellStoreVersion, getActiveCells, rules, project?.terminology])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {
@@ -3474,7 +3474,8 @@ export function ProjectWorkspace() {
     lens === "audio" ||
     drawerRuleId !== null ||
     recordingCellId !== null ||
-    exportOpen
+    exportOpen ||
+    checkOpen
   const legacyCells = useMemo(
     () => legacyCellsNeeded ? readAtVersion(cellStoreVersion, getActiveCells) : EMPTY_CELL_DATA,
     [cellStoreVersion, getActiveCells, legacyCellsNeeded],
@@ -4543,7 +4544,7 @@ export function ProjectWorkspace() {
               <CheckFindingsDrawer
                 result={checkResult}
                 running={checkRunning}
-                cells={cells}
+                cells={legacyCells}
                 onClose={() => setCheckOpen(false)}
                 onNavigateToCell={jumpToCellId}
                 onOpenComments={(cellId) => {

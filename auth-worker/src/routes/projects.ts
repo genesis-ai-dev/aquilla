@@ -26,11 +26,13 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { JWTService } from "../auth/jwt"
 import {
   INVITE_MIN_ROLE,
   LINK_ROLE_CAP,
   ROLE,
   type AuthUser,
+  type Env,
   type ProjectInviteRow,
   type ProjectRow,
 } from "../types"
@@ -58,6 +60,25 @@ import { sendProjectInviteEmail } from "../services/email"
 import { notifySyncWorkerOfMemberRemoval } from "../services/sync-worker-notify"
 
 const projects = new Hono<AuthHonoEnv>()
+
+/**
+ * FRO-347 follow-up: best-effort caller identity for the (otherwise public)
+ * invite-preview route. Unlike `authMiddleware`, a missing/invalid/expired
+ * token is NOT an error here — it just means "treat this preview as
+ * anonymous", since the route must stay reachable for signed-out visitors
+ * following a share link. Mirrors `optionalCaller` in routes/invites.ts.
+ */
+async function optionalCaller(env: Env, authHeader: string | null): Promise<AuthUser | null> {
+  if (!authHeader) return null
+  const jwtService = new JWTService(env)
+  const token = jwtService.extractTokenFromHeader(authHeader)
+  if (!token) return null
+  const payload = await jwtService.verifyToken(token)
+  if (!payload) return null
+  const now = Math.floor(Date.now() / 1000)
+  if (payload.exp < now) return null
+  return jwtService.getUserByUsername(payload.sub)
+}
 
 function roleNameFor(level: number): string {
   return ROLE_NAMES[level] ?? `level_${level}`
@@ -1074,8 +1095,26 @@ projects.get("/invite-preview/:token", async (c) => {
       return c.json({ error: "Invite expired", code: "time_expired" }, 410)
     }
   }
+  // FRO-347 follow-up: a used link isn't necessarily dead for THIS caller.
+  // If the authenticated caller is the original redeemer (used_by) AND is
+  // still a member of the project, re-clicking the link should read as
+  // "you're already in — continue", not a terminal error: the normal 200
+  // preview lets JoinPage render the ordinary confirm card, and accept-invite
+  // is already an idempotent no-op for a still-member redeemer. Everyone
+  // else (removed redeemer, a different user, anonymous) still gets 410.
   if (invite.used_at) {
-    return c.json({ error: "Invite already used", code: "used" }, 410)
+    const caller = await optionalCaller(c.env, c.req.header("Authorization") ?? null)
+    const callerIsStillMemberRedeemer =
+      caller != null &&
+      invite.used_by === caller.id &&
+      (await c.env.AQUILLA_PG.prepare(
+        `SELECT 1 AS present FROM project_members WHERE project_id = ? AND user_id = ?`,
+      )
+        .bind(invite.project_id, caller.id)
+        .first()) != null
+    if (!callerIsStillMemberRedeemer) {
+      return c.json({ error: "Invite already used", code: "used" }, 410)
+    }
   }
 
   const project = await c.env.AQUILLA_PG.prepare(

@@ -195,4 +195,58 @@ describe("FileTargetImportPanel — optimistic bulk import", () => {
     // Review step should still be visible so user can retry
     expect(screen.getByText(/review matches/i)).toBeInTheDocument()
   })
+
+  // WHY: the optimistic patch renders imported text instantly, but if the
+  // (local) enqueue throws, nothing was actually queued. Leaving the patch in
+  // place shows phantom translations that only a later revalidate would clear.
+  // The failure path must roll the patch back to each cell's pre-import value.
+  it("rolls back the optimistic patch when the enqueue throws", async () => {
+    vi.mocked(applyEBibleTargetImport).mockRejectedValue(new Error("Network timeout"))
+    const applyOptimisticTargetEdits = vi.fn()
+    renderPanel({ applyOptimisticTargetEdits })
+    await selectFile(makeFile(USFM_FIXTURE))
+    await screen.findByText(/review matches/i)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /import 2/i }))
+      await new Promise((r) => setTimeout(r, 0))
+    })
+
+    await waitFor(() => expect(screen.getByText(/network timeout/i)).toBeInTheDocument())
+    // Called twice: once forward (imported text) then once to revert.
+    expect(applyOptimisticTargetEdits).toHaveBeenCalledTimes(2)
+    const forward = applyOptimisticTargetEdits.mock.calls[0][0] as { cellId: string; value: string }[]
+    const rollback = applyOptimisticTargetEdits.mock.calls[1][0] as { cellId: string; value: string }[]
+    // Forward patch carried the imported (non-empty) translations…
+    expect(forward.every((p) => p.value.length > 0)).toBe(true)
+    // …the rollback restored each cell's pre-import value (empty here).
+    expect(rollback.map((p) => p.cellId).sort()).toEqual(forward.map((p) => p.cellId).sort())
+    expect(rollback.every((p) => p.value === "")).toBe(true)
+  })
+
+  // WHY: while a slow enqueue is in flight the Import button must be disabled so
+  // a second click can't re-optimistic-patch and re-enqueue the same cells.
+  it("disables the Import button while an enqueue is in flight (no double-submit)", async () => {
+    let resolveImport!: (v: { committedCount: number; skippedCount: number }) => void
+    vi.mocked(applyEBibleTargetImport).mockReturnValue(
+      new Promise((res) => { resolveImport = res }),
+    )
+    renderPanel()
+    await selectFile(makeFile(USFM_FIXTURE))
+    await screen.findByText(/review matches/i)
+
+    const importBtn = screen.getByRole("button", { name: /import 2/i })
+    await act(async () => { fireEvent.click(importBtn) })
+
+    // The in-flight enqueue leaves exactly one call; the button is now disabled
+    // and a second click is a no-op.
+    expect(importBtn).toBeDisabled()
+    await act(async () => { fireEvent.click(importBtn) })
+    expect(vi.mocked(applyEBibleTargetImport)).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      resolveImport({ committedCount: 2, skippedCount: 0 })
+      await new Promise((r) => setTimeout(r, 0))
+    })
+  })
 })

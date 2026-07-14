@@ -80,7 +80,7 @@ const FORMAT_OPTIONS: FormatOption[] = [
     id: "docx",
     label: "Word (.docx)",
     ext: ".docx",
-    description: "Translations injected back into the original Word document. Paragraph/heading structure is preserved; per-run bold/italic inside translated paragraphs is not preserved. Requires the original file to have been imported after round-trip export support was added (files larger than 512 KB at import may not support this).",
+    description: "Translations injected back into the original Word document. Paragraph/heading structure is preserved; per-run bold/italic inside translated paragraphs is not preserved. Requires the original file to have been imported after round-trip export support was added — files imported before then may lack a stored original (re-import to enable).",
     lossy: false,
   },
   {

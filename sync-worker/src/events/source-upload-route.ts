@@ -17,6 +17,10 @@ import { ROLE } from "./role-policy"
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/source$/
 
+// No documented product limit on original-source size; 50 MB comfortably
+// covers real DOCX/PPTX imports while capping unbounded R2 writes / memory use.
+export const MAX_SOURCE_BYTES = 50 * 1024 * 1024
+
 export interface SourceUploadEnv extends Pick<AudioEnv, "R2_KEY_PREFIX"> {
   SNAPSHOTS: R2Bucket
   AQUILLA_PG?: AquillaDb
@@ -71,9 +75,19 @@ export async function handleSourceUploadRequest(
   const format =
     request.headers.get("X-Source-Format") === "pptx" ? "pptx" : "docx"
 
+  // Reject oversize uploads before buffering the whole body when the client
+  // advertises the size; the post-buffer check below is the backstop.
+  const declaredLength = Number(request.headers.get("Content-Length"))
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_SOURCE_BYTES) {
+    return withCors(new Response("source too large", { status: 413 }), request)
+  }
+
   const body = await request.arrayBuffer()
   if (body.byteLength === 0) {
     return withCors(new Response("empty body", { status: 400 }), request)
+  }
+  if (body.byteLength > MAX_SOURCE_BYTES) {
+    return withCors(new Response("source too large", { status: 413 }), request)
   }
 
   const key = sourceObjectKey(env, projectId, fileId, format)

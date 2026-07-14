@@ -47,7 +47,7 @@ export interface FileTargetImportPanelProps {
   applyOptimisticTargetEdits: (patches: { cellId: string; value: string }[]) => void
 }
 
-type PanelStep = "file" | "sheet" | "mapping" | "review" | "importing"
+type PanelStep = "file" | "sheet" | "mapping" | "review"
 
 const USFM_EXTENSIONS = new Set(["usfm", "sfm", "usf"])
 const SHEET_EXTENSIONS = new Set(["csv", "tsv", "xlsx", "xls"])
@@ -69,6 +69,7 @@ export function FileTargetImportPanel({
   const [matchResult, setMatchResult] = useState<FileTargetMatchResult | null>(null)
   const [matchedByOrder, setMatchedByOrder] = useState(false)
   const [selectedCellIds, setSelectedCellIds] = useState<Set<string>>(new Set())
+  const [applying, setApplying] = useState(false)
 
   const showReview = useCallback((result: FileTargetMatchResult, byOrder: boolean) => {
     setMatchResult(result)
@@ -132,10 +133,14 @@ export function FileTargetImportPanel({
   }
 
   async function handleApply() {
-    if (!matchResult) return
+    // Guard against double-submit: a second click while the enqueue is in
+    // flight would re-optimistic-patch and re-enqueue the same cells.
+    if (!matchResult || applying) return
+    setApplying(true)
     setError(null)
     const selected = matchResult.matched.filter((m) => selectedCellIds.has(m.cellId))
-    // Optimistic: show imported translations in the open editor immediately.
+    // Optimistic: show imported translations in the open editor immediately
+    // (before the local enqueue settles) so the instant-render win is kept.
     applyOptimisticTargetEdits(selected.map((m) => ({ cellId: m.cellId, value: m.incomingText })))
     try {
       // Enqueue to the outbox (fast, local). The flusher drains in the background;
@@ -147,7 +152,13 @@ export function FileTargetImportPanel({
       )
       onImported(committedCount) // closes the dialog — content is already visible + queued
     } catch (err) {
+      // The enqueue failed, so nothing was queued — undo the optimistic patch
+      // instead of leaving phantom translations in the cell store until a later
+      // revalidate. Restore each cell's pre-import value (empty for fresh cells,
+      // the prior translation for conflicts).
+      applyOptimisticTargetEdits(selected.map((m) => ({ cellId: m.cellId, value: m.currentText })))
       setError(err instanceof Error ? err.message : "Import failed")
+      setApplying(false)
     }
   }
 
@@ -314,7 +325,7 @@ export function FileTargetImportPanel({
             <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
             <Button
               size="sm"
-              disabled={selectedCellIds.size === 0}
+              disabled={selectedCellIds.size === 0 || applying}
               onClick={handleApply}
             >
               Import {selectedCellIds.size} cell{selectedCellIds.size !== 1 ? "s" : ""}
@@ -325,11 +336,9 @@ export function FileTargetImportPanel({
     )
   }
 
-  // ── Step: importing ─────────────────────────────────────────────────────────
-  return (
-    <div className="flex flex-col items-center justify-center gap-3 py-8">
-      <p className="text-sm font-medium">Importing…</p>
-      <p className="text-xs text-muted-foreground">Applying translations to "{fileName}".</p>
-    </div>
-  )
+  // No blocking "importing" screen: the optimistic patch means the editor
+  // already shows the result and handleApply calls onImported (closing the
+  // dialog) as soon as the local enqueue accepts. This return only covers
+  // transient/impossible states (e.g. a step with its data not yet set).
+  return null
 }

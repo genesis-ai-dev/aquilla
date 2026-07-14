@@ -295,7 +295,7 @@ function AppTooltip({
 
   return (
     <Tooltip>
-      <TooltipTrigger render={trigger} />
+      <TooltipTrigger render={trigger} delay={delay} />
       <TooltipContent side={side} className={className}>
         {content}
       </TooltipContent>

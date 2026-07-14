@@ -113,8 +113,8 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   await expect(deadlineTrigger).toBeVisible()
   await deadlineTrigger.hover()
   const deadlineTooltip = alice.getByRole("tooltip")
-  await expect(deadlineTooltip).toContainText("Overdue")
-  await expect(deadlineTooltip).toContainText("Due")
+  await expect(deadlineTooltip).toContainText("Overdue", { timeout: 250 })
+  await expect(deadlineTooltip).toContainText("Due", { timeout: 250 })
 
   const organizationsBox = await alice.getByTestId("organizations-panel").boundingBox()
   const projectsBox = await alice.getByTestId("projects-panel").boundingBox()

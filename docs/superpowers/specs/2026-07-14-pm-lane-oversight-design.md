@@ -124,17 +124,23 @@ español    ▓▓░░░░░░ 22%  8%          (avatars)          3d ago 
 - No lane-level org StatTile averages (cross-lane averages remain).
 - No portfolio push/realtime — PM surfaces stay read-on-load like today.
 
-## 5. Sequencing (each independently shippable)
+## 5. Sequencing (each independently shippable) — ALL SHIPPED 2026-07-14
 
-1. **Foundation** — portfolio `lanes[]` + client lane threading + `?lane=` deep link. (server
-   + lib; no visible UI change; unblocks everything)
-2. **ProjectOverview lane table + lane filter pills.** (the per-project PM story)
-3. **OrgHome lane chips + expandable rows + "+ Language" quick action.** (the org PM story)
-4. **StaffLanePopover + matrix tab mount + scope chips.** (people story)
-5. **Assignment lane dimension.** (work-routing story)
+1. **Foundation** ✅ — portfolio `lanes[]` (union-includes registered-but-empty lanes so a
+   just-added language shows a 0% chip immediately), client lane threading, `?lane=` deep link.
+2. **ProjectOverview lane table + lane filter pills** ✅ — per-project lane rows (translated/
+   validated/people/last-activity + Open/Assign/Staff); stat tiles gain lane pills; the per-file
+   drill-down re-reads with `?lane=`.
+3. **OrgHome language grid** ✅ — lane chips column, expandable per-lane sub-rows, per-project
+   "+ Language" quick action (maintainer 600+).
+4. **StaffLanePopover + matrix tab + scope chips** ✅ — one-gesture "add X as reviewer on
+   <lane>"; the previously-dark MembersMatrixView mounted as `/members?tab=matrix` with lane-
+   scope chips.
+5. **Assignment lane dimension** ✅ — migration 0057, `targetLang` on assignment events,
+   AssignModal lane select, lane chips in AssignedToMe/Workload.
 
-Plus the already-agreed creation fix (multi-select target languages in the create dialog),
-which slots in anywhere — it writes the same `targetLanes` registry.
+Plus the creation fix ✅ — the self-contained shape's "Target language(s)" multi-entry writes
+the extra languages into `targetLanes` on create.
 
 ## 6. Open questions for Ryder
 

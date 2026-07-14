@@ -459,19 +459,24 @@ describe("complete", () => {
     expect(out).toBe("café")
   })
 
-  it("frontier: forces non-streaming even when caller requests stream", async () => {
-    // The Frontier worker's SSE proxy currently drops content; until the fix
-    // is deployed the client must fall back to a single-shot JSON request.
-    fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "translated" } }] }))
+  it("frontier: streams when the caller requests stream (workaround removed, Phase 0)", async () => {
+    // The frontier provider used to force stream:false to dodge a chunk-drop
+    // bug in the long-gone chat-worker SSE proxy. The current worker passes
+    // bytes through unmodified, so frontier must stream like any provider —
+    // incremental tokens are the UX (silence reads as broken, spec §8).
+    fetchMock.mockResolvedValueOnce(streamResponse([
+      `data: {"choices":[{"delta":{"content":"trans"}}]}\n\n`,
+      `data: {"choices":[{"delta":{"content":"lated"}}]}\n\ndata: [DONE]\n\n`,
+    ]))
     const pieces: string[] = []
     const out = await complete({
       settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg,
       stream: true, onChunk: (t) => pieces.push(t),
     })
     expect(out).toBe("translated")
-    expect(pieces).toEqual([])
+    expect(pieces).toEqual(["trans", "translated"])
     const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
-    expect(body.stream).toBe(false)
+    expect(body.stream).toBe(true)
   })
 })
 

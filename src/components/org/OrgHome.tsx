@@ -28,6 +28,8 @@ import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import { OrgSetupChecklist } from "./OrgSetupChecklist"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
+import { LaneChips } from "./LaneChips"
+import { displayLanes } from "./project-lanes"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import {
   Select,
@@ -241,7 +243,8 @@ function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, 
 // Kept compact so the Name column survives inside the narrow all-orgs panel.
 // Audio column is 5rem (not 4rem) to fit the "Has Audio" header (AQU-489/490
 // terminology parity) without wrapping.
-const PROJECT_TABLE_COLS = "grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_5rem_5.5rem_6rem]"
+const PROJECT_TABLE_COLS =
+  "grid-cols-[minmax(0,1fr)_minmax(6rem,12rem)_4.5rem_4.5rem_5rem_5.5rem_6rem]"
 
 /**
  * The org/portfolio project list as a compact table — one row per project with
@@ -272,19 +275,22 @@ function ProjectTable({
   now,
   showOrg,
   roleByProjectId,
+  defaultLaneLabelByProjectId,
 }: {
   projects: PortfolioProjectRow[]
   now: number
   showOrg: boolean
   roleByProjectId?: Map<string, CloudProjectSummary["role"]>
+  defaultLaneLabelByProjectId?: Map<string, string>
 }) {
   return (
     <div className="overflow-x-auto">
-      <div className="min-w-[39rem]">
+      <div className="min-w-[46rem]">
         <div
           className={`grid ${PROJECT_TABLE_COLS} gap-x-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground`}
         >
           <span>Name</span>
+          <span>Languages</span>
           <AppTooltip content="Percentage of cells with target-language content filled in.">
             <span className="whitespace-nowrap text-right">Translated</span>
           </AppTooltip>
@@ -319,6 +325,15 @@ function ProjectTable({
                     </Badge>
                   )}
                   <ProjectDeadlineStatuses deadline={dstatus} className="shrink-0" />
+                </span>
+
+                <span className="flex min-w-0 items-center">
+                  <LaneChips
+                    projectId={p.id}
+                    lanes={displayLanes(p)}
+                    defaultLaneLabel={defaultLaneLabelByProjectId?.get(p.id) ?? ""}
+                    maxVisible={2}
+                  />
                 </span>
 
                 <span className="text-right font-medium tabular-nums text-foreground" aria-label={`${tpct}% translated`}>
@@ -425,6 +440,9 @@ export function OrgHome() {
   const [orgQuery, setOrgQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [projectLens, setProjectLens] = useState<ProjectLens>(readProjectLens)
+  // AQU-538 §3.2: bumped after a lane action (add language / assign / staff) to
+  // refetch the portfolio so per-lane rollups reflect the change.
+  const [refreshTick, setRefreshTick] = useState(0)
 
   useEffect(() => {
     if (!jwt) {
@@ -501,7 +519,7 @@ export function OrgHome() {
         if (!cancelled) setLoading(false)
       })
     return () => { cancelled = true }
-  }, [jwt, activeOrgId, activeOrg?.name, isAllOrgs, orgLoading, orgs])
+  }, [jwt, activeOrgId, activeOrg?.name, isAllOrgs, orgLoading, orgs, refreshTick])
 
   // AQU-335: surface cross-org grants on the Projects page too — otherwise a user
   // whose only project arrived via an invite link sees an empty dashboard.
@@ -586,6 +604,23 @@ export function OrgHome() {
     isAllOrgs ? "all-orgs" : "active-org",
   ).sharedWithMe
   const roleByProjectId = new Map(accessibleProjects.map((project) => [project.id, project.role]))
+  // AQU-538 §3.2: the '' (default) lane chip is labeled with the project's
+  // target language. The accessible-projects feed joins per-file language hints;
+  // take the first non-empty target language as the project's default. Absent →
+  // the chip falls back to a generic "Default" label (see laneChipLabel).
+  const defaultLaneLabelByProjectId = new Map(
+    accessibleProjects.map((project) => [
+      project.id,
+      project.files?.find((f) => f.targetLanguage)?.targetLanguage ?? "",
+    ]),
+  )
+  // AQU-538 §3.2: files per project, for the lane sub-row "Assign…" (books scope).
+  const filesByProjectId = new Map(
+    accessibleProjects.map((project) => [
+      project.id,
+      (project.files ?? []).map((f) => ({ id: f.id, name: f.name })),
+    ]),
+  )
 
   const orgSummaries: OrgPortfolioSummary[] = orgs
     .map((org) => {
@@ -902,7 +937,13 @@ export function OrgHome() {
                           title={projectQuery ? "No matching projects." : currentProjectLens.empty}
                         />
                       ) : (
-                        <ProjectTable projects={visible} now={now} showOrg roleByProjectId={roleByProjectId} />
+                        <ProjectTable
+                          projects={visible}
+                          now={now}
+                          showOrg
+                          roleByProjectId={roleByProjectId}
+                          defaultLaneLabelByProjectId={defaultLaneLabelByProjectId}
+                        />
                       )}
                     </section>
                   </div>
@@ -974,6 +1015,13 @@ export function OrgHome() {
                         projects={statusFilteredProjects}
                         now={now}
                         roleByProjectId={roleByProjectId}
+                        defaultLaneLabelByProjectId={defaultLaneLabelByProjectId}
+                        filesByProjectId={filesByProjectId}
+                        orgId={activeOrgId}
+                        jwt={jwt}
+                        author={session?.username}
+                        allowSelfAssignment={orgSettings.allowSelfAssignment}
+                        onLanesChanged={() => setRefreshTick((t) => t + 1)}
                         initialLens={projectLens}
                         emptyTitle={
                           statusFilter === "stalled"

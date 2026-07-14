@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
-import { OrgHome, activityStatus } from "./OrgHome"
+import { OrgHome, ProjectTable, activityStatus } from "./OrgHome"
 import type { PortfolioProject } from "@/lib/frontier/portfolio"
 
 function projectsRollupStat() {
@@ -127,6 +127,64 @@ beforeEach(async () => {
   canEditRosterProgressFloorMock.mockImplementation((level: number | null | undefined) => (level ?? 0) >= 700)
 })
 afterEach(() => vi.restoreAllMocks())
+
+describe("ProjectTable", () => {
+  const project: PortfolioProject & { orgName: string } = {
+    id: "long-project",
+    name: "A project name that must remain readable beside its organization",
+    orgName: "Come and See Foundation International",
+    totalCells: 100,
+    filledCells: 40,
+    validatedCells: 20,
+    aiDraftedCells: 0,
+    lastEditAt: Date.now(),
+    audioCells: 10,
+    validatedAudioCells: 0,
+    recordedMs: 0,
+    deadlineAt: "2020-01-01",
+    sourceLanguage: null,
+    targetLanguage: null,
+  }
+
+  it("keeps the organization as a secondary badge that yields to the project name", () => {
+    render(
+      <MemoryRouter>
+        <ProjectTable projects={[project]} now={Date.now()} showOrg />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText("Organization")).toBeInTheDocument()
+    const identity = screen.getByTestId("project-table-identity")
+    const projectName = screen.getByTestId("project-table-name")
+    const organization = screen.getByTestId("project-table-organization")
+    const metadata = screen.getByTestId("project-table-metadata")
+    const deadlineStatus = screen.getByTestId("project-table-deadline-status")
+    expect(projectName).toHaveTextContent(project.name)
+    expect(organization).toHaveTextContent(project.orgName)
+    expect(identity).toContainElement(projectName)
+    expect(identity).toContainElement(organization)
+    expect(projectName).not.toHaveAttribute("data-slot", "tooltip-trigger")
+    expect(organization).not.toHaveAttribute("data-slot", "tooltip-trigger")
+    expect(identity).toHaveClass("grid-cols-[minmax(7rem,1fr)_minmax(6rem,10rem)]")
+    expect(organization).toHaveClass("relative", "max-w-40")
+    expect(organization).toHaveAttribute("data-org-name", project.orgName)
+    expect(metadata).toContainElement(deadlineStatus)
+    expect(organization).not.toContainElement(deadlineStatus)
+    expect(screen.getByTestId("project-table")).toHaveClass("overflow-hidden")
+    expect(screen.getByTestId("project-table")).not.toHaveClass("overflow-x-auto")
+  })
+
+  it("omits the redundant organization column in a single-organization view", () => {
+    render(
+      <MemoryRouter>
+        <ProjectTable projects={[project]} now={Date.now()} showOrg={false} />
+      </MemoryRouter>,
+    )
+
+    expect(screen.queryByTestId("project-table-organization")).not.toBeInTheDocument()
+    expect(screen.getByTestId("project-table-name")).toHaveTextContent(project.name)
+  })
+})
 
 describe("OrgHome", () => {
   it("renders the org name, nav, and admin links for an owner", async () => {

@@ -1,5 +1,7 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { ensureAuthState } from "../../helpers/auth"
+import { createOrg } from "../../helpers/frontier-api"
 
 /**
  * Org overview (OrgHome at "/").
@@ -44,4 +46,45 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
 
   // 5. The new project's card is visible.
   await expect(alice.getByText(name).first()).toBeVisible({ timeout: 5_000 })
+
+  // 6. In the all-organizations table, the org remains a compact secondary
+  // badge beside the project name. It must not become a separate rigid column
+  // or squeeze the project name down to one or two characters.
+  const aliceSession = await ensureAuthState("alice")
+  await createOrg(aliceSession.jwt, `A second organization with a long name ${Date.now()}`)
+  await alice.goto("/?org=all")
+  await alice.waitForLoadState("networkidle")
+
+  const projectRow = alice.locator(`[data-project-id]`).filter({ hasText: name }).first()
+  await expect(projectRow).toBeVisible({ timeout: 10_000 })
+  const projectName = projectRow.getByTestId("project-table-name")
+  const organization = projectRow.getByTestId("project-table-organization")
+  await expect(projectName).toHaveText(name)
+  await expect(organization).not.toBeEmpty()
+  const organizationName = await organization.getAttribute("data-org-name")
+  expect(organizationName).toBeTruthy()
+  const projectNameBox = await projectName.boundingBox()
+  const organizationBox = await organization.boundingBox()
+  expect(projectNameBox).not.toBeNull()
+  expect(organizationBox).not.toBeNull()
+  expect(projectNameBox!.width).toBeGreaterThanOrEqual(96)
+  expect(organizationBox!.width).toBeLessThanOrEqual(160)
+
+  await organization.hover()
+  await expect(alice.getByRole("tooltip")).toHaveCount(0)
+  const organizationHeader = alice.getByText("Organization", { exact: true })
+  await expect(organizationHeader).toBeVisible()
+  const organizationHeaderBox = await organizationHeader.boundingBox()
+  expect(organizationHeaderBox).not.toBeNull()
+  expect(Math.abs(organizationHeaderBox!.x + organizationHeaderBox!.width - (organizationBox!.x + organizationBox!.width))).toBeLessThan(16)
+  const organizationsBox = await alice.getByTestId("organizations-panel").boundingBox()
+  const projectsBox = await alice.getByTestId("projects-panel").boundingBox()
+  expect(organizationsBox).not.toBeNull()
+  expect(projectsBox).not.toBeNull()
+  expect(Math.abs(projectsBox!.y - organizationsBox!.y)).toBeLessThan(2)
+  expect(projectsBox!.x).toBeGreaterThan(organizationsBox!.x + organizationsBox!.width)
+  const tableFits = await alice.getByTestId("project-table").evaluate(
+    (element) => element.scrollWidth <= element.clientWidth,
+  )
+  expect(tableFits).toBe(true)
 })

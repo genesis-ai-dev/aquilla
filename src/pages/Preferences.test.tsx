@@ -1,9 +1,8 @@
 import { describe, it, expect, afterEach, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { ThemeModeProvider } from "@/branding/ThemeMode"
-import { ColorThemeProvider } from "@/branding/ColorTheme"
 import { Preferences } from "./Preferences"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -21,20 +20,22 @@ vi.mock("@/components/settings/PersonalProviderSection", () => ({
   PersonalProviderSection: () => <div>provider section</div>,
 }))
 
-afterEach(() => vi.clearAllMocks())
+afterEach(() => {
+  vi.clearAllMocks()
+  window.localStorage.clear()
+  document.documentElement.classList.remove("dark")
+})
 
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <ThemeModeProvider>
-        <ColorThemeProvider>
-          <OrgProvider>
-            <Routes>
-              <Route path="/preferences" element={<Preferences />} />
-              <Route path="/preferences/:section" element={<Preferences />} />
-            </Routes>
-          </OrgProvider>
-        </ColorThemeProvider>
+        <OrgProvider>
+          <Routes>
+            <Route path="/preferences" element={<Preferences />} />
+            <Route path="/preferences/:section" element={<Preferences />} />
+          </Routes>
+        </OrgProvider>
       </ThemeModeProvider>
     </MemoryRouter>,
   )
@@ -81,5 +82,13 @@ describe("Preferences", () => {
   it("renders the Appearance controls on their detail route", () => {
     renderAt("/preferences/appearance")
     expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "System" })).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByRole("tab", { name: "Light" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Dark" })).toBeInTheDocument()
+    expect(screen.queryByText("Accent color")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("tab", { name: "Dark" }))
+    expect(window.localStorage.getItem("codex-theme")).toBe("dark")
+    expect(document.documentElement).toHaveClass("dark")
   })
 })

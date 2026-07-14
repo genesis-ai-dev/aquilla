@@ -243,12 +243,14 @@ function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, 
 // date columns stay fixed and reveal at wider container widths. In all-orgs
 // mode the organization remains a compact secondary badge inside the identity
 // cell. Column count by breakpoint: 4 (identity, languages, translated,
-// validated) → +audio @xl → +role @2xl → +updated @3xl.
+// validated) → +audio @2xl → +role @3xl → +updated @4xl. Each reveal point
+// leaves enough room for the declared minimum tracks plus gaps and padding;
+// @xl (36rem) was too early for the 37.5rem five-column minimum.
 const PROJECT_TABLE_COLS = [
   "grid-cols-[minmax(11rem,2fr)_minmax(4.5rem,1.2fr)_minmax(4.5rem,1fr)_minmax(4.5rem,1fr)]",
-  "@xl/project-table:grid-cols-[minmax(14rem,2.5fr)_minmax(5rem,1.2fr)_repeat(3,minmax(4.5rem,1fr))]",
-  "@2xl/project-table:grid-cols-[minmax(14rem,2.5fr)_minmax(5rem,1.2fr)_repeat(3,minmax(4.5rem,1fr))_minmax(5.5rem,1fr)]",
-  "@3xl/project-table:grid-cols-[minmax(14rem,2.5fr)_minmax(5rem,1.2fr)_repeat(3,minmax(4.5rem,1fr))_minmax(5.5rem,1fr)_minmax(6rem,1fr)]",
+  "@2xl/project-table:grid-cols-[minmax(14rem,2.5fr)_minmax(5rem,1.2fr)_repeat(3,minmax(4.5rem,1fr))]",
+  "@3xl/project-table:grid-cols-[minmax(14rem,2.5fr)_minmax(5rem,1.2fr)_repeat(3,minmax(4.5rem,1fr))_minmax(5.5rem,1fr)]",
+  "@4xl/project-table:grid-cols-[minmax(14rem,2.5fr)_minmax(5rem,1.2fr)_repeat(3,minmax(4.5rem,1fr))_minmax(5.5rem,1fr)_minmax(6rem,1fr)]",
 ].join(" ")
 
 /**
@@ -313,10 +315,10 @@ export function ProjectTable({
             <span className="whitespace-nowrap text-right">Validated</span>
           </AppTooltip>
           <AppTooltip content="Percentage of cells that have at least one audio recording attached. This is coverage, not validation — audio-specific validation isn't tracked yet (see AQU-490).">
-            <span className="hidden whitespace-nowrap text-right @xl/project-table:block">Has Audio</span>
+            <span className="hidden whitespace-nowrap text-right @2xl/project-table:block">Has Audio</span>
           </AppTooltip>
-          <span className="hidden whitespace-nowrap text-right @2xl/project-table:block">Role</span>
-          <span className="hidden whitespace-nowrap text-right @3xl/project-table:block">Updated</span>
+          <span className="hidden whitespace-nowrap text-right @3xl/project-table:block">Role</span>
+          <span className="hidden whitespace-nowrap text-right @4xl/project-table:block">Updated</span>
         </div>
         <div className="divide-y">
           {projects.map((p) => {
@@ -409,14 +411,14 @@ export function ProjectTable({
                 <span className="text-right tabular-nums text-muted-foreground" aria-label={`${pct}% validated`}>
                   {pct}%
                 </span>
-                <span className="hidden text-right tabular-nums text-muted-foreground @xl/project-table:block" aria-label={`${apct}% audio`}>
+                <span className="hidden text-right tabular-nums text-muted-foreground @2xl/project-table:block" aria-label={`${apct}% audio`}>
                   {apct}%
                 </span>
-                <span className="hidden truncate text-right text-xs text-muted-foreground @2xl/project-table:block">
+                <span className="hidden truncate text-right text-xs text-muted-foreground @3xl/project-table:block">
                   {role?.name ? <RoleLabel name={role.name} /> : "—"}
                 </span>
                 <span
-                  className={`hidden truncate text-right text-xs @3xl/project-table:block ${
+                  className={`hidden truncate text-right text-xs @4xl/project-table:block ${
                     status === "stalled" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
                   }`}
                 >

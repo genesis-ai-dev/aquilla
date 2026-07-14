@@ -3724,14 +3724,14 @@ function EditorRow({
     </span>
   )
 
-  // ── Hover / focus / tap state for the floating action rail ───────────────
-  // Three input sources OR'd together: row hover, focus-within, tap-selected
-  // (touch). Hover-leave has a 120ms grace period to prevent flicker as the
-  // cursor grazes adjacent rows.
+  // ── Hover / focus state for the floating action rail ─────────────────────
+  // Browser focus is exclusive, as is the pointer's hovered row. Deriving
+  // visibility only from those two sources guarantees one rail normally and
+  // at most two while a focused editor remains active and another row is
+  // hovered. Do not add a per-row sticky selection latch here: visited rows
+  // would accumulate visible rails.
   const [isHovering, setIsHovering] = useState(false)
   const [hasFocusWithin, setHasFocusWithin] = useState(false)
-  const [isTapSelected, setIsTapSelected] = useState(false)
-  const hoverLeaveTimerRef = useRef<number | null>(null)
   // AQU-354: does a rail control specifically hold focus? Used to pin the rail
   // open (an in-progress interaction must never be idle-collapsed).
   const [railHasFocus, setRailHasFocus] = useState(false)
@@ -3822,7 +3822,7 @@ function EditorRow({
   // were editing" conflict banner (whose Discard button sits under the rail).
   // Pins (expansion open, a rail control focused, a rail popover open) keep the
   // rail visible so an in-progress interaction is never yanked away.
-  const railRevealTriggered = isHovering || hasFocusWithin || isTapSelected
+  const railRevealTriggered = isHovering || hasFocusWithin
   const railPinned = expanded || railHasFocus || showMicDeniedHelp || showGenerateConfirm
   const { revealed: railRevealed, registerActivity: registerRailActivity } = useRailIdleHide({
     revealTriggered: railRevealTriggered,
@@ -3871,20 +3871,14 @@ function EditorRow({
 
   // Stable rail handlers
   const handleRowMouseEnter = () => {
-    if (hoverLeaveTimerRef.current !== null) {
-      window.clearTimeout(hoverLeaveTimerRef.current)
-      hoverLeaveTimerRef.current = null
-    }
     setIsHovering(true)
     // AQU-354: a fresh hover re-summons the rail if it had idle-collapsed.
     registerRailActivity()
   }
   const handleRowMouseLeave = () => {
-    if (hoverLeaveTimerRef.current !== null) window.clearTimeout(hoverLeaveTimerRef.current)
-    hoverLeaveTimerRef.current = window.setTimeout(() => {
-      setIsHovering(false)
-      hoverLeaveTimerRef.current = null
-    }, 120)
+    // Clear immediately. A grace timer lets the previous hovered row overlap
+    // the next one, producing three rails when an editor is also focused.
+    setIsHovering(false)
   }
   const handleRowFocusCapture = () => {
     setHasFocusWithin(true)
@@ -3913,8 +3907,8 @@ function EditorRow({
     // Plain click clears any active multi-selection so the next interaction
     // doesn't surprise the user with a stale bulk action target.
     clearSelection()
-    setIsTapSelected((p) => !p)
-    // AQU-354: a tap re-summons the rail if it had idle-collapsed.
+    // The row is focusable (`tabIndex={0}`), so mouse/touch activation is
+    // represented by the same exclusive focus state as keyboard activation.
     registerRailActivity()
   }
 

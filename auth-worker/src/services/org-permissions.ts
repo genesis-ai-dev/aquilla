@@ -826,7 +826,7 @@ function mapPortfolioRow(r: PortfolioDbRow): PortfolioRow {
 export async function getOrgPortfolio(env: Env, orgId: number): Promise<PortfolioRow[]> {
   // Perf (dashboard 15s timeout fix):
   //  - The AQU-523 language pair reads the STORED generated columns on
-  //    project_settings (migration 0036) — never (settings::jsonb)->>'…'
+  //    project_settings (migration 0054) — never (settings::jsonb)->>'…'
   //    inline: settings blobs run to ~6 MB and the inline extraction
   //    re-parsed that JSON on every file-fan-out row (~100x per project).
   //  - au: the previous 3 correlated cell_audio subqueries re-scanned and

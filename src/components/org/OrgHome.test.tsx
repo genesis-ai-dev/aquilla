@@ -146,7 +146,7 @@ describe("ProjectTable", () => {
     targetLanguage: null,
   }
 
-  it("keeps the organization as a secondary badge that yields to the project name", () => {
+  it("keeps the organization secondary while preserving project identity and activity", () => {
     render(
       <MemoryRouter>
         <ProjectTable projects={[project]} now={Date.now()} showOrg />
@@ -156,22 +156,31 @@ describe("ProjectTable", () => {
     expect(screen.getByText("Organization")).toBeInTheDocument()
     const identity = screen.getByTestId("project-table-identity")
     const projectName = screen.getByTestId("project-table-name")
+    const expandedProjectName = screen.getByTestId("project-table-name-expanded")
     const organization = screen.getByTestId("project-table-organization")
     const metadata = screen.getByTestId("project-table-metadata")
+    const activity = screen.getByTestId("project-table-activity")
     const deadlineStatus = screen.getByTestId("project-table-deadline-status")
     expect(projectName).toHaveTextContent(project.name)
     expect(organization).toHaveTextContent(project.orgName)
     expect(identity).toContainElement(projectName)
     expect(identity).toContainElement(organization)
     expect(projectName).not.toHaveAttribute("data-slot", "tooltip-trigger")
+    expect(expandedProjectName).toHaveTextContent(project.name)
+    expect(expandedProjectName).toHaveAttribute("aria-hidden", "true")
     expect(organization).not.toHaveAttribute("data-slot", "tooltip-trigger")
-    expect(identity).toHaveClass("grid-cols-[minmax(7rem,1fr)_minmax(6rem,10rem)]")
+    expect(identity).toHaveClass("@lg/project-table:grid-cols-[minmax(6rem,1fr)_minmax(4rem,6rem)]")
     expect(organization).toHaveClass("relative", "max-w-40")
     expect(organization).toHaveAttribute("data-org-name", project.orgName)
+    expect(activity).toHaveTextContent(/^Updated /)
     expect(metadata).toContainElement(deadlineStatus)
     expect(organization).not.toContainElement(deadlineStatus)
     expect(screen.getByTestId("project-table")).toHaveClass("overflow-hidden")
     expect(screen.getByTestId("project-table")).not.toHaveClass("overflow-x-auto")
+    expect(screen.getByText("Languages")).toBeInTheDocument()
+    expect(screen.getByText("Has Audio")).toBeInTheDocument()
+    expect(screen.queryByText("Role")).not.toBeInTheDocument()
+    expect(screen.queryByText("Updated", { exact: true })).not.toBeInTheDocument()
   })
 
   it("omits the redundant organization column in a single-organization view", () => {

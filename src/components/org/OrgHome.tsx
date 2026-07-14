@@ -221,6 +221,12 @@ function formatShortDate(value: number | null): string {
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(value))
 }
 
+function projectActivityLabel(project: PortfolioProjectRow, status: ActivityStatus): string {
+  if (status === "not-started") return "Not started"
+  if (status === "stalled") return "Stalled"
+  return project.lastEditAt == null ? "No recent activity" : `Updated ${formatShortDate(project.lastEditAt)}`
+}
+
 function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, now: number): PortfolioProjectRow[] {
   return [...projects].sort((a, b) => {
     switch (lens) {
@@ -238,27 +244,22 @@ function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, 
   })
 }
 
-// Shared column template keeps headers and data aligned. The identity cell is
-// flexible; the Languages column (AQU-538 lane chips) sits beside it; metric/
-// date columns stay fixed and reveal at wider container widths. In all-orgs
-// mode the organization remains a compact secondary badge inside the identity
-// cell. Column count by breakpoint: 4 (identity, languages, translated,
-// validated) → +audio @2xl → +role @3xl → +updated @4xl. Each reveal point
-// leaves enough room for the declared minimum tracks plus gaps and padding;
-// @xl (36rem) was too early for the 37.5rem five-column minimum.
+// Keep the decision-making columns stable at normal project-panel widths.
+// Organization remains secondary information inside the identity cell, while
+// activity moves below the project name instead of consuming another column.
+// Compact panels retain identity + the two core text metrics; Languages and
+// Has Audio appear together once the container can support the full table.
 const PROJECT_TABLE_COLS = [
-  "grid-cols-[minmax(11rem,2fr)_minmax(4.5rem,1.2fr)_minmax(4.5rem,1fr)_minmax(4.5rem,1fr)]",
-  "@2xl/project-table:grid-cols-[minmax(14rem,2.5fr)_minmax(5rem,1.2fr)_repeat(3,minmax(4.5rem,1fr))]",
-  "@3xl/project-table:grid-cols-[minmax(14rem,2.5fr)_minmax(5rem,1.2fr)_repeat(3,minmax(4.5rem,1fr))_minmax(5.5rem,1fr)]",
-  "@4xl/project-table:grid-cols-[minmax(14rem,2.5fr)_minmax(5rem,1.2fr)_repeat(3,minmax(4.5rem,1fr))_minmax(5.5rem,1fr)_minmax(6rem,1fr)]",
+  "grid-cols-[minmax(10rem,2fr)_repeat(2,minmax(4.75rem,1fr))]",
+  "@lg/project-table:grid-cols-[minmax(0,2.8fr)_minmax(5.5rem,1.25fr)_repeat(3,minmax(4.25rem,1fr))]",
 ].join(" ")
 
 /**
  * The org/portfolio project list as a compact table — one row per project with
- * aligned Translated / Validated / Has Audio / Updated columns — instead of a
+ * aligned Languages / Translated / Validated / Has Audio columns — instead of a
  * stack of full-width progress-bar cards. Rows stay `<Link>`s so cmd-click
- * still opens a project in a new tab. Wrapped in `overflow-x-auto` so the
- * fixed columns can scroll rather than squash on a narrow viewport.
+ * still opens a project in a new tab. Activity and deadline context live below
+ * the project name, where they remain useful without taking a rigid column.
  *
  * AQU-489: column headers ARE the visible label for each number (no hover
  * required to identify what a figure means); the header tooltips below are
@@ -281,13 +282,11 @@ export function ProjectTable({
   projects,
   now,
   showOrg,
-  roleByProjectId,
   defaultLaneLabelByProjectId,
 }: {
   projects: PortfolioProjectRow[]
   now: number
   showOrg: boolean
-  roleByProjectId?: Map<string, CloudProjectSummary["role"]>
   defaultLaneLabelByProjectId?: Map<string, string>
 }) {
   return (
@@ -300,14 +299,14 @@ export function ProjectTable({
           <span
             className={cn(
               "min-w-0",
-              showOrg && "grid grid-cols-[minmax(7rem,1fr)_minmax(6rem,10rem)] gap-x-3",
+              showOrg && "@lg/project-table:grid @lg/project-table:grid-cols-[minmax(6rem,1fr)_minmax(4rem,6rem)] @lg/project-table:gap-x-3",
             )}
           >
-            <span>{showOrg ? "Project" : "Name"}</span>
-            {showOrg && <span className="text-right">Organization</span>}
+            <span>Name</span>
+            {showOrg && <span className="hidden text-right @lg/project-table:block">Organization</span>}
           </span>
           {/* AQU-538: lane chips column (see the LaneChips cell in each row). */}
-          <span>Languages</span>
+          <span className="hidden @lg/project-table:block">Languages</span>
           <AppTooltip content="Percentage of cells with target-language content filled in.">
             <span className="whitespace-nowrap text-right">Translated</span>
           </AppTooltip>
@@ -315,43 +314,53 @@ export function ProjectTable({
             <span className="whitespace-nowrap text-right">Validated</span>
           </AppTooltip>
           <AppTooltip content="Percentage of cells that have at least one audio recording attached. This is coverage, not validation — audio-specific validation isn't tracked yet (see AQU-490).">
-            <span className="hidden whitespace-nowrap text-right @2xl/project-table:block">Has Audio</span>
+            <span className="hidden whitespace-nowrap text-right @lg/project-table:block">Has Audio</span>
           </AppTooltip>
-          <span className="hidden whitespace-nowrap text-right @3xl/project-table:block">Role</span>
-          <span className="hidden whitespace-nowrap text-right @4xl/project-table:block">Updated</span>
         </div>
         <div className="divide-y">
           {projects.map((p) => {
             const tpct = Math.round(translatedPct(p) * 100)
             const pct = Math.round(validatedPct(p) * 100)
             const apct = Math.round(audioPct(p) * 100)
-            const role = roleByProjectId?.get(p.id)
             const status = activityStatus(p, now)
             const dstatus = deadlineStatus(p, now)
+            const activityLabel = projectActivityLabel(p, status)
             return (
               <Link
                 key={p.id}
                 to={`/projects/${p.id}`}
                 data-project-id={p.id}
-                className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-3 px-4 py-2.5 text-sm transition-colors hover:bg-muted/50`}
+                className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-3 overflow-hidden px-4 py-2.5 text-sm transition-colors hover:bg-muted/50`}
               >
                 <span
                   data-testid="project-table-identity"
                   className={cn(
                     "min-w-0",
                     showOrg && p.orgName
-                      ? "grid grid-cols-[minmax(7rem,1fr)_minmax(6rem,10rem)] items-start gap-x-3"
+                      ? "@lg/project-table:grid @lg/project-table:grid-cols-[minmax(6rem,1fr)_minmax(4rem,6rem)] @lg/project-table:items-start @lg/project-table:gap-x-3"
                       : "flex items-start",
                   )}
                 >
                   <span className="flex min-w-0 flex-1 flex-col">
-                    <span data-testid="project-table-name" className="min-w-0 truncate font-medium">
-                      {p.name}
+                    <span className="group/name relative min-w-0">
+                      <span
+                        data-testid="project-table-name"
+                        className="block min-w-0 truncate font-medium transition-opacity duration-100 group-hover/name:opacity-0"
+                      >
+                        {p.name}
+                      </span>
+                      <span
+                        aria-hidden="true"
+                        data-testid="project-table-name-expanded"
+                        className="pointer-events-none absolute top-0 left-0 z-10 origin-left scale-x-95 whitespace-nowrap rounded-sm bg-popover px-1 font-medium text-popover-foreground opacity-0 shadow-sm transition-[opacity,transform] duration-150 group-hover/name:scale-x-100 group-hover/name:opacity-100"
+                      >
+                        {p.name}
+                      </span>
                     </span>
                     {/* AQU-523: source → target language pair beneath the name, so
                         the org / all-orgs list shows it at a glance (matching the
                         single-project overview). Rendered only when known. */}
-                    {(languagePairLabel(p) || dstatus) && (
+                    {(languagePairLabel(p) || dstatus || activityLabel) && (
                       <span
                         data-testid="project-table-metadata"
                         className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
@@ -361,6 +370,13 @@ export function ProjectTable({
                             {languagePairLabel(p)}
                           </span>
                         )}
+                        {languagePairLabel(p) && <span aria-hidden="true">·</span>}
+                        <span
+                          data-testid="project-table-activity"
+                          className={cn(status === "stalled" && "text-amber-600 dark:text-amber-400")}
+                        >
+                          {activityLabel}
+                        </span>
                         <ProjectDeadlineStatuses
                           deadline={dstatus}
                           className="shrink-0"
@@ -370,7 +386,7 @@ export function ProjectTable({
                     )}
                   </span>
                   {showOrg && p.orgName && (
-                    <span className="flex min-w-0 items-center justify-end">
+                    <span className="hidden min-w-0 items-center justify-end @lg/project-table:flex">
                       <span
                         data-testid="project-table-organization"
                         data-org-name={p.orgName}
@@ -396,7 +412,7 @@ export function ProjectTable({
                   )}
                 </span>
 
-                <span className="flex min-w-0 items-center">
+                <span className="hidden min-w-0 items-center @lg/project-table:flex">
                   <LaneChips
                     projectId={p.id}
                     lanes={displayLanes(p)}
@@ -411,22 +427,8 @@ export function ProjectTable({
                 <span className="text-right tabular-nums text-muted-foreground" aria-label={`${pct}% validated`}>
                   {pct}%
                 </span>
-                <span className="hidden text-right tabular-nums text-muted-foreground @2xl/project-table:block" aria-label={`${apct}% audio`}>
+                <span className="hidden text-right tabular-nums text-muted-foreground @lg/project-table:block" aria-label={`${apct}% audio`}>
                   {apct}%
-                </span>
-                <span className="hidden truncate text-right text-xs text-muted-foreground @3xl/project-table:block">
-                  {role?.name ? <RoleLabel name={role.name} /> : "—"}
-                </span>
-                <span
-                  className={`hidden truncate text-right text-xs @4xl/project-table:block ${
-                    status === "stalled" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
-                  }`}
-                >
-                  {status === "not-started"
-                    ? "Not started"
-                    : status === "stalled"
-                      ? "Stalled"
-                      : formatShortDate(p.lastEditAt)}
                 </span>
               </Link>
             )
@@ -1011,7 +1013,6 @@ export function OrgHome() {
                           projects={visible}
                           now={now}
                           showOrg
-                          roleByProjectId={roleByProjectId}
                           defaultLaneLabelByProjectId={defaultLaneLabelByProjectId}
                         />
                       )}

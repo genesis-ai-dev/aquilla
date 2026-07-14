@@ -34,7 +34,7 @@
 | Collab      | File propagates from alice to bob                    | `e2e/specs/collab/file-propagation.smoke.spec.ts` (API project bootstrap)  | ✅ |
 | Collab      | Concurrent cell edit propagates alice → bob          | `e2e/specs/collab/concurrent-edit.smoke.spec.ts` (API project bootstrap)   | ✅ |
 | Collab      | Conflict resolution on same cell                     | _gap — Plan 2_                                                |        |
-| Collab      | Member presence indicators                           | _gap — Plan 2_                                                |        |
+| Collab      | Member presence indicators                           | `e2e/specs/collab/member-presence-popover.smoke.spec.ts`       | ✅ |
 | Comments    | Add / edit / resolve comment                         | `e2e/specs/editor/comments.smoke.spec.ts` + `comment-resolve.smoke.spec.ts` + `comment-reply.smoke.spec.ts` | ✅ |
 | Comments    | Go to cell from comments page                        | `e2e/specs/editor/comments-go-to-cell.smoke.spec.ts`          |   ✅   |
 | Sharing     | Generate invite link / join project via link         | `e2e/specs/projects/share-invite-link.smoke.spec.ts` + `join-page.smoke.spec.ts` | ✅ |

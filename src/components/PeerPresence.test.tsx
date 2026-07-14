@@ -27,4 +27,20 @@ describe("PeerPresence", () => {
 
     expect(onJumpToPeer).toHaveBeenCalledWith(alice)
   })
+
+  it("portals the collaborator list outside clipped workspace chrome", () => {
+    render(
+      <div data-testid="clipped-shell" style={{ overflow: "hidden" }}>
+        <PeerPresence peers={[alice]} />
+      </div>,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /alice/i }))
+
+    const shell = screen.getByTestId("clipped-shell")
+    const popover = screen.getByText("Online (1)").closest<HTMLElement>('[data-slot="popover-content"]')
+    expect(popover).not.toBeNull()
+    expect(shell).not.toContainElement(popover)
+    expect(document.body).toContainElement(popover)
+  })
 })

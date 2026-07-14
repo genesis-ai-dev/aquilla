@@ -18,7 +18,7 @@
 -- (Fresh databases pick this up from schema.sql; the dev-stack reconcile's
 -- generic ADD-COLUMN loop also performs this exact upgrade on drifted local
 -- containers — a plain new column with a DEFAULT needs no special handling
--- there, unlike the PK rebuilds of 0055/0056.)
+-- there, unlike the lane-PK promotions in 0061/0062.)
 -- Verify: `SELECT target_lang FROM assignments LIMIT 1;` resolves.
 
 ALTER TABLE assignments ADD COLUMN IF NOT EXISTS target_lang TEXT NOT NULL DEFAULT '';

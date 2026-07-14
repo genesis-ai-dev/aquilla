@@ -481,12 +481,14 @@ async function reconcilePgSchema(
       patched.push(`added column ${name}.${col.name}`)
     }
   }
-  // AQU-538 (migration 0054): the cells PK gained the target_lang lane. The
-  // generic loop above adds the column, but a drifted container still carries
-  // the 4-column PK — and Postgres rejects `ON CONFLICT (…, target_lang)`
-  // without a matching unique constraint, 500-ing every commit. Rebuild the
-  // PK in place; all pre-lane rows carry '' so the 5-column key is trivially
-  // unique. Idempotent (skipped once target_lang is in the PK).
+  // AQU-538 (migrations 0057 expand + 0061 contract): the cells PK gained the
+  // target_lang lane. The generic loop above adds the column, but a drifted
+  // container still carries the 4-column PK — and Postgres rejects
+  // `ON CONFLICT (…, target_lang)` without a matching unique constraint,
+  // 500-ing every commit. Local dev has no old workers serving, so we skip the
+  // production expand/contract dance and rebuild the PK straight to the 5-column
+  // form here; all pre-lane rows carry '' so it's trivially unique. Idempotent
+  // (skipped once target_lang is in the PK).
   const { rows: pkCols } = await client.query(
     `SELECT a.attname FROM pg_index i
      JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
@@ -496,12 +498,12 @@ async function reconcilePgSchema(
     await run(
       `ALTER TABLE cells DROP CONSTRAINT cells_pkey;
        ALTER TABLE cells ADD PRIMARY KEY (project_id, file_id, cell_id, side, target_lang)`,
-      "rebuilding the cells primary key with target_lang (migration 0054)",
+      "rebuilding the cells primary key with target_lang (migrations 0057+0061)",
     )
     patched.push("rebuilt cells PK with target_lang")
   }
 
-  // AQU-538 (migration 0055): cell_validators and file_section_progress gained
+  // AQU-538 (migrations 0058 expand + 0062 contract): cell_validators and file_section_progress gained
   // target_lang in their PKs so validations and progress rollups are per-lane.
   // Same rationale as the cells rebuild above — the generic loop adds the
   // column, but a drifted container keeps the pre-lane PK and Postgres rejects
@@ -517,7 +519,7 @@ async function reconcilePgSchema(
     await run(
       `ALTER TABLE cell_validators DROP CONSTRAINT cell_validators_pkey;
        ALTER TABLE cell_validators ADD PRIMARY KEY (project_id, file_id, cell_id, target_lang, username)`,
-      "rebuilding the cell_validators primary key with target_lang (migration 0055)",
+      "rebuilding the cell_validators primary key with target_lang (migrations 0058+0062)",
     )
     patched.push("rebuilt cell_validators PK with target_lang")
   }
@@ -531,7 +533,7 @@ async function reconcilePgSchema(
     await run(
       `ALTER TABLE file_section_progress DROP CONSTRAINT file_section_progress_pkey;
        ALTER TABLE file_section_progress ADD PRIMARY KEY (project_id, file_id, scope, section_key, target_lang)`,
-      "rebuilding the file_section_progress primary key with target_lang (migration 0055)",
+      "rebuilding the file_section_progress primary key with target_lang (migrations 0058+0062)",
     )
     patched.push("rebuilt file_section_progress PK with target_lang")
   }

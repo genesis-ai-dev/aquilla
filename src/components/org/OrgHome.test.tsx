@@ -114,6 +114,8 @@ beforeEach(async () => {
   // and restoreAllMocks does not undo a persistent mockResolvedValue.
   const { listMyOrgs } = await import("@/lib/frontier/orgs")
   vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
+  const { getWorkload } = await import("@/lib/sync/assignments")
+  vi.mocked(getWorkload).mockResolvedValue([])
   // Reset to the default (no invites); the pending-invites test overrides this.
   // restoreAllMocks does not reset vi.fn implementations, so without this a
   // mockResolvedValue set in one test would leak into the next.
@@ -142,11 +144,11 @@ describe("ProjectTable", () => {
     validatedAudioCells: 0,
     recordedMs: 0,
     deadlineAt: "2020-01-01",
-    sourceLanguage: null,
-    targetLanguage: null,
+    sourceLanguage: "English",
+    targetLanguage: "French",
   }
 
-  it("keeps the organization secondary while preserving project identity and activity", () => {
+  it("keeps the organization secondary while preserving a compact project identity", () => {
     render(
       <MemoryRouter>
         <ProjectTable projects={[project]} now={Date.now()} showOrg />
@@ -159,7 +161,7 @@ describe("ProjectTable", () => {
     const expandedProjectName = screen.getByTestId("project-table-name-expanded")
     const organization = screen.getByTestId("project-table-organization")
     const metadata = screen.getByTestId("project-table-metadata")
-    const activity = screen.getByTestId("project-table-activity")
+    const deadlineTrigger = screen.getByTestId("project-table-deadline-trigger")
     const deadlineStatus = screen.getByTestId("project-table-deadline-status")
     expect(projectName).toHaveTextContent(project.name)
     expect(organization).toHaveTextContent(project.orgName)
@@ -170,10 +172,15 @@ describe("ProjectTable", () => {
     expect(expandedProjectName).toHaveAttribute("aria-hidden", "true")
     expect(organization).not.toHaveAttribute("data-slot", "tooltip-trigger")
     expect(identity).toHaveClass("@lg/project-table:grid-cols-[minmax(6rem,1fr)_minmax(4rem,6rem)]")
-    expect(organization).toHaveClass("relative", "max-w-40")
+    expect(organization).toHaveClass("relative", "h-5", "w-full")
     expect(organization).toHaveAttribute("data-org-name", project.orgName)
-    expect(activity).toHaveTextContent(/^Updated /)
-    expect(metadata).toContainElement(deadlineStatus)
+    expect(organization.querySelectorAll('[data-slot="badge"]')).toHaveLength(1)
+    expect(metadata).toHaveTextContent("English → French")
+    expect(identity).toContainElement(deadlineTrigger)
+    expect(deadlineTrigger).toContainElement(deadlineStatus)
+    expect(deadlineStatus).toHaveTextContent("Overdue")
+    expect(deadlineStatus).toHaveClass("[&>span:last-child]:sr-only")
+    expect(metadata).not.toContainElement(deadlineStatus)
     expect(organization).not.toContainElement(deadlineStatus)
     expect(screen.getByTestId("project-table")).toHaveClass("overflow-hidden")
     expect(screen.getByTestId("project-table")).not.toHaveClass("overflow-x-auto")
@@ -181,6 +188,7 @@ describe("ProjectTable", () => {
     expect(screen.getByText("Has Audio")).toBeInTheDocument()
     expect(screen.queryByText("Role")).not.toBeInTheDocument()
     expect(screen.queryByText("Updated", { exact: true })).not.toBeInTheDocument()
+    expect(screen.queryByText(/Updated /)).not.toBeInTheDocument()
   })
 
   it("omits the redundant organization column in a single-organization view", () => {
@@ -254,10 +262,11 @@ describe("OrgHome", () => {
     expect(within(projectsStat).getByText("2")).toBeInTheDocument()
   })
 
-  it("shows the overdue rollup card and an overdue badge", async () => {
+  it("shows the overdue rollup card and a compact overdue row indicator", async () => {
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
-    // "Overdue" appears twice: the rollup card label + the long-past-deadline row badge
+    // The visual row treatment is icon-only, but its sr-only label keeps the
+    // status available to assistive technology and tooltip users.
     expect(screen.getAllByText("Overdue").length).toBeGreaterThan(1)
   })
 
@@ -408,6 +417,10 @@ describe("OrgHome per-section visibility (AQU-486)", () => {
       ...defaultOrgSettingsMock(),
       memberProgressViewMinRole: 600,
     })
+    const { getWorkload } = await import("@/lib/sync/assignments")
+    vi.mocked(getWorkload).mockResolvedValue([
+      { assignmentId: "a1", projectId: "p1", projectName: "Legacy Translation", fileId: "f1", assigneeUserId: 2, username: "anna", scopeLabel: "Genesis", cellsTotal: 10, cellsDone: 4, deadline: null },
+    ])
     // Default org role in this suite is 700 (owner) — meets the floor.
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
@@ -424,12 +437,19 @@ describe("OrgHome per-section visibility (AQU-486)", () => {
       patch,
     })
     canEditRosterProgressFloorMock.mockReturnValue(true)
+    const { getWorkload } = await import("@/lib/sync/assignments")
+    vi.mocked(getWorkload).mockResolvedValue([
+      { assignmentId: "a1", projectId: "p1", projectName: "Legacy Translation", fileId: "f1", assigneeUserId: 2, username: "anna", scopeLabel: "Genesis", cellsTotal: 10, cellsDone: 4, deadline: null },
+    ])
 
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
 
     const section = await screen.findByTestId("section-team-workload")
-    fireEvent.click(within(section).getByTestId("section-visibility-badge"))
+    const visibilityButton = await within(section).findByRole("button", {
+      name: /change section visibility/i,
+    })
+    fireEvent.click(visibilityButton)
 
     const trigger = await screen.findByRole("combobox", { name: /who can see this section/i })
     fireEvent.click(trigger)

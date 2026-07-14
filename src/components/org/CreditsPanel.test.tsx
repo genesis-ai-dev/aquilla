@@ -59,11 +59,19 @@ describe("CreditsPanel — renders for maintainer when data is present", () => {
   it("shows daily and weekly windows + the agent sub-cap for a maintainer", async () => {
     // WHY: this is the happy path — a maintainer should see the panel.
     mockGetOrgCredits.mockResolvedValue(SAMPLE_DATA)
-    render(<CreditsPanel jwt="mgr-jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
+    render(
+      <CreditsPanel
+        jwt="mgr-jwt"
+        orgId={1}
+        orgRoleLevel={ROLE.MAINTAINER}
+        action={<span>Visibility control</span>}
+      />,
+    )
 
     await waitFor(() => expect(screen.getByTestId("credits-panel")).toBeInTheDocument())
 
     expect(screen.getByText("Compute credits")).toBeInTheDocument()
+    expect(screen.getByTestId("credits-panel")).toHaveTextContent("Visibility control")
     // "Today"/"This week" label both the overall window and the agent sub-cap row.
     expect(screen.getAllByText("Today").length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText("This week").length).toBeGreaterThanOrEqual(1)
@@ -213,11 +221,17 @@ describe("CreditsPanel — hides on null/403", () => {
     // server-enforced part of the trust boundary. UI must self-hide on null.
     mockGetOrgCredits.mockResolvedValue(null)
     const { container } = render(
-      <CreditsPanel jwt="mgr-jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />,
+      <CreditsPanel
+        jwt="mgr-jwt"
+        orgId={1}
+        orgRoleLevel={ROLE.MAINTAINER}
+        action={<span>Visibility control</span>}
+      />,
     )
     await waitFor(() => expect(mockGetOrgCredits).toHaveBeenCalled())
     expect(container).toBeEmptyDOMElement()
     expect(screen.queryByTestId("credits-panel")).not.toBeInTheDocument()
+    expect(screen.queryByText("Visibility control")).not.toBeInTheDocument()
   })
 
   it("renders nothing on transient fetch error", async () => {

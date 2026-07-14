@@ -3,6 +3,12 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { ensureAuthState } from "../../helpers/auth"
 import { createOrg } from "../../helpers/frontier-api"
 
+function isoDateOffset(days: number): string {
+  const date = new Date()
+  date.setDate(date.getDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
 /**
  * Org overview (OrgHome at "/").
  *
@@ -23,6 +29,13 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   // Create a project so the portfolio has at least one entry.
   const name = `Overview ${Date.now()}`
   await dash.createProject({ name, source: "en", target: "fr" })
+
+  // Give the project a deterministic status so the compact deadline indicator
+  // and its explanatory tooltip can be exercised in the portfolio table.
+  await alice.getByRole("button", { name: /Set deadline/i }).click()
+  await alice.getByLabel(/Deadline date/i).fill(isoDateOffset(-3))
+  await alice.getByRole("button", { name: /^Save$/i }).click()
+  await expect(alice.locator('[data-testid="status-chip"]')).toHaveText(/Overdue/i)
 
   // Navigate to the org home.
   await alice.goto("/")
@@ -67,18 +80,26 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   await expect(projectTable.getByText("Has Audio", { exact: true })).toBeVisible()
   await expect(projectTable.getByText("Role", { exact: true })).toHaveCount(0)
   await expect(projectTable.getByText("Updated", { exact: true })).toHaveCount(0)
-  await expect(projectRow.getByTestId("project-table-activity")).toBeVisible()
+  await expect(projectRow.getByText(/Updated /)).toHaveCount(0)
   const organizationName = await organization.getAttribute("data-org-name")
   expect(organizationName).toBeTruthy()
   const projectNameBox = await projectName.boundingBox()
   const organizationBox = await organization.boundingBox()
   expect(projectNameBox).not.toBeNull()
   expect(organizationBox).not.toBeNull()
-  expect(projectNameBox!.width).toBeGreaterThanOrEqual(96)
+  // The project gets enough visible width for a meaningful prefix even in the
+  // compact side-by-side layout; short names are allowed to size naturally.
+  expect(projectNameBox!.width).toBeGreaterThanOrEqual(64)
   expect(organizationBox!.width).toBeLessThanOrEqual(160)
 
+  const projectRowBoxBeforeHover = await projectRow.boundingBox()
+  const projectNameBoxBeforeHover = await projectName.boundingBox()
   await projectName.hover()
   await expect(expandedProjectName).toHaveCSS("opacity", "1")
+  const projectRowBoxAfterHover = await projectRow.boundingBox()
+  const projectNameBoxAfterHover = await projectName.boundingBox()
+  expect(projectRowBoxAfterHover).toEqual(projectRowBoxBeforeHover)
+  expect(projectNameBoxAfterHover).toEqual(projectNameBoxBeforeHover)
 
   await organization.hover()
   await expect(alice.getByRole("tooltip")).toHaveCount(0)
@@ -86,7 +107,15 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   await expect(organizationHeader).toBeVisible()
   const organizationHeaderBox = await organizationHeader.boundingBox()
   expect(organizationHeaderBox).not.toBeNull()
-  expect(Math.abs(organizationHeaderBox!.x + organizationHeaderBox!.width - (organizationBox!.x + organizationBox!.width))).toBeLessThan(16)
+  expect(Math.abs(organizationHeaderBox!.x - organizationBox!.x)).toBeLessThan(16)
+
+  const deadlineTrigger = projectRow.getByTestId("project-table-deadline-trigger")
+  await expect(deadlineTrigger).toBeVisible()
+  await deadlineTrigger.hover()
+  const deadlineTooltip = alice.getByRole("tooltip")
+  await expect(deadlineTooltip).toContainText("Overdue")
+  await expect(deadlineTooltip).toContainText("Due")
+
   const organizationsBox = await alice.getByTestId("organizations-panel").boundingBox()
   const projectsBox = await alice.getByTestId("projects-panel").boundingBox()
   expect(organizationsBox).not.toBeNull()
@@ -97,4 +126,27 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
     (element) => element.scrollWidth <= element.clientWidth,
   )
   expect(tableFits).toBe(true)
+
+  const projectsPanelFits = await alice.getByTestId("projects-panel").evaluate(
+    (element) => element.scrollWidth <= element.clientWidth,
+  )
+  expect(projectsPanelFits).toBe(true)
+  const sortBox = await alice.getByRole("combobox", { name: "Sort projects" }).boundingBox()
+  expect(sortBox).not.toBeNull()
+  expect(sortBox!.x + sortBox!.width).toBeLessThanOrEqual(projectsBox!.x + projectsBox!.width)
+
+  const sideBySideButton = alice.getByRole("button", { name: "Side-by-side layout" })
+  const stackedButton = alice.getByRole("button", { name: "Stacked layout" })
+  await expect(sideBySideButton).toHaveAttribute("aria-pressed", "true")
+  await stackedButton.click()
+  await expect(stackedButton).toHaveAttribute("aria-pressed", "true")
+
+  const stackedOrganizationsBox = await alice.getByTestId("organizations-panel").boundingBox()
+  const stackedProjectsBox = await alice.getByTestId("projects-panel").boundingBox()
+  expect(stackedOrganizationsBox).not.toBeNull()
+  expect(stackedProjectsBox).not.toBeNull()
+  expect(stackedProjectsBox!.y).toBeGreaterThan(stackedOrganizationsBox!.y + stackedOrganizationsBox!.height)
+
+  await alice.reload()
+  await expect(alice.getByRole("button", { name: "Stacked layout" })).toHaveAttribute("aria-pressed", "true")
 })

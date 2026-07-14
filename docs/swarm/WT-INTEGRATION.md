@@ -43,7 +43,12 @@ Integration branch: `swarm/wt-integration` (worktree `.worktrees/wt-integration`
 
 ## Merge log
 
-- 2026-07-13: swarm/integration (ed0d51774) → swarm/wt-integration. Clean auto-merge. Gate: pending.
+- 2026-07-13: swarm/integration (ed0d51774) → swarm/wt-integration. Clean auto-merge.
+  Gate GREEN: tsc clean; sync-worker 866/866; auth-worker 662/662; root vitest 21 failures
+  in 9 files — verified byte-identical pre-existing on origin/dev 4a4a7f2a8 (baseline
+  worktree .worktrees/baseline-dev). Gate criterion for this run: no NEW failures vs that baseline.
+  NOTE: worker suites need per-package `npm install` in each worktree (root node_modules
+  symlink is not enough — hono/jwt etc. resolve from worker-local deps).
 
 ## TRACES (open TODOs for next agent/session)
 

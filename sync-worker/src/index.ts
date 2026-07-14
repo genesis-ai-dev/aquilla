@@ -26,6 +26,8 @@ import { handleHealthRollupRequest } from "./events/health-rollup-route"
 import { handleCellAudioReadRequest } from "./events/cell-audio-read-route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleEventsWriteRequest } from "./events/route"
+import { handleExternalChangesetsRequest } from "./external/changesets-route"
+import { handleExternalArtifactsRequest } from "./external/artifacts-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleProgressReadRequest } from "./events/progress-read-route"
 import { handleBulkImportRequest } from "./events/import-route"
@@ -53,6 +55,8 @@ import { handleBranchingSearchRequest } from "./events/branching-search-route"
 import { handleBranchingSearchPassagesRequest } from "./events/branching-search-passages-route"
 import { handleCommentsReadRequest } from "./events/comments-read-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
+import { handleExternalReadRequest } from "./external/read-routes"
+import { handleExternalMcpRequest } from "./external/mcp-route"
 export { ProjectSync } from "./project-do"
 // Inert legacy DO class — kept exported so deploys don't trip the
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
@@ -258,6 +262,8 @@ export default {
     if (commentsReadResponse) return withCors(commentsReadResponse, request)
     const btReadResponse = await handleCellBacktranslationsReadRequest(request, env)
     if (btReadResponse) return withCors(btReadResponse, request)
+    const externalReadResponse = await handleExternalReadRequest(request, env)
+    if (externalReadResponse) return withCors(externalReadResponse, request)
     // /search/passages must be checked BEFORE /search — PATH_RE for /search is
     // anchored with $ so it won't match /search/passages, but ordering here
     // makes the intent explicit and guards against future regex changes.
@@ -299,6 +305,18 @@ export default {
     if (exportBundleResponse) return exportBundleResponse
     const eventsWriteResponse = await handleEventsWriteRequest(request, env, ctx)
     if (eventsWriteResponse) return withCors(eventsWriteResponse, request)
+
+    // AQU-533: Agent API changeset engine (external command layer).
+    const externalChangesetsResponse = await handleExternalChangesetsRequest(request, env, ctx)
+    if (externalChangesetsResponse) return withCors(externalChangesetsResponse, request)
+
+    // AQU-533: Agent API remote MCP server (tools-only, streamable HTTP).
+    const externalMcpResponse = await handleExternalMcpRequest(request, env, ctx)
+    if (externalMcpResponse) return withCors(externalMcpResponse, request)
+
+    // AQU-533 (W2-B): Agent API source-artifact upload / inspect.
+    const externalArtifactsResponse = await handleExternalArtifactsRequest(request, env)
+    if (externalArtifactsResponse) return withCors(externalArtifactsResponse, request)
 
     const projectSyncResponse = routeProjectSync(request, env)
     if (projectSyncResponse) return projectSyncResponse

@@ -266,7 +266,14 @@ CREATE TABLE events (
     client_ts      BIGINT NOT NULL,
     server_ts      BIGINT NOT NULL,
     parent_id      TEXT,
-    server_seq     BIGINT NOT NULL DEFAULT 0
+    server_seq     BIGINT NOT NULL DEFAULT 0,
+    -- AQU-533: server-stamped provenance envelope for externally-originated
+    -- events (Agent API). NULL for all internal (in-app / mirror / import)
+    -- writes — the canonical event insert never populates it; only the
+    -- external changeset commit path stamps it after events land. Shape:
+    -- { origin, human_authority:{user_id,credential_id}, agent, channel,
+    --   autonomy_mode, changeset_id, confirmation_id? }.
+    provenance     JSONB
 );
 
 -- Per-project server_seq allocator (audit RACE-1 / M1-1). One row per project,
@@ -719,6 +726,90 @@ CREATE TABLE IF NOT EXISTS model_ab_events (
 );
 CREATE INDEX IF NOT EXISTS idx_model_ab_events_created ON model_ab_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_ab_events_user ON model_ab_events(user_id);
+
+-- AQU-533 Agent API: immutable changeset execution plans (0055). External
+-- callers submit domain commands; prepare compiles them into a staged plan
+-- with server-computed preconditions, effect summary, and content digest.
+-- Commit re-checks preconditions (plan_stale on drift), routes compiled events
+-- through the existing /events perimeter, and records an execution receipt.
+CREATE TABLE IF NOT EXISTS changesets (
+    id                 TEXT PRIMARY KEY,          -- client-supplied UUIDv7
+    project_id         TEXT NOT NULL,
+    created_by_user_id TEXT NOT NULL,             -- the credential's owning user
+    credential_id      TEXT NOT NULL,
+    autonomy_mode      TEXT NOT NULL CHECK (autonomy_mode IN ('ask', 'act')),
+    status             TEXT NOT NULL DEFAULT 'staged'
+                         CHECK (status IN ('staged', 'committed', 'discarded', 'stale', 'expired')),
+    commands           JSONB NOT NULL,            -- normalized domain commands
+    preconditions      JSONB NOT NULL,            -- per-cell head/source pins resolved at prepare
+    summary            JSONB NOT NULL,            -- server-computed effect summary
+    digest             TEXT NOT NULL,             -- SHA-256 over canonical(commands + preconditions)
+    receipt            JSONB,                     -- execution receipt (after commit)
+    confirmation_id    TEXT,                      -- consumed ask-mode approval (after commit)
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at         TIMESTAMPTZ NOT NULL,
+    committed_at       TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_changesets_project_status ON changesets(project_id, status);
+
+-- One-time human approval assertions for ask-mode commits (AQU-533 §3). A row
+-- binds a specific changeset digest + credential; commit consumes it exactly
+-- once (UPDATE ... SET consumed_at WHERE consumed_at IS NULL RETURNING).
+CREATE TABLE IF NOT EXISTS changeset_confirmations (
+    id            TEXT PRIMARY KEY,               -- UUIDv7
+    changeset_id  TEXT NOT NULL,
+    user_id       TEXT NOT NULL,                  -- approving human (browser session)
+    credential_id TEXT NOT NULL,
+    digest        TEXT NOT NULL,                  -- must match the changeset digest at commit
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at    TIMESTAMPTZ NOT NULL,
+    consumed_at   TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_changeset_confirmations_changeset
+  ON changeset_confirmations(changeset_id);
+
+-- External API credentials (0054_api_credentials.sql): personal access tokens
+-- for the Agent API (AQU-533 §2). Per-user, optionally scoped to an org and/or
+-- project, with an autonomy ceiling ('ask' | 'act'). Only a SHA-256 hash is
+-- stored; token_prefix (first 12 chars, incl. the 'aqk_' tag) is display-only.
+-- User-scoped like agent_sessions; live role is re-resolved per call.
+CREATE TABLE IF NOT EXISTS api_credentials (
+    id           UUID PRIMARY KEY,
+    user_id      TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    token_prefix TEXT NOT NULL,
+    token_hash   TEXT NOT NULL UNIQUE,
+    mode         TEXT NOT NULL CHECK (mode IN ('ask', 'act')),
+    org_id       TEXT,
+    project_id   TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at   TIMESTAMPTZ,
+    last_used_at TIMESTAMPTZ,
+    revoked_at   TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_api_credentials_user ON api_credentials(user_id);
+CREATE INDEX IF NOT EXISTS idx_api_credentials_token_hash ON api_credentials(token_hash);
+
+-- Uploaded source artifacts (0056_artifacts.sql): agent-uploaded original files
+-- (USFM, JSON, XLIFF, …) preserved verbatim in R2 for round-trip fidelity and
+-- format inspection (AQU-533 §5). Bytes live in SNAPSHOTS under
+-- `{prefix}artifacts/{projectId}/{artifactId}`; this row is metadata +
+-- provenance + integrity digest. `file_id` is linked when a PlanImport
+-- changeset referencing the artifact commits.
+CREATE TABLE IF NOT EXISTS artifacts (
+    id                  UUID PRIMARY KEY,
+    project_id          TEXT NOT NULL,
+    uploaded_by_user_id TEXT NOT NULL,
+    credential_id       TEXT NOT NULL,
+    name                TEXT NOT NULL,
+    content_type        TEXT,
+    size_bytes          BIGINT NOT NULL,
+    sha256              TEXT NOT NULL,
+    r2_key              TEXT NOT NULL,
+    file_id             TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project_id);
 
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new

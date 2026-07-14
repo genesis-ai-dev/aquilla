@@ -77,6 +77,8 @@ import aquiferRoutes from "./routes/aquifer"
 import parseDocumentRoutes from "./routes/parse-document"
 import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
 import usageRoutes from "./routes/usage"
+import credentialsRoutes from "./routes/credentials"
+import changesetApprovalsRoutes from "./routes/changeset-approvals"
 
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
@@ -178,6 +180,13 @@ app.route("/api/v2/projects", termbaseSubscriptionRoutes)
 app.route("/api/v2/projects", projectsRoutes)
 // Multi-project invite surface.
 app.route("/api/v2/invites", invitesRoutes)
+// External API credentials (PATs) for the Agent API (AQU-533 §2). Mint/list/
+// revoke; live role is re-resolved on every downstream API call.
+app.route("/api/v2/credentials", credentialsRoutes)
+// One-time human approval assertion for ask-mode changesets (AQU-533 §3).
+// Browser-session-authenticated — distinct from the API-credential-gated
+// agent surface in sync-worker's /api/v1/external/projects/*/changesets.
+app.route("/api/v2/changesets", changesetApprovalsRoutes)
 
 // Chat-completion proxy to OpenRouter (formerly aquilla-chat-worker). The
 // path is kept at /api/v1/chat/completions so the codex-web client doesn't

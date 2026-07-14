@@ -78,6 +78,11 @@ const AdminConsole = lazy(() =>
 const DebugView = lazy(() =>
   import("@/components/DebugView").then((m) => ({ default: m.DebugView })),
 )
+// Agent API (AQU-533 §3) — standalone ask-mode approval page; works without
+// the workspace shell (mirrors JoinPage's standalone-page precedent).
+const ApproveChangeset = lazy(() =>
+  import("@/pages/ApproveChangeset/ApproveChangeset").then((m) => ({ default: m.ApproveChangeset })),
+)
 void hydratePrefetchStatus()
 void probeOpfsAvailability()
 
@@ -178,6 +183,8 @@ function AppRoutes() {
         <Route path="/projects/:id" element={<ProjectOverview />} />
         <Route path="/assigned" element={<AssignedToMe />} />
         <Route path="/join/:token" element={<JoinPage />} />
+        {/* Agent API (AQU-533 §3) — one-time human approval for ask-mode changesets. */}
+        <Route path="/approve/:changesetId" element={<ApproveChangeset />} />
         <Route path="/join-org/:token" element={<JoinOrgPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/onboarding" element={<OnboardingWizard />} />

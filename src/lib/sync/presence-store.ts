@@ -77,7 +77,15 @@ function affectedCellIds(
 }
 
 export class ProjectPresenceStore {
-  private readonly currentUserId: string
+  /**
+   * Every identity that represents the *current* user. Presence frames stamp
+   * the connection's `auth.claims.username`, but legacy tokens that predate the
+   * username claim fall back to a `user:<numericId>` form (see
+   * sync-worker `project-do.ts`). Filtering by username alone would then leak
+   * the user's *own* presence back to them (AQU-559). We hold every known self
+   * form here and exclude all of them.
+   */
+  private readonly selfIds: Set<string>
   private users = new Map<string, PresenceUserSnapshot>()
   private lockHolders = new Map<string, string>()
   private rosterListeners = new Set<Listener>()
@@ -85,8 +93,28 @@ export class ProjectPresenceStore {
   private rosterSnapshot: ProjectPresencePeer[] = []
   private cellSnapshots = new Map<string, CellPresencePeer[]>()
 
-  constructor(currentUserId: string) {
-    this.currentUserId = currentUserId
+  constructor(currentUserId: string | readonly string[]) {
+    this.selfIds = new Set(typeof currentUserId === "string" ? [currentUserId] : currentUserId)
+  }
+
+  private isSelf(userId: string): boolean {
+    return this.selfIds.has(userId)
+  }
+
+  /**
+   * Register an additional identity for the current user (e.g. the
+   * `user:<numericId>` fallback resolved once the project roster loads). Any
+   * presence already surfaced under that identity is re-filtered out, so the
+   * user never sees themselves even if their own frame arrived first.
+   */
+  addSelfId(id: string): void {
+    if (this.selfIds.has(id)) return
+    this.selfIds.add(id)
+    this.rosterSnapshot = this.computePeers()
+    this.emitRoster()
+    for (const cellId of Array.from(this.cellSnapshots.keys())) {
+      this.updateCellSnapshot(cellId)
+    }
   }
 
   reset(): void {
@@ -155,7 +183,7 @@ export class ProjectPresenceStore {
   private computePeers(): ProjectPresencePeer[] {
     const peers: ProjectPresencePeer[] = []
     for (const user of this.users.values()) {
-      if (user.userId === this.currentUserId) continue
+      if (this.isSelf(user.userId)) continue
       peers.push(this.toPeer(user))
     }
     peers.sort((a, b) => a.username.localeCompare(b.username))
@@ -168,13 +196,13 @@ export class ProjectPresenceStore {
     const seen = new Set<string>()
 
     for (const user of this.users.values()) {
-      if (user.userId === this.currentUserId) continue
+      if (this.isSelf(user.userId)) continue
       if (user.focusedCell !== cellId) continue
       seen.add(user.userId)
       peers.push({ ...this.toPeer(user), cellId })
     }
 
-    if (explicitHolder && explicitHolder !== this.currentUserId && !seen.has(explicitHolder)) {
+    if (explicitHolder && !this.isSelf(explicitHolder) && !seen.has(explicitHolder)) {
       peers.push({
         peerId: explicitHolder,
         username: explicitHolder,

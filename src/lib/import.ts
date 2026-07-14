@@ -32,7 +32,7 @@ import {
 import { buildBilingualPlan, type SourceVerse } from "./parsers/paratext-pairing"
 import type { ParatextSettings } from "./parsers/paratext"
 import { usxToUsfm, looksLikeUsx } from "./parsers/usx"
-import { bulkUploadTargetCommits, bulkUploadMorphRows, type MorphRow, type TargetCommit } from "./sync/bulk-import"
+import { enqueueTargetCommits, bulkUploadMorphRows, type MorphRow, type TargetCommit } from "./sync/bulk-import"
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
@@ -259,7 +259,7 @@ export async function applyEBibleTargetImport(
         value: c.incomingText,
       }))
 
-    await bulkUploadTargetCommits({
+    await enqueueTargetCommits({
       projectId: ctx.projectId,
       fileId,
       author: ctx.author,
@@ -1396,7 +1396,7 @@ export async function importParatextAsTarget(
         signal: ctx.signal,
       })
 
-      await bulkUploadTargetCommits({
+      await enqueueTargetCommits({
         projectId: ctx.projectId,
         fileId,
         author: ctx.author,

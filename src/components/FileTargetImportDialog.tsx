@@ -28,6 +28,8 @@ export interface FileTargetImportDialogProps {
   getToken: (fileId: string) => Promise<string | null>
   /** Fired after commits land so the workspace can revalidate cells. */
   onImported: (committedCount: number) => void
+  /** Optimistically patch many cells so the editor reflects imports immediately. */
+  applyOptimisticTargetEdits: (patches: { cellId: string; value: string }[]) => void
 }
 
 export function FileTargetImportDialog({
@@ -39,6 +41,7 @@ export function FileTargetImportDialog({
   cells,
   getToken,
   onImported,
+  applyOptimisticTargetEdits,
 }: FileTargetImportDialogProps) {
   // Remount the panel each time the dialog opens so a previous run's step
   // state never leaks into the next one.
@@ -66,6 +69,7 @@ export function FileTargetImportDialog({
             fileName={fileName}
             cells={cells}
             getToken={getToken}
+            applyOptimisticTargetEdits={applyOptimisticTargetEdits}
             onImported={(committedCount) => {
               posthog.capture(IMPORT_SUCCEEDED, {
                 import_type: "file-target",

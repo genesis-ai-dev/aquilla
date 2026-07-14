@@ -149,6 +149,35 @@ export async function enqueueOutboxEvent(event: CqrsRawEvent): Promise<void> {
   notifyOutboxChanged()
 }
 
+/** Enqueue many events in ONE transaction and fire a SINGLE change
+ *  notification. Used by bulk import so a large batch produces one overlay
+ *  rebuild + one badge refresh instead of N. Same-id `put` overwrites, so a
+ *  re-enqueue of already-queued events is a no-op (idempotent). */
+export async function enqueueOutboxEvents(events: CqrsRawEvent[]): Promise<void> {
+  if (events.length === 0) return
+  const db = await openDb()
+  const now = Date.now()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite")
+    tx.onerror = () => reject(tx.error ?? new Error("bulk enqueue tx failed"))
+    tx.oncomplete = () => resolve()
+    const store = tx.objectStore(STORE)
+    for (const event of events) {
+      const rec: OutboxRecord = {
+        id: event.id,
+        enqueuedAt: now,
+        event,
+        attempts: 0,
+        lastAttemptAt: null,
+        lastError: null,
+        status: "pending",
+      }
+      store.put(rec)
+    }
+  })
+  notifyOutboxChanged()
+}
+
 /**
  * Record an attempt outcome on the kept-back records. Called by the flusher
  * after a POST resolves: each record that wasn't accepted (or permanently

@@ -56,7 +56,14 @@ export function OutboxSyncIndicator({
 
   if (!records) return trigger
 
-  return <OutboxInspectorPopover trigger={trigger} records={records} onRetryNow={onRetryNow} />
+  return (
+    <OutboxInspectorPopover
+      trigger={trigger}
+      records={records}
+      pendingCount={pendingCount}
+      onRetryNow={onRetryNow}
+    />
+  )
 }
 
 interface ChipProps {

@@ -9,6 +9,7 @@ import {
   emitSourceCellCreate,
   emitFileCreate,
   enqueueEvent,
+  enqueueEvents,
   InsufficientRoleError,
 } from "./events-emit"
 import {
@@ -350,6 +351,27 @@ describe("events-emit", () => {
       expect(ev.fileId).toBe("f")
       expect(ev.payload.name).toBe("Genesis")
       expect(ev.payload.sourceLanguage).toBe("en")
+    })
+  })
+
+  describe("enqueueEvents (bulk builder)", () => {
+    it("enqueueEvents builds typed events and bulk-enqueues them", async () => {
+      const res = await enqueueEvents([
+        { kind: "target.cell.commit", projectId: "p", fileId: "f", cellId: "c1",
+          parentId: "s1", author: "u", payload: { value: "hello" } },
+        { kind: "target.cell.commit", projectId: "p", fileId: "f", cellId: "c2",
+          parentId: "s2", author: "u", payload: { value: "world" } },
+      ])
+      expect(res).toHaveLength(2)
+      expect(res[0].eventId).toBeTruthy()
+      const rows = await peekOutboxBatch(100)
+      expect(rows.map((r) => r.event.cellId).sort()).toEqual(["c1", "c2"])
+    })
+
+    it("returns empty array for empty input without writing to outbox", async () => {
+      const res = await enqueueEvents([])
+      expect(res).toEqual([])
+      expect(await outboxPendingCount()).toBe(0)
     })
   })
 })

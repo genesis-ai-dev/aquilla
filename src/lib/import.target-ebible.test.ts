@@ -5,12 +5,14 @@
 //  2. applyEBibleTargetImport — commit payload shape, parentId selection, empty selection
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import "fake-indexeddb/auto"
 import {
   matchEBibleToSourceCells,
   applyEBibleTargetImport,
   type SourceCellRef,
   type EBibleMatchResult,
 } from "./import"
+import { peekOutboxBatch, resetOutboxConnectionForTests } from "./sync/outbox"
 
 // ---------------------------------------------------------------------------
 // matchEBibleToSourceCells
@@ -176,16 +178,23 @@ describe("applyEBibleTargetImport — commit shape", () => {
     unmatchedSourceCount: 0,
   }
 
-  let postedBodies: { fileId: string; events: unknown[] }[] = []
+  // Target import now ENQUEUES to the CQRS outbox instead of POSTing. `fetch`
+  // is stubbed only to PROVE no network happens in the apply path — the
+  // flusher owns the network. Assertions read the outbox.
+  let fetchCalls = 0
 
-  beforeEach(() => {
-    postedBodies = []
-    // Stub fetch for /events POSTs
-    vi.stubGlobal("fetch", async (_url: string, opts: RequestInit) => {
-      const body = JSON.parse(opts.body as string) as { events: unknown[] }
-      // Extract fileId from the token header — we grab it from events payload instead
-      postedBodies.push({ fileId: "unknown", events: body.events })
-      return { ok: true, text: async () => "" }
+  beforeEach(async () => {
+    fetchCalls = 0
+    vi.stubGlobal("fetch", async () => {
+      fetchCalls += 1
+      return { ok: true, text: async () => "" } as Response
+    })
+    await resetOutboxConnectionForTests()
+    await new Promise<void>((resolve, reject) => {
+      const d = indexedDB.deleteDatabase("aquilla-cqrs-outbox")
+      d.onblocked = () => resolve()
+      d.onsuccess = () => resolve()
+      d.onerror = () => reject(d.error)
     })
   })
 
@@ -208,23 +217,21 @@ describe("applyEBibleTargetImport — commit shape", () => {
     expect(committedCount).toBe(2)
   })
 
-  it("emits target.cell.commit events with correct shape", async () => {
+  it("enqueues target.cell.commit events with correct shape (no network)", async () => {
     const selected = new Set(["cell-1"])
     await applyEBibleTargetImport(matchResult, selected, ctx)
 
-    expect(postedBodies.length).toBeGreaterThan(0)
-    const events = postedBodies.flatMap((b) => b.events) as Array<{
-      kind: string
-      cellId: string
-      parentId: string
-      payload: { value: string; sourceEventId: string }
-    }>
-    expect(events[0].kind).toBe("target.cell.commit")
-    expect(events[0].cellId).toBe("cell-1")
-    expect(events[0].parentId).toBe("src-evt-1")
-    expect(events[0].payload.value).toBe("In the beginning")
+    expect(fetchCalls).toBe(0) // the flusher owns the network, not the apply path
+    const rows = await peekOutboxBatch(100)
+    const mine = rows.find((r) => r.event.cellId === "cell-1")!
+    expect(mine).toBeDefined()
+    expect(mine.event.kind).toBe("target.cell.commit")
+    expect(mine.event.cellId).toBe("cell-1")
+    expect(mine.event.parentId).toBe("src-evt-1")
+    const payload = mine.event.payload as { value: string; sourceEventId: string }
+    expect(payload.value).toBe("In the beginning")
     // sourceEventId is echoed in the payload for AD-9 staleness pin
-    expect(events[0].payload.sourceEventId).toBe("src-evt-1")
+    expect(payload.sourceEventId).toBe("src-evt-1")
   })
 
   it("returns committedCount=0 and skippedCount=total when selection is empty", async () => {
@@ -235,15 +242,19 @@ describe("applyEBibleTargetImport — commit shape", () => {
     )
     expect(committedCount).toBe(0)
     expect(skippedCount).toBe(3)
-    // No HTTP calls should have been made
-    expect(postedBodies).toHaveLength(0)
+    // Nothing enqueued, no network.
+    expect(fetchCalls).toBe(0)
+    expect(await peekOutboxBatch(100)).toHaveLength(0)
   })
 
-  it("groups commits by fileId and posts once per file", async () => {
+  it("enqueues commits for every selected file (no network)", async () => {
     // cell-1 and cell-2 are in file-a; cell-3 is in file-b
     const selected = new Set(["cell-1", "cell-2", "cell-3"])
     await applyEBibleTargetImport(matchResult, selected, ctx)
-    // Two separate POST calls (one per file)
-    expect(postedBodies).toHaveLength(2)
+    expect(fetchCalls).toBe(0)
+    const rows = await peekOutboxBatch(100)
+    const fileIds = new Set(rows.map((r) => r.event.fileId))
+    expect(fileIds).toEqual(new Set(["file-a", "file-b"]))
+    expect(rows).toHaveLength(3)
   })
 })

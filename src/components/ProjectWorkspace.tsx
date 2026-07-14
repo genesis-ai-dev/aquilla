@@ -92,11 +92,13 @@ import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-dia
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose, ListChecks, Loader2 } from "lucide-react"
 import { AgentDockPanel } from "./AgentDockPanel"
 import { agentSessionStore } from "@/lib/agent/session-store"
 import { AgentWorkbench } from "./agent/AgentWorkbench"
 import type { ContextChip } from "@/lib/agent/context-chip"
+import { CheckFindingsDrawer, checkScopeSummary } from "./CheckFindingsDrawer"
+import { runDeterministicCheck, type CheckRunResult } from "@/lib/check/deterministic-check"
 import { SearchDockPanel } from "./SearchDockPanel"
 import { SearchResultsView } from "./search/SearchResultsView"
 import { LeftDock, type DockTab } from "./LeftDock"
@@ -632,6 +634,11 @@ export function ProjectWorkspace() {
   }, [searchParams])
   const [commentsCellId, setCommentsCellId] = useState<string | null>(null)
   const [historyCellId, setHistoryCellId] = useState<string | null>(null)
+  // Phase 0.5 deterministic "Check file" (agentic-harness strategy §4, no
+  // LLM). Findings are session-local: held here, never persisted or synced.
+  const [checkOpen, setCheckOpen] = useState(false)
+  const [checkRunning, setCheckRunning] = useState(false)
+  const [checkResult, setCheckResult] = useState<CheckRunResult | null>(null)
   const [parallelOpen, setParallelOpen] = useState(false)
   const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
@@ -2209,6 +2216,36 @@ export function ProjectWorkspace() {
     editorRef.current?.flashCell(pending.cellId, "")
   }, [activeFileId, cellStore, cellStoreVersion])
 
+  // Phase 0.5: run the deterministic check over the open file's cells.
+  // Scope = the open file (the editor's working unit; chapters only exist as
+  // sidebar section labels). Pure + chunked — no network, no LLM.
+  const runCheck = useCallback(async () => {
+    if (!activeFileId || checkRunning) return
+    // One aside panel at a time (matches the existing drawer pattern).
+    setDrawerRuleId(null)
+    setCommentsCellId(null)
+    setHistoryCellId(null)
+    setCheckOpen(true)
+    setCheckRunning(true)
+    try {
+      const result = await runDeterministicCheck({
+        fileId: activeFileId,
+        cells: readAtVersion(cellStoreVersion, getActiveCells),
+        rules,
+        concepts: project?.terminology ?? [],
+      })
+      setCheckResult(result)
+    } finally {
+      setCheckRunning(false)
+    }
+  }, [activeFileId, checkRunning, cellStoreVersion, getActiveCells, rules, project?.terminology])
+
+  // A check run describes one file's cells; switching files invalidates it.
+  useEffect(() => {
+    setCheckResult(null)
+    setCheckOpen(false)
+  }, [activeFileId])
+
   // FRO-192: jump to the first cell matching an assignment's scopeLabel.
   // Uses the same globalReferences prefix match as assignmentsByCellId build.
   const jumpToScopeLabel = useCallback((scopeLabel: string) => {
@@ -3437,7 +3474,8 @@ export function ProjectWorkspace() {
     lens === "audio" ||
     drawerRuleId !== null ||
     recordingCellId !== null ||
-    exportOpen
+    exportOpen ||
+    checkOpen
   const legacyCells = useMemo(
     () => legacyCellsNeeded ? readAtVersion(cellStoreVersion, getActiveCells) : EMPTY_CELL_DATA,
     [cellStoreVersion, getActiveCells, legacyCellsNeeded],
@@ -4017,6 +4055,36 @@ export function ProjectWorkspace() {
               />
             ) : null}
 
+            {/* Phase 0.5: deterministic "Check file" entry point. Title doubles
+                as the last-run summary so the result is visible at the button. */}
+            {project && centerSurface === "editor" && activeFileId && (
+              <button
+                type="button"
+                onClick={() => void runCheck()}
+                disabled={checkRunning}
+                className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent disabled:opacity-60"
+                title={
+                  checkResult
+                    ? `Last check: ${checkResult.totalFindingCount} issue${checkResult.totalFindingCount === 1 ? "" : "s"} · ${checkScopeSummary(checkResult)} · ${new Date(checkResult.ranAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
+                    : "Check the open file against the project's rules and term base"
+                }
+                aria-label="Check file"
+                data-testid="check-file-button"
+              >
+                {checkRunning
+                  ? <Loader2 className="h-3 w-3 animate-spin" />
+                  : <ListChecks className="h-3 w-3" />}
+                Check file
+                {checkResult && !checkRunning && (
+                  <span className={checkResult.totalFindingCount > 0
+                    ? "rounded-full bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/50 dark:text-amber-300"
+                    : "rounded-full bg-green-100 px-1.5 text-[10px] font-semibold text-green-800 dark:bg-green-900/50 dark:text-green-300"}>
+                    {checkResult.totalFindingCount}
+                  </span>
+                )}
+              </button>
+            )}
+
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
 
             {/* FRO-331: hidden trigger — opened from ⋯ menu; keeps RTL hint anchored here. */}
@@ -4472,6 +4540,20 @@ export function ProjectWorkspace() {
                 if (projectId) writeTnSidebarVisible(projectId, next)
               }}
             />
+            {checkOpen && (
+              <CheckFindingsDrawer
+                result={checkResult}
+                running={checkRunning}
+                cells={legacyCells}
+                onClose={() => setCheckOpen(false)}
+                onNavigateToCell={jumpToCellId}
+                onOpenComments={(cellId) => {
+                  // Reuse the existing comments drawer; one aside at a time.
+                  setCheckOpen(false)
+                  setCommentsCellId(cellId)
+                }}
+              />
+            )}
             {drawerRuleId && (
               <RuleDrawer
                 rule={drawerRule}

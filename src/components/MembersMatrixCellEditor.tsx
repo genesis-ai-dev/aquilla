@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { Trash2, GitMerge } from "lucide-react"
 import type { SecondarySrc } from "@/lib/frontier/members"
 import { Button } from "@/components/ui/button"
@@ -37,6 +37,13 @@ interface CellEditorProps {
   sourceBadge: string
   /** Non-winning contributing paths from the server. Empty = single path. */
   secondarySources?: SecondarySrc[]
+  /**
+   * AQU-538 §3.4: optional extra content rendered under the role, inside the
+   * same cell — the matrix's lane-scope chips + scope-editor affordance.
+   * Purely additive (undefined = no visual change), so this component's
+   * existing role-edit behavior is untouched when the caller doesn't pass it.
+   */
+  footer?: ReactNode
 }
 
 type Status = "idle" | "submitting" | "error"
@@ -84,6 +91,7 @@ export function MembersMatrixCellEditor({
   sourceHint,
   sourceBadge,
   secondarySources = [],
+  footer,
 }: CellEditorProps) {
   const { session } = useFrontierSession()
   const [open, setOpen] = useState(false)
@@ -236,6 +244,7 @@ export function MembersMatrixCellEditor({
           )}
         </PopoverContent>
       </Popover>
+      {footer}
     </TableCell>
   )
 }

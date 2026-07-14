@@ -397,6 +397,12 @@ export interface EventPayloads {
     scopeLabel: string
     /** Frontier user id of the assignee. */
     assigneeUserId: number
+    /**
+     * AQU-538 (§3.5): target-language lane this assignment is pinned to.
+     * Absent/'' = the default lane (same convention as every other lane field).
+     * Stored on assignments.target_lang; omitted on the wire when ''.
+     */
+    targetLang?: string
     /** Optional ISO date string deadline. */
     deadline?: string | null
     /** Optional instruction note. */
@@ -405,6 +411,12 @@ export interface EventPayloads {
   'assignment.reassign': {
     assignmentId: string
     assigneeUserId: number
+    /**
+     * AQU-538 (§3.5): optionally re-pin the assignment to a different lane.
+     * Absent (undefined) = leave the stored lane untouched — a plain reassign
+     * only changes the assignee. Present (including '') = set the lane.
+     */
+    targetLang?: string
   }
   'assignment.unassign': {
     assignmentId: string

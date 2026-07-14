@@ -57,6 +57,86 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(byId.pb).toMatchObject({ audioCells: 0, recordedMs: 0 })
   })
 
+  it("AQU-538: per-lane aggregates from file_section_progress file-scope rows (default '' row always present)", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO files (id, project_id, name, event_id, cell_count, approved_count, last_edit_at) VALUES ('f1', 'pa', 'GEN', 'e1', 45, 5, 2000)").run()
+    // Project validationCount = 2: a cell is "validated" only at >= 2 endorsements.
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings) VALUES ('pa', ?)",
+    ).bind(JSON.stringify({ validationCount: 2 })).run()
+    // Two lanes of the same file. total_count is lane-independent (source rows).
+    // '' lane: filled 15, histogram {0:30,1:10,2:5} → validated(>=2) = 5, updated 1500.
+    // es lane: filled 2,  histogram {0:43,3:2}      → validated(>=2) = 2, updated 2600.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
+        ('pa','f1','file','', '',   45, 15, ?, 1, 1500),
+        ('pa','f1','file','', 'es', 45, 2,  ?, 1, 2600)`,
+    ).bind(JSON.stringify({ "0": 30, "1": 10, "2": 5 }), JSON.stringify({ "0": 43, "3": 2 })).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string; lanes: Array<{ lane: string; totalCells: number; filledCells: number; validatedCells: number; lastEditAt: number | null }> }> }
+    const pa = body.projects.find((p) => p.id === "pa")!
+    // Default lane first, then by tag.
+    expect(pa.lanes.map((l) => l.lane)).toEqual(["", "es"])
+    const byLane = Object.fromEntries(pa.lanes.map((l) => [l.lane, l]))
+    expect(byLane[""]).toMatchObject({ totalCells: 45, filledCells: 15, validatedCells: 5, lastEditAt: 1500 })
+    expect(byLane.es).toMatchObject({ totalCells: 45, filledCells: 2, validatedCells: 2, lastEditAt: 2600 })
+    // Scalar fields remain cross-lane (from files), untouched by the lane rollup.
+    const paScalar = body.projects.find((p) => p.id === "pa") as unknown as { totalCells: number; validatedCells: number }
+    expect(paScalar).toMatchObject({ totalCells: 45, validatedCells: 5 })
+  })
+
+  it("AQU-538: a REGISTERED lane with no progress rows yet appears as a 0% row (PM sees the chip immediately)", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1)").run()
+    // Lane registry carries 'swh' — no translations committed on it yet.
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings) VALUES ('pa', ?)",
+    ).bind(JSON.stringify({ targetLanes: ["swh"] })).run()
+    // Only the default lane has progress rows.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
+        ('pa','f1','file','', '', 45, 15, ?, 1, 1500)`,
+    ).bind(JSON.stringify({ "0": 30, "1": 15 })).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string; lanes: Array<{ lane: string; totalCells: number; filledCells: number; validatedCells: number; lastEditAt: number | null }> }> }
+    const pa = body.projects.find((p) => p.id === "pa")!
+    expect(pa.lanes.map((l) => l.lane)).toEqual(["", "swh"])
+    const swh = pa.lanes.find((l) => l.lane === "swh")!
+    // Denominator borrowed from the '' row; nothing translated or validated yet.
+    expect(swh).toMatchObject({ totalCells: 45, filledCells: 0, validatedCells: 0, lastEditAt: null })
+  })
+
+  it("AQU-538: N=1 project surfaces a single '' lane row", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO files (id, project_id, name, event_id, cell_count, approved_count, last_edit_at) VALUES ('f1', 'pa', 'GEN', 'e1', 10, 3, 1000)").run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
+        ('pa','f1','file','', '', 10, 4, ?, 1, 1200)`,
+    ).bind(JSON.stringify({ "0": 6, "1": 4 })).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string; lanes: Array<{ lane: string; totalCells: number; filledCells: number; validatedCells: number }> }> }
+    const pa = body.projects.find((p) => p.id === "pa")!
+    expect(pa.lanes).toHaveLength(1)
+    // Default validationCount = 1 (no settings row) → validated = buckets >= 1 = 4.
+    expect(pa.lanes[0]).toMatchObject({ lane: "", totalCells: 10, filledCells: 4, validatedCells: 4 })
+  })
+
   it("AQU-508: validatedAudioCells counts cells whose selected clip is approved, distinct from coverage", async () => {
     await seedUser(1, "wendi")
     await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()

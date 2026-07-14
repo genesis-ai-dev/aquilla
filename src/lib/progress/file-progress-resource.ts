@@ -52,6 +52,10 @@ const PREFETCH_FRESH_MS = 30_000
 const EMPTY_STATE: FileProgressResourceState = { progress: null, loading: false, error: false, fromCache: false }
 
 interface ResourceRecord extends FileProgressResourceState {
+  projectId: string
+  fileId: string
+  /** AQU-538 target-language lane; '' = default lane (byte-identical to pre-lane behavior). */
+  lane: string
   view: FileProgressResourceState
   server: FileProgressResponse | null
   local: FileProgressResponse | null
@@ -68,16 +72,24 @@ interface ResourceRecord extends FileProgressResourceState {
 let dbPromise: Promise<IDBDatabase> | null = null
 const resources = new Map<string, ResourceRecord>()
 
-function key(projectId: string, fileId: string): string {
-  return `${projectId}:${fileId}`
+// AQU-538: the default lane ('') keeps the legacy key byte-for-byte so existing
+// IDB cache entries and in-memory resources are untouched; a non-default lane
+// appends a NUL-delimited segment (NUL never appears in project/file ids or
+// lane tags) so caches, ETags, and pending overlays never cross lanes.
+const LANE_KEY_SEP = '\u0000'
+function key(projectId: string, fileId: string, lane = ''): string {
+  return lane ? `${projectId}:${fileId}${LANE_KEY_SEP}lane${LANE_KEY_SEP}${lane}` : `${projectId}:${fileId}`
 }
 
-function resourceFor(projectId: string, fileId: string): ResourceRecord {
-  const cacheKey = key(projectId, fileId)
+function resourceFor(projectId: string, fileId: string, lane = ''): ResourceRecord {
+  const cacheKey = key(projectId, fileId, lane)
   let record = resources.get(cacheKey)
   if (!record) {
     record = {
       ...EMPTY_STATE,
+      projectId,
+      fileId,
+      lane,
       view: EMPTY_STATE,
       server: null,
       local: null,
@@ -126,11 +138,11 @@ async function openDb(): Promise<IDBDatabase> {
   return dbPromise
 }
 
-async function readCache(projectId: string, fileId: string): Promise<ProgressCacheEntry | null> {
+async function readCache(projectId: string, fileId: string, lane = ''): Promise<ProgressCacheEntry | null> {
   try {
     const db = await openDb()
     return await new Promise((resolve, reject) => {
-      const request = db.transaction(STORE, 'readonly').objectStore(STORE).get(key(projectId, fileId))
+      const request = db.transaction(STORE, 'readonly').objectStore(STORE).get(key(projectId, fileId, lane))
       request.onsuccess = () => resolve((request.result as ProgressCacheEntry | undefined) ?? null)
       request.onerror = () => reject(request.error ?? new Error('IDB read failed'))
     })
@@ -139,12 +151,12 @@ async function readCache(projectId: string, fileId: string): Promise<ProgressCac
   }
 }
 
-async function writeCache(projectId: string, fileId: string, record: ResourceRecord): Promise<void> {
+async function writeCache(record: ResourceRecord): Promise<void> {
   if (!record.server || !record.progress) return
   try {
     const db = await openDb()
     const entry: ProgressCacheEntry = {
-      key: key(projectId, fileId),
+      key: key(record.projectId, record.fileId, record.lane),
       server: record.server,
       display: record.progress,
       etag: record.etag,
@@ -170,11 +182,7 @@ async function livePendingEventIds(ids: readonly string[]): Promise<string[]> {
     .map((record) => record.id)
 }
 
-async function reconcilePendingOverlay(
-  projectId: string,
-  fileId: string,
-  record: ResourceRecord,
-): Promise<void> {
+async function reconcilePendingOverlay(record: ResourceRecord): Promise<void> {
   if (record.pendingEventIds.length === 0) return
   const pendingEventIds = await livePendingEventIds(record.pendingEventIds)
   if (
@@ -185,13 +193,13 @@ async function reconcilePendingOverlay(
   record.pendingEventIds = pendingEventIds
   // Persist the shrunken id set too. Otherwise a restart would revive events
   // already accepted while another local event is still pending for this file.
-  void writeCache(projectId, fileId, record)
+  void writeCache(record)
   if (pendingEventIds.length === 0) {
     // The accepted record is gone from the durable outbox. Never let a
     // persisted optimistic display keep masking the authoritative snapshot.
     record.local = null
     record.progress = record.server
-    if (record.getToken) void loadResource(projectId, fileId, record.getToken, true)
+    if (record.getToken) void loadResource(record.projectId, record.fileId, record.getToken, true, record.lane)
   }
   emit(record)
 }
@@ -199,13 +207,17 @@ async function reconcilePendingOverlay(
 async function fetchProgress(
   projectId: string,
   fileId: string,
+  lane: string,
   token: string,
   etag: string | null,
 ): Promise<{ kind: 'not-modified' } | { kind: 'progress'; progress: FileProgressResponse; etag: string | null }> {
   const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
   if (etag) headers['If-None-Match'] = etag
+  // AQU-538: only append ?lane= for a non-default lane, so the default request
+  // URL (and thus the server ETag) stays byte-identical to pre-lane behavior.
+  const laneQuery = lane ? `?lane=${encodeURIComponent(lane)}` : ''
   const response = await fetch(
-    `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/progress`,
+    `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/progress${laneQuery}`,
     { headers, signal: timeoutSignal(REQUEST_TIMEOUT_MS) },
   )
   if (response.status === 304) return { kind: 'not-modified' }
@@ -222,8 +234,9 @@ async function loadResource(
   fileId: string,
   getToken: () => Promise<string | null>,
   force = false,
+  lane = '',
 ): Promise<void> {
-  const record = resourceFor(projectId, fileId)
+  const record = resourceFor(projectId, fileId, lane)
   record.getToken = getToken
   if (record.inFlight) {
     if (force) record.refreshAfterFlight = true
@@ -232,7 +245,7 @@ async function loadResource(
   record.inFlight = (async () => {
     if (!record.hydrated) {
       record.hydrated = true
-      const cached = await readCache(projectId, fileId)
+      const cached = await readCache(projectId, fileId, lane)
       if (cached) {
         const pendingEventIds = await livePendingEventIds(cached.pendingEventIds)
         record.server = cached.server
@@ -251,7 +264,7 @@ async function loadResource(
     try {
       const token = await getToken()
       if (!token) throw new Error('progress token unavailable')
-      const result = await fetchProgress(projectId, fileId, token, force ? null : record.etag)
+      const result = await fetchProgress(projectId, fileId, lane, token, force ? null : record.etag)
       if (result.kind === 'progress') {
         record.server = result.progress
         record.etag = result.etag
@@ -267,7 +280,7 @@ async function loadResource(
       record.fetchedAt = Date.now()
       record.error = false
       record.fromCache = false
-      void writeCache(projectId, fileId, record)
+      void writeCache(record)
     } catch {
       record.error = true
     } finally {
@@ -277,7 +290,7 @@ async function loadResource(
       const refreshAfterFlight = record.refreshAfterFlight
       record.refreshAfterFlight = false
       if (refreshAfterFlight && record.getToken) {
-        void loadResource(projectId, fileId, record.getToken, true)
+        void loadResource(projectId, fileId, record.getToken, true, lane)
       }
     }
   })()
@@ -288,8 +301,9 @@ export function useFileProgressResource(
   projectId: string | null,
   fileId: string | null,
   getTokenForFile: ((fileId: string) => Promise<string | null>) | undefined,
+  lane = '',
 ): FileProgressResourceState & { retry: () => void } {
-  const record = projectId && fileId ? resourceFor(projectId, fileId) : null
+  const record = projectId && fileId ? resourceFor(projectId, fileId, lane) : null
   const state = useSyncExternalStore(
     (listener) => {
       if (!record) return () => undefined
@@ -301,20 +315,20 @@ export function useFileProgressResource(
   )
   useEffect(() => {
     if (!projectId || !fileId || !getTokenForFile) return
-    void loadResource(projectId, fileId, () => getTokenForFile(fileId))
-  }, [fileId, getTokenForFile, projectId])
+    void loadResource(projectId, fileId, () => getTokenForFile(fileId), false, lane)
+  }, [fileId, getTokenForFile, projectId, lane])
   useEffect(() => {
     if (!projectId || !fileId) return
-    const record = resourceFor(projectId, fileId)
+    const record = resourceFor(projectId, fileId, lane)
     return subscribeToOutbox(() => {
-      void reconcilePendingOverlay(projectId, fileId, record)
+      void reconcilePendingOverlay(record)
     })
-  }, [fileId, projectId])
+  }, [fileId, projectId, lane])
   return {
     ...state,
     retry: () => {
       if (projectId && fileId && getTokenForFile) {
-        void loadResource(projectId, fileId, () => getTokenForFile(fileId), true)
+        void loadResource(projectId, fileId, () => getTokenForFile(fileId), true, lane)
       }
     },
   }
@@ -325,8 +339,9 @@ export function setLocalFileProgress(
   fileId: string,
   progress: FileProgressResponse,
   pendingEventIds: readonly string[],
+  lane = '',
 ): void {
-  const record = resourceFor(projectId, fileId)
+  const record = resourceFor(projectId, fileId, lane)
   const hadPendingEvents = record.pendingEventIds.length > 0
   record.local = progress
   record.pendingEventIds = [...new Set(pendingEventIds)]
@@ -336,23 +351,22 @@ export function setLocalFileProgress(
     ? progress
     : (record.server ?? progress)
   emit(record)
-  void writeCache(projectId, fileId, record)
+  void writeCache(record)
   if (hadPendingEvents && record.pendingEventIds.length === 0 && record.getToken) {
-    void loadResource(projectId, fileId, record.getToken, true)
+    void loadResource(projectId, fileId, record.getToken, true, lane)
   }
 }
 
-export function invalidateFileProgress(projectId: string, fileId: string): void {
-  const record = resourceFor(projectId, fileId)
-  if (record.getToken) void loadResource(projectId, fileId, record.getToken, true)
+export function invalidateFileProgress(projectId: string, fileId: string, lane = ''): void {
+  const record = resourceFor(projectId, fileId, lane)
+  if (record.getToken) void loadResource(projectId, fileId, record.getToken, true, lane)
 }
 
-/** Revalidate every mounted/prefetched file resource in a project. */
+/** Revalidate every mounted/prefetched file resource in a project (all lanes). */
 export function invalidateProjectFileProgress(projectId: string): void {
-  const prefix = `${projectId}:`
-  for (const [cacheKey, record] of resources) {
-    if (!cacheKey.startsWith(prefix) || !record.getToken) continue
-    void loadResource(projectId, cacheKey.slice(prefix.length), record.getToken, true)
+  for (const record of resources.values()) {
+    if (record.projectId !== projectId || !record.getToken) continue
+    void loadResource(record.projectId, record.fileId, record.getToken, true, record.lane)
   }
 }
 
@@ -376,9 +390,10 @@ export function prefetchFileProgress(
   projectId: string,
   fileId: string,
   getTokenForFile: (fileId: string) => Promise<string | null>,
+  lane = '',
 ): void {
-  const record = resourceFor(projectId, fileId)
-  const cacheKey = key(projectId, fileId)
+  const record = resourceFor(projectId, fileId, lane)
+  const cacheKey = key(projectId, fileId, lane)
   if (
     record.inFlight ||
     queuedOrActivePrefetches.has(cacheKey) ||
@@ -387,7 +402,7 @@ export function prefetchFileProgress(
   queuedOrActivePrefetches.add(cacheKey)
   prefetchQueue.push({
     key: cacheKey,
-    run: () => loadResource(projectId, fileId, () => getTokenForFile(fileId)),
+    run: () => loadResource(projectId, fileId, () => getTokenForFile(fileId), false, lane),
   })
   drainPrefetchQueue()
 }
@@ -396,9 +411,10 @@ export async function getFileProgress(
   projectId: string,
   fileId: string,
   getTokenForFile: (fileId: string) => Promise<string | null>,
+  lane = '',
 ): Promise<FileProgressResponse> {
-  await loadResource(projectId, fileId, () => getTokenForFile(fileId))
-  const progress = resourceFor(projectId, fileId).progress
+  await loadResource(projectId, fileId, () => getTokenForFile(fileId), false, lane)
+  const progress = resourceFor(projectId, fileId, lane).progress
   if (!progress) throw new Error('progress unavailable')
   return progress
 }
@@ -408,11 +424,15 @@ export async function getFileSectionProgress(
   fileId: string,
   sectionKey: string,
   getTokenForFile: (fileId: string) => Promise<string | null>,
+  lane = '',
 ): Promise<SectionProgressDetailResponse> {
   const token = await getTokenForFile(fileId)
   if (!token) throw new Error('progress token unavailable')
+  // AQU-538: only append ?lane= for a non-default lane so the default URL/ETag
+  // stays byte-identical.
+  const laneQuery = lane ? `?lane=${encodeURIComponent(lane)}` : ''
   const response = await fetch(
-    `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/progress/sections/${encodeURIComponent(sectionKey)}`,
+    `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/progress/sections/${encodeURIComponent(sectionKey)}${laneQuery}`,
     { headers: { Authorization: `Bearer ${token}` }, signal: timeoutSignal(REQUEST_TIMEOUT_MS) },
   )
   if (!response.ok) throw new Error(`section progress read failed: HTTP ${response.status}`)

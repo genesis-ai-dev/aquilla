@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
-import { FolderOpen } from "lucide-react"
+import { ChevronDown, ChevronRight, FolderOpen } from "lucide-react"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import {
   attentionRank,
@@ -11,6 +11,7 @@ import {
   validatedPct,
   type PortfolioProject,
 } from "@/lib/frontier/portfolio"
+import { ROLE } from "@/lib/frontier/roles"
 import { portfolioActivityStatus } from "@/lib/project-status"
 import { ProjectDeadlineStatuses } from "@/components/ProjectStatus"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -24,6 +25,11 @@ import {
 } from "@/components/ui/empty"
 import { Badge } from "@/components/ui/badge"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { LaneChips } from "./LaneChips"
+import { AddLanguagePopover } from "./AddLanguagePopover"
+import { ProjectLaneSubRows } from "./ProjectLaneSubRows"
+import { OrgLaneAssignModal } from "./OrgLaneAssignModal"
+import { displayLanes } from "./project-lanes"
 
 export type OrgProjectRow = PortfolioProject & {
   orgId?: number
@@ -63,6 +69,14 @@ export function OrgProjectsDataTable({
   emptyTitle = "No projects yet.",
   emptyDescription,
   testId = "org-projects-table",
+  defaultLaneLabelByProjectId,
+  filesByProjectId,
+  orgId = null,
+  jwt,
+  author,
+  allowSelfAssignment = false,
+  callerUserId = null,
+  onLanesChanged,
 }: {
   projects: OrgProjectRow[]
   now: number
@@ -72,9 +86,46 @@ export function OrgProjectsDataTable({
   emptyTitle?: string
   emptyDescription?: string
   testId?: string
+  /** AQU-538 §3.2: project → default target language, labeling the '' lane chip. */
+  defaultLaneLabelByProjectId?: Map<string, string>
+  /** AQU-538 §3.2: project → its files, for the lane sub-row "Assign…" action. */
+  filesByProjectId?: Map<string, { id: string; name: string }[]>
+  /** The active org id — threaded to StaffLanePopover / AssignModal. */
+  orgId?: number | null
+  /** JWT — required to enable the "+ Language" and "Assign…" lane actions. */
+  jwt?: string | null
+  /** Current username — stamped as the assignment event author. */
+  author?: string
+  allowSelfAssignment?: boolean
+  callerUserId?: number | null
+  /** Called after a lane is added, so the parent can refetch the portfolio. */
+  onLanesChanged?: () => void
 }) {
   const navigate = useNavigate()
   const [tableNow] = useState(() => now)
+  // AQU-538 §3.2: which project rows are expanded into their per-lane detail.
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
+  // The lane "Assign…" currently open (project + lane), or null.
+  const [assignTarget, setAssignTarget] = useState<{ projectId: string; lane: string } | null>(null)
+
+  const toggleExpand = useCallback((projectId: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(projectId)) next.delete(projectId)
+      else next.add(projectId)
+      return next
+    })
+  }, [])
+
+  const canAddLanguage = useCallback(
+    (projectId: string) => {
+      const level = roleByProjectId?.get(projectId)?.level
+      // §3.2: enabled for maintainer 600+; when the row's role is unknown, show
+      // it anyway and let the PATCH 403 surface gracefully.
+      return level == null || level >= ROLE.MAINTAINER
+    },
+    [roleByProjectId],
+  )
 
   const tableData = useMemo(() => {
     if (initialLens === "attention") {
@@ -85,6 +136,29 @@ export function OrgProjectsDataTable({
 
   const columns = useMemo<ColumnDef<OrgProjectRow>[]>(
     () => [
+      {
+        id: "expand",
+        enableSorting: false,
+        header: () => <span className="sr-only">Expand languages</span>,
+        cell: ({ row }) => {
+          const isOpen = expanded.has(row.original.id)
+          return (
+            <button
+              type="button"
+              data-testid={`project-lanes-expand-${row.original.id}`}
+              aria-label={isOpen ? "Collapse languages" : "Expand languages"}
+              aria-expanded={isOpen}
+              className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={(e) => {
+                e.stopPropagation()
+                toggleExpand(row.original.id)
+              }}
+            >
+              {isOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+            </button>
+          )
+        },
+      },
       {
         accessorKey: "name",
         header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
@@ -100,6 +174,27 @@ export function OrgProjectsDataTable({
               )}
               <ProjectDeadlineStatuses deadline={deadlineStatus(p, tableNow)} className="shrink-0" />
             </span>
+          )
+        },
+      },
+      {
+        id: "languages",
+        enableSorting: false,
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Languages" />,
+        cell: ({ row }) => {
+          const p = row.original
+          return (
+            <div className="flex items-center gap-1.5">
+              <LaneChips
+                projectId={p.id}
+                lanes={displayLanes(p)}
+                defaultLaneLabel={defaultLaneLabelByProjectId?.get(p.id) ?? ""}
+                onOverflowClick={() => toggleExpand(p.id)}
+              />
+              {jwt && canAddLanguage(p.id) && (
+                <AddLanguagePopover projectId={p.id} jwt={jwt} onAdded={onLanesChanged} />
+              )}
+            </div>
           )
         },
       },
@@ -214,8 +309,25 @@ export function OrgProjectsDataTable({
         },
       },
     ],
-    [roleByProjectId, showOrg, tableNow],
+    [
+      roleByProjectId,
+      showOrg,
+      tableNow,
+      expanded,
+      toggleExpand,
+      canAddLanguage,
+      defaultLaneLabelByProjectId,
+      jwt,
+      onLanesChanged,
+    ],
   )
+
+  const colSpan = columns.length
+  const canAssign = Boolean(jwt && author != null)
+
+  const assignProject = assignTarget
+    ? projects.find((p) => p.id === assignTarget.projectId) ?? null
+    : null
 
   const emptyState = (
     <div
@@ -235,32 +347,68 @@ export function OrgProjectsDataTable({
   )
 
   return (
-    <DataTable
-      columns={columns}
-      data={tableData}
-      getRowId={(p) => p.id}
-      onRowClick={(p) => navigate(`/projects/${p.id}`)}
-      rowClassName="cursor-pointer"
-      initialSorting={
-        initialLens === "attention" ? [] : [...lensToSorting(initialLens)]
-      }
-      searchPlaceholder="Filter projects by name"
-      globalFilterFn={(row, _columnId, filterValue) => {
-        const q = String(filterValue).trim().toLowerCase()
-        if (!q) return true
-        const p = row.original
-        return `${p.name} ${p.orgName ?? ""}`.toLowerCase().includes(q)
-      }}
-      toolbar={(table) => (
-        <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-          {table.getFilteredRowModel().rows.length === tableData.length
-            ? `${tableData.length}`
-            : `${table.getFilteredRowModel().rows.length} of ${tableData.length}`}
-        </span>
+    <>
+      <DataTable
+        columns={columns}
+        data={tableData}
+        getRowId={(p) => p.id}
+        onRowClick={(p) => navigate(`/projects/${p.id}`)}
+        rowClassName="cursor-pointer"
+        initialSorting={
+          initialLens === "attention" ? [] : [...lensToSorting(initialLens)]
+        }
+        searchPlaceholder="Filter projects by name"
+        globalFilterFn={(row, _columnId, filterValue) => {
+          const q = String(filterValue).trim().toLowerCase()
+          if (!q) return true
+          const p = row.original
+          return `${p.name} ${p.orgName ?? ""}`.toLowerCase().includes(q)
+        }}
+        toolbar={(table) => (
+          <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+            {table.getFilteredRowModel().rows.length === tableData.length
+              ? `${tableData.length}`
+              : `${table.getFilteredRowModel().rows.length} of ${tableData.length}`}
+          </span>
+        )}
+        renderSubRow={(p) =>
+          expanded.has(p.id) ? (
+            <ProjectLaneSubRows
+              projectId={p.id}
+              lanes={displayLanes(p)}
+              defaultLaneLabel={defaultLaneLabelByProjectId?.get(p.id) ?? ""}
+              colSpan={colSpan}
+              orgId={orgId}
+              onAssign={
+                canAssign ? (lane) => setAssignTarget({ projectId: p.id, lane }) : undefined
+              }
+              onStaffed={onLanesChanged}
+            />
+          ) : null
+        }
+        emptyState={emptyState}
+        testId={testId}
+        dense
+      />
+      {assignTarget && assignProject && jwt && author != null && (
+        <OrgLaneAssignModal
+          projectId={assignTarget.projectId}
+          lane={assignTarget.lane}
+          targetLanes={displayLanes(assignProject)
+            .map((l) => l.lane)
+            .filter((l) => l !== "")}
+          files={filesByProjectId?.get(assignTarget.projectId) ?? []}
+          roleLevel={roleByProjectId?.get(assignTarget.projectId)?.level ?? ROLE.PROJECT_LEAD}
+          jwt={jwt}
+          author={author}
+          allowSelfAssignment={allowSelfAssignment}
+          callerUserId={callerUserId}
+          onAssigned={() => {
+            onLanesChanged?.()
+          }}
+          onClose={() => setAssignTarget(null)}
+        />
       )}
-      emptyState={emptyState}
-      testId={testId}
-      dense
-    />
+    </>
   )
 }

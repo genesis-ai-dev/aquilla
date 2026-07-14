@@ -824,33 +824,53 @@ function mapPortfolioRow(r: PortfolioDbRow): PortfolioRow {
 
 /** Per-project rollup over the org's non-archived projects (derive-on-read, one GROUP BY). */
 export async function getOrgPortfolio(env: Env, orgId: number): Promise<PortfolioRow[]> {
+  // Perf (dashboard 15s timeout fix): both heavy pieces are hoisted into
+  // MATERIALIZED CTEs so they run exactly once.
+  //  - ps: settings blobs run to ~6 MB; extracting the AQU-523 language pair
+  //    inline re-parsed that JSON on every file-fan-out row (~100x per
+  //    project). MATERIALIZED fences the planner from pulling the extraction
+  //    back up into the join.
+  //  - au: the previous 3 correlated cell_audio subqueries re-scanned and
+  //    re-sorted cell_audio (~300k rows) per project; one grouped pass
+  //    replaces them. Both join 1:1 on project_id, so MAX() collapses the
+  //    file fan-out without affecting the SUMs.
   const rows = await env.AQUILLA_PG.prepare(
-    `SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
+    `WITH ps AS MATERIALIZED (
+       SELECT project_id,
+              (settings::jsonb)->>'sourceLanguage' AS source_language,
+              (settings::jsonb)->>'targetLanguage' AS target_language
+         FROM project_settings
+        WHERE project_id IN (SELECT id FROM projects WHERE org_id = ?)
+     ), au AS MATERIALIZED (
+       SELECT ca.project_id,
+              COUNT(DISTINCT ca.cell_id) AS audio_cells,
+              COUNT(DISTINCT ca.cell_id) FILTER (WHERE ca.selected = 1 AND ca.approved = 1)
+                AS validated_audio_cells,
+              COALESCE(SUM(ca.duration_ms) FILTER (WHERE ca.selected = 1), 0) AS recorded_ms
+         FROM cell_audio ca
+        WHERE ca.deleted = 0
+          AND ca.project_id IN (SELECT id FROM projects WHERE org_id = ?)
+        GROUP BY ca.project_id
+     )
+     SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
             COALESCE(SUM(f.cell_count), 0)          AS total_cells,
             COALESCE(SUM(f.approved_count), 0)      AS validated_cells,
             COALESCE(SUM(f.filled_count), 0)        AS filled_cells,
             COALESCE(SUM(f.ai_drafted_count), 0)    AS ai_drafted_cells,
             MAX(f.last_edit_at)                     AS last_edit_at,
-            -- AQU-523: language pair from the project_settings JSON. The join is
-            -- 1:1 on project_id (settings.project_id is PK), so MAX() collapses
-            -- the file-multiplied rows to the single settings value (or NULL)
-            -- without needing these in GROUP BY and without affecting the SUMs.
-            MAX((ps.settings::jsonb)->>'sourceLanguage') AS source_language,
-            MAX((ps.settings::jsonb)->>'targetLanguage') AS target_language,
-            (SELECT COUNT(DISTINCT ca.cell_id) FROM cell_audio ca
-              WHERE ca.project_id = p.id AND ca.deleted = 0)                    AS audio_cells,
-            (SELECT COUNT(DISTINCT ca.cell_id) FROM cell_audio ca
-              WHERE ca.project_id = p.id AND ca.deleted = 0 AND ca.selected = 1
-                AND ca.approved = 1)                                            AS validated_audio_cells,
-            (SELECT COALESCE(SUM(ca.duration_ms), 0) FROM cell_audio ca
-              WHERE ca.project_id = p.id AND ca.deleted = 0 AND ca.selected = 1) AS recorded_ms
+            MAX(ps.source_language)                 AS source_language,
+            MAX(ps.target_language)                 AS target_language,
+            COALESCE(MAX(au.audio_cells), 0)           AS audio_cells,
+            COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,
+            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms
        FROM projects p
        LEFT JOIN files f ON f.project_id = p.id
-       LEFT JOIN project_settings ps ON ps.project_id = p.id
+       LEFT JOIN ps ON ps.project_id = p.id
+       LEFT JOIN au ON au.project_id = p.id
       WHERE p.org_id = ? AND p.archived_at IS NULL
       GROUP BY p.id, p.name
       ORDER BY LOWER(p.name)`,
-  ).bind(orgId).all<PortfolioDbRow>()
+  ).bind(orgId, orgId, orgId).all<PortfolioDbRow>()
   return (rows.results ?? []).map(mapPortfolioRow)
 }
 
@@ -859,31 +879,46 @@ export async function getOrgPortfolios(env: Env, orgIds: number[]): Promise<OrgP
   const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
   if (uniqueOrgIds.length === 0) return []
   const placeholders = uniqueOrgIds.map(() => "?").join(", ")
+  // See getOrgPortfolio for why ps/au are MATERIALIZED CTEs (dashboard
+  // 15s-timeout fix: parse settings JSON once per project, aggregate
+  // cell_audio in one pass instead of 3 correlated subqueries per project).
   const rows = await env.AQUILLA_PG.prepare(
-    `SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
+    `WITH ps AS MATERIALIZED (
+       SELECT project_id,
+              (settings::jsonb)->>'sourceLanguage' AS source_language,
+              (settings::jsonb)->>'targetLanguage' AS target_language
+         FROM project_settings
+        WHERE project_id IN (SELECT id FROM projects WHERE org_id IN (${placeholders}))
+     ), au AS MATERIALIZED (
+       SELECT ca.project_id,
+              COUNT(DISTINCT ca.cell_id) AS audio_cells,
+              COUNT(DISTINCT ca.cell_id) FILTER (WHERE ca.selected = 1 AND ca.approved = 1)
+                AS validated_audio_cells,
+              COALESCE(SUM(ca.duration_ms) FILTER (WHERE ca.selected = 1), 0) AS recorded_ms
+         FROM cell_audio ca
+        WHERE ca.deleted = 0
+          AND ca.project_id IN (SELECT id FROM projects WHERE org_id IN (${placeholders}))
+        GROUP BY ca.project_id
+     )
+     SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
             COALESCE(SUM(f.cell_count), 0)          AS total_cells,
             COALESCE(SUM(f.approved_count), 0)      AS validated_cells,
             COALESCE(SUM(f.filled_count), 0)        AS filled_cells,
             COALESCE(SUM(f.ai_drafted_count), 0)    AS ai_drafted_cells,
             MAX(f.last_edit_at)                     AS last_edit_at,
-            -- AQU-523: see getOrgPortfolio above for why MAX() over the 1:1
-            -- project_settings join is the right shape here.
-            MAX((ps.settings::jsonb)->>'sourceLanguage') AS source_language,
-            MAX((ps.settings::jsonb)->>'targetLanguage') AS target_language,
-            (SELECT COUNT(DISTINCT ca.cell_id) FROM cell_audio ca
-              WHERE ca.project_id = p.id AND ca.deleted = 0)                    AS audio_cells,
-            (SELECT COUNT(DISTINCT ca.cell_id) FROM cell_audio ca
-              WHERE ca.project_id = p.id AND ca.deleted = 0 AND ca.selected = 1
-                AND ca.approved = 1)                                            AS validated_audio_cells,
-            (SELECT COALESCE(SUM(ca.duration_ms), 0) FROM cell_audio ca
-              WHERE ca.project_id = p.id AND ca.deleted = 0 AND ca.selected = 1) AS recorded_ms
+            MAX(ps.source_language)                 AS source_language,
+            MAX(ps.target_language)                 AS target_language,
+            COALESCE(MAX(au.audio_cells), 0)           AS audio_cells,
+            COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,
+            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms
        FROM projects p
        LEFT JOIN files f ON f.project_id = p.id
-       LEFT JOIN project_settings ps ON ps.project_id = p.id
+       LEFT JOIN ps ON ps.project_id = p.id
+       LEFT JOIN au ON au.project_id = p.id
       WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL
       GROUP BY p.org_id, p.id, p.name
       ORDER BY p.org_id, LOWER(p.name)`,
-  ).bind(...uniqueOrgIds).all<PortfolioDbRow>()
+  ).bind(...uniqueOrgIds, ...uniqueOrgIds, ...uniqueOrgIds).all<PortfolioDbRow>()
   return (rows.results ?? []).map((r) => ({ ...mapPortfolioRow(r), orgId: r.org_id }))
 }
 

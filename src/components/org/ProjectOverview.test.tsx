@@ -44,6 +44,26 @@ vi.mock("@/lib/frontier/portfolio", () => ({
   aiDraftedPct: (p: { aiDraftedCells: number; totalCells: number }) => (p.totalCells > 0 ? p.aiDraftedCells / p.totalCells : 0),
   recordedMinutes: (p: { recordedMs: number }) => Math.round(p.recordedMs / 60000),
   deadlineStatus: () => _deadlineStatusResult,
+  // AQU-538 §3.3: real per-lane helpers so the lane table/tiles compute true %s.
+  laneTranslatedPct: (l: { filledCells: number; totalCells: number }) => (l.totalCells > 0 ? l.filledCells / l.totalCells : 0),
+  laneValidatedPct: (l: { validatedCells: number; totalCells: number }) => (l.totalCells > 0 ? l.validatedCells / l.totalCells : 0),
+}))
+
+// AQU-538 §3.3: the lane table mounts AssignModal + StaffLanePopover per lane.
+// Stub both to capture the lane they were handed (defaultLane / lane) without
+// pulling their whole fetch surface into this suite.
+vi.mock("@/components/AssignModal", () => ({
+  AssignModal: ({ open, defaultLane }: { open: boolean; defaultLane?: string }) =>
+    open ? <div data-testid="assign-modal-mock" data-lane={defaultLane ?? ""} /> : null,
+}))
+vi.mock("@/components/StaffLanePopover", () => ({
+  StaffLanePopover: ({ lane, laneLabel }: { lane: string; laneLabel: string }) => (
+    <div data-testid="staff-lane-mock" data-lane={lane} data-label={laneLabel} />
+  ),
+}))
+vi.mock("@/lib/sync/member-scopes", () => ({
+  fetchMemberScopes: vi.fn(async () => []),
+  putMemberScopes: vi.fn(async () => []),
 }))
 vi.mock("@/lib/sync/cloud-projects", () => ({
   setProjectDeadline: vi.fn(),
@@ -1273,5 +1293,180 @@ describe("ProjectOverview CSV export (AQU-500)", () => {
     const [blob, filename] = downloadBlob.mock.calls[0]
     expect(blob).toBeInstanceOf(Blob)
     expect(filename).toBe("My-Project-progress.csv")
+  })
+})
+
+// ── AQU-538 §3.3: per-project lane table + lane filter pills ─────────────────
+
+describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
+  // WHY: once a project has more than one target-language lane, a PM must see
+  // per-lane progress + people + quick actions directly on the overview, and be
+  // able to filter the header StatTiles / per-file drill-down to one lane. N=1
+  // projects must be byte-identical to the pre-lane overview (no table, no pills).
+
+  const NOW = new Date("2026-07-14T12:00:00Z").getTime()
+
+  type PL = NonNullable<PortfolioProject["lanes"]>[number]
+  const TWO_LANES: PL[] = [
+    { lane: "", totalCells: 100, filledCells: 80, validatedCells: 50, lastEditAt: NOW - 2 * 3600 * 1000 },
+    { lane: "es", totalCells: 100, filledCells: 20, validatedCells: 8, lastEditAt: NOW - 3 * 24 * 3600 * 1000 },
+  ]
+
+  function laneProject(over: Partial<PortfolioProject> = {}): PortfolioProject {
+    return {
+      id: "p1", name: "John", totalCells: 200, filledCells: 100, validatedCells: 58,
+      aiDraftedCells: 0, audioCells: 0, validatedAudioCells: 0, recordedMs: 0,
+      lastEditAt: NOW, deadlineAt: null, lanes: TWO_LANES, ...over,
+    }
+  }
+
+  function useLaneProject(
+    files: ProjectRecord["files"] =
+      [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "x", cellCount: 10 }],
+  ) {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, targetLanguage: "Bambara", targetLanes: ["es"], files }),
+      status: "ready", refresh,
+    })
+  }
+
+  /** The StatTile whose visible label is `label` (distinct from the StatBar row
+   *  which reuses the same word) — filtered by the tile-label's unique class. */
+  function statTile(label: string): HTMLElement {
+    const node = screen.getAllByText(label).find((n) => n.className.includes("text-[11px]"))
+    return node!.parentElement as HTMLElement
+  }
+
+  beforeEach(() => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+  })
+
+  it("renders the lane table with one row per lane and correct percentages when lanes > 1", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    const table = await screen.findByTestId("overview-lane-table")
+    const defaultRow = within(table).getByTestId("overview-lane-row-default")
+    const esRow = within(table).getByTestId("overview-lane-row-es")
+
+    // Default lane labeled with the project's targetLanguage; es keeps its tag.
+    expect(defaultRow).toHaveTextContent("Bambara")
+    expect(esRow).toHaveTextContent("es")
+
+    // Translated 80% / Validated 50% (default), 20% / 8% (es).
+    expect(defaultRow).toHaveTextContent("80%")
+    expect(defaultRow).toHaveTextContent("50%")
+    expect(esRow).toHaveTextContent("20%")
+    expect(esRow).toHaveTextContent("8%")
+  })
+
+  it("does not render the lane table (or pills) for a single-lane project", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject({
+      lanes: [{ lane: "", totalCells: 100, filledCells: 80, validatedCells: 50, lastEditAt: NOW }],
+    })])
+    renderOverview()
+
+    // The progress card still renders (Translated tile present) — just no lane UI.
+    await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
+    expect(screen.queryByTestId("overview-lane-table")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("lane-filter-pills")).not.toBeInTheDocument()
+  })
+
+  it("selecting a lane pill swaps the header StatTile percentages to that lane's numbers", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    await screen.findByTestId("lane-filter-pills")
+
+    // "All" (default) — cross-lane scalars: 100/200 = 50% translated, 58/200 = 29% validated.
+    expect(statTile("Translated")).toHaveTextContent("50%")
+    expect(statTile("Validated")).toHaveTextContent("29%")
+
+    // Filter to es — laneTranslatedPct(es) = 20/100 = 20%, laneValidatedPct = 8/100 = 8%.
+    fireEvent.click(screen.getByTestId("lane-pill-es"))
+    await waitFor(() => expect(statTile("Translated")).toHaveTextContent("20%"))
+    expect(statTile("Validated")).toHaveTextContent("8%")
+
+    // Back to All restores the cross-lane figures.
+    fireEvent.click(screen.getByTestId("lane-pill-all"))
+    await waitFor(() => expect(statTile("Translated")).toHaveTextContent("50%"))
+  })
+
+  it("each lane row's Open link deep-links the workspace at that lane (?lane=)", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    await screen.findByTestId("overview-lane-table")
+    expect(screen.getByTestId("overview-lane-open-es").getAttribute("href")).toBe("/project/p1?lane=es")
+    // The default lane opens the workspace with no lane param (today's behavior).
+    expect(screen.getByTestId("overview-lane-open-default").getAttribute("href")).toBe("/project/p1")
+  })
+
+  it("Assign… on a lane row mounts AssignModal pinned to that lane", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    await screen.findByTestId("overview-lane-table")
+    // Closed until launched.
+    expect(screen.queryByTestId("assign-modal-mock")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-lane-assign-es"))
+    const modal = await screen.findByTestId("assign-modal-mock")
+    expect(modal.getAttribute("data-lane")).toBe("es")
+  })
+
+  it("Staff… on a lane row mounts StaffLanePopover for that lane", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    const table = await screen.findByTestId("overview-lane-table")
+    const esStaff = within(within(table).getByTestId("overview-lane-row-es")).getByTestId("staff-lane-mock")
+    expect(esStaff.getAttribute("data-lane")).toBe("es")
+
+    const defaultStaff = within(within(table).getByTestId("overview-lane-row-default")).getByTestId("staff-lane-mock")
+    expect(defaultStaff.getAttribute("data-lane")).toBe("")
+    expect(defaultStaff.getAttribute("data-label")).toBe("Bambara")
+  })
+
+  it("the '+ Add language' link routes to the project settings Languages section", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    await screen.findByTestId("overview-lane-table")
+    expect(screen.getByTestId("overview-lane-add-language").getAttribute("href"))
+      .toBe("/project/p1/settings?section=general")
+  })
+
+  it("re-reads the per-file drill-down with the selected lane param", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
+    getFileProgress.mockResolvedValue({
+      fileId: "f1", revision: 1, validationCount: 1,
+      file: { totalCount: 1, filledCount: 1, validatedCount: 1, validationLevels: [1] },
+      sections: [{ key: "GEN 1", totalCount: 1, filledCount: 1, validatedCount: 1, validationLevels: [1] }],
+      source: "projection",
+    })
+    renderOverview()
+
+    await screen.findByTestId("lane-filter-pills")
+    fireEvent.click(screen.getByTestId("lane-pill-es"))
+
+    const row = await screen.findByTestId("file-row")
+    fireEvent.click(within(row).getByRole("button", { name: /^expand/i }))
+
+    await waitFor(() =>
+      expect(getFileProgress.mock.calls.some((c) => c[3] === "es")).toBe(true),
+    )
+    // And never with the default lane once es is selected (lane-true drill-down).
+    expect(getFileProgress.mock.calls.every((c) => c[3] === "es")).toBe(true)
   })
 })

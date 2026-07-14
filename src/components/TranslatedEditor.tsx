@@ -54,8 +54,18 @@ import {
 /** Window before a quiet keystroke pause counts as a commit-worthy idle. */
 export const COMMIT_IDLE_MS = 1_200
 const PRESENCE_SELECTION_THROTTLE_MS = 120
+export const PRESENCE_DRAFT_IDLE_MS = 650
+export const PRESENCE_WORD_BATCH_SIZE = 2
 /** Keep presence frames lightweight even if a malformed/imported cell is huge. */
 export const MAX_PRESENCE_DRAFT_LENGTH = 16_384
+
+function presenceWordCount(text: string): number {
+  return text.trim().match(/\S+/g)?.length ?? 0
+}
+
+export function shouldPublishPresenceDraft(previous: string, next: string): boolean {
+  return Math.abs(presenceWordCount(next) - presenceWordCount(previous)) >= PRESENCE_WORD_BATCH_SIZE
+}
 
 export interface TranslatedEditorCommit {
   /** Plain-text value derived from editor content. */
@@ -246,7 +256,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
 
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const presenceDraftIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSelectionKeyRef = useRef<string | null>(null)
+  const lastPublishedDraftRef = useRef(initialPlain)
   const lastCommittedRef = useRef<string>(initialPlain)
   // Latest typed-but-not-yet-committed snapshot. Held so the unmount cleanup
   // can flush it (navigate-away / reload during the idle window must not drop
@@ -282,6 +294,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     const key = `${next.side}:${next.anchor}:${next.head}:${next.draftText ?? ""}`
     if (key === lastSelectionKeyRef.current) return
     lastSelectionKeyRef.current = key
+    lastPublishedDraftRef.current = text
     onSelectionChangeRef.current?.(next)
   }, [])
   const scheduleSelectionPublish = useCallback((editorInstance: TiptapEditor | null) => {
@@ -291,6 +304,28 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       selectionTimerRef.current = null
       publishSelection(editorInstance)
     }, PRESENCE_SELECTION_THROTTLE_MS)
+  }, [publishSelection])
+  const scheduleTypingPresencePublish = useCallback((editorInstance: TiptapEditor | null) => {
+    if (!editorInstance || isReadOnlyRef.current) return
+    const text = editorInstance.getText()
+    if (shouldPublishPresenceDraft(lastPublishedDraftRef.current, text)) {
+      if (presenceDraftIdleTimerRef.current !== null) {
+        clearTimeout(presenceDraftIdleTimerRef.current)
+        presenceDraftIdleTimerRef.current = null
+      }
+      publishSelection(editorInstance)
+      return
+    }
+    // Edits within an existing word do not change the word count. Publish
+    // after a short pause so slow typing, corrections, and partial final words
+    // never remain invisible indefinitely.
+    if (presenceDraftIdleTimerRef.current !== null) {
+      clearTimeout(presenceDraftIdleTimerRef.current)
+    }
+    presenceDraftIdleTimerRef.current = setTimeout(() => {
+      presenceDraftIdleTimerRef.current = null
+      publishSelection(editorInstance)
+    }, PRESENCE_DRAFT_IDLE_MS)
   }, [publishSelection])
 
   const editor = useEditor({
@@ -481,7 +516,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     },
     onUpdate({ editor }) {
       applyEditorDirection(editor)
-      scheduleSelectionPublish(editor)
+      scheduleTypingPresencePublish(editor)
       // Reset idle timer on every keystroke; commit when the user pauses.
       if (idleTimerRef.current !== null) clearTimeout(idleTimerRef.current)
       const text = editor.getText()
@@ -494,7 +529,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         onCommitRef.current({ value: text, valueHtml: html })
       }, COMMIT_IDLE_MS)
     },
-    onSelectionUpdate({ editor }) {
+    onSelectionUpdate({ editor, transaction }) {
+      // A typing transaction also moves the caret; onUpdate owns its batched
+      // draft publication. Pointer/arrow selection changes remain responsive.
+      if (transaction.docChanged) return
       scheduleSelectionPublish(editor)
     },
     onFocus({ editor }) {
@@ -506,6 +544,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       if (selectionTimerRef.current !== null) {
         clearTimeout(selectionTimerRef.current)
         selectionTimerRef.current = null
+      }
+      if (presenceDraftIdleTimerRef.current !== null) {
+        clearTimeout(presenceDraftIdleTimerRef.current)
+        presenceDraftIdleTimerRef.current = null
       }
       lastSelectionKeyRef.current = null
       onSelectionChangeRef.current?.(null)
@@ -533,6 +575,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       if (selectionTimerRef.current !== null) {
         clearTimeout(selectionTimerRef.current)
         selectionTimerRef.current = null
+      }
+      if (presenceDraftIdleTimerRef.current !== null) {
+        clearTimeout(presenceDraftIdleTimerRef.current)
+        presenceDraftIdleTimerRef.current = null
       }
       lastSelectionKeyRef.current = null
       onSelectionChangeRef.current?.(null)

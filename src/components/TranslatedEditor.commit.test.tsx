@@ -4,11 +4,22 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { render, fireEvent, cleanup, act } from "@testing-library/react"
-import { TranslatedEditor, COMMIT_IDLE_MS } from "./TranslatedEditor"
+import {
+  TranslatedEditor,
+  COMMIT_IDLE_MS,
+  shouldPublishPresenceDraft,
+} from "./TranslatedEditor"
 
 afterEach(cleanup)
 
 describe("TranslatedEditor — plain TipTap commit path", () => {
+  it("batches live draft presence at two-word checkpoints", () => {
+    expect(shouldPublishPresenceDraft("", "one")).toBe(false)
+    expect(shouldPublishPresenceDraft("", "one two")).toBe(true)
+    expect(shouldPublishPresenceDraft("one two", "one two corrected")).toBe(false)
+    expect(shouldPublishPresenceDraft("one two", "one two three four")).toBe(true)
+  })
+
   it("hydrates from initialPlain", async () => {
     const { container } = render(
       <TranslatedEditor

@@ -59,12 +59,37 @@ export const PRESENCE_WORD_BATCH_SIZE = 2
 /** Keep presence frames lightweight even if a malformed/imported cell is huge. */
 export const MAX_PRESENCE_DRAFT_LENGTH = 16_384
 
-function presenceWordCount(text: string): number {
-  return text.trim().match(/\S+/g)?.length ?? 0
+function presenceWords(text: string): string[] {
+  // Unicode letters/numbers/marks keep this useful outside English. Treat
+  // apostrophes and hyphens inside a token as part of the same word so one
+  // contraction or compound does not accidentally satisfy a two-word batch.
+  return text.match(/[\p{L}\p{N}\p{M}]+(?:[-'’\u2010-\u2015][\p{L}\p{N}\p{M}]+)*/gu) ?? []
 }
 
 export function shouldPublishPresenceDraft(previous: string, next: string): boolean {
-  return Math.abs(presenceWordCount(next) - presenceWordCount(previous)) >= PRESENCE_WORD_BATCH_SIZE
+  const before = presenceWords(previous)
+  const after = presenceWords(next)
+  let prefix = 0
+  while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) {
+    prefix += 1
+  }
+  let suffix = 0
+  while (
+    suffix < before.length - prefix &&
+    suffix < after.length - prefix &&
+    before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
+  ) {
+    suffix += 1
+  }
+  const changedBefore = before.length - prefix - suffix
+  const changedAfter = after.length - prefix - suffix
+  return Math.max(changedBefore, changedAfter) >= PRESENCE_WORD_BATCH_SIZE
+}
+
+export function isPresenceWordBoundary(text: string, caretOffset: number): boolean {
+  if (caretOffset <= 0) return false
+  const preceding = Array.from(text.slice(0, caretOffset)).at(-1)
+  return preceding !== undefined && /[\s\p{P}]/u.test(preceding)
 }
 
 export interface TranslatedEditorCommit {
@@ -259,6 +284,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const presenceDraftIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSelectionKeyRef = useRef<string | null>(null)
   const lastPublishedDraftRef = useRef(initialPlain)
+  const lastTypingEndedAtBoundaryRef = useRef(false)
   const lastCommittedRef = useRef<string>(initialPlain)
   // Latest typed-but-not-yet-committed snapshot. Held so the unmount cleanup
   // can flush it (navigate-away / reload during the idle window must not drop
@@ -302,28 +328,23 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     if (selectionTimerRef.current !== null) return
     selectionTimerRef.current = setTimeout(() => {
       selectionTimerRef.current = null
+      // The caret offsets belong to the current draft. Until that draft has
+      // passed the paused word-boundary gate, sending them would either leak
+      // a partial word or position a caret against different remote text.
+      if (editorInstance.getText() !== lastPublishedDraftRef.current) return
       publishSelection(editorInstance)
     }, PRESENCE_SELECTION_THROTTLE_MS)
   }, [publishSelection])
   const scheduleTypingPresencePublish = useCallback((editorInstance: TiptapEditor | null) => {
     if (!editorInstance || isReadOnlyRef.current) return
-    const text = editorInstance.getText()
-    if (shouldPublishPresenceDraft(lastPublishedDraftRef.current, text)) {
-      if (presenceDraftIdleTimerRef.current !== null) {
-        clearTimeout(presenceDraftIdleTimerRef.current)
-        presenceDraftIdleTimerRef.current = null
-      }
-      publishSelection(editorInstance)
-      return
-    }
-    // Edits within an existing word do not change the word count. Publish
-    // after a short pause so slow typing, corrections, and partial final words
-    // never remain invisible indefinitely.
     if (presenceDraftIdleTimerRef.current !== null) {
       clearTimeout(presenceDraftIdleTimerRef.current)
     }
     presenceDraftIdleTimerRef.current = setTimeout(() => {
       presenceDraftIdleTimerRef.current = null
+      const text = editorInstance.getText()
+      if (!lastTypingEndedAtBoundaryRef.current) return
+      if (!shouldPublishPresenceDraft(lastPublishedDraftRef.current, text)) return
       publishSelection(editorInstance)
     }, PRESENCE_DRAFT_IDLE_MS)
   }, [publishSelection])
@@ -516,6 +537,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     },
     onUpdate({ editor }) {
       applyEditorDirection(editor)
+      const { selection, doc } = editor.state
+      const caretOffset = pmPositionToPlainPosition(doc, selection.head)
+      lastTypingEndedAtBoundaryRef.current = isPresenceWordBoundary(editor.getText(), caretOffset)
       scheduleTypingPresencePublish(editor)
       // Reset idle timer on every keystroke; commit when the user pauses.
       if (idleTimerRef.current !== null) clearTimeout(idleTimerRef.current)

@@ -7,6 +7,7 @@ import { render, fireEvent, cleanup, act } from "@testing-library/react"
 import {
   TranslatedEditor,
   COMMIT_IDLE_MS,
+  isPresenceWordBoundary,
   shouldPublishPresenceDraft,
 } from "./TranslatedEditor"
 
@@ -16,8 +17,18 @@ describe("TranslatedEditor — plain TipTap commit path", () => {
   it("batches live draft presence at two-word checkpoints", () => {
     expect(shouldPublishPresenceDraft("", "one")).toBe(false)
     expect(shouldPublishPresenceDraft("", "one two")).toBe(true)
-    expect(shouldPublishPresenceDraft("one two", "one two corrected")).toBe(false)
+    expect(shouldPublishPresenceDraft("one two", "one corrected words")).toBe(true)
+    expect(shouldPublishPresenceDraft("one two three", "one")).toBe(true)
     expect(shouldPublishPresenceDraft("one two", "one two three four")).toBe(true)
+    expect(shouldPublishPresenceDraft("", "one,two ")).toBe(true)
+    expect(shouldPublishPresenceDraft("", "don't ")).toBe(false)
+  })
+
+  it("recognizes only whitespace and Unicode punctuation as publish boundaries", () => {
+    expect(isPresenceWordBoundary("one ", 4)).toBe(true)
+    expect(isPresenceWordBoundary("one…", 4)).toBe(true)
+    expect(isPresenceWordBoundary("one", 3)).toBe(false)
+    expect(isPresenceWordBoundary("", 0)).toBe(false)
   })
 
   it("hydrates from initialPlain", async () => {

@@ -48,6 +48,20 @@ import { sendOrgInviteEmail } from "../services/email"
 
 const orgs = new Hono<AuthHonoEnv>()
 
+/**
+ * Compare two user ids that may arrive as a number or, from a Postgres BIGINT
+ * column (e.g. org_invites.used_by), a string. Comparing across those types
+ * with `===` silently fails, so a still-member redeemer re-clicking a used
+ * invite would wrongly get a 410 instead of the continue-preview. Normalize
+ * both sides before comparing.
+ */
+export function isSameUserId(
+  a: number | string | null | undefined,
+  b: number | string | null | undefined,
+): boolean {
+  return a != null && b != null && String(a) === String(b)
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // PUBLIC route — registered BEFORE the router-wide authMiddleware below so a
 // signed-out invite recipient can see what they were invited to. Mirrors
@@ -102,7 +116,7 @@ orgs.get("/invite-preview/:token", async (c) => {
     const caller = await optionalCaller(c.env, c.req.header("Authorization") ?? null)
     const callerIsStillMemberRedeemer =
       caller != null &&
-      invite.used_by === caller.id &&
+      isSameUserId(invite.used_by, caller.id) &&
       (await c.env.AQUILLA_PG.prepare(
         "SELECT 1 AS present FROM org_members WHERE org_id = ? AND user_id = ?",
       )

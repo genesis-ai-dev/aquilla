@@ -88,7 +88,11 @@ import {
   chapterLabelFromCanonical,
   verseLabelFromCanonical,
 } from "@/lib/scripture-reference"
-import { sectionLabelAtViewportStart } from "@/lib/chapter-navigation"
+import {
+  firstActuallyVisibleIndex,
+  rowMatchesChapterHeading,
+  sectionLabelAtViewportStart,
+} from "@/lib/chapter-navigation"
 import { isPerfLogEnabled } from "@/lib/perf-log"
 import {
   type DirectionMode,
@@ -681,6 +685,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const listRef = useRef<LegendListRef | null>(null)
   const [firstVisibleIndex, setFirstVisibleIndex] = useState(0)
   const [viewableIndexes, setViewableIndexes] = useState<number[]>([])
+  const [chapterVisibleIndex, setChapterVisibleIndex] = useState<number | null>(null)
   const [activeEditorCellId, setActiveEditorCellId] = useState<string | null>(null)
   const [hoveredFootnote, setHoveredFootnote] = useState<{ cellId: string; index: number } | null>(null)
   const isDragging = useRef(false)
@@ -698,6 +703,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   } | null>(null)
   const selectionDragAbortRef = useRef<AbortController | null>(null)
   const selectionAutoScrollFrameRef = useRef<number | null>(null)
+  const chapterScrollFrameRef = useRef<number | null>(null)
   const selectionPointerYRef = useRef<number | null>(null)
   const previousBodyUserSelectRef = useRef<string | null>(null)
 
@@ -764,8 +770,50 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [])
   const getListQueryRoot = useCallback(() => parentRef.current ?? listRootRef.current, [])
 
+  const updateChapterVisibleIndex = useCallback(() => {
+    const viewport = listRootRef.current
+    const root = getListQueryRoot()
+    if (!viewport || !root) return
+
+    const rows = Array.from(root.querySelectorAll<HTMLElement>("[data-cell-id][data-index]"))
+      .map((row) => {
+        const index = Number(row.dataset.index)
+        if (!Number.isInteger(index)) return null
+        const rect = row.getBoundingClientRect()
+        return { index, top: rect.top, bottom: rect.bottom }
+      })
+      .filter((row): row is { index: number; top: number; bottom: number } => row !== null)
+    const nextIndex = firstActuallyVisibleIndex(
+      rows,
+      viewport.getBoundingClientRect().top,
+      firstVisibleIndex,
+    )
+    setChapterVisibleIndex((current) => current === nextIndex ? current : nextIndex)
+  }, [firstVisibleIndex, getListQueryRoot])
+
+  const handleListScroll = useCallback(() => {
+    if (chapterScrollFrameRef.current !== null) return
+    chapterScrollFrameRef.current = requestAnimationFrame(() => {
+      // Legend List applies its row transforms after the scroll callback.
+      // Read geometry on the following frame so positions are settled.
+      chapterScrollFrameRef.current = requestAnimationFrame(() => {
+        chapterScrollFrameRef.current = null
+        updateChapterVisibleIndex()
+      })
+    })
+  }, [updateChapterVisibleIndex])
+
+  useEffect(() => () => {
+    if (chapterScrollFrameRef.current !== null) {
+      cancelAnimationFrame(chapterScrollFrameRef.current)
+    }
+  }, [])
+
   useEffect(() => {
     setFirstVisibleIndex((current) => clampIndex(current, displayCellIds.length))
+    setChapterVisibleIndex((current) => current === null
+      ? null
+      : clampIndex(current, displayCellIds.length))
     setViewableIndexes((current) => {
       const next = current.filter((index) => index >= 0 && index < displayCellIds.length)
       return next.length === current.length ? current : next
@@ -1165,11 +1213,29 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [cellStore])
 
   const firstVisibleCellId = displayCellIds[firstVisibleIndex] ?? null
-  const currentSectionLabel = sectionLabelAtViewportStart(
-    displayCellIds,
-    firstVisibleIndex,
-    (cellId) => cellStore.getSectionLabelForCellId(cellId),
-  )
+  const currentSectionLabel = useMemo(() => {
+    const visibleIndex = chapterVisibleIndex ?? firstVisibleIndex
+    const baseLabel = sectionLabelAtViewportStart(
+      displayCellIds,
+      visibleIndex,
+      (cellId) => cellStore.getSectionLabelForCellId(cellId),
+    )
+    const nextSection = cellStore.getNavigationIndex().find(
+      (entry) => entry.firstIndex > visibleIndex,
+    )
+    const cellId = displayCellIds[visibleIndex]
+    const cell = cellId ? cellStore.getCellView(cellId) : null
+    const nextDisplayLabel = chapterLabelFromCanonical(nextSection?.label)
+    if (
+      nextSection
+      && nextDisplayLabel
+      && cell
+      && rowMatchesChapterHeading([cell.original, cell.translated], nextDisplayLabel)
+    ) {
+      return nextSection.label
+    }
+    return baseLabel
+  }, [cellStore, cellStoreVersion, chapterVisibleIndex, displayCellIds, firstVisibleIndex])
 
   const chapterNavigationItems = useMemo<ChapterNavigationItem[]>(() =>
     readAtVersion(cellStoreVersion, () => {
@@ -1209,6 +1275,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const index = cellStore.findIndexBySection(label)
     if (index < 0) return
     setFirstVisibleIndex(index)
+    setChapterVisibleIndex(index)
     void listRef.current?.scrollToIndex({
       index,
       viewPosition: 0,
@@ -1536,6 +1603,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             drawDistance={LEGEND_LIST_DRAW_DISTANCE_PX}
             recycleItems
             maintainVisibleContentPosition
+            onScroll={handleListScroll}
             onFirstVisibleItemChanged={handleFirstVisibleItemChanged}
             onViewableItemsChanged={handleViewableItemsChanged}
             viewabilityConfig={{ viewAreaCoveragePercentThreshold: 0 }}

@@ -52,7 +52,7 @@ import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
 import { AppTooltip, TooltipDelegationBoundary } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
-import { FolderPlus, Search, X, Building2, Columns2, Rows3, Sparkles, CircleCheck, Mic } from "lucide-react"
+import { FolderPlus, Search, X, Building2, Sparkles, CircleCheck, Mic } from "lucide-react"
 
 function ProjectRowSkeleton() {
   return (
@@ -126,7 +126,6 @@ export function activityStatus(p: PortfolioProject, now: number): ActivityStatus
 type StatusFilter = "all" | "stalled" | "overdue"
 
 type ProjectLens = "recent" | "attention" | "least-translated" | "most-progress" | "name"
-type PortfolioLayout = "split" | "stacked"
 
 const PROJECT_LENS_STORAGE_KEY = "org:all-projects:view"
 
@@ -178,7 +177,6 @@ function ProjectTableName({ name }: { name: string }) {
     </span>
   )
 }
-const PORTFOLIO_LAYOUT_STORAGE_KEY = "org:all-projects:layout"
 const PROJECT_LENS_VALUES: ProjectLens[] = ["recent", "attention", "least-translated", "most-progress", "name"]
 
 type PortfolioProjectRow = PortfolioProject & {
@@ -247,22 +245,6 @@ function readProjectLens(): ProjectLens {
 function writeProjectLens(lens: ProjectLens) {
   try {
     localStorage.setItem(PROJECT_LENS_STORAGE_KEY, lens)
-  } catch {
-    // Ignore local storage restrictions; the in-memory state still updates.
-  }
-}
-
-function readPortfolioLayout(): PortfolioLayout {
-  try {
-    return localStorage.getItem(PORTFOLIO_LAYOUT_STORAGE_KEY) === "stacked" ? "stacked" : "split"
-  } catch {
-    return "split"
-  }
-}
-
-function writePortfolioLayout(layout: PortfolioLayout) {
-  try {
-    localStorage.setItem(PORTFOLIO_LAYOUT_STORAGE_KEY, layout)
   } catch {
     // Ignore local storage restrictions; the in-memory state still updates.
   }
@@ -592,7 +574,6 @@ export function OrgHome() {
   const [orgQuery, setOrgQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [projectLens, setProjectLens] = useState<ProjectLens>(readProjectLens)
-  const [portfolioLayout, setPortfolioLayout] = useState<PortfolioLayout>(readPortfolioLayout)
   // AQU-538 §3.2: bumped after a lane action (add language / assign / staff) to
   // refetch the portfolio so per-lane rollups reflect the change.
   const [refreshTick, setRefreshTick] = useState(0)
@@ -805,11 +786,6 @@ export function OrgHome() {
     writeProjectLens(lens)
   }
 
-  function selectPortfolioLayout(layout: PortfolioLayout) {
-    setPortfolioLayout(layout)
-    writePortfolioLayout(layout)
-  }
-
   function handleProjectLensChange(value: string | null) {
     if (!isProjectLens(value)) return
     selectProjectLens(value)
@@ -927,46 +903,7 @@ export function OrgHome() {
                     />
                   </div>
 
-                  <div className="space-y-2">
-                    <div className="flex justify-end">
-                      <div
-                        className="inline-flex items-center rounded-md border bg-background p-0.5"
-                        role="group"
-                        aria-label="Organization and project layout"
-                      >
-                        <AppTooltip content="Show organizations and projects side by side">
-                          <Button
-                            type="button"
-                            size="icon-xs"
-                            variant={portfolioLayout === "split" ? "secondary" : "ghost"}
-                            aria-label="Side-by-side layout"
-                            aria-pressed={portfolioLayout === "split"}
-                            onClick={() => selectPortfolioLayout("split")}
-                          >
-                            <Columns2 />
-                          </Button>
-                        </AppTooltip>
-                        <AppTooltip content="Stack organizations above projects">
-                          <Button
-                            type="button"
-                            size="icon-xs"
-                            variant={portfolioLayout === "stacked" ? "secondary" : "ghost"}
-                            aria-label="Stacked layout"
-                            aria-pressed={portfolioLayout === "stacked"}
-                            onClick={() => selectPortfolioLayout("stacked")}
-                          >
-                            <Rows3 />
-                          </Button>
-                        </AppTooltip>
-                      </div>
-                    </div>
-
-                    <div
-                      className={cn(
-                        "grid items-start gap-6",
-                        portfolioLayout === "split" && "xl:grid-cols-[minmax(20rem,1fr)_minmax(0,2fr)]",
-                      )}
-                    >
+                  <div className="grid items-start gap-6 xl:grid-cols-[minmax(20rem,1fr)_minmax(0,2fr)]">
                     <section data-testid="organizations-panel" className="self-start rounded-2xl border bg-card">
                       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
                         <div>
@@ -1137,7 +1074,6 @@ export function OrgHome() {
                         />
                       )}
                     </section>
-                    </div>
                   </div>
 
                   {/* AQU-475: projects reachable only via a project-level grant

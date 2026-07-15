@@ -182,18 +182,6 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   expect(sortBox).not.toBeNull()
   expect(sortBox!.x + sortBox!.width).toBeLessThanOrEqual(projectsBox!.x + projectsBox!.width)
 
-  const sideBySideButton = alice.getByRole("button", { name: "Side-by-side layout" })
-  const stackedButton = alice.getByRole("button", { name: "Stacked layout" })
-  await expect(sideBySideButton).toHaveAttribute("aria-pressed", "true")
-  await stackedButton.click()
-  await expect(stackedButton).toHaveAttribute("aria-pressed", "true")
-
-  const stackedOrganizationsBox = await alice.getByTestId("organizations-panel").boundingBox()
-  const stackedProjectsBox = await alice.getByTestId("projects-panel").boundingBox()
-  expect(stackedOrganizationsBox).not.toBeNull()
-  expect(stackedProjectsBox).not.toBeNull()
-  expect(stackedProjectsBox!.y).toBeGreaterThan(stackedOrganizationsBox!.y + stackedOrganizationsBox!.height)
-
-  await alice.reload()
-  await expect(alice.getByRole("button", { name: "Stacked layout" })).toHaveAttribute("aria-pressed", "true")
+  await expect(alice.getByRole("button", { name: "Side-by-side layout" })).toHaveCount(0)
+  await expect(alice.getByRole("button", { name: "Stacked layout" })).toHaveCount(0)
 })

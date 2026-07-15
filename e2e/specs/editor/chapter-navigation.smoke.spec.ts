@@ -26,6 +26,9 @@ test("scripture editor shows canonical verse numbers and supports chapter naviga
   })
   await expect(chapterOneVerse.getByLabel("Line 1")).toBeVisible()
 
+  const chapterHeading = alice.locator("[data-cell-id]").filter({ hasText: "Genesis" }).first()
+  await expect(chapterHeading.getByLabel("Line 1")).toHaveCount(0)
+
   await alice.getByRole("button", { name: "Next chapter" }).click()
   await expect(alice.getByRole("button", { name: /Current chapter: Genesis 2/ })).toContainText("Verses 1–2")
 

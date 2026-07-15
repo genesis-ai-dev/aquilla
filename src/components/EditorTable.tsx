@@ -1163,8 +1163,18 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     return cellStore.getCellsByIds(displayCellIdsRef.current.slice(startIndex, startIndex + count))
   }, [cellStore])
 
+  // Use the viewport's representative (middle) row for chapter wayfinding.
+  // Virtualized lists retain a small overscan buffer above the visible area;
+  // keying the label off that first retained row makes a chapter jump appear
+  // to stay in the previous chapter even when the new chapter fills the view.
   const firstVisibleCellId = displayCellIds[firstVisibleIndex] ?? null
-  const currentSectionLabel = firstVisibleCellId ? cellStore.getSectionLabelForCellId(firstVisibleCellId) : ""
+  const currentSectionLabel = useMemo(() => {
+    const representativeIndex = viewableIndexes.length > 0
+      ? viewableIndexes[Math.floor(viewableIndexes.length / 2)]
+      : firstVisibleIndex
+    const cellId = displayCellIds[representativeIndex] ?? null
+    return cellId ? cellStore.getSectionLabelForCellId(cellId) : ""
+  }, [cellStore, displayCellIds, firstVisibleIndex, viewableIndexes])
 
   const chapterNavigationItems = useMemo<ChapterNavigationItem[]>(() =>
     readAtVersion(cellStoreVersion, () => {
@@ -1351,6 +1361,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onSeekToCue={onSeekToCue}
           rowIndex={index}
           lineNumbersEnabled={lineNumbersEnabled}
+          scriptureNumbering={chapterNavigationItems.length > 0}
           cellLabelsEnabled={cellLabelsEnabled}
           sourceDirectionMode={sourceDirectionMode}
           targetDirectionMode={targetDirectionMode}
@@ -1434,6 +1445,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     isCompletionAvailable,
     isCompletionConfigured,
     isTimeOrdered,
+    chapterNavigationItems.length,
     lineNumbersEnabled,
     micDenied,
     onAckRemoteChange,
@@ -1709,6 +1721,8 @@ interface MemoizedRowProps {
   onFootnoteCreated?: () => void
   sourceFootnoteNumberOffset: number
   targetFootnoteNumberOffset: number
+  /** Scripture files number verse rows by canonical ref and leave headings unnumbered. */
+  scriptureNumbering: boolean
 }
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
@@ -1734,7 +1748,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     ruleMap, onCompleteSingle,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
     getFootnoteDetails,
-    onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
+    onSeekToCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
@@ -1854,6 +1868,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onSeekToCue={onSeekToCue}
         rowIndex={rowIndex}
         lineNumbersEnabled={lineNumbersEnabled}
+        scriptureNumbering={scriptureNumbering}
         cellLabelsEnabled={cellLabelsEnabled}
         sourceDirectionMode={sourceDirectionMode}
         targetDirectionMode={targetDirectionMode}
@@ -1982,6 +1997,8 @@ interface EditorRowProps {
   getVoiceTakeCells: (startIndex: number, count: number) => CellData[]
   rowIndex: number
   lineNumbersEnabled: boolean
+  /** Scripture files number verse rows by canonical ref and leave headings unnumbered. */
+  scriptureNumbering: boolean
   cellLabelsEnabled: boolean
   sourceDirectionMode: DirectionMode
   targetDirectionMode: DirectionMode
@@ -2843,7 +2860,7 @@ function EditorRow({
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
-  rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols,
+  rowIndex, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, micDenied,
   audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, onAskAiFromSelection,
   onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
@@ -3777,9 +3794,8 @@ function EditorRow({
   const hasAnyIssue = infractionCount > 0 || cellNeedsAttention
   const canonicalVerseLabel = verseLabelFromCanonical(cell.group)
     ?? verseLabelFromCanonical(cell.globalReferences?.[0])
-  const hasScriptureSectionRef = /^[1-3]?[A-Z]{2,3}\s+\d+(?::|$)/i.test(cell.group?.trim() ?? "")
   const numberLabel = showLineNumber
-    ? canonicalVerseLabel ?? (hasScriptureSectionRef ? null : String(rowIndex + 1))
+    ? canonicalVerseLabel ?? (scriptureNumbering ? null : String(rowIndex + 1))
     : null
   const numberPill = numberLabel === null ? null : (
     <span className="flex h-6 items-center" aria-label={`Line ${numberLabel}`}>

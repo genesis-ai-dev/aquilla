@@ -160,8 +160,7 @@ function ProjectTableName({ name }: { name: string }) {
       <span
         ref={nameRef}
         data-testid="project-table-name"
-        className="block min-w-0 truncate font-medium"
-        title={undefined}
+        className="block min-w-0 overflow-hidden whitespace-nowrap text-clip font-medium"
       >
         {name}
       </span>
@@ -169,7 +168,7 @@ function ProjectTableName({ name }: { name: string }) {
         <span
           aria-hidden="true"
           data-testid="project-table-name-expanded"
-          className="pointer-events-none absolute top-0 left-0 z-50 whitespace-nowrap rounded-sm bg-popover font-medium text-popover-foreground opacity-0 shadow-sm ring-1 ring-border/50 transition-opacity duration-100 group-hover/name:opacity-100"
+          className="pointer-events-none absolute top-1/2 -left-2 z-50 -translate-y-1/2 whitespace-nowrap rounded-md bg-popover px-2 py-1 font-medium text-popover-foreground opacity-0 shadow-md ring-1 ring-border/60 transition-opacity duration-100 group-hover/name:opacity-100"
         >
           {name}
         </span>

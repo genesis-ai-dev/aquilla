@@ -181,15 +181,22 @@ describe("ProjectTable", () => {
     const deadlineTrigger = screen.getByTestId("project-table-deadline-trigger")
     const deadlineStatus = screen.getByTestId("project-table-deadline-status")
     expect(projectName).toHaveTextContent(project.name)
+    expect(projectName).toHaveClass("overflow-hidden", "whitespace-nowrap", "text-clip")
+    expect(projectName).not.toHaveClass("truncate", "text-ellipsis")
     expect(organization).toHaveTextContent(project.orgName)
     expect(identity).toContainElement(projectName)
     expect(identity).toContainElement(organization)
     expect(projectName).not.toHaveAttribute("title")
+    expect(
+      [...(projectName.closest("a")?.querySelectorAll("[title]") ?? [])].filter(
+        (element) => element.getAttribute("title") === project.name,
+      ),
+    ).toHaveLength(0)
     expect(projectName).not.toHaveAttribute("data-slot", "tooltip-trigger")
     expect(projectName.parentElement).toHaveAttribute("data-project-name-truncated", "true")
     expect(expandedProjectName).toHaveTextContent(project.name)
     expect(expandedProjectName).toHaveAttribute("aria-hidden", "true")
-    expect(expandedProjectName).toHaveClass("z-50")
+    expect(expandedProjectName).toHaveClass("z-50", "-left-2", "px-2", "py-1", "bg-popover", "shadow-md")
     expect(organization).not.toHaveAttribute("data-slot", "tooltip-trigger")
     expect(identity).toHaveClass("@md/project-table:grid-cols-[minmax(6.5rem,1fr)_minmax(4rem,6rem)]")
     expect(organization).toHaveClass("relative", "h-5", "w-full")

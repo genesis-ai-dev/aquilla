@@ -99,18 +99,16 @@ export function ChapterNavigator({
             render={
               <Button
                 variant="outline"
-                className="min-w-56 justify-between"
+                className="grid min-w-56 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2"
                 aria-label={`Current chapter: ${active.displayLabel}. Choose chapter`}
               />
             }
           >
-            <span className="flex min-w-0 items-center gap-2">
-              <span className="truncate font-semibold">{active.displayLabel}</span>
-              <span className="shrink-0 text-xs font-normal text-muted-foreground">
-                {activeSummary}
-              </span>
+            <span className="truncate text-left font-semibold">{active.displayLabel}</span>
+            <span className="justify-self-center text-xs font-normal text-muted-foreground">
+              {activeSummary}
             </span>
-            <ChevronDown data-icon="inline-end" />
+            <ChevronDown data-icon="inline-end" className="justify-self-end" />
           </PopoverTrigger>
           <PopoverContent align="center" className="w-80 gap-0 overflow-hidden p-0">
             <PopoverHeader className="px-3 py-2.5">

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react"
 import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import {
@@ -18,7 +19,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { cn } from "@/lib/utils"
+import { Separator } from "@/components/ui/separator"
 
 export interface ChapterNavigationItem {
   label: string
@@ -58,11 +59,11 @@ export function ChapterNavigator({
   }
 
   return (
-    <nav aria-label="Chapter navigation" className="flex items-center justify-center gap-2">
-      <ButtonGroup aria-label="Move between chapters">
+    <nav aria-label="Chapter navigation" className="flex items-center justify-center">
+      <ButtonGroup aria-label="Move between chapters" className="shadow-xs">
         <Button
           variant="outline"
-          size="icon-sm"
+          size="icon"
           disabled={!canGoPrevious}
           aria-label="Previous chapter"
           onClick={() => choose(chapters[activeIndex - 1].label)}
@@ -74,29 +75,30 @@ export function ChapterNavigator({
             render={
               <Button
                 variant="outline"
-                className="h-8 min-w-44 justify-between gap-3 px-3"
+                className="min-w-64 justify-between"
                 aria-label={`Current chapter: ${active.displayLabel}. Choose chapter`}
               />
             }
           >
-            <span className="flex min-w-0 items-baseline gap-2">
-              <span className="truncate font-semibold normal-case tracking-normal">{active.displayLabel}</span>
-              <span className="shrink-0 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="truncate font-semibold">{active.displayLabel}</span>
+              <span className="shrink-0 text-xs font-normal text-muted-foreground">
                 {activeSummary}
               </span>
             </span>
             <ChevronDown data-icon="inline-end" />
           </PopoverTrigger>
-          <PopoverContent align="center" className="w-80 p-1.5">
-            <PopoverHeader className="px-2 pt-1.5">
+          <PopoverContent align="center" className="w-88 gap-0 overflow-hidden p-0">
+            <PopoverHeader className="px-3 py-2.5">
               <PopoverTitle>Go to chapter</PopoverTitle>
               <PopoverDescription>Choose a chapter to jump to its first verse.</PopoverDescription>
             </PopoverHeader>
-            <Command label="Find a chapter">
+            <Separator />
+            <Command label="Find a chapter" className="rounded-none! p-1">
               <CommandInput placeholder="Find a chapter…" />
               <CommandList>
                 <CommandEmpty>No chapters found.</CommandEmpty>
-                <CommandGroup>
+                <CommandGroup heading="Chapters">
                   {chapters.map((chapter) => {
                     const selected = chapter.label === active.label
                     const translatedPercent = chapter.total > 0
@@ -110,15 +112,13 @@ export function ChapterNavigator({
                         onSelect={() => choose(chapter.label)}
                         className="min-h-11"
                       >
-                        <span
-                          className={cn(
-                            "flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-semibold tabular-nums",
-                            selected && "border-primary bg-primary text-primary-foreground",
-                          )}
+                        <Badge
+                          variant={selected ? "default" : "outline"}
+                          className="size-6 rounded-full p-0 tabular-nums"
                           aria-hidden="true"
                         >
                           {chapter.displayLabel.match(/\d+$/)?.[0]}
-                        </span>
+                        </Badge>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate font-medium">{chapter.displayLabel}</span>
                           <span className="block text-xs text-muted-foreground">
@@ -138,7 +138,7 @@ export function ChapterNavigator({
         </Popover>
         <Button
           variant="outline"
-          size="icon-sm"
+          size="icon"
           disabled={!canGoNext}
           aria-label="Next chapter"
           onClick={() => choose(chapters[activeIndex + 1].label)}

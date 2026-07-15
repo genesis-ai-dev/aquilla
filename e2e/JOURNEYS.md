@@ -21,6 +21,7 @@
 | Orgs        | Remove member, change role                           | `e2e/specs/orgs/remove-member-dialog.smoke.spec.ts` + `projects/share-panel-role-change.smoke.spec.ts` | ✅ |
 | Orgs        | Send & accept invite                                 | `e2e/specs/orgs/invite-to-projects.smoke.spec.ts` + `pending-invite-revoke.smoke.spec.ts` | ✅ |
 | Editor      | Import markdown, edit cell, persists across reload   | `e2e/specs/editor/import-and-edit.smoke.spec.ts`              |   ✅   |
+| Editor      | Scripture verse labels match canonical refs; chapter picker and previous/next navigation | `e2e/specs/editor/chapter-navigation.smoke.spec.ts` | ✅ |
 | Editor      | Commit survives a stale in-flight refetch (no vanish-until-refresh, AQU-247) | `e2e/specs/editor/commit-survives-stale-refetch.smoke.spec.ts` | ✅ |
 | Editor      | Cmd+K search                                         | `e2e/specs/editor/search.smoke.spec.ts` (toolbar) + `search-keyboard-shortcut.smoke.spec.ts` (Ctrl+K) | ✅ |
 | Editor      | Virtualization scroll integrity                      | _gap — Plan 2_                                                |        |

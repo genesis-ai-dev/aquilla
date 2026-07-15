@@ -71,6 +71,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
+import { ChapterNavigator, type ChapterNavigationItem } from "./ChapterNavigator"
 import { InterlinearAlignmentPanel } from "./InterlinearAlignmentPanel"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
@@ -83,6 +84,10 @@ import { assignedCastVoiceId, findVoice } from "@/lib/audio/voices"
 import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { looksLikeUuid } from "@/lib/uuid"
+import {
+  chapterLabelFromCanonical,
+  verseLabelFromCanonical,
+} from "@/lib/scripture-reference"
 import { isPerfLogEnabled } from "@/lib/perf-log"
 import {
   type DirectionMode,
@@ -1161,6 +1166,51 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const firstVisibleCellId = displayCellIds[firstVisibleIndex] ?? null
   const currentSectionLabel = firstVisibleCellId ? cellStore.getSectionLabelForCellId(firstVisibleCellId) : ""
 
+  const chapterNavigationItems = useMemo<ChapterNavigationItem[]>(() =>
+    readAtVersion(cellStoreVersion, () => {
+      const navigation = cellStore.getNavigationIndex()
+      const summaries = cellStore.getAllSummaries()
+      return navigation
+        .map((entry, index) => {
+          const displayLabel = chapterLabelFromCanonical(entry.label)
+          if (looksLikeUuid(entry.label) || !displayLabel) return null
+          const endIndex = navigation[index + 1]?.firstIndex ?? summaries.length
+          const verseLabels = summaries
+            .slice(entry.firstIndex, endIndex)
+            .map((cell) => verseLabelFromCanonical(cell.group))
+            .filter((label): label is string => Boolean(label))
+          const firstVerse = verseLabels[0] ?? null
+          const lastVerse = verseLabels[verseLabels.length - 1] ?? null
+          return {
+            label: entry.label,
+            displayLabel,
+            verseRange: firstVerse && lastVerse
+              ? firstVerse === lastVerse ? firstVerse : `${firstVerse}–${lastVerse}`
+              : null,
+            translated: entry.translated,
+            validated: entry.validated,
+            total: entry.total,
+          }
+        })
+        .filter((entry): entry is ChapterNavigationItem => entry !== null)
+    }),
+  [cellStore, cellStoreVersion])
+
+  const activeChapterLabel = chapterNavigationItems.some((chapter) => chapter.label === currentSectionLabel)
+    ? currentSectionLabel
+    : chapterNavigationItems[0]?.label ?? ""
+
+  const handleChapterSelect = useCallback((label: string) => {
+    const index = cellStore.findIndexBySection(label)
+    if (index < 0) return
+    setFirstVisibleIndex(index)
+    void listRef.current?.scrollToIndex({
+      index,
+      viewPosition: 0,
+      animated: true,
+    })
+  }, [cellStore])
+
   // Parallel-bibles sidebar tracking: report the first visible row's canonical
   // ref as the user scrolls. Keyed on the derived ref string
   // so the effect only fires on actual row changes, not every scrolled pixel.
@@ -1433,15 +1483,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {readOnlyLabel}
           </div>
         )}
-        <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
-          {/* FRO-250: sticky chapter label — left gutter, does not shift Source */}
-          <div className="flex w-full items-center justify-center overflow-visible">
-            {currentSectionLabel && !looksLikeUuid(currentSectionLabel) && (
-              <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-                {currentSectionLabel}
-              </span>
-            )}
+        {chapterNavigationItems.length > 0 && activeChapterLabel && (
+          <div className="border-b border-border bg-background/90 px-4 py-2 backdrop-blur-xl">
+            <ChapterNavigator
+              chapters={chapterNavigationItems}
+              activeLabel={activeChapterLabel}
+              onSelect={handleChapterSelect}
+            />
           </div>
+        )}
+        <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
+          <div aria-hidden="true" />
           {/* In Audio mode the left column carries per-line voice controls, not
               source text, so label it "Controls" (no source-language badge). */}
           <div className="flex items-center gap-2">
@@ -3723,8 +3775,13 @@ function EditorRow({
   // the cast label moved to the target column header lane so it isn't squished
   // into this 44px gutter.)
   const hasAnyIssue = infractionCount > 0 || cellNeedsAttention
-  const numberLabel = showLineNumber ? String(rowIndex + 1) : null
-  const numberPill = !showLineNumber ? null : (
+  const canonicalVerseLabel = verseLabelFromCanonical(cell.group)
+    ?? verseLabelFromCanonical(cell.globalReferences?.[0])
+  const hasScriptureSectionRef = /^[1-3]?[A-Z]{2,3}\s+\d+(?::|$)/i.test(cell.group?.trim() ?? "")
+  const numberLabel = showLineNumber
+    ? canonicalVerseLabel ?? (hasScriptureSectionRef ? null : String(rowIndex + 1))
+    : null
+  const numberPill = numberLabel === null ? null : (
     <span className="flex h-6 items-center" aria-label={`Line ${numberLabel}`}>
       <CellNumberPill
         number={numberLabel}

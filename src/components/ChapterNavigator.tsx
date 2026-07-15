@@ -99,7 +99,7 @@ export function ChapterNavigator({
             render={
               <Button
                 variant="outline"
-                className="grid min-w-56 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2"
+                className="grid min-w-56 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2"
                 aria-label={`Current chapter: ${active.displayLabel}. Choose chapter`}
               />
             }

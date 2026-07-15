@@ -15,7 +15,9 @@ const chapters: ChapterNavigationItem[] = [
 describe("ChapterNavigator", () => {
   it("keeps the current chapter and verse range visible", () => {
     render(<ChapterNavigator chapters={chapters} activeLabel="MAT 1" onSelect={() => {}} />)
-    expect(screen.getByRole("button", { name: /Current chapter: Matthew 1/ })).toHaveTextContent("Verses 1–25")
+    const trigger = screen.getByRole("button", { name: /Current chapter: Matthew 1/ })
+    expect(trigger).toHaveTextContent("Verses 1–25")
+    expect(trigger).toHaveClass("grid-cols-[auto_minmax(0,1fr)_auto]")
     expect(screen.getByText("Verses 1–25")).toHaveClass("justify-self-center")
     expect(screen.getByRole("button", { name: "Previous chapter" })).toBeDisabled()
   })

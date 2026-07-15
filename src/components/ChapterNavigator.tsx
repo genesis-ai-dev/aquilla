@@ -75,7 +75,7 @@ export function ChapterNavigator({
             render={
               <Button
                 variant="outline"
-                className="min-w-64 justify-between"
+                className="min-w-56 justify-between"
                 aria-label={`Current chapter: ${active.displayLabel}. Choose chapter`}
               />
             }
@@ -88,7 +88,7 @@ export function ChapterNavigator({
             </span>
             <ChevronDown data-icon="inline-end" />
           </PopoverTrigger>
-          <PopoverContent align="center" className="w-88 gap-0 overflow-hidden p-0">
+          <PopoverContent align="center" className="w-80 gap-0 overflow-hidden p-0">
             <PopoverHeader className="px-3 py-2.5">
               <PopoverTitle>Go to chapter</PopoverTitle>
               <PopoverDescription>Choose a chapter to jump to its first verse.</PopoverDescription>

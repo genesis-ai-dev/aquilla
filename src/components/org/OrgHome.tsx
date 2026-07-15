@@ -331,7 +331,7 @@ function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, 
 // Has Audio appear together once the container can support the full table.
 const PROJECT_TABLE_COLS = [
   "grid-cols-[minmax(10rem,2fr)_repeat(2,minmax(3.5rem,0.65fr))]",
-  "@lg/project-table:grid-cols-[minmax(0,1fr)_minmax(7.5rem,9rem)_repeat(3,3.25rem)]",
+  "@lg/project-table:grid-cols-[minmax(0,1fr)_minmax(7.5rem,9rem)_repeat(3,2.5rem)]",
 ].join(" ")
 
 const PROJECT_IDENTITY_COLS =
@@ -365,7 +365,7 @@ export function ProjectTable({
       <div data-testid="project-table" className="@container/project-table overflow-hidden">
         <div className="w-full">
         <div
-          className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground`}
+          className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-3 border-b bg-muted/30 py-2 pr-2 pl-4 text-xs font-medium uppercase tracking-wide text-muted-foreground`}
         >
           <span
             className={cn(
@@ -409,7 +409,7 @@ export function ProjectTable({
                 key={p.id}
                 to={`/projects/${p.id}`}
                 data-project-id={p.id}
-                className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-3 overflow-hidden px-4 py-2 text-sm transition-colors hover:bg-muted/50`}
+                className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-3 overflow-hidden py-2 pr-2 pl-4 text-sm transition-colors hover:bg-muted/50`}
               >
                 <span
                   data-testid="project-table-identity"

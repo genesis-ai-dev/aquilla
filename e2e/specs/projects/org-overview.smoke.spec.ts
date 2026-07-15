@@ -103,6 +103,7 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   const validatedValueBox = await projectRow.getByTestId("project-table-validated-value").boundingBox()
   const audioHeaderBox = await audioHeader.boundingBox()
   const audioValueBox = await projectRow.getByTestId("project-table-audio-value").boundingBox()
+  const projectTableBox = await projectTable.boundingBox()
   expect(translatedHeaderBox).not.toBeNull()
   expect(projectHeaderBox).not.toBeNull()
   expect(translatedValueBox).not.toBeNull()
@@ -111,6 +112,7 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   expect(validatedValueBox).not.toBeNull()
   expect(audioHeaderBox).not.toBeNull()
   expect(audioValueBox).not.toBeNull()
+  expect(projectTableBox).not.toBeNull()
   expect(
     Math.abs(
       projectHeaderBox!.y + projectHeaderBox!.height / 2 -
@@ -121,6 +123,7 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   expect(translatedValueBox!.x - (languagesBox!.x + languagesBox!.width)).toBeGreaterThanOrEqual(8)
   expect(Math.abs(validatedHeaderBox!.x - validatedValueBox!.x)).toBeLessThan(2)
   expect(Math.abs(audioHeaderBox!.x - audioValueBox!.x)).toBeLessThan(2)
+  expect(projectTableBox!.x + projectTableBox!.width - (audioValueBox!.x + audioValueBox!.width)).toBeLessThanOrEqual(32)
   const projectNameBox = await projectName.boundingBox()
   const organizationBox = await organization.boundingBox()
   expect(projectNameBox).not.toBeNull()

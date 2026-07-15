@@ -347,7 +347,7 @@ export function ProjectTable({
       <div data-testid="project-table" className="@container/project-table overflow-hidden">
         <div className="w-full">
         <div
-          className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-2 border-b bg-muted/30 py-2 pr-2 pl-4 text-xs font-medium uppercase tracking-wide text-muted-foreground`}
+          className={`sticky top-0 z-20 grid ${PROJECT_TABLE_COLS} items-center gap-x-2 border-b bg-muted/95 py-2 pr-2 pl-4 text-xs font-medium uppercase tracking-wide text-muted-foreground backdrop-blur-sm`}
         >
           <span
             className={cn(
@@ -904,8 +904,11 @@ export function OrgHome() {
                   </div>
 
                   <div className="grid items-start gap-6 lg:grid-cols-[minmax(14rem,1fr)_minmax(30rem,2fr)]">
-                    <section data-testid="organizations-panel" className="self-start rounded-2xl border bg-card">
-                      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+                    <section
+                      data-testid="organizations-panel"
+                      className="self-start overflow-hidden rounded-2xl border bg-card lg:flex lg:max-h-[clamp(16rem,calc(100dvh-24rem),42rem)] lg:flex-col xl:max-h-[clamp(20rem,calc(100dvh-18rem),42rem)]"
+                    >
+                      <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
                         <div>
                           <h2 className="text-base font-semibold">Organizations</h2>
                           <p className="text-xs text-muted-foreground">
@@ -928,50 +931,58 @@ export function OrgHome() {
                         )}
                       </div>
 
-                      {orgSummaries.length === 0 ? (
-                        <EmptyState
-                          variant="inline"
-                          className="py-10"
-                          icon={Building2}
-                          title="No organizations yet."
-                        />
-                      ) : visibleOrgSummaries.length === 0 ? (
-                        <EmptyState
-                          variant="inline"
-                          className="py-10"
-                          icon={Search}
-                          title="No matching organizations."
-                        />
-                      ) : (
-                        <div className="divide-y">
-                          {visibleOrgSummaries.map((summary) => (
-                            <button
-                              key={summary.org.id}
-                              type="button"
-                              onClick={() => openOrg(summary.org.id)}
-                              className="flex w-full items-center gap-4 p-4 text-left transition-colors hover:bg-muted/50"
-                            >
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <p className="truncate font-medium">{orgDisplayName(summary.org)}</p>
-                                  <Badge variant="secondary" className="shrink-0">
-                                    {roleLabel(summary.org)}
-                                  </Badge>
+                      <div
+                        data-testid="organizations-scroll"
+                        className="min-h-0 overscroll-contain lg:overflow-y-auto"
+                      >
+                        {orgSummaries.length === 0 ? (
+                          <EmptyState
+                            variant="inline"
+                            className="py-10"
+                            icon={Building2}
+                            title="No organizations yet."
+                          />
+                        ) : visibleOrgSummaries.length === 0 ? (
+                          <EmptyState
+                            variant="inline"
+                            className="py-10"
+                            icon={Search}
+                            title="No matching organizations."
+                          />
+                        ) : (
+                          <div className="divide-y">
+                            {visibleOrgSummaries.map((summary) => (
+                              <button
+                                key={summary.org.id}
+                                type="button"
+                                onClick={() => openOrg(summary.org.id)}
+                                className="flex w-full items-center gap-4 p-4 text-left transition-colors hover:bg-muted/50"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <p className="truncate font-medium">{orgDisplayName(summary.org)}</p>
+                                    <Badge variant="secondary" className="shrink-0">
+                                      {roleLabel(summary.org)}
+                                    </Badge>
+                                  </div>
+                                  <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+                                    <span>{summary.projectCount} project{summary.projectCount === 1 ? "" : "s"}</span>
+                                    <span>{Math.round(summary.avgTranslatedPct * 100)}% translated</span>
+                                    <span>{Math.round(summary.avgValidatedPct * 100)}% validated</span>
+                                  </div>
                                 </div>
-                                <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
-                                  <span>{summary.projectCount} project{summary.projectCount === 1 ? "" : "s"}</span>
-                                  <span>{Math.round(summary.avgTranslatedPct * 100)}% translated</span>
-                                  <span>{Math.round(summary.avgValidatedPct * 100)}% validated</span>
-                                </div>
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                      )}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </section>
 
-                    <section data-testid="projects-panel" className="@container/projects-panel min-w-0 rounded-2xl border bg-card">
-                      <div className="flex flex-col gap-2 border-b px-4 py-2.5">
+                    <section
+                      data-testid="projects-panel"
+                      className="@container/projects-panel min-w-0 overflow-hidden rounded-2xl border bg-card lg:flex lg:max-h-[clamp(16rem,calc(100dvh-24rem),42rem)] lg:flex-col xl:max-h-[clamp(20rem,calc(100dvh-18rem),42rem)]"
+                    >
+                      <div className="shrink-0 flex flex-col gap-2 border-b px-4 py-2.5">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
                             <h2 className="text-base font-semibold">Projects</h2>
@@ -1051,28 +1062,33 @@ export function OrgHome() {
                         </div>
                       </div>
 
-                      {projects.length === 0 ? (
-                        <EmptyState
-                          variant="inline"
-                          className="py-10"
-                          icon={FolderPlus}
-                          title="No projects yet."
-                        />
-                      ) : visible.length === 0 ? (
-                        <EmptyState
-                          variant="inline"
-                          className="py-10"
-                          icon={Search}
-                          title={projectQuery ? "No matching projects." : currentProjectLens.empty}
-                        />
-                      ) : (
-                        <ProjectTable
-                          projects={visible}
-                          now={now}
-                          showOrg
-                          defaultLaneLabelByProjectId={defaultLaneLabelByProjectId}
-                        />
-                      )}
+                      <div
+                        data-testid="projects-scroll"
+                        className="min-h-0 overscroll-contain lg:overflow-y-auto"
+                      >
+                        {projects.length === 0 ? (
+                          <EmptyState
+                            variant="inline"
+                            className="py-10"
+                            icon={FolderPlus}
+                            title="No projects yet."
+                          />
+                        ) : visible.length === 0 ? (
+                          <EmptyState
+                            variant="inline"
+                            className="py-10"
+                            icon={Search}
+                            title={projectQuery ? "No matching projects." : currentProjectLens.empty}
+                          />
+                        ) : (
+                          <ProjectTable
+                            projects={visible}
+                            now={now}
+                            showOrg
+                            defaultLaneLabelByProjectId={defaultLaneLabelByProjectId}
+                          />
+                        )}
+                      </div>
                     </section>
                   </div>
 

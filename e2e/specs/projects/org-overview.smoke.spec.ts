@@ -185,12 +185,14 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   await expect(alice.getByRole("button", { name: "Side-by-side layout" })).toHaveCount(0)
   await expect(alice.getByRole("button", { name: "Stacked layout" })).toHaveCount(0)
 
-  await alice.setViewportSize({ width: 1024, height: 800 })
+  await alice.setViewportSize({ width: 1024, height: 650 })
   const narrowOrganizationsBox = await alice.getByTestId("organizations-panel").boundingBox()
   const narrowProjectsBox = await alice.getByTestId("projects-panel").boundingBox()
   expect(narrowOrganizationsBox).not.toBeNull()
   expect(narrowProjectsBox).not.toBeNull()
   expect(Math.abs(narrowProjectsBox!.y - narrowOrganizationsBox!.y)).toBeLessThan(2)
+  expect(narrowOrganizationsBox!.y + narrowOrganizationsBox!.height).toBeLessThan(650)
+  expect(narrowProjectsBox!.y + narrowProjectsBox!.height).toBeLessThan(650)
   await expect(alice.getByText("Org", { exact: true })).toBeVisible()
   await expect(alice.getByText("Language", { exact: true })).toBeVisible()
   expect(
@@ -198,4 +200,18 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
       (element) => element.scrollWidth <= element.clientWidth,
     ),
   ).toBe(true)
+
+  const organizationsScroll = alice.getByTestId("organizations-scroll")
+  const projectsScroll = alice.getByTestId("projects-scroll")
+  expect(
+    await organizationsScroll.evaluate((element) => getComputedStyle(element).overflowY),
+  ).toBe("auto")
+  expect(
+    await projectsScroll.evaluate((element) => getComputedStyle(element).overflowY),
+  ).toBe("auto")
+  await organizationsScroll.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+  })
+  expect(await organizationsScroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+  await expect(projectTable.getByText("Project", { exact: true })).toBeVisible()
 })

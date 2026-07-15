@@ -105,7 +105,7 @@ export function ChapterNavigator({
             }
           >
             <span className="truncate text-left font-semibold">{active.displayLabel}</span>
-            <span className="justify-self-center text-xs font-normal text-muted-foreground">
+            <span className="justify-self-end text-xs font-normal text-muted-foreground">
               {activeSummary}
             </span>
             <ChevronDown data-icon="inline-end" className="justify-self-end" />

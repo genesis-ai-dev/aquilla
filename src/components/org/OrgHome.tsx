@@ -29,6 +29,7 @@ import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import { OrgSetupChecklist } from "./OrgSetupChecklist"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import { LaneChips } from "./LaneChips"
+import { ProjectMetricHeader } from "./ProjectMetricHeader"
 import { displayLanes } from "./project-lanes"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import {
@@ -51,7 +52,7 @@ import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
 import { AppTooltip, TooltipDelegationBoundary } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
-import { FolderPlus, Search, X, Building2, Columns2, Rows3 } from "lucide-react"
+import { FolderPlus, Search, X, Building2, Columns2, Rows3, Sparkles, CircleCheck, Mic } from "lucide-react"
 
 function ProjectRowSkeleton() {
   return (
@@ -329,9 +330,12 @@ function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, 
 // Compact panels retain identity + the two core text metrics; Languages and
 // Has Audio appear together once the container can support the full table.
 const PROJECT_TABLE_COLS = [
-  "grid-cols-[minmax(10rem,2fr)_repeat(2,minmax(4.75rem,1fr))]",
-  "@lg/project-table:grid-cols-[minmax(0,2.8fr)_minmax(5.5rem,1.25fr)_repeat(3,minmax(4.25rem,1fr))]",
+  "grid-cols-[minmax(10rem,2fr)_repeat(2,minmax(3.5rem,0.65fr))]",
+  "@lg/project-table:grid-cols-[minmax(0,1fr)_minmax(7.5rem,9rem)_repeat(3,3.25rem)]",
 ].join(" ")
+
+const PROJECT_IDENTITY_COLS =
+  "@lg/project-table:grid-cols-[minmax(8rem,1fr)_minmax(4.5rem,7rem)]"
 
 /**
  * The org/portfolio project list as a compact table — one row per project with
@@ -340,22 +344,10 @@ const PROJECT_TABLE_COLS = [
  * still opens a project in a new tab. Deadline context stays with identity;
  * activity remains available through the status filter and sort menu.
  *
- * AQU-489: column headers ARE the visible label for each number (no hover
- * required to identify what a figure means); the header tooltips below are
- * retained as EXTRA detail only. "Has Audio" (not bare "Audio") mirrors the
- * ProjectOverview.tsx relabel from AQU-490 — this table has no per-medium
- * validation figure to show (server doesn't track one; see AQU-490's
- * in-code note there), so unlike ProjectOverview there is no separate
- * "Audio Validated" column here — just the coverage figure, honestly named.
- *
- * SWARM-TODO(AQU-489): verify live — open the org home / all-organizations
- * projects table and confirm each column header ("Translated", "Validated",
- * "Has Audio") reads as a permanent visible label with NO hover required;
- * hovering a header may show extra detail (a one-line tooltip) but the
- * meaning must already be legible from the header text alone. Then open a
- * single project's overview (ProjectOverview.tsx Progress card) and confirm
- * the same three terms — plus "Audio Validated" — are used identically
- * (not "Audio" bare, not "Approved" instead of "Validated").
+ * The compact metric headings use familiar icons, accessible labels, and
+ * immediate hover/focus tooltips. Their grid cells and values share the same
+ * left edge, keeping percentages easy to scan without spending table width on
+ * repeated heading text.
  */
 export function ProjectTable({
   projects,
@@ -373,28 +365,38 @@ export function ProjectTable({
       <div data-testid="project-table" className="@container/project-table overflow-hidden">
         <div className="w-full">
         <div
-          className={`grid ${PROJECT_TABLE_COLS} gap-x-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground`}
+          className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground`}
         >
           <span
             className={cn(
               "min-w-0",
-              showOrg && "@lg/project-table:grid @lg/project-table:grid-cols-[minmax(6rem,1fr)_minmax(4rem,6rem)] @lg/project-table:gap-x-3",
+              showOrg && `@lg/project-table:grid ${PROJECT_IDENTITY_COLS} @lg/project-table:gap-x-3`,
             )}
           >
-            <span>Name</span>
-            {showOrg && <span className="hidden text-left @lg/project-table:block">Organization</span>}
+            <span>Project</span>
+            {showOrg && <span className="hidden text-left @lg/project-table:block">Org</span>}
           </span>
           {/* AQU-538: lane chips column (see the LaneChips cell in each row). */}
-          <span className="hidden @lg/project-table:block">Languages</span>
-          <AppTooltip content="Percentage of cells with target-language content filled in.">
-            <span className="whitespace-nowrap text-right">Translated</span>
-          </AppTooltip>
-          <AppTooltip content="Percentage of cells marked validated by a reviewer.">
-            <span className="whitespace-nowrap text-right">Validated</span>
-          </AppTooltip>
-          <AppTooltip content="Percentage of cells that have at least one audio recording attached. This is coverage, not validation — audio-specific validation isn't tracked yet (see AQU-490).">
-            <span className="hidden whitespace-nowrap text-right @lg/project-table:block">Has Audio</span>
-          </AppTooltip>
+          <span className="hidden @lg/project-table:block">Language</span>
+          <ProjectMetricHeader
+            label="Translated"
+            description="Translated: percentage of cells with target-language content filled in."
+            icon={Sparkles}
+            testId="project-table-translated-header"
+          />
+          <ProjectMetricHeader
+            label="Validated"
+            description="Validated: percentage of cells marked validated by a reviewer."
+            icon={CircleCheck}
+            testId="project-table-validated-header"
+          />
+          <ProjectMetricHeader
+            label="Has audio"
+            description="Audio: percentage of cells with at least one recording attached."
+            icon={Mic}
+            testId="project-table-audio-header"
+            className="hidden @lg/project-table:inline-flex"
+          />
         </div>
         <div className="divide-y">
           {projects.map((p) => {
@@ -414,7 +416,7 @@ export function ProjectTable({
                   className={cn(
                     "min-w-0",
                     showOrg && p.orgName
-                      ? "@lg/project-table:grid @lg/project-table:grid-cols-[minmax(6rem,1fr)_minmax(4rem,6rem)] @lg/project-table:items-start @lg/project-table:gap-x-3"
+                      ? `@lg/project-table:grid ${PROJECT_IDENTITY_COLS} @lg/project-table:items-start @lg/project-table:gap-x-3`
                       : "flex items-start",
                   )}
                 >
@@ -475,7 +477,10 @@ export function ProjectTable({
                   )}
                 </span>
 
-                <span className="hidden min-w-0 items-center @lg/project-table:flex">
+                <span
+                  data-testid="project-table-languages"
+                  className="hidden min-w-0 items-center @lg/project-table:flex"
+                >
                   <LaneChips
                     projectId={p.id}
                     lanes={displayLanes(p)}
@@ -484,13 +489,25 @@ export function ProjectTable({
                   />
                 </span>
 
-                <span className="text-right font-medium tabular-nums text-foreground" aria-label={`${tpct}% translated`}>
+                <span
+                  data-testid="project-table-translated-value"
+                  className="justify-self-start text-left font-medium tabular-nums text-foreground"
+                  aria-label={`${tpct}% translated`}
+                >
                   {tpct}%
                 </span>
-                <span className="text-right tabular-nums text-muted-foreground" aria-label={`${pct}% validated`}>
+                <span
+                  data-testid="project-table-validated-value"
+                  className="justify-self-start text-left tabular-nums text-muted-foreground"
+                  aria-label={`${pct}% validated`}
+                >
                   {pct}%
                 </span>
-                <span className="hidden text-right tabular-nums text-muted-foreground @lg/project-table:block" aria-label={`${apct}% audio`}>
+                <span
+                  data-testid="project-table-audio-value"
+                  className="hidden justify-self-start text-left tabular-nums text-muted-foreground @lg/project-table:block"
+                  aria-label={`${apct}% audio`}
+                >
                   {apct}%
                 </span>
               </Link>
@@ -947,7 +964,7 @@ export function OrgHome() {
                     <div
                       className={cn(
                         "grid items-start gap-6",
-                        portfolioLayout === "split" && "xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]",
+                        portfolioLayout === "split" && "xl:grid-cols-[minmax(20rem,1fr)_minmax(0,2fr)]",
                       )}
                     >
                     <section data-testid="organizations-panel" className="self-start rounded-2xl border bg-card">

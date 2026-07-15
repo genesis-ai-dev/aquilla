@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
-import { ChevronDown, ChevronRight, FolderOpen } from "lucide-react"
+import { ChevronDown, ChevronRight, CircleCheck, FolderOpen, Mic, Sparkles } from "lucide-react"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import {
   attentionRank,
@@ -24,8 +24,8 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { Badge } from "@/components/ui/badge"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { LaneChips } from "./LaneChips"
+import { ProjectMetricHeader } from "./ProjectMetricHeader"
 import { AddLanguagePopover } from "./AddLanguagePopover"
 import { ProjectLaneSubRows } from "./ProjectLaneSubRows"
 import { OrgLaneAssignModal } from "./OrgLaneAssignModal"
@@ -180,7 +180,7 @@ export function OrgProjectsDataTable({
       {
         id: "languages",
         enableSorting: false,
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Languages" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Language" />,
         cell: ({ row }) => {
           const p = row.original
           return (
@@ -201,18 +201,24 @@ export function OrgProjectsDataTable({
       {
         id: "translated",
         accessorFn: (p) => translatedPct(p),
-        meta: { align: "right" },
         header: ({ column }) => (
-          <AppTooltip content="Percentage of cells with target-language content filled in.">
-            <span className="inline-flex">
-              <DataTableColumnHeader column={column} title="Translated" className="justify-end" />
-            </span>
-          </AppTooltip>
+          <ProjectMetricHeader
+            label="Translated"
+            description="Translated: percentage of cells with target-language content filled in."
+            icon={Sparkles}
+            testId="project-table-translated-header"
+            sorted={column.getIsSorted()}
+            onSort={column.getToggleSortingHandler()}
+          />
         ),
         cell: ({ row }) => {
           const pct = Math.round(translatedPct(row.original) * 100)
           return (
-            <div className="text-right font-medium tabular-nums text-foreground" aria-label={`${pct}% translated`}>
+            <div
+              data-testid="project-table-translated-value"
+              className="text-left font-medium tabular-nums text-foreground"
+              aria-label={`${pct}% translated`}
+            >
               {pct}%
             </div>
           )
@@ -221,18 +227,24 @@ export function OrgProjectsDataTable({
       {
         id: "validated",
         accessorFn: (p) => validatedPct(p),
-        meta: { align: "right" },
         header: ({ column }) => (
-          <AppTooltip content="Percentage of cells marked validated by a reviewer.">
-            <span className="inline-flex">
-              <DataTableColumnHeader column={column} title="Validated" className="justify-end" />
-            </span>
-          </AppTooltip>
+          <ProjectMetricHeader
+            label="Validated"
+            description="Validated: percentage of cells marked validated by a reviewer."
+            icon={CircleCheck}
+            testId="project-table-validated-header"
+            sorted={column.getIsSorted()}
+            onSort={column.getToggleSortingHandler()}
+          />
         ),
         cell: ({ row }) => {
           const pct = Math.round(validatedPct(row.original) * 100)
           return (
-            <div className="text-right tabular-nums text-muted-foreground" aria-label={`${pct}% validated`}>
+            <div
+              data-testid="project-table-validated-value"
+              className="text-left tabular-nums text-muted-foreground"
+              aria-label={`${pct}% validated`}
+            >
               {pct}%
             </div>
           )
@@ -241,18 +253,24 @@ export function OrgProjectsDataTable({
       {
         id: "audio",
         accessorFn: (p) => audioPct(p),
-        meta: { align: "right" },
         header: ({ column }) => (
-          <AppTooltip content="Percentage of cells that have at least one audio recording attached. This is coverage, not validation — audio-specific validation isn't tracked yet (see AQU-490).">
-            <span className="inline-flex">
-              <DataTableColumnHeader column={column} title="Has Audio" className="justify-end" />
-            </span>
-          </AppTooltip>
+          <ProjectMetricHeader
+            label="Has audio"
+            description="Audio: percentage of cells with at least one recording attached."
+            icon={Mic}
+            testId="project-table-audio-header"
+            sorted={column.getIsSorted()}
+            onSort={column.getToggleSortingHandler()}
+          />
         ),
         cell: ({ row }) => {
           const pct = Math.round(audioPct(row.original) * 100)
           return (
-            <div className="text-right tabular-nums text-muted-foreground" aria-label={`${pct}% audio`}>
+            <div
+              data-testid="project-table-audio-value"
+              className="text-left tabular-nums text-muted-foreground"
+              aria-label={`${pct}% audio`}
+            >
               {pct}%
             </div>
           )
@@ -262,10 +280,9 @@ export function OrgProjectsDataTable({
         id: "role",
         accessorFn: (p) => roleByProjectId?.get(p.id)?.name ?? "",
         enableSorting: false,
-        meta: { align: "right" },
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Role" className="justify-end" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Role" />,
         cell: ({ row }) => (
-          <div className="truncate text-right text-xs text-muted-foreground">
+          <div className="truncate text-left text-xs text-muted-foreground">
             {roleByProjectId?.get(row.original.id)?.name.replace(/_/g, " ") ?? "—"}
           </div>
         ),
@@ -273,8 +290,7 @@ export function OrgProjectsDataTable({
       {
         id: "edited",
         accessorFn: (p) => p.lastEditAt ?? null,
-        meta: { align: "right" },
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Updated" className="justify-end" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Updated" />,
         sortingFn: (a, b) => {
           const av = a.original.lastEditAt
           const bv = b.original.lastEditAt
@@ -289,7 +305,7 @@ export function OrgProjectsDataTable({
           if (label) {
             return (
               <div
-                className={`truncate text-right text-xs ${
+                className={`truncate text-left text-xs ${
                   status === "stalled" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
                 }`}
               >
@@ -298,7 +314,7 @@ export function OrgProjectsDataTable({
             )
           }
           return (
-            <div className="truncate text-right text-xs text-muted-foreground">
+            <div className="truncate text-left text-xs text-muted-foreground">
               <DateTooltip
                 value={row.original.lastEditAt}
                 label="Edited"

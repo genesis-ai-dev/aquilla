@@ -171,7 +171,8 @@ describe("ProjectTable", () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getByText("Organization")).toBeInTheDocument()
+    expect(screen.getByText("Project")).toBeInTheDocument()
+    expect(screen.getByText("Org")).toBeInTheDocument()
     const identity = screen.getByTestId("project-table-identity")
     const projectName = screen.getByTestId("project-table-name")
     const expandedProjectName = screen.getByTestId("project-table-name-expanded")
@@ -190,7 +191,7 @@ describe("ProjectTable", () => {
     expect(expandedProjectName).toHaveAttribute("aria-hidden", "true")
     expect(expandedProjectName).toHaveClass("z-50")
     expect(organization).not.toHaveAttribute("data-slot", "tooltip-trigger")
-    expect(identity).toHaveClass("@lg/project-table:grid-cols-[minmax(6rem,1fr)_minmax(4rem,6rem)]")
+    expect(identity).toHaveClass("@lg/project-table:grid-cols-[minmax(8rem,1fr)_minmax(4.5rem,7rem)]")
     expect(organization).toHaveClass("relative", "h-5", "w-full")
     expect(organization).toHaveAttribute("data-org-name", project.orgName)
     expect(organization.querySelectorAll('[data-slot="badge"]')).toHaveLength(1)
@@ -203,8 +204,13 @@ describe("ProjectTable", () => {
     expect(organization).not.toContainElement(deadlineStatus)
     expect(screen.getByTestId("project-table")).toHaveClass("overflow-hidden")
     expect(screen.getByTestId("project-table")).not.toHaveClass("overflow-x-auto")
-    expect(screen.getByText("Languages")).toBeInTheDocument()
-    expect(screen.getByText("Has Audio")).toBeInTheDocument()
+    expect(screen.getByText("Language")).toBeInTheDocument()
+    expect(screen.getByTestId("project-table-translated-header")).toHaveAttribute("aria-label", "Translated")
+    expect(screen.getByTestId("project-table-validated-header")).toHaveAttribute("aria-label", "Validated")
+    expect(screen.getByTestId("project-table-audio-header")).toHaveAttribute("aria-label", "Has audio")
+    expect(screen.getByTestId("project-table-translated-value")).toHaveClass("justify-self-start", "text-left")
+    expect(screen.getByTestId("project-table-validated-value")).toHaveClass("justify-self-start", "text-left")
+    expect(screen.getByTestId("project-table-audio-value")).toHaveClass("justify-self-start", "text-left")
     expect(screen.queryByText("Role")).not.toBeInTheDocument()
     expect(screen.queryByText("Updated", { exact: true })).not.toBeInTheDocument()
     expect(screen.queryByText(/Updated /)).not.toBeInTheDocument()
@@ -310,11 +316,8 @@ describe("OrgHome", () => {
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
     // Rollup average is still surfaced…
     expect(screen.getByText("Avg audio")).toBeInTheDocument()
-    // …and the project list is a table with a dedicated Has Audio column
-    // (AQU-489: visible header label, no hover required; "Has Audio" mirrors
-    // the ProjectOverview.tsx relabel from AQU-490 for cross-surface
-    // consistency)…
-    expect(screen.getByText("Has Audio")).toBeInTheDocument()
+    // …and the project list has an accessible, compact audio column heading…
+    expect(screen.getByTestId("project-table-audio-header")).toHaveAttribute("aria-label", "Has audio")
     // …so each project row shows its own audio coverage (both are 50% audio).
     // Scope to the row so the bare "50%" cell isn't confused with a rollup tile.
     const legacyRow = screen.getByText("Legacy Translation").closest("tr")
@@ -325,20 +328,18 @@ describe("OrgHome", () => {
     expect(within(freshRow!).getByText("50%")).toBeInTheDocument()
   })
 
-  // AQU-489: a PM must be able to name what each progress-table number means
-  // without hovering — the column header is the (always-rendered) visible
-  // label; a title/hover explanation is optional extra detail, never the
-  // only source of meaning. Assert the three metric headers render as plain
-  // text nodes (not e.g. only inside a `title` attribute that needs a hover
-  // to surface).
-  it("labels every progress-table column visibly, without requiring hover (AQU-489)", async () => {
+  it("labels every compact metric heading for assistive technology", async () => {
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
-    for (const header of ["Translated", "Validated", "Has Audio"]) {
-      const el = screen.getByText(header)
-      expect(el).toBeInTheDocument()
-      // Visible text content, not a title-only attribute — no hover needed.
-      expect(el.textContent).toBe(header)
+    for (const [testId, label] of [
+      ["project-table-translated-header", "Translated"],
+      ["project-table-validated-header", "Validated"],
+      ["project-table-audio-header", "Has audio"],
+    ]) {
+      const el = screen.getByTestId(testId)
+      expect(el).toHaveAttribute("aria-label", label)
+      expect(el).not.toHaveAttribute("title")
+      expect(el).toHaveClass("justify-self-start")
     }
   })
 

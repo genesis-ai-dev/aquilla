@@ -18,7 +18,7 @@ describe("ChapterNavigator", () => {
     const trigger = screen.getByRole("button", { name: /Current chapter: Matthew 1/ })
     expect(trigger).toHaveTextContent("Verses 1–25")
     expect(trigger).toHaveClass("grid-cols-[auto_minmax(0,1fr)_auto]")
-    expect(screen.getByText("Verses 1–25")).toHaveClass("justify-self-end")
+    expect(screen.getByText("Verses 1–25")).toHaveClass("justify-self-center")
     expect(screen.getByRole("button", { name: "Previous chapter" })).toBeDisabled()
   })
 

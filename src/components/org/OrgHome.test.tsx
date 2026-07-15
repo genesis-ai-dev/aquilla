@@ -191,7 +191,7 @@ describe("ProjectTable", () => {
     expect(expandedProjectName).toHaveAttribute("aria-hidden", "true")
     expect(expandedProjectName).toHaveClass("z-50")
     expect(organization).not.toHaveAttribute("data-slot", "tooltip-trigger")
-    expect(identity).toHaveClass("@lg/project-table:grid-cols-[minmax(8rem,1fr)_minmax(4.5rem,7rem)]")
+    expect(identity).toHaveClass("@md/project-table:grid-cols-[minmax(6.5rem,1fr)_minmax(4rem,6rem)]")
     expect(organization).toHaveClass("relative", "h-5", "w-full")
     expect(organization).toHaveAttribute("data-org-name", project.orgName)
     expect(organization.querySelectorAll('[data-slot="badge"]')).toHaveLength(1)

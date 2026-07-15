@@ -313,11 +313,11 @@ function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, 
 // Has Audio appear together once the container can support the full table.
 const PROJECT_TABLE_COLS = [
   "grid-cols-[minmax(10rem,2fr)_repeat(2,minmax(3.5rem,0.65fr))]",
-  "@lg/project-table:grid-cols-[minmax(0,1fr)_minmax(7.5rem,9rem)_repeat(3,2.5rem)]",
+  "@md/project-table:grid-cols-[minmax(0,1fr)_minmax(6rem,7.5rem)_repeat(3,2.25rem)]",
 ].join(" ")
 
 const PROJECT_IDENTITY_COLS =
-  "@lg/project-table:grid-cols-[minmax(8rem,1fr)_minmax(4.5rem,7rem)]"
+  "@md/project-table:grid-cols-[minmax(6.5rem,1fr)_minmax(4rem,6rem)]"
 
 /**
  * The org/portfolio project list as a compact table — one row per project with
@@ -347,19 +347,19 @@ export function ProjectTable({
       <div data-testid="project-table" className="@container/project-table overflow-hidden">
         <div className="w-full">
         <div
-          className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-3 border-b bg-muted/30 py-2 pr-2 pl-4 text-xs font-medium uppercase tracking-wide text-muted-foreground`}
+          className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-2 border-b bg-muted/30 py-2 pr-2 pl-4 text-xs font-medium uppercase tracking-wide text-muted-foreground`}
         >
           <span
             className={cn(
               "min-w-0",
-              showOrg && `@lg/project-table:grid ${PROJECT_IDENTITY_COLS} @lg/project-table:gap-x-3`,
+              showOrg && `@md/project-table:grid ${PROJECT_IDENTITY_COLS} @md/project-table:gap-x-2`,
             )}
           >
             <span>Project</span>
-            {showOrg && <span className="hidden text-left @lg/project-table:block">Org</span>}
+            {showOrg && <span className="hidden text-left @md/project-table:block">Org</span>}
           </span>
           {/* AQU-538: lane chips column (see the LaneChips cell in each row). */}
-          <span className="hidden @lg/project-table:block">Language</span>
+          <span className="hidden @md/project-table:block">Language</span>
           <ProjectMetricHeader
             label="Translated"
             description="Translated: percentage of cells with target-language content filled in."
@@ -377,7 +377,7 @@ export function ProjectTable({
             description="Audio: percentage of cells with at least one recording attached."
             icon={Mic}
             testId="project-table-audio-header"
-            className="hidden @lg/project-table:inline-flex"
+            className="hidden @md/project-table:inline-flex"
           />
         </div>
         <div className="divide-y">
@@ -391,14 +391,14 @@ export function ProjectTable({
                 key={p.id}
                 to={`/projects/${p.id}`}
                 data-project-id={p.id}
-                className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-3 overflow-hidden py-2 pr-2 pl-4 text-sm transition-colors hover:bg-muted/50`}
+                className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-2 overflow-hidden py-2 pr-2 pl-4 text-sm transition-colors hover:bg-muted/50`}
               >
                 <span
                   data-testid="project-table-identity"
                   className={cn(
                     "min-w-0",
                     showOrg && p.orgName
-                      ? `@lg/project-table:grid ${PROJECT_IDENTITY_COLS} @lg/project-table:items-start @lg/project-table:gap-x-3`
+                      ? `@md/project-table:grid ${PROJECT_IDENTITY_COLS} @md/project-table:items-start @md/project-table:gap-x-2`
                       : "flex items-start",
                   )}
                 >
@@ -440,7 +440,7 @@ export function ProjectTable({
                     )}
                   </span>
                   {showOrg && p.orgName && (
-                    <span className="hidden min-w-0 items-center justify-start @lg/project-table:flex">
+                    <span className="hidden min-w-0 items-center justify-start @md/project-table:flex">
                       <span
                         data-testid="project-table-organization"
                         data-org-name={p.orgName}
@@ -461,7 +461,7 @@ export function ProjectTable({
 
                 <span
                   data-testid="project-table-languages"
-                  className="hidden min-w-0 items-center @lg/project-table:flex"
+                  className="hidden min-w-0 items-center @md/project-table:flex"
                 >
                   <LaneChips
                     projectId={p.id}
@@ -487,7 +487,7 @@ export function ProjectTable({
                 </span>
                 <span
                   data-testid="project-table-audio-value"
-                  className="hidden justify-self-start text-left tabular-nums text-muted-foreground @lg/project-table:block"
+                  className="hidden justify-self-start text-left tabular-nums text-muted-foreground @md/project-table:block"
                   aria-label={`${apct}% audio`}
                 >
                   {apct}%
@@ -903,7 +903,7 @@ export function OrgHome() {
                     />
                   </div>
 
-                  <div className="grid items-start gap-6 xl:grid-cols-[minmax(20rem,1fr)_minmax(0,2fr)]">
+                  <div className="grid items-start gap-6 lg:grid-cols-[minmax(14rem,1fr)_minmax(30rem,2fr)]">
                     <section data-testid="organizations-panel" className="self-start rounded-2xl border bg-card">
                       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
                         <div>

@@ -27,7 +27,7 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   await dash.goto()
 
   // Create a project so the portfolio has at least one entry.
-  const name = `Overview ${Date.now()}`
+  const name = `Overview dashboard project with a deliberately long name ${Date.now()}`
   await dash.createProject({ name, source: "en", target: "fr" })
 
   // Give the project a deterministic status so the compact deadline indicator
@@ -60,9 +60,9 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   // 5. The new project's card is visible.
   await expect(alice.getByText(name).first()).toBeVisible({ timeout: 5_000 })
 
-  // 6. In the all-organizations table, the org remains a compact secondary
-  // badge beside the project name. It must not become a separate rigid column
-  // or squeeze the project name down to one or two characters.
+  // 6. In the all-organizations table, project and org identity remain useful
+  // at both wide and compact desktop widths. Long names expand without shifting
+  // the row, while ordinary names are not squeezed to one or two characters.
   const aliceSession = await ensureAuthState("alice")
   await createOrg(aliceSession.jwt, `A second organization with a long name ${Date.now()}`)
   await alice.goto("/?org=all")
@@ -184,4 +184,18 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
 
   await expect(alice.getByRole("button", { name: "Side-by-side layout" })).toHaveCount(0)
   await expect(alice.getByRole("button", { name: "Stacked layout" })).toHaveCount(0)
+
+  await alice.setViewportSize({ width: 1024, height: 800 })
+  const narrowOrganizationsBox = await alice.getByTestId("organizations-panel").boundingBox()
+  const narrowProjectsBox = await alice.getByTestId("projects-panel").boundingBox()
+  expect(narrowOrganizationsBox).not.toBeNull()
+  expect(narrowProjectsBox).not.toBeNull()
+  expect(Math.abs(narrowProjectsBox!.y - narrowOrganizationsBox!.y)).toBeLessThan(2)
+  await expect(alice.getByText("Org", { exact: true })).toBeVisible()
+  await expect(alice.getByText("Language", { exact: true })).toBeVisible()
+  expect(
+    await alice.getByTestId("projects-panel").evaluate(
+      (element) => element.scrollWidth <= element.clientWidth,
+    ),
+  ).toBe(true)
 })

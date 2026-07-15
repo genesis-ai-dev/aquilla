@@ -30,6 +30,19 @@ export interface ChapterNavigationItem {
   total: number
 }
 
+export function chapterMatchesSearch(chapter: ChapterNavigationItem, query: string): boolean {
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  if (!normalizedQuery) return true
+
+  if (/^\d+$/.test(normalizedQuery)) {
+    const chapterNumber = chapter.label.match(/\s(\d+)$/)?.[1]
+      ?? chapter.displayLabel.match(/\s(\d+)$/)?.[1]
+    return chapterNumber === normalizedQuery
+  }
+
+  return `${chapter.displayLabel} ${chapter.label}`.toLocaleLowerCase().includes(normalizedQuery)
+}
+
 export function ChapterNavigator({
   chapters,
   activeLabel,
@@ -40,6 +53,7 @@ export function ChapterNavigator({
   onSelect: (label: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState("")
   const matchedActiveIndex = chapters.findIndex((chapter) => chapter.label === activeLabel)
   const activeIndex = matchedActiveIndex >= 0 ? matchedActiveIndex : 0
   const active = chapters[activeIndex]
@@ -50,12 +64,22 @@ export function ChapterNavigator({
     if (!active) return ""
     return active.verseRange ? `Verses ${active.verseRange}` : `${active.total} cells`
   }, [active])
+  const filteredChapters = useMemo(
+    () => chapters.filter((chapter) => chapterMatchesSearch(chapter, search)),
+    [chapters, search],
+  )
 
   if (!active || chapters.length === 0) return null
 
   const choose = (label: string) => {
     onSelect(label)
     setOpen(false)
+    setSearch("")
+  }
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen)
+    if (!nextOpen) setSearch("")
   }
 
   return (
@@ -70,7 +94,7 @@ export function ChapterNavigator({
         >
           <ChevronLeft />
         </Button>
-        <Popover open={open} onOpenChange={setOpen}>
+        <Popover open={open} onOpenChange={handleOpenChange}>
           <PopoverTrigger
             render={
               <Button
@@ -94,12 +118,16 @@ export function ChapterNavigator({
               <PopoverDescription>Choose a chapter to jump to its first verse.</PopoverDescription>
             </PopoverHeader>
             <Separator />
-            <Command label="Find a chapter" className="rounded-none! p-1">
-              <CommandInput placeholder="Find a chapter…" />
+            <Command label="Find a chapter" className="rounded-none! p-1" shouldFilter={false}>
+              <CommandInput
+                placeholder="Find a chapter…"
+                value={search}
+                onValueChange={setSearch}
+              />
               <CommandList>
                 <CommandEmpty>No chapters found.</CommandEmpty>
                 <CommandGroup heading="Chapters">
-                  {chapters.map((chapter) => {
+                  {filteredChapters.map((chapter) => {
                     const selected = chapter.label === active.label
                     const translatedPercent = chapter.total > 0
                       ? Math.round((chapter.translated / chapter.total) * 100)

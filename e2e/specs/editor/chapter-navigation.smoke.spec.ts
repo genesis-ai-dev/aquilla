@@ -41,4 +41,12 @@ test("scripture editor shows canonical verse numbers and supports chapter naviga
   await alice.getByRole("button", { name: /Current chapter: Genesis 2/ }).click()
   await alice.getByRole("option", { name: /Genesis 1/ }).click()
   await expect(alice.getByRole("button", { name: /Current chapter: Genesis 1/ })).toBeVisible()
+
+  await alice.getByRole("button", { name: /Current chapter: Genesis 1/ }).click()
+  const chapterSearch = alice.getByRole("combobox", { name: "Find a chapter" })
+  await chapterSearch.fill("21")
+  await expect(alice.getByText("No chapters found.")).toBeVisible()
+  await chapterSearch.fill("2")
+  await expect(alice.getByRole("option", { name: /Genesis 2/ })).toBeVisible()
+  await expect(alice.getByRole("option", { name: /Genesis 1/ })).toHaveCount(0)
 })

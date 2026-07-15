@@ -88,6 +88,7 @@ import {
   chapterLabelFromCanonical,
   verseLabelFromCanonical,
 } from "@/lib/scripture-reference"
+import { sectionLabelAtViewportStart } from "@/lib/chapter-navigation"
 import { isPerfLogEnabled } from "@/lib/perf-log"
 import {
   type DirectionMode,
@@ -1163,18 +1164,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     return cellStore.getCellsByIds(displayCellIdsRef.current.slice(startIndex, startIndex + count))
   }, [cellStore])
 
-  // Use the viewport's representative (middle) row for chapter wayfinding.
-  // Virtualized lists retain a small overscan buffer above the visible area;
-  // keying the label off that first retained row makes a chapter jump appear
-  // to stay in the previous chapter even when the new chapter fills the view.
   const firstVisibleCellId = displayCellIds[firstVisibleIndex] ?? null
-  const currentSectionLabel = useMemo(() => {
-    const representativeIndex = viewableIndexes.length > 0
-      ? viewableIndexes[Math.floor(viewableIndexes.length / 2)]
-      : firstVisibleIndex
-    const cellId = displayCellIds[representativeIndex] ?? null
-    return cellId ? cellStore.getSectionLabelForCellId(cellId) : ""
-  }, [cellStore, displayCellIds, firstVisibleIndex, viewableIndexes])
+  const currentSectionLabel = sectionLabelAtViewportStart(
+    displayCellIds,
+    firstVisibleIndex,
+    (cellId) => cellStore.getSectionLabelForCellId(cellId),
+  )
 
   const chapterNavigationItems = useMemo<ChapterNavigationItem[]>(() =>
     readAtVersion(cellStoreVersion, () => {

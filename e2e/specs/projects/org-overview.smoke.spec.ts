@@ -94,8 +94,13 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
 
   const projectRowBoxBeforeHover = await projectRow.boundingBox()
   const projectNameBoxBeforeHover = await projectName.boundingBox()
+  await expect(projectName).not.toHaveAttribute("title")
+  await expect(projectName.locator("..")).toHaveAttribute("data-project-name-truncated", "true")
   await projectName.hover()
+  await expect(expandedProjectName).toHaveText(name)
   await expect(expandedProjectName).toHaveCSS("opacity", "1")
+  await expect(expandedProjectName).toHaveCSS("z-index", "50")
+  await expect(alice.getByRole("tooltip")).toHaveCount(0)
   const projectRowBoxAfterHover = await projectRow.boundingBox()
   const projectNameBoxAfterHover = await projectName.boundingBox()
   expect(projectRowBoxAfterHover).toEqual(projectRowBoxBeforeHover)

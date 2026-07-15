@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
@@ -128,6 +128,55 @@ type ProjectLens = "recent" | "attention" | "least-translated" | "most-progress"
 type PortfolioLayout = "split" | "stacked"
 
 const PROJECT_LENS_STORAGE_KEY = "org:all-projects:view"
+
+function ProjectTableName({ name }: { name: string }) {
+  const nameRef = useRef<HTMLSpanElement>(null)
+  const [truncated, setTruncated] = useState(false)
+
+  useLayoutEffect(() => {
+    const element = nameRef.current
+    if (!element) return
+
+    const measure = () => {
+      setTruncated(element.scrollWidth > element.clientWidth + 1)
+    }
+
+    measure()
+    if (typeof ResizeObserver === "undefined") return
+
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [name])
+
+  return (
+    <span
+      className={cn(
+        "relative min-w-0 flex-1",
+        truncated && "group/name z-30 hover:z-50",
+      )}
+      data-project-name-truncated={truncated ? "true" : "false"}
+    >
+      <span
+        ref={nameRef}
+        data-testid="project-table-name"
+        className="block min-w-0 truncate font-medium"
+        title={undefined}
+      >
+        {name}
+      </span>
+      {truncated && (
+        <span
+          aria-hidden="true"
+          data-testid="project-table-name-expanded"
+          className="pointer-events-none absolute top-0 left-0 z-50 whitespace-nowrap rounded-sm bg-popover font-medium text-popover-foreground opacity-0 shadow-sm ring-1 ring-border/50 transition-opacity duration-100 group-hover/name:opacity-100"
+        >
+          {name}
+        </span>
+      )}
+    </span>
+  )
+}
 const PORTFOLIO_LAYOUT_STORAGE_KEY = "org:all-projects:layout"
 const PROJECT_LENS_VALUES: ProjectLens[] = ["recent", "attention", "least-translated", "most-progress", "name"]
 
@@ -371,21 +420,7 @@ export function ProjectTable({
                 >
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="flex min-w-0 items-center gap-1.5">
-                      <span className="group/name relative min-w-0 flex-1">
-                        <span
-                          data-testid="project-table-name"
-                          className="block min-w-0 truncate font-medium"
-                        >
-                          {p.name}
-                        </span>
-                        <span
-                          aria-hidden="true"
-                          data-testid="project-table-name-expanded"
-                          className="pointer-events-none absolute top-0 left-0 z-10 whitespace-nowrap rounded-sm bg-popover font-medium text-popover-foreground opacity-0 shadow-sm transition-opacity duration-100 group-hover/name:opacity-100"
-                        >
-                          {p.name}
-                        </span>
-                      </span>
+                      <ProjectTableName name={p.name} />
                       {(dstatus === "overdue" || dstatus === "soon") && (
                         <AppTooltip
                           content={deadlineTooltip(p, dstatus)}

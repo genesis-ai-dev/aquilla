@@ -128,7 +128,22 @@ beforeEach(async () => {
   useOrgSettingsMock.mockReturnValue(defaultOrgSettingsMock())
   canEditRosterProgressFloorMock.mockImplementation((level: number | null | undefined) => (level ?? 0) >= 700)
 })
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  Reflect.deleteProperty(HTMLElement.prototype, "scrollWidth")
+  Reflect.deleteProperty(HTMLElement.prototype, "clientWidth")
+})
+
+function mockProjectNameOverflow(overflowing: boolean) {
+  Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
+    configurable: true,
+    get: () => (overflowing ? 400 : 80),
+  })
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get: () => 128,
+  })
+}
 
 describe("ProjectTable", () => {
   const project: PortfolioProject & { orgName: string } = {
@@ -149,6 +164,7 @@ describe("ProjectTable", () => {
   }
 
   it("keeps the organization secondary while preserving a compact project identity", () => {
+    mockProjectNameOverflow(true)
     render(
       <MemoryRouter>
         <ProjectTable projects={[project]} now={Date.now()} showOrg />
@@ -167,9 +183,12 @@ describe("ProjectTable", () => {
     expect(organization).toHaveTextContent(project.orgName)
     expect(identity).toContainElement(projectName)
     expect(identity).toContainElement(organization)
+    expect(projectName).not.toHaveAttribute("title")
     expect(projectName).not.toHaveAttribute("data-slot", "tooltip-trigger")
+    expect(projectName.parentElement).toHaveAttribute("data-project-name-truncated", "true")
     expect(expandedProjectName).toHaveTextContent(project.name)
     expect(expandedProjectName).toHaveAttribute("aria-hidden", "true")
+    expect(expandedProjectName).toHaveClass("z-50")
     expect(organization).not.toHaveAttribute("data-slot", "tooltip-trigger")
     expect(identity).toHaveClass("@lg/project-table:grid-cols-[minmax(6rem,1fr)_minmax(4rem,6rem)]")
     expect(organization).toHaveClass("relative", "h-5", "w-full")
@@ -200,6 +219,22 @@ describe("ProjectTable", () => {
 
     expect(screen.queryByTestId("project-table-organization")).not.toBeInTheDocument()
     expect(screen.getByTestId("project-table-name")).toHaveTextContent(project.name)
+  })
+
+  it("does not reveal or tooltip a project name that fits", () => {
+    mockProjectNameOverflow(false)
+    render(
+      <MemoryRouter>
+        <ProjectTable projects={[{ ...project, id: "exodus", name: "Exodus" }]} now={Date.now()} showOrg />
+      </MemoryRouter>,
+    )
+
+    const projectName = screen.getByTestId("project-table-name")
+    expect(projectName).toHaveTextContent("Exodus")
+    expect(projectName).not.toHaveAttribute("title")
+    expect(projectName).not.toHaveAttribute("data-slot", "tooltip-trigger")
+    expect(projectName.parentElement).toHaveAttribute("data-project-name-truncated", "false")
+    expect(screen.queryByTestId("project-table-name-expanded")).not.toBeInTheDocument()
   })
 })
 

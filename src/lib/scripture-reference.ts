@@ -28,6 +28,38 @@ export function verseLabelFromCanonical(value: string | null | undefined): strin
   return parseScriptureReference(value)?.verse ?? null
 }
 
+export interface CellNumberLabelInput {
+  lineNumbersEnabled: boolean
+  cellType: string | null | undefined
+  canonicalRef: string | null | undefined
+  sourceCanonicalRef?: string | null
+  scriptureNumbering: boolean
+  rowIndex: number
+}
+
+/**
+ * Resolve the editor gutter label without letting non-verse Paratext rows
+ * shift scripture numbering. The target side often has no canonical_ref of
+ * its own, so `sourceCanonicalRef` keeps a paired target row on the source
+ * verse number.
+ */
+export function cellNumberLabel({
+  lineNumbersEnabled,
+  cellType,
+  canonicalRef,
+  sourceCanonicalRef,
+  scriptureNumbering,
+  rowIndex,
+}: CellNumberLabelInput): string | null {
+  if (!lineNumbersEnabled || cellType === "heading" || cellType === "paratext") return null
+
+  const canonicalVerse = verseLabelFromCanonical(canonicalRef)
+    ?? verseLabelFromCanonical(sourceCanonicalRef)
+  if (canonicalVerse) return canonicalVerse
+
+  return scriptureNumbering ? null : String(rowIndex + 1)
+}
+
 /** Friendly chapter label for editor wayfinding (`MAT 1` → `Matthew 1`). */
 export function chapterLabelFromCanonical(value: string | null | undefined): string | null {
   const ref = parseScriptureReference(value)

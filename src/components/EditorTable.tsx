@@ -85,6 +85,7 @@ import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { looksLikeUuid } from "@/lib/uuid"
 import {
+  cellNumberLabel,
   chapterLabelFromCanonical,
   verseLabelFromCanonical,
 } from "@/lib/scripture-reference"
@@ -3841,7 +3842,6 @@ function EditorRow({
   // SECURITY: originalHtml below is sanitized through DOMPurify.sanitize() at
   // the render boundary. Parsers only produce safe inline tags (<b>, <i>, <u>,
   // <s>, <code>). DOMPurify provides defense-in-depth against XSS.
-  const showLineNumber = lineNumbersEnabled && cell.type !== "paratext"
   // Prefer the explicitly-assigned cast member's name; fall back to the cell's
   // own label (e.g. a chapter/verse marker from USFM), then nothing.
   const castVoiceId = cellLabelsEnabled ? assignedCastVoiceId(project.ttsSettings, cell.id) : undefined
@@ -3855,11 +3855,14 @@ function EditorRow({
   // the cast label moved to the target column header lane so it isn't squished
   // into this 44px gutter.)
   const hasAnyIssue = infractionCount > 0 || cellNeedsAttention
-  const canonicalVerseLabel = verseLabelFromCanonical(cell.group)
-    ?? verseLabelFromCanonical(cell.globalReferences?.[0])
-  const numberLabel = showLineNumber
-    ? canonicalVerseLabel ?? (scriptureNumbering ? null : String(rowIndex + 1))
-    : null
+  const numberLabel = cellNumberLabel({
+    lineNumbersEnabled,
+    cellType: cell.type,
+    canonicalRef: cell.group,
+    sourceCanonicalRef: cell.globalReferences?.[0],
+    scriptureNumbering,
+    rowIndex,
+  })
   const numberPill = numberLabel === null ? null : (
     <span className="flex h-6 items-center" aria-label={`Line ${numberLabel}`}>
       <CellNumberPill

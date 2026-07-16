@@ -1,5 +1,5 @@
 /**
- * FRO-316: Column mapping UI for spreadsheet imports.
+ * AQU-316: Column mapping UI for spreadsheet imports.
  *
  * Shown after the user selects a CSV or XLSX file. They choose:
  *   - which column is the source text (required)
@@ -23,6 +23,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import type { ColumnMapping, SpreadsheetSheet } from "@/lib/parsers/spreadsheet"
 
 export interface ColumnMappingPanelProps {
@@ -200,28 +208,26 @@ export function ColumnMappingPanel({ sheet, onConfirm, onCancel, mode = "create"
         <div>
           <p className="mb-1.5 text-xs font-medium text-foreground/70">Preview (first {previewRows.length} data rows)</p>
           <ScrollArea className="max-h-40 rounded-md border">
-            <table className="w-full text-xs">
-              <thead className="bg-muted/50">
-                <tr>
+            <Table>
+              <TableHeader>
+                <TableRow>
                   {headers.map((h, i) => (
-                    <th key={i} className="whitespace-nowrap px-2 py-1 text-left font-medium text-foreground/70">
-                      {h}
-                    </th>
+                    <TableHead key={i}>{h}</TableHead>
                   ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y">
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {previewRows.map((row, ri) => (
-                  <tr key={ri}>
+                  <TableRow key={ri}>
                     {headers.map((_, ci) => (
-                      <td key={ci} className="max-w-[160px] truncate px-2 py-1 text-foreground/80">
+                      <TableCell key={ci} className="max-w-[160px] truncate">
                         {row[ci] ?? ""}
-                      </td>
+                      </TableCell>
                     ))}
-                  </tr>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </ScrollArea>
         </div>
       )}

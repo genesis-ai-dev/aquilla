@@ -26,6 +26,14 @@
 // same pattern — both are permission-policy keys gated OWNER-only on write,
 // for the same reason as exportMinRole (a maintainer must not be able to
 // unilaterally lower the org's roster/progress disclosure posture).
+//
+// AQU-496: allowSelfAssignment (whether members below project_lead may claim
+// assignment.create for THEMSELVES — never for anyone else) is the same kind
+// of permission-policy key, OWNER-only on write, except it's a boolean rather
+// than a role-ladder value — see BOOLEAN_POLICY_KEYS below. Default (unset)
+// is false, preserving the pre-AQU-496 leads-only behavior. Enforced
+// server-side in sync-worker (authorize.ts + assignment-authority.ts); this
+// route only stores/validates the setting.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -57,7 +65,14 @@ const PERMISSION_POLICY_KEYS: Record<string, string> = {
   exportMinRole: "exportMinRole",
   rosterViewMinRole: "rosterViewMinRole",
   memberProgressViewMinRole: "memberProgressViewMinRole",
+  allowSelfAssignment: "allowSelfAssignment",
 }
+
+/**
+ * AQU-496: subset of PERMISSION_POLICY_KEYS validated as a boolean instead of
+ * a role-ladder number. Still gated OWNER-only on write (same loop below).
+ */
+const BOOLEAN_POLICY_KEYS = new Set(["allowSelfAssignment"])
 
 interface OrgSettingsRow {
   org_id: number
@@ -168,7 +183,7 @@ orgSettings.on(
       )
     }
 
-    // FRO-253 / AQU-485: validate every permission-policy key present in the
+    // AQU-253 / AQU-485: validate every permission-policy key present in the
     // patch (exportMinRole, rosterViewMinRole, memberProgressViewMinRole).
     // Each must be a known role-ladder value (100–700); garbage values (e.g.
     // "owner", -1, 9999) are rejected with 400 so misconfiguration is
@@ -196,7 +211,11 @@ orgSettings.on(
           403,
         )
       }
-      if (
+      if (BOOLEAN_POLICY_KEYS.has(key)) {
+        if (floorChanged && typeof rawFloor !== "boolean") {
+          return c.json({ error: `${key} must be a boolean` }, 400)
+        }
+      } else if (
         floorChanged &&
         (typeof rawFloor !== "number" ||
           !Number.isFinite(rawFloor) ||
@@ -351,7 +370,7 @@ orgSettings.post(
       ...current.settings,
       promotionRequests: [...existingRequests, newRequest],
     }
-    // FRO-253 / AQU-485 invariant: this blob write must never alter any
+    // AQU-253 / AQU-485 invariant: this blob write must never alter any
     // permission-policy key (exportMinRole, rosterViewMinRole,
     // memberProgressViewMinRole).
     for (const key of Object.keys(PERMISSION_POLICY_KEYS)) {

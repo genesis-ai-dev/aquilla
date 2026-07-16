@@ -7,7 +7,7 @@
 // resulting tables. Same Postgres engine on both sides → byte-for-byte parity.
 
 import { describe, it, expect } from "vitest"
-import { buildEventProjectionStmts, CHAIN_MUTATING_KINDS, type PersistedEvent } from "../events/event-projection"
+import { buildEventProjectionStmts, CHAIN_MUTATING_KINDS, laneOfEvent, type PersistedEvent } from "../events/event-projection"
 import type { EventKind } from "../events/types"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
 import { foldProjection, type FoldEvent } from "../../../scripts/lib/fold-projection"
@@ -34,8 +34,13 @@ function ev(partial: Partial<PersistedEvent> & { kind: EventKind }): PersistedEv
   }
 }
 
-const childKey = (e: PersistedEvent) =>
-  `${e.projectId}\0${e.fileId ?? ""}\0${e.cellId ?? ""}\0${e.parentId ?? "<null>"}`
+// AQU-538: lane-qualified for non-default target lanes, mirroring the live
+// route / rebuild / fold. Legacy (lane-less) events keep the identical key.
+const childKey = (e: PersistedEvent) => {
+  const lane = laneOfEvent(e.kind, e.payload)
+  const laneSuffix = lane ? `@lane:${lane}` : ""
+  return `${e.projectId}\0${e.fileId ?? ""}\0${e.cellId ?? ""}\0${e.parentId ?? "<null>"}${laneSuffix}`
+}
 
 // Canonical replay — mirrors the LIVE route (route.ts): the AD-2 winner guard
 // applies only to chain-mutating kinds; validates/comments always project.

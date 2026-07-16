@@ -43,9 +43,10 @@ test("cell Remove your validation button removes the validation", async ({ alice
   const healthBtn = row.getByRole("button", { name: /Validated/i }).first()
   await expect(healthBtn).toHaveAttribute("aria-pressed", "true", { timeout: 5_000 })
 
-  // Open the validation popover by hovering (openOnHover mode).
-  // Hover triggers the popover to open; we then click inside it.
-  await healthBtn.hover()
+  // Open the validation popover with the documented pointer interaction.
+  // Clicking an already-validated indicator opens details; unlike hover-open,
+  // this remains deterministic when the full smoke suite is under load.
+  await healthBtn.click()
 
   // "Remove your validation" trash button should appear inside the popover.
   const removeBtn = alice.locator('[data-tooltip="Remove your validation"] button, button[aria-label="Remove your validation"]')

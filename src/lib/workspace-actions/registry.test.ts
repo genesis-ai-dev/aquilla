@@ -79,7 +79,7 @@ describe("getDefaultAction", () => {
   })
 })
 
-describe("export org-policy gate (FRO-253)", () => {
+describe("export org-policy gate (AQU-253)", () => {
   // The header's duplicate "Export file" overflow item was removed, so the
   // registry action is the ONLY export entry point — it must honor the org
   // export floor, not just rely on openExportFlow's runtime no-op.
@@ -99,7 +99,7 @@ describe("export org-policy gate (FRO-253)", () => {
   })
 })
 
-describe("FRO-365: header actions hidden for below-floor roles", () => {
+describe("AQU-365: header actions hidden for below-floor roles", () => {
   const runCompletions = workspaceActions.find((a) => a.id === "run-completions")!
   const completeAll = workspaceActions.find((a) => a.id === "complete-all")!
   const batchValidate = workspaceActions.find((a) => a.id === "batch-validate")!

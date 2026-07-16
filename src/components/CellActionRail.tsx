@@ -109,6 +109,8 @@ export function CellActionRail({
 
   return (
     <div
+      data-slot="cell-action-rail"
+      data-revealed={revealed ? "true" : "false"}
       className={cn(
         "flex items-center justify-end gap-0.5 rounded-full px-1 py-0.5",
         // Filled pill only when revealed, so the rail reads as a distinct

@@ -1,4 +1,4 @@
-// FRO-214: useProjectLifecycle hook tests.
+// AQU-214: useProjectLifecycle hook tests.
 //
 // Verifies:
 //   1. isFrozen is false for an active project (isActive: true or absent)

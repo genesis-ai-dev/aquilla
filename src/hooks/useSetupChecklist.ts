@@ -6,7 +6,7 @@ import { useModelStatus } from "@/lib/audio/prefetch"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { DEFAULT_TTS_PROVIDER } from "@/lib/audio/tts-providers"
 
-// FRO-244: per-project localStorage key that records "this project's setup
+// AQU-244: per-project localStorage key that records "this project's setup
 // checklist has been auto-opened at least once". Stored as "1".
 function autoShownKey(projectId: string): string {
   return `codex.setupAutoShown.${projectId}`
@@ -69,7 +69,7 @@ export function deriveChecklistState(
 
 export function useSetupChecklist(project: ProjectRecord | null) {
   const [memberCount, setMemberCount] = useState(0)
-  // FRO-244: tracks whether the async member fetch has completed for the
+  // AQU-244: tracks whether the async member fetch has completed for the
   // current project. We must NOT declare the checklist incomplete until this
   // resolves — otherwise a project-switch sees memberCount=0 (stale from A)
   // while the flag check reads B's id, burning B's auto-open flag on a
@@ -90,7 +90,7 @@ export function useSetupChecklist(project: ProjectRecord | null) {
     setDismissed(persisted || sessionLocked)
   }, [project])
 
-  // FRO-244: Reset member state when switching to a different project so we
+  // AQU-244: Reset member state when switching to a different project so we
   // don't evaluate shouldAutoOpen against the previous project's member count.
   useEffect(() => {
     setMemberCount(0)
@@ -135,7 +135,7 @@ export function useSetupChecklist(project: ProjectRecord | null) {
         ? mms.kind === "ready"
         : kokoro.kind === "ready")
 
-  // FRO-244: model status is "resolved" once whisper + tts provider are no
+  // AQU-244: model status is "resolved" once whisper + tts provider are no
   // longer in the "downloading" state. We must not declare models-complete
   // (or incomplete) before the status is known — otherwise a project with
   // pre-installed models would show as incomplete during the brief
@@ -173,14 +173,14 @@ export function useSetupChecklist(project: ProjectRecord | null) {
     }
   }, [project, session?.jwt, session?.username])
 
-  // FRO-244: Call this once after auto-opening the drawer so it doesn't
+  // AQU-244: Call this once after auto-opening the drawer so it doesn't
   // reopen on subsequent visits / navigations to this project.
   const markAutoShownFn = useCallback(() => {
     if (!project?.id) return
     markSetupAutoShown(project.id)
   }, [project?.id])
 
-  // FRO-244: true when the setup checklist should auto-open (once, on first visit
+  // AQU-244: true when the setup checklist should auto-open (once, on first visit
   // to an incomplete project). We read wasSetupAutoShown() directly at render
   // (not via mirrored state) so project-A→B switches don't inherit A's flag.
   // We also require membersFetched + modelsResolved before declaring incomplete —

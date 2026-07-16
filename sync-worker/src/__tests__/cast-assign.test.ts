@@ -1,4 +1,4 @@
-// Tests for the cast.assign event (FRO-438):
+// Tests for the cast.assign event (AQU-438):
 //   - Projection: merges cast_name into cells.metadata JSONB on the source row.
 //   - Does NOT touch cells.event_id, cells.value, or target text.
 //   - Non-chain-mutating: not in CHAIN_MUTATING_KINDS.

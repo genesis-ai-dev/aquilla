@@ -23,7 +23,7 @@ users.use("*", authMiddleware)
  * GET /api/v2/users/lookup?username=X
  *
  * Resolve a username to a public user record. Auth-gated. Trimmed +
- * case-insensitive (FRO-457) — matches lookupUserByUsername. Used by the
+ * case-insensitive (AQU-457) — matches lookupUserByUsername. Used by the
  * "Add member" UX.
  */
 users.get("/lookup", async (c) => {
@@ -45,7 +45,7 @@ users.get("/lookup", async (c) => {
  * Username prefix search for the Add-member typeahead. Empty result set
  * returns 200 with an empty array.
  *
- * FRO-321: When ?scoped=1 (the invite picker's default), results are limited
+ * AQU-321: When ?scoped=1 (the invite picker's default), results are limited
  * to users that share an org or maintainer-accessible project with the caller.
  * Exact-match lookup for out-of-scope users is done via GET /users/lookup, which
  * does not confirm-or-deny on miss for privacy reasons.
@@ -69,7 +69,7 @@ users.get("/search", async (c) => {
     }
   }
 
-  // FRO-321: ?scoped=1 restricts results to org/project-overlap users.
+  // AQU-321: ?scoped=1 restricts results to org/project-overlap users.
   // Default is unscoped for backward compat; new invite picker passes scoped=1.
   const scoped = c.req.query("scoped") === "1" || c.req.query("scoped") === "true"
 

@@ -64,8 +64,8 @@ export function handleAssignmentEvent(
         .prepare(
           `INSERT INTO assignments (
             assignment_id, project_id, assignee_user_id, scope_kind, scope_label,
-            cells_total, deadline, note, created_by, created_at
-          ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+            target_lang, cells_total, deadline, note, created_by, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
           ON CONFLICT DO NOTHING`,
         )
         .bind(
@@ -74,6 +74,8 @@ export function handleAssignmentEvent(
           p.assigneeUserId,
           p.scopeKind,
           p.scopeLabel,
+          // AQU-538 (§3.5): '' is the default lane (absent/omitted on the wire).
+          p.targetLang ?? '',
           p.deadline ?? null,
           p.note ?? null,
           claims.userId,
@@ -127,14 +129,28 @@ export function handleAssignmentEvent(
     dirtyTables.push('assignments', 'assignment_cells')
   } else if (event.kind === 'assignment.reassign') {
     const p = event.payload as EventPayloads['assignment.reassign']
-    stmts.push(
-      db
-        .prepare(
-          `UPDATE assignments SET assignee_user_id = ?
-           WHERE assignment_id = ? AND project_id = ?`,
-        )
-        .bind(p.assigneeUserId, p.assignmentId, event.projectId),
-    )
+    // AQU-538 (§3.5): a plain reassign (no targetLang) only moves the assignee
+    // and leaves the stored lane untouched; when the payload carries a lane,
+    // re-pin it too (including to '' = default lane).
+    if (p.targetLang !== undefined) {
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE assignments SET assignee_user_id = ?, target_lang = ?
+             WHERE assignment_id = ? AND project_id = ?`,
+          )
+          .bind(p.assigneeUserId, p.targetLang, p.assignmentId, event.projectId),
+      )
+    } else {
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE assignments SET assignee_user_id = ?
+             WHERE assignment_id = ? AND project_id = ?`,
+          )
+          .bind(p.assigneeUserId, p.assignmentId, event.projectId),
+      )
+    }
     dirtyTables.push('assignments')
   } else {
     // assignment.unassign — soft close, keep the row + its cells for audit.

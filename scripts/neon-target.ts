@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url"
 import process from "node:process"
 
 type Target = "production" | "staging" | "dev"
-type Command = "status" | "apply" | "baseline"
+type Command = "status" | "apply" | "baseline" | "backfill-progress"
 type PgKey = "HOST" | "DB" | "ROLE" | "PASSWORD"
 
 const DEFAULT_PROJECT_ID = "sweet-paper-88472094"
@@ -38,7 +38,7 @@ const DEFAULTS: Partial<Record<PgKey, string>> = {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 function usage(): never {
-  console.error("usage: tsx scripts/neon-target.ts <production|staging|dev> <status|apply|baseline>")
+  console.error("usage: tsx scripts/neon-target.ts <production|staging|dev> <status|apply|baseline|backfill-progress>")
   process.exit(1)
 }
 
@@ -50,7 +50,7 @@ function parseTarget(value: string | undefined): Target {
 }
 
 function parseCommand(value: string | undefined): Command {
-  if (value === "status" || value === "apply" || value === "baseline") return value
+  if (value === "status" || value === "apply" || value === "baseline" || value === "backfill-progress") return value
   usage()
 }
 
@@ -228,7 +228,11 @@ async function main() {
   const env = await resolvePgEnv(target)
 
   console.log(`neon-target ${target} ${command} -> ${env.NEON_PG_HOST}`)
-  process.exit(await run("tsx", ["scripts/neon-migrate.ts", command], env))
+  const script = command === "backfill-progress"
+    ? "scripts/neon-backfill-progress.ts"
+    : "scripts/neon-migrate.ts"
+  const args = command === "backfill-progress" ? [script] : [script, command]
+  process.exit(await run("tsx", args, env))
 }
 
 main().catch((error) => {

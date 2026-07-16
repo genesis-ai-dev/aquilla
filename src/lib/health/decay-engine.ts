@@ -45,7 +45,7 @@ export const DEFAULT_ENDORSEMENT_TARGET = 5
 export const DEFAULT_DECAY_WARN_THRESHOLD = 0.66
 
 /**
- * FRO-232: user-visible status text shown in the cell popover when a cell
+ * AQU-232: user-visible status text shown in the cell popover when a cell
  * needs attention due to insufficient validation in its passage context.
  * Single source of truth — tested in decay-engine.test.ts.
  */

@@ -1,4 +1,4 @@
-// FRO-296: OfflineBanner component tests.
+// AQU-296: OfflineBanner component tests.
 
 import { describe, it, expect, afterEach } from "vitest"
 import { render, screen, act } from "@testing-library/react"

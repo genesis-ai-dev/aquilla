@@ -29,7 +29,7 @@ export function makeEventId(): string {
 }
 
 /**
- * FRO-476: mint a short-lived service sync-token and POST
+ * AQU-476: mint a short-lived service sync-token and POST
  * /api/v1/projects/:projectId/link/sync on the downstream project — this
  * is "seeding is the first mirror sync" (design spec §5): linking a project
  * with mode='live' runs the same engine a lazy file-open would, so files +
@@ -107,7 +107,7 @@ export interface SourceLinkProject {
   archived_at: string | null
 }
 
-/** FRO-476: link mode/consumes/gate — see the linked-projects design spec §2. */
+/** AQU-476: link mode/consumes/gate — see the linked-projects design spec §2. */
 export type SourceLinkMode = "clone" | "live"
 export type SourceLinkConsumes = "source" | "target"
 export type SourceLinkGate = "head" | "validated"

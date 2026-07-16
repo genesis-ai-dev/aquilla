@@ -1,4 +1,4 @@
-// FRO-214: InactiveProjectBanner component tests.
+// AQU-214: InactiveProjectBanner component tests.
 
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"

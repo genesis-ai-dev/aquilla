@@ -8,7 +8,8 @@ import { mergeCellsDelta, readCellsCache, writeCellsCache } from "@/lib/sync/cel
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { sortByLens } from "@/lib/timeline/derive"
-import type { OrderedBy } from "@/lib/parsers/types"
+import type { OrderedBy, RuleWaiver } from "@/lib/parsers/types"
+import type { FileProgressResponse, ProgressCounts } from "@/lib/progress/file-progress-resource"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
 const EMPTY_CELL_IDS: readonly string[] = Object.freeze([])
@@ -25,6 +26,19 @@ const EMPTY_FOOTNOTE_DETAILS: CellFootnoteDetails = Object.freeze({
 })
 
 export type CellViewModel = CellData
+
+// AQU-538 (slice 2): one source, N target lanes; `''` is the default lane.
+// `CellRow.targetLang` (slice 1) carries the lane; source rows and every
+// pre-lane target row are `''`. This store keys ONE target per cell per view,
+// so we filter target rows to the active lane before pairing — identical to
+// useCells' `laneOf`. Non-active-lane target rows are retained (see
+// `otherLaneTargetRows`) so the cache stays lane-complete and switching lane
+// re-derives the view instantly without a refetch. N=1 (only default-lane
+// rows) is byte-identical: the filter keeps everything.
+/** The lane a row belongs to. Source rows and default-lane targets → `''`. */
+function laneOf(row: CellRow): string {
+  return row.targetLang ?? ""
+}
 
 export interface CellSummary {
   id: string
@@ -48,6 +62,7 @@ export interface CellSummary {
   sourceEventId?: string
   targetEventId?: string
   targetSourceEventId?: string | null
+  aiDrafted?: boolean
   lastEditAt?: number
   startTime?: number
   endTime?: number
@@ -133,11 +148,19 @@ interface RuntimeContext {
   username: string
   requiredValidations: number
   auditStats: ReadonlyMap<string, CellAuditStats>
+  /**
+   * AQU-538: the active target LANE the view renders. `''`/undefined = the
+   * default lane (byte-identical to pre-lane behaviour). Optional so existing
+   * `setRuntime` callers that predate lanes keep compiling; normalized to `''`.
+   */
+  lane?: string
 }
 
 interface PendingOverlay {
   value: string
   valueHtml?: string
+  eventId?: string
+  aiDrafted?: boolean
 }
 
 interface OptimisticEdit extends PendingOverlay {
@@ -157,6 +180,7 @@ export class CellStore {
     username: "local",
     requiredValidations: 1,
     auditStats: EMPTY_STATS,
+    lane: "",
   }
 
   private order: string[] = []
@@ -165,10 +189,23 @@ export class CellStore {
   private indexById = new Map<string, number>()
   private sourceById = new Map<string, CellRow>()
   private targetById = new Map<string, CellRow>()
+  // AQU-538: target rows for NON-active lanes, retained verbatim so `toRows()`
+  // (and thus the IDB cache + delta merges) stays lane-complete. They never
+  // enter the paired view (`targetById`/`order`). Always empty for N=1.
+  private otherLaneTargetRows: CellRow[] = []
   private pendingOverlay = new Map<string, PendingOverlay>()
+  private pendingProgressEventIds: string[] = []
   private optimisticEdits = new Map<string, OptimisticEdit>()
   private freshnessFloors = new Map<string, number>()
   private cellVersionById = new Map<string, number>()
+  // Feeds per-cell versions from one store-lifetime counter that reset() never
+  // rewinds. useSyncExternalStore bails out when getCellVersion returns a value
+  // the row already rendered with, so a version number may never be reused: a
+  // per-cell counter that restarts at 0 on reset() can silently re-inflate
+  // (bumpAllCells on audit-stats churn notifies only the audit-changed cells)
+  // and land a real data change on an already-seen number — the row then stays
+  // stale until remount.
+  private versionCounter = 0
   private cellListeners = new Map<string, Set<() => void>>()
   private listListeners = new Set<() => void>()
   private allListeners = new Set<() => void>()
@@ -178,6 +215,7 @@ export class CellStore {
   private writeSeq = 0
   private maxServerSeq: number | null = null
   private navIndex: CellNavigationEntry[] = []
+  private fileProgressSnapshot: FileProgressResponse | null = null
   private sectionLabelById = new Map<string, string>()
   private footnoteOffsets = new Map<string, { source: number; target: number }>()
   private footnoteCache = new Map<string, {
@@ -188,25 +226,63 @@ export class CellStore {
   private derivedCache: DerivedCache = { baseVersion: -1, summaries: [], textPairs: [] }
 
   setRuntime(next: RuntimeContext): void {
-    const statsChanged = this.ctx.auditStats !== next.auditStats
+    const prevStats = this.ctx.auditStats
+    const nextLane = next.lane ?? ""
+    const statsChanged = prevStats !== next.auditStats
     const userChanged = this.ctx.username !== next.username || this.ctx.requiredValidations !== next.requiredValidations
-    this.ctx = next
+    const laneChanged = (this.ctx.lane ?? "") !== nextLane
+    this.ctx = { ...next, lane: nextLane }
+    if (laneChanged) {
+      // AQU-538: re-partition the already-loaded rows against the new active
+      // lane. `toRows()` retains every lane's rows, so switching lane re-derives
+      // the view (and per-lane progress) instantly, with no refetch. N=1 never
+      // reaches here — the hook always passes `''`.
+      this.replaceRows(this.toRows(), { full: true, maxServerSeq: this.maxServerSeq })
+      return
+    }
     if (statsChanged || userChanged) {
-      this.bumpAllCells()
+      // Invariant: a per-cell version bump is ALWAYS paired with a per-cell
+      // emit of the same set. Editor rows read useSyncExternalStore over
+      // getCellVersion; a bump without an emit lets a parent-driven render
+      // consume the new version number with the data of that moment, and any
+      // later same-version data change looks like "no change" to React — the
+      // row then stays stale until remount. The old bumpAllCells()-but-emit-
+      // only-the-changed-cells shape here was exactly that: audit-stats churn
+      // during a batch silently inflated every cell's version.
+      if (userChanged) {
+        this.bumpAllCells()
+        this.rebuildDerivedIndexes()
+        this.emit(this.order)
+        return
+      }
+      const changed = diffChangedAuditCellIds(prevStats, next.auditStats)
+      this.bumpCells(changed)
+      this.fileVersion++
       this.rebuildDerivedIndexes()
-      this.emitAll()
+      if (changed.size > 0) {
+        this.emit(changed) // per-cell + list + all listeners
+      } else {
+        this.emitAll()
+      }
     }
   }
 
   reset(projectId: string | null, fileId: string | null): void {
     this.ctx = { ...this.ctx, projectId, fileId }
+    // Rows still subscribed to the outgoing cells must hear about the reset —
+    // emitAll() alone only wakes subscribeAll consumers (footer/table shell),
+    // and a per-cell subscriber left unnotified keeps rendering the old file's
+    // content until something else touches its cell.
+    const clearedIds = this.order
     this.order = []
     this.sourceOrder = []
     this.targetOrder = []
     this.indexById = new Map()
     this.sourceById = new Map()
     this.targetById = new Map()
+    this.otherLaneTargetRows = []
     this.pendingOverlay = new Map()
+    this.pendingProgressEventIds = []
     this.optimisticEdits = new Map()
     this.freshnessFloors = new Map()
     this.cellVersionById = new Map()
@@ -216,7 +292,7 @@ export class CellStore {
     this.rebuildDerivedIndexes()
     this.listVersion++
     this.fileVersion++
-    this.emitAll()
+    this.emit(clearedIds)
   }
 
   subscribeList = (listener: () => void): (() => void) => {
@@ -249,7 +325,12 @@ export class CellStore {
   getProjectId = (): string | null => this.ctx.projectId
   getCellCount = (): number => this.order.length
   getMaxServerSeq = (): number | null => this.maxServerSeq
-  setMaxServerSeq(seq: number | null): void { this.maxServerSeq = seq }
+  setMaxServerSeq(seq: number | null): void {
+    this.maxServerSeq = seq
+    if (this.fileProgressSnapshot) {
+      this.fileProgressSnapshot = { ...this.fileProgressSnapshot, revision: seq ?? 0 }
+    }
+  }
   getWriteSeq = (): number => this.writeSeq
   getFreshnessFloor = (cellId: string): number | undefined => this.freshnessFloors.get(cellId)
 
@@ -294,6 +375,14 @@ export class CellStore {
 
   getNavigationIndex(): readonly CellNavigationEntry[] {
     return this.navIndex.length === 0 ? EMPTY_NAVIGATION : this.navIndex
+  }
+
+  getFileProgressSnapshot(): FileProgressResponse | null {
+    return this.fileProgressSnapshot
+  }
+
+  getPendingProgressEventIds(): readonly string[] {
+    return this.pendingProgressEventIds
   }
 
   getFootnoteOffsets(cellId: string): { source: number; target: number } {
@@ -428,6 +517,7 @@ export class CellStore {
       sourceEventId: view.sourceEventId,
       targetEventId: view.targetEventId,
       targetSourceEventId: view.targetSourceEventId,
+      aiDrafted: view.aiDrafted,
       lastEditAt: view.lastEditAt,
       startTime: view.startTime,
       endTime: view.endTime,
@@ -487,6 +577,8 @@ export class CellStore {
     const targetById = new Map<string, CellRow>()
     const sourceOrder: string[] = []
     const targetOrder: string[] = []
+    const otherLaneTargetRows: CellRow[] = []
+    const lane = this.ctx.lane ?? ""
 
     for (const row of rows) {
       if (row.side === "source") {
@@ -496,6 +588,12 @@ export class CellStore {
         }
         sourceById.set(row.cellId, row)
       } else {
+        // AQU-538: only the active lane's target participates in the paired
+        // view; other-lane rows are retained (toRows) but never keyed/rendered.
+        if (laneOf(row) !== lane) {
+          otherLaneTargetRows.push(row)
+          continue
+        }
         if (!targetById.has(row.cellId)) targetOrder.push(row.cellId)
         targetById.set(row.cellId, row)
         changedIds.add(row.cellId)
@@ -519,6 +617,7 @@ export class CellStore {
     this.targetOrder = targetOrder
     this.sourceById = sourceById
     this.targetById = targetById
+    this.otherLaneTargetRows = otherLaneTargetRows
     this.indexById = new Map(order.map((id, index) => [id, index]))
     const liveIds = new Set(order)
     for (const id of this.footnoteCache.keys()) {
@@ -546,6 +645,9 @@ export class CellStore {
       const row = this.targetById.get(id)
       if (row) rows.push(row)
     }
+    // AQU-538: keep non-active-lane target rows so the cache + delta merges
+    // stay lane-complete. Empty for N=1, so byte-identical there.
+    for (const row of this.otherLaneTargetRows) rows.push(row)
     return rows
   }
 
@@ -598,12 +700,28 @@ export class CellStore {
   }
 
   setPendingOverlay(next: Map<string, PendingOverlay>): void {
-    const changed = symmetricChangedKeys(this.pendingOverlay, next, (a, b) => a.value === b.value && a.valueHtml === b.valueHtml)
+    const changed = symmetricChangedKeys(
+      this.pendingOverlay,
+      next,
+      (a, b) => a.value === b.value
+        && a.valueHtml === b.valueHtml
+        && a.eventId === b.eventId
+        && a.aiDrafted === b.aiDrafted,
+    )
     if (changed.size === 0) return
     this.pendingOverlay = next
     this.bumpCells(changed)
     this.rebuildDerivedIndexes()
     this.emit(changed)
+  }
+
+  setPendingProgressEventIds(next: readonly string[]): void {
+    const unique = [...new Set(next)]
+    if (unique.length === this.pendingProgressEventIds.length
+      && unique.every((eventId, index) => eventId === this.pendingProgressEventIds[index])) return
+    this.pendingProgressEventIds = unique
+    this.fileVersion++
+    this.emitAll()
   }
 
   clearOptimisticIfValue(cellId: string, value: string): boolean {
@@ -623,10 +741,20 @@ export class CellStore {
 
     const existing = this.targetById.get(cellId)
     if (existing) {
-      this.targetById.set(cellId, { ...existing, value: patch.value, valueHtml: patch.valueHtml ?? null })
+      this.targetById.set(cellId, { ...existing, value: patch.value, valueHtml: patch.valueHtml ?? null, aiDrafted: patch.aiDrafted ?? false })
     } else {
       const source = this.sourceById.get(cellId)
-      if (!source) return
+      // No source row (mid-refetch/reset window): the shadow written above is
+      // still live data that getCellView overlays, so fall through to the
+      // bump + emit below — an early return here left the write invisible to
+      // the subscribed row (stale until remount) while the footer moved on.
+      if (!source) {
+        this.rebuildDerivedIndexes()
+        this.bumpCells([cellId])
+        this.fileVersion++
+        this.emit([cellId])
+        return
+      }
       this.targetById.set(cellId, {
         ...source,
         side: "target",
@@ -637,6 +765,7 @@ export class CellStore {
         lastEditor: this.ctx.username,
         lastEditAt: Date.now(),
         validated: false,
+        aiDrafted: patch.aiDrafted ?? false,
         wordCount: patch.value.trim() ? patch.value.trim().split(/\s+/).length : 0,
       })
       if (!this.targetOrder.includes(cellId)) this.targetOrder.push(cellId)
@@ -653,14 +782,72 @@ export class CellStore {
     this.emit([cellId])
   }
 
+  /** Bulk version of applyOptimisticTargetEdit. Stamps optimistic shadows for
+   *  every cell in the batch and rebuilds derived indexes + emits ONCE at the
+   *  end, instead of once per cell (O(N) not O(N²)). Used by the bulk-import
+   *  path so imported cells don't flicker on flush-before-refetch. */
+  applyOptimisticTargetEdits(patches: { cellId: string; value: string; valueHtml?: string }[]): void {
+    if (patches.length === 0) return
+    const changedIds = new Set<string>()
+    let orderChanged = false
+    for (const patch of patches) {
+      const seq = ++this.writeSeq
+      this.optimisticEdits.set(patch.cellId, { value: patch.value, valueHtml: patch.valueHtml, seq })
+      this.freshnessFloors.set(patch.cellId, seq)
+
+      const existing = this.targetById.get(patch.cellId)
+      if (existing) {
+        this.targetById.set(patch.cellId, { ...existing, value: patch.value, valueHtml: patch.valueHtml ?? null })
+      } else {
+        const source = this.sourceById.get(patch.cellId)
+        if (!source) {
+          changedIds.add(patch.cellId)
+          continue
+        }
+        this.targetById.set(patch.cellId, {
+          ...source,
+          side: "target",
+          value: patch.value,
+          valueHtml: patch.valueHtml ?? null,
+          eventId: "",
+          sourceEventId: source.eventId,
+          lastEditor: this.ctx.username,
+          lastEditAt: Date.now(),
+          validated: false,
+          wordCount: patch.value.trim() ? patch.value.trim().split(/\s+/).length : 0,
+        })
+        if (!this.targetOrder.includes(patch.cellId)) this.targetOrder.push(patch.cellId)
+        if (!this.indexById.has(patch.cellId)) {
+          this.indexById.set(patch.cellId, this.order.length)
+          this.order.push(patch.cellId)
+          orderChanged = true
+        }
+      }
+      changedIds.add(patch.cellId)
+    }
+    if (orderChanged) this.listVersion++
+    this.rebuildDerivedIndexes()
+    this.bumpCells(changedIds)
+    this.fileVersion++
+    this.emit(changedIds)
+  }
+
   markCellFresh(cellId: string): void {
     this.freshnessFloors.set(cellId, ++this.writeSeq)
   }
 
   replaceRowsForCell(cellId: string, rows: CellRow[]): void {
-    const bySide = new Map(rows.map((row) => [row.side, row]))
-    const source = bySide.get("source")
-    const target = bySide.get("target")
+    const lane = this.ctx.lane ?? ""
+    const source = rows.find((row) => row.side === "source")
+    // AQU-538: a targeted refetch can return this cell's rows across multiple
+    // lanes. Only the active-lane target keys the paired view; other-lane rows
+    // replace this cell's retained rows so the cache stays lane-complete. For
+    // N=1 every target is lane `''`, so this is the old side-only replacement.
+    const target = rows.find((row) => row.side === "target" && laneOf(row) === lane)
+    this.otherLaneTargetRows = this.otherLaneTargetRows.filter((row) => row.cellId !== cellId)
+    for (const row of rows) {
+      if (row.side === "target" && laneOf(row) !== lane) this.otherLaneTargetRows.push(row)
+    }
     if (source) {
       this.sourceById.set(cellId, source)
       if (!this.sourceOrder.includes(cellId)) this.sourceOrder.push(cellId)
@@ -720,14 +907,31 @@ export class CellStore {
       cell.translated = pending.value
       if (pending.valueHtml !== undefined) cell.translatedHtml = pending.valueHtml
       cell.status = deriveStatus(pending.value, false)
+      cell.aiDrafted = pending.aiDrafted ?? false
       cell.hasPendingEdit = true
     }
     const optimistic = this.optimisticEdits.get(cell.id)
     if (optimistic) {
       cell.translated = optimistic.value
-      if (optimistic.valueHtml !== undefined) cell.translatedHtml = optimistic.valueHtml
+      // The optimistic value is authoritative for BOTH text and html. When an
+      // edit carries no valueHtml (e.g. an AI completion commits plain `text`),
+      // clear translatedHtml so the editor's html-first hydration falls back to
+      // the fresh plain text instead of re-showing the stale prior html.
+      cell.translatedHtml = optimistic.valueHtml
       cell.status = deriveStatus(optimistic.value, false)
+      cell.aiDrafted = optimistic.aiDrafted ?? false
       cell.hasPendingEdit = true
+    }
+    if (pending || optimistic) {
+      // The overlay changed `translated`/`status`; recompute validationStatus
+      // from the overlaid text so the row's aria/ring can't keep reporting
+      // "empty" (or a stale validator state) while showing the fresh value.
+      cell.validationStatus = deriveValidationStatus(
+        cell.status,
+        cell.activeValidators,
+        this.ctx.username,
+        this.ctx.requiredValidations,
+      )
     }
   }
 
@@ -758,6 +962,24 @@ export class CellStore {
     const sectionById = new Map<string, string>()
     const footnoteOffsets = new Map<string, { source: number; target: number }>()
     const countsByScope = new Map<string, { source: number; target: number }>()
+    const progressThreshold = Math.min(15, Math.max(1, this.ctx.requiredValidations))
+    const emptyProgressCounts = (): ProgressCounts => ({
+      totalCount: 0,
+      filledCount: 0,
+      validatedCount: 0,
+      validationLevels: new Array(progressThreshold).fill(0),
+    })
+    const fileProgress = emptyProgressCounts()
+    const sectionProgress = new Map<string, ProgressCounts>()
+
+    const addProgress = (counts: ProgressCounts, filled: boolean, endorsements: number, validated: boolean): void => {
+      counts.totalCount++
+      if (filled) counts.filledCount++
+      for (let level = 1; level <= progressThreshold; level++) {
+        if (endorsements >= level) counts.validationLevels[level - 1]++
+      }
+      if (validated) counts.validatedCount++
+    }
 
     for (let index = 0; index < this.order.length; index++) {
       const id = this.order[index]
@@ -777,6 +999,31 @@ export class CellStore {
         if (target?.validated) entry.validated++
       }
 
+      if (source) {
+        const audit = this.ctx.auditStats.get(id)
+        const endorsements = audit
+          ? audit.activeValidators.length
+          : Math.max(0, target?.endorsementCount ?? 0)
+        const targetValue = this.optimisticEdits.get(id)?.value
+          ?? this.pendingOverlay.get(id)?.value
+          ?? target?.value
+          ?? ''
+        const hasAuthoritativeEndorsements = audit !== undefined || target?.endorsementCount !== undefined
+        const validated = hasAuthoritativeEndorsements
+          ? endorsements >= progressThreshold
+          : Boolean(target?.validated)
+        addProgress(fileProgress, targetValue.trim().length > 0, endorsements, validated)
+        const progressSection = source.canonicalRef ? sectionLabelFromCanonical(source.canonicalRef) : ''
+        if (progressSection) {
+          let counts = sectionProgress.get(progressSection)
+          if (!counts) {
+            counts = emptyProgressCounts()
+            sectionProgress.set(progressSection, counts)
+          }
+          addProgress(counts, targetValue.trim().length > 0, endorsements, validated)
+        }
+      }
+
       const scopeKey = footnoteScopeKey(this.ctx.fileId ?? "", canonical, section)
       const counts = countsByScope.get(scopeKey) ?? { source: 0, target: 0 }
       footnoteOffsets.set(id, { source: counts.source, target: counts.target })
@@ -785,13 +1032,23 @@ export class CellStore {
       countsByScope.set(scopeKey, counts)
     }
     this.navIndex = Array.from(nav.values())
+    this.fileProgressSnapshot = this.ctx.fileId && this.sourceOrder.length > 0
+      ? {
+          fileId: this.ctx.fileId,
+          revision: this.maxServerSeq ?? 0,
+          validationCount: progressThreshold,
+          file: fileProgress,
+          sections: [...sectionProgress].map(([key, counts]) => ({ key, ...counts })),
+          source: 'projection',
+        }
+      : null
     this.sectionLabelById = sectionById
     this.footnoteOffsets = footnoteOffsets
   }
 
   private bumpCells(ids: Iterable<string>): void {
     for (const id of ids) {
-      this.cellVersionById.set(id, (this.cellVersionById.get(id) ?? 0) + 1)
+      this.cellVersionById.set(id, ++this.versionCounter)
     }
   }
 
@@ -826,13 +1083,22 @@ export interface UseActiveCellStoreOptions {
   auditStats?: ReadonlyMap<string, CellAuditStats>
   getToken?: (fileId: string) => Promise<string | null>
   enabled?: boolean
+  /**
+   * AQU-538: the active target LANE to render. `''` (default) pairs the
+   * default-lane target for each cell — byte-identical to the pre-lane view.
+   * Switching lane re-derives the view against that lane's target rows (all
+   * lanes are already loaded, so no refetch is needed).
+   */
+  lane?: string
 }
 
 export interface UseActiveCellStoreResult {
   store: CellStore
   revalidate: () => void
   revalidateCell: (cellId: string) => void
-  applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string }) => void
+  applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => void
+  /** Bulk version of applyOptimisticTargetEdit — see CellStore.applyOptimisticTargetEdits. */
+  applyOptimisticTargetEdits: (patches: { cellId: string; value: string; valueHtml?: string }[]) => void
   isLoading: boolean
   isError: boolean
 }
@@ -846,8 +1112,11 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     auditStats = EMPTY_STATS,
     getToken,
     enabled = true,
+    lane = "",
   } = opts
   const store = useMemo(() => new CellStore(), [])
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (typeof window !== "undefined") (window as any).__cellStore = store
   const [isLoading, setIsLoading] = useState(false)
   const [isError, setIsError] = useState(false)
   const projectRef = useRef(projectId)
@@ -866,8 +1135,12 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   tokenFetcherRef.current = getToken
 
   useEffect(() => {
-    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats })
-  }, [auditStats, fileId, projectId, requiredValidations, store, username])
+    // AQU-538: `lane` flows through here; setRuntime re-partitions the loaded
+    // rows against it on change (instant lane switch, no refetch). This effect
+    // is defined before the (projectId, fileId, enabled) reload effect, so on a
+    // lane change the store's active lane is updated before any fetch runs.
+    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, lane })
+  }, [auditStats, fileId, lane, projectId, requiredValidations, store, username])
 
   const doFetch = useCallback(async (soft = false) => {
     const pid = projectRef.current
@@ -1026,6 +1299,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   useEffect(() => {
     if (!enabled || !fileId) {
       store.setPendingOverlay(new Map())
+      store.setPendingProgressEventIds([])
       return
     }
     let cancelled = false
@@ -1034,21 +1308,37 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       if (cancelled) return
       const fid = fileRef.current
       const next = new Map<string, PendingOverlay>()
+      const pendingProgressEventIds: string[] = []
       for (const record of all) {
         if (fid && record.event.fileId !== fid) continue
         const kind = record.event.kind
+        const failed = (record.status ?? "pending") === "failed"
+        if (!failed && (
+          kind.startsWith("source.cell.") ||
+          kind.startsWith("target.cell.") ||
+          kind === "cell.validate" ||
+          kind === "cell.unvalidate"
+        )) {
+          pendingProgressEventIds.push(record.event.id)
+        }
         if (kind !== "target.cell.commit" && kind !== "target.cell.create") continue
         const cellId = record.event.cellId
         if (!cellId) continue
-        const payload = record.event.payload as { value?: string; valueHtml?: string }
-        if ((record.status ?? "pending") === "failed") {
+        const payload = record.event.payload as { value?: string; valueHtml?: string; ai_suggestion?: true }
+        if (failed) {
           if (typeof payload.value === "string") store.clearOptimisticIfValue(cellId, payload.value)
           continue
         }
         if (typeof payload.value !== "string") continue
-        next.set(cellId, { value: payload.value, valueHtml: payload.valueHtml })
+        next.set(cellId, {
+          value: payload.value,
+          valueHtml: payload.valueHtml,
+          eventId: record.event.id,
+          aiDrafted: payload.ai_suggestion === true,
+        })
       }
       store.setPendingOverlay(next)
+      store.setPendingProgressEventIds(pendingProgressEventIds)
     }
     void refresh()
     const unsub = subscribeToOutbox(refresh)
@@ -1080,6 +1370,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     void doFetch(true)
   }, [doFetch])
 
+  const refreshCellsCacheFromStore = useCallback((maxServerSeq?: number) => {
+    const pid = projectRef.current
+    const fid = fileRef.current
+    if (!pid || !fid) return
+    void writeCellsCache(pid, fid, store.toRows(), maxServerSeq ?? store.getMaxServerSeq() ?? undefined)
+  }, [store])
+
   const revalidateCellRef = useRef<(cellId: string) => void>(() => {})
   const revalidateCell = useCallback((cellId: string) => {
     const pid = projectRef.current
@@ -1110,6 +1407,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
           store.clearConfirmedShadows(rows, startSeq)
           store.markCellFresh(cellId)
           store.replaceRowsForCell(cellId, rows)
+          refreshCellsCacheFromStore()
           return
         }
       } catch {
@@ -1127,11 +1425,15 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         }
       }
     })()
-  }, [doFetch, store])
+  }, [doFetch, refreshCellsCacheFromStore, store])
   revalidateCellRef.current = revalidateCell
 
-  const applyOptimisticTargetEdit = useCallback((cellId: string, patch: { value: string; valueHtml?: string }) => {
+  const applyOptimisticTargetEdit = useCallback((cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => {
     store.applyOptimisticTargetEdit(cellId, patch)
+  }, [store])
+
+  const applyOptimisticTargetEdits = useCallback((patches: { cellId: string; value: string; valueHtml?: string }[]) => {
+    store.applyOptimisticTargetEdits(patches)
   }, [store])
 
   useEffect(() => {
@@ -1173,21 +1475,37 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     }
   }, [store])
 
-  return { store, revalidate, revalidateCell, applyOptimisticTargetEdit, isLoading, isError }
+  return { store, revalidate, revalidateCell, applyOptimisticTargetEdit, applyOptimisticTargetEdits, isLoading, isError }
+}
+
+/**
+ * Anchor a store read to a version counter so the React Compiler keys the
+ * surrounding memo on the version. The compiler infers memoization deps from
+ * the values REFERENCED in the computation and DISCARDS manual dep arrays —
+ * `useMemo(() => store.read(), [store, version])` compiles to a cache guarded
+ * only by `store`, so the read is frozen at its mount-time value and the row
+ * stays stale forever while the store (and footer) move on. Routing every
+ * version-keyed read through this function makes the version an operand the
+ * compiler must track.
+ */
+export function readAtVersion<T>(version: number, read: () => T): T {
+  if (Number.isNaN(version)) throw new Error("unreachable: version counters are integers")
+  return read()
 }
 
 export function useCellIds(store: CellStore, orderedBy?: OrderedBy, mediaLayer = false): readonly string[] {
   const version = useSyncExternalStore(store.subscribeList, store.getListVersion, () => 0)
-  return useMemo(() => store.getCellIdsForLens(orderedBy, mediaLayer), [mediaLayer, orderedBy, store, version])
+  return useMemo(
+    () => readAtVersion(version, () => store.getCellIdsForLens(orderedBy, mediaLayer)),
+    [mediaLayer, orderedBy, store, version],
+  )
 }
 
 export function useCellView(store: CellStore, cellId: string): CellViewModel | null {
-  const version = useSyncExternalStore(
-    (listener) => store.subscribeCell(cellId, listener),
-    () => store.getCellVersion(cellId),
-    () => 0,
-  )
-  return useMemo(() => store.getCellView(cellId), [cellId, store, version])
+  const subscribe = useCallback((listener: () => void) => store.subscribeCell(cellId, listener), [store, cellId])
+  const getSnapshot = useCallback(() => store.getCellVersion(cellId), [store, cellId])
+  const version = useSyncExternalStore(subscribe, getSnapshot, () => 0)
+  return useMemo(() => readAtVersion(version, () => store.getCellView(cellId)), [cellId, store, version])
 }
 
 export function useCellStoreVersion(store: CellStore): number {
@@ -1196,7 +1514,7 @@ export function useCellStoreVersion(store: CellStore): number {
 
 export function useCellStoreViews(store: CellStore): CellViewModel[] {
   const version = useCellStoreVersion(store)
-  return useMemo(() => store.getAllCellViews(), [store, version])
+  return useMemo(() => readAtVersion(version, () => store.getAllCellViews()), [store, version])
 }
 
 function deriveStatus(translated: string, validated: boolean): CellData["status"] {
@@ -1223,6 +1541,53 @@ function sameStringArray(a: readonly string[], b: readonly string[]): boolean {
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
   return true
+}
+
+function waiversEqual(a: readonly RuleWaiver[], b: readonly RuleWaiver[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].ruleId !== b[i].ruleId || a[i].reason !== b[i].reason
+      || a[i].waivedAt !== b[i].waivedAt || a[i].waivedBy !== b[i].waivedBy) return false
+  }
+  return true
+}
+
+function auditStatsEqual(a: CellAuditStats | undefined, b: CellAuditStats | undefined): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return (
+    a.editCount === b.editCount &&
+    a.contentHash === b.contentHash &&
+    a.lastEditAt === b.lastEditAt &&
+    a.lastEditEventId === b.lastEditEventId &&
+    sameStringArray(a.activeValidators, b.activeValidators) &&
+    waiversEqual(a.waivers, b.waivers)
+  )
+}
+
+/**
+ * Cell ids whose audit-stats entry actually changed between two stats maps.
+ * Targeted single-cell refetches produce a `new Map(prev)` that shares entry
+ * references for every untouched cell, so the `prevStats === nextStats` fast
+ * path skips them in O(1) and only the genuinely-changed cell is value-compared
+ * — keeping the per-cell emit set small even on Bible-sized files.
+ */
+function diffChangedAuditCellIds(
+  prev: ReadonlyMap<string, CellAuditStats>,
+  next: ReadonlyMap<string, CellAuditStats>,
+): Set<string> {
+  const changed = new Set<string>()
+  if (prev === next) return changed
+  for (const [id, nextStats] of next) {
+    const prevStats = prev.get(id)
+    if (prevStats === nextStats) continue
+    if (!auditStatsEqual(prevStats, nextStats)) changed.add(id)
+  }
+  for (const id of prev.keys()) {
+    if (!next.has(id)) changed.add(id)
+  }
+  return changed
 }
 
 function symmetricChangedKeys<T>(

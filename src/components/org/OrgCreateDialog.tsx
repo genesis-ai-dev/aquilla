@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
+import { useForm } from "@tanstack/react-form"
+import { z } from "zod"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -10,10 +12,18 @@ import {
 } from "@/components/ui/dialog"
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Spinner } from "@/components/ui/spinner"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { createOrg } from "@/lib/frontier/orgs"
+import { isFieldInvalid } from "@/lib/forms/field-state"
+import { requiredString } from "@/lib/forms/schemas"
+import { useSubmitError } from "@/lib/forms/submit-error"
 import posthog from "@/lib/posthog"
 import { ORG_CREATED } from "@/lib/event-names"
+
+const formSchema = z.object({
+  name: requiredString("Organization name"),
+})
 
 interface OrgCreateDialogProps {
   open: boolean
@@ -24,33 +34,30 @@ interface OrgCreateDialogProps {
 export function OrgCreateDialog({ open, onOpenChange, onCreated }: OrgCreateDialogProps) {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
-  const [name, setName] = useState("")
-  const [creating, setCreating] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
+
+  const form = useForm({
+    defaultValues: { name: "" },
+    validators: { onSubmit: formSchema },
+    onSubmit: async ({ value }) => {
+      if (!jwt) return
+      clearSubmitError()
+      try {
+        const org = await createOrg(jwt, value.name.trim())
+        posthog.capture(ORG_CREATED, { org_id: org.id })
+        onCreated(org.id)
+        onOpenChange(false)
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : "Couldn't create your organization.")
+      }
+    },
+  })
 
   useEffect(() => {
     if (!open) return
-    setName("")
-    setError(null)
-  }, [open])
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    const trimmed = name.trim()
-    if (!jwt || !trimmed || creating) return
-    setCreating(true)
-    setError(null)
-    try {
-      const org = await createOrg(jwt, trimmed)
-      posthog.capture(ORG_CREATED, { org_id: org.id })
-      onCreated(org.id)
-      onOpenChange(false)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't create your organization.")
-    } finally {
-      setCreating(false)
-    }
-  }
+    form.reset()
+    clearSubmitError()
+  }, [open, form, clearSubmitError])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -61,26 +68,49 @@ export function OrgCreateDialog({ open, onOpenChange, onCreated }: OrgCreateDial
             Give your team a workspace for projects, members, and settings.
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form
+          id="org-create-form"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void form.handleSubmit()
+          }}
+        >
           <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="org-create-name">Organization name</FieldLabel>
-              <Input
-                id="org-create-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Acme Bible Translation"
-                autoFocus
-              />
-            </Field>
+            <form.Field
+              name="name"
+              children={(field) => {
+                const invalid = isFieldInvalid(field)
+                return (
+                  <Field data-invalid={invalid}>
+                    <FieldLabel htmlFor="org-create-name">Organization name</FieldLabel>
+                    <Input
+                      id="org-create-name"
+                      name={field.name}
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      placeholder="Acme Bible Translation"
+                      aria-invalid={invalid}
+                      autoFocus
+                    />
+                    {invalid && <FieldError errors={field.state.meta.errors} />}
+                  </Field>
+                )
+              }}
+            />
           </FieldGroup>
-          {error ? <FieldError role="alert">{error}</FieldError> : null}
-          <DialogFooter>
+          {submitError && (
+            <FieldError role="alert" className="mt-3">
+              {submitError}
+            </FieldError>
+          )}
+          <DialogFooter className="mt-4">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={creating || !name.trim()}>
-              {creating ? "Creating…" : "Create organization"}
+            <Button type="submit" form="org-create-form">
+              {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
+              {form.state.isSubmitting ? "Creating…" : "Create organization"}
             </Button>
           </DialogFooter>
         </form>

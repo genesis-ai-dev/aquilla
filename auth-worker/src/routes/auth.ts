@@ -74,8 +74,14 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
       )
     }
 
+    // Uniqueness is case-insensitive (AQU-340): reject `ryan` when `Ryan`
+    // already exists so we never mint case-twin accounts that then collide in
+    // lookups/@mentions/audit trails. The row still stores the exact casing the
+    // user typed (see INSERT below) — case-insensitive functionally, but the
+    // chosen casing is preserved for display. Email is likewise compared
+    // case-insensitively (it is the closest sibling identifier).
     const existingUser = await c.env.AQUILLA_PG.prepare(
-      "SELECT id FROM users WHERE username = ? OR email = ?",
+      "SELECT id FROM users WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)",
     )
       .bind(username, email)
       .first<ExistingUserCheck>()
@@ -267,7 +273,7 @@ auth.get("/me", authMiddleware, async (c) => {
   })
 })
 
-// FRO-436: Self-update gate for the authenticated user.
+// AQU-436: Self-update gate for the authenticated user.
 //
 // USERNAME is intentionally immutable for self-service users. Come and See
 // (the translation-programme manager) centrally tracks translator usernames
@@ -316,7 +322,7 @@ auth.patch("/me", authMiddleware, zValidator("json", patchMeSchema), async (c) =
   const body = c.req.valid("json")
   const user = c.get("user")
 
-  // FRO-436: block username self-change unconditionally.
+  // AQU-436: block username self-change unconditionally.
   // Configurable override via org setting `usernameChangeMinRole` is
   // documented above but not implemented — the default (block) is correct
   // for all current managed translation programmes.
@@ -330,7 +336,7 @@ auth.patch("/me", authMiddleware, zValidator("json", patchMeSchema), async (c) =
     )
   }
 
-  // FRO-436: password self-change is not offered here.
+  // AQU-436: password self-change is not offered here.
   // Use POST /api/v2/auth/password-reset/request (email-token flow).
   // See SWARM-TODO above for the org-managed reset path.
   if (body.password !== undefined || body.new_password !== undefined) {

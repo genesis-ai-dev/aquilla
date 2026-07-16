@@ -77,6 +77,10 @@ vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "tok", username: "tester" }, loading: false }),
 }))
 
+vi.mock("@/hooks/useAccounts", () => ({
+  useAccounts: () => ({ active: null, sessions: [], loading: false, add: vi.fn(), activate: vi.fn(), remove: vi.fn() }),
+}))
+
 vi.mock("@/hooks/useCompletionSettings", () => ({
   buildCompletionSettings: vi.fn((existing: unknown, updates: unknown) => ({ ...Object(existing), ...Object(updates) })),
   DEFAULT_SYSTEM_PROMPT: "Translate accurately.",
@@ -85,7 +89,7 @@ vi.mock("@/hooks/useCompletionSettings", () => ({
 vi.mock("@/lib/completion/completion-service", () => ({
   fetchModels: vi.fn().mockResolvedValue([]),
   resolveProvider: vi.fn(() => "frontier"),
-  // FRO-478: ProjectSettings transitively imports events-emit.ts (via
+  // AQU-478: ProjectSettings transitively imports events-emit.ts (via
   // UpstreamChangesPanel) -> src/lib/ab/feedback.ts, which reads this export
   // at module-eval time.
   FRONTIER_CHAT_URL: "https://api.aquilla.app/chat/api/v1/chat/completions",
@@ -201,14 +205,14 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     renderAt(`/project/${PROJECT_ID}/settings?section=validation`)
     expect(screen.getByLabelText(/required validators \(text\)/i)).toBeTruthy()
     expect(screen.getByText(/^harmonization$/i)).toBeTruthy()
-    expect(screen.getByText(/staleness & health/i)).toBeTruthy()
+    expect(screen.getByText(/retrieval support/i)).toBeTruthy()
 
     renderAt(`/project/${PROJECT_ID}/settings?section=audio-media`)
     expect(screen.getByText(/audio loading/i)).toBeTruthy()
 
     renderAt(`/project/${PROJECT_ID}/settings?section=metrics`)
     // PostEditMetricsSection renders its own heading regardless of loading state.
-    expect(screen.getByText(/ai metrics|post-edit/i)).toBeTruthy()
+    expect(screen.getByText(/approved ai review effort/i)).toBeTruthy()
   })
 
   // The hidden termbase-sharing section (SHOW_TERMBASE_SHARING_IN_SETTINGS

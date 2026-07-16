@@ -11,7 +11,7 @@ import { addOrgMember, createOrg, ROLE } from "../../helpers/frontier-api"
  *
  * The typeahead resolves a username when the user picks a suggestion from the
  * dropdown (handlePick sets value.resolved) — typing alone doesn't set the
- * badge. The user search is scoped to org/project-overlap users (FRO-321).
+ * badge. The user search is scoped to org/project-overlap users (AQU-321).
  * Bob is seeded into a separate alice-owned org so he is searchable but is not
  * already an effective member of the project under test.
  *

@@ -1,5 +1,5 @@
 /**
- * Tests for useComments — focusing on the two correctness fixes in FRO-228:
+ * Tests for useComments — focusing on the two correctness fixes in AQU-228:
  *
  * 1. Optimistic comments survive a WS-triggered refresh (stale-refetch-wipes-
  *    optimistic regression — same class as commit b813940 fixed for cells).
@@ -61,7 +61,7 @@ beforeEach(() => {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe("useComments — optimistic comment survives refresh (FRO-228 WARN)", () => {
+describe("useComments — optimistic comment survives refresh (AQU-228 WARN)", () => {
   it("an optimistic comment added before a refresh is still visible after the refresh completes", async () => {
     // Initial load: server returns one comment.
     mockFetchComments.mockResolvedValue([makeServerComment()])
@@ -141,7 +141,7 @@ describe("useComments — optimistic comment survives refresh (FRO-228 WARN)", (
   })
 })
 
-describe("useComments — sentinel fileId for project-scoped mutations (FRO-228 BLOCKER 1 client side)", () => {
+describe("useComments — sentinel fileId for project-scoped mutations (AQU-228 BLOCKER 1 client side)", () => {
   it("addComment with project scope enqueues event with __project__ fileId sentinel", async () => {
     mockFetchComments.mockResolvedValue([])
     const { result } = renderHook(() =>

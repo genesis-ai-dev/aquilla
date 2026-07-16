@@ -23,4 +23,17 @@ describe("buildCellData timecodes", () => {
     expect(cell.startTime).toBeUndefined()
     expect(cell.context).toBe("")
   })
+
+  it("exposes the untouched-machine-draft marker from the target projection", () => {
+    const cell = buildCellData(
+      "c1",
+      row({ side: "source" }),
+      row({ side: "target", value: "Borrador", aiDrafted: true }),
+      "f1",
+      "u",
+      1,
+      undefined,
+    )
+    expect(cell.aiDrafted).toBe(true)
+  })
 })

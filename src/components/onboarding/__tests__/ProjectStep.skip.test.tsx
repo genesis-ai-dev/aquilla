@@ -1,5 +1,5 @@
 /**
- * FRO-432: "Do this later" skip is prominently discoverable in the ProjectStep.
+ * AQU-432: "Do this later" skip is prominently discoverable in the ProjectStep.
  *
  * Covers:
  *  - Skip button is rendered as a visible Button (not a tiny text link)
@@ -64,7 +64,7 @@ beforeEach(() => {
 // Tests — signed-in path
 // ---------------------------------------------------------------------------
 
-describe("ProjectStep — signed-in: skip affordance prominence (FRO-432)", () => {
+describe("ProjectStep — signed-in: skip affordance prominence (AQU-432)", () => {
   it("renders a <button> element labelled 'Do this later' (not a tiny text node)", () => {
     renderStep()
     // getByRole throws if not found — asserts existence AND correct role.
@@ -101,7 +101,7 @@ describe("ProjectStep — signed-in: skip affordance prominence (FRO-432)", () =
 // Tests — no-session path
 // ---------------------------------------------------------------------------
 
-describe("ProjectStep — no session: skip affordance prominence (FRO-432)", () => {
+describe("ProjectStep — no session: skip affordance prominence (AQU-432)", () => {
   beforeEach(() => {
     mockSession = null
   })

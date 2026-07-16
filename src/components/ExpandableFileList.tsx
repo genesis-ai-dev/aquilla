@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { Search as SearchIcon, X, ChevronDown, Pencil } from "lucide-react"
+import { Search as SearchIcon, X, ChevronDown, Pencil, BookOpen } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileTypeHasSections } from "@/lib/parsers/types"
 import { useSidebarExpansion, usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
@@ -20,6 +20,7 @@ import {
   downloadSourceFile,
   SourceExportError,
 } from "@/lib/sync/source-export"
+import { prefetchFileProgress } from "@/lib/progress/file-progress-resource"
 
 const EXPORTABLE_FILE_TYPES: ReadonlySet<FileReference["type"]> = new Set(["usfm"])
 
@@ -36,23 +37,28 @@ interface Props {
   onSelectFile: (fileId: string, opts?: { sectionLabel?: string }) => void
   onRename: (fileId: string, newName: string) => void
   onMove: (fileId: string) => void
-  /** FRO-271: Optional — pass undefined to hide delete for roles below project_lead (500). */
+  /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead (500). */
   onDelete?: (fileId: string) => void
   onApplySuggestion?: (fileId: string) => void
   onRenameCorpus?: (oldMarker: string, newMarker: string) => void
   /**
-   * FRO-253 (a fix): whether org policy allows export. When false, the
+   * AQU-253 (a fix): whether org policy allows export. When false, the
    * per-file export menu items are hidden so dashboard affordances match
    * the workspace. Defaults to true (no gate) for callers that haven't
    * wired up org settings.
    */
   canExportByOrgPolicy?: boolean
+  /** Render a pinned "Glossary" pseudo-file entry; invoked on click. Omit to hide. */
+  onOpenGlossary?: () => void
+  /** True when the glossary surface is the active center surface (for highlight). */
+  glossaryActive?: boolean
 }
 
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
   suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onRename, onMove, onDelete,
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
+  onOpenGlossary, glossaryActive,
 }: Props) {
   const { expanded, toggle } = useSidebarExpansion(projectId)
   const { members: collapsed, toggle: toggleCollapsed } = usePersistedToggleSet(
@@ -64,6 +70,11 @@ export function ExpandableFileList({
   const [editingCorpus, setEditingCorpus] = useState<string | null>(null)
   const [exportToast, setExportToast] = useState<{ msg: string; tone: "ok" | "err" } | null>(null)
   const { requestScrollToSection } = useEditorScroll()
+
+  useEffect(() => {
+    if (activeFileId) prefetchFileProgress(projectId, activeFileId, getTokenForFile)
+    for (const fileId of expanded) prefetchFileProgress(projectId, fileId, getTokenForFile)
+  }, [activeFileId, expanded, getTokenForFile, projectId])
 
   // Auto-dismiss the export toast after a few seconds — mirrors the Dashboard
   // errorToast pattern (no external toast lib in this codebase).
@@ -118,6 +129,19 @@ export function ExpandableFileList({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="p-2 space-y-2">
+          {onOpenGlossary && (
+            <button
+              type="button"
+              onClick={onOpenGlossary}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+                glossaryActive ? "bg-accent text-accent-foreground" : "hover:bg-muted/60",
+              )}
+            >
+              <BookOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="truncate">Glossary</span>
+            </button>
+          )}
           {groups.length === 0 && (
             <p className="px-2 text-sm text-muted-foreground">
               {filter ? `No files match "${filter}".` : "No files imported yet."}
@@ -183,7 +207,11 @@ export function ExpandableFileList({
                       const isExpanded = canExpand && expanded.has(file.id)
                       const isEditing = editingFileId === file.id
                       return (
-                        <div key={file.id}>
+                        <div
+                          key={file.id}
+                          onPointerEnter={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
+                          onFocusCapture={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
+                        >
                           <FileRow
                             file={file}
                             active={file.id === activeFileId}
@@ -213,7 +241,7 @@ export function ExpandableFileList({
                               onSectionClick={(label) => {
                                 if (file.id !== activeFileId) {
                                   onSelectFile(file.id, { sectionLabel: label })
-                                  // FRO-250/254: stamp the fileId so ScrollToGroupHandler
+                                  // AQU-250/254: stamp the fileId so ScrollToGroupHandler
                                   // skips this request if cells still belong to the OLD file.
                                   setTimeout(() => requestScrollToSection(label, file.id), 100)
                                 } else {
@@ -235,7 +263,7 @@ export function ExpandableFileList({
       </div>
       {menu && (() => {
         const menuFile = files.find((f) => f.id === menu.fileId)
-        // FRO-253 (a fix): also gate on org policy, not just file type.
+        // AQU-253 (a fix): also gate on org policy, not just file type.
         const canExportFile = !!menuFile && EXPORTABLE_FILE_TYPES.has(menuFile.type) && canExportByOrgPolicy
         return (
           <FileActionMenu

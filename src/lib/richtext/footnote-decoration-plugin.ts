@@ -19,13 +19,29 @@
 import { Extension } from "@tiptap/core"
 import type { Node as PMNode } from "@tiptap/pm/model"
 import { Plugin, PluginKey } from "@tiptap/pm/state"
-import { Decoration, DecorationSet } from "@tiptap/pm/view"
+import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view"
 import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
 import { FOOTNOTE_NODE_NAME } from "@/lib/richtext/usfm-plain-text"
 import { FOOTNOTE_DECORATION_SPEC, type FootnoteMarkerInfo } from "@/lib/richtext/footnote-node"
 
 export const footnoteDecorationPluginKey = new PluginKey<DecorationSet>("footnoteDecorations")
-export const footnoteSelectionPluginKey = new PluginKey<DecorationSet>("footnoteSelectionOverlay")
+export const measuredSelectionPluginKey = new PluginKey("measuredSelectionOverlay")
+
+interface RectLike {
+  left: number
+  top: number
+  right: number
+  bottom: number
+  width: number
+  height: number
+}
+
+export interface MeasuredSelectionRect {
+  left: number
+  top: number
+  width: number
+  height: number
+}
 
 function docHasFootnote(doc: PMNode): boolean {
   let found = false
@@ -40,22 +56,159 @@ function docHasFootnote(doc: PMNode): boolean {
   return found
 }
 
-/**
- * Draw the text selection ourselves, positioned by document position, for cells
- * that contain footnotes. Safari mis-paints the native selection rectangles
- * around our contenteditable=false footnote pills (it highlights the adjacent
- * region when a selection edge lands at an element offset next to the atom), so
- * we hide the native paint (see .usfm-fn-editor ::selection in index.css) and
- * render an inline decoration over the live selection range instead. PM maps
- * the range to the DOM by position, sidestepping Safari's broken selection-rect
- * math entirely. Only active when the cell has a footnote AND the selection is a
- * non-empty text range.
- */
-function buildSelectionOverlay(doc: PMNode, from: number, to: number, empty: boolean): DecorationSet {
-  if (empty || from === to || !docHasFootnote(doc)) return DecorationSet.empty
-  return DecorationSet.create(doc, [
-    Decoration.inline(from, to, { class: "usfm-text-sel" }),
-  ])
+function shouldMeasureSelection(view: EditorView): boolean {
+  const domDirection = view.dom.getAttribute("dir") || getComputedStyle(view.dom).direction
+  return domDirection === "rtl" || docHasFootnote(view.state.doc)
+}
+
+function createDomRange(view: EditorView, from: number, to: number): Range | null {
+  try {
+    const start = view.domAtPos(from)
+    const end = view.domAtPos(to)
+    const range = document.createRange()
+    range.setStart(start.node, start.offset)
+    range.setEnd(end.node, end.offset)
+    return range
+  } catch {
+    return null
+  }
+}
+
+export function normalizeMeasuredSelectionRects(
+  rects: RectLike[],
+  hostRect: RectLike,
+  clipRect: RectLike,
+  scrollLeft = 0,
+  scrollTop = 0,
+): MeasuredSelectionRect[] {
+  const out: MeasuredSelectionRect[] = []
+  const seen = new Set<string>()
+  for (const rect of rects) {
+    if (rect.width <= 0 || rect.height <= 0) continue
+    const left = Math.max(rect.left, clipRect.left)
+    const right = Math.min(rect.right, clipRect.right)
+    const top = Math.max(rect.top, clipRect.top)
+    const bottom = Math.min(rect.bottom, clipRect.bottom)
+    const width = right - left
+    const height = bottom - top
+    if (width <= 0 || height <= 0) continue
+    const measured = {
+      left: left - hostRect.left + scrollLeft,
+      top: top - hostRect.top + scrollTop,
+      width,
+      height,
+    }
+    const key = [
+      Math.round(measured.left),
+      Math.round(measured.top),
+      Math.round(measured.width),
+      Math.round(measured.height),
+    ].join(":")
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(measured)
+  }
+  return out
+}
+
+function selectedFootnoteMarkerRects(view: EditorView, range: Range): DOMRect[] {
+  const rects: DOMRect[] = []
+  for (const marker of Array.from(view.dom.querySelectorAll<HTMLElement>(".usfm-footnote-marker"))) {
+    try {
+      if (range.intersectsNode(marker)) rects.push(marker.getBoundingClientRect())
+    } catch {
+      // Detached/re-rendered marker while a selection is changing. Ignore it;
+      // the next view update will redraw against the current DOM.
+    }
+  }
+  return rects
+}
+
+function renderMeasuredSelection(view: EditorView, overlay: HTMLElement, host: HTMLElement): void {
+  const enabled = shouldMeasureSelection(view)
+  overlay.replaceChildren()
+  view.dom.classList.remove("pm-measured-selection")
+  if (!enabled || view.state.selection.empty || !view.hasFocus()) return
+
+  const from = Math.min(view.state.selection.from, view.state.selection.to)
+  const to = Math.max(view.state.selection.from, view.state.selection.to)
+  if (from === to) return
+
+  const range = createDomRange(view, from, to)
+  if (!range) return
+
+  const hostRect = host.getBoundingClientRect()
+  const clipRect = view.dom.getBoundingClientRect()
+  const rects = normalizeMeasuredSelectionRects(
+    [
+      ...Array.from(range.getClientRects()),
+      ...selectedFootnoteMarkerRects(view, range),
+    ],
+    hostRect,
+    clipRect,
+    host.scrollLeft,
+    host.scrollTop,
+  )
+  if (rects.length === 0) return
+
+  view.dom.classList.add("pm-measured-selection")
+  for (const rect of rects) {
+    const node = document.createElement("span")
+    node.className = "pm-selection-overlay-rect"
+    node.style.left = `${rect.left}px`
+    node.style.top = `${rect.top}px`
+    node.style.width = `${rect.width}px`
+    node.style.height = `${rect.height}px`
+    overlay.appendChild(node)
+  }
+}
+
+function createMeasuredSelectionPlugin(): Plugin {
+  return new Plugin({
+    key: measuredSelectionPluginKey,
+    view(view) {
+      const host = view.dom.parentElement ?? view.dom
+      host.classList.add("pm-selection-overlay-host")
+      const overlay = document.createElement("div")
+      overlay.className = "pm-selection-overlay"
+      overlay.setAttribute("aria-hidden", "true")
+      host.appendChild(overlay)
+
+      let frame: number | null = null
+      let resizeObserver: ResizeObserver | null = null
+      const draw = () => {
+        frame = null
+        renderMeasuredSelection(view, overlay, host)
+      }
+      const schedule = () => {
+        if (frame !== null) return
+        frame = requestAnimationFrame(draw)
+      }
+
+      if (typeof ResizeObserver !== "undefined") {
+        resizeObserver = new ResizeObserver(schedule)
+        resizeObserver.observe(view.dom)
+      }
+      window.addEventListener("resize", schedule)
+      window.addEventListener("scroll", schedule, { capture: true, passive: true })
+      schedule()
+
+      return {
+        update() {
+          schedule()
+        },
+        destroy() {
+          if (frame !== null) cancelAnimationFrame(frame)
+          resizeObserver?.disconnect()
+          window.removeEventListener("resize", schedule)
+          window.removeEventListener("scroll", schedule, { capture: true })
+          overlay.remove()
+          host.classList.remove("pm-selection-overlay-host")
+          view.dom.classList.remove("pm-measured-selection")
+        },
+      }
+    },
+  })
 }
 
 export function buildFootnoteDecorationSet(
@@ -123,38 +276,7 @@ export function createFootnoteDecorationExtension(
             },
           },
         }),
-        new Plugin({
-          key: footnoteSelectionPluginKey,
-          state: {
-            init: (_, state) => buildSelectionOverlay(
-              state.doc,
-              state.selection.from,
-              state.selection.to,
-              state.selection.empty,
-            ),
-            apply: (tr, old, oldState, newState) => {
-              if (tr.docChanged || !oldState.selection.eq(newState.selection) || !old) {
-                return buildSelectionOverlay(
-                  newState.doc,
-                  newState.selection.from,
-                  newState.selection.to,
-                  newState.selection.empty,
-                )
-              }
-              return old
-            },
-          },
-          props: {
-            // Tag the editor root so the CSS that hides native ::selection and
-            // styles .usfm-text-sel only applies to footnote-bearing cells.
-            attributes(state): { [name: string]: string } {
-              return { class: docHasFootnote(state.doc) ? "usfm-fn-editor" : "" }
-            },
-            decorations(state) {
-              return footnoteSelectionPluginKey.getState(state)
-            },
-          },
-        }),
+        createMeasuredSelectionPlugin(),
       ]
     },
   })

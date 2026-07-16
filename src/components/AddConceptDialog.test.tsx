@@ -1,5 +1,5 @@
 /**
- * Tests for AddConceptDialog (FRO-260).
+ * Tests for AddConceptDialog (AQU-260).
  *
  * Covers:
  *   - Dialog pre-fills with the provided sourceTerm
@@ -102,20 +102,27 @@ describe("AddConceptDialog", () => {
     expect(onConfirm).not.toHaveBeenCalled()
   })
 
-  // ── Empty term disables submit ─────────────────────────────────────────────
+  // ── Empty term validates on submit ─────────────────────────────────────────
 
-  it("disables Create draft button when term is empty", () => {
-    renderDialog({ sourceTerm: "" })
-    const btn = screen.getByRole("button", { name: /create draft concept/i })
-    expect(btn).toBeDisabled()
+  it("shows validation when Create draft is clicked with empty term", async () => {
+    const onConfirm = vi.fn()
+    renderDialog({ sourceTerm: "", onConfirm })
+    fireEvent.submit(document.getElementById("add-concept-form")!)
+    await waitFor(() => {
+      expect(screen.getByText(/source term is required/i)).toBeInTheDocument()
+    })
+    expect(onConfirm).not.toHaveBeenCalled()
   })
 
-  it("disables Create draft button when term is whitespace only", () => {
-    renderDialog({ sourceTerm: "   " })
-    // Clear the field
+  it("shows validation when term is whitespace only", async () => {
+    const onConfirm = vi.fn()
+    renderDialog({ sourceTerm: "   ", onConfirm })
     const input = screen.getByLabelText(/source term for new concept/i)
     fireEvent.change(input, { target: { value: "   " } })
-    const btn = screen.getByRole("button", { name: /create draft concept/i })
-    expect(btn).toBeDisabled()
+    fireEvent.submit(document.getElementById("add-concept-form")!)
+    await waitFor(() => {
+      expect(screen.getByText(/source term is required/i)).toBeInTheDocument()
+    })
+    expect(onConfirm).not.toHaveBeenCalled()
   })
 })

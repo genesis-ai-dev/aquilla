@@ -51,6 +51,15 @@ export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchP
 
   const rows = useMemo(() => deriveWorkingSet(state.runs, decided), [state.runs, decided])
   const pending = useMemo(() => pendingRows(rows), [rows])
+  // The stage exists for REVIEW: staged drafts awaiting a decision, or the
+  // record of decisions made. Read-only sightings live in chat as passage
+  // cards — mirroring them into a grid is the double-display the
+  // agent-complete redesign removed.
+  const stageRows = useMemo(
+    () => rows.filter((r) => (r.proposed !== undefined && r.stagedEvent) || r.outcome),
+    [rows],
+  )
+  const hasReviewWork = stageRows.length > 0
 
   const activeRun = state.runs.find((r) => r.status === "running")
   const progress = activeRun?.progress
@@ -247,26 +256,36 @@ export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchP
         </span>
       </div>
 
-      {/* Chat rail + review grid: the conversation narrates from the side;
-          the working set (the artifact) gets the space. */}
+      {/* Chat is the SPINE (agent-complete §2): until the session stages
+          something to review, the conversation is the whole surface — a
+          centered column. The working set is a STAGE summoned by review work
+          (pending drafts / decisions), and the chat becomes its narrator. */}
       <div className="flex min-h-0 flex-1">
-        <div className="flex w-[380px] min-w-[320px] flex-none flex-col border-r">
-          <AgentDockView {...agent} renderProposalOverride={renderProposalOverride} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <WorkingSetPanel
-            ref={panelRef}
-            rows={rows}
-            busy={applying}
-            lintRow={lintRow}
-            onAccept={(row, value) => acceptRows([{ row, value }])}
-            onAcceptAll={(valueFor) =>
-              acceptRows(pending.map((row) => ({ row, value: valueFor(row) })))
-            }
-            onReject={rejectRow}
-            onJumpToCell={onJumpToCell}
-          />
-        </div>
+        {hasReviewWork ? (
+          <>
+            <div className="flex w-[380px] min-w-[320px] flex-none flex-col border-r">
+              <AgentDockView {...agent} renderProposalOverride={renderProposalOverride} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <WorkingSetPanel
+                ref={panelRef}
+                rows={stageRows}
+                busy={applying}
+                lintRow={lintRow}
+                onAccept={(row, value) => acceptRows([{ row, value }])}
+                onAcceptAll={(valueFor) =>
+                  acceptRows(pending.map((row) => ({ row, value: valueFor(row) })))
+                }
+                onReject={rejectRow}
+                onJumpToCell={onJumpToCell}
+              />
+            </div>
+          </>
+        ) : (
+          <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col">
+            <AgentDockView {...agent} renderProposalOverride={renderProposalOverride} />
+          </div>
+        )}
       </div>
     </div>
   )

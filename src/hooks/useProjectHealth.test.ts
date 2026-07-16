@@ -1,4 +1,4 @@
-// FRO-190 — unit tests for useProjectHealth.
+// AQU-190 — unit tests for useProjectHealth.
 //
 // The critical invariant tested here: useProjectHealth MUST mint a sync-token
 // via `makeSyncTokenFetcher` (which calls POST /api/v2/sync-token and returns a
@@ -41,7 +41,7 @@ vi.mock("./useFrontierSession", () => ({
 // --- import after mocks ---
 import { useProjectHealth } from "./useProjectHealth"
 
-describe("useProjectHealth (FRO-190)", () => {
+describe("useProjectHealth (AQU-190)", () => {
   beforeEach(() => {
     capturedGetToken = undefined
     makeSyncTokenFetcherMock.mockClear()

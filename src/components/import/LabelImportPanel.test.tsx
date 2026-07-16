@@ -1,5 +1,5 @@
 /**
- * FRO-438: Tests for the LabelImportPanel apply path.
+ * AQU-438: Tests for the LabelImportPanel apply path.
  *
  * Validates:
  *   - Template download triggers generateLabelTemplate with project's refs.
@@ -202,9 +202,9 @@ describe("LabelImportPanel — apply (cast.assign events)", () => {
   })
 })
 
-// ─── FRO-439: angle-splitting on import ──────────────────────────────────────
+// ─── AQU-439: angle-splitting on import ──────────────────────────────────────
 
-describe("LabelImportPanel — FRO-439 angle splitting", () => {
+describe("LabelImportPanel — AQU-439 angle splitting", () => {
   beforeEach(() => {
     mockEmitCastAssign.mockClear()
     DEFAULT_PROPS.onImported.mockClear()

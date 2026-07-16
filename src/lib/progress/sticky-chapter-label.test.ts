@@ -1,5 +1,5 @@
 /**
- * FRO-250: sticky chapter indicator label derivation.
+ * AQU-250: sticky chapter indicator label derivation.
  *
  * The EditorTable derives a per-row section label array (sectionByIndex) so
  * the sticky header can show the current chapter as you scroll. These tests
@@ -39,7 +39,7 @@ function buildSectionByIndex(displayCells: DisplayCell[]): string[] {
   return out
 }
 
-describe("sticky chapter label derivation (FRO-250)", () => {
+describe("sticky chapter label derivation (AQU-250)", () => {
   it("assigns the chapter label to every row in that chapter", () => {
     const cells: DisplayCell[] = [
       { globalReferences: ["LUK 1:1"] },

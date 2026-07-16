@@ -44,7 +44,7 @@ export interface DispatchOptions {
    */
   deferFileCounters?: boolean
   /**
-   * FRO-279: project-level threshold for cells.validated.
+   * AQU-279: project-level threshold for cells.validated.
    * Passed through to buildEventProjectionStmts for cell.validate /
    * cell.unvalidate events. Default 1 (N=1 projects: byte-identical behavior).
    */
@@ -80,6 +80,8 @@ export function dispatchEvent(
     case 'cell.audio.attach':
     case 'cell.audio.select':
     case 'cell.audio.remove':
+    case 'cell.audio.validate':
+    case 'cell.audio.unvalidate':
       return {
         ok: true,
         result: handleCellEvent(
@@ -160,12 +162,12 @@ export function dispatchEvent(
     case 'file.mirror':
     case 'link.cursor.advance':
     case 'target.cell.repin':
-      // FRO-476: mirror-engine kinds share the generic cell-event handler.
+      // AQU-476: mirror-engine kinds share the generic cell-event handler.
       // They are not chain-mutating (see CHAIN_MUTATING_KINDS in
       // event-projection.ts) so handleCellEvent never takes the chain-claim
       // path for them; the monotonic upstream_seq guard lives in the
       // projection SQL itself.
-      // FRO-478: target.cell.repin joins this group for the same reason —
+      // AQU-478: target.cell.repin joins this group for the same reason —
       // non-chain-mutating, guarded instead by expectedTargetEventId in the
       // projection SQL (see event-projection.ts).
       return {

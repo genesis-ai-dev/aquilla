@@ -10,7 +10,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 /**
  * Search affordance — dock Search tab opens the parallel panel.
  *
- * FRO-308 replaced the old workspace-toolbar "Search & replace" button with
+ * AQU-308 replaced the old workspace-toolbar "Search & replace" button with
  * a Search tab in the left dock rail (LeftDock.tsx). The dock hosts
  * SearchDockPanel (quick inline search); its "Open full search panel" button
  * opens the full ParallelPassagesPanel dialog:

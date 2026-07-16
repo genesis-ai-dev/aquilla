@@ -3,7 +3,8 @@ import { ChevronDown, ChevronRight } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { getMemberAccess, type MemberEffectiveAccess, type ProjectAccessBreakdown } from "@/lib/frontier/orgs"
 import { removeProjectMember } from "@/lib/frontier/members"
-import { roleName, ROLE } from "@/lib/frontier/roles"
+import { ROLE } from "@/lib/frontier/roles"
+import { RoleLevelLabel } from "@/components/RoleLabel"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { denialMessage } from "@/lib/permissions/denial"
 
@@ -25,7 +26,7 @@ export function MemberAccessRow({
   userId: number
   username: string
   /**
-   * FRO-427: The current user's org-level role. When provided, the "Revoke
+   * AQU-427: The current user's org-level role. When provided, the "Revoke
    * direct grant" button is disabled with an explanation for callers who lack
    * MAINTAINER (600) — instead of a silent no-op or a raw server 403. The
    * server requires MAINTAINER (600) to remove a project member
@@ -43,7 +44,7 @@ export function MemberAccessRow({
   const [error, setError] = useState<string | null>(null)
   const [revoking, setRevoking] = useState<string | null>(null)
 
-  // FRO-427: callers with role < MAINTAINER (600) cannot revoke direct grants
+  // AQU-427: callers with role < MAINTAINER (600) cannot revoke direct grants
   // (matches the server gate in projects.ts DELETE /members).
   const canRevoke =
     callerOrgRoleLevel == null ? true : callerOrgRoleLevel >= ROLE.MAINTAINER
@@ -116,7 +117,7 @@ export function MemberAccessRow({
               <p className="text-[10px] text-muted-foreground">
                 {data.orgRole != null ? (
                   <>
-                    Org role: <strong>{roleName(data.orgRole)}</strong> — applies to every project in this org.
+                    Org role: <RoleLevelLabel level={data.orgRole} as="strong" /> — applies to every project in this org.
                   </>
                 ) : (
                   "No org-wide role."
@@ -157,7 +158,7 @@ function AccessProjectRow({
 }: {
   p: ProjectAccessBreakdown
   revoking: boolean
-  /** FRO-427: whether the current user may revoke direct grants. */
+  /** AQU-427: whether the current user may revoke direct grants. */
   canRevoke: boolean
   callerOrgRoleLevel: number | null
   onRevokeDirect: () => void
@@ -172,15 +173,15 @@ function AccessProjectRow({
       <div className="flex items-center justify-between gap-2">
         <span className="truncate text-xs font-medium">{p.projectName}</span>
         <span className="shrink-0 text-[10px] text-muted-foreground">
-          resolved: <strong>{roleName(p.resolved)}</strong>
+          resolved: <RoleLevelLabel level={p.resolved} as="strong" />
         </span>
       </div>
       <div className="mt-1 flex flex-wrap gap-1">
-        {p.direct != null && <Chip>direct: {roleName(p.direct)}</Chip>}
+        {p.direct != null && <Chip>direct: <RoleLevelLabel level={p.direct} /></Chip>}
         {p.groups.map((g) => (
-          <Chip key={g.groupId}>team {g.name}: {roleName(g.roleLevel)}</Chip>
+          <Chip key={g.groupId}>team {g.name}: <RoleLevelLabel level={g.roleLevel} /></Chip>
         ))}
-        {p.org != null && <Chip>org: {roleName(p.org)}</Chip>}
+        {p.org != null && <Chip>org: <RoleLevelLabel level={p.org} /></Chip>}
         {p.creator && <Chip>creator</Chip>}
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-2">

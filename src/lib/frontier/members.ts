@@ -41,6 +41,34 @@ export interface ProjectMember {
   secondarySources: SecondarySrc[];
 }
 
+/**
+ * AQU-454: split an effective-member roster into people granted access to a
+ * specific project (a direct `project_members` grant, a group attachment, or
+ * being the creator) versus people who only reach it through an org-wide role.
+ * Org members inherit access to every project via AD-12 max-wins
+ * (04-features/members-and-sharing.md), so a large org otherwise floods each
+ * project's roster. A member counts as project-specific if ANY of their
+ * contributing paths (winning or secondary) is override/group/creator;
+ * org-baseline-only members have `org` as their sole path. Input order is
+ * preserved within each bucket.
+ */
+export function partitionMembers(members: ProjectMember[]): {
+  projectMembers: ProjectMember[];
+  orgAccessMembers: ProjectMember[];
+} {
+  const projectMembers: ProjectMember[] = [];
+  const orgAccessMembers: ProjectMember[] = [];
+  for (const m of members) {
+    const paths = [m.role.source, ...(m.secondarySources ?? []).map((s) => s.source)];
+    const hasProjectPath = paths.some(
+      (s) => s === "override" || s === "group" || s === "creator"
+    );
+    if (hasProjectPath) projectMembers.push(m);
+    else orgAccessMembers.push(m);
+  }
+  return { projectMembers, orgAccessMembers };
+}
+
 function authHeaders(jwt: string): HeadersInit {
   return {
     "Content-Type": "application/json",
@@ -118,7 +146,7 @@ export async function listProjectMembers(
  *
  * One request that returns effective members for every project the caller can
  * access in the org — replaces the per-project listProjectMembers fan-out that
- * flooded the backend (FRO-218). Returns a map of projectId → members. Projects
+ * flooded the backend (AQU-218). Returns a map of projectId → members. Projects
  * the caller can't access are simply absent from the map (cells render empty),
  * matching the old fan-out's per-project 403→[] collapse.
  */

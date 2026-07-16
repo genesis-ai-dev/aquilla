@@ -1,4 +1,4 @@
-// FRO-477: inherited staleness — the per-hop chain walk (design spec §6).
+// AQU-477: inherited staleness — the per-hop chain walk (design spec §6).
 //
 // Direct staleness (stale-source-route.ts's existing query) only sees ONE
 // hop: does THIS project's local mirrored source head match the target's
@@ -30,7 +30,7 @@
 //      upstream's lane-relevant max seq. If U itself hasn't caught up to
 //      ITS upstream, some cell in U's lineage is stale but attributing it
 //      to a specific cell requires reading U's un-mirrored delta (deferred
-//      to the review panel, FRO-478) — v1 surfaces this as a link-level
+//      to the review panel, AQU-478) — v1 surfaces this as a link-level
 //      `behindSeq`-shaped signal on the response, not a per-cell flag.
 //   4. Recurse: U becomes D, continue until a self-contained project (no
 //      `source_project_id`) or the 32-hop cap (matches chainContains's cap

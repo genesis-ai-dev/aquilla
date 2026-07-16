@@ -11,6 +11,16 @@ const AUTH_DIR = path.resolve(__dirname, "../.auth")
 if (!existsSync(AUTH_DIR)) mkdirSync(AUTH_DIR, { recursive: true })
 
 const FRONTIER_BASE = process.env.VITE_FRONTIER_BASE ?? "http://127.0.0.1:8787"
+const AUTH_TRANSPORT_ATTEMPTS = 3
+
+function isRetryableTransportError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /socket hang up|ECONNRESET|ECONNREFUSED|fetch failed/i.test(message)
+}
+
+async function waitForAuthRetry(attempt: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)))
+}
 
 interface AuthResponse {
   access_token: string
@@ -35,9 +45,21 @@ export async function ensureAuthState(username: SeedUser["username"]): Promise<P
 
   const ctx = await pwRequest.newContext()
   try {
-    const r = await ctx.post(`${FRONTIER_BASE}/api/v1/auth/token`, {
-      data: { username: u.username, password: u.password },
-    })
+    let r: Awaited<ReturnType<typeof ctx.post>> | null = null
+    for (let attempt = 0; attempt < AUTH_TRANSPORT_ATTEMPTS; attempt++) {
+      try {
+        r = await ctx.post(`${FRONTIER_BASE}/api/v1/auth/token`, {
+          data: { username: u.username, password: u.password },
+        })
+        break
+      } catch (error) {
+        if (!isRetryableTransportError(error) || attempt === AUTH_TRANSPORT_ATTEMPTS - 1) {
+          throw error
+        }
+        await waitForAuthRetry(attempt)
+      }
+    }
+    if (!r) throw new Error(`login ${username} failed before receiving a response`)
     if (!r.ok()) {
       throw new Error(`login ${username} failed: HTTP ${r.status()} — ${await r.text()}`)
     }
@@ -105,7 +127,7 @@ export async function injectSession(page: Page, session: PersistedSession): Prom
 
     // Mark onboarding complete so the app routes straight to dashboard.
     localStorage.setItem("codex:onboardingComplete", "true")
-    // Suppress the first-run product tour (FRO-243) — its modal welcome
+    // Suppress the first-run product tour (AQU-243) — its modal welcome
     // dialog makes the workspace inert and blocks every role-based locator.
     localStorage.setItem("codex:productTourDone", "1")
     // Set the auth-hint cookie (aq_hint=1) that App.tsx checks via
@@ -114,7 +136,7 @@ export async function injectSession(page: Page, session: PersistedSession): Prom
     document.cookie = "aq_hint=1; Path=/; Max-Age=31536000; SameSite=Lax"
   }, session)
 
-  // FRO-244: the "Project setup" checklist auto-opens as a modal sheet on the
+  // AQU-244: the "Project setup" checklist auto-opens as a modal sheet on the
   // first workspace visit to any incomplete project, making the page inert.
   // Its localStorage key is per-project (codex.setupAutoShown.<id>) so it
   // can't be pre-seeded for projects the test creates later. Patch getItem at

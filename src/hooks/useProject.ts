@@ -38,6 +38,9 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   }
   assign("sourceLanguage", settings.sourceLanguage)
   assign("targetLanguage", settings.targetLanguage)
+  // AQU-538: the lane registry must reach the workspace or the LaneSwitcher
+  // never renders (found by the add-target-language e2e journey).
+  assign("targetLanes", settings.targetLanes)
   if (settings.systemPrompt != null) {
     if (record.completionSettings?.systemPrompt !== settings.systemPrompt) {
       draft().completionSettings = buildCompletionSettings(
@@ -88,14 +91,14 @@ export type ProjectLoadStatus =
   | "loading"
   | "ready"
   | "not-found"    // server returned 404 — project doesn't exist
-  | "forbidden"    // server returned 403 — project exists but this account has no access (FRO-346)
+  | "forbidden"    // server returned 403 — project exists but this account has no access (AQU-346)
   | "unreachable"  // network error or 5xx — server is down, not a missing project
   | "no-session"   // no jwt available; can't fetch
 
 export function useProject(projectId: string) {
   const [project, setProject] = useState<ProjectRecord | null>(null)
   const [status, setStatus] = useState<ProjectLoadStatus>("loading")
-  // FRO-334: the caller's role as returned by THIS load's GET /:projectId (or
+  // AQU-334: the caller's role as returned by THIS load's GET /:projectId (or
   // its list-endpoint fallback) — always populated together with `project` on
   // a successful resolve. Kept separate from `project.syncRole` because that
   // field is an intentionally stale-tolerant cache (see its doc comment:
@@ -138,7 +141,7 @@ export function useProject(projectId: string) {
       if (!result.ok) {
         setProject(null)
         setRoleLevel(null)
-        // FRO-346: "forbidden" (403 — access revoked / never granted) renders
+        // AQU-346: "forbidden" (403 — access revoked / never granted) renders
         // a clean "you no longer have access" state, distinct from a
         // genuinely missing project.
         setStatus(
@@ -186,7 +189,7 @@ export function useProject(projectId: string) {
     /** True when the server could not be reached (network error / 5xx). Shows
      *  "Can't reach the server" rather than "project not found". */
     isUnreachable: status === "unreachable",
-    /** FRO-334: the caller's role from THIS load's resolve, fresh every time
+    /** AQU-334: the caller's role from THIS load's resolve, fresh every time
      *  (not the stale-tolerant `project.syncRole` cache). null only when the
      *  project hasn't resolved a server role at all (loading, or genuinely
      *  unsynced/local-only). Prefer this over `project.syncRole?.level` for

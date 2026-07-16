@@ -48,8 +48,9 @@ export interface DraftOutcome extends ToolOutcome {
   proposal?: AgentProposal
 }
 
-const DEFAULT_LIMIT = 20
-const MAX_LIMIT = 50
+// Keep agent proposals in the same human-review package used by the editor.
+const DEFAULT_LIMIT = 10
+const MAX_LIMIT = 10
 const PRECEDING_CONTEXT = 3
 const EXAMPLES_N = 8
 
@@ -137,7 +138,7 @@ export async function executeDraft(
   const firstIdx = all.findIndex((p) => p.cellId === work[0].cellId)
   const preceding: CellPair[] = []
   for (let i = firstIdx - 1; i >= 0 && preceding.length < PRECEDING_CONTEXT; i--) {
-    if (all[i].target.trim()) preceding.unshift(all[i])
+    if (all[i].validated && all[i].target.trim()) preceding.unshift(all[i])
   }
   const precedingBlock =
     preceding.length > 0
@@ -203,12 +204,34 @@ export async function executeDraft(
 
   // Stage through the SAME path as a hand emit: role floors, staleness
   // pre-check, provenance injection, and rule lint all apply.
-  const emits: { kind: string; fileId: string; cellId: string; payload: { value: string } }[] = []
+  const generatedAt = Date.now()
+  const exampleIds = examplePairs.flatMap((example) => example.cellId ? [example.cellId] : [])
+  const emits: { kind: string; fileId: string; cellId: string; payload: Record<string, unknown> }[] = []
   const missed: string[] = []
   work.forEach((p, i) => {
     const t = drafts.get(i + 1)
     if (t && t.trim()) {
-      emits.push({ kind: "target.cell.commit", fileId: scope.fileId, cellId: p.cellId, payload: { value: t.trim() } })
+      emits.push({
+        kind: "target.cell.commit",
+        fileId: scope.fileId,
+        cellId: p.cellId,
+        payload: {
+          value: t.trim(),
+          ai_draft: {
+            model: modelCfg.model,
+            provider: "platform",
+            promptVersion: "agent-draft-v1",
+            exampleIds,
+            generatedAt,
+            mode: "agent",
+            projectState: {
+              sourceLanguage: ctx.sourceLanguage ?? "",
+              targetLanguage: ctx.targetLanguage ?? "",
+              approvedExampleCount: examplePairs.length,
+            },
+          },
+        },
+      })
     } else {
       missed.push(p.canonicalRef ?? ctx.aliases.alias(p.cellId, "c"))
     }

@@ -1,6 +1,6 @@
 /**
- * FRO-438: Cell-label / cast import via downloadable spreadsheet template.
- * FRO-439: Now splits angle-embedded labels ("Mary Magdalene   (on)") into
+ * AQU-438: Cell-label / cast import via downloadable spreadsheet template.
+ * AQU-439: Now splits angle-embedded labels ("Mary Magdalene   (on)") into
  *           voice name + cameraState before emitting cast.assign.
  *
  * Flow:
@@ -20,6 +20,14 @@
 import { useState, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import type { SourceCellRef } from "@/lib/import"
 import { generateLabelTemplate, parseCsvRows, splitCastName } from "@/lib/parsers/spreadsheet"
 import { emitCastAssign } from "@/lib/sync/events-emit"
@@ -45,7 +53,7 @@ export function LabelImportPanel({
   const [preview, setPreview] = useState<{
     ref: string
     castName: string
-    /** FRO-439: camera angle extracted from the cast_name string, or undefined */
+    /** AQU-439: camera angle extracted from the cast_name string, or undefined */
     cameraState: "on" | "mixed" | "off" | undefined
   }[] | null>(null)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
@@ -92,7 +100,7 @@ export function LabelImportPanel({
         const ref = (row[refCol] ?? "").trim()
         const rawCast = (row[castCol] ?? "").trim()
         if (ref && rawCast) {
-          // FRO-439: split angle suffix from name ("Mary (on)" → voice + cameraState)
+          // AQU-439: split angle suffix from name ("Mary (on)" → voice + cameraState)
           const { voice, cameraState } = splitCastName(rawCast)
           entries.push({ ref, castName: voice, cameraState })
         }
@@ -103,7 +111,7 @@ export function LabelImportPanel({
     }
   }, [])
 
-  /** Apply the cast labels via cast.assign events (FRO-438).
+  /** Apply the cast labels via cast.assign events (AQU-438).
    *
    * For each row in the preview:
    *   - Look up the cellId from sourceCells by canonicalRef.
@@ -138,7 +146,7 @@ export function LabelImportPanel({
           fileId: cell.fileId,
           cellId: cell.cellId,
           castName,
-          // FRO-439: forward camera angle when it was present in the import row
+          // AQU-439: forward camera angle when it was present in the import row
           ...(cameraState !== undefined ? { cameraState } : {}),
           author: username,
         }),
@@ -212,24 +220,24 @@ export function LabelImportPanel({
             {preview.length} label{preview.length !== 1 ? "s" : ""} to import
           </p>
           <ScrollArea className="max-h-40 rounded-md border">
-            <table className="w-full text-xs">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="px-2 py-1 text-left font-medium text-foreground/70">Ref</th>
-                  <th className="px-2 py-1 text-left font-medium text-foreground/70">Voice</th>
-                  <th className="px-2 py-1 text-left font-medium text-foreground/70">Camera</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Ref</TableHead>
+                  <TableHead>Voice</TableHead>
+                  <TableHead>Camera</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {preview.slice(0, 20).map((p, i) => (
-                  <tr key={i}>
-                    <td className="px-2 py-1 font-mono text-foreground/70">{p.ref}</td>
-                    <td className="px-2 py-1 text-foreground/80">{p.castName}</td>
-                    <td className="px-2 py-1 text-muted-foreground">{p.cameraState ?? "—"}</td>
-                  </tr>
+                  <TableRow key={i}>
+                    <TableCell className="font-mono">{p.ref}</TableCell>
+                    <TableCell>{p.castName}</TableCell>
+                    <TableCell className="text-muted-foreground">{p.cameraState ?? "—"}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </ScrollArea>
           {preview.length > 20 && (
             <p className="mt-1 text-xs text-muted-foreground">…and {preview.length - 20} more</p>

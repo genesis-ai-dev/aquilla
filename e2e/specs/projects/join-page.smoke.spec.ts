@@ -1,4 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
+import { ensureAuthState } from "../../helpers/auth"
+import { createProjectServerSide, createProjectInvite } from "../../helpers/frontier-api"
 
 /**
  * Join page (/join/:token) — error state for an invalid token.
@@ -28,4 +30,24 @@ test("join page with invalid token shows error state and Back to projects", asyn
   // (RootRedirect → OrgHome) — it no longer redirects to /projects.
   await alice.getByRole("button", { name: /Back to projects/i }).click()
   await alice.waitForURL((url) => url.pathname === "/", { timeout: 5_000 })
+})
+
+/**
+ * AQU-471 — the join page must answer "who invited me, to what?" (Biblica
+ * pilot feedback). A real invite minted by alice must show her name and the
+ * workspace on bob's landing page, not just the project name.
+ */
+test("join page names the inviter and workspace on a real invite", async ({ bob }) => {
+  const aliceSession = await ensureAuthState("alice")
+  const proj = await createProjectServerSide(aliceSession.jwt, {
+    id: `join-ctx-${Date.now()}`,
+    name: `JoinCtx ${Date.now()}`,
+  })
+  const invite = await createProjectInvite(aliceSession.jwt, proj.id)
+
+  await bob.goto(`/join/${invite.token}`)
+  await expect(bob.getByText(proj.name)).toBeVisible({ timeout: 10_000 })
+  await expect(bob.getByText(/Invited by/i)).toBeVisible()
+  await expect(bob.getByText("alice", { exact: true })).toBeVisible()
+  await expect(bob.getByRole("button", { name: /Accept invitation/i })).toBeVisible()
 })

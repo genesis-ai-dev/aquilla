@@ -1,5 +1,5 @@
 /**
- * FRO-270: 404 catch-all page (audit finding F-IA3).
+ * AQU-270: 404 catch-all page (audit finding F-IA3).
  *
  * Rendered by the `*` catch-all route in App.tsx so bad links never blank-screen.
  * Styled to match the ErrorBoundary empty-state pattern (centred icon + title +

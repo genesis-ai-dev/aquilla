@@ -3,22 +3,29 @@ import { test, expect } from "../../helpers/multi-user"
 /**
  * Org settings page (/settings).
  *
- * The routed Identity detail page renders:
- *   - h2 "Identity" section
- *   - org name + current role
+ * The page renders:
+ *   - h1 "Organization settings"
+ *   - Navigation rows to identity, export, roster, providers, members, teams, archived
  *
  * This spec verifies the route loads and the key structural elements render.
  * It does NOT mutate org settings.
  */
 test("org settings page renders Identity section and stats", async ({ alice }) => {
-  await alice.goto("/settings/identity")
+  await alice.goto("/settings")
   await alice.waitForLoadState("networkidle")
 
-  await expect(alice).toHaveURL(/\/settings\/identity$/)
+  // Main heading.
+  await expect(alice.locator("h1").filter({ hasText: /Organization settings/i })).toBeVisible({
+    timeout: 10_000,
+  })
 
-  // Identity section heading.
-  await expect(alice.getByRole("heading", { name: /^Identity$/i, level: 2 })).toBeVisible({
+  // Identity nav row on the index.
+  await expect(alice.getByRole("link", { name: /Identity/i })).toBeVisible({
     timeout: 5_000,
   })
-  await expect(alice.getByText(/Your role:\s*owner/i)).toBeVisible({ timeout: 5_000 })
+
+  // AQU-485: roster & progress visibility is a first-class settings sub-page.
+  await expect(alice.getByRole("link", { name: /Roster & progress visibility/i })).toBeVisible({
+    timeout: 5_000,
+  })
 })

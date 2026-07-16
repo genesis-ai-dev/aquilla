@@ -1,4 +1,4 @@
-// FRO-408 — AI Settings panel: every field must actually persist, not just
+// AQU-408 — AI Settings panel: every field must actually persist, not just
 // "AI instructions". Prior bug: `buildCompletionSettings` (the merge function
 // the Save Changes handler funnels every completion-settings edit through)
 // omitted top_k / contextSize / useOnlyValidatedExamples / main_chat_language /
@@ -82,6 +82,10 @@ vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "tok", username: "tester" }, loading: false }),
 }))
 
+vi.mock("@/hooks/useAccounts", () => ({
+  useAccounts: () => ({ active: null, sessions: [], loading: false, add: vi.fn(), activate: vi.fn(), remove: vi.fn() }),
+}))
+
 // Intentionally NOT mocked: we want the real buildCompletionSettings so a
 // regression in the merge logic itself fails this test.
 
@@ -157,13 +161,17 @@ beforeEach(() => {
   lastUpdateProjectArg = null
 })
 
-describe("ProjectSettings — AI Settings persistence (FRO-408)", () => {
-  it("persists Top K, context window, validated-only, and example format on Save", async () => {
+describe("ProjectSettings — AI Settings persistence (AQU-408)", () => {
+  it("persists Top K and context while locking retrieval to approved examples", async () => {
     renderSettings()
 
     fireEvent.change(screen.getByLabelText(/examples retrieved/i), { target: { value: "17" } })
     await pickSelectOption(/context window/i, /large — chapter/i)
-    fireEvent.click(screen.getByRole("checkbox", { name: /validated/i }))
+    const approvedOnly = screen.getByRole("checkbox", { name: /approved examples only/i })
+    expect(approvedOnly.getAttribute("aria-checked")).toBe("true")
+    expect(
+      approvedOnly.hasAttribute("data-disabled") || approvedOnly.getAttribute("aria-disabled") === "true",
+    ).toBe(true)
 
     const saveBtn = screen.getByRole("button", { name: /save changes/i })
     fireEvent.click(saveBtn)

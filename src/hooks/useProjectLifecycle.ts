@@ -1,4 +1,4 @@
-// FRO-214: Active/inactive lifecycle hook.
+// AQU-214: Active/inactive lifecycle hook.
 //
 // Derives the frozen flag from the project record (isActive === false) and
 // provides a toggle action that calls PATCH /api/v2/projects/:id/lifecycle.

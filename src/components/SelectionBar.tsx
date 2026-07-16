@@ -14,7 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { Languages, Sparkles, Wand2, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
-import { type CellStore, useCellStoreVersion } from "@/hooks/useActiveCellStore"
+import { type CellStore, readAtVersion, useCellStoreVersion } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { Button } from "@/components/ui/button"
@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils"
 import { clearSelection, MAX_SELECTED, useSelectedIds } from "@/lib/audio/selection"
 import { emitCellValidate, emitCellUnvalidate } from "@/lib/sync/events-emit"
 import { canPerform } from "@/lib/sync/role-policy"
+import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 
 interface Props {
   project: ProjectRecord
@@ -35,14 +36,14 @@ interface Props {
   /** Synthesize the selected cells as one continuous clip + slice per cell. */
   onVoiceTogether?: (cells: CellData[]) => Promise<void> | void
   /**
-   * FRO-186: called when the user clicks "Harmonize…" on the selection bar.
+   * AQU-186: called when the user clicks "Harmonize…" on the selection bar.
    * Receives the subset of selected cells that have at least one active
    * fix-review proposal. The parent opens FixReviewPanel in multi-cell scope.
    * Optional — when absent the button is not rendered.
    */
   onHarmonize?: (cells: CellData[]) => void
   /**
-   * FRO-186: whether the current user has the harmonize_min_role.
+   * AQU-186: whether the current user has the harmonize_min_role.
    * When false, the button is disabled (server is still authoritative).
    */
   canHarmonize?: boolean
@@ -83,7 +84,7 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
   }, [])
 
   const selectedCells = useMemo(() => {
-    return cellStore.getCellsByIds(selected).slice(0, MAX_SELECTED)
+    return readAtVersion(cellStoreVersion, () => cellStore.getCellsByIds(selected).slice(0, MAX_SELECTED))
   }, [cellStore, cellStoreVersion, selected])
 
   const missingCount = useMemo(
@@ -92,7 +93,7 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
   )
   const validatableCount = useMemo(
     () => selectedCells.filter(
-      (c) => c.translated.trim() && !c.activeValidators.includes(username),
+      (c) => isBulkValidationEligible(c) && !c.activeValidators.includes(username),
     ).length,
     [selectedCells, username],
   )
@@ -102,12 +103,31 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
     ).length,
     [selectedCells, username],
   )
+  // When nothing is validatable, explain the actual reason rather than always
+  // blaming AI drafts. Priority: everything already validated by me → AI
+  // drafts needing individual review → cells still lacking a translation.
+  const validateDisabledReason = useMemo(() => {
+    if (validatableCount > 0) return null
+    const alreadyMine = selectedCells.filter(
+      (c) => isBulkValidationEligible(c) && c.activeValidators.includes(username),
+    ).length
+    const aiDrafts = selectedCells.filter(
+      (c) => c.translated.trim() && c.targetEventId && c.aiDrafted,
+    ).length
+    const needTranslation = selectedCells.filter((c) => !c.translated.trim()).length
+    if (alreadyMine > 0 && aiDrafts === 0 && needTranslation === 0) {
+      return "All selected cells are already validated by you"
+    }
+    if (aiDrafts > 0) return "Nothing eligible — untouched AI drafts require individual review"
+    if (needTranslation > 0) return "Selected cells need a translation first"
+    return "Nothing eligible to validate"
+  }, [validatableCount, selectedCells, username])
   const allHaveTranslation = selectedCells.length > 0 && selectedCells.every((c) => c.translated.trim())
   const voiceableCount = useMemo(
     () => selectedCells.filter((c) => c.type !== "paratext" && c.translated.trim()).length,
     [selectedCells],
   )
-  // FRO-186: cells with at least one infraction or fix proposal — v1 minimum:
+  // AQU-186: cells with at least one infraction or fix proposal — v1 minimum:
   // show affordance when ≥ 1 selected cell has a translated value (proxy for
   // "may have violations"; real infraction data wires in when worker lands).
   const harmonizableCount = useMemo(
@@ -149,7 +169,7 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
       let validated = 0
       let alreadyValidated = 0
       for (const cell of selectedCells) {
-        if (!cell.translated.trim()) continue
+        if (!isBulkValidationEligible(cell)) continue
         if (cell.activeValidators.includes(username)) { alreadyValidated++; continue }
         if (!cell.targetEventId || !project.id) continue
         void emitCellValidate({
@@ -195,7 +215,7 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
     }
   }, [selectedCells, username, unvalidatableCount, isBusy, project.id])
 
-  // FRO-365: viewers (and any role below the lowest gated action here —
+  // AQU-365: viewers (and any role below the lowest gated action here —
   // REVIEWER 300, the validate floor) get no selection affordance at all.
   // canPerform fails OPEN when the role is unknown (local/legacy projects
   // with no syncRole), so this only suppresses the bar for a KNOWN
@@ -294,8 +314,8 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
         onClick={onValidate}
         disabled={isBusy || validatableCount === 0}
         title={
-          validatableCount === 0
-            ? "Nothing to validate — selected cells are empty or already validated by you"
+          validateDisabledReason
+            ? validateDisabledReason
             : `Validate ${validatableCount} cell${validatableCount === 1 ? "" : "s"}`
         }
       >
@@ -328,7 +348,7 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
           </span>
         )}
       </Button>
-      {/* FRO-186: Harmonize affordance — appears when ≥ 1 selected cell has a
+      {/* AQU-186: Harmonize affordance — appears when ≥ 1 selected cell has a
           translation (v1 minimum per spec). Disabled when canHarmonize=false
           (role too low) or onHarmonize callback not provided. */}
       {onHarmonize != null && harmonizableCount > 0 && (

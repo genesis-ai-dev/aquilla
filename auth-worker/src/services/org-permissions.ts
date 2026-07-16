@@ -459,7 +459,7 @@ export interface ProjectEffectiveMembers {
 }
 
 /**
- * Batched membership-matrix resolver (FRO-218). Computes effective members for
+ * Batched membership-matrix resolver (AQU-218). Computes effective members for
  * EVERY non-archived project the viewer can access in `orgId`, in a small
  * constant number of queries regardless of project count — replacing the
  * client's per-project /:projectId/members fan-out that flooded the connection
@@ -780,7 +780,26 @@ export async function detachGroupProject(env: Env, groupId: number, projectId: s
   await env.AQUILLA_PG.prepare("DELETE FROM group_project_grants WHERE group_id = ? AND project_id = ?").bind(groupId, projectId).run()
 }
 
-export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number }
+/**
+ * AQU-538: per-target-language-lane rollup for a project. Aggregated from
+ * `file_section_progress` file-scope rows (`scope='file'`) grouped by
+ * `target_lang`. `lane: ''` is the default lane (the project's configured
+ * `targetLanguage`, labeled client-side) and is always present whenever the
+ * project has any file-scope progress rows. `validatedCells` mirrors the
+ * per-file progress route: cells whose endorsement count meets the project's
+ * `validationCount` threshold (default 1, cap 15). `lastEditAt` is the most
+ * recent progress-projection update in the lane (updated on every edit /
+ * validation that touches the lane), which avoids a heavy per-lane cells scan.
+ */
+export interface PortfolioLane {
+  lane: string
+  totalCells: number
+  filledCells: number
+  validatedCells: number
+  lastEditAt: number | null
+}
+
+export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; sourceLanguage: string | null; targetLanguage: string | null; lanes: PortfolioLane[] }
 export interface OrgPortfolioRow extends PortfolioRow { orgId: number }
 
 interface PortfolioDbRow {
@@ -794,10 +813,15 @@ interface PortfolioDbRow {
   ai_drafted_cells: number
   last_edit_at: number | null
   audio_cells: number
+  validated_audio_cells: number
   recorded_ms: number
+  // AQU-523: project language pair, read from the project_settings JSON blob
+  // (the canonical per-project source useProject overlays). Null when unset.
+  source_language: string | null
+  target_language: string | null
 }
 
-function mapPortfolioRow(r: PortfolioDbRow): PortfolioRow {
+function mapPortfolioRow(r: PortfolioDbRow, lanesByProject: Map<string, PortfolioLane[]>): PortfolioRow {
   return {
     id: r.id,
     name: r.name,
@@ -807,31 +831,190 @@ function mapPortfolioRow(r: PortfolioDbRow): PortfolioRow {
     aiDraftedCells: r.ai_drafted_cells,
     lastEditAt: r.last_edit_at,
     audioCells: r.audio_cells,
+    validatedAudioCells: r.validated_audio_cells,
     recordedMs: r.recorded_ms,
     deadlineAt: r.deadline_at,
+    // "" (empty settings default) is normalized to null so the client shows a
+    // graceful "no language set" rather than a blank/broken "→" (AQU-523).
+    sourceLanguage: r.source_language || null,
+    targetLanguage: r.target_language || null,
+    lanes: lanesByProject.get(r.id) ?? [],
   }
+}
+
+const MAX_VALIDATION_LEVEL = 15
+
+interface LaneDbRow {
+  project_id: string
+  target_lang: string
+  total_count: number | string
+  filled_count: number | string
+  validator_histogram: Record<string, number> | string | null
+  updated_at: number | string | null
+}
+
+interface PortfolioSettingsDbRow {
+  project_id: string
+  validation_count: number | string | null
+  target_lanes: unknown
+}
+
+/** Endorsement threshold at which a cell counts as validated, per the project's settings (default 1, cap 15). */
+function readValidationCounts(settingsRows: PortfolioSettingsDbRow[]): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const row of settingsRows) {
+    const value = Math.floor(Number(row.validation_count))
+    const threshold = Number.isFinite(value) ? Math.min(MAX_VALIDATION_LEVEL, Math.max(1, value)) : 1
+    out.set(row.project_id, threshold)
+  }
+  return out
+}
+
+/** Sum of histogram buckets whose endorsement count meets the threshold. */
+function validatedFromHistogram(raw: LaneDbRow["validator_histogram"], threshold: number): number {
+  let value: unknown = raw
+  if (typeof raw === "string") {
+    try { value = JSON.parse(raw) } catch { value = null }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return 0
+  let count = 0
+  for (const [key, amount] of Object.entries(value as Record<string, unknown>)) {
+    const bucket = Number(key)
+    const cells = Number(amount)
+    if (Number.isInteger(bucket) && bucket >= threshold && Number.isFinite(cells) && cells > 0) count += cells
+  }
+  return count
+}
+
+/**
+ * Per-lane rollup for the given org's non-archived projects, keyed by project
+ * id. Derive-on-read over `file_section_progress` file-scope rows (one row per
+ * file per lane since migration 0055) — a SUM, not new bookkeeping. Lanes are
+ * ordered default ('') first, then by tag, for deterministic output.
+ */
+async function fetchPortfolioLanes(env: Env, orgIds: number[]): Promise<Map<string, PortfolioLane[]>> {
+  const byProject = new Map<string, PortfolioLane[]>()
+  if (orgIds.length === 0) return byProject
+  const placeholders = orgIds.map(() => "?").join(", ")
+  const [laneRows, settingsRows] = await Promise.all([
+    env.AQUILLA_PG.prepare(
+      `SELECT fsp.project_id AS project_id, fsp.target_lang AS target_lang,
+              fsp.total_count AS total_count, fsp.filled_count AS filled_count,
+              fsp.validator_histogram AS validator_histogram, fsp.updated_at AS updated_at
+         FROM file_section_progress fsp
+         JOIN projects p ON p.id = fsp.project_id
+        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL AND fsp.scope = 'file'`,
+    ).bind(...orgIds).all<LaneDbRow>(),
+    env.AQUILLA_PG.prepare(
+      `SELECT ps.project_id AS project_id,
+              ps.validation_count AS validation_count,
+              ps.target_lanes AS target_lanes
+         FROM project_settings ps
+         JOIN projects p ON p.id = ps.project_id
+        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL`,
+    ).bind(...orgIds).all<PortfolioSettingsDbRow>(),
+  ])
+  const thresholds = readValidationCounts(settingsRows.results ?? [])
+  // Accumulate one lane entry per (project, target_lang).
+  const acc = new Map<string, Map<string, PortfolioLane>>()
+  for (const row of laneRows.results ?? []) {
+    const threshold = thresholds.get(row.project_id) ?? 1
+    let lanes = acc.get(row.project_id)
+    if (!lanes) { lanes = new Map(); acc.set(row.project_id, lanes) }
+    const lane = row.target_lang ?? ""
+    let entry = lanes.get(lane)
+    if (!entry) { entry = { lane, totalCells: 0, filledCells: 0, validatedCells: 0, lastEditAt: null }; lanes.set(lane, entry) }
+    entry.totalCells += Number(row.total_count) || 0
+    entry.filledCells += Number(row.filled_count) || 0
+    entry.validatedCells += validatedFromHistogram(row.validator_histogram, threshold)
+    const updatedAt = row.updated_at == null ? null : Number(row.updated_at)
+    if (updatedAt != null && Number.isFinite(updatedAt)) {
+      entry.lastEditAt = entry.lastEditAt == null ? updatedAt : Math.max(entry.lastEditAt, updatedAt)
+    }
+  }
+  // AQU-538: union in REGISTERED lanes that have no progress rows yet — a PM
+  // who just added a language must see its 0% chip immediately, not after the
+  // first translation lands. The denominator is borrowed from the '' row
+  // (source-cell count is lane-independent); no '' row means the project has
+  // no progress rows at all and the registered lane stays 0/0.
+  for (const row of settingsRows.results ?? []) {
+    const registered = readTargetLanes(row.target_lanes)
+    if (registered.length === 0) continue
+    let lanes = acc.get(row.project_id)
+    if (!lanes) {
+      lanes = new Map()
+      acc.set(row.project_id, lanes)
+    }
+    const denominator = lanes.get("")?.totalCells ?? 0
+    for (const lane of registered) {
+      if (lane === "" || lanes.has(lane)) continue
+      lanes.set(lane, { lane, totalCells: denominator, filledCells: 0, validatedCells: 0, lastEditAt: null })
+    }
+  }
+  for (const [projectId, lanes] of acc) {
+    byProject.set(
+      projectId,
+      [...lanes.values()].sort((a, b) => (a.lane === b.lane ? 0 : a.lane === "" ? -1 : b.lane === "" ? 1 : a.lane < b.lane ? -1 : 1)),
+    )
+  }
+  return byProject
+}
+
+/** Parse the generated target_lanes projection defensively across PG adapters. */
+function readTargetLanes(raw: unknown): string[] {
+  let value = raw
+  if (typeof raw === "string") {
+    try { value = JSON.parse(raw) } catch { return [] }
+  }
+  if (!Array.isArray(value)) return []
+  return value.filter((lane): lane is string => typeof lane === "string" && lane !== "")
 }
 
 /** Per-project rollup over the org's non-archived projects (derive-on-read, one GROUP BY). */
 export async function getOrgPortfolio(env: Env, orgId: number): Promise<PortfolioRow[]> {
+  // Perf (dashboard 15s timeout fix):
+  //  - The AQU-523 language pair reads the STORED generated columns on
+  //    project_settings (migration 0054) — never (settings::jsonb)->>'…'
+  //    inline: settings blobs run to ~6 MB and the inline extraction
+  //    re-parsed that JSON on every file-fan-out row (~100x per project).
+  //  - au: the previous 3 correlated cell_audio subqueries re-scanned and
+  //    re-sorted cell_audio (~300k rows) per project; one MATERIALIZED
+  //    grouped pass replaces them. It joins 1:1 on project_id, so MAX()
+  //    collapses the file fan-out without affecting the SUMs (same for the
+  //    1:1 project_settings join).
   const rows = await env.AQUILLA_PG.prepare(
-    `SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
+    `WITH au AS MATERIALIZED (
+       SELECT ca.project_id,
+              COUNT(DISTINCT ca.cell_id) AS audio_cells,
+              COUNT(DISTINCT ca.cell_id) FILTER (WHERE ca.selected = 1 AND ca.approved = 1)
+                AS validated_audio_cells,
+              COALESCE(SUM(ca.duration_ms) FILTER (WHERE ca.selected = 1), 0) AS recorded_ms
+         FROM cell_audio ca
+        WHERE ca.deleted = 0
+          AND ca.project_id IN (SELECT id FROM projects WHERE org_id = ?)
+        GROUP BY ca.project_id
+     )
+     SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
             COALESCE(SUM(f.cell_count), 0)          AS total_cells,
             COALESCE(SUM(f.approved_count), 0)      AS validated_cells,
             COALESCE(SUM(f.filled_count), 0)        AS filled_cells,
             COALESCE(SUM(f.ai_drafted_count), 0)    AS ai_drafted_cells,
             MAX(f.last_edit_at)                     AS last_edit_at,
-            (SELECT COUNT(DISTINCT ca.cell_id) FROM cell_audio ca
-              WHERE ca.project_id = p.id AND ca.deleted = 0)                    AS audio_cells,
-            (SELECT COALESCE(SUM(ca.duration_ms), 0) FROM cell_audio ca
-              WHERE ca.project_id = p.id AND ca.deleted = 0 AND ca.selected = 1) AS recorded_ms
+            MAX(ps.source_language)                 AS source_language,
+            MAX(ps.target_language)                 AS target_language,
+            COALESCE(MAX(au.audio_cells), 0)           AS audio_cells,
+            COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,
+            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms
        FROM projects p
        LEFT JOIN files f ON f.project_id = p.id
+       LEFT JOIN project_settings ps ON ps.project_id = p.id
+       LEFT JOIN au ON au.project_id = p.id
       WHERE p.org_id = ? AND p.archived_at IS NULL
       GROUP BY p.id, p.name
       ORDER BY LOWER(p.name)`,
-  ).bind(orgId).all<PortfolioDbRow>()
-  return (rows.results ?? []).map(mapPortfolioRow)
+  ).bind(orgId, orgId).all<PortfolioDbRow>()
+  const lanesByProject = await fetchPortfolioLanes(env, [orgId])
+  return (rows.results ?? []).map((r) => mapPortfolioRow(r, lanesByProject))
 }
 
 /** Batched portfolio rollup for all-org dashboard/list views. */
@@ -839,24 +1022,44 @@ export async function getOrgPortfolios(env: Env, orgIds: number[]): Promise<OrgP
   const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
   if (uniqueOrgIds.length === 0) return []
   const placeholders = uniqueOrgIds.map(() => "?").join(", ")
+  // One set-based aggregate keeps the request to a fixed number of database
+  // round trips regardless of organization count. The expensive cell_audio
+  // scan is still bounded to projects in the authorized org set. Lane metadata
+  // uses the small generated project_settings projections, so this no longer
+  // transfers/parses hundreds of MB of full settings blobs for large accounts.
   const rows = await env.AQUILLA_PG.prepare(
-    `SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
+    `WITH au AS MATERIALIZED (
+       SELECT ca.project_id,
+              COUNT(DISTINCT ca.cell_id) AS audio_cells,
+              COUNT(DISTINCT ca.cell_id) FILTER (WHERE ca.selected = 1 AND ca.approved = 1)
+                AS validated_audio_cells,
+              COALESCE(SUM(ca.duration_ms) FILTER (WHERE ca.selected = 1), 0) AS recorded_ms
+         FROM cell_audio ca
+        WHERE ca.deleted = 0
+          AND ca.project_id IN (SELECT id FROM projects WHERE org_id IN (${placeholders}))
+        GROUP BY ca.project_id
+     )
+     SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
             COALESCE(SUM(f.cell_count), 0)          AS total_cells,
             COALESCE(SUM(f.approved_count), 0)      AS validated_cells,
             COALESCE(SUM(f.filled_count), 0)        AS filled_cells,
             COALESCE(SUM(f.ai_drafted_count), 0)    AS ai_drafted_cells,
             MAX(f.last_edit_at)                     AS last_edit_at,
-            (SELECT COUNT(DISTINCT ca.cell_id) FROM cell_audio ca
-              WHERE ca.project_id = p.id AND ca.deleted = 0)                    AS audio_cells,
-            (SELECT COALESCE(SUM(ca.duration_ms), 0) FROM cell_audio ca
-              WHERE ca.project_id = p.id AND ca.deleted = 0 AND ca.selected = 1) AS recorded_ms
+            MAX(ps.source_language)                 AS source_language,
+            MAX(ps.target_language)                 AS target_language,
+            COALESCE(MAX(au.audio_cells), 0)           AS audio_cells,
+            COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,
+            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms
        FROM projects p
        LEFT JOIN files f ON f.project_id = p.id
+       LEFT JOIN project_settings ps ON ps.project_id = p.id
+       LEFT JOIN au ON au.project_id = p.id
       WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL
       GROUP BY p.org_id, p.id, p.name
       ORDER BY p.org_id, LOWER(p.name)`,
-  ).bind(...uniqueOrgIds).all<PortfolioDbRow>()
-  return (rows.results ?? []).map((r) => ({ ...mapPortfolioRow(r), orgId: r.org_id }))
+  ).bind(...uniqueOrgIds, ...uniqueOrgIds).all<PortfolioDbRow>()
+  const lanesByProject = await fetchPortfolioLanes(env, uniqueOrgIds)
+  return (rows.results ?? []).map((row) => ({ ...mapPortfolioRow(row, lanesByProject), orgId: row.org_id }))
 }
 
 export interface ProjectAccessBreakdown {
@@ -1037,7 +1240,7 @@ export async function canReadTermbase(
 // ──────────────────────────────────────────────────────────────────────────
 // AQU-485: configurable roster + member-progress visibility
 //
-// Generalizes the FRO-253 exportMinRole pattern to two independent,
+// Generalizes the AQU-253 exportMinRole pattern to two independent,
 // org-scoped read floors stored in the same org_settings JSON blob:
 //
 //   - rosterViewMinRole:        who can see the member list (+ count)
@@ -1127,10 +1330,14 @@ export function canViewRoster(callerRoleLevel: number | null, rosterMinRole: num
  * True when `callerRoleLevel` meets or exceeds the org's configured
  * member-progress floor.
  *
- * SWARM-TODO(AQU-498): this helper is defined and enforced-ready now, but
- * there is no dedicated per-member progress view yet to gate with it. The
- * future productivity view should call this (server-side) before returning
- * any per-member progress/productivity data.
+ * SWARM-TODO(AQU-498): still unconsumed by any auth-worker route — the
+ * per-member activity view AQU-498 shipped reads straight from sync-worker
+ * (GET /api/v1/projects/:projectId/members/:author/activity, gated by its
+ * own resolveMemberProgressFloor in member-progress-floor.ts, since
+ * sync-worker doesn't depend on auth-worker). If a future auth-worker route
+ * needs the same floor (e.g. a member-progress summary folded into
+ * /projects/:projectId/members), it should call this helper rather than
+ * re-deriving the comparison.
  */
 export function canViewMemberProgress(callerRoleLevel: number | null, progressMinRole: number): boolean {
   if (callerRoleLevel == null) return false

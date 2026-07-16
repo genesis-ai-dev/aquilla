@@ -3,7 +3,7 @@
 // Single source of truth so the agent (execute.aquifer branch) and the
 // read-only aquifer routes agree on whether the feature is on for a project.
 //
-// FRO-460 derive-on-read: `bibleResourcesEnabled` in project_settings is the
+// AQU-460 derive-on-read: `bibleResourcesEnabled` in project_settings is the
 // EXPLICIT user override only — nothing writes it on load. The effective
 // value is DERIVED at read time:
 //   explicit === "true"  -> allow

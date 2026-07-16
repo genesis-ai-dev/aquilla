@@ -1,8 +1,8 @@
-// FRO-478: "Upstream changes" review panel read route.
+// AQU-478: "Upstream changes" review panel read route.
 //
 //   GET /api/v1/projects/:projectId/link/cursor-batches
 //
-// `link.cursor.advance` (FRO-476 §4) is a project-level, non-chain-mutating
+// `link.cursor.advance` (AQU-476 §4) is a project-level, non-chain-mutating
 // audit record — `fileId`/`cellId` are both NULL on the event row — so
 // neither the file-scoped `read-route.ts` (`GET /events`, requires
 // `fileId`) nor `cell-history-read-route.ts` (requires `fileId` + `cellId`)

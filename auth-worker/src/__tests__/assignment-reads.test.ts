@@ -50,7 +50,7 @@ async function seedOrgWithAssignments() {
 }
 
 describe("GET /api/v2/orgs/:orgId/assignments/workload", () => {
-  it("returns per-assignee open workload + derived progress (maintainer)", async () => {
+  it("returns one row per open assignment, with project + progress attribution (maintainer)", async () => {
     await seedOrgWithAssignments()
     const res = await app.request(
       "/api/v2/orgs/1/assignments/workload",
@@ -59,13 +59,41 @@ describe("GET /api/v2/orgs/:orgId/assignments/workload", () => {
     )
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
-      workload: Array<{ userId: number; username: string | null; openAssignments: number; cellsTotal: number; cellsDone: number }>
+      assignments: Array<{
+        assignmentId: string
+        projectId: string
+        projectName: string
+        fileId: string | null
+        assigneeUserId: number
+        username: string | null
+        scopeLabel: string
+        cellsTotal: number
+        cellsDone: number
+      }>
     }
-    const byUser = Object.fromEntries(body.workload.map((w) => [w.userId, w]))
-    // as-anna-old is unassigned, so anna shows only the open assignment.
-    expect(byUser[2]).toMatchObject({ username: "anna", openAssignments: 1, cellsTotal: 3, cellsDone: 2 })
-    expect(byUser[3]).toMatchObject({ username: "bob", openAssignments: 1, cellsTotal: 2, cellsDone: 1 })
-    expect(body.workload).toHaveLength(2)
+    // as-anna-old is unassigned (soft-closed), so it's excluded entirely —
+    // AQU-494: this is the row that "disappears" once an assignment is removed.
+    expect(body.assignments).toHaveLength(2)
+    const byId = Object.fromEntries(body.assignments.map((a) => [a.assignmentId, a]))
+    expect(byId["as-anna"]).toMatchObject({
+      projectId: "pa",
+      projectName: "John",
+      fileId: "f1",
+      assigneeUserId: 2,
+      username: "anna",
+      scopeLabel: "Genesis",
+      cellsTotal: 3,
+      cellsDone: 2,
+    })
+    expect(byId["as-bob"]).toMatchObject({
+      projectId: "pa",
+      projectName: "John",
+      assigneeUserId: 3,
+      username: "bob",
+      scopeLabel: "Genesis 1",
+      cellsTotal: 2,
+      cellsDone: 1,
+    })
   })
 
   it("403s a contributor and a non-member", async () => {

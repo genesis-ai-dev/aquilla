@@ -145,7 +145,7 @@ export function LanguageBlitz() {
 
 /* Marquee of every language name — reinforces the breadth. */
 export function LanguageMarquee() {
-  const names = DATA.map((d) => d.en)
+  const names = DATA.map((d) => d.name)
   const loop = [...names, ...names]
   return (
     <div className="aq-marquee" aria-hidden>

@@ -63,7 +63,7 @@ export function fileTypeHasSections(type: FileType): boolean {
   return SCRIPTURE_FILE_TYPES.has(type)
 }
 
-/** FRO-460: true when any project file is a scripture type (USFM/eBible/HelloAO).
+/** AQU-460: true when any project file is a scripture type (USFM/eBible/HelloAO).
  *  Feeds `resolveBibleResourcesEnabled` — same signal as `fileTypeHasSections`,
  *  just aggregated across the file list. */
 export function projectHasScriptureFiles(files: { type: FileType }[] | undefined): boolean {
@@ -71,7 +71,7 @@ export function projectHasScriptureFiles(files: { type: FileType }[] | undefined
 }
 
 /**
- * FRO-460 derive-on-read: the effective Bible-resources availability for a
+ * AQU-460 derive-on-read: the effective Bible-resources availability for a
  * project. The PERSISTED setting (`explicit`) is written ONLY by an explicit
  * user toggle in Project Settings — nothing writes it on load. When absent,
  * the effective value falls back to whether the project has scripture files,
@@ -297,6 +297,12 @@ export interface ProjectRecord {
   orgId?: number | null
   sourceLanguage: string
   targetLanguage: string
+  /**
+   * AQU-538: non-default target-language lanes ('' is always implicit, never
+   * stored). Overlaid from ProjectWideSettings.targetLanes by useProject's
+   * overlaySettings — the workspace LaneSwitcher reads this.
+   */
+  targetLanes?: string[]
   createdAt: string
   files: FileReference[]
   members: ProjectMember[]
@@ -366,7 +372,7 @@ export interface ProjectRecord {
    */
   allowSelfValidation?: boolean
   /**
-   * FRO-186: minimum role to trigger a harmonization sweep on this project.
+   * AQU-186: minimum role to trigger a harmonization sweep on this project.
    * Default (absent) = project_lead (500). Configurable up to maintainer (600).
    * Lowering below project_lead is not allowed (hard floor per spec).
    */
@@ -384,7 +390,7 @@ export interface ProjectRecord {
    * server's response, or from the local session for purely local projects. */
   deletedBy?: string
   /**
-   * Active/inactive lifecycle state (migration 0033, FRO-214).
+   * Active/inactive lifecycle state (migration 0033, AQU-214).
    * Absent or true = active (normal, editable). false = inactive (frozen).
    * Inactive projects are visible in the list but block edits until reactivated.
    * DISTINCT from deletedAt (Trash): inactive keeps the project in the normal
@@ -397,7 +403,7 @@ export interface ProjectRecord {
    * auth-worker's /link-source endpoint; cleared by /detach-source.
    */
   sourceProjectId?: string | null
-  /** FRO-476/478: link mode/consumes/gate/cursor — see CloudProjectSummary
+  /** AQU-476/478: link mode/consumes/gate/cursor — see CloudProjectSummary
    *  for field semantics. Populated alongside sourceProjectId. */
   sourceLinkMode?: "clone" | "live" | null
   sourceLinkConsumes?: "source" | "target" | null
@@ -426,7 +432,7 @@ export interface ProjectRecord {
    *  ProjectWideSettings the same way as `livingMemoryEntries`. */
   translationBrief?: import("@/lib/brief/types").TranslationBrief
   /**
-   * Persisted interlinear alignment seeds (FRO-207). Synced via
+   * Persisted interlinear alignment seeds (AQU-207). Synced via
    * ProjectWideSettings the same way as `terminology`. Positive weight =
    * confirmed, negative = invalidated. Feeds back into buildAlignmentModel as
    * pseudo-count seeds so subsequent statistical BT/alignment reflects them.
@@ -436,7 +442,7 @@ export interface ProjectRecord {
    *  ProjectWideSettings. This is the EXPLICIT user override only — absent
    *  means "no explicit choice yet". Do not read this field directly for
    *  gating; use `resolveBibleResourcesEnabled(explicit, hasScriptureFiles)`
-   *  (FRO-460 derive-on-read: unset defaults to on for scripture projects,
+   *  (AQU-460 derive-on-read: unset defaults to on for scripture projects,
    *  never persisted just by opening/viewing). Gates the Search-dock "Bible
    *  resources" mode and the agent's aquifer branch. */
   bibleResourcesEnabled?: boolean
@@ -476,6 +482,12 @@ export interface FileReference {
    * mutates cell data — it only chooses the sort key. Fully reversible.
    */
   orderedBy?: OrderedBy
+  /** Optional file-level language hints from import metadata. */
+  sourceLanguage?: string
+  targetLanguage?: string
+  /** Optional file-level text direction hints from import metadata. */
+  sourceTextDirection?: "ltr" | "rtl"
+  targetTextDirection?: "ltr" | "rtl"
   /**
    * Timeline editor: core video URL for the preview / master clock. Stored in
    * files.meta JSON (set via the `file.video.set` event). Absent ⇒ no video.
@@ -531,9 +543,10 @@ export interface CompletionSettings {
   contextSize?: ContextSize
 
   /**
-   * When true, only cells with `status === "validated"` are eligible as
-   * few-shot examples (no search-retrieved unvalidated examples).
-   * Spec key: `useOnlyValidatedExamples`. Default false.
+   * Legacy compatibility key. Production drafting always restricts few-shot
+   * examples to approved (`status === "validated"`) cells; false values from
+   * older project settings are ignored.
+   * Spec key: `useOnlyValidatedExamples`. Effective value: true.
    */
   useOnlyValidatedExamples?: boolean
 
@@ -587,6 +600,8 @@ export interface CellHistoryEntry {
    * chain head; everything not on that walk is a stale branch.
    */
   isStale?: boolean
+  /** Local outbox state; absent once the server history has acknowledged it. */
+  syncState?: "pending" | "failed"
 }
 
 export interface CommentMessage {
@@ -664,11 +679,11 @@ export function detectFileType(fileName: string): FileType | null {
     md: "md",
     markdown: "md",
     docx: "docx",
-    // FRO-431: .doc files — modern Word often saves OOXML under a .doc extension;
+    // AQU-431: .doc files — modern Word often saves OOXML under a .doc extension;
     // attempt the same ZIP/XML parse path as .docx. True legacy binary .doc
     // (OLE2 compound document) will fail with a JSZip error; the error surface is
     // the same "Import failed" message the user already sees for corrupt .docx files.
-    // SWARM-TODO(FRO-431): add a dedicated legacy .doc binary parser (e.g. via
+    // SWARM-TODO(AQU-431): add a dedicated legacy .doc binary parser (e.g. via
     // cfb + a doc-text extractor) once a suitable in-repo dependency is available.
     doc: "docx",
     pptx: "pptx",

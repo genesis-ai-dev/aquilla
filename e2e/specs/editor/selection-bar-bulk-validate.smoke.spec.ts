@@ -15,8 +15,9 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * Clicking it emits a validate event for each selected cell.
  * After bulk validation a success toast is shown (role="status").
  *
- * This spec: selects the first cell → clicks "Validate" in the SelectionBar
- * → asserts the success status message appears.
+ * Direct human edits auto-validate. This spec removes that validation, then
+ * selects the reviewed cell → clicks "Validate" in the SelectionBar → asserts
+ * the success status message appears.
  */
 test("SelectionBar bulk validate marks selected cells as validated", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -30,8 +31,11 @@ test("SelectionBar bulk validate marks selected cells as validated", async ({ al
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Edit the first cell to give it a non-empty translation (required to validate).
+  // A direct human edit creates eligible text and auto-validates it. Remove that
+  // validation first so this test exercises the bulk re-validation journey.
   await ws.editCell(0, "translated text")
+  await ws.expectSelfValidated(0)
+  await ws.unvalidateCell(0)
 
   // Select the first cell via its selection checkbox.
   const row = ws.cellRow(0)

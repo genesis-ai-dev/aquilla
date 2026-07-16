@@ -87,7 +87,7 @@ export function OnboardingWizard() {
   }, [])
 
   /**
-   * FRO-282: called when the user completes a LOGIN (not signup) in SignInStep.
+   * AQU-282: called when the user completes a LOGIN (not signup) in SignInStep.
    * If they already have orgs, skip Name + Project steps and land on dashboard.
    * refreshOrgs() now returns the freshly loaded list so we don't race against
    * a stale closure (the `orgs` state value captured at callback creation time

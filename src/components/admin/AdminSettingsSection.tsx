@@ -1,8 +1,35 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Check } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { FieldLabel } from "@/components/ui/field"
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Section } from "@/components/ui/page"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Separator } from "@/components/ui/separator"
+import { Switch } from "@/components/ui/switch"
 import { ModelListEditor, type ModelListValue } from "./ModelListEditor"
 import { AbResultsPanel } from "./AbResultsPanel"
 import {
@@ -99,7 +126,7 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
         abTest: {
           enabled: abEnabled,
           challengerModel: abChallenger,
-          trafficPct: Math.min(100, Math.max(0, Math.round(Number(abTrafficPct) || 0))),
+          trafficPct: normalizeTrafficPct(abTrafficPct),
         },
         ifMatchVersion: data.version,
       })
@@ -131,6 +158,10 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
   if (error && !data) return <p className="text-sm text-destructive">{error}</p>
   if (!data) return <p className="text-sm text-muted-foreground">No settings available.</p>
 
+  const challengerTrafficPct = normalizeTrafficPct(abTrafficPct)
+  const controlTrafficPct = 100 - challengerTrafficPct
+  const challengerModels = modelList.models.filter((model) => model !== modelList.chatModel)
+
   return (
     <div className="space-y-6">
       <p className="text-sm text-muted-foreground">
@@ -143,57 +174,112 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
       </Section>
 
       <Section
-        title="A/B experiment"
-        description="Route a share of default-model chat traffic to a challenger and compare how often each model's drafts are accepted."
+        title="Compare with default"
+        description="Measure a challenger against the current default model using traffic from the same time window."
       >
-        <div className="space-y-4">
-          <label className="flex items-center gap-2 text-sm">
-            <Toggle checked={abEnabled} onChange={setAbEnabled} label="enable A/B experiment" />
-            <span>Run the experiment</span>
-          </label>
+        <FieldGroup>
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel htmlFor="admin-ab-enabled">Compare with default</FieldLabel>
+              <FieldDescription>
+                The current default stays in the control arm while the challenger receives the
+                selected share of otherwise-default requests.
+              </FieldDescription>
+            </FieldContent>
+            <Switch
+              id="admin-ab-enabled"
+              checked={abEnabled}
+              onCheckedChange={setAbEnabled}
+            />
+          </Field>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <FieldLabel htmlFor="admin-ab-challenger">Challenger model</FieldLabel>
-              <select
-                id="admin-ab-challenger"
-                value={abChallenger}
-                onChange={(e) => setAbChallenger(e.target.value)}
-                disabled={!abEnabled}
-                className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-              >
-                <option value="">— choose a model —</option>
-                {modelList.models
-                  .filter((m) => m !== modelList.chatModel)
-                  .map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-              </select>
-              <p className="text-xs text-muted-foreground">
-                Competes against the default chat model ({modelList.chatModel || "unset"}).
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <FieldLabel htmlFor="admin-ab-traffic">Challenger traffic %</FieldLabel>
-              <NumberInput
-                id="admin-ab-traffic"
-                value={abTrafficPct}
-                onChange={setAbTrafficPct}
-                placeholder="20"
-              />
-              <p className="text-xs text-muted-foreground">
-                Share of default-model requests served by the challenger (0–100).
-              </p>
-            </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card size="sm" role="group" aria-labelledby="admin-ab-control-title">
+              <CardHeader>
+                <CardTitle id="admin-ab-control-title">Control</CardTitle>
+                <CardDescription>Current default model</CardDescription>
+                <CardAction>
+                  <Badge variant="secondary">{controlTrafficPct}% traffic</Badge>
+                </CardAction>
+              </CardHeader>
+              <CardContent>
+                <code className="block truncate" title={modelList.chatModel || "Not set"}>
+                  {modelList.chatModel || "Not set"}
+                </code>
+              </CardContent>
+              <CardFooter>
+                <p className="text-xs text-muted-foreground">
+                  Serves every eligible request not assigned to the challenger.
+                </p>
+              </CardFooter>
+            </Card>
+
+            <Card size="sm" role="group" aria-labelledby="admin-ab-challenger-title">
+              <CardHeader>
+                <CardTitle id="admin-ab-challenger-title">Challenger</CardTitle>
+                <CardDescription>Model being compared</CardDescription>
+                <CardAction>
+                  <Badge variant={abEnabled ? "default" : "outline"}>
+                    {challengerTrafficPct}% traffic
+                  </Badge>
+                </CardAction>
+              </CardHeader>
+              <CardContent>
+                <FieldGroup>
+                  <Field data-disabled={!abEnabled}>
+                    <FieldLabel htmlFor="admin-ab-challenger">Challenger model</FieldLabel>
+                    <Select
+                      items={challengerModels.map((model) => ({ value: model, label: model }))}
+                      value={abChallenger || null}
+                      onValueChange={(value) => setAbChallenger(value ?? "")}
+                      disabled={!abEnabled}
+                    >
+                      <SelectTrigger id="admin-ab-challenger" className="w-full">
+                        <SelectValue placeholder="Choose a model" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {challengerModels.map((model) => (
+                            <SelectItem key={model} value={model}>
+                              {model}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+
+                  <Field data-disabled={!abEnabled}>
+                    <FieldLabel htmlFor="admin-ab-traffic">Challenger traffic %</FieldLabel>
+                    <Input
+                      id="admin-ab-traffic"
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={abTrafficPct}
+                      onChange={(event) => setAbTrafficPct(event.target.value)}
+                      disabled={!abEnabled}
+                    />
+                    <FieldDescription>
+                      Control traffic adjusts automatically to keep the total at 100%.
+                    </FieldDescription>
+                  </Field>
+                </FieldGroup>
+              </CardContent>
+              <CardFooter>
+                <p className="text-xs text-muted-foreground">
+                  Runs concurrently with the control so results are directly comparable.
+                </p>
+              </CardFooter>
+            </Card>
           </div>
 
-          <div className="border-t pt-4">
+          <Separator />
+          <div className="flex flex-col gap-2">
             <h3 className="mb-2 text-sm font-medium text-foreground">Results</h3>
             <AbResultsPanel jwt={jwt} />
           </div>
-        </div>
+        </FieldGroup>
       </Section>
 
       <Section title="AI budget" description="Daily request ceilings, and whether they block or just log.">
@@ -234,6 +320,10 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
       </div>
     </div>
   )
+}
+
+function normalizeTrafficPct(value: string): number {
+  return Math.min(100, Math.max(0, Math.round(Number(value) || 0)))
 }
 
 function NumberInput({

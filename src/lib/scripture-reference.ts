@@ -51,7 +51,7 @@ export function cellNumberLabel({
   scriptureNumbering,
   rowIndex,
 }: CellNumberLabelInput): string | null {
-  if (!lineNumbersEnabled || cellType === "heading" || cellType === "paratext") return null
+  if (!lineNumbersEnabled || cellType === "paratext") return null
 
   const canonicalVerse = verseLabelFromCanonical(canonicalRef)
     ?? verseLabelFromCanonical(sourceCanonicalRef)

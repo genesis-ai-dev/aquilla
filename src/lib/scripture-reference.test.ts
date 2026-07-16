@@ -65,4 +65,14 @@ describe("scripture references", () => {
       rowIndex: 8,
     })).toBe("9")
   })
+
+  it("retains ordinal labels for headings in ordinary non-scripture files", () => {
+    expect(cellNumberLabel({
+      lineNumbersEnabled: true,
+      cellType: "heading",
+      canonicalRef: null,
+      scriptureNumbering: false,
+      rowIndex: 0,
+    })).toBe("1")
+  })
 })

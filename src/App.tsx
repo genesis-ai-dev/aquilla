@@ -6,6 +6,7 @@ import { ProductTourProvider } from "@/context/ProductTourContext"
 import { ArchivedProjects } from "@/components/org/ArchivedProjects"
 import { ProjectOverview } from "@/components/org/ProjectOverview"
 import { AssignedToMe } from "@/components/org/AssignedToMe"
+import { SharedProjectsPage } from "@/components/org/SharedProjectsPage"
 import { JoinPage } from "@/components/JoinPage"
 import { JoinOrgPage } from "@/components/JoinOrgPage"
 import { VerifyEmailPage } from "@/components/VerifyEmailPage"
@@ -182,6 +183,7 @@ function AppRoutes() {
         <Route path="/projects" element={<Navigate to="/" replace />} />
         <Route path="/projects/:id" element={<ProjectOverview />} />
         <Route path="/assigned" element={<AssignedToMe />} />
+        <Route path="/shared" element={<SharedProjectsPage />} />
         <Route path="/join/:token" element={<JoinPage />} />
         {/* Agent API (AQU-533 §3) — one-time human approval for ask-mode changesets. */}
         <Route path="/approve/:changesetId" element={<ApproveChangeset />} />

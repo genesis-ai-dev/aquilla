@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { HealthRing } from "@/components/HealthRing"
+import { pickNaturalVoice } from "./pick-speech-voice"
 
 type Mode = "text" | "audio" | "video" | "image" | "story"
 
@@ -317,6 +318,18 @@ function useSpeech(words: string[], lang: string) {
   const [progress, setProgress] = useState(0)
   const [health, setHealth] = useState(71)
   const rafRef = useRef<number | null>(null)
+  // Voices load asynchronously — `getVoices()` is often empty on the very first
+  // call, before the `voiceschanged` event fires. Pre-load them so the first
+  // "Hear it" click already has the full list to pick a natural voice from.
+  const voicesRef = useRef<SpeechSynthesisVoice[]>([])
+  useEffect(() => {
+    const synth = typeof window !== "undefined" ? window.speechSynthesis : undefined
+    if (!synth) return
+    const load = () => { voicesRef.current = synth.getVoices() }
+    load()
+    synth.addEventListener?.("voiceschanged", load)
+    return () => synth.removeEventListener?.("voiceschanged", load)
+  }, [])
 
   const stop = useCallback(() => {
     if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
@@ -342,7 +355,8 @@ function useSpeech(words: string[], lang: string) {
         const u = new SpeechSynthesisUtterance(words.join(" "))
         u.lang = lang === "es" ? "es-ES" : lang
         u.rate = 0.95
-        const v = synth.getVoices().find((vc) => vc.lang?.toLowerCase().startsWith("es"))
+        const available = voicesRef.current.length ? voicesRef.current : synth.getVoices()
+        const v = pickNaturalVoice(available, lang)
         if (v) u.voice = v
         synth.speak(u)
       }

@@ -52,7 +52,6 @@ import { CellExpansion } from "./CellExpansion"
 import { tokenizeWords, activeWordRange } from "@/lib/audio/timings"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { useCellAudio } from "@/hooks/useCellAudio"
-import { useCellEditHistory } from "@/hooks/useCellEditHistory"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -113,7 +112,7 @@ import { useEditorActions } from "@/context/EditorActionsContext"
 import { AddConceptDialog } from "./AddConceptDialog"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
-import { FootnoteInline, FootnotedTextValue } from "./footnotes/FootnoteInline"
+import { FootnoteInline } from "./footnotes/FootnoteInline"
 import {
   AddFootnoteDialog,
   type AddFootnoteMarkerOption,
@@ -2931,7 +2930,6 @@ function EditorRow({
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
   isUpstreamStaleSource,
-  getTokenForFile,
   getAlignmentModel,
   onAlignmentSeedChange,
   sourceFontSize = 14,
@@ -3892,23 +3890,10 @@ function EditorRow({
     return getAlignmentModel?.() ?? null
   }, [btAlignmentOpen, cell.original, visibleTranslated, expanded, expansionTab, getAlignmentModel])
 
-  // History tab: fetch the D1 event log on demand only when the History tab is
-  // visible. `cell.history` from useCells is intentionally empty (EMPTY_HISTORY)
-  // — the audit trail lives in the sync-worker, not the cell projection.
-  const historyTokenFetcher = useMemo(() => {
-    return getTokenForFile ?? (async (_fileId: string) => null as string | null)
-  }, [getTokenForFile])
-  const {
-    history: fetchedHistory,
-    isLoading: isHistoryLoading,
-    isError: isHistoryError,
-  } = useCellEditHistory({
-    enabled: expanded && expansionTab === "history" && Boolean(getTokenForFile),
-    projectId: project?.id ?? null,
-    fileId: cell.fileId ?? null,
-    cellId: cell.id,
-    getTokenForFile: historyTokenFetcher,
-  })
+  // Edit history is reached via the single History control on the cell action
+  // rail (opens the full HistoryDrawer). The audit trail lives in the
+  // sync-worker, not the cell projection, so the drawer fetches the D1 event
+  // log on demand — the row itself no longer renders a duplicate inline list.
 
   // ── Compute attention signals for chevron + tab dots ──────────────────────
   const isBtStale = Boolean(
@@ -5007,6 +4992,14 @@ function EditorRow({
                 />
               )}
 
+              {onOpenHistory && (
+                <RailButton
+                  icon={<HistoryIcon className="h-3.5 w-3.5" />}
+                  tooltip="Edit history"
+                  onClick={() => onOpenHistory(cell.id)}
+                />
+              )}
+
               {onSeekToCue && (
                 <RailButton
                   icon={<Play className="h-3.5 w-3.5" />}
@@ -5566,63 +5559,6 @@ function EditorRow({
                           })}
                         </>
                       )}
-                    </>
-                  )}
-                </div>
-              ),
-            },
-            {
-              value: "history",
-              icon: <HistoryIcon className="h-3 w-3" />,
-              label: "History",
-              renderContent: () => (
-                <div className="flex flex-col gap-2">
-                  {isHistoryLoading ? (
-                    <p className="py-3 text-center text-xs text-muted-foreground">
-                      Loading edit history…
-                    </p>
-                  ) : isHistoryError ? (
-                    <p className="py-3 text-center text-xs text-destructive">
-                      Failed to load edit history.
-                    </p>
-                  ) : fetchedHistory.length === 0 ? (
-                    <p className="py-3 text-center text-xs text-muted-foreground">
-                      No edit history yet.
-                    </p>
-                  ) : (
-                    <>
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="outline"
-                        onClick={() => onOpenHistory?.(cell.id)}
-                        disabled={!onOpenHistory}
-                        className="self-start"
-                      >
-                        <HistoryIcon className="h-3 w-3" />
-                        Open full history
-                      </Button>
-                      <ul className="bg-muted divide-y divide-border/40 rounded-lg">
-                        {[...fetchedHistory].slice(-5).reverse().map((entry, i) => {
-                          const date = new Date(entry.timestamp).toLocaleString(undefined, {
-                            month: "short",
-                            day: "numeric",
-                            hour: "numeric",
-                            minute: "2-digit",
-                          })
-                          return (
-                            <li key={`${entry.timestamp}-${i}`} className="px-2.5 py-1.5 text-xs">
-                              <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wide text-muted-foreground/80">
-                                <span>{entry.author}</span>
-                                <span>{date}</span>
-                              </div>
-                              <div className="mt-0.5 text-muted-foreground">
-                                <FootnotedTextValue value={entry.value} showFootnotes />
-                              </div>
-                            </li>
-                          )
-                        })}
-                      </ul>
                     </>
                   )}
                 </div>

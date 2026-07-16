@@ -170,6 +170,25 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     expect(screen.queryByRole("button", { name: "Add comment" })).not.toBeInTheDocument()
   })
 
+  it("clicking the row's history affordance calls the context's onOpenHistory with the cell id", async () => {
+    const onOpenHistory = vi.fn()
+    renderTable({ onOpenHistory })
+
+    const button = await screen.findByRole("button", { name: "Edit history" })
+    fireEvent.click(button)
+
+    expect(onOpenHistory).toHaveBeenCalledTimes(1)
+    expect(onOpenHistory).toHaveBeenCalledWith("cell-1")
+  })
+
+  it("does not render the history affordance when onOpenHistory is absent from context", async () => {
+    renderTable({})
+
+    // A moment for the row to mount before asserting absence.
+    await screen.findByText("bonjour")
+    expect(screen.queryByRole("button", { name: "Edit history" })).not.toBeInTheDocument()
+  })
+
   it("raises and unclamps the row while microphone-permission help is open", async () => {
     renderTable({ onOpenRecording: vi.fn() })
 

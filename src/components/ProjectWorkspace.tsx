@@ -2152,6 +2152,15 @@ export function ProjectWorkspace() {
   const currentUserId = projectMembers.find((m) => m.username === currentUsername)?.userId ?? null
   const jwt = frontierSession?.jwt ?? null
 
+  // AQU-559: presence frames stamped by the sync DO carry `auth.claims.username`,
+  // but legacy tokens without a username claim fall back to a `user:<numericId>`
+  // form. Register that fallback identity as "self" once the roster resolves the
+  // numeric id, so the user never sees their own presence circle on cells.
+  useEffect(() => {
+    if (currentUserId == null) return
+    presenceStore.addSelfId(`user:${currentUserId}`)
+  }, [presenceStore, currentUserId])
+
   useEffect(() => {
     if (!jwt || !project?.id) return
     let cancelled = false

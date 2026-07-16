@@ -37,8 +37,23 @@ export interface TnNote {
   fileId: string
   /** TN row content (may include Markdown) */
   body: string
+  /**
+   * AQU-527: the original-language phrase (Greek/Hebrew) this note is about,
+   * from the imported cell's `metadata.tnQuote`. UW's #1 requirement — shown
+   * above the note body so translators aren't "editing blind." Absent for
+   * general notes with no phrase anchor, or for TN files imported before this
+   * change (re-import to backfill).
+   */
+  quote?: string
   /** Row index within the file, for stable ordering */
   rowIndex: number
+}
+
+/** Read the original-language phrase off a cell's extensible metadata bucket. */
+function readTnQuote(metadata: Record<string, unknown> | null | undefined): string | undefined {
+  if (!metadata) return undefined
+  const q = metadata.tnQuote
+  return typeof q === "string" && q.trim().length > 0 ? q : undefined
 }
 
 interface TranslationNotesSidebarProps {
@@ -132,6 +147,7 @@ export function TranslationNotesSidebar({
                   fileName: tnFile.name,
                   fileId: tnFile.fileId,
                   body: cell.value,
+                  quote: readTnQuote(cell.metadata),
                   rowIndex,
                 })
               }
@@ -246,7 +262,20 @@ interface NoteCardProps {
 
 function NoteCard({ note, showDivider }: NoteCardProps) {
   return (
-    <div className={cn("px-3 py-2.5", showDivider && "border-t border-dashed")}>
+    <div className={cn("space-y-1.5 px-3 py-2.5", showDivider && "border-t border-dashed")}>
+      {note.quote && (
+        // AQU-527: the original Greek/Hebrew phrase, distinct from the note
+        // body. `dir="auto"` so Hebrew renders right-to-left. `lang` is left
+        // unset — the phrase's own Unicode drives shaping/direction.
+        <p
+          dir="auto"
+          data-testid="tn-original-phrase"
+          title="Original-language phrase"
+          className="border-l-2 border-primary/40 bg-muted/50 px-2 py-1 text-sm font-medium leading-snug text-foreground"
+        >
+          {note.quote}
+        </p>
+      )}
       <p className="text-xs leading-relaxed text-foreground/90 whitespace-pre-wrap">
         {note.body}
       </p>

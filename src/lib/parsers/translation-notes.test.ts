@@ -140,3 +140,45 @@ describe("parseTnTsv — robustness", () => {
     }
   })
 })
+
+describe("parseTnTsv — original-language phrase (AQU-527)", () => {
+  it("extracts OrigQuote as a distinct field, kept out of the note body", () => {
+    const result = parseTnTsv(UW_FIXTURE)
+    expect(result.notes[0].quote).toBe("הַשָּׁמַ֖יִם וְאֵ֥ת הָאָֽרֶץ")
+    expect(result.notes[0].occurrence).toBe("1")
+    // The note body is only the human-readable note — never the Greek/Hebrew
+    // phrase or the bare occurrence integer mashed in with a tab.
+    expect(result.notes[0].body).toBe("This is a merism for everything.")
+    expect(result.notes[0].body).not.toContain("הַשָּׁמַ֖יִם")
+    expect(result.notes[0].body).not.toContain("\t")
+  })
+
+  it("threads the phrase through cell metadata (tnQuote) for the sidebar", () => {
+    const result = parseTnTsv(UW_FIXTURE)
+    expect(result.strings[0].metadata).toEqual({
+      tnQuote: "הַשָּׁמַ֖יִם וְאֵ֥ת הָאָֽרֶץ",
+      tnOccurrence: "1",
+    })
+    // original (the projected cell value) stays the note body, phrase excluded.
+    expect(result.strings[0].original).toBe("This is a merism for everything.")
+  })
+
+  it("leaves quote/metadata absent for notes with no phrase anchor", () => {
+    const result = parseTnTsv(UW_FIXTURE)
+    // Row 3 (GEN 1:2) has an empty OrigQuote column.
+    expect(result.notes[2].quote).toBeUndefined()
+    expect(result.strings[2].metadata).toBeUndefined()
+    expect(result.notes[2].body).toBe("Note for verse 2.")
+  })
+
+  it("handles the older Reference/Quote column layout", () => {
+    const OLD = `Reference\tID\tTags\tQuote\tOccurrence\tNote
+JHN 1:1\tabcd\tfigs-x\tἐν ἀρχῇ\t1\tIn the beginning was the Word.`
+    const result = parseTnTsv(OLD)
+    expect(result.notes).toHaveLength(1)
+    expect(result.notes[0].canonicalRef).toBe("JHN 1:1")
+    expect(result.notes[0].quote).toBe("ἐν ἀρχῇ")
+    expect(result.notes[0].body).toBe("In the beginning was the Word.")
+    expect(result.strings[0].metadata).toEqual({ tnQuote: "ἐν ἀρχῇ", tnOccurrence: "1" })
+  })
+})

@@ -12,8 +12,10 @@ import {
   requiredRoleForCommand,
   PLAN_IMPORT_MAX_CELLS,
   type Command,
+  type CreateProjectCommand,
   type PlanImportCommand,
   type SetTranslationCommand,
+  type UpdateProjectSettingsCommand,
 } from './commands'
 import { resolveCellStates, type CellPrecondition } from './preconditions'
 import { computeDigest } from './canonical'
@@ -23,6 +25,8 @@ import { assertCredentialScope } from './token-bridge'
 import type { ChangesetSummary, ChangesetWarning, ExternalEnv, PlannedEventIds } from './types'
 import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
+import { loadProjectSettings } from '../../../db/shared/projects'
+import { ROLE } from '../events/role-policy'
 
 /** Staged changesets live for one hour before they expire. Exported so the MCP
  *  adapter's get_capabilities can publish the real value (never invent limits). */
@@ -44,12 +48,10 @@ export async function handlePrepare(
   const cred = await validateApiCredential(db, bearer(request) ?? "")
   if (!cred) return errorResponse('permission_denied', 'invalid or missing API credential')
 
-  try {
-    await assertCredentialScope(db, cred, projectId)
-  } catch (err) {
-    return toErrorResponse(err)
-  }
-
+  // Parse + validate the batch BEFORE the project-existence scope check: a
+  // receipt-only CreateProject (W2-A) files its changeset under a
+  // not-yet-existing project id and so takes its own path that must skip
+  // assertCredentialScope (which would 404 the absent project).
   let body: unknown
   try {
     body = await request.json()
@@ -61,6 +63,48 @@ export async function handlePrepare(
   const validated = validateCommands(raw.commands)
   if (!validated.ok) {
     return errorResponse('validation_failed', 'invalid commands', validated.issues)
+  }
+
+  // Effective autonomy: the credential is a ceiling; a request may downgrade
+  // act→ask but never upgrade ask→act.
+  const requested = raw.autonomyMode
+  const autonomyMode: 'ask' | 'act' =
+    requested === 'ask' || cred.mode === 'ask' ? 'ask' : 'act'
+
+  const id = typeof raw.id === 'string' && raw.id.length > 0 ? raw.id : uuidv7()
+
+  // W2-A CreateProject (receipt-only): sole command in its changeset; scope
+  // (unscoped / org-scoped only) and org-role (>= MAINTAINER) are enforced in
+  // its own handler — the project doesn't exist yet, so the project-scoped
+  // assertCredentialScope + project-role gates below cannot apply.
+  const createProject = validated.commands.find(
+    (c): c is CreateProjectCommand => c.kind === 'CreateProject',
+  )
+  if (createProject) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', 'CreateProject must be the only command in a changeset')
+    }
+    return prepareCreateProject(db, cred, projectId, id, autonomyMode, createProject, env)
+  }
+
+  // Every remaining command operates on an EXISTING project — enforce the
+  // credential's scope ceiling first.
+  try {
+    await assertCredentialScope(db, cred, projectId)
+  } catch (err) {
+    return toErrorResponse(err)
+  }
+
+  // W2-A UpdateProjectSettings (receipt-only): sole command; project role
+  // (>= MAINTAINER) and the settings version pin are enforced in its handler.
+  const updateSettings = validated.commands.find(
+    (c): c is UpdateProjectSettingsCommand => c.kind === 'UpdateProjectSettings',
+  )
+  if (updateSettings) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', 'UpdateProjectSettings must be the only command in a changeset')
+    }
+    return prepareUpdateProjectSettings(db, cred, projectId, id, autonomyMode, updateSettings, env)
   }
 
   // Live role/membership gate (§2 — resolve the caller's CURRENT role on every
@@ -75,14 +119,6 @@ export async function handlePrepare(
   if (!resolvedRole || resolvedRole.level < requiredRole) {
     return errorResponse('permission_denied', 'insufficient project role to stage this changeset')
   }
-
-  // Effective autonomy: the credential is a ceiling; a request may downgrade
-  // act→ask but never upgrade ask→act.
-  const requested = raw.autonomyMode
-  const autonomyMode: 'ask' | 'act' =
-    requested === 'ask' || cred.mode === 'ask' ? 'ask' : 'act'
-
-  const id = typeof raw.id === 'string' && raw.id.length > 0 ? raw.id : uuidv7()
 
   // PlanImport is a whole-file operation, not a per-cell batch — it takes its
   // own prepare path (no cell preconditions; a duplicate-name precondition). A
@@ -319,4 +355,183 @@ async function preparePlanImport(
     digest: stored.digest,
     approvalUrl,
   })
+}
+
+// ── W2-A: receipt-only project-lifecycle commands (spec §2, D8) ───────────────
+
+/** Live org-member role level for (orgId, userId), or null when not a member.
+ *  Mirrors auth-worker getOrgMemberRole — the receipt-only CreateProject path
+ *  resolves org membership directly because no project row exists yet to hang a
+ *  project role off. Platform-admin elevation is intentionally NOT applied: the
+ *  external API confers no cross-tenant project-creation authority. */
+async function resolveOrgRoleLevel(
+  db: AquillaDb,
+  orgId: number,
+  userId: string,
+): Promise<number | null> {
+  const row = await db
+    .prepare(`SELECT role_level FROM org_members WHERE org_id = ? AND user_id = ?`)
+    .bind(orgId, userId)
+    .first<{ role_level: number }>()
+  return row?.role_level ?? null
+}
+
+/** Stage a receipt-only project-lifecycle changeset (CreateProject /
+ *  UpdateProjectSettings): no per-cell preconditions, an empty effect summary,
+ *  and a plan carrying only its pinned ids (definitive project id / settings
+ *  version). Mirrors preparePlanImport's insert + response. */
+async function stageReceiptOnlyChangeset(
+  db: AquillaDb,
+  cred: ApiCredentialContext,
+  changesetProjectId: string,
+  id: string,
+  autonomyMode: 'ask' | 'act',
+  cmd: Command,
+  plannedIds: PlannedEventIds,
+  env: ExternalEnv,
+): Promise<Response> {
+  const summary: ChangesetSummary = { warnings: [] }
+  const commands: Command[] = [cmd]
+  const preconditions: CellPrecondition[] = []
+  const digest = await computeDigest(commands, preconditions)
+  const expiresAt = new Date(Date.now() + CHANGESET_TTL_MS).toISOString()
+
+  await db
+    .prepare(
+      `INSERT INTO changesets (
+         id, project_id, created_by_user_id, credential_id, autonomy_mode,
+         status, commands, preconditions, summary, digest, expires_at
+       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::jsonb, ?::jsonb, ?::jsonb, ?, ?)
+       ON CONFLICT (id) DO NOTHING`,
+    )
+    .bind(
+      id,
+      changesetProjectId,
+      String(cred.userId),
+      cred.credentialId,
+      autonomyMode,
+      JSON.stringify(commands),
+      JSON.stringify(preconditions),
+      JSON.stringify({ ...summary, plannedIds }),
+      digest,
+      expiresAt,
+    )
+    .run()
+
+  const stored = await loadChangeset(db, changesetProjectId, id)
+  if (!stored) return errorResponse('job_failed', 'changeset insert did not persist')
+
+  const approvalUrl = `${env.BASE_URL ?? ''}/approve/${stored.id}`
+  return Response.json({
+    changeset: changesetToResponse(stored),
+    summary: stored.summary,
+    digest: stored.digest,
+    approvalUrl,
+  })
+}
+
+/**
+ * Prepare a CreateProject changeset (spec §2). Enforces the scope rule
+ * (unscoped / org-scoped-to-target only; project-scoped → scope_denied), the
+ * org-role floor (>= MAINTAINER in the target org), and the id-not-taken
+ * precondition. The definitive project id is pinned in the plan so a
+ * crash-retry re-applies the SAME id (prepare-time-ids doctrine).
+ */
+async function prepareCreateProject(
+  db: AquillaDb,
+  cred: ApiCredentialContext,
+  urlProjectId: string,
+  id: string,
+  autonomyMode: 'ask' | 'act',
+  cmd: CreateProjectCommand,
+  env: ExternalEnv,
+): Promise<Response> {
+  // Scope: a project-scoped credential can NEVER create a project. (Act tokens
+  // are project-scoped at mint, so CreateProject is ask-mode-only by design.)
+  if (cred.projectId != null) {
+    return errorResponse('scope_denied', 'a project-scoped credential cannot create projects')
+  }
+
+  // Resolve the target org id.
+  let orgId: number | null = null
+  if (cmd.orgId != null) {
+    orgId = typeof cmd.orgId === 'number' ? cmd.orgId : Number(cmd.orgId)
+    if (!Number.isInteger(orgId)) {
+      return errorResponse('validation_failed', 'CreateProject.orgId must be an integer org id')
+    }
+  }
+
+  // An org-scoped credential may only create into its own org.
+  const targetOrgStr = orgId == null ? null : String(orgId)
+  if (cred.orgId != null && cred.orgId !== targetOrgStr) {
+    return errorResponse('scope_denied', 'credential org scope does not match the target org')
+  }
+
+  // Org-role gate: >= MAINTAINER in the target org (org-level — no project row
+  // exists yet to resolve a project role against). A personal (org-less) project
+  // has no org to gate on; only an unscoped credential reaches that path and the
+  // creator becomes owner via the membership row written at commit.
+  if (orgId != null) {
+    const level = await resolveOrgRoleLevel(db, orgId, cred.userId)
+    if (level == null || level < ROLE.MAINTAINER) {
+      return errorResponse('permission_denied', 'org role >= maintainer required to create a project')
+    }
+  }
+
+  // Definitive project id — explicit, else the changeset URL project id.
+  const definitiveProjectId = cmd.projectId ?? urlProjectId
+  const existing = await db
+    .prepare(`SELECT id FROM projects WHERE id = ?`)
+    .bind(definitiveProjectId)
+    .first<{ id: string }>()
+  if (existing) {
+    return errorResponse('validation_failed', `project ${definitiveProjectId} already exists`)
+  }
+
+  const plannedIds: PlannedEventIds = {
+    createProject: { projectId: definitiveProjectId, orgId },
+  }
+  return stageReceiptOnlyChangeset(db, cred, urlProjectId, id, autonomyMode, cmd, plannedIds, env)
+}
+
+/**
+ * Prepare an UpdateProjectSettings changeset (spec §2). The command project must
+ * be the scoped changeset project (else the scope check would guard a different
+ * project than the one written). Enforces the project-role floor (>= MAINTAINER)
+ * and pins the settings version (`ifMatchVersion` must equal the live version,
+ * else plan_stale) so commit can re-check the same guard.
+ */
+async function prepareUpdateProjectSettings(
+  db: AquillaDb,
+  cred: ApiCredentialContext,
+  urlProjectId: string,
+  id: string,
+  autonomyMode: 'ask' | 'act',
+  cmd: UpdateProjectSettingsCommand,
+  env: ExternalEnv,
+): Promise<Response> {
+  if (cmd.projectId !== urlProjectId) {
+    return errorResponse(
+      'validation_failed',
+      'UpdateProjectSettings.projectId must match the changeset project',
+    )
+  }
+
+  const role = await resolveProjectRoleShared(db, { id: cred.userId }, urlProjectId)
+  if (!role || role.level < ROLE.MAINTAINER) {
+    return errorResponse('permission_denied', 'project role >= maintainer required to update settings')
+  }
+
+  const current = await loadProjectSettings(db, urlProjectId)
+  if (current.version !== cmd.ifMatchVersion) {
+    return errorResponse('plan_stale', 'settings version changed since prepare', {
+      expected: cmd.ifMatchVersion,
+      current: current.version,
+    })
+  }
+
+  const plannedIds: PlannedEventIds = {
+    updateProjectSettings: { version: cmd.ifMatchVersion },
+  }
+  return stageReceiptOnlyChangeset(db, cred, urlProjectId, id, autonomyMode, cmd, plannedIds, env)
 }

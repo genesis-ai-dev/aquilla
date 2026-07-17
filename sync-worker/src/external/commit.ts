@@ -13,18 +13,31 @@ import { errorResponse, toErrorResponse } from './errors'
 import {
   cellKey,
   requiredRoleForCommand,
+  type CreateProjectCommand,
   type PlanImportCommand,
   type SetTranslationCommand,
+  type UpdateProjectSettingsCommand,
 } from './commands'
 import { resolveCellStates } from './preconditions'
 import { loadChangeset } from './store'
 import { mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
 import { handleEventsWriteRequest } from '../events/route'
+import { ROLE } from '../events/role-policy'
 import type { RawEvent } from '../events/types'
-import type { ChangesetReceipt, ChangesetWarning, ExternalEnv, StoredChangeset } from './types'
+import type {
+  ChangesetReceipt,
+  ChangesetWarning,
+  ExternalEnv,
+  ReceiptOnlyReceipt,
+  StoredChangeset,
+} from './types'
 import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
+import {
+  createProjectShared,
+  updateProjectSettingsShared,
+} from '../../../db/shared/projects'
 
 /** Provenance channel for the commit request. MCP-originated commits arrive via
  *  a synthetic in-process Request carrying `x-aquilla-channel: mcp`
@@ -83,6 +96,25 @@ export async function handleCommit(
   }
   // status is 'staged' (first attempt) or 'committing' (crash-retry, W1-B §4)
   // from here.
+
+  // ── W2-A: receipt-only project-lifecycle commands take their own path ──────
+  // These apply a plain row write (not events), so the generic per-command
+  // project-role precheck below (which resolves a role against cs.projectId)
+  // does not fit: CreateProject's target project does not exist yet (its gate is
+  // org-level), and UpdateProjectSettings needs the MAINTAINER floor. Each
+  // handler runs its own live-role re-check + the shared staged→committing gates.
+  const createProjectCmd = cs.commands.find(
+    (c): c is CreateProjectCommand => c.kind === 'CreateProject',
+  )
+  if (createProjectCmd) {
+    return commitCreateProject(request, env, db, cred, cs, createProjectCmd)
+  }
+  const updateSettingsCmd = cs.commands.find(
+    (c): c is UpdateProjectSettingsCommand => c.kind === 'UpdateProjectSettings',
+  )
+  if (updateSettingsCmd) {
+    return commitUpdateProjectSettings(request, env, db, cred, cs, updateSettingsCmd)
+  }
 
   // ── Live role/membership precheck (§2) ────────────────────────────────────
   // Resolve the caller's CURRENT role and require the floor of the command kinds
@@ -512,5 +544,249 @@ async function commitPlanImport(
     })
   }
 
+  return Response.json({ receipt })
+}
+
+// ── W2-A: receipt-only project-lifecycle commits (spec §2, D8) ────────────────
+
+/** Live org-member role level for (orgId, userId), or null. Mirrors
+ *  prepare.ts's resolveOrgRoleLevel — the receipt-only CreateProject commit
+ *  re-resolves org membership directly (no project row to hang a project role
+ *  off), the live-role re-check pattern the event commits use. */
+async function commitOrgRoleLevel(
+  db: AquillaDb,
+  orgId: number,
+  userId: string,
+): Promise<number | null> {
+  const row = await db
+    .prepare(`SELECT role_level FROM org_members WHERE org_id = ? AND user_id = ?`)
+    .bind(orgId, userId)
+    .first<{ role_level: number }>()
+  return row?.role_level ?? null
+}
+
+/**
+ * Shared staged→committing gate sequence for receipt-only commits. There are no
+ * per-cell preconditions, so no drift re-check — the CreateProject id-collision
+ * / UpdateProjectSettings version guard is enforced by the apply step itself.
+ * On the first attempt (status==='staged') this checks expiry, consumes the
+ * one-time ask-mode confirmation, and flips to 'committing'; a crash-retry
+ * (status==='committing') re-uses the persisted confirmation id and skips the
+ * gates (matching the SetTranslation / PlanImport path). Returns the (possibly
+ * consumed) confirmation id, or an error Response to short-circuit.
+ */
+async function receiptOnlyGates(
+  db: AquillaDb,
+  cs: StoredChangeset,
+): Promise<{ confirmationId: string | null } | Response> {
+  if (cs.status !== 'staged') return { confirmationId: cs.confirmationId ?? null }
+
+  if (new Date(cs.expiresAt).getTime() < Date.now()) {
+    await db.prepare(`UPDATE changesets SET status = 'expired' WHERE id = ?`).bind(cs.id).run()
+    return errorResponse('validation_failed', 'changeset has expired')
+  }
+
+  let confirmationId: string | null = cs.confirmationId ?? null
+  if (cs.autonomyMode === 'ask') {
+    const consumed = await db
+      .prepare(
+        `UPDATE changeset_confirmations SET consumed_at = now()
+           WHERE changeset_id = ? AND credential_id = ? AND digest = ?
+             AND consumed_at IS NULL AND expires_at > now()
+         RETURNING id`,
+      )
+      .bind(cs.id, cs.credentialId, cs.digest)
+      .first<{ id: string }>()
+    if (!consumed) {
+      return errorResponse(
+        'confirmation_required',
+        'ask-mode changeset requires a valid, unconsumed human approval',
+      )
+    }
+    confirmationId = consumed.id
+  }
+
+  await db
+    .prepare(
+      `UPDATE changesets SET status = 'committing', confirmation_id = ?
+         WHERE id = ? AND status = 'staged'`,
+    )
+    .bind(confirmationId, cs.id)
+    .run()
+  return { confirmationId }
+}
+
+/**
+ * Commit a CreateProject (spec §2, receipt-only). Re-checks scope + org role
+ * live, runs the shared gates, then applies the row write via
+ * createProjectShared with writeCreatorMembership: true (the receipt-only apply
+ * has no implicit creator-path resolver, so the owner-level 700 membership row
+ * must be written explicitly). An id claimed by ANOTHER caller between prepare
+ * and commit → `conflict`; the caller's OWN prior attempt (a crash-retry that
+ * already inserted) is absorbed idempotently.
+ */
+async function commitCreateProject(
+  request: Request,
+  _env: ExternalEnv,
+  db: AquillaDb,
+  cred: ApiCredentialContext,
+  cs: StoredChangeset,
+  cmd: CreateProjectCommand,
+): Promise<Response> {
+  const wasStaged = cs.status === 'staged'
+  const planned = cs.plannedIds?.createProject
+  const projectId = planned?.projectId ?? cmd.projectId ?? cs.projectId
+  const orgId =
+    planned?.orgId ?? (cmd.orgId != null ? Number(cmd.orgId) : null)
+
+  // Live scope + org-role re-check (D8 live-role pattern).
+  if (cred.projectId != null) {
+    return errorResponse('scope_denied', 'a project-scoped credential cannot create projects')
+  }
+  const targetOrgStr = orgId == null ? null : String(orgId)
+  if (cred.orgId != null && cred.orgId !== targetOrgStr) {
+    return errorResponse('scope_denied', 'credential org scope does not match the target org')
+  }
+  if (orgId != null) {
+    const level = await commitOrgRoleLevel(db, orgId, cred.userId)
+    if (level == null || level < ROLE.MAINTAINER) {
+      return errorResponse('permission_denied', 'org role >= maintainer required to create a project')
+    }
+  }
+
+  const gate = await receiptOnlyGates(db, cs)
+  if (gate instanceof Response) return gate
+  const confirmationId = gate.confirmationId
+
+  // Apply — MANDATORY writeCreatorMembership: true (see JSDoc above).
+  const { inserted } = await createProjectShared(db, {
+    projectId,
+    name: cmd.name,
+    orgId,
+    createdBy: cred.userId,
+    writeCreatorMembership: true,
+  })
+
+  if (!inserted) {
+    // The id already exists. Distinguish a genuine race (someone else claimed it
+    // between prepare and commit → conflict) from this credential owner's own
+    // prior crash-retry attempt (idempotent success). A first attempt that finds
+    // the row taken is always a race; a retry that finds its own row is not.
+    const existing = await db
+      .prepare(`SELECT created_by FROM projects WHERE id = ?`)
+      .bind(projectId)
+      .first<{ created_by: number | string }>()
+    const mineByRetry =
+      !wasStaged && existing != null && String(existing.created_by) === String(cred.userId)
+    if (!mineByRetry) {
+      // Non-retryable: move off 'committing' so a later retry can't misread it as
+      // its own prior attempt and falsely claim success.
+      await db.prepare(`UPDATE changesets SET status = 'stale' WHERE id = ?`).bind(cs.id).run()
+      return errorResponse('conflict', `project ${projectId} was created by another caller since prepare`)
+    }
+  }
+
+  const receipt: ReceiptOnlyReceipt = {
+    credentialId: cred.credentialId,
+    channel: readChannel(request),
+    changesetId: cs.id,
+    command: 'CreateProject',
+    appliedAt: new Date().toISOString(),
+    projectId,
+  }
+  await db
+    .prepare(
+      `UPDATE changesets
+          SET status = 'committed', receipt = ?::jsonb, confirmation_id = ?, committed_at = now()
+        WHERE id = ?`,
+    )
+    .bind(JSON.stringify(receipt), confirmationId, cs.id)
+    .run()
+
+  return Response.json({ receipt })
+}
+
+/**
+ * Commit an UpdateProjectSettings (spec §2, receipt-only). Re-checks the project
+ * role live (>= MAINTAINER), runs the shared gates, then applies the
+ * version-guarded write via updateProjectSettingsShared — a conflict (the live
+ * version drifted from the pinned `ifMatchVersion`) maps to plan_stale. When the
+ * validation threshold changed, the shared module's re-projection statements run
+ * locally here (sync-worker owns the projection).
+ */
+async function commitUpdateProjectSettings(
+  request: Request,
+  _env: ExternalEnv,
+  db: AquillaDb,
+  cred: ApiCredentialContext,
+  cs: StoredChangeset,
+  cmd: UpdateProjectSettingsCommand,
+): Promise<Response> {
+  const wasStaged = cs.status === 'staged'
+  const projectId = cs.projectId
+
+  const role = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
+  if (!role || role.level < ROLE.MAINTAINER) {
+    return errorResponse('permission_denied', 'project role >= maintainer required to update settings')
+  }
+
+  const gate = await receiptOnlyGates(db, cs)
+  if (gate instanceof Response) return gate
+  const confirmationId = gate.confirmationId
+
+  const expectedVersion = cs.plannedIds?.updateProjectSettings?.version ?? cmd.ifMatchVersion
+  const result = await updateProjectSettingsShared(db, {
+    projectId,
+    settings: cmd.settings,
+    ifMatchVersion: expectedVersion,
+    updatedBy: cred.userId,
+  })
+
+  if (result.status === 'conflict') {
+    // A crash-retry whose first attempt already applied the bump (current version
+    // is exactly expected+1) is idempotent success, not drift.
+    if (!wasStaged && result.current.version === expectedVersion + 1) {
+      return finishUpdateSettingsReceipt(request, db, cred, cs, projectId, result.current.version, confirmationId)
+    }
+    await db.prepare(`UPDATE changesets SET status = 'stale' WHERE id = ?`).bind(cs.id).run()
+    return errorResponse('plan_stale', 'settings version changed since prepare', {
+      expected: expectedVersion,
+      current: result.current.version,
+    })
+  }
+  if (result.status === 'error') {
+    return errorResponse('job_failed', result.message)
+  }
+
+  return finishUpdateSettingsReceipt(request, db, cred, cs, projectId, result.settings.version, confirmationId)
+}
+
+/** Write the committed receipt for an UpdateProjectSettings commit. */
+async function finishUpdateSettingsReceipt(
+  request: Request,
+  db: AquillaDb,
+  cred: ApiCredentialContext,
+  cs: StoredChangeset,
+  projectId: string,
+  version: number,
+  confirmationId: string | null,
+): Promise<Response> {
+  const receipt: ReceiptOnlyReceipt = {
+    credentialId: cred.credentialId,
+    channel: readChannel(request),
+    changesetId: cs.id,
+    command: 'UpdateProjectSettings',
+    appliedAt: new Date().toISOString(),
+    projectId,
+    version,
+  }
+  await db
+    .prepare(
+      `UPDATE changesets
+          SET status = 'committed', receipt = ?::jsonb, confirmation_id = ?, committed_at = now()
+        WHERE id = ?`,
+    )
+    .bind(JSON.stringify(receipt), confirmationId, cs.id)
+    .run()
   return Response.json({ receipt })
 }

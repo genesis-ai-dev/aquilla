@@ -10,6 +10,7 @@ export type ExternalErrorCode =
   | 'plan_stale'
   | 'confirmation_required'
   | 'validation_failed'
+  | 'conflict'
   | 'job_failed'
   | 'rate_limited'
   | 'not_found'
@@ -21,6 +22,9 @@ const STATUS: Record<ExternalErrorCode, number> = {
   plan_stale: 409,
   confirmation_required: 428, // Precondition Required — a human approval must land first.
   validation_failed: 400,
+  // W2-A: a receipt-only CreateProject whose project id was claimed between
+  // prepare and commit (a race, not the caller's own retry). 409 like plan_stale.
+  conflict: 409,
   job_failed: 500,
   rate_limited: 429,
   not_found: 404,

@@ -8,7 +8,7 @@
 // as a UX courtesy only — the server (auth-worker/src/routes/credentials.ts)
 // remains the authority and re-checks everything.
 
-import { useEffect, useMemo, useState, type FormEvent } from "react"
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react"
 import { Copy } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -399,6 +399,10 @@ function MintTokenDialog({
   const [expiry, setExpiry] = useState<ExpiryPresetId>("90d")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Re-entrancy guard: `busy` state only disables the submit button after a
+  // re-render, so a fast double-click or double Enter can fire handleSubmit twice
+  // before that lands — minting two credentials. This ref flips synchronously.
+  const submittingRef = useRef(false)
 
   // Scope choices are capped to what the caller can actually use: >= CONTRIBUTOR
   // to scope a credential at all (matches the server's scope_denied rule).
@@ -441,10 +445,14 @@ function MintTokenDialog({
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    // Drop re-entrant submits (double-click / double Enter) while a mint is in
+    // flight, before `busy` has re-rendered the button to disabled.
+    if (submittingRef.current) return
     if (!name.trim()) {
       setError("Give this token a name.")
       return
     }
+    submittingRef.current = true
     setBusy(true)
     setError(null)
     try {
@@ -460,6 +468,7 @@ function MintTokenDialog({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to mint token.")
     } finally {
+      submittingRef.current = false
       setBusy(false)
     }
   }

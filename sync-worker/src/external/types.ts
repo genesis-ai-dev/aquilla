@@ -37,6 +37,25 @@ export interface ChangesetSummary {
   artifactLinked?: string
   /** LinkMedia: number of cells an audio artifact is attached to. */
   mediaLinked?: number
+  /** Receipt-only (CreateProject / UpdateProjectSettings): the command kind, so
+   *  the human on /approve/:id sees WHICH lifecycle op they're approving instead
+   *  of an empty "No changes summarized." box (design §2 / blind-approval fix). */
+  command?: 'CreateProject' | 'UpdateProjectSettings'
+  /** CreateProject: the project name being created. */
+  projectName?: string
+  /** CreateProject: the definitive new project id. */
+  newProjectId?: string
+  /** CreateProject: the target org id as a string, or 'personal' for org-less. */
+  targetOrg?: string
+  /** Receipt-only UpdateProjectSettings: the changeset's project id. */
+  projectId?: string
+  /** UpdateProjectSettings: the pinned settings version this write guards on. */
+  ifMatchVersion?: number
+  /** UpdateProjectSettings: one truncated "key → preview" per top-level settings
+   *  key being written. Rendered as individual lines on the approval page (an
+   *  object, so the page's flat number/string filter ignores it — the page reads
+   *  it explicitly). */
+  settingsChanges?: Record<string, string>
   warnings: ChangesetWarning[]
 }
 

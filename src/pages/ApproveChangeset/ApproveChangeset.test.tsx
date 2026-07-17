@@ -86,6 +86,52 @@ describe("ApproveChangeset", () => {
     })
   })
 
+  it("renders a receipt-only CreateProject summary instead of 'No changes summarized.'", async () => {
+    const data = {
+      ...APPROVAL_DATA,
+      summary: {
+        command: "CreateProject",
+        projectName: "Brand New",
+        newProjectId: "brand-new",
+        targetOrg: "10",
+        warnings: [],
+      },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    expect(await screen.findByText(/command/i)).toBeInTheDocument()
+    expect(screen.getByText("CreateProject")).toBeInTheDocument()
+    expect(screen.getByText("Brand New")).toBeInTheDocument()
+    expect(screen.getByText("brand-new")).toBeInTheDocument()
+    expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
+  })
+
+  it("renders per-key settings previews for an UpdateProjectSettings changeset", async () => {
+    const data = {
+      ...APPROVAL_DATA,
+      summary: {
+        command: "UpdateProjectSettings",
+        projectId: "proj-1",
+        ifMatchVersion: 1,
+        settingsChanges: { targetLanguage: "de", validationCount: "5" },
+        warnings: [],
+      },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    expect(await screen.findByText(/Settings changes/i)).toBeInTheDocument()
+    expect(screen.getByText("targetLanguage")).toBeInTheDocument()
+    expect(screen.getByText("de")).toBeInTheDocument()
+    expect(screen.getByText("validationCount")).toBeInTheDocument()
+    expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
+  })
+
   it("shows a not-authorized message on 403", async () => {
     const fetchMock = vi.fn(async () => {
       return new Response(

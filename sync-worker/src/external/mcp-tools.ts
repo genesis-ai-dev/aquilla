@@ -153,9 +153,10 @@ export const MCP_TOOLS: McpToolDef[] = [
       '`projectId` argument (the changeset\'s URL project id) — set BOTH to the same value ' +
       'to avoid ambiguity, or omit the command\'s `projectId` and rely on the top-level one. ' +
       'Requires an unscoped or org-scoped credential with org role >= MAINTAINER in the ' +
-      'target org (a project-scoped credential gets scope_denied) — since act-mode ' +
-      'credentials must be project-scoped at mint, CreateProject is effectively ask-mode ' +
-      'only. A project id already taken between prepare and commit surfaces as `conflict`.\n' +
+      'target org (a project-scoped credential gets scope_denied) — and prepare ALWAYS ' +
+      'stages CreateProject in ask-mode regardless of credential mode, so it always needs ' +
+      'human approval at the approvalUrl before commit. A project id already taken between ' +
+      'prepare and commit surfaces as `conflict`.\n' +
       '  { kind: "UpdateProjectSettings", projectId, settings, ifMatchVersion } — ' +
       'receipt-only; must be the SOLE command in the changeset. Requires project role >= ' +
       'MAINTAINER. `ifMatchVersion` must equal the live settings version or you get ' +

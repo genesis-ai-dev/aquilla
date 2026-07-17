@@ -115,9 +115,10 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'event) — stage via prepare_translations\'s `commands` argument and commit with ' +
         'confirm_changeset exactly like SetTranslation. Each must be the sole command in its ' +
         'changeset. CreateProject requires an unscoped or org-scoped credential with org ' +
-        'role >= MAINTAINER (a project-scoped credential gets scope_denied) — since act-mode ' +
-        'credentials must be project-scoped at mint, CreateProject is effectively ask-mode ' +
-        'only; a project id claimed by another caller between prepare and commit returns ' +
+        'role >= MAINTAINER (a project-scoped credential gets scope_denied) — and prepare ' +
+        'ALWAYS stages CreateProject in ask-mode regardless of credential mode, so it always ' +
+        'requires human approval at the approvalUrl before it can commit; a project id ' +
+        'claimed by another caller between prepare and commit returns ' +
         'conflict. UpdateProjectSettings requires project role >= MAINTAINER and a matching ' +
         'ifMatchVersion (else plan_stale). Receipt shape: { credentialId, channel, ' +
         'changesetId, command, appliedAt, projectId, version? }.',

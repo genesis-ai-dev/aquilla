@@ -190,6 +190,39 @@ describe("ApiTokensSection", () => {
     await waitFor(() => expect(screen.queryByText("aqk_freshplaintext")).not.toBeInTheDocument())
   })
 
+  it("mint: a fast double-submit only mints once (H2 double-submit guard)", async () => {
+    // Hold the mint in flight so both clicks land before it resolves — the
+    // re-entrancy guard (not just the busy-disabled button) must drop the second.
+    let resolveMint: (r: MintCredentialResult) => void = () => {}
+    mockMintCredential.mockImplementation(
+      () => new Promise<MintCredentialResult>((res) => { resolveMint = res }),
+    )
+
+    render(<ApiTokensSection />)
+    await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole("button", { name: "New token" }))
+    await screen.findByText("New API token")
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Dupe bot" } })
+
+    const submit = screen.getByRole("button", { name: "Mint token" })
+    fireEvent.click(submit)
+    fireEvent.click(submit)
+
+    await waitFor(() => expect(mockMintCredential).toHaveBeenCalledTimes(1))
+    // Even after the first mint settles, no second call was queued.
+    resolveMint({
+      token: "aqk_once",
+      credential: {
+        id: "cred-x", name: "Dupe bot", mode: "ask", orgId: null, projectId: null,
+        tokenPrefix: "aqk_once", createdAt: "2026-07-17T00:00:00.000Z",
+        expiresAt: null, lastUsedAt: null, revokedAt: null,
+      },
+    })
+    await screen.findByText("aqk_once")
+    expect(mockMintCredential).toHaveBeenCalledTimes(1)
+  })
+
   it("revoke: opens a confirm dialog and only calls revokeCredential after confirming", async () => {
     mockRevokeCredential.mockResolvedValue(undefined)
     render(<ApiTokensSection />)

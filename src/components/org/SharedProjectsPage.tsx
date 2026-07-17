@@ -1,0 +1,115 @@
+import { useEffect, useState } from "react"
+import { Link } from "react-router-dom"
+import { Share2 } from "lucide-react"
+import { AppShell } from "@/components/AppShell"
+import { EmptyState } from "@/components/ui/page"
+import { Badge } from "@/components/ui/badge"
+import { RoleLabel } from "@/components/RoleLabel"
+import { OrgSidebar } from "./OrgSidebar"
+import { OrgBreadcrumb } from "./OrgBreadcrumb"
+import { useActiveOrg } from "@/context/OrgContext"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
+import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
+
+/**
+ * AQU-417: the single, dedicated home for "shared with you" projects — every
+ * accessible project in an organization the caller is NOT a member of (or with
+ * no org at all), gathered in one place.
+ *
+ * Previously these were listed under a "Shared with you" section at the bottom
+ * of whichever org you were viewing (both the sidebar and the dashboard), which
+ * repeated the same list under every org and felt scattered — especially for
+ * grants from orgs you don't belong to. This page collects them once; the
+ * sidebar links here instead of re-listing per org.
+ *
+ * Org-agnostic by design (AQU-475 "all-orgs" partition scope): the list is the
+ * same regardless of which org is active, and it works for a project-only
+ * invitee with zero org memberships — for whom the all-orgs overview is not
+ * reachable (isAllOrgs requires 2+ member orgs, see OrgContext).
+ */
+export function SharedProjectsPage() {
+  const { orgs, activeOrgId, isLoading: orgLoading } = useActiveOrg()
+  const { session } = useFrontierSession()
+  const jwt = session?.jwt ?? null
+
+  const [accessibleProjects, setAccessibleProjects] = useState<CloudProjectSummary[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!jwt) {
+      setAccessibleProjects([])
+      setLoading(false)
+      return
+    }
+    if (orgLoading) return
+    let cancelled = false
+    setLoading(true)
+    fetchAccessibleProjects(jwt)
+      .then((all) => { if (!cancelled) setAccessibleProjects(all) })
+      .catch(() => { if (!cancelled) setAccessibleProjects([]) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [jwt, orgs, activeOrgId, orgLoading])
+
+  const sharedProjects = partitionSharedProjects(
+    accessibleProjects,
+    orgs,
+    activeOrgId,
+    "all-orgs",
+  ).sharedWithMe
+
+  return (
+    <AppShell
+      sidebar={<OrgSidebar />}
+      header={<OrgBreadcrumb section="Shared with you" />}
+      statusBar={null}
+      main={
+        // See ProjectsList.tsx / AssignedToMe.tsx for why `h-full overflow-y-auto
+        // overscroll-contain` is the correct scroll surface inside AppShell.
+        <div
+          className="h-full overflow-y-auto overscroll-contain space-y-4 p-6"
+          data-testid="shared-projects-scroll"
+        >
+          <div>
+            <h1 className="text-lg font-semibold">Shared with you</h1>
+            <p className="text-sm text-muted-foreground">
+              Projects shared with you from organizations you&rsquo;re not a member of,
+              gathered in one place.
+            </p>
+          </div>
+          {loading ? (
+            <p className="text-sm text-muted-foreground">Loading&hellip;</p>
+          ) : sharedProjects.length === 0 ? (
+            <EmptyState
+              icon={Share2}
+              title="Nothing shared with you yet."
+              description="When someone invites you to a project in another organization, it shows up here."
+            />
+          ) : (
+            <section data-testid="shared-with-you" className="rounded-2xl border divide-y">
+              {sharedProjects.map((p) => {
+                const orgLabel = p.orgName ?? (p.orgId != null ? `Org #${p.orgId}` : null)
+                return (
+                  <Link
+                    key={p.id}
+                    to={`/projects/${p.id}`}
+                    className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
+                  >
+                    <p className="flex-1 min-w-0 truncate font-medium">{p.name}</p>
+                    {orgLabel && (
+                      <Badge variant="secondary" className="shrink-0 truncate">
+                        {orgLabel}
+                      </Badge>
+                    )}
+                    <RoleLabel name={p.role.name} className="shrink-0 text-xs text-muted-foreground" />
+                  </Link>
+                )
+              })}
+            </section>
+          )}
+        </div>
+      }
+    />
+  )
+}

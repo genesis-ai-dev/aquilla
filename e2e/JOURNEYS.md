@@ -39,7 +39,7 @@
 | Comments    | Add / edit / resolve comment                         | `e2e/specs/editor/comments.smoke.spec.ts` + `comment-resolve.smoke.spec.ts` + `comment-reply.smoke.spec.ts` | ✅ |
 | Comments    | Go to cell from comments page                        | `e2e/specs/editor/comments-go-to-cell.smoke.spec.ts`          |   ✅   |
 | Sharing     | Generate invite link / join project via link         | `e2e/specs/projects/share-invite-link.smoke.spec.ts` + `join-page.smoke.spec.ts` | ✅ |
-| Sharing     | Invite accept confirmation + dashboard visibility (AQU-335) | `e2e/specs/projects/invite-accept-dashboard-visibility.smoke.spec.ts` | ✅ |
+| Sharing     | Invite accept confirmation + `/shared` visibility (AQU-335 / AQU-417) | `e2e/specs/projects/invite-accept-dashboard-visibility.smoke.spec.ts` | ✅ |
 | Sharing     | Pending-invite inbox + org external-collaborator revoke (AQU-326) | `e2e/specs/orgs/pending-invite-inbox-external-revoke.smoke.spec.ts` | ✅ |
 | Sharing     | Copy invite URL from share panel                     | `e2e/specs/projects/share-invite-copy-url.smoke.spec.ts`      |   ✅   |
 | Sharing     | Toggle invite mode between @user and email           | `e2e/specs/projects/share-invite-mode-toggle.smoke.spec.ts`   |   ✅   |

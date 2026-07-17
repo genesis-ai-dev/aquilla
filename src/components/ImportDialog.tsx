@@ -91,7 +91,7 @@ import {
   IMPORT_COLLISION_DUPLICATED,
 } from "@/lib/event-names"
 import { SpreadsheetImportPanel } from "@/components/import/SpreadsheetImportPanel"
-import { LabelImportPanel } from "@/components/import/LabelImportPanel"
+import { LabelImportPanel, type LabelImportResult } from "@/components/import/LabelImportPanel"
 import { PairedImportPanel } from "@/components/import/PairedImportPanel"
 import { DcsCatalogBrowser } from "@/components/dcs/DcsCatalogBrowser"
 import { importDcsResource } from "@/lib/dcs/import-dcs"
@@ -140,6 +140,20 @@ interface ImportDialogProps {
    * without a way to write settings). Returns true on a successful save.
    */
   patchDcsCursor?: (cursor: DcsCursor) => Promise<boolean>
+  /**
+   * AQU-314: project files for the Cell-labels panel's step-1 file picker.
+   * The panel fetches the selected file's source cells itself, so labels no
+   * longer depend on which file happens to be active in the editor.
+   */
+  projectFiles?: { id: string; name: string }[]
+  /** AQU-314: the workspace's active file — pre-selected in the picker. */
+  activeFileId?: string | null
+  /**
+   * AQU-314: called after a label apply run completes and the dialog closes.
+   * The host surfaces the result (applied/unmatched counts) as its transient
+   * status notice — the dialog itself is gone by then.
+   */
+  onLabelsImported?: (result: LabelImportResult) => void
 }
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */
@@ -161,6 +175,9 @@ export function ImportDialog({
   sourceCells,
   existingFiles,
   patchDcsCursor,
+  projectFiles,
+  activeFileId,
+  onLabelsImported,
 }: ImportDialogProps) {
   const [screen, setScreen] = useState<Screen>("landing")
   // Holds refs + inferred languages while waiting for the user to set direction.
@@ -580,19 +597,21 @@ export function ImportDialog({
         )}
 
         {/* AQU-314: Cell labels / cast import via downloadable template */}
-        {screen === "labels" && sourceCells && sourceCells.length > 0 && (
+        {screen === "labels" && projectFiles && projectFiles.length > 0 && (
           <LabelImportPanel
             projectId={projectId}
             username={username}
-            sourceCells={sourceCells}
+            files={projectFiles}
+            defaultFileId={activeFileId}
             getToken={getToken}
-            onImported={() => {
+            onImported={(result) => {
               onOpenChange(false)
+              onLabelsImported?.(result)
             }}
             onCancel={() => setScreen("landing")}
           />
         )}
-        {screen === "labels" && (!sourceCells || sourceCells.length === 0) && (
+        {screen === "labels" && (!projectFiles || projectFiles.length === 0) && (
           <div className="py-4 text-center text-sm text-muted-foreground">
             Cell labels require an existing source file in this project. Import source files first, then return here.
           </div>

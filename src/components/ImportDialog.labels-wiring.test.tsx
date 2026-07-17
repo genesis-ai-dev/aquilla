@@ -39,19 +39,30 @@ vi.mock("@/lib/import/file-entries", () => ({ filesToProjectEntries: vi.fn(async
 // The apply path is exercised by LabelImportPanel.test.tsx; here we only need the
 // panel to mount, so stub the event emitter to keep the test hermetic.
 vi.mock("@/lib/sync/events-emit", () => ({ emitCastAssign: vi.fn(async () => "evt-test-id") }))
+// AQU-314: the panel fetches the picked file's cells itself — stub the read.
+vi.mock("@/lib/sync/cells-read", () => ({
+  fetchAllFileCells: vi.fn(async () => [{ cellId: "cell-gen-1-1", canonicalRef: "GEN 1:1" }]),
+}))
 // ScrollArea uses @base-ui/react which calls getAnimations() — not in happy-dom.
 vi.mock("@/components/ui/scroll-area", () => ({
   ScrollArea: ({ children, className }: { children: React.ReactNode; className?: string }) => (
     <div className={className}>{children}</div>
   ),
 }))
+// Select is @base-ui/react too — stub with plain elements.
+vi.mock("@/components/ui/select", () => ({
+  Select: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  SelectContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  SelectItem: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  SelectTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  SelectValue: () => <span />,
+}))
 
 import { ImportDialog } from "./ImportDialog"
-import type { SourceCellRef } from "@/lib/import"
 
-const SOURCE_CELLS: SourceCellRef[] = [
-  { cellId: "cell-gen-1-1", fileId: "file-genesis", canonicalRef: "GEN 1:1", translated: "" },
-  { cellId: "cell-gen-1-2", fileId: "file-genesis", canonicalRef: "GEN 1:2", translated: "The earth…" },
+const PROJECT_FILES = [
+  { id: "file-genesis", name: "Genesis.usfm" },
+  { id: "file-exodus", name: "Exodus.usfm" },
 ]
 
 const baseProps = {
@@ -66,21 +77,26 @@ const baseProps = {
 }
 
 describe("AQU-314 — Cell labels / cast import is wired into the ImportDialog", () => {
-  it("mounts the LabelImportPanel when the labels card is chosen and source cells exist", () => {
-    render(<ImportDialog {...baseProps} sourceCells={SOURCE_CELLS} />)
+  it("mounts the LabelImportPanel when the labels card is chosen and project files exist", () => {
+    render(
+      <ImportDialog {...baseProps} projectFiles={PROJECT_FILES} activeFileId="file-genesis" />,
+    )
 
     // The landing card exists...
     fireEvent.click(screen.getByText("Cell labels / cast"))
 
     // ...and routing to it renders the panel (its step-1 download button proves
-    // the panel mounted and received the project's source cells).
+    // the panel mounted and received the project's files for the picker).
     expect(
       screen.getByRole("button", { name: /Download CSV template/i }),
     ).toBeInTheDocument()
+    // AQU-314: the picker lists the project's files.
+    expect(screen.getByText("Genesis.usfm")).toBeInTheDocument()
+    expect(screen.getByText("Exodus.usfm")).toBeInTheDocument()
   })
 
-  it("shows the source-file-required guidance (not a broken panel) when there are no source cells", () => {
-    render(<ImportDialog {...baseProps} sourceCells={[]} />)
+  it("shows the source-file-required guidance (not a broken panel) when there are no files", () => {
+    render(<ImportDialog {...baseProps} projectFiles={[]} />)
 
     fireEvent.click(screen.getByText("Cell labels / cast"))
 

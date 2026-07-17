@@ -9,7 +9,7 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, ChevronDown, Music,
+  ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, ChevronDown, Music, Braces,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -50,6 +50,7 @@ import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
 import { CellExpansion } from "./CellExpansion"
+import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
 import { tokenizeWords, activeWordRange } from "@/lib/audio/timings"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { useCellAudio } from "@/hooks/useCellAudio"
@@ -5672,6 +5673,19 @@ function EditorRow({
                 </div>
               ),
             },
+            // Metadata — untranslated import columns (DCS TSV supportReference/
+            // quote/occurrence/tags, OBS image attachments). Only offered when
+            // the cell actually carries a non-empty metadata bucket.
+            ...(hasCellMetadata(cell.metadata)
+              ? [
+                  {
+                    value: "metadata",
+                    icon: <Braces className="h-3 w-3" />,
+                    label: "Metadata",
+                    renderContent: () => <CellMetadataTab metadata={cell.metadata as Record<string, unknown>} />,
+                  },
+                ]
+              : []),
           ]}
         />
       </div>

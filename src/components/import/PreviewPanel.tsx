@@ -17,6 +17,7 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import type { ImportResult } from "@/lib/import"
 import { formatBytesProgress } from "@/lib/format-bytes"
+import { usfmDisplayText } from "@/lib/parsers/usfm-display"
 
 /**
  * Live upload progress surfaced from the importer. `count`/`total` are cells;
@@ -125,7 +126,14 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
           against a max-h-only root, so content paints past the border. */}
       <div className="max-h-80 overflow-y-auto rounded-md border">
         <div className="divide-y">
-          {results.map((r, ri) => (
+          {results.map((r, ri) => {
+            // AQU-580: USFM cell text is stored raw (lossless), so strip the
+            // intra-cell markers for the preview — a translator should never
+            // see backslash codes. Non-USFM formats are shown verbatim.
+            const isUsfm = r.rawSourceFormat === "usfm"
+            const previewText = (original: string) =>
+              isUsfm ? usfmDisplayText(original) : original
+            return (
             <div key={ri} className="p-3">
               <p className="mb-2 text-xs font-semibold text-foreground/80 uppercase tracking-wide">
                 {r.name}
@@ -146,7 +154,7 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
                       </span>
                     )}
                     <span className="truncate text-foreground/80">
-                      {s.original || <span className="italic text-muted-foreground">(empty)</span>}
+                      {previewText(s.original) || <span className="italic text-muted-foreground">(empty)</span>}
                     </span>
                   </li>
                 ))}
@@ -157,7 +165,8 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
                 )}
               </ul>
             </div>
-          ))}
+            )
+          })}
         </div>
       </div>
 

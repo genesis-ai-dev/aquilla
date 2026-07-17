@@ -44,6 +44,40 @@ describe("PreviewPanel — commit error visibility (AQU-430 fix)", () => {
   })
 })
 
+describe("PreviewPanel — USFM markers stripped from preview (AQU-580)", () => {
+  const USFM_RESULT: ImportResult[] = [
+    {
+      name: "GEN.usfm",
+      rawSourceFormat: "usfm",
+      strings: [
+        {
+          id: "v1",
+          original:
+            "In the \\nd Lord\\nd* beginning God \\add really\\add* created the heavens.\\f + \\fr 1:1 \\ft A note.\\f*",
+          context: "GEN 1:1",
+          group: "GEN 1:1",
+        },
+      ],
+    },
+  ] as unknown as ImportResult[]
+
+  it("shows verse text with no backslash codes for a USFM import", () => {
+    render(<PreviewPanel results={USFM_RESULT} onConfirm={vi.fn()} onCancel={vi.fn()} error={null} />)
+    // Translator-facing preview must be clean: markers, footnotes, and word-
+    // level tags removed — never a raw backslash.
+    expect(screen.getByText(/In the Lord beginning God really created the heavens\./)).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain("\\")
+  })
+
+  it("leaves non-USFM text verbatim (backslashes are not USFM there)", () => {
+    const TSV: ImportResult[] = [
+      { name: "notes.tsv", rawSourceFormat: "tsv", strings: [{ id: "a", original: "path C:\\Users\\x", context: "1", group: "1" }] },
+    ] as unknown as ImportResult[]
+    render(<PreviewPanel results={TSV} onConfirm={vi.fn()} onCancel={vi.fn()} error={null} />)
+    expect(screen.getByText(/C:\\Users\\x/)).toBeInTheDocument()
+  })
+})
+
 describe("PreviewPanel — transferred-size readout during upload (AQU-520)", () => {
   it("shows an X / Y MB readout alongside the cell count while committing", async () => {
     // onConfirm never resolves, so the panel stays in its in-progress view and

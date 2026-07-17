@@ -22,8 +22,49 @@ export function extractUsfmStrings(content: string): UsfmBookResult[] {
   })
 }
 
+// Aligned USFM3 (unfoldingWord en_ult/en_ust/hbo_uhb/el-x-koine_ugnt) puts every word
+// on its own line inside \zaln-s ...\* / \zaln-e\* milestones and \w word|attrs\w*
+// wrappers; hbo_uhb even emits bare "\v N" lines with the words on following lines.
+// Normalize such sections back to one-physical-line-per-verse plain USFM so the
+// line-based parser below sees ordinary input. Sections without alignment/word markup
+// are returned untouched, so plain-USFM output is byte-identical to before.
+const ALIGNED_MARKUP = /\\zaln-s|\\w[\s*]/
+// Joining word lines must not insert a space before punctuation (incl. Hebrew
+// sof pasuq ׃ and maqqef ־, which trail outside the \w wrapper).
+const LEADING_PUNCT = /^[,.;:!?)׃־]/
+
+function normalizeAlignedUsfm(section: string): string {
+  if (!ALIGNED_MARKUP.test(section)) return section
+
+  // Milestones become a space (not ""), so adjacent groups on one line cannot fuse
+  // words together; the verse-line cleanup below collapses the extra whitespace.
+  const stripped = section
+    .replace(/\\zaln-s[^\\]*\\\*/g, " ")
+    .replace(/\\zaln-e\\\*/g, " ")
+    .replace(/\\w\s+([^\\|]+?)(?:\|[^\\]*?)?\\w\*/g, "$1")
+
+  const merged: string[] = []
+  for (const raw of stripped.split("\n")) {
+    const line = raw.trim()
+    if (!line) continue
+    const prev = merged[merged.length - 1]
+    if (!line.startsWith("\\") && prev !== undefined && /^\\v\s/.test(prev)) {
+      merged[merged.length - 1] = prev + (LEADING_PUNCT.test(line) ? "" : " ") + line
+      continue
+    }
+    merged.push(line)
+  }
+
+  // Safety net: collapse runs of spaces and any space that landed before punctuation.
+  return merged
+    .map((l) =>
+      /^\\v\s/.test(l) ? l.replace(/\s{2,}/g, " ").replace(/\s+([,.;:!?)׃])/g, "$1") : l,
+    )
+    .join("\n")
+}
+
 function parseBookSection(section: string, bookId: string): UsfmBookResult {
-  const lines = section.split("\n")
+  const lines = normalizeAlignedUsfm(section).split("\n")
   const strings: TranslatableString[] = []
   let chapter = 0
   let verse = 0
@@ -63,11 +104,13 @@ function parseBookSection(section: string, bookId: string): UsfmBookResult {
       continue
     }
 
-    const verseMatch = trimmed.match(/^\\v\s+(\d+)\s+(.*)/)
+    // Text is optional: aligned corpora (hbo_uhb) emit bare "\v N" lines whose
+    // words arrive on the following lines and get appended below.
+    const verseMatch = trimmed.match(/^\\v\s+(\d+)(?:\s+(.*))?$/)
     if (verseMatch) {
       verse = parseInt(verseMatch[1])
       const vref = `${bookId} ${chapter}:${verse}`
-      addString(verseMatch[2], vref, "verse", `${bookId} ${chapter}`, [vref])
+      addString(verseMatch[2] ?? "", vref, "verse", `${bookId} ${chapter}`, [vref])
       continue
     }
 
@@ -87,7 +130,7 @@ function parseBookSection(section: string, bookId: string): UsfmBookResult {
 
     if (!trimmed.startsWith("\\") && strings.length > 0) {
       const last = strings[strings.length - 1]
-      last.original += " " + trimmed
+      last.original = last.original ? last.original + " " + trimmed : trimmed
     }
   }
 

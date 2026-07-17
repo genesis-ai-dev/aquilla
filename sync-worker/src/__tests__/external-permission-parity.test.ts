@@ -66,7 +66,34 @@ const ROLES: RoleSpec[] = [
   { name: 'reviewer', level: ROLE.REVIEWER },
   { name: 'contributor', level: ROLE.CONTRIBUTOR },
   { name: 'project_lead', level: ROLE.PROJECT_LEAD },
+  // W3-B: MAINTAINER(600) row so the matrix can express the UpdateProjectSettings
+  // floor (>= MAINTAINER). Adding a higher role STRENGTHENS the existing blocks
+  // (reads/SetTranslation/PlanImport/LinkMedia/upload all pass a fortiori at 600)
+  // — it never weakens a row.
+  { name: 'maintainer', level: ROLE.MAINTAINER },
 ]
+
+// Org-role dimension for CreateProject. CreateProject's role gate is org-level
+// (the project doesn't exist yet, so there is no project role to resolve): the
+// credential must be unscoped or org-scoped to the target org, and the caller
+// must hold >= MAINTAINER in that org. This is a separate axis from the
+// project-role ROLES matrix above, so it seeds an org + org-scoped credential
+// rather than a project membership.
+interface OrgRoleSpec {
+  name: string
+  level: number | null // null = not an org member
+}
+
+const ORG_ROLES: OrgRoleSpec[] = [
+  { name: 'org-none', level: null },
+  { name: 'org-contributor', level: ROLE.CONTRIBUTOR },
+  { name: 'org-reviewer', level: ROLE.REVIEWER },
+  { name: 'org-maintainer', level: ROLE.MAINTAINER },
+  { name: 'org-owner', level: ROLE.OWNER },
+]
+
+/** Org id used by the CreateProject org-role rows. Distinct from any project. */
+const CP_ORG_ID = 4242
 
 let nextUserId = 1000
 
@@ -94,6 +121,40 @@ async function seedRoleCredential(
     `INSERT INTO api_credentials (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id)
      VALUES (gen_random_uuid(), $1, 'test', $2, $3, $4, NULL, $5)`,
     [String(userId), tokenPrefix, tokenHash, mode, PROJECT],
+  )
+  return { token, userId }
+}
+
+/** Seed a fresh user, the CP_ORG_ID org (if absent), an optional org_members row
+ *  at `orgLevel`, and mint an ORG-scoped (project_id NULL) credential — the scope
+ *  CreateProject requires. Returns the token + userId. Used only by the
+ *  CreateProject org-role rows below. */
+async function seedOrgRoleCredential(
+  tdb: TestDb,
+  orgLevel: number | null,
+  mode: 'ask' | 'act' = 'act',
+): Promise<{ token: string; userId: number }> {
+  const userId = nextUserId++
+  await tdb.pg.query(
+    `INSERT INTO users (id, username, email, password_hash) VALUES ($1, $2, $3, 'h')`,
+    [userId, `u${userId}`, `u${userId}@x.com`],
+  )
+  await tdb.pg.query(
+    `INSERT INTO organizations (id, name, owner_user_id) VALUES ($1, 'CP Org', 99999)
+     ON CONFLICT (id) DO NOTHING`,
+    [CP_ORG_ID],
+  )
+  if (orgLevel !== null) {
+    await tdb.pg.query(
+      `INSERT INTO org_members (org_id, user_id, role_level) VALUES ($1, $2, $3)`,
+      [CP_ORG_ID, userId, orgLevel],
+    )
+  }
+  const { token, tokenHash, tokenPrefix } = await mintApiToken()
+  await tdb.pg.query(
+    `INSERT INTO api_credentials (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id)
+     VALUES (gen_random_uuid(), $1, 'test', $2, $3, $4, $5, NULL)`,
+    [String(userId), tokenPrefix, tokenHash, mode, String(CP_ORG_ID)],
   )
   return { token, userId }
 }
@@ -282,6 +343,72 @@ describe('permission parity — LinkMedia requires CONTRIBUTOR (400)+ at prepare
     }
     expect(prep.status).toBe(200)
     expect(prep.body.summary.mediaLinked).toBe(1)
+  })
+})
+
+// ── 3c. UpdateProjectSettings → MAINTAINER floor at prepare ──────────────────
+// (receipt-only command; its role gate is resolveProjectRoleShared >= MAINTAINER
+// in prepareUpdateProjectSettings — a project role of CONTRIBUTOR or even
+// PROJECT_LEAD is below floor. This is the "maintainer vs contributor" row the
+// spec §9 parity list calls for, generalized across the whole ROLES ladder.)
+
+describe('permission parity — UpdateProjectSettings requires MAINTAINER (600)+ at prepare', () => {
+  it.each(ROLES)('role=$name (level=$level)', async ({ level }) => {
+    const { token } = await seedRoleCredential(tdb, level)
+
+    const prep = await prepareChangeset(tdb, token, [
+      { kind: 'UpdateProjectSettings', projectId: PROJECT, settings: { targetLanguage: 'de' }, ifMatchVersion: 0 },
+    ])
+
+    if (level === null || level < ROLE.MAINTAINER) {
+      expect(prep.status).toBe(403)
+      expect(prep.body.error.code).toBe('permission_denied')
+      // Below-floor callers never stage the plan.
+      expect(prep.body.changeset).toBeUndefined()
+      return
+    }
+    // >= MAINTAINER: the version pin (ifMatchVersion 0 == the no-row default) holds
+    // and the plan stages. No live version drift here, so no plan_stale.
+    expect(prep.status).toBe(200)
+    expect(prep.body.changeset.status).toBe('staged')
+  })
+})
+
+// ── 3d. CreateProject → org role >= MAINTAINER (org-scoped credential) ────────
+// CreateProject is the one command gated at the ORG level, not the project level
+// (no project row exists yet). The credential must be org-scoped to the target
+// org (project-scoped → scope_denied, covered in external-project-commands), and
+// the caller must hold >= MAINTAINER in that org. Below-floor / non-member org
+// roles are denied at prepare so nothing is staged.
+
+describe('permission parity — CreateProject requires org role MAINTAINER (600)+ at prepare', () => {
+  it.each(ORG_ROLES)('org role=$name (level=$level)', async ({ level }) => {
+    const { token, userId } = await seedOrgRoleCredential(tdb, level)
+    // File the changeset under a fresh, not-yet-existing project id (the
+    // definitive id is the URL project id when the command omits its own).
+    const newProjectId = `cp-${userId}`
+    const res = (await handleExternalChangesetsRequest(
+      req(`https://w/api/v1/external/projects/${newProjectId}/changesets`, {
+        method: 'POST',
+        token,
+        body: { commands: [{ kind: 'CreateProject', name: 'New', orgId: CP_ORG_ID }] },
+      }),
+      env(tdb),
+    ))!
+    const body = (await res.json()) as any
+
+    if (level === null || level < ROLE.MAINTAINER) {
+      expect(res.status).toBe(403)
+      expect(body.error.code).toBe('permission_denied')
+      // Nothing staged for a below-floor org role.
+      expect(await tdb.rows('changesets')).toHaveLength(0)
+      return
+    }
+    // >= MAINTAINER in the org: the plan stages (CreateProject is ask-mode-only in
+    // practice, but staging succeeds regardless of mode — the human approval gate
+    // is at commit, not prepare).
+    expect(res.status).toBe(200)
+    expect(body.changeset.status).toBe('staged')
   })
 })
 

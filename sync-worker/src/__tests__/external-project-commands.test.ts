@@ -460,6 +460,45 @@ describe('project commands — commit crash-retry idempotency', () => {
       .filter((m) => m.project_id === 'retry-proj')
     expect(members).toHaveLength(1)
   })
+
+  it('an UpdateProjectSettings retry from `committing` is idempotent — one version bump, no plan_stale', async () => {
+    // The version-guarded UPDATE bumps version by exactly 1. A crash-retry re-runs
+    // the SAME version-guarded write, whose guard (WHERE version = ifMatchVersion)
+    // now fails because the first attempt already advanced the version — commit.ts
+    // must recognize "current == expected+1" as its OWN prior apply and return
+    // success, NOT plan_stale, and must not bump the version a second time.
+    const env = makeEnv(tdb.db)
+    await seedSettingsProject(tdb, 'retry-settings', 1, { targetLanguage: 'fr' }, 1)
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-0000000000f4', userId: 1, username: 'alice',
+      orgId: null, projectId: 'retry-settings', mode: 'act',
+    })
+
+    const { body: prep } = await prepare(env, 'retry-settings', token, [
+      { kind: 'UpdateProjectSettings', projectId: 'retry-settings', settings: { targetLanguage: 'de' }, ifMatchVersion: 1 },
+    ])
+    const { res: res1, body: body1 } = await commit(env, 'retry-settings', token, prep.changeset.id)
+    expect(res1.status).toBe(200)
+    expect(body1.receipt.version).toBe(2)
+
+    // Simulate a crash after the row write but before the status flip to
+    // 'committed' was durably persisted.
+    await tdb.db
+      .prepare(`UPDATE changesets SET status = 'committing', receipt = NULL WHERE id = ?`)
+      .bind(prep.changeset.id)
+      .run()
+
+    const { res: res2, body: body2 } = await commit(env, 'retry-settings', token, prep.changeset.id)
+    expect(res2.status).toBe(200)
+    expect(body2.receipt.command).toBe('UpdateProjectSettings')
+    // Version reported is still 2 — the retry did NOT bump to 3.
+    expect(body2.receipt.version).toBe(2)
+
+    const settings = await tdb.rows<{ project_id: string; version: number; settings: string }>('project_settings')
+    const row = settings.find((s) => s.project_id === 'retry-settings')!
+    expect(row.version).toBe(2)
+    expect(JSON.parse(row.settings).targetLanguage).toBe('de')
+  })
 })
 
 // ── ask-mode confirmation for CreateProject (ask-mode-only by design) ────────

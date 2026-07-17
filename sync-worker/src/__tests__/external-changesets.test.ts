@@ -445,3 +445,59 @@ describe('changesets — member removed after prepare is denied on GET/commit/di
     expect(cs[0].status).toBe('staged')
   })
 })
+
+// ── commit replay: crash-retry idempotency (W1-B §4/§9) ─────────────────────
+// The bug this guards: pre-W1-B, commit minted event ids at commit time and
+// flipped to 'committed' only at the end, so a worker eviction mid-commit left
+// the changeset re-committable and a retry minted FRESH ids → duplicate events.
+// Now ids are minted at prepare and stored; a retry (status='committing')
+// re-posts identical ids that the /events idempotency layer dedupes.
+
+describe('changesets — commit replay (crash-retry idempotency)', () => {
+  it('a SetTranslation retry from `committing` re-uses stored ids — no duplicate events', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb, contributorCred())
+    const { body: prep } = await prepare(env, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hello' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-2', value: 'world' },
+    ])
+
+    // First commit applies both target.cell.commit events.
+    const res1 = (await handleExternalChangesetsRequest(commitReq(token, prep.changeset.id), env))!
+    expect(res1.status).toBe(200)
+    const r1 = (await res1.json()) as any
+    expect(r1.receipt.appliedCount).toBe(2)
+    const firstEventIds = [...r1.receipt.eventIds].sort()
+    expect(
+      (await tdb.rows('events')).filter((e: any) => e.kind === 'target.cell.commit'),
+    ).toHaveLength(2)
+
+    // Simulate a worker eviction AFTER the events applied but BEFORE the status
+    // flip to 'committed' was durably written — the changeset is left in the
+    // transient 'committing' state.
+    await tdb.db
+      .prepare(`UPDATE changesets SET status = 'committing' WHERE id = ?`)
+      .bind(prep.changeset.id)
+      .run()
+
+    // Retry: re-enters via the 'committing' gate (drift/expiry/confirmation are
+    // skipped), re-posts the SAME stored event ids, and converges to committed.
+    const res2 = (await handleExternalChangesetsRequest(commitReq(token, prep.changeset.id), env))!
+    expect(res2.status).toBe(200)
+    const r2 = (await res2.json()) as any
+    // Identical event ids prove the prepare-time ids were reused, not re-minted.
+    expect([...r2.receipt.eventIds].sort()).toEqual(firstEventIds)
+
+    // No duplicate events: still exactly two target.cell.commit rows.
+    const afterRetry = (await tdb.rows<{ id: string; kind: string }>('events')).filter(
+      (e) => e.kind === 'target.cell.commit',
+    )
+    expect(afterRetry).toHaveLength(2)
+    expect(afterRetry.map((e) => e.id).sort()).toEqual(firstEventIds)
+
+    // Single changeset row, back to committed.
+    const cs = await tdb.rows<{ status: string }>('changesets')
+    expect(cs).toHaveLength(1)
+    expect(cs[0].status).toBe('committed')
+  })
+})

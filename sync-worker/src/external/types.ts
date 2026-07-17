@@ -38,6 +38,29 @@ export interface ChangesetSummary {
   warnings: ChangesetWarning[]
 }
 
+/** Prepare-time id ledger (W1-B, design §4). All event/file/cell ids a commit
+ *  needs are minted at prepare and stored in the plan, so a crash-and-retry
+ *  re-posts IDENTICAL ids and the /events idempotency layer absorbs the
+ *  duplicates instead of a fresh mint producing duplicate events/files. Held
+ *  alongside — not inside — the effect summary; persisted in the `summary`
+ *  JSONB column and split back out on load (store.ts) so the public summary
+ *  shape stays clean and the digest (over commands + preconditions) is
+ *  unaffected. */
+export interface PlannedEventIds {
+  /** SetTranslation: minted target.cell.commit event id per target cell — one
+   *  per resolved precondition. Stored as a list (not a cellKey-keyed object):
+   *  cellKey's NUL separator is not a legal jsonb object key. */
+  setTranslation?: { fileId: string; cellId: string; eventId: string }[]
+  /** PlanImport: the created file id, its file.create event id, and one
+   *  source.cell.create {cellId, eventId} per plan cell (cellId minted here
+   *  when the plan cell omitted its own id), in plan-cell order. */
+  planImport?: {
+    fileId: string
+    fileEventId: string
+    cells: { cellId: string; eventId: string }[]
+  }
+}
+
 /** Execution receipt recorded on commit. */
 export interface ChangesetReceipt {
   eventIds: string[]
@@ -56,10 +79,16 @@ export interface StoredChangeset {
   createdByUserId: string
   credentialId: string
   autonomyMode: 'ask' | 'act'
-  status: 'staged' | 'committed' | 'discarded' | 'stale' | 'expired'
+  /** `committing` is the mid-commit state (W1-B, §4): set when apply starts,
+   *  flipped to `committed` at the end. A changeset found in `committing` is a
+   *  crash-retry — commit re-enters it, re-posts the stored ids, and finishes. */
+  status: 'staged' | 'committing' | 'committed' | 'discarded' | 'stale' | 'expired'
   commands: Command[]
   preconditions: CellPrecondition[]
   summary: ChangesetSummary
+  /** Prepare-time id ledger (W1-B). Null for changesets staged before this
+   *  landed — commit falls back to minting for backward compat. */
+  plannedIds: PlannedEventIds | null
   digest: string
   receipt: ChangesetReceipt | null
   confirmationId: string | null

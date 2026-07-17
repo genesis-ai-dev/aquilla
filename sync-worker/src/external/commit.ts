@@ -81,60 +81,86 @@ export async function handleCommit(
   if (cs.status === 'stale') {
     return errorResponse('plan_stale', 'changeset is stale — prepare a new plan')
   }
-  // status === 'staged' from here.
+  // status is 'staged' (first attempt) or 'committing' (crash-retry, W1-B §4)
+  // from here.
 
   // ── Live role/membership precheck (§2) ────────────────────────────────────
   // Resolve the caller's CURRENT role and require the floor of the command kinds
   // being committed. The /events perimeter re-checks per-event roles as the
   // backstop, but resolving here first means a member removed after prepare is
   // denied cleanly (permission_denied) instead of half-applying at the perimeter.
+  // Runs for a crash-retry too — a member removed mid-commit is still stopped.
   const requiredRole = Math.max(...cs.commands.map(requiredRoleForCommand))
   const resolvedRole = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
   if (!resolvedRole || resolvedRole.level < requiredRole) {
     return errorResponse('permission_denied', 'insufficient project role to commit this changeset')
   }
 
-  // ── Expiry ────────────────────────────────────────────────────────────────
-  if (new Date(cs.expiresAt).getTime() < Date.now()) {
-    await db.prepare(`UPDATE changesets SET status = 'expired' WHERE id = ?`).bind(id).run()
-    return errorResponse('validation_failed', 'changeset has expired')
-  }
+  // ── First-attempt gates (staged only) ─────────────────────────────────────
+  // Expiry, one-time ask-mode approval, and precondition drift are checked ONCE,
+  // on the first commit attempt. A crash-retry (status='committing') skips them:
+  //   • expiry — the plan is already mid-apply; blocking would strand partially
+  //     applied events;
+  //   • confirmation — already consumed on the first attempt; re-consuming would
+  //     wrongly demand a second approval (the id was persisted at the flip below);
+  //   • drift — our OWN partial apply legitimately moved the head, so a re-check
+  //     would false-positive; the stored ids + /events idempotency make the
+  //     re-apply safe regardless.
+  let confirmationId: string | null = cs.confirmationId ?? null
+  if (cs.status === 'staged') {
+    // Expiry.
+    if (new Date(cs.expiresAt).getTime() < Date.now()) {
+      await db.prepare(`UPDATE changesets SET status = 'expired' WHERE id = ?`).bind(id).run()
+      return errorResponse('validation_failed', 'changeset has expired')
+    }
 
-  // ── Autonomy: ask requires a consumed one-time confirmation ───────────────
-  let confirmationId: string | null = null
-  if (cs.autonomyMode === 'ask') {
-    const consumed = await db
+    // Autonomy: ask requires a consumed one-time confirmation.
+    if (cs.autonomyMode === 'ask') {
+      const consumed = await db
+        .prepare(
+          `UPDATE changeset_confirmations SET consumed_at = now()
+             WHERE changeset_id = ? AND credential_id = ? AND digest = ?
+               AND consumed_at IS NULL AND expires_at > now()
+           RETURNING id`,
+        )
+        .bind(id, cs.credentialId, cs.digest)
+        .first<{ id: string }>()
+      if (!consumed) {
+        return errorResponse(
+          'confirmation_required',
+          'ask-mode changeset requires a valid, unconsumed human approval',
+        )
+      }
+      confirmationId = consumed.id
+    }
+
+    // Re-check preconditions against the live projection.
+    const liveStates = await resolveCellStates(db, projectId, cs.preconditions)
+    const drift: { fileId: string; cellId: string }[] = []
+    for (const pre of cs.preconditions) {
+      const s = liveStates.get(cellKey(pre.fileId, pre.cellId))
+      const liveHead = s?.targetHeadEventId ?? null
+      const liveSource = s?.sourceEventId ?? null
+      if (liveHead !== pre.targetHeadEventId || liveSource !== pre.sourceEventId) {
+        drift.push({ fileId: pre.fileId, cellId: pre.cellId })
+      }
+    }
+    if (drift.length > 0) {
+      await db.prepare(`UPDATE changesets SET status = 'stale' WHERE id = ?`).bind(id).run()
+      return errorResponse('plan_stale', 'project state changed since prepare', { drift })
+    }
+
+    // Flip to 'committing' before applying and persist the consumed confirmation
+    // id, so a crash after this point re-enters as a retry (skipping the gates
+    // above) and can rebuild provenance without a second approval. Guarded on
+    // status='staged' so a concurrent double-commit can't both flip.
+    await db
       .prepare(
-        `UPDATE changeset_confirmations SET consumed_at = now()
-           WHERE changeset_id = ? AND credential_id = ? AND digest = ?
-             AND consumed_at IS NULL AND expires_at > now()
-         RETURNING id`,
+        `UPDATE changesets SET status = 'committing', confirmation_id = ?
+           WHERE id = ? AND status = 'staged'`,
       )
-      .bind(id, cs.credentialId, cs.digest)
-      .first<{ id: string }>()
-    if (!consumed) {
-      return errorResponse(
-        'confirmation_required',
-        'ask-mode changeset requires a valid, unconsumed human approval',
-      )
-    }
-    confirmationId = consumed.id
-  }
-
-  // ── Re-check preconditions against the live projection ────────────────────
-  const liveStates = await resolveCellStates(db, projectId, cs.preconditions)
-  const drift: { fileId: string; cellId: string }[] = []
-  for (const pre of cs.preconditions) {
-    const s = liveStates.get(cellKey(pre.fileId, pre.cellId))
-    const liveHead = s?.targetHeadEventId ?? null
-    const liveSource = s?.sourceEventId ?? null
-    if (liveHead !== pre.targetHeadEventId || liveSource !== pre.sourceEventId) {
-      drift.push({ fileId: pre.fileId, cellId: pre.cellId })
-    }
-  }
-  if (drift.length > 0) {
-    await db.prepare(`UPDATE changesets SET status = 'stale' WHERE id = ?`).bind(id).run()
-    return errorResponse('plan_stale', 'project state changed since prepare', { drift })
+      .bind(confirmationId, id)
+      .run()
   }
 
   // ── PlanImport takes its own compile/commit path ──────────────────────────
@@ -153,6 +179,14 @@ export async function handleCommit(
     commandByCell.set(cellKey(c.fileId, c.cellId), c)
   }
 
+  // W1-B: consume the event ids minted at prepare, so a crash-retry re-posts
+  // identical ids (deduped by the /events layer). The ledger is a list; rebuild
+  // the cellKey lookup in memory (its NUL separator is fine as a Map key, unlike
+  // a jsonb object key). Fall back to minting for changesets staged before the
+  // planned-id ledger existed (backward compat).
+  const plannedSet = new Map(
+    (cs.plannedIds?.setTranslation ?? []).map((p) => [cellKey(p.fileId, p.cellId), p.eventId]),
+  )
   const eventsByFile = new Map<string, RawEvent<'target.cell.commit'>[]>()
   const allEventIds: string[] = []
   const clientTs = Date.now()
@@ -160,7 +194,7 @@ export async function handleCommit(
     const cmd = commandByCell.get(cellKey(pre.fileId, pre.cellId))
     if (!cmd) continue
     const ev: RawEvent<'target.cell.commit'> = {
-      id: uuidv7(),
+      id: plannedSet.get(cellKey(pre.fileId, pre.cellId)) ?? uuidv7(),
       schemaVersion: 1,
       kind: 'target.cell.commit',
       projectId,
@@ -329,11 +363,18 @@ async function commitPlanImport(
   ctx: Pick<ExecutionContext, 'waitUntil'> | undefined,
 ): Promise<Response> {
   const projectId = cs.projectId
-  const fileId = uuidv7()
   const clientTs = Date.now()
 
+  // W1-B (§4): consume the file id, file.create event id, and per-cell ids
+  // minted at prepare. A crash-retry re-posts these IDENTICAL ids, so the
+  // /events idempotency layer (INSERT OR IGNORE on event id) dedupes them — no
+  // duplicate file, no duplicate source cells. Fall back to minting for
+  // changesets staged before the planned-id ledger existed (backward compat).
+  const plannedImport = cs.plannedIds?.planImport
+  const fileId = plannedImport?.fileId ?? uuidv7()
+
   const fileEvent: RawEvent<'file.create'> = {
-    id: uuidv7(),
+    id: plannedImport?.fileEventId ?? uuidv7(),
     schemaVersion: 1,
     kind: 'file.create',
     projectId,
@@ -352,10 +393,11 @@ async function commitPlanImport(
   // Genesis source cells, chained via anchorCellId (null for the first cell).
   const cellEvents: RawEvent<'source.cell.create'>[] = []
   let prevCellId: string | null = null
-  for (const cell of cmd.cells) {
-    const cellId = cell.id ?? uuidv7()
+  cmd.cells.forEach((cell, i) => {
+    const planned = plannedImport?.cells[i]
+    const cellId = planned?.cellId ?? cell.id ?? uuidv7()
     cellEvents.push({
-      id: uuidv7(),
+      id: planned?.eventId ?? uuidv7(),
       schemaVersion: 1,
       kind: 'source.cell.create',
       projectId,
@@ -374,7 +416,7 @@ async function commitPlanImport(
       clientTs,
     })
     prevCellId = cellId
-  }
+  })
 
   // file.create must land in the first chunk (it seeds the files row).
   const allEvents: RawEvent[] = [fileEvent, ...cellEvents]
@@ -448,10 +490,11 @@ async function commitPlanImport(
     fileId,
   }
 
-  // Mark committed regardless of partial rejects: event ids are regenerated on
-  // each attempt, so a retry after a partial apply would create a DUPLICATE
-  // file. Committing (idempotently returning this receipt on re-commit) is the
-  // safe choice; a partial apply is reported as job_failed with the receipt.
+  // Mark committed regardless of partial rejects. W1-B: event + file ids are now
+  // minted at prepare and stored, so a crash-retry (status='committing') re-posts
+  // IDENTICAL ids that the /events layer dedupes — no duplicate file. A partial
+  // apply is still reported as job_failed with the accurate receipt; re-committing
+  // a 'committing' changeset re-drives the same ids and converges.
   await db
     .prepare(
       `UPDATE changesets

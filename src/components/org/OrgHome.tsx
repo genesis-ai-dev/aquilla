@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
@@ -30,7 +30,7 @@ import { OrgSetupChecklist } from "./OrgSetupChecklist"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import { LaneChips } from "./LaneChips"
 import { ProjectMetricHeader } from "./ProjectMetricHeader"
-import { displayLanes } from "./project-lanes"
+import { displayLanes, withOptimisticLane } from "./project-lanes"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import {
   Select,
@@ -576,6 +576,16 @@ export function OrgHome() {
   // AQU-538 §3.2: bumped after a lane action (add language / assign / staff) to
   // refetch the portfolio so per-lane rollups reflect the change.
   const [refreshTick, setRefreshTick] = useState(0)
+
+  // AQU-605: adding a language lane updates just that project's row in place
+  // (optimistic chip insert) rather than bumping refreshTick, which refetched
+  // the whole portfolio and blanked the table behind a loading state. Assign /
+  // staff actions still refetch (their per-lane rollups genuinely change).
+  const handleLaneAdded = useCallback((projectId: string, lane: string) => {
+    setProjects((prev) =>
+      prev.map((p) => (p.id === projectId ? withOptimisticLane(p, lane) : p)),
+    )
+  }, [])
 
   useEffect(() => {
     if (!jwt) {
@@ -1165,6 +1175,7 @@ export function OrgHome() {
                         author={session?.username}
                         allowSelfAssignment={orgSettings.allowSelfAssignment}
                         onLanesChanged={() => setRefreshTick((t) => t + 1)}
+                        onLaneAdded={handleLaneAdded}
                         initialLens={projectLens}
                         emptyTitle={
                           statusFilter === "stalled"

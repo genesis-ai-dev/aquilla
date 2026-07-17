@@ -33,6 +33,7 @@ import { hasTiming } from "@/lib/timeline/derive"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform } from "@/lib/sync/role-policy"
 import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
+import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { needsAttention, needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
@@ -2990,7 +2991,17 @@ function EditorRow({
   // machinery in useCells) shown until the projection round-trips.
   const [sourceEditing, setSourceEditing] = useState(false)
   const [sourceDraft, setSourceDraft] = useState<{ value: string; valueHtml: string } | null>(null)
-  const pendingSourceEventIdRef = useRef<string | null>(cell.sourceEventId ?? null)
+  // Tracks the newest source.cell.commit this row enqueued whose projection
+  // head hasn't caught up yet, as { eventId, parentId }. Successive source edits
+  // chain onto `eventId`; the reconciling effect below clears it once the
+  // projection reaches it (or a different/remote head lands) — crucially WITHOUT
+  // regressing it back to the lagging projection head. Mirrors the target-side
+  // pendingTargetCommitHeadsRef reconciliation in ProjectWorkspace. AQU-603: the
+  // old naive "adopt cell.sourceEventId" effect clobbered the pending head when a
+  // lane switch triggered a mid-flight cells revalidate, forking the next edit
+  // onto the same parent — which the server's AD-2 first-child guard dropped as a
+  // "stale sibling" (server accepted but did not apply).
+  const pendingSourceCommitRef = useRef<{ eventId: string; parentId: string | null } | null>(null)
   const sourceColRef = useRef<HTMLDivElement | null>(null)
   // RES-4: local error state for enqueue failures (IDB quota, role errors).
   // Surfaces a compact inline message below the editor instead of swallowing.
@@ -3299,7 +3310,7 @@ function EditorRow({
     // (cleared by the effect below once cell.original round-trips).
     setSourceDraft({ value, valueHtml })
     setWriteError(null)
-    const parentId = pendingSourceEventIdRef.current ?? cell.sourceEventId ?? null
+    const parentId = resolveSourceCommitParent(pendingSourceCommitRef.current, cell.sourceEventId ?? null)
     emitSourceCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
@@ -3309,7 +3320,7 @@ function EditorRow({
       valueHtml,
       author: username,
     }).then((eventId) => {
-      pendingSourceEventIdRef.current = eventId
+      pendingSourceCommitRef.current = { eventId, parentId }
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.error("[source-edit] enqueue failed:", err)
@@ -3319,10 +3330,21 @@ function EditorRow({
     })
   }, [canEditSource, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.sourceEventId, username, onCellCommitted])
 
-  // Adopt the projection's source head as the next chain parent — for both our
-  // own confirmed commits and remote source commits (mirror-sync / peer leads).
+  // Reconcile the pending source head against the projection — the mirror of
+  // ProjectWorkspace's target-side pendingTargetCommitHeadsRef reconciliation.
+  // Clear the pending head ONLY when the projection has caught up to it, or when
+  // a DIFFERENT head (a remote/peer source commit, mirror-sync) landed that isn't
+  // the parent we chained from — in which case the next edit should chain onto
+  // that new projection head. While the projection still lags at our commit's
+  // parent, KEEP the pending head so the next edit chains onto it rather than
+  // forking a stale sibling onto the same parent (AQU-603). When there is no
+  // pending commit, handleSourceCommit falls back to cell.sourceEventId, so a
+  // remote head is still adopted correctly.
   useEffect(() => {
-    if (cell.sourceEventId) pendingSourceEventIdRef.current = cell.sourceEventId
+    pendingSourceCommitRef.current = reconcilePendingSourceCommit(
+      pendingSourceCommitRef.current,
+      cell.sourceEventId ?? null,
+    )
   }, [cell.sourceEventId])
 
   // Clear the optimistic source draft once the server projection carries it.

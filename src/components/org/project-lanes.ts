@@ -36,6 +36,23 @@ export function laneChipLabel(lane: string, defaultLaneLabel: string): string {
   return defaultLaneLabel.trim() || "Default"
 }
 
+/**
+ * AQU-606: resolve the display label for a project's default ('') lane. Prefer
+ * the project's configured `targetLanguage` (AQU-523) — it comes from project
+ * settings and therefore survives the lanes migration even when the per-file
+ * language hints are absent, so a migrated project whose target is e.g. French
+ * reads "French" rather than the placeholder "default". Fall back to the
+ * per-file hint (the first file that carries a target language), then to '' so
+ * {@link laneChipLabel} renders its generic placeholder instead of a literal
+ * lane label.
+ */
+export function resolveDefaultLaneLabel(
+  project: { targetLanguage?: string | null },
+  fileTargetHint?: string,
+): string {
+  return project.targetLanguage?.trim() || fileTargetHint?.trim() || ""
+}
+
 /** A 0..100 integer percentage guarded against NaN (missing counts). */
 export function safePct(fraction: number): number {
   return Number.isFinite(fraction) ? Math.round(fraction * 100) : 0

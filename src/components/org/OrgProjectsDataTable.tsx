@@ -29,7 +29,7 @@ import { ProjectMetricHeader } from "./ProjectMetricHeader"
 import { AddLanguagePopover } from "./AddLanguagePopover"
 import { ProjectLaneSubRows } from "./ProjectLaneSubRows"
 import { OrgLaneAssignModal } from "./OrgLaneAssignModal"
-import { displayLanes } from "./project-lanes"
+import { displayLanes, resolveDefaultLaneLabel } from "./project-lanes"
 
 export type OrgProjectRow = PortfolioProject & {
   orgId?: number
@@ -188,7 +188,7 @@ export function OrgProjectsDataTable({
               <LaneChips
                 projectId={p.id}
                 lanes={displayLanes(p)}
-                defaultLaneLabel={defaultLaneLabelByProjectId?.get(p.id) ?? ""}
+                defaultLaneLabel={resolveDefaultLaneLabel(p, defaultLaneLabelByProjectId?.get(p.id))}
                 onOverflowClick={() => toggleExpand(p.id)}
               />
               {jwt && canAddLanguage(p.id) && (
@@ -392,7 +392,7 @@ export function OrgProjectsDataTable({
             <ProjectLaneSubRows
               projectId={p.id}
               lanes={displayLanes(p)}
-              defaultLaneLabel={defaultLaneLabelByProjectId?.get(p.id) ?? ""}
+              defaultLaneLabel={resolveDefaultLaneLabel(p, defaultLaneLabelByProjectId?.get(p.id))}
               colSpan={colSpan}
               orgId={orgId}
               onAssign={

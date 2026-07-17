@@ -30,7 +30,7 @@ import { OrgSetupChecklist } from "./OrgSetupChecklist"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import { LaneChips } from "./LaneChips"
 import { ProjectMetricHeader } from "./ProjectMetricHeader"
-import { displayLanes } from "./project-lanes"
+import { displayLanes, resolveDefaultLaneLabel } from "./project-lanes"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import {
   Select,
@@ -465,7 +465,7 @@ export function ProjectTable({
                   <LaneChips
                     projectId={p.id}
                     lanes={displayLanes(p)}
-                    defaultLaneLabel={defaultLaneLabelByProjectId?.get(p.id) ?? ""}
+                    defaultLaneLabel={resolveDefaultLaneLabel(p, defaultLaneLabelByProjectId?.get(p.id))}
                     maxVisible={2}
                   />
                 </span>

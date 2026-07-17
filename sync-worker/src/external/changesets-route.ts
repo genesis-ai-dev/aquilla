@@ -78,6 +78,12 @@ async function handleDiscard(
   if (cs.status === 'committed') {
     return errorResponse('validation_failed', 'cannot discard a committed changeset')
   }
+  // W2-A: a changeset mid-apply must not be discarded — doing so would strand a
+  // partially-applied plan and let a concurrent commit finish onto a row the
+  // caller believes is gone. Previously this fell through as a silent no-op.
+  if (cs.status === 'committing') {
+    return errorResponse('validation_failed', 'cannot discard a changeset that is currently committing')
+  }
   if (cs.status === 'staged' || cs.status === 'stale' || cs.status === 'expired') {
     await db.prepare(`UPDATE changesets SET status = 'discarded' WHERE id = ?`).bind(id).run()
   }

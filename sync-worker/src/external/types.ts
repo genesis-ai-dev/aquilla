@@ -59,6 +59,14 @@ export interface PlannedEventIds {
     fileEventId: string
     cells: { cellId: string; eventId: string }[]
   }
+  /** W2-A CreateProject (receipt-only): the definitive project id (minted /
+   *  fixed at prepare so a crash-retry re-applies the SAME id, not a fresh one)
+   *  and the resolved target org id (null for a personal/org-less project). */
+  createProject?: { projectId: string; orgId: number | null }
+  /** W2-A UpdateProjectSettings (receipt-only): the settings version the plan
+   *  pinned at prepare (the commit-time version guard, i.e. the drift check for
+   *  a versioned blob rather than a per-cell head). */
+  updateProjectSettings?: { version: number }
 }
 
 /** Execution receipt recorded on commit. */
@@ -70,6 +78,22 @@ export interface ChangesetReceipt {
   committedAt: string
   /** PlanImport: the created file's id. */
   fileId?: string
+}
+
+/** W2-A receipt for the receipt-only project-lifecycle commands (spec §2 D8).
+ *  These apply a plain row write, not events, so the event-shaped
+ *  ChangesetReceipt does not fit — the receipt is a provenance stamp instead. */
+export interface ReceiptOnlyReceipt {
+  credentialId: string
+  channel: 'mcp' | 'rest'
+  changesetId: string
+  command: 'CreateProject' | 'UpdateProjectSettings'
+  appliedAt: string
+  /** CreateProject: the created project id. UpdateProjectSettings: the updated
+   *  project id. */
+  projectId: string
+  /** UpdateProjectSettings: the new settings version after the write. */
+  version?: number
 }
 
 /** The full stored plan, as persisted in `changesets`. */
@@ -90,7 +114,7 @@ export interface StoredChangeset {
    *  landed — commit falls back to minting for backward compat. */
   plannedIds: PlannedEventIds | null
   digest: string
-  receipt: ChangesetReceipt | null
+  receipt: ChangesetReceipt | ReceiptOnlyReceipt | null
   confirmationId: string | null
   createdAt: string
   expiresAt: string

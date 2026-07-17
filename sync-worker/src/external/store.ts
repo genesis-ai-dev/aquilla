@@ -6,6 +6,7 @@ import type {
   ChangesetReceipt,
   ChangesetSummary,
   PlannedEventIds,
+  ReceiptOnlyReceipt,
   StoredChangeset,
 } from './types'
 
@@ -66,7 +67,7 @@ function rowToStored(row: ChangesetRow): StoredChangeset {
     summary,
     plannedIds,
     digest: row.digest,
-    receipt: row.receipt == null ? null : parseJson<ChangesetReceipt>(row.receipt),
+    receipt: row.receipt == null ? null : parseJson<ChangesetReceipt | ReceiptOnlyReceipt>(row.receipt),
     confirmationId: row.confirmation_id,
     createdAt: toIso(row.created_at),
     expiresAt: toIso(row.expires_at),

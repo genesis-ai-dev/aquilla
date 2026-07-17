@@ -35,6 +35,15 @@ export interface CellNumberLabelInput {
   sourceCanonicalRef?: string | null
   scriptureNumbering: boolean
   rowIndex: number
+  /**
+   * 1-based ordinal among *numbered* (non-paratext) cells, used only by the
+   * sequential (non-scripture) numbering path. Passing it makes numbering start
+   * at 1 at the first real content cell and stay gap-free, rather than tracking
+   * the absolute display row — so leading/interspersed front matter,
+   * introductions, and other paratextual cells no longer offset the count
+   * (AQU-610). Falls back to `rowIndex + 1` when not supplied.
+   */
+  contentNumber?: number
 }
 
 /**
@@ -50,6 +59,7 @@ export function cellNumberLabel({
   sourceCanonicalRef,
   scriptureNumbering,
   rowIndex,
+  contentNumber,
 }: CellNumberLabelInput): string | null {
   if (!lineNumbersEnabled || cellType === "paratext") return null
 
@@ -57,7 +67,7 @@ export function cellNumberLabel({
     ?? verseLabelFromCanonical(sourceCanonicalRef)
   if (canonicalVerse) return canonicalVerse
 
-  return scriptureNumbering ? null : String(rowIndex + 1)
+  return scriptureNumbering ? null : String(contentNumber ?? rowIndex + 1)
 }
 
 /** Friendly chapter label for editor wayfinding (`MAT 1` → `Matthew 1`). */

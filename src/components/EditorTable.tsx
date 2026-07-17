@@ -1268,6 +1268,23 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }),
   [cellStore, cellStoreVersion])
 
+  // AQU-610: sequential (non-scripture) numbering counts only *numbered*
+  // (non-paratext) cells, so the count starts at 1 at the first real content
+  // cell and stays gap-free even when front matter, introductions, or other
+  // paratextual cells sit before/among the content. Scripture files number by
+  // canonical verse ref and don't consult this map.
+  const sequentialNumberByCellId = useMemo(() =>
+    readAtVersion(cellStoreVersion, () => {
+      const map = new Map<string, number>()
+      let ordinal = 0
+      for (const id of displayCellIds) {
+        if (cellStore.getCellView(id)?.type === "paratext") continue
+        map.set(id, ++ordinal)
+      }
+      return map
+    }),
+  [cellStore, cellStoreVersion, displayCellIds])
+
   const activeChapterLabel = chapterNavigationItems.some((chapter) => chapter.label === currentSectionLabel)
     ? currentSectionLabel
     : chapterNavigationItems[0]?.label ?? ""
@@ -1423,6 +1440,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           activeCueIndex={activeCueIndex}
           onSeekToCue={onSeekToCue}
           rowIndex={index}
+          contentNumber={sequentialNumberByCellId.get(cell.id) ?? index + 1}
           lineNumbersEnabled={lineNumbersEnabled}
           scriptureNumbering={chapterNavigationItems.length > 0}
           cellLabelsEnabled={cellLabelsEnabled}
@@ -1509,6 +1527,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     isCompletionConfigured,
     isTimeOrdered,
     chapterNavigationItems.length,
+    sequentialNumberByCellId,
     lineNumbersEnabled,
     micDenied,
     onAckRemoteChange,
@@ -1732,6 +1751,8 @@ interface MemoizedRowProps {
   activeCueIndex?: number
   onSeekToCue?: (cellId: string) => void
   rowIndex: number
+  /** AQU-610: 1-based ordinal among numbered (non-paratext) cells for sequential numbering. */
+  contentNumber: number
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
   sourceDirectionMode: DirectionMode
@@ -1793,7 +1814,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
     cell, examples, completing, errors, previews, healthMap, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
-    activeCueIndex, rowIndex, gridCols,
+    activeCueIndex, rowIndex, contentNumber, gridCols,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
     onSelectionPointerDown: onSelectionPointerDownParent,
     onNavigateCell: onNavigateCellParent,
@@ -1931,6 +1952,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         isActiveCue={isActiveCue}
         onSeekToCue={onSeekToCue}
         rowIndex={rowIndex}
+        contentNumber={contentNumber}
         lineNumbersEnabled={lineNumbersEnabled}
         scriptureNumbering={scriptureNumbering}
         cellLabelsEnabled={cellLabelsEnabled}
@@ -2060,6 +2082,8 @@ interface EditorRowProps {
   onGridRowKeyNav: (direction: "prev" | "next") => void
   getVoiceTakeCells: (startIndex: number, count: number) => CellData[]
   rowIndex: number
+  /** AQU-610: 1-based ordinal among numbered (non-paratext) cells for sequential numbering. */
+  contentNumber: number
   lineNumbersEnabled: boolean
   /** Scripture files number verse rows by canonical ref and leave headings unnumbered. */
   scriptureNumbering: boolean
@@ -2924,7 +2948,7 @@ function EditorRow({
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
-  rowIndex, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols,
+  rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, micDenied,
   audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, onAskAiFromSelection,
   onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
@@ -3882,6 +3906,7 @@ function EditorRow({
     sourceCanonicalRef: cell.globalReferences?.[0],
     scriptureNumbering,
     rowIndex,
+    contentNumber,
   })
   const numberPill = numberLabel === null ? null : (
     <span className="flex h-6 items-center" aria-label={`Line ${numberLabel}`}>

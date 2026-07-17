@@ -4,30 +4,33 @@ Status: **draft v2, post-review** · 2026-07-13 · Ryder + Claude
 Linear: [AQU-533](https://linear.app/frontierrandd/issue/AQU-533/expose-a-public-permission-checked-api-agentic-import-admin-partner)
 Related: AQU-550 (Biblica), AQU-525 / AQU-532 (WAHA JSON import)
 
-## Implementation status (2026-07-13)
+## Implementation status (2026-07-17)
 
 This document is the **design spec**. For what is actually implemented and callable today, see
 the practitioner guide: [`docs/api/agent-api.md`](api/agent-api.md) (plus
 [`docs/api/examples/blackfoot-import.md`](api/examples/blackfoot-import.md) and
-[`docs/api/openapi.yaml`](api/openapi.yaml)). Status against the §6 release gates:
+[`docs/api/openapi.yaml`](api/openapi.yaml)). The v1.1 follow-on slice (token UI, the three
+remaining commands, commit idempotency) is tracked in
+[`docs/superpowers/specs/2026-07-17-agent-api-v1.1-design.md`](superpowers/specs/2026-07-17-agent-api-v1.1-design.md).
+Status against the §6 release gates:
 
 | # | Gate | Status |
 | --- | --- | --- |
-| 1 | Credential creation, scoping, expiry, revocation | **Done** — `auth-worker/src/routes/credentials.ts` |
+| 1 | Credential creation, scoping, expiry, revocation | **Done** — `auth-worker/src/routes/credentials.ts`. As of v1.1, also mintable/revocable from the UI (Preferences → Account → "API tokens", `src/components/settings/ApiTokensSection.tsx`) — see the v1.1 design doc §1. |
 | 2 | Read project state via MCP and REST | **Done** — `sync-worker/src/external/read-routes.ts`, `mcp-handlers.ts` |
-| 3 | Update translations via commands + changesets | **Done** for `SetTranslation`; `CreateProject`/`UpdateProjectSettings`/`LinkMedia` **not implemented** |
-| 4 | Upload and preserve a source artifact | **Done**, but worker-proxied bytes, not signed URLs (D10 not yet built) |
+| 3 | Update translations via commands + changesets | **Done.** `SetTranslation`/`PlanImport` since v1; as of v1.1, `CreateProject`, `UpdateProjectSettings`, and `LinkMedia` are also implemented and MCP-stageable (via the same `prepare_translations`/`confirm_changeset` tools) — see the v1.1 design doc §2 and `docs/api/agent-api.md` §4.1. `PlanImport` remains the only command with no MCP staging tool (REST-only). |
+| 4 | Upload and preserve a source artifact | **Done**, but worker-proxied bytes, not signed URLs (D10 not yet built). As of v1.1, artifact upload also accepts `kind: audio` (for `LinkMedia`) via `x-artifact-kind: audio` — see the v1.1 design doc §3. |
 | 5 | One supported end-to-end import: Blackfoot / USFM | **Done** via `PlanImport` (REST only, capped 5,000 cells/changeset) — see the worked example |
-| 6 | Ask/act changeset behavior incl. one-time approval + `plan_stale` | **Done** — `sync-worker/src/external/{prepare,commit}.ts`, `auth-worker/src/routes/changeset-approvals.ts`, `src/pages/ApproveChangeset/` |
-| 7 | Permission-parity tests | **Not verified by this pass** — commit paths reuse the in-app `/events` perimeter (same role gates), but no dedicated parity test suite was located |
-| 8 | Provenance envelope + execution receipts | **Partial** — envelope stamped on changeset-committed events only; `channel` is hardcoded `"rest"` (doesn't yet distinguish MCP), and there is no separate audit ledger for reads/searches/discarded plans |
-| 9 | Minimal REST + MCP docs with one worked example | **Done by this pass** — `docs/api/agent-api.md`, `docs/api/openapi.yaml`, `docs/api/examples/blackfoot-import.md` |
+| 6 | Ask/act changeset behavior incl. one-time approval + `plan_stale` | **Done** — `sync-worker/src/external/{prepare,commit}.ts`, `auth-worker/src/routes/changeset-approvals.ts`, `src/pages/ApproveChangeset/`. As of v1.1, commit is also crash-safe: prepare-time ids + a `committing` status let a mid-commit retry resume without duplicating events/files — see the v1.1 design doc §4. |
+| 7 | Permission-parity tests | **Done for the shipped command set** — `sync-worker/src/__tests__/external-permission-parity.test.ts` covers reads, `SetTranslation`, `PlanImport`, and (v1.1) `LinkMedia`; `CreateProject`/`UpdateProjectSettings` role/scope gates are covered in `external-project-commands.test.ts` instead of the shared parity matrix. |
+| 8 | Provenance envelope + execution receipts | **Done.** Envelope stamped on every changeset-committed event (`SetTranslation`/`PlanImport`/`LinkMedia`); `channel` now distinguishes `"mcp"` vs `"rest"` (v1.1 — no longer hardcoded). `CreateProject`/`UpdateProjectSettings` are receipt-only and carry their provenance in the receipt itself (no `events.provenance` row — see `docs/api/agent-api.md` §6). There is still no separate audit ledger for reads/searches/discarded plans. |
+| 9 | Minimal REST + MCP docs with one worked example | **Done** — `docs/api/agent-api.md`, `docs/api/openapi.yaml`, `docs/api/examples/blackfoot-import.md`, kept current through v1.1. |
 | 10 | Cold-start test | **Not run** — no evidence of an executed cold-start session in this repo |
 
 Also not yet implemented, called out explicitly rather than left silent: `run_checks`, jobs
-(`get_job`), export (`prepare_export`/`get_export`), OAuth 2.1, rate limiting, and MCP tools for
-artifacts/`PlanImport` (REST-only today). Full detail in `docs/api/agent-api.md` §8 and the
-running list in `docs/swarm/AGENT-API-TRACES.md`.
+(`get_job`), export (`prepare_export`/`get_export`), OAuth 2.1, rate limiting, and an MCP staging
+tool for `PlanImport` (REST-only). Full detail in `docs/api/agent-api.md` §8 and the running list
+in `docs/swarm/AGENT-API-TRACES.md`.
 
 ---
 

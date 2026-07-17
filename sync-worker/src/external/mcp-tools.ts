@@ -29,14 +29,16 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'Discover what this API and THIS credential can do before attempting anything. ' +
       'Returns the API version, the autonomy mode of the calling credential (ask|act), ' +
-      'the domain command kinds available (SetTranslation and PlanImport — note ' +
-      'PlanImport is staged over REST only, there is no MCP staging tool for it yet), ' +
-      'the operational limits (changeset expiry, PlanImport max cells, artifact max ' +
-      'bytes, max commands per changeset), the full list of stable ' +
-      'machine-actionable error codes, and an explanation of the ask-mode approval flow ' +
-      '(prepare -> approvalUrl -> a human approves in a browser -> confirm_changeset). ' +
-      'This is the recommended first call: it tells an agent its ceiling so it does not ' +
-      'attempt commits it cannot make. Takes no arguments.',
+      'the domain command kinds available (SetTranslation, PlanImport, CreateProject, ' +
+      'UpdateProjectSettings, LinkMedia — note PlanImport is staged over REST only, there ' +
+      'is no MCP staging tool for it yet; the other four all stage/commit via ' +
+      'prepare_translations/confirm_changeset — see the returned projectLifecycle and ' +
+      'linkMedia fields for their per-kind rules), the operational limits (changeset ' +
+      'expiry, PlanImport max cells, artifact max bytes, max commands per changeset), the ' +
+      'full list of stable machine-actionable error codes, and an explanation of the ' +
+      'ask-mode approval flow (prepare -> approvalUrl -> a human approves in a browser -> ' +
+      'confirm_changeset). This is the recommended first call: it tells an agent its ' +
+      'ceiling so it does not attempt commits it cannot make. Takes no arguments.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
@@ -132,16 +134,41 @@ export const MCP_TOOLS: McpToolDef[] = [
   {
     name: 'prepare_translations',
     description:
-      'Stage a batch of translations as an immutable changeset (execution plan) WITHOUT ' +
-      'applying them. Compiles each entry into a SetTranslation command, resolves per-cell ' +
-      'preconditions from live state, and computes a server-side effect summary (added vs ' +
-      'modified counts, plus warnings for missing/duplicate cells — nothing is silently ' +
-      'dropped). Args: projectId, translations (array of { cellId, fileId, value, valueHtml? }), ' +
-      'and optional changesetId (a client UUIDv7 for idempotent retries). Returns ' +
-      '{ changesetId, summary, digest, mode, approvalUrl? }. If mode is "ask" you CANNOT ' +
-      'commit directly: surface the approvalUrl to a human, wait for them to approve in the ' +
-      'browser, then call confirm_changeset. If mode is "act", call confirm_changeset to ' +
-      'commit immediately.',
+      'Stage a batch of commands as an immutable changeset (execution plan) WITHOUT applying ' +
+      'them — the generic propose step for every MCP-stageable command kind (Agent API v1.1). ' +
+      'Pass `translations` for a SetTranslation batch (as before), and/or `commands` for ' +
+      'CreateProject, UpdateProjectSettings, or LinkMedia. Resolves preconditions from live ' +
+      'state and computes a server-side effect summary (nothing is silently dropped) before ' +
+      'returning { changesetId, summary, digest, mode, approvalUrl? }. If mode is "ask" you ' +
+      'CANNOT commit directly: surface the approvalUrl to a human, wait for them to approve ' +
+      'in the browser, then call confirm_changeset. If mode is "act", call confirm_changeset ' +
+      'to commit immediately.\n\n' +
+      'PlanImport is NOT accepted via `commands` — it remains REST-only ' +
+      '(see get_capabilities.planImport).\n\n' +
+      '`commands` shapes (each enforced server-side; a validation_failed error names the ' +
+      'violated rule):\n' +
+      '  { kind: "CreateProject", name, projectId?, orgId? } — receipt-only (a plain row ' +
+      'write, not an event); must be the SOLE command in the changeset. `projectId` is ' +
+      'optional: when omitted, the DEFINITIVE new project id is this tool call\'s own ' +
+      '`projectId` argument (the changeset\'s URL project id) — set BOTH to the same value ' +
+      'to avoid ambiguity, or omit the command\'s `projectId` and rely on the top-level one. ' +
+      'Requires an unscoped or org-scoped credential with org role >= MAINTAINER in the ' +
+      'target org (a project-scoped credential gets scope_denied) — since act-mode ' +
+      'credentials must be project-scoped at mint, CreateProject is effectively ask-mode ' +
+      'only. A project id already taken between prepare and commit surfaces as `conflict`.\n' +
+      '  { kind: "UpdateProjectSettings", projectId, settings, ifMatchVersion } — ' +
+      'receipt-only; must be the SOLE command in the changeset. Requires project role >= ' +
+      'MAINTAINER. `ifMatchVersion` must equal the live settings version or you get ' +
+      'plan_stale (re-fetch the current version and re-prepare); the receipt carries the new ' +
+      'version.\n' +
+      '  { kind: "LinkMedia", fileId, cellId, artifactId } — event-native (compiles to ' +
+      'cell.audio.attach + cell.audio.select). `artifactId` must reference an audio-kind ' +
+      'artifact already uploaded to this project via REST ' +
+      '`POST .../projects/:projectId/artifacts` with header `x-artifact-kind: audio` — MCP ' +
+      'is JSON-RPC text and cannot carry that binary upload itself. Multiple LinkMedia ' +
+      'commands may share one changeset with each other, but LinkMedia cannot mix with ' +
+      'SetTranslation/CreateProject/UpdateProjectSettings in the same changeset. Requires ' +
+      'CONTRIBUTOR.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -149,7 +176,7 @@ export const MCP_TOOLS: McpToolDef[] = [
         changesetId: { type: 'string', description: 'Optional client-supplied UUIDv7 for idempotency.' },
         translations: {
           type: 'array',
-          description: 'The translations to stage.',
+          description: 'SetTranslation entries to stage.',
           items: {
             type: 'object',
             properties: {
@@ -162,19 +189,81 @@ export const MCP_TOOLS: McpToolDef[] = [
             additionalProperties: false,
           },
         },
+        commands: {
+          type: 'array',
+          description:
+            'CreateProject / UpdateProjectSettings / LinkMedia commands to stage (Agent API ' +
+            'v1.1) — see this tool\'s description for per-kind shape, role gates, and ' +
+            'sole-command rules. PlanImport is not accepted here (REST-only).',
+          items: {
+            type: 'object',
+            oneOf: [
+              {
+                type: 'object',
+                properties: {
+                  kind: { type: 'string', enum: ['CreateProject'] },
+                  name: { type: 'string' },
+                  projectId: {
+                    type: 'string',
+                    description: 'Optional — defaults to this call\'s top-level projectId.',
+                  },
+                  orgId: {
+                    type: ['string', 'number'],
+                    description: 'Target org id; omit for a personal (org-less) project.',
+                  },
+                },
+                required: ['kind', 'name'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  kind: { type: 'string', enum: ['UpdateProjectSettings'] },
+                  projectId: { type: 'string' },
+                  settings: { type: 'object', description: 'Settings blob to write (replaces the stored blob).' },
+                  ifMatchVersion: {
+                    type: 'number',
+                    description: 'Must equal the live settings version, else plan_stale.',
+                  },
+                },
+                required: ['kind', 'projectId', 'settings', 'ifMatchVersion'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  kind: { type: 'string', enum: ['LinkMedia'] },
+                  fileId: { type: 'string' },
+                  cellId: { type: 'string' },
+                  artifactId: {
+                    type: 'string',
+                    description: 'An audio-kind artifact id from the REST artifact upload endpoint.',
+                  },
+                },
+                required: ['kind', 'fileId', 'cellId', 'artifactId'],
+                additionalProperties: false,
+              },
+            ],
+          },
+        },
       },
-      required: ['projectId', 'translations'],
+      required: ['projectId'],
       additionalProperties: false,
     },
   },
   {
     name: 'get_changeset',
     description:
-      'Fetch a staged changeset: its status (staged|committed|discarded|stale|expired), the ' +
-      'server-computed effect summary, the content digest, the approvalUrl (for ask mode), ' +
-      'and — once committed — the execution receipt (applied event ids, counts, warnings). ' +
-      'Poll this after directing a human to the approvalUrl to observe when status becomes ' +
-      'committed. Args: projectId, changesetId.',
+      'Fetch a staged changeset: its status (staged|committing|committed|discarded|stale|' +
+      'expired — "committing" is a transient mid-apply state you should treat the same as ' +
+      '"staged" and simply poll again), the server-computed effect summary, the content ' +
+      'digest, the approvalUrl (for ask mode), and — once committed — the execution receipt. ' +
+      'For SetTranslation/PlanImport/LinkMedia the receipt has applied event ids, counts, and ' +
+      'warnings; for the receipt-only commands (CreateProject, UpdateProjectSettings) it is ' +
+      'instead a provenance stamp { credentialId, channel, changesetId, command, appliedAt, ' +
+      'projectId, version? } — there are no events to list, since those commands apply a ' +
+      'plain row write. Poll this after directing a human to the approvalUrl to observe when ' +
+      'status becomes committed. Args: projectId, changesetId.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -194,7 +283,10 @@ export const MCP_TOOLS: McpToolDef[] = [
       'receipt. In ask mode it commits ONLY if a human has approved via the approvalUrl; ' +
       'otherwise it returns a confirmation_required error (with the approvalUrl) and applies ' +
       'nothing — approval is never fabricated. If state drifted since prepare you get ' +
-      'plan_stale. Committing is idempotent: a second call returns the same receipt.',
+      'plan_stale (for CreateProject specifically, a project id claimed by someone else ' +
+      'between prepare and commit returns conflict instead). Committing is idempotent: a ' +
+      'second call returns the same receipt — this also covers a crash mid-commit, which a ' +
+      'retry safely resumes rather than double-applying.',
     inputSchema: {
       type: 'object',
       properties: {

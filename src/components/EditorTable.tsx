@@ -9,7 +9,7 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, Music,
+  ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, ChevronDown, Music,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -33,6 +33,7 @@ import { hasTiming } from "@/lib/timeline/derive"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform } from "@/lib/sync/role-policy"
 import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
+import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { needsAttention, needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
@@ -66,6 +67,12 @@ import {
 } from "@/lib/audio/selection"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
@@ -498,6 +505,21 @@ interface EditorTableProps {
    * the emit helpers, so N=1 is byte-identical.
    */
   activeLane?: string
+  /**
+   * AQU-602: all selectable target lanes, default lane FIRST as `''` (callers
+   * build `['', ...targetLanes]`). When more than one is offered AND
+   * `onLaneChange` is provided, the TARGET language tag in the column header
+   * becomes a dropdown that switches the active lane. With one lane (or no
+   * handler) the tag stays a static pill — byte-identical to the N=1 header.
+   */
+  lanes?: string[]
+  /** Called with the chosen lane (`''` = default) when the TARGET tag dropdown
+   *  is used. Omit to keep the tag non-interactive. */
+  onLaneChange?: (lane: string) => void
+  /** Human label for the default (`''`) lane in the TARGET tag dropdown — the
+   *  project/file's default target-language name. Non-default lanes label
+   *  themselves with their own tag string. */
+  defaultLaneLabel?: string
   /** When set, each row shows the Audio-lens strip (speaker chip + generate). */
   audioLens?: AudioLensContext | null
   /** Timeline-segment-model: the active file's order lens. When `'time'`, the
@@ -641,7 +663,8 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, username, activeLane = "", isCompletionConfigured, isCompletionAvailable,
+  project, cellStore, username, activeLane = "", lanes, onLaneChange, defaultLaneLabel,
+  isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews,
   onCompleteSingle, onCompleteBatch, healthMap,
   infractions = new Map(), rules = [],
@@ -1267,6 +1290,23 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }),
   [cellStore, cellStoreVersion])
 
+  // AQU-610: sequential (non-scripture) numbering counts only *numbered*
+  // (non-paratext) cells, so the count starts at 1 at the first real content
+  // cell and stays gap-free even when front matter, introductions, or other
+  // paratextual cells sit before/among the content. Scripture files number by
+  // canonical verse ref and don't consult this map.
+  const sequentialNumberByCellId = useMemo(() =>
+    readAtVersion(cellStoreVersion, () => {
+      const map = new Map<string, number>()
+      let ordinal = 0
+      for (const id of displayCellIds) {
+        if (cellStore.getCellView(id)?.type === "paratext") continue
+        map.set(id, ++ordinal)
+      }
+      return map
+    }),
+  [cellStore, cellStoreVersion, displayCellIds])
+
   const activeChapterLabel = chapterNavigationItems.some((chapter) => chapter.label === currentSectionLabel)
     ? currentSectionLabel
     : chapterNavigationItems[0]?.label ?? ""
@@ -1422,6 +1462,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           activeCueIndex={activeCueIndex}
           onSeekToCue={onSeekToCue}
           rowIndex={index}
+          contentNumber={sequentialNumberByCellId.get(cell.id) ?? index + 1}
           lineNumbersEnabled={lineNumbersEnabled}
           scriptureNumbering={chapterNavigationItems.length > 0}
           cellLabelsEnabled={cellLabelsEnabled}
@@ -1508,6 +1549,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     isCompletionConfigured,
     isTimeOrdered,
     chapterNavigationItems.length,
+    sequentialNumberByCellId,
     lineNumbersEnabled,
     micDenied,
     onAckRemoteChange,
@@ -1580,11 +1622,50 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </div>
           <div className="flex items-center gap-2 pl-3">
             Target
-            {project.targetLanguage && (
+            {/* AQU-602: the target-language tag doubles as the lane switcher.
+                With >1 lane (and a change handler) it's a dropdown that switches
+                the active target lane; otherwise it's a static pill. `''` = the
+                default lane, labelled with the project/file default language. */}
+            {project.targetLanguage && lanes && lanes.length > 1 && onLaneChange ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <button
+                      type="button"
+                      data-testid="lane-switcher"
+                      data-active-lane={activeLane}
+                      aria-label="Active translation lane"
+                      className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    />
+                  }
+                >
+                  {project.targetLanguage}
+                  <ChevronDown className="h-2.5 w-2.5" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-[8rem]">
+                  {lanes.map((lane) => {
+                    const active = lane === activeLane
+                    const label = lane === "" ? (defaultLaneLabel || "Target") : lane
+                    return (
+                      <DropdownMenuItem
+                        key={lane || "__default__"}
+                        data-testid={`lane-option-${lane}`}
+                        data-active={active ? "true" : undefined}
+                        onClick={() => onLaneChange(lane)}
+                        className="justify-between gap-2 text-xs"
+                      >
+                        {label}
+                        {active && <Check className="h-3.5 w-3.5" />}
+                      </DropdownMenuItem>
+                    )
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : project.targetLanguage ? (
               <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
                 {project.targetLanguage}
               </span>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
@@ -1731,6 +1812,8 @@ interface MemoizedRowProps {
   activeCueIndex?: number
   onSeekToCue?: (cellId: string) => void
   rowIndex: number
+  /** AQU-610: 1-based ordinal among numbered (non-paratext) cells for sequential numbering. */
+  contentNumber: number
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
   sourceDirectionMode: DirectionMode
@@ -1792,7 +1875,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
     cell, examples, completing, errors, previews, healthMap, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
-    activeCueIndex, rowIndex, gridCols,
+    activeCueIndex, rowIndex, contentNumber, gridCols,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
     onSelectionPointerDown: onSelectionPointerDownParent,
     onNavigateCell: onNavigateCellParent,
@@ -1930,6 +2013,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         isActiveCue={isActiveCue}
         onSeekToCue={onSeekToCue}
         rowIndex={rowIndex}
+        contentNumber={contentNumber}
         lineNumbersEnabled={lineNumbersEnabled}
         scriptureNumbering={scriptureNumbering}
         cellLabelsEnabled={cellLabelsEnabled}
@@ -2059,6 +2143,8 @@ interface EditorRowProps {
   onGridRowKeyNav: (direction: "prev" | "next") => void
   getVoiceTakeCells: (startIndex: number, count: number) => CellData[]
   rowIndex: number
+  /** AQU-610: 1-based ordinal among numbered (non-paratext) cells for sequential numbering. */
+  contentNumber: number
   lineNumbersEnabled: boolean
   /** Scripture files number verse rows by canonical ref and leave headings unnumbered. */
   scriptureNumbering: boolean
@@ -2923,7 +3009,7 @@ function EditorRow({
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
-  rowIndex, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols,
+  rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, micDenied,
   audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, onAskAiFromSelection,
   onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
@@ -2990,7 +3076,17 @@ function EditorRow({
   // machinery in useCells) shown until the projection round-trips.
   const [sourceEditing, setSourceEditing] = useState(false)
   const [sourceDraft, setSourceDraft] = useState<{ value: string; valueHtml: string } | null>(null)
-  const pendingSourceEventIdRef = useRef<string | null>(cell.sourceEventId ?? null)
+  // Tracks the newest source.cell.commit this row enqueued whose projection
+  // head hasn't caught up yet, as { eventId, parentId }. Successive source edits
+  // chain onto `eventId`; the reconciling effect below clears it once the
+  // projection reaches it (or a different/remote head lands) — crucially WITHOUT
+  // regressing it back to the lagging projection head. Mirrors the target-side
+  // pendingTargetCommitHeadsRef reconciliation in ProjectWorkspace. AQU-603: the
+  // old naive "adopt cell.sourceEventId" effect clobbered the pending head when a
+  // lane switch triggered a mid-flight cells revalidate, forking the next edit
+  // onto the same parent — which the server's AD-2 first-child guard dropped as a
+  // "stale sibling" (server accepted but did not apply).
+  const pendingSourceCommitRef = useRef<{ eventId: string; parentId: string | null } | null>(null)
   const sourceColRef = useRef<HTMLDivElement | null>(null)
   // RES-4: local error state for enqueue failures (IDB quota, role errors).
   // Surfaces a compact inline message below the editor instead of swallowing.
@@ -3299,7 +3395,7 @@ function EditorRow({
     // (cleared by the effect below once cell.original round-trips).
     setSourceDraft({ value, valueHtml })
     setWriteError(null)
-    const parentId = pendingSourceEventIdRef.current ?? cell.sourceEventId ?? null
+    const parentId = resolveSourceCommitParent(pendingSourceCommitRef.current, cell.sourceEventId ?? null)
     emitSourceCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
@@ -3309,7 +3405,7 @@ function EditorRow({
       valueHtml,
       author: username,
     }).then((eventId) => {
-      pendingSourceEventIdRef.current = eventId
+      pendingSourceCommitRef.current = { eventId, parentId }
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.error("[source-edit] enqueue failed:", err)
@@ -3319,10 +3415,21 @@ function EditorRow({
     })
   }, [canEditSource, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.sourceEventId, username, onCellCommitted])
 
-  // Adopt the projection's source head as the next chain parent — for both our
-  // own confirmed commits and remote source commits (mirror-sync / peer leads).
+  // Reconcile the pending source head against the projection — the mirror of
+  // ProjectWorkspace's target-side pendingTargetCommitHeadsRef reconciliation.
+  // Clear the pending head ONLY when the projection has caught up to it, or when
+  // a DIFFERENT head (a remote/peer source commit, mirror-sync) landed that isn't
+  // the parent we chained from — in which case the next edit should chain onto
+  // that new projection head. While the projection still lags at our commit's
+  // parent, KEEP the pending head so the next edit chains onto it rather than
+  // forking a stale sibling onto the same parent (AQU-603). When there is no
+  // pending commit, handleSourceCommit falls back to cell.sourceEventId, so a
+  // remote head is still adopted correctly.
   useEffect(() => {
-    if (cell.sourceEventId) pendingSourceEventIdRef.current = cell.sourceEventId
+    pendingSourceCommitRef.current = reconcilePendingSourceCommit(
+      pendingSourceCommitRef.current,
+      cell.sourceEventId ?? null,
+    )
   }, [cell.sourceEventId])
 
   // Clear the optimistic source draft once the server projection carries it.
@@ -3860,6 +3967,7 @@ function EditorRow({
     sourceCanonicalRef: cell.globalReferences?.[0],
     scriptureNumbering,
     rowIndex,
+    contentNumber,
   })
   const numberPill = numberLabel === null ? null : (
     <span className="flex h-6 items-center" aria-label={`Line ${numberLabel}`}>

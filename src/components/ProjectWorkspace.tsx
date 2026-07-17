@@ -31,7 +31,6 @@ import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileOrderedBy, fileTypeHasSections, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
-import { LaneSwitcher } from "./LaneSwitcher"
 import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -4202,13 +4201,9 @@ export function ProjectWorkspace() {
 
             {project && centerSurface === "editor" && activeFileId ? (
               <>
-                {/* AQU-538: active-lane switcher — renders only when >1 lane. */}
-                <LaneSwitcher
-                  lanes={availableLanes}
-                  value={activeLane}
-                  onChange={setActiveLane}
-                  defaultLaneLabel={activeTargetLanguage || "Target"}
-                />
+                {/* AQU-602: the active-lane switcher moved into the editor's
+                    TARGET language tag (see EditorTable header) — no separate
+                    header control. */}
                 <EditorModeToggle
                   lens={lens}
                   onChange={(l) => {
@@ -4605,6 +4600,9 @@ export function ProjectWorkspace() {
             onVisibleFootnotesChange={footnoteViewMode === "tray" ? handleVisibleFootnotesChange : undefined}
             username={currentUsername}
             activeLane={activeLane}
+            lanes={availableLanes}
+            onLaneChange={setActiveLane}
+            defaultLaneLabel={activeTargetLanguage || "Target"}
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
             onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}

@@ -14,28 +14,19 @@
  * Flow:
  *   1. Create a project (source en, target fr), import a small file.
  *   2. Translate cell 0 in the default lane.
- *   3. Assert the LaneSwitcher does NOT render (only the default lane exists).
+ *   3. Assert the lane switcher does NOT render (only the default lane exists).
  *   4. Open Settings → Languages, add lane "es".
- *   5. Back in the workspace, the LaneSwitcher appears; switch to "es".
+ *   5. Back in the workspace, the switcher appears; switch to "es".
  *   6. Cell 0's target is EMPTY in the "es" lane (lanes are independent).
  *   7. Type Spanish text, commit (targetLang: "es" on the wire).
  *   8. Switch back to the default lane — the original French text is intact.
  *   9. Switch to "es" again — the Spanish text is intact.
  *
- * KNOWN BLOCKER (documented, not fixed here — e2e/** only):
- * `src/hooks/useProject.ts`'s `overlaySettings()` merges every synced
- * `ProjectWideSettings` field (sourceLanguage, targetLanguage, rules, …) onto
- * the `ProjectRecord` the workspace reads as `project`, EXCEPT `targetLanes`
- * (added to the `ProjectWideSettings` interface in project-settings.ts:94 but
- * never assigned in the `assign(...)` calls in useProject.ts:39-60). Since
- * `ProjectWorkspace.tsx` computes `targetLanes`/`availableLanes` off
- * `project.targetLanes` (component ~line 1120), a lane added via Settings is
- * persisted and listed correctly on the Settings page, but the workspace
- * header's `project.targetLanes` stays `undefined`/`[]` forever, so the
- * LaneSwitcher never renders. See SWARM-TODO(AQU-538) in
- * docs/swarm/AQU538-TRACES.md. Steps 5-9 above are expected to fail on the
- * "LaneSwitcher appears" assertion until that's fixed — left in place
- * (not weakened) per AGENTS.md's "fix the product, don't water down the test".
+ * AQU-602: the lane switcher is the TARGET language tag in the editor's column
+ * header — a dropdown when >1 lane exists, a static pill otherwise (there is no
+ * separate header control). The earlier `overlaySettings()` blocker (targetLanes
+ * not merged onto the workspace `project` record) is resolved — see
+ * `src/hooks/useProject.ts` (`assign("targetLanes", …)`).
  */
 
 import path from "node:path"

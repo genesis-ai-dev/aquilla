@@ -9,7 +9,7 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, Music,
+  ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, ChevronDown, Music,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -67,6 +67,12 @@ import {
 } from "@/lib/audio/selection"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
@@ -499,6 +505,21 @@ interface EditorTableProps {
    * the emit helpers, so N=1 is byte-identical.
    */
   activeLane?: string
+  /**
+   * AQU-602: all selectable target lanes, default lane FIRST as `''` (callers
+   * build `['', ...targetLanes]`). When more than one is offered AND
+   * `onLaneChange` is provided, the TARGET language tag in the column header
+   * becomes a dropdown that switches the active lane. With one lane (or no
+   * handler) the tag stays a static pill — byte-identical to the N=1 header.
+   */
+  lanes?: string[]
+  /** Called with the chosen lane (`''` = default) when the TARGET tag dropdown
+   *  is used. Omit to keep the tag non-interactive. */
+  onLaneChange?: (lane: string) => void
+  /** Human label for the default (`''`) lane in the TARGET tag dropdown — the
+   *  project/file's default target-language name. Non-default lanes label
+   *  themselves with their own tag string. */
+  defaultLaneLabel?: string
   /** When set, each row shows the Audio-lens strip (speaker chip + generate). */
   audioLens?: AudioLensContext | null
   /** Timeline-segment-model: the active file's order lens. When `'time'`, the
@@ -642,7 +663,8 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, username, activeLane = "", isCompletionConfigured, isCompletionAvailable,
+  project, cellStore, username, activeLane = "", lanes, onLaneChange, defaultLaneLabel,
+  isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews,
   onCompleteSingle, onCompleteBatch, healthMap,
   infractions = new Map(), rules = [],
@@ -1600,11 +1622,50 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </div>
           <div className="flex items-center gap-2 pl-3">
             Target
-            {project.targetLanguage && (
+            {/* AQU-602: the target-language tag doubles as the lane switcher.
+                With >1 lane (and a change handler) it's a dropdown that switches
+                the active target lane; otherwise it's a static pill. `''` = the
+                default lane, labelled with the project/file default language. */}
+            {project.targetLanguage && lanes && lanes.length > 1 && onLaneChange ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <button
+                      type="button"
+                      data-testid="lane-switcher"
+                      data-active-lane={activeLane}
+                      aria-label="Active translation lane"
+                      className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    />
+                  }
+                >
+                  {project.targetLanguage}
+                  <ChevronDown className="h-2.5 w-2.5" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-[8rem]">
+                  {lanes.map((lane) => {
+                    const active = lane === activeLane
+                    const label = lane === "" ? (defaultLaneLabel || "Target") : lane
+                    return (
+                      <DropdownMenuItem
+                        key={lane || "__default__"}
+                        data-testid={`lane-option-${lane}`}
+                        data-active={active ? "true" : undefined}
+                        onClick={() => onLaneChange(lane)}
+                        className="justify-between gap-2 text-xs"
+                      >
+                        {label}
+                        {active && <Check className="h-3.5 w-3.5" />}
+                      </DropdownMenuItem>
+                    )
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : project.targetLanguage ? (
               <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
                 {project.targetLanguage}
               </span>
-            )}
+            ) : null}
           </div>
         </div>
       </div>

@@ -21,7 +21,7 @@ import {
 } from './commands'
 import { resolveCellStates } from './preconditions'
 import { loadChangeset } from './store'
-import { mintInternalSyncToken } from './token-bridge'
+import { assertCredentialScope, mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
 import { audioObjectKey } from '../audio'
 import { handleEventsWriteRequest } from '../events/route'
@@ -144,7 +144,10 @@ export async function handleCommit(
   if (cs.status === 'staged') {
     // Expiry.
     if (new Date(cs.expiresAt).getTime() < Date.now()) {
-      await db.prepare(`UPDATE changesets SET status = 'expired' WHERE id = ?`).bind(id).run()
+      await db
+        .prepare(`UPDATE changesets SET status = 'expired' WHERE id = ? AND status IN ('staged','committing')`)
+        .bind(id)
+        .run()
       return errorResponse('validation_failed', 'changeset has expired')
     }
 
@@ -180,7 +183,10 @@ export async function handleCommit(
       }
     }
     if (drift.length > 0) {
-      await db.prepare(`UPDATE changesets SET status = 'stale' WHERE id = ?`).bind(id).run()
+      await db
+        .prepare(`UPDATE changesets SET status = 'stale' WHERE id = ? AND status IN ('staged','committing')`)
+        .bind(id)
+        .run()
       return errorResponse('plan_stale', 'project state changed since prepare', { drift })
     }
 
@@ -188,13 +194,24 @@ export async function handleCommit(
     // id, so a crash after this point re-enters as a retry (skipping the gates
     // above) and can rebuild provenance without a second approval. Guarded on
     // status='staged' so a concurrent double-commit can't both flip.
-    await db
+    const flip = await db
       .prepare(
         `UPDATE changesets SET status = 'committing', confirmation_id = ?
            WHERE id = ? AND status = 'staged'`,
       )
       .bind(confirmationId, id)
       .run()
+    // Inspect the flip: a 0-row result means a CONCURRENT commit of this same
+    // changeset already won the staged→committing race. Do NOT proceed to apply
+    // (and, critically, do NOT fall through to a stale-write that could clobber
+    // the winner's committed receipt). Re-load: if the winner already committed,
+    // return its stored receipt (idempotent); otherwise it is still mid-apply —
+    // refuse rather than double-apply.
+    if ((flip.meta?.changes ?? 0) === 0) {
+      const fresh = await loadChangeset(db, projectId, id)
+      if (fresh?.status === 'committed') return Response.json({ receipt: fresh.receipt })
+      return errorResponse('conflict', 'commit already in progress')
+    }
   }
 
   // ── PlanImport takes its own compile/commit path ──────────────────────────
@@ -592,7 +609,10 @@ async function receiptOnlyGates(
   if (cs.status !== 'staged') return { confirmationId: cs.confirmationId ?? null }
 
   if (new Date(cs.expiresAt).getTime() < Date.now()) {
-    await db.prepare(`UPDATE changesets SET status = 'expired' WHERE id = ?`).bind(cs.id).run()
+    await db
+      .prepare(`UPDATE changesets SET status = 'expired' WHERE id = ? AND status IN ('staged','committing')`)
+      .bind(cs.id)
+      .run()
     return errorResponse('validation_failed', 'changeset has expired')
   }
 
@@ -616,13 +636,22 @@ async function receiptOnlyGates(
     confirmationId = consumed.id
   }
 
-  await db
+  const flip = await db
     .prepare(
       `UPDATE changesets SET status = 'committing', confirmation_id = ?
          WHERE id = ? AND status = 'staged'`,
     )
     .bind(confirmationId, cs.id)
     .run()
+  // A 0-row flip means a concurrent commit of this same changeset won the
+  // staged→committing race. Return the winner's stored receipt if it already
+  // committed (idempotent), else refuse — never fall through to the apply +
+  // stale-write, which could clobber the winner's committed row.
+  if ((flip.meta?.changes ?? 0) === 0) {
+    const fresh = await loadChangeset(db, cs.projectId, cs.id)
+    if (fresh?.status === 'committed') return Response.json({ receipt: fresh.receipt })
+    return errorResponse('conflict', 'commit already in progress')
+  }
   return { confirmationId }
 }
 
@@ -691,7 +720,10 @@ async function commitCreateProject(
     if (!mineByRetry) {
       // Non-retryable: move off 'committing' so a later retry can't misread it as
       // its own prior attempt and falsely claim success.
-      await db.prepare(`UPDATE changesets SET status = 'stale' WHERE id = ?`).bind(cs.id).run()
+      await db
+        .prepare(`UPDATE changesets SET status = 'stale' WHERE id = ? AND status IN ('staged','committing')`)
+        .bind(cs.id)
+        .run()
       return errorResponse('conflict', `project ${projectId} was created by another caller since prepare`)
     }
   }
@@ -766,7 +798,10 @@ async function commitLinkMedia(
       .bind(cmd.artifactId, projectId)
       .first<{ id: string; kind: string; r2_key: string; audio_id: string | null; content_type: string | null }>()
     if (!artifact || artifact.kind !== 'audio' || !artifact.audio_id) {
-      await db.prepare(`UPDATE changesets SET status = 'stale' WHERE id = ?`).bind(cs.id).run()
+      await db
+        .prepare(`UPDATE changesets SET status = 'stale' WHERE id = ? AND status IN ('staged','committing')`)
+        .bind(cs.id)
+        .run()
       return errorResponse(
         'plan_stale',
         `artifact ${cmd.artifactId} is no longer an audio artifact in this project`,
@@ -777,7 +812,10 @@ async function commitLinkMedia(
     const cellStates = await resolveCellStates(db, projectId, [cmd])
     const s = cellStates.get(cellKey(cmd.fileId, cmd.cellId))
     if (!s || (!s.sourceExists && !s.targetExists)) {
-      await db.prepare(`UPDATE changesets SET status = 'stale' WHERE id = ?`).bind(cs.id).run()
+      await db
+        .prepare(`UPDATE changesets SET status = 'stale' WHERE id = ? AND status IN ('staged','committing')`)
+        .bind(cs.id)
+        .run()
       return errorResponse(
         'plan_stale',
         `cell ${cmd.cellId} in file ${cmd.fileId} no longer exists`,
@@ -788,7 +826,10 @@ async function commitLinkMedia(
     // /audio route (keyed by the cell's file) serves them. Idempotent on retry.
     const src = await env.SNAPSHOTS.get(artifact.r2_key)
     if (!src) {
-      await db.prepare(`UPDATE changesets SET status = 'stale' WHERE id = ?`).bind(cs.id).run()
+      await db
+        .prepare(`UPDATE changesets SET status = 'stale' WHERE id = ? AND status IN ('staged','committing')`)
+        .bind(cs.id)
+        .run()
       return errorResponse('plan_stale', `artifact ${cmd.artifactId} bytes missing from storage`)
     }
     const destKey = audioObjectKey(env, projectId, cmd.fileId, artifact.audio_id)
@@ -932,6 +973,18 @@ async function commitUpdateProjectSettings(
   const wasStaged = cs.status === 'staged'
   const projectId = cs.projectId
 
+  // H1: re-assert the credential's scope ceiling at commit, matching the event
+  // path (which re-checks via mintInternalSyncToken → assertCredentialScope).
+  // The receipt-only path mints no internal token, so without this a credential
+  // whose scope stopped covering the project between prepare and commit would
+  // still apply the write. (The same-credential rule — cred.credentialId ===
+  // cs.credentialId — is enforced once for every path at the top of handleCommit.)
+  try {
+    await assertCredentialScope(db, cred, projectId)
+  } catch (err) {
+    return toErrorResponse(err)
+  }
+
   const role = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
   if (!role || role.level < ROLE.MAINTAINER) {
     return errorResponse('permission_denied', 'project role >= maintainer required to update settings')
@@ -950,12 +1003,30 @@ async function commitUpdateProjectSettings(
   })
 
   if (result.status === 'conflict') {
-    // A crash-retry whose first attempt already applied the bump (current version
-    // is exactly expected+1) is idempotent success, not drift.
-    if (!wasStaged && result.current.version === expectedVersion + 1) {
+    // A crash-retry whose OWN first attempt already applied the bump lands here:
+    // the version-guarded UPDATE now misses because the live version is already
+    // expected+1. But a CONCURRENT maintainer writing during the crash window
+    // ALSO leaves the live version at expected+1 — treating that as our own apply
+    // would silently drop the agent's settings and hand back a false-success
+    // receipt. Disambiguate by author, mirroring commitCreateProject's created_by
+    // check: absorb it as idempotent success ONLY when the stored updated_by is
+    // this credential's user; otherwise it is a genuine concurrent write → stale.
+    //
+    // Residual ambiguity: if the SAME human wrote these settings via the web UI
+    // inside the crash window, updated_by matches and we absorb it as success. We
+    // accept that — it is the same human authority, and the version guard bounds
+    // the agent's effect to a single bump either way.
+    const bumpedByThisUser =
+      result.current.version === expectedVersion + 1 &&
+      result.current.updatedBy != null &&
+      String(result.current.updatedBy) === String(cred.userId)
+    if (!wasStaged && bumpedByThisUser) {
       return finishUpdateSettingsReceipt(request, db, cred, cs, projectId, result.current.version, confirmationId)
     }
-    await db.prepare(`UPDATE changesets SET status = 'stale' WHERE id = ?`).bind(cs.id).run()
+    await db
+      .prepare(`UPDATE changesets SET status = 'stale' WHERE id = ? AND status IN ('staged','committing')`)
+      .bind(cs.id)
+      .run()
     return errorResponse('plan_stale', 'settings version changed since prepare', {
       expected: expectedVersion,
       current: result.current.version,

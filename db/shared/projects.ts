@@ -241,12 +241,12 @@ export interface UpdateProjectSettingsInput {
  *   - `ok`       → the write landed; `settings` is the freshly-stored row.
  *   - `conflict` → version drift (pre-check or a racing writer); `current` is
  *                  the now-stored row for the client to rebase on.
- *   - `error`    → the first-write INSERT failed for a non-conflict reason;
- *                  `message` is the DB error text.
+ *   - `error`    → the INSERT or version-guarded UPDATE failed for a non-conflict
+ *                  reason; `message` is the DB error text.
  *
- * Note: the version-guarded UPDATE path does NOT catch DB errors — they throw,
- * matching the internal route's original behavior (a generic 500), whereas the
- * first-write INSERT path disambiguates a losing race from a real failure.
+ * Both write paths disambiguate a losing race (→ `conflict`) from a real DB
+ * failure (→ `error`); neither throws an uncaught exception. The caller maps
+ * `error` to its own 500, matching the internal route's original behavior.
  */
 export type UpdateProjectSettingsResult =
   | { status: "ok"; settings: ProjectSettingsResponse }
@@ -325,7 +325,20 @@ export async function updateProjectSettingsShared(
         db, input.projectId, newThreshold, newVersion, newSettingsJson,
       ))
     }
-    const [result] = await db.batch(stmts)
+    // H3: catch DB errors on the version-guarded UPDATE (e.g. a projection
+    // statement failing) and return the discriminated `error` result rather than
+    // letting the exception propagate uncaught. The caller (auth-worker route /
+    // sync-worker commit) maps `error` to its own 500 — mapping unchanged, but a
+    // thrown exception no longer escapes this module. A genuine losing race still
+    // returns `conflict` (0-row guard below); only real failures are `error`.
+    let result: Awaited<ReturnType<typeof db.batch>>[number]
+    try {
+      ;[result] = await db.batch(stmts)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error("project_settings update failed:", err)
+      return { status: "error", message }
+    }
 
     const changes = result.meta?.changes
     if ((typeof changes === "number" && changes === 0) || result.results.length === 0) {

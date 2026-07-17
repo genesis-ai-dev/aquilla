@@ -394,9 +394,11 @@ async function resolveOrgRoleLevel(
 }
 
 /** Stage a receipt-only project-lifecycle changeset (CreateProject /
- *  UpdateProjectSettings): no per-cell preconditions, an empty effect summary,
- *  and a plan carrying only its pinned ids (definitive project id / settings
- *  version). Mirrors preparePlanImport's insert + response. */
+ *  UpdateProjectSettings): no per-cell preconditions, a caller-built effect
+ *  summary (the command's renderable fields, so /approve/:id shows what's being
+ *  applied rather than "No changes summarized."), and a plan carrying only its
+ *  pinned ids (definitive project id / settings version). Mirrors
+ *  preparePlanImport's insert + response. */
 async function stageReceiptOnlyChangeset(
   db: AquillaDb,
   cred: ApiCredentialContext,
@@ -405,9 +407,9 @@ async function stageReceiptOnlyChangeset(
   autonomyMode: 'ask' | 'act',
   cmd: Command,
   plannedIds: PlannedEventIds,
+  summary: ChangesetSummary,
   env: ExternalEnv,
 ): Promise<Response> {
-  const summary: ChangesetSummary = { warnings: [] }
   const commands: Command[] = [cmd]
   const preconditions: CellPrecondition[] = []
   const digest = await computeDigest(commands, preconditions)
@@ -600,7 +602,25 @@ async function prepareCreateProject(
   const plannedIds: PlannedEventIds = {
     createProject: { projectId: definitiveProjectId, orgId },
   }
-  return stageReceiptOnlyChangeset(db, cred, urlProjectId, id, autonomyMode, cmd, plannedIds, env)
+
+  // CreateProject is human-approved by design (spec §2, §3 "ask-mode only, by
+  // construction"): FORCE the staged changeset to ask-mode regardless of the
+  // credential's or request's mode, so every agent-initiated project creation
+  // passes through /approve/:id. Org-scoped act tokens (which the mint endpoint
+  // still permits) keep act for their OTHER commands — only CreateProject is
+  // pinned to ask here. `autonomyMode` is intentionally ignored on this path.
+  void autonomyMode
+
+  // Effect summary the /approve page renders (blind-approval fix): the command
+  // kind plus the definitive facts a human needs to authorize a project create.
+  const summary: ChangesetSummary = {
+    command: 'CreateProject',
+    projectName: cmd.name,
+    newProjectId: definitiveProjectId,
+    targetOrg: orgId == null ? 'personal' : String(orgId),
+    warnings: [],
+  }
+  return stageReceiptOnlyChangeset(db, cred, urlProjectId, id, 'ask', cmd, plannedIds, summary, env)
 }
 
 /**
@@ -642,5 +662,33 @@ async function prepareUpdateProjectSettings(
   const plannedIds: PlannedEventIds = {
     updateProjectSettings: { version: cmd.ifMatchVersion },
   }
-  return stageReceiptOnlyChangeset(db, cred, urlProjectId, id, autonomyMode, cmd, plannedIds, env)
+
+  // Effect summary the /approve page renders (blind-approval fix): the command
+  // kind, project id, pinned version, and a compact per-key preview of the new
+  // settings values (truncated — never dump a huge blob into the approval box).
+  const settingsChanges: Record<string, string> = {}
+  for (const key of Object.keys(cmd.settings)) {
+    settingsChanges[key] = previewSettingValue(cmd.settings[key])
+  }
+  const summary: ChangesetSummary = {
+    command: 'UpdateProjectSettings',
+    projectId: urlProjectId,
+    ifMatchVersion: cmd.ifMatchVersion,
+    settingsChanges,
+    warnings: [],
+  }
+  return stageReceiptOnlyChangeset(db, cred, urlProjectId, id, autonomyMode, cmd, plannedIds, summary, env)
+}
+
+/** Compact, truncated preview of a single settings value for the approval page.
+ *  Objects/arrays are JSON-stringified; everything is capped so a large nested
+ *  blob renders as a short, human-scannable snippet rather than a wall of text. */
+const SETTING_PREVIEW_MAX = 80
+function previewSettingValue(value: unknown): string {
+  let s: string
+  if (value === null) s = 'null'
+  else if (value === undefined) s = 'undefined'
+  else if (typeof value === 'object') s = JSON.stringify(value)
+  else s = String(value)
+  return s.length > SETTING_PREVIEW_MAX ? `${s.slice(0, SETTING_PREVIEW_MAX - 1)}…` : s
 }

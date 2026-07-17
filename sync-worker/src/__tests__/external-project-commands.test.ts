@@ -114,6 +114,24 @@ async function commit(
   return { res, body: (await res.json()) as any }
 }
 
+/** Seed a valid, unconsumed human approval for a staged changeset — CreateProject
+ *  is always ask-mode (blocker 3), so any create-commit needs one. */
+async function seedConfirmation(
+  tdb: TestDb,
+  changesetId: string,
+  digest: string,
+  userId: number,
+  credentialId: string,
+): Promise<void> {
+  await tdb.db
+    .prepare(
+      `INSERT INTO changeset_confirmations (id, changeset_id, user_id, credential_id, digest, expires_at, consumed_at)
+       VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+    )
+    .bind(`conf-${changesetId.slice(0, 8)}`, changesetId, String(userId), credentialId, digest, new Date(Date.now() + 60_000).toISOString())
+    .run()
+}
+
 let tdb: TestDb
 beforeEach(async () => {
   tdb = await makeTestDb({})
@@ -174,9 +192,12 @@ describe('project commands — validation', () => {
 // ── CreateProject ──────────────────────────────────────────────────────────
 
 describe('CreateProject — happy path (org-scoped maintainer)', () => {
-  it('commits the project row AND the creator owner(700) membership row; receipt is stamped', async () => {
+  it('is ALWAYS staged ask-mode (blocker 3): an org-scoped act credential still needs approval, then commits the project + owner(700) row', async () => {
     const env = makeEnv(tdb.db)
     await seedOrgMember(tdb, 1, 600) // alice: org maintainer
+    // NOTE: credential is mode 'act' AND org-scoped — the exact combination the
+    // mint endpoint permits. prepare must still force the changeset to ask-mode,
+    // so a direct commit is refused until a human approval is seeded.
     const token = await credToken(tdb, {
       credentialId: '00000000-0000-0000-0000-0000000000b1', userId: 1, username: 'alice',
       orgId: String(ORG_ID), projectId: null, mode: 'act',
@@ -186,6 +207,23 @@ describe('CreateProject — happy path (org-scoped maintainer)', () => {
       { kind: 'CreateProject', name: 'Brand New', orgId: ORG_ID },
     ])
     expect(prep.changeset.status).toBe('staged')
+    // Forced ask-mode regardless of the act credential.
+    expect(prep.changeset.autonomyMode).toBe('ask')
+
+    // A direct commit (no approval) is refused — no project created unattended.
+    const denied = await commit(env, 'brand-new', token, prep.changeset.id)
+    expect(denied.res.status).toBe(428)
+    expect(denied.body.error.code).toBe('confirmation_required')
+    expect((await tdb.rows<{ id: string }>('projects')).filter((p) => p.id === 'brand-new')).toHaveLength(0)
+
+    // Seed a human approval, then commit succeeds.
+    await tdb.db
+      .prepare(
+        `INSERT INTO changeset_confirmations (id, changeset_id, user_id, credential_id, digest, expires_at, consumed_at)
+         VALUES (?, ?, '1', ?, ?, ?, NULL)`,
+      )
+      .bind('conf-b1', prep.changeset.id, '00000000-0000-0000-0000-0000000000b1', prep.digest, new Date(Date.now() + 60_000).toISOString())
+      .run()
 
     const { res, body } = await commit(env, 'brand-new', token, prep.changeset.id)
     expect(res.status).toBe(200)
@@ -288,6 +326,7 @@ describe('CreateProject — id collision', () => {
     const { body: prep } = await prepare(env, 'raced', token, [
       { kind: 'CreateProject', name: 'Raced', orgId: ORG_ID },
     ])
+    await seedConfirmation(tdb, prep.changeset.id, prep.digest, 1, '00000000-0000-0000-0000-0000000000c2')
     // Someone else creates the same id before commit.
     await tdb.pg.query(`INSERT INTO projects (id, name, created_by) VALUES ('raced', 'Other', 99)`)
 
@@ -439,6 +478,7 @@ describe('project commands — commit crash-retry idempotency', () => {
     const { body: prep } = await prepare(env, 'retry-proj', token, [
       { kind: 'CreateProject', name: 'Retry', orgId: ORG_ID },
     ])
+    await seedConfirmation(tdb, prep.changeset.id, prep.digest, 1, '00000000-0000-0000-0000-0000000000f1')
     const { res: res1 } = await commit(env, 'retry-proj', token, prep.changeset.id)
     expect(res1.status).toBe(200)
 
@@ -498,6 +538,50 @@ describe('project commands — commit crash-retry idempotency', () => {
     const row = settings.find((s) => s.project_id === 'retry-settings')!
     expect(row.version).toBe(2)
     expect(JSON.parse(row.settings).targetLanguage).toBe('de')
+  })
+
+  it('blocker 1: an UpdateProjectSettings retry where a DIFFERENT user bumped the version → plan_stale (not false success)', async () => {
+    // The crash-window hazard: current.version == expected+1 is NOT sufficient to
+    // claim idempotent success — a concurrent maintainer writing during the window
+    // leaves the same version but a different updated_by. Absorbing that as success
+    // would silently DROP the agent's settings and return a false receipt. commit.ts
+    // must disambiguate by author (updated_by == this credential's user).
+    const env = makeEnv(tdb.db)
+    await seedSettingsProject(tdb, 'stale-settings', 1, { targetLanguage: 'fr' }, 1)
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-0000000000f5', userId: 1, username: 'alice',
+      orgId: null, projectId: 'stale-settings', mode: 'act',
+    })
+
+    const { body: prep } = await prepare(env, 'stale-settings', token, [
+      { kind: 'UpdateProjectSettings', projectId: 'stale-settings', settings: { targetLanguage: 'de' }, ifMatchVersion: 1 },
+    ])
+
+    // Put the changeset in the crash-retry state (committing), and simulate a
+    // CONCURRENT maintainer (user 2) having written settings during the window:
+    // version advances to expected+1 (2), but updated_by is 2, not the agent's 1.
+    await tdb.db
+      .prepare(`UPDATE changesets SET status = 'committing' WHERE id = ?`)
+      .bind(prep.changeset.id)
+      .run()
+    await tdb.db
+      .prepare(`UPDATE project_settings SET version = 2, updated_by = 2, settings = ? WHERE project_id = ?`)
+      .bind(JSON.stringify({ targetLanguage: 'es' }), 'stale-settings')
+      .run()
+
+    const { res, body } = await commit(env, 'stale-settings', token, prep.changeset.id)
+    expect(res.status).toBe(409)
+    expect(body.error.code).toBe('plan_stale')
+
+    // The agent's write was NOT applied and the concurrent write is untouched.
+    const row = (await tdb.rows<{ project_id: string; version: number; settings: string; updated_by: number | string }>('project_settings'))
+      .find((s) => s.project_id === 'stale-settings')!
+    expect(row.version).toBe(2)
+    expect(String(row.updated_by)).toBe('2')
+    expect(JSON.parse(row.settings).targetLanguage).toBe('es')
+    // Changeset moved off 'committing' so a later retry can't misread it.
+    const cs = await tdb.rows<{ status: string }>('changesets')
+    expect(cs[0].status).toBe('stale')
   })
 })
 
@@ -578,5 +662,148 @@ describe('discard — a committing changeset is rejected', () => {
     // Still committing — not discarded.
     const cs = await tdb.rows<{ status: string }>('changesets')
     expect(cs[0].status).toBe('committing')
+  })
+})
+
+// ── blocker 4: receipt-only changesets stage a NON-EMPTY renderable summary ───
+
+describe('blocker 4: receipt-only summary is renderable (no blind approval)', () => {
+  it('CreateProject prepare stores the command kind, project name, definitive id, and target org', async () => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600)
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-0000000004a1', userId: 1, username: 'alice',
+      orgId: String(ORG_ID), projectId: null, mode: 'ask',
+    })
+    const { body: prep } = await prepare(env, 'summ-proj', token, [
+      { kind: 'CreateProject', name: 'Summed Project', orgId: ORG_ID },
+    ])
+    // Summary carries flat, human-renderable fields (the /approve page filters to
+    // string/number, so these must be strings — never nested objects only).
+    expect(prep.summary.command).toBe('CreateProject')
+    expect(prep.summary.projectName).toBe('Summed Project')
+    expect(prep.summary.newProjectId).toBe('summ-proj')
+    expect(prep.summary.targetOrg).toBe(String(ORG_ID))
+    // The stored row (not just the response) carries them too.
+    const cs = await tdb.rows<{ summary: any }>('changesets')
+    const stored = typeof cs[0].summary === 'string' ? JSON.parse(cs[0].summary) : cs[0].summary
+    expect(stored.command).toBe('CreateProject')
+    expect(stored.newProjectId).toBe('summ-proj')
+  })
+
+  it('CreateProject for a personal (org-less) project shows targetOrg = "personal"', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-0000000004a2', userId: 1, username: 'alice',
+      orgId: null, projectId: null, mode: 'ask',
+    })
+    const { body: prep } = await prepare(env, 'personal-proj', token, [
+      { kind: 'CreateProject', name: 'Mine' },
+    ])
+    expect(prep.summary.command).toBe('CreateProject')
+    expect(prep.summary.targetOrg).toBe('personal')
+  })
+
+  it('UpdateProjectSettings prepare stores the kind, project id, pinned version, and per-key settings preview', async () => {
+    const env = makeEnv(tdb.db)
+    await seedSettingsProject(tdb, 'summ-settings', 1, { targetLanguage: 'fr' }, 1)
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-0000000004a3', userId: 1, username: 'alice',
+      orgId: null, projectId: 'summ-settings', mode: 'act',
+    })
+    const { body: prep } = await prepare(env, 'summ-settings', token, [
+      {
+        kind: 'UpdateProjectSettings',
+        projectId: 'summ-settings',
+        settings: { targetLanguage: 'de', validationCount: 5 },
+        ifMatchVersion: 1,
+      },
+    ])
+    expect(prep.summary.command).toBe('UpdateProjectSettings')
+    expect(prep.summary.projectId).toBe('summ-settings')
+    expect(prep.summary.ifMatchVersion).toBe(1)
+    // Per-key preview of each new value (strings, truncated). Object rendered
+    // explicitly by the approval page.
+    expect(prep.summary.settingsChanges.targetLanguage).toBe('de')
+    expect(prep.summary.settingsChanges.validationCount).toBe('5')
+  })
+
+  it('UpdateProjectSettings truncates a huge settings value in the preview', async () => {
+    const env = makeEnv(tdb.db)
+    await seedSettingsProject(tdb, 'big-settings', 1, {}, 0)
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-0000000004a4', userId: 1, username: 'alice',
+      orgId: null, projectId: 'big-settings', mode: 'act',
+    })
+    const huge = 'x'.repeat(500)
+    const { body: prep } = await prepare(env, 'big-settings', token, [
+      { kind: 'UpdateProjectSettings', projectId: 'big-settings', settings: { note: huge }, ifMatchVersion: 0 },
+    ])
+    const preview: string = prep.summary.settingsChanges.note
+    expect(preview.length).toBeLessThanOrEqual(80)
+    expect(preview.endsWith('…')).toBe(true)
+  })
+})
+
+// ── blocker 2: a committed changeset's receipt is never clobbered by a loser ──
+
+describe('blocker 2: committed receipts survive a stale-write / double commit', () => {
+  it('the guarded stale-write does NOT alter a committed row (unit contract)', async () => {
+    // The loser of a flip race used to run an UNCONDITIONAL
+    // `UPDATE changesets SET status='stale' WHERE id=?`, which could overwrite a
+    // sibling's status='committed' and make the stored receipt permanently
+    // unreachable. The guard `AND status IN ('staged','committing')` must protect
+    // a committed row.
+    await seedSettingsProject(tdb, 'guard-proj', 1, {}, 0)
+    const receipt = JSON.stringify({ command: 'UpdateProjectSettings', version: 1 })
+    await tdb.pg.query(
+      `INSERT INTO changesets (id, project_id, created_by_user_id, credential_id, autonomy_mode,
+         status, commands, preconditions, summary, digest, expires_at, receipt, committed_at)
+       VALUES ('cs-committed', 'guard-proj', '1', '00000000-0000-0000-0000-0000000002a1', 'act',
+         'committed', '[]'::jsonb, '[]'::jsonb, '{"warnings":[]}'::jsonb, 'd', now() + interval '1 hour',
+         $1::jsonb, now())`,
+      [receipt],
+    )
+
+    await tdb.db
+      .prepare(`UPDATE changesets SET status = 'stale' WHERE id = ? AND status IN ('staged','committing')`)
+      .bind('cs-committed')
+      .run()
+
+    const row = (await tdb.rows<{ id: string; status: string; receipt: any }>('changesets'))
+      .find((c) => c.id === 'cs-committed')!
+    expect(row.status).toBe('committed')
+    const stored = typeof row.receipt === 'string' ? JSON.parse(row.receipt) : row.receipt
+    expect(stored.command).toBe('UpdateProjectSettings')
+  })
+
+  it('a second sequential commit returns the SAME stored receipt twice and never flips to stale', async () => {
+    const env = makeEnv(tdb.db)
+    await seedSettingsProject(tdb, 'twice-settings', 1, { targetLanguage: 'fr' }, 1)
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-0000000002b1', userId: 1, username: 'alice',
+      orgId: null, projectId: 'twice-settings', mode: 'act',
+    })
+    const { body: prep } = await prepare(env, 'twice-settings', token, [
+      { kind: 'UpdateProjectSettings', projectId: 'twice-settings', settings: { targetLanguage: 'de' }, ifMatchVersion: 1 },
+    ])
+
+    const { res: r1, body: b1 } = await commit(env, 'twice-settings', token, prep.changeset.id)
+    expect(r1.status).toBe(200)
+    expect(b1.receipt.version).toBe(2)
+
+    // A committed changeset short-circuits and returns its stored receipt — the
+    // second call must NOT re-apply, NOT mark stale, and NOT change the receipt.
+    const { res: r2, body: b2 } = await commit(env, 'twice-settings', token, prep.changeset.id)
+    expect(r2.status).toBe(200)
+    expect(b2.receipt.version).toBe(2)
+    expect(b2.receipt.appliedAt).toBe(b1.receipt.appliedAt)
+
+    const cs = await tdb.rows<{ status: string }>('changesets')
+    expect(cs[0].status).toBe('committed')
+    // Version bumped exactly once.
+    const settings = (await tdb.rows<{ project_id: string; version: number }>('project_settings'))
+      .find((s) => s.project_id === 'twice-settings')!
+    expect(settings.version).toBe(2)
   })
 })

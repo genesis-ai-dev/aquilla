@@ -150,8 +150,9 @@ describe('external API accrues zero AI credits (design §5 billing guard)', () =
 
   it('a CreateProject receipt-only commit leaves org_credit_usage_daily untouched', async () => {
     const env = makeEnv(tdb.db)
-    // Org-scoped maintainer credential (CreateProject is org-gated, ask-mode-only
-    // in practice; here an org-scoped act credential stages + commits directly).
+    // Org-scoped maintainer credential. CreateProject is ALWAYS staged ask-mode
+    // (blocker 3), so even this act credential needs a seeded human approval to
+    // commit — the point of THIS test is only that the commit charges no credits.
     await tdb.pg.query(
       `INSERT INTO org_members (org_id, user_id, role_level) VALUES ($1, 1, 600)`,
       [ORG_ID],
@@ -164,6 +165,13 @@ describe('external API accrues zero AI credits (design §5 billing guard)', () =
     const { body: prep } = await prepare(env, 'brand-new', token, [
       { kind: 'CreateProject', name: 'Brand New', orgId: ORG_ID },
     ])
+    await tdb.db
+      .prepare(
+        `INSERT INTO changeset_confirmations (id, changeset_id, user_id, credential_id, digest, expires_at, consumed_at)
+         VALUES (?, ?, '1', ?, ?, ?, NULL)`,
+      )
+      .bind('conf-nc', prep.changeset.id, '00000000-0000-0000-0000-0000000000a2', prep.digest, new Date(Date.now() + 60_000).toISOString())
+      .run()
     const { res, body } = await commit(env, 'brand-new', token, prep.changeset.id)
 
     // The project really got created (receipt-only apply landed a row).

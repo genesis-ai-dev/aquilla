@@ -227,15 +227,15 @@ approval alone does not commit; the agent's own confirm call is still required. 
 also transiently read `committing` — the mid-apply state a commit sets before flipping to
 `committed` (§4.1 "commit idempotency" below); treat it the same as `staged` and poll again.
 
-**`CreateProject` is ask-mode only, by construction.** A project-scoped credential can never
-`CreateProject` (`403 scope_denied` at prepare) — and since `act`-mode credentials are required
-to be project- or org-scoped **and ≥ MAINTAINER** at mint (§1), the only credentials that *can*
-stage a `CreateProject` are unscoped or org-scoped ones, which are `ask`-mode in every practical
-minting flow (an org-scoped `act` credential could in principle exist, but the UI's mint dialog
-disables `act` until a project is chosen — see the v1.1 design doc §1). Every real
-agent-initiated project creation therefore passes through human approval at `/approve/:id`. This
-is intentional, not a gap: project creation is the one operation this API deliberately keeps a
-human in the loop for.
+**`CreateProject` is ask-mode only, by construction.** `prepare` **forces every `CreateProject`
+changeset to ask-mode**, whatever the credential's or request's mode — an org-scoped `act`
+credential (which the mint endpoint still permits, for its *other* commands) does not commit a
+project unattended; its `CreateProject` changeset is staged ask-mode all the same and still
+requires human approval. (A project-scoped credential can never `CreateProject` at all —
+`403 scope_denied` at prepare.) Every agent-initiated project creation therefore passes through
+human approval at `/approve/:id`. This is intentional, not a gap: project creation is the one
+operation this API deliberately keeps a human in the loop for, enforced in code rather than left
+to the mint dialog's UX.
 
 ## 4. REST endpoint reference
 

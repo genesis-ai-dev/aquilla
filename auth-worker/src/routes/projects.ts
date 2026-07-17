@@ -58,6 +58,7 @@ import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { lookupUserByUsername } from "../services/user-lookup"
 import { sendProjectInviteEmail } from "../services/email"
 import { notifySyncWorkerOfMemberRemoval } from "../services/sync-worker-notify"
+import { createProjectShared } from "../../../db/shared/projects"
 
 const projects = new Hono<AuthHonoEnv>()
 
@@ -245,13 +246,17 @@ projects.post(
     }
 
     try {
-      await c.env.AQUILLA_PG.prepare(
-        `INSERT INTO projects (id, name, org_id, created_by)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(id) DO NOTHING`,
-      )
-        .bind(body.id, body.name, orgId, user.id)
-        .run()
+      // Row write is shared with sync-worker's receipt-only CreateProject
+      // command (db/shared/projects.ts). The internal route leaves
+      // writeCreatorMembership unset: the creator resolves to owner (700) via
+      // the resolver's implicit creator path, so the hardcoded response below
+      // and later role resolutions are unchanged.
+      await createProjectShared(c.env.AQUILLA_PG, {
+        projectId: body.id,
+        name: body.name,
+        orgId,
+        createdBy: user.id,
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       console.error("project create failed:", err)

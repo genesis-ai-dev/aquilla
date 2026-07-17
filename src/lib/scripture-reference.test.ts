@@ -75,4 +75,42 @@ describe("scripture references", () => {
       rowIndex: 0,
     })).toBe("1")
   })
+
+  it("prefers contentNumber over the raw row index for sequential numbering (AQU-610)", () => {
+    // The first real content cell sits at display row 3 (behind front matter),
+    // but its content ordinal is 1 — numbering starts at the first content cell.
+    expect(cellNumberLabel({
+      lineNumbersEnabled: true,
+      cellType: "text",
+      canonicalRef: null,
+      scriptureNumbering: false,
+      rowIndex: 3,
+      contentNumber: 1,
+    })).toBe("1")
+  })
+
+  it("numbers non-scripture content from 1, skipping front matter / paratext (AQU-610)", () => {
+    // Mirrors how EditorTable feeds contentNumber: a 1-based ordinal counted
+    // only over numbered (non-paratext) cells, in display order.
+    const rows = [
+      { cellType: "paratext", canonicalRef: null }, // USFM front matter
+      { cellType: "paratext", canonicalRef: null }, // introduction
+      { cellType: "heading", canonicalRef: null },  // section heading (still numbered, AQU-577)
+      { cellType: "text", canonicalRef: null },     // first real content
+      { cellType: "paratext", canonicalRef: null }, // interspersed paratext
+      { cellType: "text", canonicalRef: null },
+    ]
+
+    let ordinal = 0
+    const labels = rows.map((row, rowIndex) => cellNumberLabel({
+      lineNumbersEnabled: true,
+      scriptureNumbering: false,
+      rowIndex,
+      contentNumber: row.cellType === "paratext" ? undefined : ++ordinal,
+      ...row,
+    }))
+
+    // Front matter/paratext stay unnumbered; content is gap-free from 1.
+    expect(labels).toEqual([null, null, "1", "2", null, "3"])
+  })
 })

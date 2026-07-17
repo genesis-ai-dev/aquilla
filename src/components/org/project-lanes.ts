@@ -40,3 +40,28 @@ export function laneChipLabel(lane: string, defaultLaneLabel: string): string {
 export function safePct(fraction: number): number {
   return Number.isFinite(fraction) ? Math.round(fraction * 100) : 0
 }
+
+/**
+ * AQU-605 — optimistically append a freshly-registered lane to a project row so
+ * the org project table updates that row *in place* (a new chip) instead of the
+ * whole table blanking on a portfolio refetch. The new lane starts with empty
+ * counts (no progress yet); real rollups arrive on the next natural portfolio
+ * load. Idempotent: a case-insensitive duplicate (or a blank tag) returns the
+ * project unchanged.
+ */
+export function withOptimisticLane<T extends PortfolioProject>(p: T, lane: string): T {
+  const trimmed = lane.trim()
+  if (!trimmed) return p
+  // Base off the currently-displayed lanes so the default ('') lane is retained
+  // even when the server sent no per-lane breakdown (displayLanes synthesizes it).
+  const existing = p.lanes && p.lanes.length > 0 ? p.lanes : displayLanes(p)
+  if (existing.some((l) => l.lane.toLowerCase() === trimmed.toLowerCase())) return p
+  const added: PortfolioLane = {
+    lane: trimmed,
+    totalCells: 0,
+    filledCells: 0,
+    validatedCells: 0,
+    lastEditAt: null,
+  }
+  return { ...p, lanes: [...existing, added] }
+}

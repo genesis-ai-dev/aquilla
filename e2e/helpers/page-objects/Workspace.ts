@@ -291,10 +291,11 @@ export class Workspace {
   }
 
   /**
-   * AQU-538: the LaneSwitcher (`data-testid="lane-switcher"`) renders in the
-   * workspace header ONLY when the project has a second target lane — see
-   * `LaneSwitcher.tsx`. Options are `data-testid="lane-option-<tag>"`; the
-   * default lane's tag is the empty string (`lane-option-`).
+   * AQU-602: the lane switcher is the TARGET language tag in the editor's
+   * column header (`data-testid="lane-switcher"`). It renders as a dropdown
+   * ONLY when the project has a second target lane — otherwise the tag is a
+   * static pill. The trigger carries `data-active-lane="<tag>"` (default lane
+   * is `""`). Opening it reveals `data-testid="lane-option-<tag>"` items.
    */
   laneSwitcher(): Locator {
     return this.page.getByTestId("lane-switcher")
@@ -303,16 +304,15 @@ export class Workspace {
   /** Switch the active target lane. Pass `""` for the default lane. */
   async switchLane(tag: string): Promise<void> {
     await expect(this.laneSwitcher()).toBeVisible({ timeout: 10_000 })
+    await this.laneSwitcher().click()
     const option = this.page.getByTestId(`lane-option-${tag}`)
     await option.click()
-    await expect(option).toHaveAttribute("aria-checked", "true", { timeout: 5_000 })
+    await expect(this.laneSwitcher()).toHaveAttribute("data-active-lane", tag, { timeout: 5_000 })
   }
 
   /** Read the currently active lane's tag (`""` = default) off the switcher. */
   async readActiveLane(): Promise<string> {
     await expect(this.laneSwitcher()).toBeVisible({ timeout: 10_000 })
-    const checked = this.laneSwitcher().locator('[role="radio"][aria-checked="true"]')
-    const testId = await checked.getAttribute("data-testid")
-    return testId?.replace(/^lane-option-/, "") ?? ""
+    return (await this.laneSwitcher().getAttribute("data-active-lane")) ?? ""
   }
 }

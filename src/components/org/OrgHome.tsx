@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
@@ -10,7 +10,6 @@ import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank
 import { portfolioActivityStatus } from "@/lib/project-status"
 import { ProjectDeadlineStatuses } from "@/components/ProjectStatus"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
-import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
 import { WorkloadRollup } from "./WorkloadRollup"
 import { UsageRollup } from "./UsageRollup"
@@ -30,7 +29,7 @@ import { OrgSetupChecklist } from "./OrgSetupChecklist"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import { LaneChips } from "./LaneChips"
 import { ProjectMetricHeader } from "./ProjectMetricHeader"
-import { displayLanes } from "./project-lanes"
+import { displayLanes, withOptimisticLane } from "./project-lanes"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import {
   Select,
@@ -501,49 +500,6 @@ export function ProjectTable({
   )
 }
 
-/**
- * AQU-335 / AQU-475: projects reachable only via a project-level grant (an
- * invite accept or bulk-add) into an org the caller isn't a member of.
- * Shared across both the active-org and all-orgs views so a zero-org guest
- * never lands on an empty dashboard. `orgLabel` annotates each row with the
- * host org — AQU-473: the accessible-projects endpoint now joins `orgName`,
- * so the label falls back to "Org #N" only on older servers/absent data.
- */
-function SharedWithYouSection({
-  projects,
-  orgLabel,
-}: {
-  projects: CloudProjectSummary[]
-  orgLabel?: (project: CloudProjectSummary) => string | null
-}) {
-  if (projects.length === 0) return null
-  return (
-    <section data-testid="shared-with-you" className="space-y-2">
-      <h2 className="text-sm font-medium text-muted-foreground">Shared with you</h2>
-      <div className="rounded-2xl border divide-y">
-        {projects.map((p) => {
-          const label = orgLabel?.(p) ?? null
-          return (
-            <Link
-              key={p.id}
-              to={`/projects/${p.id}`}
-              className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
-            >
-              <p className="flex-1 min-w-0 truncate font-medium">{p.name}</p>
-              {label && (
-                <Badge variant="secondary" className="shrink-0 truncate">
-                  {label}
-                </Badge>
-              )}
-              <RoleLabel name={p.role.name} className="shrink-0 text-xs text-muted-foreground" />
-            </Link>
-          )
-        })}
-      </div>
-    </section>
-  )
-}
-
 export function OrgHome() {
   const { activeOrg, activeOrgId, isAllOrgs, orgs, isLoading: orgLoading, setActiveOrg } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
@@ -576,6 +532,16 @@ export function OrgHome() {
   // AQU-538 §3.2: bumped after a lane action (add language / assign / staff) to
   // refetch the portfolio so per-lane rollups reflect the change.
   const [refreshTick, setRefreshTick] = useState(0)
+
+  // AQU-605: adding a language lane updates just that project's row in place
+  // (optimistic chip insert) rather than bumping refreshTick, which refetched
+  // the whole portfolio and blanked the table behind a loading state. Assign /
+  // staff actions still refetch (their per-lane rollups genuinely change).
+  const handleLaneAdded = useCallback((projectId: string, lane: string) => {
+    setProjects((prev) =>
+      prev.map((p) => (p.id === projectId ? withOptimisticLane(p, lane) : p)),
+    )
+  }, [])
 
   useEffect(() => {
     if (!jwt) {
@@ -725,17 +691,6 @@ export function OrgHome() {
   const overdueCount = projects.filter((p) => deadlineStatus(p, now) === "overdue").length
   const avgAudioPct =
     projects.length > 0 ? projects.reduce((sum, p) => sum + audioPct(p), 0) / projects.length : 0
-  // AQU-475: in all-orgs mode there's no single activeOrgId to compare
-  // against — classify by org membership alone so a project reached purely
-  // via a project-level grant (zero orgs, or a grant in an org the caller
-  // doesn't belong to) still surfaces instead of vanishing into an empty
-  // dashboard.
-  const sharedProjects = partitionSharedProjects(
-    accessibleProjects,
-    orgs,
-    activeOrgId,
-    isAllOrgs ? "all-orgs" : "active-org",
-  ).sharedWithMe
   const roleByProjectId = new Map(accessibleProjects.map((project) => [project.id, project.role]))
   // AQU-538 §3.2: the '' (default) lane chip is labeled with the project's
   // target language. The accessible-projects feed joins per-file language hints;
@@ -1090,16 +1045,6 @@ export function OrgHome() {
                       </div>
                     </section>
                   </div>
-
-                  {/* AQU-475: projects reachable only via a project-level grant
-                      (no org membership at all, or a grant in an org the caller
-                      isn't a member of) are invisible to getPortfolios() — which
-                      only knows about the caller's org memberships. Without this,
-                      a zero-org guest sees a fully empty all-orgs dashboard. */}
-                  <SharedWithYouSection
-                    projects={sharedProjects}
-                    orgLabel={(p) => p.orgName ?? (p.orgId != null ? `Org #${p.orgId}` : null)}
-                  />
                 </>
               ) : (
                 <>
@@ -1165,6 +1110,7 @@ export function OrgHome() {
                         author={session?.username}
                         allowSelfAssignment={orgSettings.allowSelfAssignment}
                         onLanesChanged={() => setRefreshTick((t) => t + 1)}
+                        onLaneAdded={handleLaneAdded}
                         initialLens={projectLens}
                         emptyTitle={
                           statusFilter === "stalled"
@@ -1176,11 +1122,6 @@ export function OrgHome() {
                       />
                     </div>
                   )}
-
-                  {/* AQU-335: cross-org projects (invite-link / bulk-add grants).
-                      Listed separately — they're not part of this org's portfolio,
-                      but hiding them made them unreachable from every nav surface. */}
-                  <SharedWithYouSection projects={sharedProjects} />
                 </>
               )}
 

@@ -28,8 +28,9 @@ const MAX_LANE_LENGTH = 64
 export interface AddLanguagePopoverProps {
   projectId: string
   jwt: string
-  /** Called after a lane is successfully added, so the parent can refresh. */
-  onAdded?: () => void
+  /** Called with the newly-added lane tag after a successful add, so the parent
+   * can insert it in place (AQU-605) rather than refetching the whole table. */
+  onAdded?: (lane: string) => void
 }
 
 /** Mirrors LanguagesSection.validateNewLane — kept local so this org-dashboard
@@ -128,7 +129,7 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
         targetLanes: result.value.settings.targetLanes ?? [...snapshot.targetLanes, trimmed],
       })
       setPhase("ready")
-      onAdded?.()
+      onAdded?.(trimmed)
       setOpen(false)
       return
     }

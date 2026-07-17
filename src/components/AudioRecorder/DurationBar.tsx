@@ -36,6 +36,11 @@ export function DurationBar({ elapsedMs, targetSec, overrunHeadroomSec = 1.5, cl
         ? "warn"
         : "good"
 
+  // How far past the target the take currently runs (AQU-614). Only meaningful
+  // once over the target; ties the count-up readout (live) and the final
+  // preview summary to the same source of truth as the color/warning state.
+  const overageSec = Math.max(0, elapsedSec - targetSec)
+
   const fillClass =
     state === "over" ? "bg-red-500" : state === "warn" ? "bg-amber-400" : "bg-emerald-500"
 
@@ -60,8 +65,13 @@ export function DurationBar({ elapsedMs, targetSec, overrunHeadroomSec = 1.5, cl
         />
       </div>
       <div className="flex items-center justify-between text-xs tabular-nums text-muted-foreground">
-        <span className={cn(state === "over" && "font-medium text-red-500")}>
+        <span className={cn("flex items-center gap-1.5", state === "over" && "font-medium text-red-500")}>
           {formatTime(elapsedMs)}
+          {state === "over" && (
+            <span className="rounded bg-red-500/10 px-1 py-0.5 font-medium text-red-500">
+              +{overageSec.toFixed(1)}s over
+            </span>
+          )}
         </span>
         <span>target {formatTime(targetSec * 1000)}</span>
       </div>

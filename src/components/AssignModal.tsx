@@ -41,6 +41,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -389,6 +390,10 @@ export function AssignModal({
           </DialogTitle>
         </DialogHeader>
 
+        {/* Scroll region: header + footer stay fixed while a tall body (e.g. a
+            large Files/Books list) scrolls, instead of overflowing the clipped
+            max-h-[85dvh] DialogContent. */}
+        <DialogBody>
         <FieldGroup className="py-1">
           <Field>
             <FieldLabel htmlFor="assign-modal-scope">Scope</FieldLabel>
@@ -582,6 +587,7 @@ export function AssignModal({
 
           {error && <FieldError>{error}</FieldError>}
         </FieldGroup>
+        </DialogBody>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>

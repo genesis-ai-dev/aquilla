@@ -33,6 +33,7 @@ import { fileOrderedBy, fileTypeHasSections, projectHasScriptureFiles, resolveBi
 import type { CellData } from "@/hooks/useCells"
 import { LaneSwitcher } from "./LaneSwitcher"
 import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
+import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
 import type { EditorTableHandle } from "./EditorTable"
@@ -1176,7 +1177,20 @@ export function ProjectWorkspace() {
   }, [findNextUnfinished])
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const activeSourceLanguage = activeFile?.sourceLanguage || project?.sourceLanguage
+  // The DEFAULT (`''`) lane's target language — file's, then project's. Used to
+  // label the default-lane switch option, which must always name the project
+  // default regardless of which lane is active.
   const activeTargetLanguage = activeFile?.targetLanguage || project?.targetLanguage
+  // AQU-602: the target language of the ACTIVE lane. A non-default lane's tag IS
+  // its target language, so switching lanes switches what the editor
+  // reads/writes/translates into (source stays shared). The completion path was
+  // already lane-aware; this routes the editor project + file metadata through
+  // the same rule so the target language actually changes on lane switch.
+  const activeLaneTargetLanguage = resolveActiveTargetLanguage(
+    activeLane,
+    activeFile?.targetLanguage,
+    project?.targetLanguage,
+  )
 
   // AQU-538 (slice 2): active target lane. `''` = default lane. The registry
   // arrives on the settings-overlaid project record (useProject overlaySettings).
@@ -1220,13 +1234,13 @@ export function ProjectWorkspace() {
   const editorProject = useMemo<ProjectRecord | null>(() => {
     if (!project) return null
     const sourceLanguage = activeSourceLanguage ?? project.sourceLanguage
-    const targetLanguage = activeTargetLanguage ?? project.targetLanguage
+    const targetLanguage = activeLaneTargetLanguage ?? project.targetLanguage
     if (sourceLanguage === project.sourceLanguage && targetLanguage === project.targetLanguage) {
       return project
     }
     return { ...project, sourceLanguage, targetLanguage }
-  }, [activeSourceLanguage, activeTargetLanguage, project])
-  const fileMeta = useFileMeta(activeFileId, activeSourceLanguage, activeTargetLanguage, {
+  }, [activeSourceLanguage, activeLaneTargetLanguage, project])
+  const fileMeta = useFileMeta(activeFileId, activeSourceLanguage, activeLaneTargetLanguage, {
     sourceTextDirection: activeFile?.sourceTextDirection,
     targetTextDirection: activeFile?.targetTextDirection,
   })
@@ -1784,10 +1798,11 @@ export function ProjectWorkspace() {
   }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
   const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
-    // AQU-538: when a non-default lane is active, its tag IS the target
+    // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
     // language for few-shot/completion; default lane falls back to the file's
-    // (then project's) targetLanguage exactly as before.
-    project?.completionSettings, project?.sourceLanguage || "", activeLane || activeTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, project?.translationBrief?.l1Summary ?? undefined,
+    // (then project's) targetLanguage exactly as before. Shares the same
+    // lane-aware derivation as the editor project + file metadata.
+    project?.completionSettings, project?.sourceLanguage || "", activeLaneTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, project?.translationBrief?.l1Summary ?? undefined,
     project?.draftContext ?? DEFAULT_DRAFT_CONTEXT,
   )
 

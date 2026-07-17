@@ -24,6 +24,10 @@ interface AttachmentLike {
   alt?: unknown
 }
 
+// Metadata originates from imported third-party repos (e.g. DCS) — only ever
+// link/embed http(s) URLs so a hostile `javascript:`/`data:` value cannot run.
+const isSafeUrl = (url: string): boolean => /^https?:\/\//i.test(url)
+
 const isAttachmentArray = (value: unknown): value is AttachmentLike[] =>
   Array.isArray(value) &&
   value.length > 0 &&
@@ -44,6 +48,13 @@ function MetadataValue({ value }: { value: unknown }) {
       <span className="flex flex-wrap items-start gap-1.5">
         {value.map((att, i) => {
           const url = att.url as string
+          if (!isSafeUrl(url)) {
+            return (
+              <code key={`${url}-${i}`} className="rounded bg-muted px-1 py-0.5 text-[11px] text-foreground break-all">
+                {url}
+              </code>
+            )
+          }
           const isImage =
             att.type === "image" || /\.(png|jpe?g|gif|webp|svg)(\?|$)/i.test(url)
           return isImage ? (

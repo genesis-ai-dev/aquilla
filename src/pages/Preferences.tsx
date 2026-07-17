@@ -16,6 +16,7 @@ import { useDockRailPosition } from "@/hooks/useDockRailPosition"
 import { PersonalProviderSection } from "@/components/settings/PersonalProviderSection"
 import { LocalModelsSection } from "@/components/ProjectSettings/LocalModelsSection"
 import { UsageSection } from "@/components/settings/UsageSection"
+import { ApiTokensSection } from "@/components/settings/ApiTokensSection"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { DockRailPosition } from "@/lib/dock-rail-position"
 import {
@@ -226,6 +227,7 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
   { slug: "provider-keys", title: "AI provider keys", group: "AI & personalization", icon: KeyRound, render: () => <PersonalProviderSection /> },
   { slug: "local-models", title: "Local models", group: "AI & personalization", icon: Cpu, render: () => <LocalModelsSection /> },
   { slug: "usage", title: "Usage", group: "Account", icon: Gauge, render: () => <UsageSection /> },
+  { slug: "api-tokens", title: "API tokens", group: "Account", icon: KeyRound, render: () => <ApiTokensSection /> },
 ]
 
 const PREFERENCE_GROUPS = ["General", "AI & personalization", "Account"] as const

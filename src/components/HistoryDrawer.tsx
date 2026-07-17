@@ -173,7 +173,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
         <h3 className="text-sm font-semibold">
           Edit history {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}
         </h3>
-        <Button variant="ghost" size="sm" onClick={onClose}>
+        <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close history">
           <X className="h-4 w-4" />
         </Button>
       </div>

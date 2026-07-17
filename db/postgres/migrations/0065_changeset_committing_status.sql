@@ -1,4 +1,4 @@
--- Migration 0064: W1-B commit idempotency — admit the transient 'committing'
+-- Migration 0065: W1-B commit idempotency — admit the transient 'committing'
 -- changeset status (design 2026-07-17-agent-api-v1.1 §4).
 --
 -- Commit now sets status='committing' when it STARTS applying and 'committed'

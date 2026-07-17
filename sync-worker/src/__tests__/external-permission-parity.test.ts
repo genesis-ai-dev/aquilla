@@ -253,6 +253,38 @@ describe('permission parity — PlanImport requires PROJECT_LEAD (500)+ at prepa
   })
 })
 
+// ── 3b. commit LinkMedia → CONTRIBUTOR floor ────────────────────────────────
+// (per REQUIRED_ROLE['cell.audio.attach'] / ['cell.audio.select'] =
+// ROLE.CONTRIBUTOR — LinkMedia compiles to those events.)
+
+describe('permission parity — LinkMedia requires CONTRIBUTOR (400)+ at prepare', () => {
+  it.each(ROLES)('role=$name (level=$level)', async ({ level }) => {
+    const { token } = await seedRoleCredential(tdb, level)
+
+    // An audio artifact must exist for the prepare precondition; prepare reads
+    // only the row (no R2), so no bytes are needed here.
+    const artifactId = '00000000-0000-0000-0000-0000000000cc'
+    await tdb.pg.query(
+      `INSERT INTO artifacts (id, project_id, uploaded_by_user_id, credential_id, name, content_type, size_bytes, sha256, r2_key, kind, audio_id)
+       VALUES ($1, $2, '99999', '00000000-0000-0000-0000-0000000000c0', 'take.wav', 'audio/wav', 3, 'abc', $3, 'audio', $4)
+       ON CONFLICT (id) DO NOTHING`,
+      [artifactId, PROJECT, `projects/${PROJECT}/files/${artifactId}/audio/${artifactId}.wav`, `${artifactId}.wav`],
+    )
+
+    const prep = await prepareChangeset(tdb, token, [
+      { kind: 'LinkMedia', fileId: FILE, cellId: 'cell-1', artifactId },
+    ])
+
+    if (level === null || level < ROLE.CONTRIBUTOR) {
+      expect(prep.status).toBe(403)
+      expect(prep.body.error.code).toBe('permission_denied')
+      return
+    }
+    expect(prep.status).toBe(200)
+    expect(prep.body.summary.mediaLinked).toBe(1)
+  })
+})
+
 // ── 4. artifact upload → CONTRIBUTOR floor ──────────────────────────────────
 
 describe('permission parity — artifact upload requires CONTRIBUTOR (400)+', () => {

@@ -14,6 +14,7 @@ import {
   cellKey,
   requiredRoleForCommand,
   type CreateProjectCommand,
+  type LinkMediaCommand,
   type PlanImportCommand,
   type SetTranslationCommand,
   type UpdateProjectSettingsCommand,
@@ -22,6 +23,7 @@ import { resolveCellStates } from './preconditions'
 import { loadChangeset } from './store'
 import { mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
+import { audioObjectKey } from '../audio'
 import { handleEventsWriteRequest } from '../events/route'
 import { ROLE } from '../events/role-policy'
 import type { RawEvent } from '../events/types'
@@ -201,6 +203,14 @@ export async function handleCommit(
   )
   if (planImport) {
     return commitPlanImport(request, env, db, cred, cs, planImport, confirmationId, ctx)
+  }
+
+  // ── LinkMedia takes its own compile/commit path ───────────────────────────
+  const linkMedia = cs.commands.filter(
+    (c): c is LinkMediaCommand => c.kind === 'LinkMedia',
+  )
+  if (linkMedia.length > 0) {
+    return commitLinkMedia(request, env, db, cred, cs, linkMedia, confirmationId, ctx)
   }
 
   // ── Compile commands → target.cell.commit events, grouped by file ─────────
@@ -707,6 +717,203 @@ async function commitCreateProject(
 }
 
 /**
+ * Compile a LinkMedia changeset into cell.audio.attach + cell.audio.select
+ * events (Agent API v1.1 §3), routed through the SAME /events perimeter as
+ * SetTranslation (cell.audio.* requires CONTRIBUTOR — an observer credential is
+ * 403'd there), then stamp provenance and write the receipt.
+ *
+ * The uploaded audio bytes were stored (at artifact upload) in the audio R2
+ * layout keyed by the artifactId; here we copy them under the TARGET cell's
+ * file, because the app's native /audio playback route derives the fetch key
+ * from the cell's file. The attach/select event ids are the prepare-time ids
+ * (§4), so a crash-retry (status='committing') re-posts identical ids the
+ * /events idempotency layer dedupes — no double-attach — and re-copies the
+ * same bytes to the same key (idempotent).
+ */
+async function commitLinkMedia(
+  request: Request,
+  env: ExternalEnv,
+  db: AquillaDb,
+  cred: ApiCredentialContext,
+  cs: StoredChangeset,
+  cmds: LinkMediaCommand[],
+  confirmationId: string | null,
+  ctx: Pick<ExecutionContext, 'waitUntil'> | undefined,
+): Promise<Response> {
+  if (!env.SNAPSHOTS) return errorResponse('job_failed', 'SNAPSHOTS bucket not configured')
+  const projectId = cs.projectId
+  const clientTs = Date.now()
+
+  // Prepare-time attach/select ids (§4), keyed by (fileId, cellId, artifactId).
+  // Fall back to minting for changesets staged before the linkMedia ledger.
+  const plannedByKey = new Map(
+    (cs.plannedIds?.linkMedia ?? []).map((p) => [
+      `${cellKey(p.fileId, p.cellId)} ${p.artifactId}`,
+      p,
+    ]),
+  )
+
+  const eventsByFile = new Map<string, RawEvent[]>()
+  const allEventIds: string[] = []
+
+  for (const cmd of cmds) {
+    // Re-check the artifact: still present, still audio, same project.
+    const artifact = await db
+      .prepare(
+        `SELECT id, kind, r2_key, audio_id, content_type
+           FROM artifacts WHERE id::text = ? AND project_id = ?`,
+      )
+      .bind(cmd.artifactId, projectId)
+      .first<{ id: string; kind: string; r2_key: string; audio_id: string | null; content_type: string | null }>()
+    if (!artifact || artifact.kind !== 'audio' || !artifact.audio_id) {
+      await db.prepare(`UPDATE changesets SET status = 'stale' WHERE id = ?`).bind(cs.id).run()
+      return errorResponse(
+        'plan_stale',
+        `artifact ${cmd.artifactId} is no longer an audio artifact in this project`,
+      )
+    }
+
+    // Re-check the target cell still exists.
+    const cellStates = await resolveCellStates(db, projectId, [cmd])
+    const s = cellStates.get(cellKey(cmd.fileId, cmd.cellId))
+    if (!s || (!s.sourceExists && !s.targetExists)) {
+      await db.prepare(`UPDATE changesets SET status = 'stale' WHERE id = ?`).bind(cs.id).run()
+      return errorResponse(
+        'plan_stale',
+        `cell ${cmd.cellId} in file ${cmd.fileId} no longer exists`,
+      )
+    }
+
+    // Copy the uploaded bytes under the target cell's file so the app's native
+    // /audio route (keyed by the cell's file) serves them. Idempotent on retry.
+    const src = await env.SNAPSHOTS.get(artifact.r2_key)
+    if (!src) {
+      await db.prepare(`UPDATE changesets SET status = 'stale' WHERE id = ?`).bind(cs.id).run()
+      return errorResponse('plan_stale', `artifact ${cmd.artifactId} bytes missing from storage`)
+    }
+    const destKey = audioObjectKey(env, projectId, cmd.fileId, artifact.audio_id)
+    await env.SNAPSHOTS.put(destKey, await src.arrayBuffer(), {
+      httpMetadata: artifact.content_type ? { contentType: artifact.content_type } : undefined,
+    })
+
+    const planned = plannedByKey.get(`${cellKey(cmd.fileId, cmd.cellId)} ${cmd.artifactId}`)
+    const attachId = planned?.attachEventId ?? uuidv7()
+    const selectId = planned?.selectEventId ?? uuidv7()
+    const url = `frontier-audio://${artifact.audio_id}`
+
+    const attachEvent: RawEvent<'cell.audio.attach'> = {
+      id: attachId,
+      schemaVersion: 1,
+      kind: 'cell.audio.attach',
+      projectId,
+      fileId: cmd.fileId,
+      cellId: cmd.cellId,
+      parentId: null,
+      author: cred.username,
+      payload: {
+        audioId: artifact.audio_id,
+        url,
+        slot: 'recording',
+        ...(artifact.content_type ? { mimeType: artifact.content_type } : {}),
+      },
+      clientTs,
+    }
+    const selectEvent: RawEvent<'cell.audio.select'> = {
+      id: selectId,
+      schemaVersion: 1,
+      kind: 'cell.audio.select',
+      projectId,
+      fileId: cmd.fileId,
+      cellId: cmd.cellId,
+      parentId: null,
+      author: cred.username,
+      payload: { audioId: artifact.audio_id, slot: 'recording' },
+      clientTs,
+    }
+    // attach must precede select in the batch so the projection sees the row
+    // before the select re-affirms it.
+    allEventIds.push(attachId, selectId)
+    const list = eventsByFile.get(cmd.fileId)
+    if (list) list.push(attachEvent, selectEvent)
+    else eventsByFile.set(cmd.fileId, [attachEvent, selectEvent])
+  }
+
+  // Route each file's events through the /events perimeter.
+  const acceptedIds = new Set<string>()
+  const rejected: { id: string; status: number; reason: string }[] = []
+  for (const [fileId, events] of eventsByFile) {
+    let token: string
+    try {
+      token = await mintInternalSyncToken(env, db, cred, projectId, fileId)
+    } catch (err) {
+      return toErrorResponse(err)
+    }
+    const req = new Request('https://internal/events', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events }),
+    })
+    const res = await handleEventsWriteRequest(req, env, ctx)
+    if (!res) return errorResponse('job_failed', 'events perimeter did not respond')
+    const out = (await res.json()) as EventsWriteResponse
+    for (const a of out.accepted) acceptedIds.add(a.id)
+    for (const r of out.rejected) rejected.push(r)
+  }
+
+  // Nothing applied but events were rejected — surface the reason (an observer
+  // credential is 403'd by the perimeter since cell.audio.* needs CONTRIBUTOR).
+  if (acceptedIds.size === 0 && rejected.length > 0) {
+    const anyForbidden = rejected.some((r) => r.status === 403)
+    return errorResponse(
+      anyForbidden ? 'permission_denied' : 'job_failed',
+      'no events were applied',
+      { rejected },
+    )
+  }
+
+  // Stamp the server-verified provenance envelope on applied events.
+  const provenance = buildProvenance(request, cs, confirmationId)
+  const appliedIds = allEventIds.filter((eid) => acceptedIds.has(eid))
+  if (appliedIds.length > 0) {
+    const placeholders = appliedIds.map(() => '?').join(', ')
+    await db
+      .prepare(`UPDATE events SET provenance = ?::jsonb WHERE id IN (${placeholders})`)
+      .bind(JSON.stringify(provenance), ...appliedIds)
+      .run()
+  }
+
+  const warnings: ChangesetWarning[] = [...cs.summary.warnings]
+  for (const r of rejected) {
+    warnings.push({ code: 'rejected', fileId: '', cellId: '', message: `${r.id}: ${r.reason}` })
+  }
+
+  const receipt: ChangesetReceipt = {
+    eventIds: appliedIds,
+    appliedCount: appliedIds.length,
+    staleCount: 0,
+    warnings,
+    committedAt: new Date().toISOString(),
+  }
+
+  await db
+    .prepare(
+      `UPDATE changesets
+          SET status = 'committed', receipt = ?::jsonb, confirmation_id = ?, committed_at = now()
+        WHERE id = ?`,
+    )
+    .bind(JSON.stringify(receipt), confirmationId, cs.id)
+    .run()
+
+  if (rejected.length > 0) {
+    return errorResponse('job_failed', 'link-media partially failed — some events were rejected', {
+      receipt,
+    })
+  }
+
+  return Response.json({ receipt })
+}
+
+/**
  * Commit an UpdateProjectSettings (spec §2, receipt-only). Re-checks the project
  * role live (>= MAINTAINER), runs the shared gates, then applies the
  * version-guarded write via updateProjectSettingsShared — a conflict (the live
@@ -788,5 +995,6 @@ async function finishUpdateSettingsReceipt(
     )
     .bind(JSON.stringify(receipt), confirmationId, cs.id)
     .run()
+
   return Response.json({ receipt })
 }

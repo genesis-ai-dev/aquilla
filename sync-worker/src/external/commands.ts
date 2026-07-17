@@ -77,11 +77,23 @@ export interface UpdateProjectSettingsCommand {
   ifMatchVersion: number
 }
 
+/** Attach an uploaded audio artifact to a cell (Agent API v1.1 §3). Compiles to
+ *  cell.audio.attach + cell.audio.select events. The artifact must be an
+ *  `audio`-kind artifact in the same project (uploaded via the REST artifact
+ *  endpoint with `x-artifact-kind: audio`). */
+export interface LinkMediaCommand {
+  kind: 'LinkMedia'
+  fileId: string
+  cellId: string
+  artifactId: string
+}
+
 export type Command =
   | SetTranslationCommand
   | PlanImportCommand
   | CreateProjectCommand
   | UpdateProjectSettingsCommand
+  | LinkMediaCommand
 
 /** Hard cap on source cells per PlanImport changeset. Above this the plan is
  *  rejected with validation_failed — the manifest-in-R2 pattern for larger
@@ -271,6 +283,27 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       })
       return
     }
+    if (c.kind === 'LinkMedia') {
+      if (!isNonEmptyString(c.fileId)) {
+        issues.push({ index, message: 'LinkMedia.fileId must be a non-empty string' })
+        return
+      }
+      if (!isNonEmptyString(c.cellId)) {
+        issues.push({ index, message: 'LinkMedia.cellId must be a non-empty string' })
+        return
+      }
+      if (!isNonEmptyString(c.artifactId)) {
+        issues.push({ index, message: 'LinkMedia.artifactId must be a non-empty string' })
+        return
+      }
+      commands.push({
+        kind: 'LinkMedia',
+        fileId: c.fileId,
+        cellId: c.cellId,
+        artifactId: c.artifactId,
+      })
+      return
+    }
     issues.push({ index, message: `unsupported command kind: ${String(c.kind)}` })
   })
 
@@ -297,6 +330,10 @@ export function requiredRoleForCommand(c: Command): number {
   // for them — but the union must be covered. MAINTAINER is the honest floor.
   if (c.kind === 'CreateProject' || c.kind === 'UpdateProjectSettings') {
     return ROLE.MAINTAINER
+  }
+  if (c.kind === 'LinkMedia') {
+    // Compiles to cell.audio.attach + cell.audio.select (both CONTRIBUTOR).
+    return Math.max(REQUIRED_ROLE['cell.audio.attach'], REQUIRED_ROLE['cell.audio.select'])
   }
   return REQUIRED_ROLE['target.cell.commit']
 }

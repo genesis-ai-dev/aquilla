@@ -35,6 +35,8 @@ export interface ChangesetSummary {
   sourceCellsAdded?: number
   /** PlanImport: the artifact id linked to the created file, when supplied. */
   artifactLinked?: string
+  /** LinkMedia: number of cells an audio artifact is attached to. */
+  mediaLinked?: number
   warnings: ChangesetWarning[]
 }
 
@@ -67,6 +69,17 @@ export interface PlannedEventIds {
    *  pinned at prepare (the commit-time version guard, i.e. the drift check for
    *  a versioned blob rather than a per-cell head). */
   updateProjectSettings?: { version: number }
+  /** LinkMedia: one entry per attach command — the target (fileId, cellId), the
+   *  audio artifact id, and the minted cell.audio.attach + cell.audio.select
+   *  event ids. A crash-and-retry re-posts these IDENTICAL ids, so the /events
+   *  idempotency layer dedupes the audio events instead of double-attaching. */
+  linkMedia?: {
+    fileId: string
+    cellId: string
+    artifactId: string
+    attachEventId: string
+    selectEventId: string
+  }[]
 }
 
 /** Execution receipt recorded on commit. */

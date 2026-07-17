@@ -13,6 +13,7 @@ import {
   PLAN_IMPORT_MAX_CELLS,
   type Command,
   type CreateProjectCommand,
+  type LinkMediaCommand,
   type PlanImportCommand,
   type SetTranslationCommand,
   type UpdateProjectSettingsCommand,
@@ -134,6 +135,22 @@ export async function handlePrepare(
       )
     }
     return preparePlanImport(db, cred, projectId, id, autonomyMode, planImports[0], env)
+  }
+
+  // LinkMedia takes its own prepare path (per-cell audio attach, not a
+  // per-cell translation batch). For v1 a LinkMedia changeset holds only
+  // LinkMedia commands — mixing with SetTranslation is rejected.
+  const linkMedia = validated.commands.filter(
+    (c): c is LinkMediaCommand => c.kind === 'LinkMedia',
+  )
+  if (linkMedia.length > 0) {
+    if (linkMedia.length !== validated.commands.length) {
+      return errorResponse(
+        'validation_failed',
+        'LinkMedia cannot be mixed with other command kinds in one changeset',
+      )
+    }
+    return prepareLinkMedia(db, cred, projectId, id, autonomyMode, linkMedia, env)
   }
 
   // Past the PlanImport branch every remaining command is a SetTranslation.
@@ -419,6 +436,98 @@ async function stageReceiptOnlyChangeset(
     .run()
 
   const stored = await loadChangeset(db, changesetProjectId, id)
+  if (!stored) return errorResponse('job_failed', 'changeset insert did not persist')
+
+  const approvalUrl = `${env.BASE_URL ?? ''}/approve/${stored.id}`
+  return Response.json({
+    changeset: changesetToResponse(stored),
+    summary: stored.summary,
+    digest: stored.digest,
+    approvalUrl,
+  })
+}
+
+/**
+ * Prepare a LinkMedia changeset (Agent API v1.1 §3): for each attach command,
+ * verify the target cell exists in the live projection and the referenced
+ * artifact exists, is kind `audio`, and belongs to this project, then stage the
+ * plan. Compiles at commit to cell.audio.attach + cell.audio.select events;
+ * the attach/select event ids are minted here (§4 prepare-time ids) so a
+ * crash-and-retry re-posts identical ids. Preconditions are empty — the
+ * artifact + cell existence are re-checked directly at commit (plan_stale on
+ * disappearance), so no per-cell head is pinned (attaching audio does not
+ * conflict with a concurrent text edit on the same cell).
+ */
+async function prepareLinkMedia(
+  db: AquillaDb,
+  cred: ApiCredentialContext,
+  projectId: string,
+  id: string,
+  autonomyMode: 'ask' | 'act',
+  cmds: LinkMediaCommand[],
+  env: ExternalEnv,
+): Promise<Response> {
+  // Resolve live state for every target cell in one query.
+  const cellStates = await resolveCellStates(db, projectId, cmds)
+  const plannedLinkMedia: NonNullable<PlannedEventIds['linkMedia']> = []
+
+  for (const cmd of cmds) {
+    const s = cellStates.get(cellKey(cmd.fileId, cmd.cellId))
+    if (!s || (!s.sourceExists && !s.targetExists)) {
+      return errorResponse(
+        'validation_failed',
+        `cell ${cmd.cellId} in file ${cmd.fileId} does not exist`,
+      )
+    }
+    const artifact = await db
+      .prepare(`SELECT id, kind FROM artifacts WHERE id::text = ? AND project_id = ?`)
+      .bind(cmd.artifactId, projectId)
+      .first<{ id: string; kind: string }>()
+    if (!artifact) {
+      return errorResponse('validation_failed', `artifact ${cmd.artifactId} not found in project`)
+    }
+    if (artifact.kind !== 'audio') {
+      return errorResponse('validation_failed', `artifact ${cmd.artifactId} is not an audio artifact`)
+    }
+    plannedLinkMedia.push({
+      fileId: cmd.fileId,
+      cellId: cmd.cellId,
+      artifactId: cmd.artifactId,
+      attachEventId: uuidv7(),
+      selectEventId: uuidv7(),
+    })
+  }
+
+  const summary: ChangesetSummary = { mediaLinked: cmds.length, warnings: [] }
+  const commands: Command[] = [...cmds]
+  const preconditions: CellPrecondition[] = []
+  const digest = await computeDigest(commands, preconditions)
+  const expiresAt = new Date(Date.now() + CHANGESET_TTL_MS).toISOString()
+  const plannedIds: PlannedEventIds = { linkMedia: plannedLinkMedia }
+
+  await db
+    .prepare(
+      `INSERT INTO changesets (
+         id, project_id, created_by_user_id, credential_id, autonomy_mode,
+         status, commands, preconditions, summary, digest, expires_at
+       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::jsonb, ?::jsonb, ?::jsonb, ?, ?)
+       ON CONFLICT (id) DO NOTHING`,
+    )
+    .bind(
+      id,
+      projectId,
+      String(cred.userId),
+      cred.credentialId,
+      autonomyMode,
+      JSON.stringify(commands),
+      JSON.stringify(preconditions),
+      JSON.stringify({ ...summary, plannedIds }),
+      digest,
+      expiresAt,
+    )
+    .run()
+
+  const stored = await loadChangeset(db, projectId, id)
   if (!stored) return errorResponse('job_failed', 'changeset insert did not persist')
 
   const approvalUrl = `${env.BASE_URL ?? ''}/approve/${stored.id}`

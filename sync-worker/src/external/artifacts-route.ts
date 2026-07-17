@@ -18,7 +18,7 @@
 import { errorResponse, toErrorResponse } from './errors'
 import { assertCredentialScope } from './token-bridge'
 import { uuidv7 } from './uuid'
-import { r2KeyPrefix } from '../audio'
+import { r2KeyPrefix, audioObjectKey } from '../audio'
 import { ROLE } from '../events/role-policy'
 import type { ExternalEnv } from './types'
 import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
@@ -27,6 +27,23 @@ import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 /** Max artifact size — 25 MB. Published in get_capabilities (operational
  *  contract §4); surfaced in the oversize error so an agent can self-correct. */
 export const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024
+
+/** Artifact kinds. `source` (default) preserves a verbatim import original;
+ *  `audio` is an uploaded clip a LinkMedia changeset attaches to a cell. The
+ *  caller declares the kind via the `x-artifact-kind` header (absent → source,
+ *  keeping the existing source-upload path untouched). */
+export type ArtifactKind = 'source' | 'audio'
+
+/** Audio content types the upload path accepts (Agent API v1.1 §3), mapped to
+ *  the file extension the audio R2 object name + `frontier-audio://` url carry.
+ *  Cap is unchanged (MAX_ARTIFACT_BYTES). */
+const AUDIO_CONTENT_TYPES: Record<string, string> = {
+  'audio/wav': 'wav',
+  'audio/mpeg': 'mp3',
+  'audio/mp4': 'm4a',
+  'audio/x-m4a': 'm4a',
+  'audio/ogg': 'ogg',
+}
 
 const ROUTE_RE =
   /^\/api\/v1\/external\/projects\/([^/]+)\/artifacts(?:\/([^/]+)(?:\/(content|inspect))?)?$/
@@ -84,6 +101,8 @@ interface ArtifactRow {
   sha256: string
   r2_key: string
   file_id: string | null
+  kind: string
+  audio_id: string | null
   created_at: unknown
 }
 
@@ -98,6 +117,8 @@ function rowToMeta(row: ArtifactRow): Record<string, unknown> {
     sizeBytes: Number(row.size_bytes),
     sha256: row.sha256,
     fileId: row.file_id,
+    kind: row.kind,
+    audioId: row.audio_id,
     createdAt:
       row.created_at instanceof Date
         ? row.created_at.toISOString()
@@ -115,7 +136,7 @@ async function loadArtifact(
   return db
     .prepare(
       `SELECT id, project_id, uploaded_by_user_id, credential_id, name, content_type,
-              size_bytes, sha256, r2_key, file_id, created_at
+              size_bytes, sha256, r2_key, file_id, kind, audio_id, created_at
          FROM artifacts WHERE id::text = ? AND project_id = ?`,
     )
     .bind(artifactId, projectId)
@@ -140,6 +161,31 @@ async function handleUpload(
   }
   const contentType = request.headers.get('content-type')
 
+  // Kind (Agent API v1.1 §3). Absent header → 'source' — the existing path is
+  // byte-for-byte unchanged. 'audio' validates the content type against the
+  // audio allowlist and lands the bytes in the per-file audio R2 layout.
+  const kindHeader = request.headers.get('x-artifact-kind')
+  let kind: ArtifactKind
+  if (kindHeader == null || kindHeader === 'source') {
+    kind = 'source'
+  } else if (kindHeader === 'audio') {
+    kind = 'audio'
+  } else {
+    return errorResponse('validation_failed', `unsupported artifact kind: ${kindHeader}`)
+  }
+
+  let audioExt: string | null = null
+  if (kind === 'audio') {
+    const normalized = (contentType ?? '').split(';')[0].trim().toLowerCase()
+    audioExt = AUDIO_CONTENT_TYPES[normalized] ?? null
+    if (!audioExt) {
+      return errorResponse('validation_failed', 'unsupported audio content type', {
+        contentType,
+        supported: Object.keys(AUDIO_CONTENT_TYPES),
+      })
+    }
+  }
+
   const bytes = new Uint8Array(await request.arrayBuffer())
   if (bytes.byteLength === 0) {
     return errorResponse('validation_failed', 'artifact body is empty')
@@ -152,8 +198,19 @@ async function handleUpload(
   }
 
   const artifactId = uuidv7()
-  const r2Key = artifactR2Key(env, projectId, artifactId)
   const sha256 = await sha256HexBytes(bytes)
+
+  // Audio artifacts land in the EXISTING audio R2 layout used by audio.ts, keyed
+  // with the artifactId in the file slot; `audioId` is the full object name
+  // (`<artifactId>.<ext>`) that layout + the compiled cell.audio.attach payload
+  // expect. A LinkMedia commit copies these bytes under the target cell's file
+  // so the app's native /audio route serves them. Source artifacts keep the
+  // verbatim `artifacts/{projectId}/{artifactId}` key.
+  const audioId = kind === 'audio' ? `${artifactId}.${audioExt}` : null
+  const r2Key =
+    kind === 'audio'
+      ? audioObjectKey(env, projectId, artifactId, audioId as string)
+      : artifactR2Key(env, projectId, artifactId)
 
   await env.SNAPSHOTS.put(r2Key, bytes, {
     httpMetadata: contentType ? { contentType } : undefined,
@@ -163,8 +220,8 @@ async function handleUpload(
     await db
       .prepare(
         `INSERT INTO artifacts
-           (id, project_id, uploaded_by_user_id, credential_id, name, content_type, size_bytes, sha256, r2_key)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, project_id, uploaded_by_user_id, credential_id, name, content_type, size_bytes, sha256, r2_key, kind, audio_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         artifactId,
@@ -176,6 +233,8 @@ async function handleUpload(
         bytes.byteLength,
         sha256,
         r2Key,
+        kind,
+        audioId,
       )
       .run()
   } catch (err) {
@@ -184,7 +243,13 @@ async function handleUpload(
     return errorResponse('job_failed', `artifact insert failed: ${String(err)}`)
   }
 
-  return Response.json({ artifactId, sha256, sizeBytes: bytes.byteLength })
+  return Response.json({
+    artifactId,
+    sha256,
+    sizeBytes: bytes.byteLength,
+    kind,
+    ...(audioId ? { audioId } : {}),
+  })
 }
 
 /** SHA-256 hex of raw bytes (canonical.ts's sha256Hex takes a string). */
@@ -304,6 +369,19 @@ async function handleInspect(
   if (!authed.ok) return authed.response
   const row = await loadArtifact(env.AQUILLA_PG as AquillaDb, projectId, artifactId)
   if (!row) return errorResponse('not_found', `artifact ${artifactId} not found`)
+
+  // Audio artifacts report size + content type only — no decoding, no
+  // duration/waveform sniffing (Agent API v1.1 §3; that would require decoding).
+  if (row.kind === 'audio') {
+    return Response.json({
+      detectedFormat: 'audio',
+      details: {
+        contentType: row.content_type,
+        sizeBytes: Number(row.size_bytes),
+        audioId: row.audio_id,
+      },
+    })
+  }
 
   const obj = await env.SNAPSHOTS.get(row.r2_key)
   if (!obj) return errorResponse('not_found', 'artifact bytes missing from storage')

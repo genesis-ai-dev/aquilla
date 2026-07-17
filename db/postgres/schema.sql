@@ -779,7 +779,7 @@ CREATE TABLE IF NOT EXISTS changesets (
     credential_id      TEXT NOT NULL,
     autonomy_mode      TEXT NOT NULL CHECK (autonomy_mode IN ('ask', 'act')),
     status             TEXT NOT NULL DEFAULT 'staged'
-                         CHECK (status IN ('staged', 'committed', 'discarded', 'stale', 'expired')),
+                         CHECK (status IN ('staged', 'committing', 'committed', 'discarded', 'stale', 'expired')),
     commands           JSONB NOT NULL,            -- normalized domain commands
     preconditions      JSONB NOT NULL,            -- per-cell head/source pins resolved at prepare
     summary            JSONB NOT NULL,            -- server-computed effect summary

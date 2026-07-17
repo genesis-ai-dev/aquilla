@@ -5,6 +5,7 @@ import type { CellPrecondition } from './preconditions'
 import type {
   ChangesetReceipt,
   ChangesetSummary,
+  PlannedEventIds,
   StoredChangeset,
 } from './types'
 
@@ -42,6 +43,17 @@ interface ChangesetRow {
 }
 
 function rowToStored(row: ChangesetRow): StoredChangeset {
+  // W1-B: prepare merges the planned-id ledger into the `summary` JSONB column
+  // (no new column — see PlannedEventIds). Split it back out here so the public
+  // summary shape stays clean and only the commit path sees the ids.
+  const rawSummary = parseJson<ChangesetSummary & { plannedIds?: PlannedEventIds }>(row.summary)
+  let summary: ChangesetSummary = rawSummary
+  let plannedIds: PlannedEventIds | null = null
+  if (rawSummary && typeof rawSummary === 'object' && 'plannedIds' in rawSummary) {
+    const { plannedIds: p, ...rest } = rawSummary
+    plannedIds = p ?? null
+    summary = rest
+  }
   return {
     id: row.id,
     projectId: row.project_id,
@@ -51,7 +63,8 @@ function rowToStored(row: ChangesetRow): StoredChangeset {
     status: row.status as StoredChangeset['status'],
     commands: parseJson<Command[]>(row.commands),
     preconditions: parseJson<CellPrecondition[]>(row.preconditions),
-    summary: parseJson<ChangesetSummary>(row.summary),
+    summary,
+    plannedIds,
     digest: row.digest,
     receipt: row.receipt == null ? null : parseJson<ChangesetReceipt>(row.receipt),
     confirmationId: row.confirmation_id,

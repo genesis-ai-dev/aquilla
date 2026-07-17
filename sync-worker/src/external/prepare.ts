@@ -20,7 +20,7 @@ import { computeDigest } from './canonical'
 import { uuidv7 } from './uuid'
 import { loadChangeset, changesetToResponse } from './store'
 import { assertCredentialScope } from './token-bridge'
-import type { ChangesetSummary, ChangesetWarning, ExternalEnv } from './types'
+import type { ChangesetSummary, ChangesetWarning, ExternalEnv, PlannedEventIds } from './types'
 import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 
@@ -154,7 +154,21 @@ export async function handlePrepare(
   const digest = await computeDigest(commands, preconditions)
   const expiresAt = new Date(Date.now() + CHANGESET_TTL_MS).toISOString()
 
-  // Idempotent insert on the client-supplied id.
+  // W1-B (§4): mint the compiled target.cell.commit event id for every resolved
+  // precondition NOW and store it in the plan, so a crash-and-retry commit
+  // re-posts the same ids (the /events layer dedupes) rather than minting fresh
+  // ones. Digest is computed above over commands + preconditions only, so these
+  // ids never perturb it (two prepares of the same plan still match).
+  const plannedIds: PlannedEventIds = {
+    setTranslation: preconditions.map((p) => ({
+      fileId: p.fileId,
+      cellId: p.cellId,
+      eventId: uuidv7(),
+    })),
+  }
+
+  // Idempotent insert on the client-supplied id. The planned-id ledger rides in
+  // the summary JSONB column (no new column — split back out on load).
   await db
     .prepare(
       `INSERT INTO changesets (
@@ -171,7 +185,7 @@ export async function handlePrepare(
       autonomyMode,
       JSON.stringify(commands),
       JSON.stringify(preconditions),
-      JSON.stringify(summary),
+      JSON.stringify({ ...summary, plannedIds }),
       digest,
       expiresAt,
     )
@@ -256,6 +270,23 @@ async function preparePlanImport(
   const digest = await computeDigest(commands, preconditions)
   const expiresAt = new Date(Date.now() + CHANGESET_TTL_MS).toISOString()
 
+  // W1-B (§4): mint the file id, its file.create event id, and per-cell
+  // {cellId, eventId} NOW (cellId minted here when the plan cell omits its own).
+  // Stored in the plan so a crash-and-retry commit re-posts the SAME file +
+  // event ids — the /events idempotency layer dedupes them — instead of a fresh
+  // mint creating a duplicate file. Minted separately from `cmd` so the digest
+  // (over commands + preconditions) is unaffected and stays stable per plan.
+  const plannedIds: PlannedEventIds = {
+    planImport: {
+      fileId: uuidv7(),
+      fileEventId: uuidv7(),
+      cells: cmd.cells.map((cell) => ({
+        cellId: cell.id ?? uuidv7(),
+        eventId: uuidv7(),
+      })),
+    },
+  }
+
   await db
     .prepare(
       `INSERT INTO changesets (
@@ -272,7 +303,7 @@ async function preparePlanImport(
       autonomyMode,
       JSON.stringify(commands),
       JSON.stringify(preconditions),
-      JSON.stringify(summary),
+      JSON.stringify({ ...summary, plannedIds }),
       digest,
       expiresAt,
     )

@@ -10,7 +10,13 @@
 import type { DcsFile, DcsCell, ResourceRoute, DcsCatalogEntry, DcsManifest } from "../types"
 import { dcsCellId, dcsFileId } from "../cell-id"
 import { contentHash } from "../content-hash"
-import { parseResourceTsv, bookCodeFromTsv, canonicalRefFromTsv } from "./tsv-common"
+import {
+  parseResourceTsv,
+  bookCodeFromTsv,
+  canonicalRefFromTsv,
+  unescapeTsvProse,
+  tsvMarkdownToHtml,
+} from "./tsv-common"
 
 const QUESTIONS_SUBJECTS = [
   "tsv translation questions",
@@ -39,6 +45,16 @@ function combineQuestion(question: string, response: string): string {
   return `Question: ${question}\nResponse: ${response}`
 }
 
+/** HTML twin of combineQuestion: question and response render as separate
+ *  labelled paragraphs (a blank markdown line between them) so the user sees
+ *  both halves distinctly in the editor. */
+function combinedQuestionHtml(question: string, response: string): string {
+  if (question && response) {
+    return tsvMarkdownToHtml(`Question: ${question}\n\nResponse: ${response}`)
+  }
+  return tsvMarkdownToHtml(question || response)
+}
+
 export const tsvQuestionsRoute: ResourceRoute = {
   id: "tsv-questions",
   matches: (entry, manifest) => isQuestions(entry, manifest),
@@ -57,8 +73,12 @@ export const tsvQuestionsRoute: ResourceRoute = {
       const cells: DcsCell[] = []
 
       for (const row of rows) {
-        const question = row.prose["question"] ?? ""
-        const response = row.prose["response"] ?? ""
+        // Unescape TSV `\n`/`\t`/`\\` per column, then combine — the value is
+        // real markdown text, and valueHtml renders it (question + response as
+        // separate paragraphs). Unescaping changes value → contentHash, so a
+        // re-import over old escaped cells correctly emits content commits.
+        const question = unescapeTsvProse(row.prose["question"] ?? "")
+        const response = unescapeTsvProse(row.prose["response"] ?? "")
         const value = combineQuestion(question, response)
         const cell: DcsCell = {
           cellId: dcsCellId(`${repo}|${book}|${row.rowId}`),
@@ -67,6 +87,7 @@ export const tsvQuestionsRoute: ResourceRoute = {
           canonicalRef: canonicalRefFromTsv(book, row.reference),
           contentHash: contentHash(value),
         }
+        if (value) cell.valueHtml = combinedQuestionHtml(question, response)
         if (Object.keys(row.metadata).length > 0) cell.metadata = row.metadata
         cells.push(cell)
       }

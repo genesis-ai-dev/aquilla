@@ -96,6 +96,7 @@ export type BuiltinCheckId =
   | "placeholder-integrity"
   | "number-integrity"
   | "end-punctuation-mismatch"
+  | "punctuation-integrity"
   | "double-space"
   | "repeated-word"
   | "unpaired-symbols"

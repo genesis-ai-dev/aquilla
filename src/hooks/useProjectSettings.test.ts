@@ -7,6 +7,12 @@ vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "test-jwt", username: "ryder" } }),
 }))
 
+// The hook fetches via fetchProjectSettingsResult (fail-closed contract:
+// {ok:false} = transport failure, {ok:true,value:null} = definitive 403/404).
+// Legacy "response or null" test values wrap in the ok envelope here.
+const mockSettingsFetch = (value: restClient.ProjectSettingsResponse | null) =>
+  vi.spyOn(restClient, "fetchProjectSettingsResult").mockResolvedValue({ ok: true, value })
+
 vi.mock("@/lib/store/project-index", () => ({
   getProject: vi.fn(async () => ({
     id: "p1", name: "P", sourceLanguage: "en", targetLanguage: "swh",
@@ -35,8 +41,8 @@ describe("useProjectSettings — StrictMode race (BUG-TERM-1)", () => {
     // Use a deferred fetch so we control exactly when resolution happens
     // relative to simulated cleanup.
     let resolveServerFetch!: (v: any) => void
-    vi.spyOn(restClient, "fetchProjectSettings").mockImplementation(
-      () => new Promise((res) => { resolveServerFetch = res }),
+    vi.spyOn(restClient, "fetchProjectSettingsResult").mockImplementation(
+      () => new Promise((res) => { resolveServerFetch = (v) => res({ ok: true, value: v }) }),
     )
 
     const { unmount } = renderHook(() => useProjectSettings("p1", 700))
@@ -92,10 +98,10 @@ describe("useProjectSettings — read path", () => {
     // server "fr" overwrites it. The hook sequences: IDB read → React render
     // → server fetch, so this deferred promise gives waitFor a polling window.
     let resolveServerFetch!: (v: any) => void
-    vi.spyOn(restClient, "fetchProjectSettings").mockImplementation(
+    vi.spyOn(restClient, "fetchProjectSettingsResult").mockImplementation(
       () =>
         new Promise((res) => {
-          resolveServerFetch = res
+          resolveServerFetch = (v) => res({ ok: true, value: v })
         }),
     )
     const { result } = renderHook(() => useProjectSettings("p1", 700))
@@ -114,7 +120,7 @@ describe("useProjectSettings — read path", () => {
   })
 
   it("treats version 0 + empty server settings as no-server-row (keeps local)", async () => {
-    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
+    mockSettingsFetch({
       version: 0,
       updatedAt: "2026-04-29T10:00:00Z",
       updatedBy: null,
@@ -133,7 +139,7 @@ describe("useProjectSettings — read path", () => {
       syncRole: { level: 700, name: "owner", source: "creator", fetchedAt: "" },
       draftContext: { precedingTargetCells: 7 },
     } as never)
-    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue(null)
+    mockSettingsFetch(null)
     const { result } = renderHook(() => useProjectSettings("p1", 700))
     // Local override (7) must win over the shipped default, not be dropped on offline/IDB load.
     await waitFor(() =>
@@ -143,14 +149,14 @@ describe("useProjectSettings — read path", () => {
 
   it("canEdit is false when offline even at OWNER role", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: false })
-    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue(null)
+    mockSettingsFetch(null)
     const { result } = renderHook(() => useProjectSettings("p1", 700))
     await waitFor(() => expect(result.current.canEdit).toBe(false))
     expect(result.current.reasonCannotEdit).toBe("offline")
   })
 
   it("canEdit is false at CONTRIBUTOR (400)", async () => {
-    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue(null)
+    mockSettingsFetch(null)
     const { result } = renderHook(() => useProjectSettings("p1", 400))
     await waitFor(() => expect(result.current.canEdit).toBe(false))
     expect(result.current.reasonCannotEdit).toBe("role")
@@ -160,14 +166,14 @@ describe("useProjectSettings — read path", () => {
   // Spec: 01-personas-and-roles.md §Role ladder row 600 — "change project settings
   // (languages, system prompt, validation rules, health) — maintainer".
   it("canEdit is false at PROJECT_LEAD (500) while online — below MAINTAINER floor", async () => {
-    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue(null)
+    mockSettingsFetch(null)
     const { result } = renderHook(() => useProjectSettings("p1", 500))
     await waitFor(() => expect(result.current.canEdit).toBe(false))
     expect(result.current.reasonCannotEdit).toBe("role")
   })
 
   it("canEdit is true at MAINTAINER (600) while online", async () => {
-    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue(null)
+    mockSettingsFetch(null)
     const { result } = renderHook(() => useProjectSettings("p1", 600))
     await waitFor(() => expect(result.current.canEdit).toBe(true))
     expect(result.current.reasonCannotEdit).toBeNull()
@@ -175,7 +181,7 @@ describe("useProjectSettings — read path", () => {
 
   it("re-fetches when navigator transitions offline -> online", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: false })
-    const fetchSpy = vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue(null)
+    const fetchSpy = mockSettingsFetch(null)
     renderHook(() => useProjectSettings("p1", 700))
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(0))
     act(() => {
@@ -186,7 +192,7 @@ describe("useProjectSettings — read path", () => {
   })
 
   it("re-fetches on window focus so another client's policy change propagates without reload (AQU-349)", async () => {
-    const fetchSpy = vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
+    const fetchSpy = mockSettingsFetch({
       version: 1, updatedAt: "x", updatedBy: { id: 1, username: "ryder" },
       settings: { validationCount: 3 },
     })
@@ -202,7 +208,7 @@ describe("useProjectSettings — read path", () => {
   })
 
   it("re-fetches on visibilitychange back to visible (AQU-349)", async () => {
-    const fetchSpy = vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue(null)
+    const fetchSpy = mockSettingsFetch(null)
     renderHook(() => useProjectSettings("p1", 700))
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
     act(() => {
@@ -215,7 +221,7 @@ describe("useProjectSettings — read path", () => {
   it("does not crash when local IDB read fails", async () => {
     const idbMod = await import("@/lib/store/project-index")
     vi.mocked(idbMod.getProject).mockRejectedValueOnce(new Error("idb unavailable"))
-    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
+    mockSettingsFetch({
       version: 1, updatedAt: "x", updatedBy: { id: 1, username: "ryder" },
       settings: { sourceLanguage: "en" },
     })
@@ -230,7 +236,7 @@ describe("useProjectSettings — write path", () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: false })
     const idbMod = await import("@/lib/store/project-index")
     vi.mocked(idbMod.patchProject).mockClear()
-    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue(null)
+    mockSettingsFetch(null)
     const { result } = renderHook(() => useProjectSettings("p1", 700))
     // Wait for mount-time local-IDB read to settle before patching, otherwise
     // the mount setLocal races our optimistic setLocal inside patch.
@@ -252,7 +258,7 @@ describe("useProjectSettings — write path", () => {
   it("returns blocked-role for below-MAINTAINER callers on synced projects and does NOT apply locally", async () => {
     const idbMod = await import("@/lib/store/project-index")
     vi.mocked(idbMod.patchProject).mockClear()
-    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue(null)
+    mockSettingsFetch(null)
     // PROJECT_LEAD (500) is below the MAINTAINER (600) floor
     const { result } = renderHook(() => useProjectSettings("p1", 500))
     await waitFor(() => expect(result.current.settings.sourceLanguage).toBe("en"))
@@ -270,7 +276,7 @@ describe("useProjectSettings — write path", () => {
   it("unsynced project (roleLevel === null) writes locally with no server call", async () => {
     const idbMod = await import("@/lib/store/project-index")
     vi.mocked(idbMod.patchProject).mockClear()
-    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue(null)
+    mockSettingsFetch(null)
     const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
     const { result } = renderHook(() => useProjectSettings("p1", null))
     await waitFor(() => expect(result.current.settings.sourceLanguage).toBe("en"))
@@ -288,7 +294,7 @@ describe("useProjectSettings — write path", () => {
   })
 
   it("optimistic write + server confirm", async () => {
-    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
+    mockSettingsFetch({
       version: 1, updatedAt: "x", updatedBy: { id: 1, username: "ryder" },
       settings: { sourceLanguage: "en", targetLanguage: "swh" },
     })
@@ -317,7 +323,7 @@ describe("useProjectSettings — write path", () => {
   })
 
   it("snaps to server on conflict (including local state + IDB)", async () => {
-    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
+    mockSettingsFetch({
       version: 1, updatedAt: "x", updatedBy: { id: 1, username: "ryder" },
       settings: { sourceLanguage: "en" },
     })
@@ -351,7 +357,7 @@ describe("useProjectSettings — write path", () => {
 
 describe("useProjectSettings — migration", () => {
   it("PATCHes local IDB values when server returns version 0 + canEdit=true", async () => {
-    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
+    mockSettingsFetch({
       version: 0, updatedAt: "x", updatedBy: null, settings: {},
     })
     const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
@@ -373,7 +379,7 @@ describe("useProjectSettings — migration", () => {
 
   // AQU-255: migration guard now blocks at MAINTAINER (600), not PROJECT_LEAD (500).
   it("does NOT migrate when below MAINTAINER (600)", async () => {
-    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
+    mockSettingsFetch({
       version: 0, updatedAt: "x", updatedBy: null, settings: {},
     })
     const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
@@ -391,7 +397,7 @@ describe("useProjectSettings — migration", () => {
       files: [], members: [], createdAt: "",
       syncRole: { level: 700, name: "owner", source: "creator", fetchedAt: "" },
     } as any)
-    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
+    mockSettingsFetch({
       version: 0, updatedAt: "x", updatedBy: null, settings: {},
     })
     const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
@@ -407,7 +413,7 @@ describe("useProjectSettings — migration", () => {
 
 describe("AQU-255 — role-floor alignment (client = server = MAINTAINER 600)", () => {
   it("(a) below-MAINTAINER user (PROJECT_LEAD 500) gets canEdit=false and read-only state", async () => {
-    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
+    mockSettingsFetch({
       version: 2, updatedAt: "x", updatedBy: { id: 1, username: "ryder" },
       settings: { sourceLanguage: "en", targetLanguage: "swh" },
     })
@@ -421,7 +427,7 @@ describe("AQU-255 — role-floor alignment (client = server = MAINTAINER 600)", 
   })
 
   it("(a) MAINTAINER (600) gets canEdit=true", async () => {
-    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
+    mockSettingsFetch({
       version: 1, updatedAt: "x", updatedBy: null, settings: {},
     })
     const { result } = renderHook(() => useProjectSettings("p1", 600))
@@ -431,7 +437,7 @@ describe("AQU-255 — role-floor alignment (client = server = MAINTAINER 600)", 
 
   it("(b) server-forbidden write surfaces as blocked and rolls back local state", async () => {
     // Setup: server has sourceLanguage="en"; PATCH returns forbidden.
-    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
+    mockSettingsFetch({
       version: 1, updatedAt: "x", updatedBy: { id: 1, username: "ryder" },
       settings: { sourceLanguage: "en" },
     })
@@ -458,5 +464,90 @@ describe("AQU-255 — role-floor alignment (client = server = MAINTAINER 600)", 
     // After rollback via refresh(), local state must not retain "fr".
     // The refresh re-sets server to the authoritative value.
     await waitFor(() => expect(result.current.settings.sourceLanguage).toBe("en"))
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fail-closed GET contract (adversarial-review blocker, AQU-615)
+//
+// WHY: useDcsUpstreamCursor derives its `loading` (= source lock engaged) from
+// hasFetched. The old code marked hasFetched=true on ANY fetch outcome — so one
+// flaky GET (network blip, 401, 5xx) "resolved" a Door43-linked project as
+// cursor-less, unlocked source editing, and the next repair pass destroyed the
+// hand edit. A failed GET must leave the settings state UNKNOWN.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("useProjectSettings — fail-closed GET (DCS lockdown)", () => {
+  it("a failed GET (network/5xx) does NOT set hasFetched — the DCS source lock stays engaged", async () => {
+    const fetchSpy = vi
+      .spyOn(restClient, "fetchProjectSettingsResult")
+      .mockResolvedValue({ ok: false, status: 0, message: "network down" })
+    const { result } = renderHook(() => useProjectSettings("p1", 700))
+    // The GET ran and failed…
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled())
+    // …and the hook still reports "never fetched": useDcsUpstreamCursor keeps
+    // loading=true, which EditorTable treats as LOCKED.
+    await new Promise((r) => setTimeout(r, 30))
+    expect(result.current.hasFetched).toBe(false)
+    expect(result.current.version).toBeNull()
+  })
+
+  it("a definitive 403/404 (server answered: no settings) DOES resolve as fetched / no cursor", async () => {
+    mockSettingsFetch(null) // {ok:true, value:null} = 403/404
+    const { result } = renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.version).toBeNull()
+    expect(result.current.settings.dcsUpstream).toBeUndefined()
+  })
+
+  it("a later successful GET (focus revalidate) resolves normally after a failure", async () => {
+    // Fail every GET until we explicitly flip the server "back up" — the hook
+    // fires more than one mount-time refresh (IDB-then-fetch + online effect),
+    // so a single mockResolvedValueOnce failure would be consumed too early.
+    let serverUp = false
+    const fetchSpy = vi
+      .spyOn(restClient, "fetchProjectSettingsResult")
+      .mockImplementation(async () =>
+        serverUp
+          ? {
+              ok: true,
+              value: {
+                version: 4, updatedAt: "x", updatedBy: null,
+                settings: { sourceLanguage: "fr" },
+              },
+            }
+          : { ok: false, status: 503, message: "boom" },
+      )
+    const { result } = renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled())
+    await new Promise((r) => setTimeout(r, 30))
+    expect(result.current.hasFetched).toBe(false)
+    // The existing focus-revalidation path is the retry channel.
+    serverUp = true
+    act(() => { window.dispatchEvent(new Event("focus")) })
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.version).toBe(4)
+    expect(result.current.settings.sourceLanguage).toBe("fr")
+  })
+
+  it("a failed GET never clobbers a previously fetched server snapshot", async () => {
+    const fetchSpy = vi
+      .spyOn(restClient, "fetchProjectSettingsResult")
+      .mockResolvedValueOnce({
+        ok: true,
+        value: {
+          version: 9, updatedAt: "x", updatedBy: null,
+          settings: { sourceLanguage: "de" },
+        },
+      })
+      .mockResolvedValue({ ok: false, status: 0, message: "flaky" })
+    const { result } = renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(result.current.version).toBe(9))
+    act(() => { window.dispatchEvent(new Event("focus")) })
+    await waitFor(() => expect(fetchSpy.mock.calls.length).toBeGreaterThan(1))
+    await new Promise((r) => setTimeout(r, 30))
+    // Old behavior wrote null over the snapshot; the fixed hook keeps it.
+    expect(result.current.version).toBe(9)
+    expect(result.current.settings.sourceLanguage).toBe("de")
   })
 })

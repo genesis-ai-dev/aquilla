@@ -117,7 +117,7 @@ describe("previewServerInvite", () => {
     expect(result).toEqual({ ok: false, reason: "expired" })
   })
 
-  // FRO-429: server now returns code:'used' vs code:'time_expired' in the 410 body.
+  // AQU-429: server now returns code:'used' vs code:'time_expired' in the 410 body.
   it("returns {ok:false, reason:'used'} on 410 with code:'used'", async () => {
     global.fetch = mockFetch(410, { error: "Invite already used", code: "used" }) as unknown as typeof fetch
     const result = await previewServerInvite("tok", API)
@@ -153,7 +153,7 @@ describe("previewMultiInvite", () => {
     expect(result).toEqual({ ok: true, data: payload })
   })
 
-  // FRO-347: the Authorization header is what lets the server recognize the
+  // AQU-347: the Authorization header is what lets the server recognize the
   // original redeemer and answer 200 usedByCaller instead of 410 used. A bare
   // fetch here silently regresses the still-member re-click to a dead link.
   it("attaches Authorization when a jwt is provided (still-member re-click path)", async () => {
@@ -181,7 +181,7 @@ describe("previewMultiInvite", () => {
     expect(result).toEqual({ ok: false, reason: "expired" })
   })
 
-  // FRO-429: server now returns code:'used' vs code:'time_expired' in the 410 body.
+  // AQU-429: server now returns code:'used' vs code:'time_expired' in the 410 body.
   it("returns {ok:false, reason:'used'} on 410 with code:'used'", async () => {
     global.fetch = mockFetch(410, { error: "Invite already used", code: "used" }) as unknown as typeof fetch
     const result = await previewMultiInvite("tok", API)
@@ -241,7 +241,7 @@ describe("acceptServerInvite", () => {
     expect(result).toEqual({ ok: false, reason: "invalid" })
   })
 
-  // FRO-364: a 401 must NOT be classified the same as a dead invite — the
+  // AQU-364: a 401 must NOT be classified the same as a dead invite — the
   // caller (JoinPage) uses this to distinguish "auth problem, re-prompt
   // sign-in" from "this link is really dead."
   it("returns {ok:false, reason:'unauthorized'} on 401 (not a dead-invite signal)", async () => {
@@ -273,7 +273,7 @@ describe("acceptMultiInvite", () => {
     expect(result).toEqual({ ok: true, data: payload })
   })
 
-  // FRO-364: a 401 must NOT be classified the same as a dead invite.
+  // AQU-364: a 401 must NOT be classified the same as a dead invite.
   it("returns {ok:false, reason:'unauthorized'} on 401 (not a dead-invite signal)", async () => {
     global.fetch = mockFetch(401, { error: "Invalid or expired token" }) as unknown as typeof fetch
     const result = await acceptMultiInvite("jwt", "tok", API)

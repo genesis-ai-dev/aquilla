@@ -11,9 +11,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * ProjectOverview — per-file stats row.
  *
  * After files have been imported, ProjectOverview.tsx renders a list of
- * file rows in the Progress section. Each row has a span with:
- *   title="filled / approved / total cells · word count"
- * showing "{filled}/{approved}/{total} · {words}w"
+ * file rows in the Progress section. Each row exposes an accessible metric
+ * group for filled, approved, total-cell, and word counts.
  *
  * This spec: creates a project, imports a file, navigates to /projects/:id
  * and verifies the stats row is visible.
@@ -39,8 +38,7 @@ test("project overview shows per-file stats row after import", async ({ alice })
   await alice.waitForLoadState("networkidle")
 
   // The Progress section should show a per-file stats row.
-  const statsSpan = alice.locator('[data-tooltip="filled / approved / total cells · word count"]')
-  await expect(statsSpan).toBeVisible({ timeout: 15_000 })
-  // Content should be "{n}/{n}/{n} · {n}w"
-  await expect(statsSpan).toContainText(/\d+\/\d+\/\d+ · \d+w/)
+  const fileRow = alice.getByTestId("file-row").filter({ hasText: /sample/i }).first()
+  await expect(fileRow).toBeVisible({ timeout: 15_000 })
+  await expect(fileRow.getByLabel(/\d+ filled, \d+ approved, \d+ total cells, \d+ words/)).toBeVisible()
 })

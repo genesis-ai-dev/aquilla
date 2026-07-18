@@ -19,7 +19,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *
  * Flow:
  *   1. Create project → navigate to /project/:id/settings
- *   2. Edit the project name field (makes isDirty=true)
+ *   2. Edit the source language field (makes isDirty=true)
  *   3. Click the "▾" split-button dropdown → click "Close without saving"
  *   4. Dialog opens with title "Discard changes?"
  *   5a. Click "Keep editing" → dialog closes, URL still ends in /settings
@@ -37,14 +37,13 @@ test("project settings discard dialog: Keep editing stays on settings page", asy
   expect(projectId).toBeTruthy()
 
   // Navigate to project settings.
-  await alice.goto(`/project/${projectId}/settings`)
+  // AQU-501: Project name lives in the "General" sub-menu pane.
+  await alice.goto(`/project/${projectId}/settings?section=general`)
   await alice.waitForLoadState("networkidle")
 
-  // Edit the project name to make isDirty=true.
-  // Project name field is #pname in the Project Info card.
-  const nameInput = alice.locator("#pname")
-  await expect(nameInput).toBeVisible({ timeout: 10_000 })
-  await nameInput.fill(name + " edited")
+  const sourceLanguage = alice.locator("#sl")
+  await expect(sourceLanguage).toBeVisible({ timeout: 10_000 })
+  await sourceLanguage.fill("English (US)")
 
   // The "Unsaved changes" text should appear.
   await expect(alice.getByText(/Unsaved changes/i)).toBeVisible({ timeout: 5_000 })
@@ -71,7 +70,9 @@ test("project settings discard dialog: Keep editing stays on settings page", asy
   await keepEditingBtn.click()
 
   await expect(dialog).not.toBeVisible({ timeout: 3_000 })
-  await expect(alice).toHaveURL(/\/settings$/, { timeout: 3_000 })
+  // AQU-501: the pane is now expressed via `?section=`, so match the path
+  // rather than anchoring on end-of-string.
+  await expect(alice).toHaveURL(/\/settings(\?|$)/, { timeout: 3_000 })
 })
 
 test("project settings discard dialog: Discard navigates away from settings", async ({ alice }) => {
@@ -85,14 +86,13 @@ test("project settings discard dialog: Discard navigates away from settings", as
   const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}/settings`)
+  // AQU-501: Project name lives in the "General" sub-menu pane.
+  await alice.goto(`/project/${projectId}/settings?section=general`)
   await alice.waitForLoadState("networkidle")
 
-  // Edit name → make dirty.
-  // Project name field is #pname in the Project Info card.
-  const nameInput = alice.locator("#pname")
-  await expect(nameInput).toBeVisible({ timeout: 10_000 })
-  await nameInput.fill(name + " edited again")
+  const sourceLanguage = alice.locator("#sl")
+  await expect(sourceLanguage).toBeVisible({ timeout: 10_000 })
+  await sourceLanguage.fill("English (Canada)")
   await expect(alice.getByText(/Unsaved changes/i)).toBeVisible({ timeout: 5_000 })
 
   // Open dropdown → click "Close without saving".

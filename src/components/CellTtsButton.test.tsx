@@ -1,4 +1,4 @@
-// FRO-360 — the per-cell "Generate audio" hover must name the ENGINE that
+// AQU-360 — the per-cell "Generate audio" hover must name the ENGINE that
 // generation will actually use (the resolved voice's provider, falling back
 // to the project's configured provider) — not a stale/hardcoded engine name
 // like "Omni voice" that was never configured.
@@ -27,7 +27,7 @@ function renderButton(projectTtsSettings: ProjectTtsSettings) {
   )
 }
 
-describe("CellTtsButton hover label (FRO-360)", () => {
+describe("CellTtsButton hover label (AQU-360)", () => {
   it("names MMS when that's the project's configured provider and the voice has none of its own", () => {
     renderButton({ provider: "mms", voices: [{ id: "v1", name: "Narrator", color: "#000" }], defaultVoiceId: "v1" })
     const btn = screen.getByRole("button")

@@ -1,5 +1,5 @@
 /**
- * AgentDockPanel.tsx — FRO-320
+ * AgentDockPanel.tsx — AQU-320
  *
  * Inline AI agent panel for the left dock. Renders AgentDockView in the dock's
  * compact column layout, with a header and (for scripture files) Summarize

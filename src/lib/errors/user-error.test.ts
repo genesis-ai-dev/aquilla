@@ -1,4 +1,4 @@
-// Unit tests for the network error taxonomy (FRO-281).
+// Unit tests for the network error taxonomy (AQU-281).
 //
 // Verifies that:
 //  1. Status codes map to human messages, not "HTTP NNN" strings.

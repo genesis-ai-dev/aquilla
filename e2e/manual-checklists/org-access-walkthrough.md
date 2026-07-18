@@ -1,4 +1,4 @@
-# Manual Walkthrough: Org-Level Access Control (FRO-144)
+# Manual Walkthrough: Org-Level Access Control (AQU-144)
 
 **Purpose**: Human-clickable step-by-step verification of org membership, teams, and access revocation.  
 **Related spec**: `e2e/specs/orgs/org-access-lifecycle.spec.ts`  

@@ -13,6 +13,7 @@ import { encodeParagraphCells } from "@/lib/completion/paragraph-protocol"
  * Used as few-shot examples that capture this team's terminology decisions.
  */
 export interface ValidatedPair {
+  cellId?: string
   source: string
   target: string
 }
@@ -33,7 +34,7 @@ export interface ValidatedPair {
  * @param limit - max pairs to return (default 20; callers may want fewer)
  */
 export function collectValidatedPairs(
-  cells: { status: string; original: string; translated: string }[],
+  cells: { id?: string; status: string; original: string; translated: string }[],
   query?: string,
   limit = 20,
 ): ValidatedPair[] {
@@ -52,10 +53,18 @@ export function collectValidatedPairs(
       return { pair: c, overlap }
     })
     withScore.sort((a, b) => b.overlap - a.overlap)
-    return withScore.slice(0, limit).map((x) => ({ source: x.pair.original, target: x.pair.translated }))
+    return withScore.slice(0, limit).map((x) => ({
+      ...(x.pair.id ? { cellId: x.pair.id } : {}),
+      source: x.pair.original,
+      target: x.pair.translated,
+    }))
   }
 
-  return validated.slice(0, limit).map((c) => ({ source: c.original, target: c.translated }))
+  return validated.slice(0, limit).map((c) => ({
+    ...(c.id ? { cellId: c.id } : {}),
+    source: c.original,
+    target: c.translated,
+  }))
 }
 
 /**
@@ -136,7 +145,7 @@ interface ChatMessage { role: "system" | "user" | "assistant"; content: string }
  * route (`/project/:id/...` or `/projects/:id`), or null when not on a
  * project surface.
  *
- * FRO-414 follow-up: chat spend is billed to the org of the project in scope
+ * AQU-414 follow-up: chat spend is billed to the org of the project in scope
  * when the completion is invoked. Every completion caller (copilot drafts,
  * backtranslation, brief generator, rule extract/suggest/autofix) runs on a
  * project route, so the URL IS the project context — deriving it here means
@@ -230,11 +239,10 @@ export function buildPrompt(options: {
   return [{ role: "system", content: sys }, { role: "user", content: user.trim() }]
 }
 
-// LLMs translate a passage substantially better than the same verses in
-// isolation (pronoun antecedents, tense agreement, discourse cohesion). The
-// segmented prompt asks the model to translate a whole user-selected span as
-// one unit, framed with numbered <vN>...</vN> tags so the response can be
-// demuxed back to individual cells. Numbered tags (not bare <v>) so a
+// A segmented prompt preserves passage context (pronoun antecedents, tense
+// agreement, discourse cohesion). Current evidence does not establish that a
+// larger joint call inherently improves draft quality. Numbered <vN> tags let
+// the response be demuxed back to individual cells; numbered tags (not bare <v>) ensure a
 // missing/extra tag in the response is per-cell recoverable.
 const BATCH_FRAMING_INSTRUCTIONS =
   "The source is segmented with <v1>, <v2>, ... tags. " +
@@ -251,10 +259,6 @@ export function buildBatchPrompt(options: {
   sourceLanguage: string; targetLanguage: string; systemPrompt: string
   cells: { source: string }[]
   examples: PassageExample[]
-  // Just-translated cells from the previous sub-batch in the same selection.
-  // Rendered as a final example to give the model continuity across a chunk
-  // boundary at zero token cost vs. one full extra example.
-  priorBatch?: { source: string; target: string }[]
   /** Active project rules — injected as a "must follow" block in the system prompt. */
   rules?: TranslationRule[]
   /** Pre-filtered validated pairs from the project — prepended as a passage example. */
@@ -308,13 +312,6 @@ export function buildBatchPrompt(options: {
       user += `Translation:\n${renderSide(cells, "target")}\n\n`
     } else {
       user += `Source:\n${renderSide(cells, "source")}\n\nTranslation:\n${renderSide(cells, "target")}\n\n`
-    }
-  }
-  if (options.priorBatch?.length) {
-    if (targetOnly) {
-      user += `Translation:\n${renderSide(options.priorBatch, "target")}\n\n`
-    } else {
-      user += `Source:\n${renderSide(options.priorBatch, "source")}\n\nTranslation:\n${renderSide(options.priorBatch, "target")}\n\n`
     }
   }
   const liveSource = options.cells.map((c, i) => `<v${i + 1}>${c.source}</v${i + 1}>`).join("\n")
@@ -528,12 +525,14 @@ export async function complete(options: CompleteOptions): Promise<string> {
   const provider = resolveProvider(effectiveSettings)
   const { url, headers } = await buildRequestTarget(provider, effectiveSettings, options.session)
 
-  // The Frontier worker's SSE proxy drops OpenRouter content chunks that
-  // straddle `reader.read()` boundaries (fixed in the worker but not yet
-  // deployed), which surfaces as an empty completion. Force non-streaming
-  // for `frontier` until the worker fix ships; custom providers (BYO-key)
-  // still stream normally.
-  const useStream = options.stream === true && provider !== "frontier"
+  // Frontier streams again (Phase 0, 2026-06-11). History: the original
+  // chat-worker SSE proxy parsed and re-emitted frames, dropping OpenRouter
+  // content chunks that straddled `reader.read()` boundaries — that proxy was
+  // replaced by a byte-identical passthrough when chat folded into
+  // aquilla-identity (2026-05-26; the Phase 0 usage tee is also an identity
+  // transform), and consumeStream below buffers split frames correctly. The
+  // old `provider !== "frontier"` guard outlived the bug it worked around.
+  const useStream = options.stream === true
 
   // Frontier only: attribute this spend to the project being edited (see
   // activeProjectIdFromPath). Custom OpenAI-compatible endpoints may reject

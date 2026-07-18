@@ -17,6 +17,10 @@ export interface EmailService {
     subject: string
     html?: string
     text?: string
+    /** Where replies go. Our `from` is an unmonitored `noreply@`, so set this
+     *  to a routed inbox (support@…) or a reply lands nowhere. Workers-binding
+     *  field is camelCase `replyTo` (REST is `reply_to`). */
+    replyTo?: string
   }): Promise<{ messageId: string }>
 }
 
@@ -49,6 +53,11 @@ export interface Env {
    *  fails the same way it did without a Resend key. */
   EMAIL?: EmailService
   EMAIL_FROM?: string
+  /** Reply-To for transactional mail. Because EMAIL_FROM is an unmonitored
+   *  `noreply@`, replies are pointed here instead. Defaults to
+   *  `support@aquilla.app`; that address must be routed to a human in
+   *  Cloudflare Email Routing for "a real person reads it" to be true. */
+  EMAIL_REPLY_TO?: string
   BASE_URL?: string
 
   /** Public invite link to the community (Discord). When set, the welcome
@@ -101,7 +110,7 @@ export interface Env {
    *  so streaming routes can open a connection that outlives the Response. */
   PG_CONNECTION_STRING?: string
 
-  // AI budget + allowlist controls (FRO-265).
+  // AI budget + allowlist controls (AQU-265).
   // AI_ALLOWED_MODELS: comma-separated list of permitted OpenRouter model IDs.
   //   Unset → uses the hardcoded default list in lib/ai-budget.ts.
   AI_ALLOWED_MODELS?: string
@@ -212,12 +221,19 @@ export interface SyncTokenClaims {
   fileId: string
   role: number
   /**
-   * FRO-346: role-resolution path that produced `role` (RoleResolution.source).
+   * AQU-346: role-resolution path that produced `role` (RoleResolution.source).
    * `"platform"` marks ADMIN_EMAILS operators — the documented exemption from
    * the sync-worker's live membership re-check on writes (platform access is
    * env-configured, not data-derived, so there is no row to re-check).
    */
   src: RoleResolution["source"]
+  /**
+   * AQU-553: additive lane/file write restrictions for this user on this
+   * project. OMITTED entirely when the user is unscoped (no rows) — an absent
+   * claim means "exactly today's behavior." When present, sync-worker authorize
+   * gates target-side writes + validate/unvalidate against these scopes.
+   */
+  scopes?: Array<{ kind: "lane" | "file"; value: string }>
   aud: "sync"
   iat: number
   exp: number

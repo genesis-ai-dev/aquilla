@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useParams, useNavigate } from "react-router-dom"
-import { ArrowLeft, Check, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDriveDownload } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react"
+import { useParams, useNavigate, useSearchParams } from "react-router-dom"
+import {
+  ArrowLeft, Check, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDriveDownload,
+  SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines,
+} from "lucide-react"
 import { Menu } from "@base-ui/react/menu"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
@@ -50,15 +53,20 @@ import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
+import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
+import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
+import { readCursor } from "@/lib/dcs/cursor"
 import { UpstreamChangesPanel } from "./linked/UpstreamChangesPanel"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useOrg } from "@/hooks/useOrg"
 import { ApiKeyField } from "./ApiKeyField"
-import { SettingsNav, useScrollSpy, type SettingsSection } from "./ProjectSettings/SettingsNav"
+import { SettingsNav, type SettingsSection } from "./ProjectSettings/SettingsNav"
+import { NavList, NavRow, BackLink } from "@/components/ui/nav-list"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
 import { usePostEditMetrics } from "@/lib/metrics/use-post-edit-metrics"
 import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSection"
 
@@ -131,7 +139,7 @@ interface Baseline {
   validationNamedUsers: string[]
   allowSelfValidation: boolean
   harmonize_min_role: "project_lead" | "maintainer"
-  /** FRO-460: EXPLICIT persisted value only. `undefined` = no explicit choice
+  /** AQU-460: EXPLICIT persisted value only. `undefined` = no explicit choice
    *  yet — the effective (displayed) state is derived via
    *  `resolveBibleResourcesEnabled`, not defaulted here. */
   bibleResourcesEnabled: boolean | undefined
@@ -157,7 +165,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     llmHealthPenalty: project.completionSettings?.llmHealthPenalty ?? 0.1,
     top_k: project.completionSettings?.top_k ?? 15,
     contextSize: project.completionSettings?.contextSize ?? "medium",
-    useOnlyValidatedExamples: project.completionSettings?.useOnlyValidatedExamples ?? false,
+    useOnlyValidatedExamples: true,
     main_chat_language: project.completionSettings?.main_chat_language ?? "",
     fewShotExampleFormat: project.completionSettings?.fewShotExampleFormat ?? "source-and-target",
     autoSyncEnabled: project.syncSettings?.autoSync.enabled ?? false,
@@ -168,7 +176,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     validationNamedUsers: project.validationNamedUsers ?? [],
     allowSelfValidation: project.allowSelfValidation ?? true,
     harmonize_min_role: project.harmonize_min_role ?? "project_lead",
-    // FRO-460: preserve "unset" — do NOT default to false here, that would
+    // AQU-460: preserve "unset" — do NOT default to false here, that would
     // make an unset scripture project look explicitly off in the diff/baseline.
     bibleResourcesEnabled: project.bibleResourcesEnabled,
     decaySettings: project.decaySettings,
@@ -209,6 +217,7 @@ export function ProjectSettings() {
     conflict: sharedConflict,
     dismissConflict,
     hasFetched: sharedSettingsFetched,
+    settings: sharedSettingsBlob,
   } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null)
 
   // Org context for the termbase-sharing section. The user's org; the section's
@@ -216,7 +225,7 @@ export function ProjectSettings() {
   // yields graceful empty/403 states.
   const { org } = useOrg()
 
-  // FRO-311: AI post-edit metrics
+  // AQU-311: AI post-edit metrics
   const { session } = useFrontierSession()
   const isCloudProject = !!(project?.syncRole)
   const metricsFiles = useMemo(
@@ -237,7 +246,7 @@ export function ProjectSettings() {
     enabled: isCloudProject && !!id,
   })
 
-  // FRO-478: file-scoped sync-token minter for the Upstream-changes panel
+  // AQU-478: file-scoped sync-token minter for the Upstream-changes panel
   // (mirrors ProjectWorkspace's getTokenForFile — per-file JWTs, cached).
   const getTokenForUpstreamPanel = useMemo(
     () => buildFileScopedTokenFetcher(getJwt, id ?? "", {}),
@@ -274,7 +283,7 @@ export function ProjectSettings() {
   const [llmHealthPenalty, setLlmHealthPenalty] = useState(0.1)
   const [topK, setTopK] = useState(15)
   const [contextSize, setContextSize] = useState<ContextSize>("medium")
-  const [useOnlyValidatedExamples, setUseOnlyValidatedExamples] = useState(false)
+  const [useOnlyValidatedExamples, setUseOnlyValidatedExamples] = useState(true)
   const [fewShotExampleFormat, setFewShotExampleFormat] = useState<"source-and-target" | "target-only">("source-and-target")
   const [mainChatLanguage, setMainChatLanguage] = useState("")
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false)
@@ -284,9 +293,9 @@ export function ProjectSettings() {
   const [validationRoleFloor, setValidationRoleFloor] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
   const [validationNamedUsers, setValidationNamedUsers] = useState<string[]>([])
   const [allowSelfValidation, setAllowSelfValidation] = useState(true)
-  // FRO-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
+  // AQU-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
   const [harmonizeMinRole, setHarmonizeMinRole] = useState<"project_lead" | "maintainer">("project_lead")
-  // FRO-460: EXPLICIT persisted value only — `undefined` means no explicit
+  // AQU-460: EXPLICIT persisted value only — `undefined` means no explicit
   // choice yet. The switch displays the DERIVED effective value (see render);
   // this state only ever holds what will be persisted on Save.
   const [bibleResourcesEnabled, setBibleResourcesEnabled] = useState<boolean | undefined>(undefined)
@@ -327,7 +336,7 @@ export function ProjectSettings() {
     setLlmHealthPenalty(b.llmHealthPenalty)
     setTopK(b.top_k)
     setContextSize(b.contextSize)
-    setUseOnlyValidatedExamples(b.useOnlyValidatedExamples)
+    setUseOnlyValidatedExamples(true)
     setFewShotExampleFormat(b.fewShotExampleFormat)
     setMainChatLanguage(b.main_chat_language)
     setAutoSyncEnabled(b.autoSyncEnabled)
@@ -356,7 +365,7 @@ export function ProjectSettings() {
     seededRef.current = true
   }, [project, applyBaseline])
 
-  // FRO-460 display-race fix: `project.bibleResourcesEnabled` hydrates in two
+  // AQU-460 display-race fix: `project.bibleResourcesEnabled` hydrates in two
   // async phases — `useProject`'s minimal record resolves first WITHOUT the
   // field (undefined), then its own `useProjectSettings` GET fills it in. If
   // the baseline seed above (which runs on first non-null `project`) lands
@@ -464,7 +473,18 @@ export function ProjectSettings() {
   const [discardOpen, setDiscardOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  // FRO-408: success message reflects the actual delta saved (a brief
+  // Distinct from `saveError`: a shared-settings save blocked by the active
+  // account's role. Rendered as an enriched inline alert (names the account,
+  // offers an account switch) rather than the bare header string.
+  const [permissionBlocked, setPermissionBlocked] = useState(false)
+  // Clear the permission alert when the active account changes (e.g. the user
+  // clicks "switch account" in the alert itself) or the current account gains
+  // edit permission — otherwise the stale alert re-renders and misattributes the
+  // denial to the newly-active, possibly-authorized account.
+  useEffect(() => {
+    setPermissionBlocked(false)
+  }, [session?.username, canEditShared])
+  // AQU-408: success message reflects the actual delta saved (a brief
   // enumeration of which fields changed), not a generic "Saved". Auto-dismisses
   // like the sibling `conflictBy` notice above. The modal/page itself stays
   // open on save — only an explicit "Save and close" leaves it.
@@ -492,6 +512,10 @@ export function ProjectSettings() {
   const preset = CUSTOM_PRESETS.find((p) => p.id === presetId) ?? CUSTOM_PRESETS[0]
 
   async function handleConnect() {
+    if (!endpoint.trim()) {
+      setConnectionError("Endpoint URL is required")
+      return
+    }
     await loadModels({ force: true })
   }
 
@@ -524,8 +548,9 @@ export function ProjectSettings() {
     if (!id || !baseline) return false
     setSaving(true)
     setSaveError(null)
+    setPermissionBlocked(false)
     setSavedMessage(null)
-    // FRO-408: track which fields actually changed so the success message can
+    // AQU-408: track which fields actually changed so the success message can
     // reflect the real delta saved, instead of a generic "Saved" that implies
     // everything on the page was written.
     const changedFieldLabels: string[] = []
@@ -607,11 +632,14 @@ export function ProjectSettings() {
           return false
         }
         if (out.kind === "blocked") {
-          setSaveError(
-            out.reason === "offline"
-              ? "You're offline. Reconnect to save shared fields."
-              : "You don't have permission to change shared settings.",
-          )
+          if (out.reason === "offline") {
+            setSaveError("You're offline. Reconnect to save shared fields.")
+          } else {
+            // Permission (role) block — surface the enriched alert that names
+            // the active account and offers an account switch, instead of the
+            // bare "You don't have permission…" header string.
+            setPermissionBlocked(true)
+          }
           return false
         }
         if (out.kind === "error") {
@@ -662,7 +690,7 @@ export function ProjectSettings() {
       // updated IDB record. We don't await it — the form is already correct.
       refresh()
 
-      // FRO-408 acceptance criterion: the success message reflects the actual
+      // AQU-408 acceptance criterion: the success message reflects the actual
       // delta saved (a brief enumeration of which fields changed), and the
       // page/modal stays open afterward — callers decide separately whether
       // to also navigate away (see handleSaveAndClose).
@@ -717,14 +745,24 @@ export function ProjectSettings() {
   const hasGitOrigin = project?.origin?.kind === "git"
   const hasSourceLink = typeof project?.sourceProjectId === "string" && !!project.sourceProjectId
 
-  // FRO-478: only meaningful for a LIVE link (a clone never drifts from its
+  // AQU-478: only meaningful for a LIVE link (a clone never drifts from its
   // upstream — see the mirror-sync short-circuit in stale-source-route.ts).
   const hasLiveSourceLink = hasSourceLink && project?.sourceLinkMode !== "clone"
+
+  // DCS importer: a self-contained adapter project (pinned to a Door43 release
+  // via project_settings.dcsUpstream) is not a downstream link, so it never
+  // shows SourceLinkSection. Surface the Door43 upstream panel directly here.
+  // Rendered only when NOT a downstream link — a downstream that also carries a
+  // dcsUpstream cursor already gets the panel embedded in SourceLinkSection, so
+  // this guard prevents a double mount.
+  const hasDcsUpstream = !hasSourceLink && !!readCursor((sharedSettingsBlob ?? {}) as Record<string, unknown>)
 
   const ALL_SECTIONS: SettingsSection[] = [
     { id: "section-source-link", label: "Source link", keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
     { id: "section-upstream-changes", label: "Upstream changes", keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
+    { id: "section-dcs-upstream", label: "Door43 upstream", keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
     { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language"] },
+    { id: "section-languages", label: "Languages", keywords: ["languages", "target lanes", "lane", "target language", "dialect"] },
     { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["system prompt", "ai", "llm", "instructions"] },
@@ -742,7 +780,14 @@ export function ProjectSettings() {
   ]
 
   // ── Search filter ──────────────────────────────────────────────────────────
-  const [searchQuery, setSearchQuery] = useState("")
+  // AQU-522: the settings search is deep-linkable via `?q=<term>` so callers can
+  // point a user straight at a buried section. The Gemini/TTS key lives in the
+  // Voice section far down the page; "open audio setup" affordances navigate to
+  // `…/settings?q=gemini`, which filters to the Voice card so the key entry is
+  // visible immediately with nothing to hunt for or scroll past. Seeded once on
+  // mount; the box stays user-editable/clearable afterward.
+  const [searchParams] = useSearchParams()
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get("q") ?? "")
   const lowerQuery = searchQuery.trim().toLowerCase()
   const visibleSections = lowerQuery
     ? ALL_SECTIONS.filter(
@@ -753,8 +798,87 @@ export function ProjectSettings() {
       )
     : ALL_SECTIONS.filter((s) => s.visible !== false)
 
-  const visibleIds = visibleSections.map((s) => s.id)
-  const activeId = useScrollSpy(visibleIds)
+  // AQU-501: sub-menu IA — group the flat section list into labeled panes so
+  // picking a sub-section shows only that pane, matching the org Settings
+  // index → detail pattern (src/pages/Settings.tsx) instead of one long
+  // scroll. Internal `?section=` search-param state (no new route — App.tsx
+  // untouched); search still filters within the active pane, and clears the
+  // pane to show cross-group matches (mirrors the old scroll-spy filter).
+  const SETTINGS_GROUPS: {
+    id: string
+    label: string
+    description: string
+    icon: ComponentType<{ className?: string }>
+    sectionIds: string[]
+  }[] = [
+    {
+      id: "general",
+      label: "General",
+      description: "Name, languages, username, Bible resources",
+      icon: SlidersHorizontal,
+      sectionIds: ["section-project-info", "section-languages", "section-bible-resources", "section-user"],
+    },
+    {
+      id: "source-sync",
+      label: "Source & sync",
+      description: "Linked source project, upstream changes, git sync",
+      icon: Link2,
+      sectionIds: ["section-source-link", "section-upstream-changes", "section-git-sync"],
+    },
+    {
+      id: "ai",
+      label: "AI & completion",
+      description: "Instructions, draft context, provider, voice, terminology",
+      icon: Sparkles,
+      sectionIds: [
+        "section-ai-instructions", "section-draft-context", "section-advanced-llm",
+        "section-voice", "section-local-models", "section-terminology", "section-termbase-sharing",
+      ],
+    },
+    {
+      id: "validation",
+      label: "Validation & health",
+      description: "Approvals, harmonization, staleness decay",
+      icon: ShieldCheck,
+      sectionIds: ["section-validation", "section-decay"],
+    },
+    {
+      id: "audio-media",
+      label: "Audio media",
+      description: "How audio is fetched from storage",
+      icon: AudioLines,
+      sectionIds: ["section-audio-media"],
+    },
+    {
+      id: "metrics",
+      label: "AI metrics",
+      description: "Post-edit distance and AI usage",
+      icon: BarChart3,
+      sectionIds: ["section-ai-metrics"],
+    },
+  ]
+
+  const visibleSectionIdSet = new Set(visibleSections.map((s) => s.id))
+  const visibleGroups = SETTINGS_GROUPS
+    .map((g) => ({ ...g, sectionIds: g.sectionIds.filter((id) => visibleSectionIdSet.has(id)) }))
+    .filter((g) => g.sectionIds.length > 0)
+
+  // Navigation between the index and a pane is a plain in-page Link to
+  // `?section=<id>` (read via `searchParams` above) — no new route, App.tsx
+  // untouched, and the pane is deep-linkable / back-button friendly.
+  const activeGroupId = searchParams.get("section")
+  const activeGroup = visibleGroups.find((g) => g.id === activeGroupId) ?? null
+  // An unknown/stale group id (e.g. its only section just became invisible)
+  // falls back to the index instead of rendering an empty pane.
+  const showIndex = !activeGroup || lowerQuery.length > 0
+
+  // While searching, show matches across every group (the old flat-filter
+  // behavior) rather than confining results to whichever pane is open.
+  const sectionsToRender = lowerQuery
+    ? visibleSections
+    : activeGroup
+      ? visibleSections.filter((s) => activeGroup.sectionIds.includes(s.id))
+      : []
 
   if (loading) return <div className="p-8 text-muted-foreground">Loading...</div>
 
@@ -822,31 +946,40 @@ export function ProjectSettings() {
           {saveError && <span className="text-destructive">{saveError}</span>}
         </div>
       </header>
-      <div className="mx-auto flex max-w-5xl gap-6 px-4 py-6">
-        {/* Left rail nav */}
-        <aside className="hidden w-44 shrink-0 lg:block">
-          <div className="sticky top-[60px]">
-            <SettingsNav
-              sections={visibleSections}
-              activeId={activeId}
-              onSearch={setSearchQuery}
-              searchQuery={searchQuery}
-            />
-          </div>
-        </aside>
+      <div className="mx-auto max-w-3xl px-4 py-6">
+        {/* Search — filters across every group, mirrors the old scroll-spy filter */}
+        <div className="mb-4">
+          <SettingsNav onSearch={setSearchQuery} searchQuery={searchQuery} />
+        </div>
 
         {/* Main content */}
         <main className="min-w-0 flex-1 space-y-6">
-          {/* Mobile search — only shows on narrow widths where rail is hidden */}
-          <div className="lg:hidden">
-            <SettingsNav
-              sections={visibleSections}
-              activeId={activeId}
-              onSearch={setSearchQuery}
-              searchQuery={searchQuery}
-            />
-          </div>
+        {showIndex ? (
+          !lowerQuery ? (
+            <NavList label="Settings">
+              {visibleGroups.map((g) => (
+                <NavRow
+                  key={g.id}
+                  to={`?section=${g.id}`}
+                  icon={g.icon}
+                  title={g.label}
+                  description={g.description}
+                />
+              ))}
+            </NavList>
+          ) : sectionsToRender.length === 0 ? (
+            <p className="px-2 py-1.5 text-sm text-muted-foreground">No matching settings.</p>
+          ) : null
+        ) : (
+          <BackLink to="?" label="Settings" />
+        )}
 
+        {permissionBlocked && (
+          <PermissionDeniedAlert
+            action="change shared settings"
+            requiredRole="Maintainer or higher"
+          />
+        )}
         {sharedConflict && (
           <div
             role="alert"
@@ -863,7 +996,7 @@ export function ProjectSettings() {
             </button>
           </div>
         )}
-        {hasSourceLink && project?.sourceProjectId && visibleSections.some((s) => s.id === "section-source-link") && (
+        {hasSourceLink && project?.sourceProjectId && sectionsToRender.some((s) => s.id === "section-source-link") && (
           <SourceLinkSection
             projectId={id!}
             sourceProjectId={project.sourceProjectId}
@@ -875,7 +1008,7 @@ export function ProjectSettings() {
             roleLevel={project?.syncRole?.level ?? null}
           />
         )}
-        {hasLiveSourceLink && visibleSections.some((s) => s.id === "section-upstream-changes") && (
+        {hasLiveSourceLink && sectionsToRender.some((s) => s.id === "section-upstream-changes") && (
           <UpstreamChangesPanel
             projectId={id!}
             files={project?.files ?? []}
@@ -884,13 +1017,38 @@ export function ProjectSettings() {
             username={session?.username ?? "local"}
           />
         )}
-        {visibleSections.some((s) => s.id === "section-project-info") && (
+        {hasDcsUpstream && sectionsToRender.some((s) => s.id === "section-dcs-upstream") && (
+          <DcsUpstreamPanel projectId={id!} roleLevel={project?.syncRole?.level ?? null} />
+        )}
+        {sectionsToRender.some((s) => s.id === "section-project-info") && (
           <Card id="section-project-info">
             <CardHeader><CardTitle>Project Info</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               <div>
                 <FieldLabel htmlFor="pname">Project Name</FieldLabel>
-                <Input id="pname" value={name} onChange={(e) => setName(e.target.value)} />
+                {/* AQU-480: a synced project's name comes from the server and has
+                    no rename endpoint (see auth-worker projects route — INSERT
+                    only). Editing this field only wrote local IDB, which reverts
+                    on the next server sync — a silent no-op for every role, and
+                    un-gated for contributors. Gate it read-only with an honest
+                    reason on cloud projects; local projects keep it editable
+                    (their IDB record IS the source of truth). */}
+                <DisabledFieldTooltip
+                  disabled={isCloudProject}
+                  tooltip={isCloudProject ? "Renaming a synced project isn't supported yet." : null}
+                >
+                  <Input
+                    id="pname"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    disabled={isCloudProject}
+                  />
+                </DisabledFieldTooltip>
+                {isCloudProject && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Renaming a synced project isn't supported yet.
+                  </p>
+                )}
               </div>
               {sharedUpdatedBy && sharedUpdatedAt && sharedVersion != null && sharedVersion > 0 && (
                 <p className="text-xs text-muted-foreground">
@@ -916,7 +1074,17 @@ export function ProjectSettings() {
           </Card>
         )}
 
-        {visibleSections.some((s) => s.id === "section-bible-resources") && (
+        {sectionsToRender.some((s) => s.id === "section-languages") && (
+          <LanguagesSection
+            defaultTargetLanguage={sharedSettingsBlob?.targetLanguage ?? project?.targetLanguage ?? ""}
+            targetLanes={sharedSettingsBlob?.targetLanes ?? []}
+            canEdit={canEditShared}
+            disabledTooltip={sharedDisabledTooltip}
+            patch={patchShared}
+          />
+        )}
+
+        {sectionsToRender.some((s) => s.id === "section-bible-resources") && (
           <Card id="section-bible-resources">
             <CardHeader>
               <CardTitle>Bible resources</CardTitle>
@@ -931,7 +1099,7 @@ export function ProjectSettings() {
                     <p className="text-xs text-muted-foreground">
                       Scholarly reference data from bibletranslation.org in Search and the agent.
                     </p>
-                    {/* FRO-460 derive-on-read: nothing is written just by viewing this
+                    {/* AQU-460 derive-on-read: nothing is written just by viewing this
                         page — the hint below only describes what's already true. */}
                     {bibleResourcesEnabled === undefined && projectHasScriptureFiles(project?.files) && (
                       <p className="text-xs text-muted-foreground">
@@ -961,7 +1129,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
-        {visibleSections.some((s) => s.id === "section-user") && (
+        {sectionsToRender.some((s) => s.id === "section-user") && (
           <Card id="section-user">
             <CardHeader><CardTitle>User</CardTitle></CardHeader>
             <CardContent>
@@ -972,7 +1140,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
-        {visibleSections.some((s) => s.id === "section-ai-instructions") && (
+        {sectionsToRender.some((s) => s.id === "section-ai-instructions") && (
           <Card id="section-ai-instructions">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -1058,13 +1226,13 @@ export function ProjectSettings() {
                   <Checkbox
                     id="validated-only"
                     className="mt-1"
-                    checked={useOnlyValidatedExamples}
-                    onCheckedChange={(checked) => setUseOnlyValidatedExamples(checked)}
+                    checked
+                    disabled
                   />
                   <div>
-                    <FieldLabel htmlFor="validated-only">Validated examples only</FieldLabel>
+                    <FieldLabel htmlFor="validated-only">Approved examples only</FieldLabel>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      When on, only human-validated cells are used as reference examples — unvalidated results are excluded.
+                      Drafting always retrieves human-validated project translations. Raw machine drafts never enter the trusted example pool.
                     </p>
                   </div>
                 </div>
@@ -1098,7 +1266,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
-        {visibleSections.some((s) => s.id === "section-draft-context") && (
+        {sectionsToRender.some((s) => s.id === "section-draft-context") && (
           <Card id="section-draft-context">
             <CardHeader>
               <CardTitle>Draft Context</CardTitle>
@@ -1129,7 +1297,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
-        {visibleSections.some((s) => s.id === "section-advanced-llm") && (
+        {sectionsToRender.some((s) => s.id === "section-advanced-llm") && (
           <details id="section-advanced-llm" className="group rounded-lg border bg-card">
             <summary className="cursor-pointer select-none list-none px-6 py-4 text-sm font-medium marker:hidden">
               <span className="flex items-center justify-between">
@@ -1203,7 +1371,7 @@ export function ProjectSettings() {
                         placeholder="http://localhost:8000"
                         className="flex-1"
                       />
-                      <Button size="sm" onClick={handleConnect} disabled={connecting || !endpoint.trim()}>
+                      <Button size="sm" onClick={handleConnect} disabled={connecting}>
                         {connecting ? <Spinner /> : "Connect"}
                       </Button>
                     </div>
@@ -1307,7 +1475,7 @@ export function ProjectSettings() {
           </details>
         )}
 
-        {visibleSections.some((s) => s.id === "section-voice") && (
+        {sectionsToRender.some((s) => s.id === "section-voice") && (
           <Card id="section-voice">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -1340,7 +1508,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
-        {visibleSections.some((s) => s.id === "section-local-models") && (
+        {sectionsToRender.some((s) => s.id === "section-local-models") && (
           <Card id="section-local-models">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -1366,7 +1534,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
-        {visibleSections.some((s) => s.id === "section-decay") && (
+        {sectionsToRender.some((s) => s.id === "section-decay") && (
           <div id="section-decay">
             <DecaySettingsSection
               settings={decaySettings}
@@ -1375,7 +1543,7 @@ export function ProjectSettings() {
           </div>
         )}
 
-        {visibleSections.some((s) => s.id === "section-validation") && (
+        {sectionsToRender.some((s) => s.id === "section-validation") && (
           <div id="section-validation">
             <ValidationSettingsSection
               validationCount={validationCount}
@@ -1397,8 +1565,8 @@ export function ProjectSettings() {
           </div>
         )}
 
-        {/* FRO-186: Harmonization settings — harmonize_min_role floor. */}
-        {visibleSections.some((s) => s.id === "section-validation") && (
+        {/* AQU-186: Harmonization settings — harmonize_min_role floor. */}
+        {sectionsToRender.some((s) => s.id === "section-validation") && (
           <Card>
             <CardHeader>
               <CardTitle>Harmonization</CardTitle>
@@ -1436,7 +1604,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
-        {visibleSections.some((s) => s.id === "section-audio-media") && (
+        {sectionsToRender.some((s) => s.id === "section-audio-media") && (
           <div id="section-audio-media">
             <AudioMediaStrategySection
               value={audioMediaStrategy}
@@ -1445,7 +1613,7 @@ export function ProjectSettings() {
           </div>
         )}
 
-        {project?.origin?.kind === "git" && visibleSections.some((s) => s.id === "section-git-sync") && (
+        {project?.origin?.kind === "git" && sectionsToRender.some((s) => s.id === "section-git-sync") && (
           <Card id="section-git-sync">
             <CardHeader><CardTitle>Git Sync</CardTitle></CardHeader>
             <CardContent className="space-y-3">
@@ -1475,7 +1643,7 @@ export function ProjectSettings() {
             </CardContent>
           </Card>
         )}
-        {visibleSections.some((s) => s.id === "section-terminology") && (
+        {sectionsToRender.some((s) => s.id === "section-terminology") && (
           <Card id="section-terminology">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -1492,7 +1660,7 @@ export function ProjectSettings() {
             </CardContent>
           </Card>
         )}
-        {id && SHOW_TERMBASE_SHARING_IN_SETTINGS && visibleSections.some((s) => s.id === "section-termbase-sharing") && (
+        {id && SHOW_TERMBASE_SHARING_IN_SETTINGS && sectionsToRender.some((s) => s.id === "section-termbase-sharing") && (
           <TermbaseSharingSection
             projectId={id}
             orgId={org?.id ?? null}
@@ -1500,7 +1668,7 @@ export function ProjectSettings() {
           />
         )}
 
-        {visibleSections.some((s) => s.id === "section-ai-metrics") && (
+        {sectionsToRender.some((s) => s.id === "section-ai-metrics") && (
           <PostEditMetricsSection
             metrics={postEditMetrics}
             isLoading={metricsLoading}

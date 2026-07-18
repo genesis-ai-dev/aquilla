@@ -5,6 +5,56 @@ import { makeTestToken } from "./helpers/auth"
 import type { RawEvent } from "../events/types"
 import type { SyncTokenClaims } from "../auth"
 
+/**
+ * AQU-496: minimal AquillaDb stub for the self-assign carve-out — mirrors
+ * export-floor.test.ts's makeDb pattern (project -> org_id -> org_settings).
+ */
+function makeDb(options: { orgId?: number | null; allowSelfAssignment?: boolean }): AquillaDb {
+  const { orgId = 1, allowSelfAssignment = false } = options
+  return {
+    prepare(sql: string) {
+      return {
+        bind(..._args: unknown[]) {
+          return {
+            async first() {
+              if (sql.includes("FROM projects")) return { org_id: orgId }
+              if (sql.includes("FROM org_settings")) {
+                return { settings: JSON.stringify({ allowSelfAssignment }) }
+              }
+              return null
+            },
+            async all() { return { results: [] } },
+          }
+        },
+      }
+    },
+  } as unknown as AquillaDb
+}
+
+function makeAssignmentCreate(
+  overrides: Partial<RawEvent<"assignment.create">> = {},
+): RawEvent<"assignment.create"> {
+  return {
+    id: "00000000-0000-7000-0000-000000000003",
+    schemaVersion: 1,
+    kind: "assignment.create",
+    projectId: "proj-a",
+    fileId: "file-x",
+    cellId: undefined,
+    parentId: null,
+    author: "alice",
+    payload: {
+      assignmentId: "asg-1",
+      scopeKind: "books",
+      scope: [{ fileId: "file-x" }],
+      scopeLabel: "Genesis",
+      assigneeUserId: 1,
+    },
+    clientTs: Date.now(),
+    ...overrides,
+  }
+}
+
 const SECRET = "test-secret"
 
 async function makeToken(partial: Partial<SyncTokenClaims> = {}): Promise<string> {
@@ -220,7 +270,7 @@ describe("authorize()", () => {
   })
 })
 
-// ── FRO-228 BLOCKER 1: __project__ sentinel for comment.* events ──────────────
+// ── AQU-228 BLOCKER 1: __project__ sentinel for comment.* events ──────────────
 
 describe("authorize() — __project__ sentinel (comment.*)", () => {
   async function makeProjectToken(partial: Partial<SyncTokenClaims> = {}): Promise<string> {
@@ -325,9 +375,107 @@ describe("authorize() — __project__ sentinel (comment.*)", () => {
   })
 })
 
-// ── FRO-228 BLOCKER 2: mixed-batch quarantine regression ──────────────────────
+// ── AQU-228 BLOCKER 2: mixed-batch quarantine regression ──────────────────────
 // This test lives in outbox-flush.test.ts (client-side), but the analogous
 // server-side invariant is: a token scoped to __project__ MUST NOT be accepted
 // for a target.cell.commit event. The tests above cover that. The client-side
 // test (groupOldestFileFirst isolation) lives in outbox-flush.test.ts.
+
+// ── AQU-496: assignment.create self-assign carve-out ───────────────────────
+
+describe("authorize() — assignment.create self-assign carve-out (AQU-496)", () => {
+  it("PROJECT_LEAD (500) can assign to ANYONE, db omitted (static floor met, carve-out never consulted)", async () => {
+    const token = await makeToken({ role: 500, projectId: "proj-a", fileId: "file-x" })
+    const raw = makeAssignmentCreate({ payload: { assignmentId: "asg-1", scopeKind: "books", scope: [{ fileId: "file-x" }], scopeLabel: "Genesis", assigneeUserId: 999 } })
+    const result = await authorize(token, raw, SECRET)
+    expect(result.ok).toBe(true)
+  })
+
+  it("CONTRIBUTOR (400) self-assigning is BLOCKED (403) when db is omitted — carve-out requires a db handle", async () => {
+    const token = await makeToken({ role: 400, projectId: "proj-a", fileId: "file-x" })
+    const raw = makeAssignmentCreate({ payload: { assignmentId: "asg-1", scopeKind: "books", scope: [{ fileId: "file-x" }], scopeLabel: "Genesis", assigneeUserId: 1 } })
+    const result = await authorize(token, raw, SECRET)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(403)
+  })
+
+  it("CONTRIBUTOR (400) self-assigning is BLOCKED (403) when allowSelfAssignment is OFF", async () => {
+    const token = await makeToken({ role: 400, projectId: "proj-a", fileId: "file-x" })
+    const raw = makeAssignmentCreate({ payload: { assignmentId: "asg-1", scopeKind: "books", scope: [{ fileId: "file-x" }], scopeLabel: "Genesis", assigneeUserId: 1 } })
+    const db = makeDb({ allowSelfAssignment: false })
+    const result = await authorize(token, raw, SECRET, db)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(403)
+      expect(result.reason).toContain("assignment.create")
+    }
+  })
+
+  it("CONTRIBUTOR (400) self-assigning is ALLOWED when allowSelfAssignment is ON", async () => {
+    const token = await makeToken({ role: 400, projectId: "proj-a", fileId: "file-x" })
+    const raw = makeAssignmentCreate({ payload: { assignmentId: "asg-1", scopeKind: "books", scope: [{ fileId: "file-x" }], scopeLabel: "Genesis", assigneeUserId: 1 } })
+    const db = makeDb({ allowSelfAssignment: true })
+    const result = await authorize(token, raw, SECRET, db)
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.event.claims.roleLevel).toBe(400)
+    }
+  })
+
+  it("CONTRIBUTOR (400) assigning ANOTHER user is BLOCKED (403) even when allowSelfAssignment is ON", async () => {
+    const token = await makeToken({ role: 400, projectId: "proj-a", fileId: "file-x" })
+    // userId 1 (from the token) tries to assign to userId 2 — never allowed
+    // below PROJECT_LEAD, regardless of the org setting.
+    const raw = makeAssignmentCreate({ payload: { assignmentId: "asg-1", scopeKind: "books", scope: [{ fileId: "file-x" }], scopeLabel: "Genesis", assigneeUserId: 2 } })
+    const db = makeDb({ allowSelfAssignment: true })
+    const result = await authorize(token, raw, SECRET, db)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(403)
+  })
+
+  it("VIEWER (100) self-assigning is BLOCKED (403) even when allowSelfAssignment is ON — floor is CONTRIBUTOR (400)+", async () => {
+    const token = await makeToken({ role: 100, projectId: "proj-a", fileId: "file-x" })
+    const raw = makeAssignmentCreate({ payload: { assignmentId: "asg-1", scopeKind: "books", scope: [{ fileId: "file-x" }], scopeLabel: "Genesis", assigneeUserId: 1 } })
+    const db = makeDb({ allowSelfAssignment: true })
+    const result = await authorize(token, raw, SECRET, db)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(403)
+  })
+
+  it("PROJECT_LEAD (500) can assign to ANYONE even when allowSelfAssignment is OFF (leads always can)", async () => {
+    const token = await makeToken({ role: 500, projectId: "proj-a", fileId: "file-x" })
+    const raw = makeAssignmentCreate({ payload: { assignmentId: "asg-1", scopeKind: "books", scope: [{ fileId: "file-x" }], scopeLabel: "Genesis", assigneeUserId: 999 } })
+    const db = makeDb({ allowSelfAssignment: false })
+    const result = await authorize(token, raw, SECRET, db)
+    expect(result.ok).toBe(true)
+  })
+
+  it("MAINTAINER (600) can assign to ANYONE regardless of allowSelfAssignment", async () => {
+    const token = await makeToken({ role: 600, projectId: "proj-a", fileId: "file-x" })
+    const raw = makeAssignmentCreate({ payload: { assignmentId: "asg-1", scopeKind: "books", scope: [{ fileId: "file-x" }], scopeLabel: "Genesis", assigneeUserId: 999 } })
+    const db = makeDb({ allowSelfAssignment: false })
+    const result = await authorize(token, raw, SECRET, db)
+    expect(result.ok).toBe(true)
+  })
+
+  it("CONTRIBUTOR self-assigning assignment.reassign is still BLOCKED — carve-out is assignment.create only", async () => {
+    const token = await makeToken({ role: 400, projectId: "proj-a", fileId: "file-x" })
+    const raw: RawEvent<"assignment.reassign"> = {
+      id: "reassign-1",
+      schemaVersion: 1,
+      kind: "assignment.reassign",
+      projectId: "proj-a",
+      fileId: "file-x",
+      cellId: undefined,
+      parentId: null,
+      author: "alice",
+      payload: { assignmentId: "asg-1", assigneeUserId: 1 },
+      clientTs: Date.now(),
+    }
+    const db = makeDb({ allowSelfAssignment: true })
+    const result = await authorize(token, raw, SECRET, db)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(403)
+  })
+})
 

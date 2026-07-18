@@ -117,6 +117,21 @@ it("PROJECT_SETTINGS_VERSION_INITIAL is 0", () => {
   expect(PROJECT_SETTINGS_VERSION_INITIAL).toBe(0)
 })
 
+describe("ProjectWideSettings.targetLanes", () => {
+  it("serializes a lane list in the settings payload round-trip", () => {
+    const settings: import("./project-settings").ProjectWideSettings = {
+      targetLanes: ["fr", "es"],
+    }
+    const json = JSON.parse(JSON.stringify(settings))
+    expect(json.targetLanes).toEqual(["fr", "es"])
+  })
+
+  it("is absent by default", () => {
+    const settings: import("./project-settings").ProjectWideSettings = { sourceLanguage: "en" }
+    expect(settings.targetLanes).toBeUndefined()
+  })
+})
+
 describe("ProjectWideSettings.translationBrief", () => {
   it("serializes a brief in the settings payload round-trip", () => {
     const brief: TranslationBrief = {

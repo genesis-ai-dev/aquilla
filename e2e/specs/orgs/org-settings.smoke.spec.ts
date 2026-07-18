@@ -5,9 +5,7 @@ import { test, expect } from "../../helpers/multi-user"
  *
  * The page renders:
  *   - h1 "Organization settings"
- *   - h2 "Identity" section (org name + display name fields)
- *   - Member count and project count stats
- *   - Links to Archived projects and Members pages
+ *   - Navigation rows to identity, export, roster, providers, members, teams, archived
  *
  * This spec verifies the route loads and the key structural elements render.
  * It does NOT mutate org settings.
@@ -21,8 +19,13 @@ test("org settings page renders Identity section and stats", async ({ alice }) =
     timeout: 10_000,
   })
 
-  // Identity section heading.
-  await expect(alice.locator("h2").filter({ hasText: /Identity/i }).first()).toBeVisible({
+  // Identity nav row on the index.
+  await expect(alice.getByRole("link", { name: /Identity/i })).toBeVisible({
+    timeout: 5_000,
+  })
+
+  // AQU-485: roster & progress visibility is a first-class settings sub-page.
+  await expect(alice.getByRole("link", { name: /Roster & progress visibility/i })).toBeVisible({
     timeout: 5_000,
   })
 })

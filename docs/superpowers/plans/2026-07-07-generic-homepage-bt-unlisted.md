@@ -88,7 +88,7 @@ function renderHomepage() {
 }
 ```
 
-Update the `describe` block title to `"BibleTranslationLanding — Open app link target (FRO-282)"`.
+Update the `describe` block title to `"BibleTranslationLanding — Open app link target (AQU-282)"`.
 
 - [ ] **Step 4: Run the new test file**
 

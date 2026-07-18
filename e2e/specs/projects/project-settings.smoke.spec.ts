@@ -2,21 +2,10 @@ import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
- * Project settings — name change persists.
- *
- * ProjectSettings.tsx:
- *  - Input id="pname" bound to the project name field.
- *  - "Save changes" button only appears when isDirty (baseline !== current).
- *  - handleSaveAndClose() calls handleSave() then navigate(`/project/${id}`).
- *
- * This spec verifies the save flow: change field → "Save changes" button
- * appears → click saves without error → page navigates to /project/:id.
- *
- * NOTE: Project name is IDB-local (useProject is a thin server-read client).
- * The name does NOT persist server-side, so we only verify the save succeeded
- * (no error, correct navigation) — not round-trip value persistence.
+ * Synced projects cannot rename locally because there is no server-side rename
+ * endpoint. Other general settings remain editable and persist in place.
  */
-test("project settings name change saves and reflects in workspace", async ({ alice }) => {
+test("project settings keeps synced name read-only and saves source language", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
 
@@ -29,31 +18,34 @@ test("project settings name change saves and reflects in workspace", async ({ al
   expect(projectId).toBeTruthy()
 
   // Navigate directly to the settings page.
-  await alice.goto(`/project/${projectId}/settings`)
+  await alice.goto(`/project/${projectId}/settings?section=general`)
   await alice.waitForLoadState("networkidle")
 
-  // 1. Find the Project Name input (Label htmlFor="pname", Input id="pname").
   const nameInput = alice.locator("#pname")
   await expect(nameInput).toBeVisible({ timeout: 10_000 })
-
-  // Verify it's pre-populated with the original name.
   await expect(nameInput).toHaveValue(originalName, { timeout: 5_000 })
+  await expect(nameInput).toBeDisabled()
+  await expect(alice.getByText(/Renaming a synced project isn't supported yet/i)).toBeVisible()
 
-  // 2. Change the name — this makes the form dirty and reveals "Save changes".
-  const newName = `${originalName} — updated`
-  await nameInput.fill(newName)
+  // AQU-538: the Languages section (target-lane registry) renders in the same
+  // General group as the rest of this test's assertions — one cheap check
+  // that it's present. Full add/switch/translate journey lives in
+  // add-target-language.spec.ts (full suite, too long for the smoke budget).
+  await expect(alice.locator("#section-languages")).toBeVisible({ timeout: 5_000 })
+
+  const sourceLanguage = alice.locator("#sl")
+  await expect(sourceLanguage).toBeEnabled()
+  await sourceLanguage.fill("English (US)")
 
   // "Save changes" button only appears when isDirty.
   const saveBtn = alice.getByRole("button", { name: /Save changes/i })
   await expect(saveBtn).toBeVisible({ timeout: 5_000 })
 
-  // 3. Click Save — handleSaveAndClose saves then navigates to /project/:id.
   await saveBtn.click()
-  await alice.waitForURL(new RegExp(`/project/${projectId}$`), { timeout: 10_000 })
-  await alice.waitForLoadState("networkidle")
-
-  // 4. After save the page navigates to /project/:id.
-  //    Verify we landed on the workspace (sidebar file filter is visible).
-  await alice.waitForURL(new RegExp(`/project/${projectId}$`), { timeout: 10_000 })
-  await expect(alice.locator('[aria-label="Filter files"]')).toBeVisible({ timeout: 5_000 })
+  // AQU-501: the General pane is expressed via `?section=general`, so match
+  // the path prefix rather than anchoring on end-of-string.
+  await expect(alice).toHaveURL(new RegExp(`/project/${projectId}/settings(\\?|$)`), { timeout: 10_000 })
+  await expect(nameInput).toHaveValue(originalName, { timeout: 5_000 })
+  await expect(sourceLanguage).toHaveValue("English (US)", { timeout: 5_000 })
+  await expect(alice.getByText(/Saved: source language/i)).toBeVisible({ timeout: 10_000 })
 })

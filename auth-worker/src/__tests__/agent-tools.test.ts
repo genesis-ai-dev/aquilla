@@ -162,7 +162,7 @@ describe("executeRead", () => {
 })
 
 describe("executeExamples", () => {
-  it("returns validated pairs first, matched by source-text similarity", async () => {
+  it("returns only approved pairs with stable retrieval ids", async () => {
     await seedWorld()
     const out = await executeExamples(
       env.AQUILLA_PG,
@@ -171,8 +171,10 @@ describe("executeExamples", () => {
     )
     expect(out.ok).toBe(true)
     const pairs = out.data?.examples ?? []
-    expect(pairs.length).toBeGreaterThanOrEqual(2)
-    expect(pairs[0]).toMatchObject({ ref: "MRK 4:1", validated: true }) // validated leads
+    expect(pairs.length).toBeGreaterThan(0)
+    expect(pairs[0]).toMatchObject({ ref: "MRK 4:1", validated: true })
+    expect(pairs.every((p) => typeof p.cellId === "string")).toBe(true)
+    expect(pairs.every((p) => p.validated === true)).toBe(true)
     expect(pairs.every((p) => p.target !== "")).toBe(true) // untranslated rows never appear
   })
 
@@ -258,7 +260,20 @@ describe("executeDraft", () => {
     expect(out.proposal!.events[0]).toMatchObject({
       kind: "target.cell.commit",
       cellId: cellId("c3"),
-      payload: { ai_suggestion: true, agent_run_id: "run-1" },
+      payload: {
+        ai_suggestion: true,
+        agent_run_id: "run-1",
+        ai_draft: {
+          model: "test/drafter",
+          provider: "platform",
+          promptVersion: "agent-draft-v1",
+          mode: "agent",
+          projectState: {
+            sourceLanguage: "English",
+            targetLanguage: "Spanish",
+          },
+        },
+      },
     })
     // Rows report the CURRENT committed state — the drafted values ride the
     // proposal overlay only. Echoing them into `target` duplicated the text
@@ -275,6 +290,7 @@ describe("executeDraft", () => {
     const sys = draftRequest!.messages[0].content
     expect(sys).toContain("into Spanish")
     expect(sys).toContain("Y comenzó otra vez a enseñar") // exemplar rode along
+    expect(sys).not.toContain("Y les enseñaba muchas cosas") // unapproved target never becomes context
     expect(draftRequest!.messages[1].content).toContain("1. [MRK 4:3]")
   })
 

@@ -27,7 +27,7 @@
  * | 0.3 – 0.6  | Default / medium confidence     | Show, one-click confirm   |
  * | ≥ 0.6      | High confidence                 | Bold, bulk-approvable     |
  *
- * ## Public API (stable — FRO-207 depends on this)
+ * ## Public API (stable — AQU-207 depends on this)
  *
  * ```ts
  * buildAlignmentModel(pairs: VersPair[], seeds?: AlignmentSeed[]): AlignmentModel
@@ -502,7 +502,7 @@ export function alignCell(
  * renormalizes only the affected source-token row. O(|tgt vocab for srcToken|).
  *
  * Persistence of confirmed alignments (saving to project settings as seeds) is
- * handled by FRO-207. This function only updates the in-memory model.
+ * handled by AQU-207. This function only updates the in-memory model.
  *
  * NOTE: For models trained with EM, calling this repeatedly (without a full
  * EM re-run) will drift the probTable away from the EM optimum. A full re-run
@@ -529,7 +529,7 @@ export function confirmAlignment(
  * O(|tgt vocab for srcToken|).
  *
  * Persistence of invalidated alignments (saving to project settings as negative
- * seeds) is handled by FRO-207.
+ * seeds) is handled by AQU-207.
  */
 export function invalidateAlignment(
   srcToken: string,

@@ -135,7 +135,7 @@ Do NOT hand-write translations with propose unless the user asks for a specific 
 
 const TOOLS_CONTRACT = `## Your tools
 - read({fileId?|ref?, filter?, limit?, offset?}) — aligned source/target rows in display order with per-cell status (untranslated | drafted | stale | validated | translated). Scope by ref ("MRK 4", "MRK 4:1-20") or file. START HERE for most tasks.
-- examples({text?|cellIds?, n?}) — translation pairs to imitate: validated pairs first, then similarity-retrieved. Use before writing any translation yourself.
+- examples({text?|cellIds?, n?}) — approved human translation pairs to imitate, ranked by source similarity. Unreviewed drafts are excluded. Use before writing any translation yourself.
 - search({q, side?, fileId?, limit?}) — full-text search; side: cells (default) | source | target | comments | terms.
 - draft({fileId?|ref?, cellIds?, limit?, instructions?}) — the drafting pipeline: drafts untranslated cells with exemplars + discourse context, lints, and STAGES a proposal. Preferred over writing translations yourself.
 - propose({events:[{kind, fileId?, cellId?, payload}]}) — STAGE any other events for user approval (validations, comments, renames, back-translations, hand-written commits). Nothing is written until the user clicks Apply. The result says, per event: staged / rejected (reason) / stale (re-read and redraft).

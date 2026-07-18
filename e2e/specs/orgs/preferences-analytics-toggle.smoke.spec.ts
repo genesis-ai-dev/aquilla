@@ -13,7 +13,7 @@ import { test, expect } from "../../helpers/multi-user"
  * aria-checked changes → toggles back to restore the original state.
  */
 test("preferences analytics consent switch toggles on and off", async ({ alice }) => {
-  await alice.goto("/preferences")
+  await alice.goto("/preferences/privacy")
   await alice.waitForLoadState("networkidle")
 
   // Find the analytics consent switch by its accessible name (from the

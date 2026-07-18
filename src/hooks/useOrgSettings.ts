@@ -15,14 +15,42 @@ import type { OrgProviderKeys } from "@/lib/sync/org-settings"
 
 // Floor aligned with the server's SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER (600)
 // in auth-worker/src/routes/org-settings.ts. Lowering this to PROJECT_LEAD (500)
-// would re-open the FRO-255 silent-divergence window (editable controls + a 403
+// would re-open the AQU-255 silent-divergence window (editable controls + a 403
 // the user never sees) — do not change without a matching auth-worker update.
 const ORG_SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER
 
-// FRO-253: The WRITE gate for the exportMinRole setting itself is OWNER (700).
+// AQU-253: The WRITE gate for the exportMinRole setting itself is OWNER (700).
 // This is enforced server-side (auth-worker org-settings PATCH handler).
 // The client-side Settings UI enforces it via canEditExportFloor=(role>=OWNER)
 // so the select is disabled for non-owners. The server remains the source of truth.
+
+// AQU-485: same OWNER-only write gate applies to rosterViewMinRole and
+// memberProgressViewMinRole (see EXPORT_FLOOR_WRITE_MIN_ROLE in
+// auth-worker/src/routes/org-settings.ts — all three are permission-policy
+// keys validated by the same loop server-side).
+const ROSTER_PROGRESS_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
+
+/**
+ * AQU-485: unlike exportMinRole (whose absence means "no client gate — server
+ * keeps its own pre-existing default"), rosterViewMinRole and
+ * memberProgressViewMinRole default to MAINTAINER when the org hasn't
+ * configured them — this IS the floor, not an opt-in one. The acceptance
+ * criterion is "safe for sensitive teams out of the box," so absence must
+ * resolve to the same default the server applies (see
+ * DEFAULT_ROSTER_VIEW_MIN_ROLE / DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE in
+ * auth-worker/src/services/org-permissions.ts) rather than "allow everyone."
+ */
+const DEFAULT_ROSTER_VIEW_MIN_ROLE = ROLE.MAINTAINER
+const DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE = ROLE.MAINTAINER
+
+// AQU-496: allowSelfAssignment is the same kind of permission-policy key as
+// exportMinRole/rosterViewMinRole/memberProgressViewMinRole — OWNER-only to
+// change (auth-worker/src/routes/org-settings.ts PERMISSION_POLICY_KEYS),
+// because it loosens who may write `assignment.create`. Unlike the others it's
+// a boolean, and its safe default is `false` (leads-only — pre-AQU-496
+// behavior), not a role-ladder floor.
+const ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE = ROLE.OWNER
+const DEFAULT_ALLOW_SELF_ASSIGNMENT = false
 
 export interface UseOrgSettings {
   /** Current org settings (rules, etc). Always defined (empty when unloaded). */
@@ -39,20 +67,20 @@ export interface UseOrgSettings {
   /** True when the caller's org role is >= MAINTAINER. */
   canEdit: boolean
   /**
-   * FRO-433: True when the caller's org role is >= MAINTAINER.
+   * AQU-433: True when the caller's org role is >= MAINTAINER.
    * Org-level provider keys are set/edited by maintainer+, same gate as general settings.
    */
   canEditOrgKeys: boolean
   /**
-   * FRO-433: The current org-level provider key map, or empty object when unset.
+   * AQU-433: The current org-level provider key map, or empty object when unset.
    * Key is a provider identifier (e.g. "gemini-tts"); value is the raw key string.
    */
   orgProviderKeys: OrgProviderKeys
   /**
-   * FRO-253: True when the caller's project-resolved role meets the org's exportMinRole floor.
+   * AQU-253: True when the caller's project-resolved role meets the org's exportMinRole floor.
    *
    * NON-BREAKING DEFAULT: when the org has NOT explicitly set exportMinRole, canExport is
-   * always true client-side (gate nothing — pre-FRO-253 behavior; server routes keep their
+   * always true client-side (gate nothing — pre-AQU-253 behavior; server routes keep their
    * own pre-existing MAINTAINER default). Only when exportMinRole is explicitly set in org
    * settings does this gate apply. Callers should hide/disable export affordances when false.
    *
@@ -63,7 +91,7 @@ export interface UseOrgSettings {
    *
    * NOTE: client-side formats (txt/md/tsv/csv/xlf/tmx/vtt) operate on already-fetched cells
    * and cannot be truly enforced client-side. The floor here gates the UI affordance and the
-   * server-side USFM/bundle routes; read-API gating is explicitly out of scope (FRO-253).
+   * server-side USFM/bundle routes; read-API gating is explicitly out of scope (AQU-253).
    */
   canExport: boolean
   /**
@@ -73,6 +101,40 @@ export interface UseOrgSettings {
    * independently of this field.
    */
   exportMinRole: number | null
+  /**
+   * AQU-485: True when the caller's project-resolved role meets the org's
+   * effective roster-view floor (rosterViewMinRole, defaulting to MAINTAINER
+   * when unset — see DEFAULT_ROSTER_VIEW_MIN_ROLE above). Unlike canExport,
+   * this has NO "allow before fetch" escape hatch for the below-floor case
+   * once settings have loaded: hiding the roster/count is the point, so
+   * callers must not flash it open then hide it. Before hasFetched, callers
+   * should treat the roster as not-yet-decided (loading), not visible.
+   */
+  canViewRoster: boolean
+  /** Effective roster-view floor: explicit org setting, or the MAINTAINER default when unset. */
+  rosterViewMinRole: number
+  /**
+   * AQU-485: True when the caller's project-resolved role meets the org's
+   * effective member-progress-view floor (memberProgressViewMinRole,
+   * defaulting to MAINTAINER when unset). Independent of canViewRoster — a
+   * caller may see the roster while progress stays hidden, or vice versa.
+   *
+   * AQU-498: gates ProjectOverview's Team card (SectionVisibilityGate),
+   * which now also hosts the per-teammate activity detail (recent actions +
+   * files-worked-on rollup) — see MemberActivityPanel.
+   */
+  canViewMemberProgress: boolean
+  /** Effective member-progress-view floor: explicit org setting, or the MAINTAINER default when unset. */
+  memberProgressViewMinRole: number
+  /**
+   * AQU-496: effective self-assignment authority — true when members below
+   * project_lead may claim `assignment.create` for THEMSELVES. Explicit org
+   * setting, or `false` (leads-only) when unset — preserves pre-AQU-496
+   * behavior byte-for-byte for orgs that haven't opted in. Server-enforced;
+   * see `resolveAllowSelfAssignment` in
+   * `sync-worker/src/events/assignment-authority.ts`.
+   */
+  allowSelfAssignment: boolean
   /** Force a re-GET. */
   refresh: () => Promise<OrgSettingsResponse | null>
   /** Patch org settings (adds/replaces top-level keys). Blocked if !canEdit —
@@ -143,7 +205,7 @@ export function useOrgSettings(
   const canEdit =
     orgRoleLevel != null && orgRoleLevel >= ORG_SETTINGS_WRITE_MIN_ROLE
 
-  // FRO-253: derive the explicit export floor from org settings.
+  // AQU-253: derive the explicit export floor from org settings.
   // null = org has NOT set it (non-breaking default: no client-side gate).
   // The server routes independently default to MAINTAINER (600) for USFM/bundle.
   const exportMinRole = (() => {
@@ -153,9 +215,45 @@ export function useOrgSettings(
     return null // not set — no client-side gate
   })()
 
+  // AQU-485: effective roster/progress floors — explicit org setting, or the
+  // MAINTAINER default when unset. Unlike exportMinRole, absence here still
+  // resolves to a real (restrictive) floor rather than "no gate."
+  const rosterViewMinRole = (() => {
+    const raw = server?.settings?.rosterViewMinRole
+    if (typeof raw === "number" && Number.isFinite(raw) && raw >= 100 && raw <= 700) return raw
+    return DEFAULT_ROSTER_VIEW_MIN_ROLE
+  })()
+
+  const memberProgressViewMinRole = (() => {
+    const raw = server?.settings?.memberProgressViewMinRole
+    if (typeof raw === "number" && Number.isFinite(raw) && raw >= 100 && raw <= 700) return raw
+    return DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE
+  })()
+
+  // AQU-496: effective self-assignment authority — explicit org setting, or
+  // false (leads-only) when unset.
+  const allowSelfAssignment = server?.settings?.allowSelfAssignment === true
+    ? true
+    : DEFAULT_ALLOW_SELF_ASSIGNMENT
+
   // The effective role to check: project-resolved (AD-12 max-wins) when
   // available, falling back to org role for non-project contexts.
   const effectiveRoleLevel = projectRoleLevel ?? orgRoleLevel
+
+  // AQU-485: before the initial fetch, we don't yet know the org's floor —
+  // treat as not-permitted (loading), NOT optimistically visible, so the
+  // roster never flashes open before collapsing shut for a below-floor
+  // caller. This is the deliberate inverse of canExport's pre-fetch escape
+  // hatch (export is an action gate; roster is a disclosure gate).
+  const canViewRoster =
+    hasFetched &&
+    effectiveRoleLevel != null &&
+    effectiveRoleLevel >= rosterViewMinRole
+
+  const canViewMemberProgress =
+    hasFetched &&
+    effectiveRoleLevel != null &&
+    effectiveRoleLevel >= memberProgressViewMinRole
 
   const patch = useCallback(
     async (partial: OrgWideSettings): Promise<OrgPatchResult | { kind: "blocked" }> => {
@@ -184,7 +282,7 @@ export function useOrgSettings(
           // Forbidden (role check failed at the API layer) or error: roll back
           // the optimistic write to the pre-write snapshot, then re-fetch truth.
           // Without this the rejected value lingered until an unrelated refresh
-          // (FRO-255: no silent local divergence).
+          // (AQU-255: no silent local divergence).
           writeServer(fresh)
           void refresh()
         }
@@ -212,16 +310,16 @@ export function useOrgSettings(
   const settings = server?.settings ?? {}
   const orgRules: TranslationRule[] = settings.rules ?? []
   const promotionRequests: PromotionRequest[] = (settings.promotionRequests as PromotionRequest[] | undefined) ?? []
-  // FRO-433: org-level provider keys; default to empty object when unset.
+  // AQU-433: org-level provider keys; default to empty object when unset.
   const orgProviderKeys: OrgProviderKeys = settings.orgProviderKeys ?? {}
   // canEditOrgKeys: same gate as general settings write (maintainer+).
   const canEditOrgKeys = canEdit
 
-  // FRO-253 (corrected): canExport logic:
+  // AQU-253 (corrected): canExport logic:
   //   • Before settings are fetched (hasFetched=false): optimistically allow so the
   //     button renders; the ACTION (openExportFlow) must wait for hasFetched.
   //   • After fetch, if exportMinRole is null (not set): ALLOW — non-breaking default.
-  //     Pre-FRO-253 the button had no role gate; we preserve that for orgs that
+  //     Pre-AQU-253 the button had no role gate; we preserve that for orgs that
   //     haven't configured anything. Server routes gate USFM/bundle independently.
   //   • After fetch, if exportMinRole is set: compare against the project-resolved
   //     role (effectiveRoleLevel), not the raw org role.
@@ -243,8 +341,32 @@ export function useOrgSettings(
     orgProviderKeys,
     canExport,
     exportMinRole,
+    canViewRoster,
+    rosterViewMinRole,
+    canViewMemberProgress,
+    memberProgressViewMinRole,
+    allowSelfAssignment,
     refresh,
     patch,
     requestPromotion,
   }
+}
+
+/**
+ * AQU-485: True when `callerRoleLevel` is allowed to CHANGE the
+ * rosterViewMinRole / memberProgressViewMinRole floors (OWNER-only, same as
+ * exportMinRole's write gate). Exported so Settings.tsx doesn't need to
+ * hand-roll the ROLE.OWNER comparison inline for the new UI controls.
+ */
+export function canEditRosterProgressFloor(callerRoleLevel: number | null | undefined): boolean {
+  return (callerRoleLevel ?? 0) >= ROSTER_PROGRESS_FLOOR_WRITE_MIN_ROLE
+}
+
+/**
+ * AQU-496: True when `callerRoleLevel` is allowed to CHANGE the
+ * allowSelfAssignment setting (OWNER-only, same rationale as
+ * canEditRosterProgressFloor above).
+ */
+export function canEditAssignmentAuthority(callerRoleLevel: number | null | undefined): boolean {
+  return (callerRoleLevel ?? 0) >= ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE
 }

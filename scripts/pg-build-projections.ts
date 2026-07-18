@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url"
 import { neonConfig } from "./pg"
 import { foldProjection, type FoldEvent, type Row } from "./lib/fold-projection"
 import { buildEventProjectionStmts, CHAIN_MUTATING_KINDS, type PersistedEvent } from "../sync-worker/src/events/event-projection"
+import { fullProgressRecomputeStmts } from "../sync-worker/src/events/progress-projection"
 import type { EventKind } from "../sync-worker/src/events/types"
 import { PostgresDb, type AquillaDb, type AquillaStatement, type PgExecutor } from "../db/shim/postgres"
 
@@ -72,6 +73,28 @@ interface EventRow {
   payload: string
   server_ts: number
   server_seq: number
+}
+
+function poolClientExecutor(client: import("pg").PoolClient): PgExecutor {
+  const executor: PgExecutor = {
+    async run(sql, params) {
+      const result = await client.query<Record<string, unknown>>(sql, params)
+      return { rows: result.rows, rowCount: result.rowCount ?? result.rows.length }
+    },
+    // buildProject already owns the surrounding transaction.
+    begin: (fn) => fn(executor),
+  }
+  return executor
+}
+
+async function rebuildProgress(
+  db: AquillaDb,
+  projectId: string,
+  fileIds: readonly string[],
+  updatedAt: number,
+): Promise<void> {
+  const stmts = fileIds.flatMap((fileId) => fullProgressRecomputeStmts(db, projectId, fileId, updatedAt))
+  if (stmts.length > 0) await db.batch(stmts)
 }
 
 async function fetchEvents(pg: Pool, projectId: string): Promise<FoldEvent[]> {
@@ -128,11 +151,13 @@ async function buildProject(pg: Pool, projectId: string, counterTs: number): Pro
   const client = await pg.connect()
   try {
     await client.query("BEGIN")
-    for (const t of ["cell_validators", "cells", "comments", "files"]) {
+    for (const t of ["file_section_progress", "cell_validators", "cells", "comments", "files"]) {
       await client.query(`DELETE FROM ${t} WHERE project_id = $1`, [projectId])
     }
     for (const { name, cols, conflict } of TABLES) await bulkInsert(client, name, cols, rows[name], conflict)
     await client.query(COUNTER_UPDATE, [counterTs, projectId])
+    const db = new PostgresDb(poolClientExecutor(client)) as unknown as AquillaDb
+    await rebuildProgress(db, projectId, rows.files.map((file) => String(file.id)), counterTs)
     await client.query("COMMIT")
   } catch (e) {
     await client.query("ROLLBACK")
@@ -185,7 +210,12 @@ async function replayCanonicalInto(pg: PGlite, events: FoldEvent[]): Promise<voi
     buildEventProjectionStmts(db, event, stmts, { deferFileCounters: true })
   }
   for (let i = 0; i < stmts.length; i += 500) await db.batch(stmts.slice(i, i + 500))
-  await pg.query(COUNTER_UPDATE, [VERIFY_COUNTER_TS, events[0]?.projectId])
+  const projectId = events[0]?.projectId
+  await pg.query(COUNTER_UPDATE, [VERIFY_COUNTER_TS, projectId])
+  if (projectId) {
+    const files = await pg.query<{ id: string }>("SELECT id FROM files WHERE project_id = $1", [projectId])
+    await rebuildProgress(db, projectId, files.rows.map((file) => file.id), VERIFY_COUNTER_TS)
+  }
 }
 
 async function insertFoldInto(pg: PGlite, rows: ReturnType<typeof foldProjection>): Promise<void> {
@@ -197,7 +227,12 @@ async function insertFoldInto(pg: PGlite, rows: ReturnType<typeof foldProjection
       await pg.query(`INSERT INTO ${name} (${used.join(",")}) VALUES (${ph})`, used.map((c) => row[c]))
     }
   }
-  await pg.query(COUNTER_UPDATE, [VERIFY_COUNTER_TS, rows.files[0]?.project_id ?? rows.cells[0]?.project_id])
+  const projectId = String(rows.files[0]?.project_id ?? rows.cells[0]?.project_id ?? "")
+  await pg.query(COUNTER_UPDATE, [VERIFY_COUNTER_TS, projectId])
+  if (projectId) {
+    const db = new PostgresDb(pgliteExecutor(pg)) as unknown as AquillaDb
+    await rebuildProgress(db, projectId, rows.files.map((file) => String(file.id)), VERIFY_COUNTER_TS)
+  }
 }
 
 const VOLATILE: Record<string, Set<string>> = { files: new Set(["created_at", "updated_at"]) }
@@ -222,7 +257,7 @@ async function verifyProject(pg: Pool, projectId: string): Promise<boolean> {
   await replayCanonicalInto(ref, events)
   await insertFoldInto(fold, foldProjection(events))
   let ok = true
-  for (const table of ["cells", "cell_validators", "files", "comments"]) {
+  for (const table of ["cells", "cell_validators", "files", "comments", "file_section_progress"]) {
     const a = normalize(table, (await ref.query<Record<string, unknown>>(`SELECT * FROM ${table}`)).rows)
     const b = normalize(table, (await fold.query<Record<string, unknown>>(`SELECT * FROM ${table}`)).rows)
     const match = a === b

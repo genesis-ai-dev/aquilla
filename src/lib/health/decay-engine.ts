@@ -10,7 +10,6 @@
 // Rule/check violations are a SEPARATE sibling surface and are NOT folded in
 // here (AD-14: "rules and built-in checks stay separate").
 
-import type { CellData } from "@/hooks/useCells"
 import type { RuleInfraction, DecaySettings } from "@/lib/parsers/types"
 
 /**
@@ -46,7 +45,7 @@ export const DEFAULT_ENDORSEMENT_TARGET = 5
 export const DEFAULT_DECAY_WARN_THRESHOLD = 0.66
 
 /**
- * FRO-232: user-visible status text shown in the cell popover when a cell
+ * AQU-232: user-visible status text shown in the cell popover when a cell
  * needs attention due to insufficient validation in its passage context.
  * Single source of truth — tested in decay-engine.test.ts.
  */
@@ -142,13 +141,18 @@ export interface DecayHealth {
   projectHealth: number
 }
 
+export interface DecayCell {
+  id: string
+  endorsementCount?: number
+}
+
 /**
  * Compute decay-derived health across all files. Every cell counts, including
  * untouched ones (endorsement_count 0 → decay 1) — a freshly imported book
  * reads near-zero health and climbs as translators validate (AD-14).
  */
 export function computeDecayHealth(
-  fileCells: Map<string, CellData[]>,
+  fileCells: Map<string, readonly DecayCell[]>,
   settings: DecayConfig = DECAY_DEFAULTS,
 ): DecayHealth {
   const healthMap = new Map<string, number>()

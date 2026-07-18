@@ -6,7 +6,7 @@
 // Design: pull-on-change. The hook refetches whenever the set of validated
 // cells changes (the only event that shifts health anchors). This is
 // intentionally a pull model — the DO broadcast push (health.rollup message)
-// is a SWARM-TODO for the next wave (FRO-190).
+// is a SWARM-TODO for the next wave (AQU-190).
 //
 // Local-only projects (no projectId / no jwt): falls back to empty maps
 // and the caller uses the endorsement-count path from useHealth.

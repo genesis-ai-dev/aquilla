@@ -1,4 +1,4 @@
-// Translation Notes sidebar (FRO-179)
+// Translation Notes sidebar (AQU-179)
 //
 // Shows all TN rows matching the currently focused cell's canonicalRef.
 // Reads from the server's cells-read route for every "tsv"-typed file in the

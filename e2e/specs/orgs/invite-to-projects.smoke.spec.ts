@@ -4,7 +4,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 /**
  * MultiProjectInviteDialog — "Add to projects" on the Members page.
  *
- * FRO-322 renamed the affordance from "Invite to projects…" to
+ * AQU-322 renamed the affordance from "Invite to projects…" to
  * "Add to projects". MembersPage.tsx renders the button (org owner/admin
  * only) and disables it until the org has at least one accessible project.
  * Clicking it opens MultiProjectInviteDialog with DialogTitle "Add to projects".

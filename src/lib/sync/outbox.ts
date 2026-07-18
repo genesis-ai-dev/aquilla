@@ -149,6 +149,35 @@ export async function enqueueOutboxEvent(event: CqrsRawEvent): Promise<void> {
   notifyOutboxChanged()
 }
 
+/** Enqueue many events in ONE transaction and fire a SINGLE change
+ *  notification. Used by bulk import so a large batch produces one overlay
+ *  rebuild + one badge refresh instead of N. Same-id `put` overwrites, so a
+ *  re-enqueue of already-queued events is a no-op (idempotent). */
+export async function enqueueOutboxEvents(events: CqrsRawEvent[]): Promise<void> {
+  if (events.length === 0) return
+  const db = await openDb()
+  const now = Date.now()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite")
+    tx.onerror = () => reject(tx.error ?? new Error("bulk enqueue tx failed"))
+    tx.oncomplete = () => resolve()
+    const store = tx.objectStore(STORE)
+    for (const event of events) {
+      const rec: OutboxRecord = {
+        id: event.id,
+        enqueuedAt: now,
+        event,
+        attempts: 0,
+        lastAttemptAt: null,
+        lastError: null,
+        status: "pending",
+      }
+      store.put(rec)
+    }
+  })
+  notifyOutboxChanged()
+}
+
 /**
  * Record an attempt outcome on the kept-back records. Called by the flusher
  * after a POST resolves: each record that wasn't accepted (or permanently
@@ -266,6 +295,77 @@ export async function peekOutboxBatch(limit: number): Promise<OutboxRecord[]> {
           return
         }
         out.push(cursor.value as OutboxRecord)
+        cursor.continue()
+      }
+    })
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Resolve a small known set of records by id. Callers that persisted a local
+ * overlay use this to prove that its events are still actually pending after
+ * a tab restart, without scanning the entire outbox.
+ */
+export async function getOutboxRecords(ids: readonly string[]): Promise<OutboxRecord[]> {
+  const uniqueIds = [...new Set(ids.filter(Boolean))]
+  if (uniqueIds.length === 0) return []
+  try {
+    const db = await openDb()
+    return await new Promise((resolve, reject) => {
+      const records: OutboxRecord[] = []
+      const tx = db.transaction(STORE, "readonly")
+      tx.onerror = () => reject(tx.error ?? new Error("outbox lookup failed"))
+      tx.oncomplete = () => resolve(records)
+      const store = tx.objectStore(STORE)
+      for (const id of uniqueIds) {
+        const request = store.get(id)
+        request.onsuccess = () => {
+          const record = request.result as OutboxRecord | undefined
+          if (record?.id && record.event) records.push(record)
+        }
+      }
+    })
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Return every locally durable event for one cell, oldest first. History uses
+ * this instead of a capped global peek so a busy project cannot push the
+ * current cell's unflushed commit outside an arbitrary batch window.
+ */
+export async function getOutboxRecordsForCell(
+  projectId: string,
+  fileId: string,
+  cellId: string,
+): Promise<OutboxRecord[]> {
+  try {
+    const db = await openDb()
+    return await new Promise((resolve, reject) => {
+      const records: OutboxRecord[] = []
+      const tx = db.transaction(STORE, "readonly")
+      tx.onerror = () => reject(tx.error ?? new Error("cell outbox lookup failed"))
+      const store = tx.objectStore(STORE)
+      const index = store.index("enqueuedAt")
+      const request = index.openCursor()
+      request.onsuccess = () => {
+        const cursor = request.result
+        if (!cursor) {
+          resolve(records)
+          return
+        }
+        const record = cursor.value as OutboxRecord
+        const event = record.event
+        if (
+          event.projectId === projectId &&
+          event.fileId === fileId &&
+          event.cellId === cellId
+        ) {
+          records.push(record)
+        }
         cursor.continue()
       }
     })

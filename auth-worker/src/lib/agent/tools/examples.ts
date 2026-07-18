@@ -1,9 +1,9 @@
 // examples — few-shot retrieval, as one call.
 //
 // This is the copilot's example-gathering encoded server-side: given a source
-// text (or cell ids), return translation pairs to imitate — validated pairs
-// FIRST (they carry the team's terminology decisions), then FTS-similar pairs
-// by tsvector rank. The old flow made the model derive this JOIN by hand
+// text (or cell ids), return approved translation pairs to imitate, ranked by
+// FTS similarity. Unreviewed drafts are never eligible for generation context.
+// The old flow made the model derive this JOIN by hand
 // every run; now it is one tool call and always the same, correct retrieval.
 
 import { AliasMap } from "../compress"
@@ -41,6 +41,7 @@ export function orTsquery(text: string): string | null {
 }
 
 interface PairHit {
+  cell_id: string
   canonical_ref: string | null
   source_value: string
   target_value: string
@@ -78,25 +79,26 @@ export async function executeExamples(
 
   const tsquery = queryText ? orTsquery(queryText) : null
 
-  // Validated pairs lead; similarity ranks within each tier. With no usable
-  // query, fall back to the most recently touched validated pairs.
+  // Only validated pairs are trusted. With no usable query, fall back to the
+  // most recently touched validated pairs.
   const { results } = tsquery
     ? await db
         .prepare(
-          `SELECT t.canonical_ref, s.value AS source_value, t.value AS target_value, t.validated
+          `SELECT t.cell_id, t.canonical_ref, s.value AS source_value, t.value AS target_value, t.validated
            FROM cells t
            JOIN cells s ON s.project_id = t.project_id AND s.file_id = t.file_id
                        AND s.cell_id = t.cell_id AND s.side = 'source'
            WHERE t.project_id = ? AND t.side = 'target' AND t.value <> ''
+             AND t.validated = 1
              AND s.value_tsv @@ to_tsquery('simple', ?)
-           ORDER BY t.validated DESC, ts_rank(s.value_tsv, to_tsquery('simple', ?)) DESC
+           ORDER BY ts_rank(s.value_tsv, to_tsquery('simple', ?)) DESC
            LIMIT ?`,
         )
         .bind(ctx.projectId, tsquery, tsquery, n)
         .all<PairHit>()
     : await db
         .prepare(
-          `SELECT t.canonical_ref, s.value AS source_value, t.value AS target_value, t.validated
+          `SELECT t.cell_id, t.canonical_ref, s.value AS source_value, t.value AS target_value, t.validated
            FROM cells t
            JOIN cells s ON s.project_id = t.project_id AND s.file_id = t.file_id
                        AND s.cell_id = t.cell_id AND s.side = 'source'
@@ -110,12 +112,13 @@ export async function executeExamples(
   if (results.length === 0) {
     return {
       ok: true,
-      text: "No committed translation pairs match — the project may be new. Draft from the brief and language pair alone.",
+      text: "No approved translation pairs match — the project may be new. Draft from the brief and language pair alone.",
       data: { examples: [] },
     }
   }
 
   const pairs: ExamplePair[] = results.map((r) => ({
+    cellId: r.cell_id,
     ref: r.canonical_ref ?? undefined,
     source: r.source_value,
     target: r.target_value,
@@ -126,7 +129,7 @@ export async function executeExamples(
   for (const p of pairs) {
     lines.push([p.ref ?? "∅", p.validated ? "✓" : "·", clip(p.source), clip(p.target)].join("|"))
   }
-  lines.push(`(${pairs.length} pair${pairs.length === 1 ? "" : "s"} — imitate the ✓ rows' terminology and style)`)
+  lines.push(`(${pairs.length} approved pair${pairs.length === 1 ? "" : "s"} — imitate their terminology and style)`)
 
   return { ok: true, text: lines.join("\n"), data: { examples: pairs } }
 }

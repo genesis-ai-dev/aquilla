@@ -26,6 +26,8 @@ import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
+import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
+import { loadProjectSettings, updateProjectSettingsShared } from "../../../db/shared/projects"
 
 const projectSettings = new Hono<AuthHonoEnv>()
 
@@ -33,81 +35,6 @@ const projectSettings = new Hono<AuthHonoEnv>()
 // (project-configuration stories: name-and-configure-project,
 // customize-ai-settings, monitor-project-health, validate-translation).
 const SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER
-
-interface ProjectSettingsRow {
-  project_id: string
-  settings: string
-  version: number
-  updated_at: string | null
-  updated_by: number | null
-}
-
-interface ProjectSettingsResponse {
-  projectId: string
-  settings: Record<string, unknown>
-  version: number
-  updatedAt: string | null
-  updatedBy: number | null
-}
-
-function normalizeSettings(settings: Record<string, unknown>): Record<string, unknown> {
-  const next = { ...settings }
-  if (next.decaySettings == null && next.healthSettings != null) {
-    next.decaySettings = next.healthSettings
-  }
-  // Backward-compatible read alias while the workspace health UI still uses
-  // healthSettings. New writers should prefer decaySettings.
-  if (next.healthSettings == null && next.decaySettings != null) {
-    next.healthSettings = next.decaySettings
-  }
-  return next
-}
-
-function rowToResponse(row: ProjectSettingsRow): ProjectSettingsResponse {
-  let settings: Record<string, unknown> = {}
-  try {
-    const parsed = JSON.parse(row.settings)
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      settings = parsed as Record<string, unknown>
-    }
-  } catch {
-    // Stored value is non-JSON — treat as empty rather than 500ing the
-    // read path. Clients can overwrite via PUT to repair.
-    settings = {}
-  }
-  return {
-    projectId: row.project_id,
-    settings: normalizeSettings(settings),
-    version: row.version,
-    updatedAt: row.updated_at,
-    updatedBy: row.updated_by,
-  }
-}
-
-async function loadSettings(
-  env: AuthHonoEnv["Bindings"],
-  projectId: string,
-): Promise<ProjectSettingsResponse> {
-  const row = await env.AQUILLA_PG.prepare(
-    `SELECT project_id, settings, version, updated_at, updated_by
-       FROM project_settings
-      WHERE project_id = ?`,
-  )
-    .bind(projectId)
-    .first<ProjectSettingsRow>()
-
-  if (row) return rowToResponse(row)
-
-  // No row yet — treat as empty defaults at version 0. We don't auto-create
-  // the row on read; first PUT does the upsert.
-  return {
-    projectId,
-    settings: {},
-    version: 0,
-    updatedAt: null,
-    updatedBy: null,
-  }
-}
 
 // ──────────────────────────────────────────────────────────────────────────
 // GET /api/v2/projects/:projectId/settings
@@ -120,7 +47,7 @@ projectSettings.get("/:projectId/settings", authMiddleware, async (c) => {
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role) return c.json({ error: "no access to project" }, 403)
 
-  const response = await loadSettings(c.env, projectId)
+  const response = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
   return c.json(response)
 })
 
@@ -184,63 +111,37 @@ projectSettings.on(
       )
     }
 
-    const current = await loadSettings(c.env, projectId)
+    // Row-write domain logic (version pre-check, first-write INSERT vs
+    // version-guarded UPDATE, validation-threshold reprojection) is shared with
+    // sync-worker's receipt-only UpdateProjectSettings command
+    // (db/shared/projects.ts). The route keeps only HTTP concerns: role gate,
+    // ifMatchVersion extraction, status mapping, and the best-effort notify.
+    const result = await updateProjectSettingsShared(c.env.AQUILLA_PG, {
+      projectId,
+      settings: body.settings,
+      ifMatchVersion,
+      updatedBy: user.id,
+    })
 
-    if (ifMatchVersion !== current.version) {
-      return c.json(
-        {
-          error: "version mismatch",
-          current,
-        },
-        409,
-      )
+    if (result.status === "conflict") {
+      return c.json({ error: "version mismatch", current: result.current }, 409)
+    }
+    if (result.status === "error") {
+      return c.json({ error: `write failed: ${result.message}` }, 500)
     }
 
-    const newSettingsJson = JSON.stringify(normalizeSettings(body.settings))
-    const newVersion = current.version + 1
-
-    // No existing row yet — INSERT. Otherwise UPDATE with a version guard
-    // so a racing writer can't sneak past us.
-    if (current.updatedAt == null) {
-      try {
-        await c.env.AQUILLA_PG.prepare(
-          `INSERT INTO project_settings
-             (project_id, settings, version, updated_by)
-           VALUES (?, ?, ?, ?)`,
-        )
-          .bind(projectId, newSettingsJson, newVersion, user.id)
-          .run()
-      } catch (err) {
-        // Race: another request inserted between our load and insert.
-        // Re-read and 409.
-        const fresh = await loadSettings(c.env, projectId)
-        if (fresh.version !== newVersion) {
-          return c.json({ error: "version mismatch", current: fresh }, 409)
-        }
-        const message = err instanceof Error ? err.message : String(err)
-        console.error("project_settings insert failed:", err)
-        return c.json({ error: `write failed: ${message}` }, 500)
-      }
-    } else {
-      const result = await c.env.AQUILLA_PG.prepare(
-        `UPDATE project_settings
-            SET settings   = ?,
-                version    = version + 1,
-                updated_at = CURRENT_TIMESTAMP,
-                updated_by = ?
-          WHERE project_id = ? AND version = ?`,
-      )
-        .bind(newSettingsJson, user.id, projectId, ifMatchVersion)
-        .run()
-
-      const changes = result.meta?.changes
-      if (typeof changes === "number" && changes === 0) {
-        const fresh = await loadSettings(c.env, projectId)
-        return c.json({ error: "version mismatch", current: fresh }, 409)
-      }
+    const fresh = result.settings
+    // Settings live in identity while connected editor clients listen to the
+    // project sync DO. This is a best-effort acceleration: a missed frame is
+    // recovered by the existing focus/reconnect settings read.
+    const notifyPromise = notifySyncWorkerOfProjectSettingsChange(c.env, projectId, fresh.version)
+    try {
+      c.executionCtx.waitUntil(notifyPromise)
+    } catch {
+      // Hono's direct test harness has no ExecutionContext. The notification
+      // remains best-effort there just as it is in a deployed Worker.
+      void notifyPromise
     }
-
-    const fresh = await loadSettings(c.env, projectId)
     return c.json(fresh)
   },
 )

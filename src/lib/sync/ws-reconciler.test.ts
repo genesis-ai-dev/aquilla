@@ -4,6 +4,7 @@ import {
   createLinkUpstreamChangedHandler,
   createWsReconciler,
   isOwnWriteEcho,
+  isValidationEvent,
   parseProjectWsMessage,
   type ProjectWsServerMessage,
 } from "./ws-reconciler"
@@ -140,11 +141,11 @@ describe("parseProjectWsMessage", () => {
     ).toEqual({ t: "event.stale", id: "x", reason: "parent mismatch" })
   })
 
-  it("parses member.removed (FRO-346 eject frame)", () => {
+  it("parses member.removed (AQU-346 eject frame)", () => {
     // WHY: the DO sends this to a removed member right before closing their
     // socket. If the parser drops it (returns null), the workspace never
     // re-fetches the project and the removed user keeps an apparently-live
-    // editor until token expiry — the exact bug FRO-346 fixes.
+    // editor until token expiry — the exact bug AQU-346 fixes.
     expect(
       parseProjectWsMessage(
         JSON.stringify({ t: "member.removed", project: "p", userId: "bob" }),
@@ -156,12 +157,36 @@ describe("parseProjectWsMessage", () => {
     ).toBeNull()
   })
 
+  it("parses project settings and bulk-import progress invalidations", () => {
+    expect(
+      parseProjectWsMessage(JSON.stringify({
+        t: "project.settings.updated", project: "p1", version: 4,
+      })),
+    ).toEqual({ t: "project.settings.updated", project: "p1", version: 4 })
+    expect(
+      parseProjectWsMessage(JSON.stringify({
+        t: "file.progress.updated", project: "p1", file: "f1", fileCreated: true,
+      })),
+    ).toEqual({ t: "file.progress.updated", project: "p1", file: "f1", fileCreated: true })
+    expect(
+      parseProjectWsMessage(JSON.stringify({
+        t: "file.progress.updated", project: "p1", file: "f1",
+      })),
+    ).toBeNull()
+  })
+
   it("parses presence", () => {
     const msg = parseProjectWsMessage(
       JSON.stringify({
         t: "presence",
         users: [
-          { userId: "alice", focusedCell: "c1", ts: 100 },
+          {
+            userId: "alice",
+            focusedCell: "c1",
+            currentFileId: "file-1",
+            selection: { side: "target", anchor: 2, head: 5, draftText: "hello" },
+            ts: 100,
+          },
           { userId: "bob", ts: 200 },
         ],
       }),
@@ -170,8 +195,24 @@ describe("parseProjectWsMessage", () => {
     if (msg?.t === "presence") {
       expect(msg.users).toHaveLength(2)
       expect(msg.users[0].focusedCell).toBe("c1")
+      expect(msg.users[0].currentFileId).toBe("file-1")
+      expect(msg.users[0].selection).toEqual({
+        side: "target", anchor: 2, head: 5, draftText: "hello",
+      })
       expect(msg.users[1].focusedCell).toBeUndefined()
     }
+  })
+
+  it("rejects oversized presence drafts", () => {
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence",
+      users: [{
+        userId: "alice",
+        focusedCell: "c1",
+        selection: { side: "target", anchor: 0, head: 0, draftText: "x".repeat(16_385) },
+        ts: 100,
+      }],
+    }))).toBeNull()
   })
 
   it("parses lock.claimed + lock.released", () => {
@@ -196,7 +237,7 @@ describe("parseProjectWsMessage", () => {
     expect(parseProjectWsMessage(JSON.stringify({ t: "presence", users: "wrong" }))).toBeNull()
   })
 
-  it("parses link.upstream-changed (FRO-479 push accelerator)", () => {
+  it("parses link.upstream-changed (AQU-479 push accelerator)", () => {
     const msg = parseProjectWsMessage(
       JSON.stringify({
         t: "link.upstream-changed",
@@ -423,7 +464,7 @@ describe("isOwnWriteEcho", () => {
   })
 })
 
-describe("createLinkUpstreamChangedHandler (FRO-479 push accelerator)", () => {
+describe("createLinkUpstreamChangedHandler (AQU-479 push accelerator)", () => {
   function frame(
     overrides: Partial<Extract<ProjectWsServerMessage, { t: "link.upstream-changed" }>> = {},
   ): Extract<ProjectWsServerMessage, { t: "link.upstream-changed" }> {
@@ -537,5 +578,26 @@ describe("createLinkUpstreamChangedHandler (FRO-479 push accelerator)", () => {
 
     expect(syncA).toHaveBeenCalledTimes(1)
     expect(syncB).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("isValidationEvent", () => {
+  // Validation state (activeValidators → the pill's icon/color) projects into
+  // the audit-stats read, not the /files/:fileId/cells row. When a REMOTE
+  // user validates, the workspace's targeted revalidateCell alone leaves the
+  // pill stale until the next full stats poll — the handler must also poke
+  // revalidateCellStats for these kinds. If this predicate stops matching
+  // them, that multi-user staleness window regresses (investigated under
+  // FRO-348).
+  it("matches cell.validate and cell.unvalidate (so remote validations refresh the pill)", () => {
+    expect(isValidationEvent("cell.validate")).toBe(true)
+    expect(isValidationEvent("cell.unvalidate")).toBe(true)
+  })
+
+  it("does not match other cell events — no extra stats GET per ordinary edit", () => {
+    expect(isValidationEvent("target.cell.commit")).toBe(false)
+    expect(isValidationEvent("source.cell.create")).toBe(false)
+    expect(isValidationEvent("cell.audio.attach")).toBe(false)
+    expect(isValidationEvent("file.create")).toBe(false)
   })
 })

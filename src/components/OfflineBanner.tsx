@@ -1,4 +1,4 @@
-// FRO-296: Explicit offline banner for the workspace shell.
+// AQU-296: Explicit offline banner for the workspace shell.
 //
 // Shown whenever navigator.onLine is false. Listens for the browser's
 // "online" / "offline" events to toggle visibility without a polling loop.

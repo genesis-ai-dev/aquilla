@@ -36,7 +36,7 @@ export function useSearchIndex(_files: FileReference[], allProjectCells: CellDat
 
   useEffect(() => {
     indexRef.current.buildFromProject(
-      allProjectCells.map((c) => ({
+      allProjectCells.filter((c) => c.status === "validated").map((c) => ({
         id: c.id,
         original: c.original,
         translated: c.translated,
@@ -46,6 +46,7 @@ export function useSearchIndex(_files: FileReference[], allProjectCells: CellDat
     const order = new Map<string, string[]>()
     const lookup = new Map<string, { fileId: string; source: string; target: string }>()
     for (const c of allProjectCells) {
+      if (c.status !== "validated") continue
       let arr = order.get(c.fileId)
       if (!arr) { arr = []; order.set(c.fileId, arr) }
       arr.push(c.id)

@@ -1,5 +1,5 @@
 /**
- * RuleEditor — plain-language inline rule editor (FRO-195).
+ * RuleEditor — plain-language inline rule editor (AQU-195).
  *
  * Used for BOTH create and edit. Renders inline inside RulesSurface (no dialog).
  * Features:
@@ -14,7 +14,7 @@
 import { useState, useMemo, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { FieldLabel } from "@/components/ui/field"
+import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
 import { X } from "lucide-react"
 import type { TranslationRule, RuleCheck, RuleAutofix } from "@/lib/parsers/types"
@@ -192,9 +192,18 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
   }, [afSample, afPattern, afReplacement, afFlags])
 
   // ── Submit ──
-  const canSave = name.trim() && currentCheck && !patternError && !sourcePatternError
+  // Keep Create/Save clickable; surface why submit failed instead of disabling.
+  const [attempted, setAttempted] = useState(false)
+  const nameError = !name.trim() ? "Rule name is required" : null
+  const checkError = !currentCheck
+    ? mode === "required" && side === "target"
+      ? "Source pattern and target pattern are required"
+      : "Pattern is required"
+    : null
+  const canSave = !nameError && !!currentCheck && !patternError && !sourcePatternError
 
   function handleSave() {
+    setAttempted(true)
     if (!canSave) return
     const autofix: RuleAutofix | undefined = showAutofix && afPattern
       ? { kind: "regex-replace", pattern: afPattern, replacement: afReplacement, flags: afFlags }
@@ -238,7 +247,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
 
       {/* Name + Description */}
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <div>
+        <Field data-invalid={attempted && !!nameError}>
           <FieldLabel htmlFor="re-name" className="text-xs">Rule name</FieldLabel>
           <Input
             id="re-name"
@@ -246,9 +255,11 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Preserve numbers"
             className="mt-1"
+            aria-invalid={attempted && !!nameError}
           />
-        </div>
-        <div>
+          {attempted && nameError && <FieldError>{nameError}</FieldError>}
+        </Field>
+        <Field>
           <FieldLabel htmlFor="re-desc" className="text-xs">Description (optional)</FieldLabel>
           <Input
             id="re-desc"
@@ -257,7 +268,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
             placeholder="Numbers in source must appear in target"
             className="mt-1"
           />
-        </div>
+        </Field>
       </div>
 
       {/* Mode selectors */}
@@ -487,17 +498,20 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
       </div>
 
       {/* Actions */}
-      <div className="flex gap-2 pt-1">
-        <Button
-          size="sm"
-          onClick={handleSave}
-          disabled={!canSave}
-        >
-          {initialRule ? "Save changes" : "Create rule"}
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onCancel}>
-          Cancel
-        </Button>
+      <div className="flex flex-col gap-2 pt-1">
+        {attempted && (checkError || patternError || sourcePatternError) && (
+          <FieldError>
+            {checkError ?? patternError ?? sourcePatternError}
+          </FieldError>
+        )}
+        <div className="flex gap-2">
+          <Button size="sm" onClick={handleSave}>
+            {initialRule ? "Save changes" : "Create rule"}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+        </div>
       </div>
     </div>
   )

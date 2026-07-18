@@ -16,20 +16,20 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *   - Book <select> (project files)
  *   - Chapter <select> (optional sections)
  *   - Deadline <input type="date"> (optional)
- *   - "Assign" button (disabled until assignee + file selected)
+ *   - "Assign" button (stays enabled; validates on click)
  *
  * On submit, createAssignment() posts an assignment.create event to the
- * sync-worker. On success, {done} message appears:
- *   "Assigned <scopeLabel> to <name>."
+ * sync-worker. On success, the panel collapses so the refreshed workload is
+ * visible and reopening starts from a clean form.
  *
  * This spec extends assign-work-panel.smoke.spec.ts to cover the submit
  * path (not just opening the panel).
  *
  * Setup: alice (org owner) creates project → imports sample.md →
  * opens ProjectOverview → opens Assign panel → selects herself as
- * assignee + the imported file → clicks Assign → success message appears.
+ * assignee + the imported file → clicks Assign → panel collapses.
  */
-test("AssignWork form submits and shows success message", async ({ alice }) => {
+test("AssignWork form submits and collapses after success", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `AssignSubmit ${Date.now()}`
@@ -88,7 +88,6 @@ test("AssignWork form submits and shows success message", async ({ alice }) => {
   await expect(submitBtn).toBeEnabled({ timeout: 3_000 })
   await submitBtn.click()
 
-  // Success message: "Assigned <file> to <name>."
-  const successMsg = panel.locator("p").filter({ hasText: /Assigned .+ to .+\./i }).first()
-  await expect(successMsg).toBeVisible({ timeout: 10_000 })
+  await expect(panel).not.toBeVisible({ timeout: 10_000 })
+  await expect(alice.getByRole("button", { name: /^Assign…$/i })).toBeVisible()
 })

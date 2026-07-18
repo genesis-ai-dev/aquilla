@@ -1,5 +1,5 @@
 /**
- * FRO-348: the round "select cell" control at the source/target divider
+ * AQU-348: the round "select cell" control at the source/target divider
  * (rendered by handleSelectionPointerDown in EditorTable.tsx) silently
  * upgraded a plain click into a range-select whenever *any* other cell was
  * already selected — no Shift needed, no visual confirmation before the
@@ -21,7 +21,9 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { EditorTable } from "./EditorTable"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
+import { CellStore } from "@/hooks/useActiveCellStore"
 import type { CellData } from "@/hooks/useCells"
+import type { CellRow } from "@/lib/sync/cells-read-types"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { clearSelection, getSelectedIds } from "@/lib/audio/selection"
 
@@ -64,9 +66,9 @@ vi.mock("@legendapp/list/react", async () => {
       renderItem,
       keyExtractor,
     }: {
-      data: CellData[]
-      renderItem: (props: { item: CellData; index: number }) => React.ReactNode
-      keyExtractor?: (item: CellData, index: number) => string
+      data: string[]
+      renderItem: (props: { item: string; index: number }) => React.ReactNode
+      keyExtractor?: (item: string, index: number) => string
     }, ref) {
       React.useImperativeHandle(ref, () => ({
         getState: () => ({
@@ -83,7 +85,7 @@ vi.mock("@legendapp/list/react", async () => {
         data.map((item, index) => (
           React.createElement(
             React.Fragment,
-            { key: keyExtractor?.(item, index) ?? item.id },
+            { key: keyExtractor?.(item, index) ?? item },
             renderItem({ item, index }),
           )
         )),
@@ -92,6 +94,58 @@ vi.mock("@legendapp/list/react", async () => {
   }
 })
 
+function makeRows(cells: CellData[]): CellRow[] {
+  return cells.flatMap((cell, index) => {
+    const canonicalRef = cell.context || cell.group || null
+    const anchorCellId = index > 0 ? cells[index - 1].id : null
+    return [
+      {
+        cellId: cell.id,
+        side: "source",
+        value: cell.original,
+        valueHtml: cell.originalHtml ?? null,
+        type: cell.type,
+        canonicalRef,
+        anchorCellId,
+        eventId: `${cell.id}-source`,
+        sourceEventId: null,
+        lastEditor: null,
+        lastEditAt: 1,
+        validated: false,
+        wordCount: cell.original.trim().split(/\s+/).filter(Boolean).length,
+      },
+      {
+        cellId: cell.id,
+        side: "target",
+        value: cell.translated,
+        valueHtml: cell.translatedHtml ?? null,
+        type: cell.type,
+        canonicalRef,
+        anchorCellId,
+        eventId: `${cell.id}-target`,
+        sourceEventId: `${cell.id}-source`,
+        lastEditor: "tester",
+        lastEditAt: 2,
+        validated: false,
+        wordCount: cell.translated.trim().split(/\s+/).filter(Boolean).length,
+      },
+    ]
+  })
+}
+
+function makeStore(cells: CellData[]): CellStore {
+  const store = new CellStore()
+  store.setRuntime({
+    projectId: project.id,
+    fileId: "file-1",
+    username: "tester",
+    requiredValidations: 1,
+    auditStats: new Map(),
+  })
+  store.replaceRows(makeRows(cells), { full: true, maxServerSeq: 1 })
+  return store
+}
+
 function renderTable(cells: CellData[]) {
   const qc = new QueryClient()
   return render(
@@ -99,7 +153,7 @@ function renderTable(cells: CellData[]) {
       <EditorActionsProvider value={{}}>
         <EditorTable
           project={project}
-          cells={cells}
+          cellStore={makeStore(cells)}
           username="tester"
           isCompletionConfigured={false}
           isCompletionAvailable={false}
@@ -134,7 +188,7 @@ function selectCheckbox(cellId: string) {
   return btn
 }
 
-describe("EditorTable — selection targeting (FRO-348)", () => {
+describe("EditorTable — selection targeting (AQU-348)", () => {
   afterEach(() => {
     clearSelection()
   })
@@ -187,5 +241,11 @@ describe("EditorTable — selection targeting (FRO-348)", () => {
     pointerDown(selectCheckbox("1"))
     pointerDown(selectCheckbox("3"), { metaKey: true })
     expect(new Set(getSelectedIds())).toEqual(new Set(["1", "3"]))
+  })
+
+  it("reserves source-column space for the divider control", () => {
+    renderTable([makeCell("1")])
+
+    expect(screen.getByLabelText("Source text")).toHaveClass("pr-4")
   })
 })

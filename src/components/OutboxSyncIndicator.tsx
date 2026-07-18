@@ -56,7 +56,14 @@ export function OutboxSyncIndicator({
 
   if (!records) return trigger
 
-  return <OutboxInspectorPopover trigger={trigger} records={records} onRetryNow={onRetryNow} />
+  return (
+    <OutboxInspectorPopover
+      trigger={trigger}
+      records={records}
+      pendingCount={pendingCount}
+      onRetryNow={onRetryNow}
+    />
+  )
 }
 
 interface ChipProps {
@@ -76,8 +83,8 @@ const ChipButton = forwardRef<HTMLButtonElement, ChipProps>(function ChipButton(
       type="button"
       aria-label={title}
       className={cn(
-        "rounded-full px-2 py-0.5 text-xs tabular-nums transition-all",
-        "hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "inline-flex h-7 items-center rounded-full border border-border/70 bg-background/80 px-2 text-xs tabular-nums shadow-sm transition-all",
+        "hover:border-border hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         tone === "warning" && "text-destructive",
         tone === "stuck" && "text-amber-600 dark:text-amber-500",
         tone === "queued" && "text-foreground",

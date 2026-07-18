@@ -16,15 +16,20 @@ import { notifyProjectDo } from "./archive-broadcast"
 import { handleCorsPreflight, withCors } from "./cors"
 import { handleProjectArchiveRequest } from "./project-archive"
 import { handleMemberRemovedRequest, notifyProjectDoMemberRemoved } from "./member-removed"
+import { handleProjectSettingsChangedRequest } from "./project-settings-notify"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
 import { handleCellHistoryReadRequest } from "./events/cell-history-read-route"
+import { handleMemberActivityReadRequest } from "./events/member-activity-read-route"
 import { handleCellsReadRequest } from "./events/cells-read-route"
 import { handleCellConfidenceRequest } from "./events/cell-confidence-route"
 import { handleHealthRollupRequest } from "./events/health-rollup-route"
 import { handleCellAudioReadRequest } from "./events/cell-audio-read-route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleEventsWriteRequest } from "./events/route"
+import { handleExternalChangesetsRequest } from "./external/changesets-route"
+import { handleExternalArtifactsRequest } from "./external/artifacts-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
+import { handleProgressReadRequest } from "./events/progress-read-route"
 import { handleBulkImportRequest } from "./events/import-route"
 import { handleBulkMorphImportRequest } from "./events/import-morph-route"
 import { handleMigrateIngestRequest } from "./events/migrate-ingest-route"
@@ -37,6 +42,7 @@ import { handleMigrateAudioCopyRequest } from "./events/migrate-audio-copy-route
 import { handleMigrateOrgTeamMapsRequest } from "./events/migrate-org-team-maps-route"
 import { handleMigrateGroupsRequest } from "./events/migrate-groups-route"
 import { handleMigrateUsersReadRequest } from "./events/migrate-users-read-route"
+import { handleSourceUploadRequest } from "./events/source-upload-route"
 import { handleExportSourceRequest } from "./events/export-route"
 import { handleExportBundleRequest } from "./events/export-bundle-route"
 import { handleRebuildProjectionRequest } from "./events/rebuild"
@@ -44,12 +50,15 @@ import { handleRebuildFtsRequest } from "./events/rebuild-fts"
 import { handleSearchReadRequest, handleSearchPassagesRequest } from "./events/search-route"
 import { handleStaleSourceRequest } from "./events/stale-source-route"
 import { handleLinkSyncRequest } from "./events/link-sync-route"
+import { handleMergeSiblingRequest } from "./events/merge-sibling-route"
 import { handleLinkCursorBatchesRequest } from "./events/link-cursor-batches-route"
 import { handleValidatorsReadRequest } from "./events/validators-read-route"
 import { handleBranchingSearchRequest } from "./events/branching-search-route"
 import { handleBranchingSearchPassagesRequest } from "./events/branching-search-passages-route"
 import { handleCommentsReadRequest } from "./events/comments-read-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
+import { handleExternalReadRequest } from "./external/read-routes"
+import { handleExternalMcpRequest } from "./external/mcp-route"
 export { ProjectSync } from "./project-do"
 // Inert legacy DO class — kept exported so deploys don't trip the
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
@@ -197,7 +206,7 @@ export default {
 
     const projectArchiveResponse = await handleProjectArchiveRequest(request, env, notifyProjectDo)
     if (projectArchiveResponse) return projectArchiveResponse
-    // FRO-346: eject a removed member's live WS sessions + denylist their
+    // AQU-346: eject a removed member's live WS sessions + denylist their
     // still-valid tokens on the per-project DO.
     const memberRemovedResponse = await handleMemberRemovedRequest(
       request,
@@ -205,6 +214,8 @@ export default {
       notifyProjectDoMemberRemoved,
     )
     if (memberRemovedResponse) return memberRemovedResponse
+    const projectSettingsChangedResponse = await handleProjectSettingsChangedRequest(request, env)
+    if (projectSettingsChangedResponse) return projectSettingsChangedResponse
     const rebuildResponse = await handleRebuildProjectionRequest(request, env)
     if (rebuildResponse) return rebuildResponse
     const rebuildFtsResponse = await handleRebuildFtsRequest(request, env)
@@ -229,6 +240,8 @@ export default {
     if (cellsAuditReadResponse) return withCors(cellsAuditReadResponse, request)
     const filesReadResponse = await handleFilesReadRequest(request, env)
     if (filesReadResponse) return withCors(filesReadResponse, request)
+    const progressReadResponse = await handleProgressReadRequest(request, env)
+    if (progressReadResponse) return withCors(progressReadResponse, request)
     const cellsReadResponse = await handleCellsReadRequest(request, env)
     if (cellsReadResponse) return withCors(cellsReadResponse, request)
     const cellConfidenceResponse = await handleCellConfidenceRequest(request, env)
@@ -239,16 +252,22 @@ export default {
     if (cellAudioReadResponse) return withCors(cellAudioReadResponse, request)
     const cellHistoryResponse = await handleCellHistoryReadRequest(request, env)
     if (cellHistoryResponse) return withCors(cellHistoryResponse, request)
+    const memberActivityResponse = await handleMemberActivityReadRequest(request, env)
+    if (memberActivityResponse) return withCors(memberActivityResponse, request)
     const staleSourceResponse = await handleStaleSourceRequest(request, env)
     if (staleSourceResponse) return withCors(staleSourceResponse, request)
     const linkSyncResponse = await handleLinkSyncRequest(request, env)
     if (linkSyncResponse) return withCors(linkSyncResponse, request)
+    const mergeSiblingResponse = await handleMergeSiblingRequest(request, env)
+    if (mergeSiblingResponse) return withCors(mergeSiblingResponse, request)
     const linkCursorBatchesResponse = await handleLinkCursorBatchesRequest(request, env)
     if (linkCursorBatchesResponse) return withCors(linkCursorBatchesResponse, request)
     const commentsReadResponse = await handleCommentsReadRequest(request, env)
     if (commentsReadResponse) return withCors(commentsReadResponse, request)
     const btReadResponse = await handleCellBacktranslationsReadRequest(request, env)
     if (btReadResponse) return withCors(btReadResponse, request)
+    const externalReadResponse = await handleExternalReadRequest(request, env)
+    if (externalReadResponse) return withCors(externalReadResponse, request)
     // /search/passages must be checked BEFORE /search — PATH_RE for /search is
     // anchored with $ so it won't match /search/passages, but ordering here
     // makes the intent explicit and guards against future regex changes.
@@ -260,7 +279,7 @@ export default {
     if (branchingPassagesResponse) return withCors(branchingPassagesResponse, request)
     const branchingSearchResponse = await handleBranchingSearchRequest(request, env)
     if (branchingSearchResponse) return withCors(branchingSearchResponse, request)
-    const bulkImportResponse = await handleBulkImportRequest(request, env)
+    const bulkImportResponse = await handleBulkImportRequest(request, env, ctx)
     if (bulkImportResponse) return bulkImportResponse
     const bulkMorphImportResponse = await handleBulkMorphImportRequest(request, env)
     if (bulkMorphImportResponse) return bulkMorphImportResponse
@@ -284,12 +303,26 @@ export default {
     if (migrateGroupsResponse) return migrateGroupsResponse
     const migrateUsersReadResponse = await handleMigrateUsersReadRequest(request, env)
     if (migrateUsersReadResponse) return migrateUsersReadResponse
+    const sourceUploadResponse = await handleSourceUploadRequest(request, env)
+    if (sourceUploadResponse) return sourceUploadResponse
     const exportSourceResponse = await handleExportSourceRequest(request, env)
     if (exportSourceResponse) return exportSourceResponse
     const exportBundleResponse = await handleExportBundleRequest(request, env)
     if (exportBundleResponse) return exportBundleResponse
     const eventsWriteResponse = await handleEventsWriteRequest(request, env, ctx)
     if (eventsWriteResponse) return withCors(eventsWriteResponse, request)
+
+    // AQU-533: Agent API changeset engine (external command layer).
+    const externalChangesetsResponse = await handleExternalChangesetsRequest(request, env, ctx)
+    if (externalChangesetsResponse) return withCors(externalChangesetsResponse, request)
+
+    // AQU-533: Agent API remote MCP server (tools-only, streamable HTTP).
+    const externalMcpResponse = await handleExternalMcpRequest(request, env, ctx)
+    if (externalMcpResponse) return withCors(externalMcpResponse, request)
+
+    // AQU-533 (W2-B): Agent API source-artifact upload / inspect.
+    const externalArtifactsResponse = await handleExternalArtifactsRequest(request, env)
+    if (externalArtifactsResponse) return withCors(externalArtifactsResponse, request)
 
     const projectSyncResponse = routeProjectSync(request, env)
     if (projectSyncResponse) return projectSyncResponse

@@ -94,7 +94,7 @@ describe("stageEvents — chain resolution + staleness", () => {
     expect(event.kind).toBe("target.cell.commit")
     expect(event.parentId).toBe(TARGET_HEAD) // current cells.event_id
     expect(event.payload.sourceEventId).toBe(SOURCE_HEAD) // AD-9 staleness pin
-    expect(event.payload.ai_suggestion).toBe(true) // FRO-292 provenance
+    expect(event.payload.ai_suggestion).toBe(true) // AQU-292 provenance
     expect(event.payload.agent_run_id).toBe(RUN_ID) // attribution → agent_runs
     expect(event.display).toEqual({
       canonicalRef: "GEN 1:1",

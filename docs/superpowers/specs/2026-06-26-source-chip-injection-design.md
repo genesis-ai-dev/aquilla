@@ -51,7 +51,7 @@ All fields are captured synchronously at the toolbar call site from data already
 
 Replace the inline markup of `SelectionTermActions` (`src/components/EditorTable.tsx:1607`) with a new component `src/components/SourceSelectionToolbar.tsx` that echoes `CellActionRail`/`RailButton` (`src/components/CellActionRail.tsx`): a `bg-card shadow-neu-sm` rounded cluster of ghost `Button`s, each a lucide icon + minimal label, wrapped in `AppTooltip`, with `active:scale-[0.88]` press feedback and muted-to-foreground hover tone.
 
-- Preserve the FRO-260 selection guard: `onMouseDown` calls `e.preventDefault()` + `onToolbarMouseDown`; `onMouseUp`/`onMouseLeave` call `onToolbarMouseUp`.
+- Preserve the AQU-260 selection guard: `onMouseDown` calls `e.preventDefault()` + `onToolbarMouseDown`; `onMouseUp`/`onMouseLeave` call `onToolbarMouseUp`.
 - Props gain `onAskAi: () => void` alongside the existing `onAddToTermbase` / `onTermApply`.
 - "View term" lookup behavior is unchanged (still conditional on a concept match).
 
@@ -150,5 +150,5 @@ Explicitly **do not** widen `AgentRunRequest.context` to an array or add a `chip
 ## 14. Risks
 
 - **TipTap composer regressions** vs the current textarea (focus, mobile, paste). Mitigated by keeping the public props stable and covering send/keyboard behavior with tests + live check.
-- **Selection-guard timing** (FRO-260/FRO-248) when adding a second toolbar button — preserve the exact `onMouseDown`/`preventDefault` pattern.
+- **Selection-guard timing** (AQU-260/AQU-248) when adding a second toolbar button — preserve the exact `onMouseDown`/`preventDefault` pattern.
 - **Legend literals + SQL guard** — confirm quoted `file_id`/`cell_id` literals pass `sql-guard` with `:project` present (covered by an expansion smoke test against the guard).

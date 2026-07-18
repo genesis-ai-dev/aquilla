@@ -11,8 +11,10 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * Cell details expansion panel.
  *
  * Each cell row has a chevron button (aria-label "Open cell details") that
- * expands an inline panel with five tabs: Staleness, BT, Recording, Issues,
- * History (EditorTable.tsx tabs array — "Decay" was renamed "Staleness").
+ * expands an inline panel with four always-present tabs: Retrieval support,
+ * BT, Recording, Issues. (A fifth Footnotes tab only appears when the cell
+ * has footnotes; edit history moved out of the expansion — it now opens via
+ * the "Edit history" rail button, covered by cell-history-drawer spec.)
  *
  * The chevron is in the CellActionRail — it has `alwaysShowChevron` set, which
  * means it stays at opacity-30 (partially visible) even when the row isn't
@@ -20,7 +22,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * needed to click it. However, we hover first to raise opacity to 100% and
  * ensure the pointer registers on the button.
  */
-test("cell details panel expands and shows all five tabs", async ({ alice }) => {
+test("cell details panel expands and shows its tabs", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `CellDetails ${Date.now()}`
@@ -44,8 +46,10 @@ test("cell details panel expands and shows all five tabs", async ({ alice }) => 
   const panel = row.locator('[data-state="open"]')
   await expect(panel).toBeVisible({ timeout: 5_000 })
 
-  // 3. All five tabs should be present (they render as role="tab").
-  for (const tabName of ["Staleness", "Back-translation", "Recording", "Issues", "History"]) {
+  // 3. The always-present tabs render as role="tab". (Footnotes is
+  //    conditional on the cell actually having footnotes, so it's not
+  //    asserted here for a plain markdown import.)
+  for (const tabName of ["Retrieval support", "Back-translation", "Recording", "Issues"]) {
     await expect(panel.getByRole("tab", { name: tabName })).toBeVisible({ timeout: 3_000 })
   }
 

@@ -1,4 +1,4 @@
-// FRO-476: mirror sync trigger route.
+// AQU-476: mirror sync trigger route.
 //
 //   POST /api/v1/projects/:projectId/link/sync
 //

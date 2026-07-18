@@ -18,7 +18,7 @@ import { test, expect } from "../../helpers/multi-user"
  * warning text disappears.
  */
 test("preferences analytics disabled warning appears when switch is off", async ({ alice }) => {
-  await alice.goto("/preferences")
+  await alice.goto("/preferences/privacy")
   await alice.waitForLoadState("networkidle")
 
   const toggle = alice.getByRole("switch", { name: "Share usage data" })

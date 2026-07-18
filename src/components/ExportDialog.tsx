@@ -5,15 +5,15 @@
 // For non-USFM formats, project scope uses useProjectCells to fan-out over all
 // project files (up to MAX_FILES=40) and buildProjectZip to produce a zip.
 //
-// FRO-253 (b fix): auto-closes when canExport flips false after settings load,
+// AQU-253 (b fix): auto-closes when canExport flips false after settings load,
 // so a settings change mid-session doesn't leave the dialog open for a user who
 // lost access.
 //
-// FRO-437: Filename control — editable base name with optional timestamp/lang
+// AQU-437: Filename control — editable base name with optional timestamp/lang
 // tag appended at export time. The chosen name drives the downloaded filename
 // for both single-file and project-scope exports.
 //
-// FRO-439: Voice filter — when cells have cast assignments (metadata.cast_name),
+// AQU-439: Voice filter — when cells have cast assignments (metadata.cast_name),
 // a "Voice" filter appears letting users export only one voice's cells across
 // all camera angles.
 
@@ -75,12 +75,12 @@ const FORMAT_OPTIONS: FormatOption[] = [
     lossy: false,
   },
   {
-    // FRO-233: DOCX export with paragraph/heading structure preserved.
+    // AQU-233: DOCX export with paragraph/heading structure preserved.
     // Only shown for files imported as .docx (isDocxFile prop).
     id: "docx",
     label: "Word (.docx)",
     ext: ".docx",
-    description: "Translations injected back into the original Word document. Paragraph/heading structure is preserved; per-run bold/italic inside translated paragraphs is not preserved. Requires the original file to have been imported after round-trip export support was added (files larger than 512 KB at import may not support this).",
+    description: "Translations injected back into the original Word document. Paragraph/heading structure is preserved; per-run bold/italic inside translated paragraphs is not preserved. Requires the original file to have been imported after round-trip export support was added — files imported before then may lack a stored original (re-import to enable).",
     lossy: false,
   },
   {
@@ -163,7 +163,7 @@ const FORMAT_OPTIONS: FormatOption[] = [
     description: "Every translated segment, one per line. Quick content extraction only.",
     lossy: true,
   },
-  // FRO-441: Metadata/cast spreadsheet — listed in Advanced section.
+  // AQU-441: Metadata/cast spreadsheet — listed in Advanced section.
   {
     id: "metadata-csv",
     label: "Metadata spreadsheet",
@@ -177,7 +177,7 @@ interface ExportDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   /**
-   * FRO-253 (b fix): whether org policy allows export. When this flips false
+   * AQU-253 (b fix): whether org policy allows export. When this flips false
    * while the dialog is open (e.g. an owner raises the floor mid-session), the
    * dialog auto-closes so the user isn't left in an inconsistent state.
    * Defaults to true for non-org contexts.
@@ -194,7 +194,7 @@ interface ExportDialogProps {
   /** Whether the active file is a USFM file — enables USFM option. */
   isUsfmFile: boolean
   /**
-   * FRO-233: Whether the active file was imported as a .docx — enables the
+   * AQU-233: Whether the active file was imported as a .docx — enables the
    * Word (.docx) round-trip export option when a side-car blob exists.
    */
   isDocxFile?: boolean
@@ -225,7 +225,7 @@ export function ExportDialog({
   ttsSettings,
   getToken,
 }: ExportDialogProps) {
-  // FRO-253 (b fix): close the dialog if canExport flips to false after it opened.
+  // AQU-253 (b fix): close the dialog if canExport flips to false after it opened.
   // Track the previous open state to detect the transition.
   const prevCanExportRef = useRef(canExport)
   useEffect(() => {
@@ -241,7 +241,7 @@ export function ExportDialog({
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [dumpIncludeRefs, setDumpIncludeRefs] = useState(false)
 
-  // FRO-437: Filename control state. Default changes with scope/format.
+  // AQU-437: Filename control state. Default changes with scope/format.
   // The base name is editable; timestamp and language tag are optional suffixes.
   const defaultBaseName = (activeFileName ?? "export").replace(/\.[^.]+$/, "")
   const [customBaseName, setCustomBaseName] = useState<string>(defaultBaseName)
@@ -299,7 +299,7 @@ export function ExportDialog({
   const selectedFormat = FORMAT_OPTIONS.find((f) => f.id === format)!
   const isLossy = selectedFormat.lossy
 
-  // FRO-439: Voice filter — collect distinct voice names from metadata.cast_name.
+  // AQU-439: Voice filter — collect distinct voice names from metadata.cast_name.
   // Only appears when at least one cell has a cast assignment.
   const [voiceFilter, setVoiceFilter] = useState<string>("") // "" = All voices
 
@@ -345,7 +345,7 @@ export function ExportDialog({
     })
 
   /**
-   * FRO-437: Build the final filename stem from the user's inputs.
+   * AQU-437: Build the final filename stem from the user's inputs.
    * - Starts with customBaseName (or projectName for project scope).
    * - Appends _YYYYMMDD-HHMM suffix when appendTimestamp is set.
    * - Appends _<langTag> suffix when appendLangTag is set and a language is available.
@@ -391,10 +391,10 @@ export function ExportDialog({
             : `Exported ${result.exported}; skipped ${result.skipped.length} (older imports — re-import to enable)`
           setStatus({ kind: "ok", msg })
         } else {
-          // FRO-437: use user-chosen stem with .SFM extension.
+          // AQU-437: use user-chosen stem with .SFM extension.
           const stem = buildExportStem(false)
           const downloadName = `${stem}.SFM`
-          // FRO-276: read lossy-verse count from response header.
+          // AQU-276: read lossy-verse count from response header.
           const result = await downloadSourceFile({ projectId, fileId: activeFileId, downloadName, getToken })
           const lossyCount = result.lossyVerseCount
           if (lossyCount !== null && lossyCount > 0) {
@@ -408,14 +408,14 @@ export function ExportDialog({
           }
         }
       } else if (format === "docx") {
-        // FRO-233: DOCX round-trip export. Fetch the raw DOCX side-car from the
+        // AQU-233: DOCX round-trip export. Fetch the raw DOCX side-car from the
         // server, then inject translations client-side using JSZip + DOMParser.
         setStatus({ kind: "busy", msg: "Fetching original document…" })
         const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken })
         setStatus({ kind: "busy", msg: "Injecting translations…" })
         const { exportDocx } = await import("@/lib/export/exporters/docx")
         const result = await exportDocx(rawBytes, cells)
-        const baseName = buildExportStem(false) // FRO-437: user-chosen stem
+        const baseName = buildExportStem(false) // AQU-437: user-chosen stem
         downloadBlob(result.blob, `${baseName}.docx`)
         const note = result.injected === 0
           ? " (no translations to inject — download original structure)"
@@ -447,7 +447,7 @@ export function ExportDialog({
           decode: decodeToMono48k,
           onProgress: (d, t) => setStatus({ kind: "busy", msg: `Decoding ${d}/${t}…` }),
         })
-        const safe = buildExportStem(false) // FRO-437: user-chosen stem
+        const safe = buildExportStem(false) // AQU-437: user-chosen stem
         downloadBlob(result.blob, `${safe}_audio-by-character.zip`)
         const skippedNote = result.skipped > 0 ? ` (${result.skipped} clip${result.skipped === 1 ? "" : "s"} skipped)` : ""
         setStatus({ kind: "ok", msg: `Exported audio by character${skippedNote}` })
@@ -489,7 +489,7 @@ export function ExportDialog({
           setStatus({ kind: "busy", msg: "Still loading file cells, please wait…" })
           return
         }
-        // FRO-441: metadata-csv project scope — flatten all file cells into one sheet.
+        // AQU-441: metadata-csv project scope — flatten all file cells into one sheet.
         if (format === "metadata-csv") {
           const allCells = projectFileCells.flatMap((f) => f.cells)
           const csvBlob = exportMetadataCsv(allCells, ttsSettings)
@@ -506,7 +506,7 @@ export function ExportDialog({
           sourceLanguage,
           targetLanguage,
         })
-        const safeName = buildExportStem(true) // FRO-437: project scope uses project name + suffixes
+        const safeName = buildExportStem(true) // AQU-437: project scope uses project name + suffixes
         const ext = selectedFormat.ext
         downloadBlob(zipBlob, `${safeName}${ext}.zip`)
         setFidelityWarnings(projectFileCells.flatMap((f) => collectInlineStyleWarnings(f.cells)))
@@ -514,10 +514,10 @@ export function ExportDialog({
         setStatus({ kind: "ok", msg: `Downloaded ${projectFileCells.length} files${truncNote}` })
       } else {
         // Client-side single-file exporter
-        // FRO-439: apply voice filter before passing to any exporter.
+        // AQU-439: apply voice filter before passing to any exporter.
         const filteredCells = applyVoiceFilter(cells)
         let blob: Blob
-        const baseName = buildExportStem(false) // FRO-437: user-chosen stem
+        const baseName = buildExportStem(false) // AQU-437: user-chosen stem
         const ext = selectedFormat.ext
         switch (format) {
           case "txt":
@@ -551,8 +551,8 @@ export function ExportDialog({
             })
             break
           case "metadata-csv":
-            // FRO-441: export cast/camera metadata for the current file.
-            // FRO-439: voice filter applied (filteredCells already scoped).
+            // AQU-441: export cast/camera metadata for the current file.
+            // AQU-439: voice filter applied (filteredCells already scoped).
             blob = exportMetadataCsv(filteredCells, ttsSettings)
             break
           default:
@@ -576,6 +576,13 @@ export function ExportDialog({
   }
 
   const isBusy = status.kind === "busy"
+  // AQU-519: after a successful export the dialog must make it obvious the
+  // export completed and give an unmistakable way out. The success banner shows
+  // the confirmation; here the footer swaps "Cancel" for a primary "Done"
+  // button (and demotes "Export" to "Export again") so users aren't left
+  // wondering whether anything happened. We keep the dialog open rather than
+  // auto-closing so lossy/fidelity warnings stay visible.
+  const isDone = status.kind === "ok" || status.kind === "ok-lossy"
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -584,7 +591,7 @@ export function ExportDialog({
           <DialogTitle>Export</DialogTitle>
         </DialogHeader>
 
-        {/* FRO-458: the whole body scrolls as one region (DialogBody =
+        {/* AQU-458: the whole body scrolls as one region (DialogBody =
             min-h-0 flex-1 overflow-y-auto) instead of nesting a fixed-height
             scroll area inside the Format fieldset. A max-h-64 inner scroll
             on just the format list got clipped by the dialog's own
@@ -604,7 +611,7 @@ export function ExportDialog({
           >
             {FORMAT_OPTIONS.filter((f) => {
               if (f.id === "usfm") return isUsfmFile
-              if (f.id === "docx") return isDocxFile // FRO-233: only for docx imports
+              if (f.id === "docx") return isDocxFile // AQU-233: only for docx imports
               if (f.id === "sdbh-xml") return hasSdbhFiles // SDBH round-trip: only for lexicon projects
               if (f.id === "plain-text-dump") return false // shown in Advanced section only
               return true
@@ -702,7 +709,7 @@ export function ExportDialog({
           )}
         </fieldset>
 
-        {/* FRO-439: Voice filter — only shown when cells have cast assignments */}
+        {/* AQU-439: Voice filter — only shown when cells have cast assignments */}
         {distinctVoices.length > 0 && (
           <fieldset className="flex flex-col gap-1.5">
             <legend className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
@@ -727,7 +734,7 @@ export function ExportDialog({
           </fieldset>
         )}
 
-        {/* FRO-437: Filename control — editable base name + optional suffixes */}
+        {/* AQU-437: Filename control — editable base name + optional suffixes */}
         <fieldset className="flex flex-col gap-1.5">
           <legend className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
             Filename
@@ -881,7 +888,7 @@ export function ExportDialog({
                 )}
               </span>
             </label>
-            {/* FRO-441: Metadata spreadsheet — cast, camera angle, cell ref */}
+            {/* AQU-441: Metadata spreadsheet — cast, camera angle, cell ref */}
             <label
               className={
                 "flex items-start gap-2.5 rounded-xl px-2.5 py-2 cursor-pointer transition-colors " +
@@ -972,20 +979,25 @@ export function ExportDialog({
         </DialogBody>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={isBusy}>
-            Cancel
+          <Button
+            variant={isDone ? "default" : "outline"}
+            onClick={() => handleOpenChange(false)}
+            disabled={isBusy}
+          >
+            {isDone ? "Done" : "Cancel"}
           </Button>
           <Button
             onClick={handleExport}
             disabled={!activeFileId || isBusy}
             aria-busy={isBusy}
+            variant={isDone ? "outline" : "default"}
           >
             {isBusy ? (
               <Spinner aria-hidden="true" />
             ) : (
               <Download className="h-4 w-4" aria-hidden="true" />
             )}
-            {isBusy ? "Exporting…" : "Export"}
+            {isBusy ? "Exporting…" : isDone ? "Export again" : "Export"}
           </Button>
         </DialogFooter>
       </DialogContent>

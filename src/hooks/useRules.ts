@@ -40,7 +40,7 @@ export function useRules(
   const penalties: RulePenalties = project?.rulePenalties || { major: 15, minor: 5 }
   const terminology = project?.terminology
 
-  // FRO-455: track the latest known-cumulative rules array ourselves rather
+  // AQU-455: track the latest known-cumulative rules array ourselves rather
   // than trusting `patchProject`'s return value or the `project` prop as the
   // source of truth for "what rules exist right now".
   //
@@ -119,7 +119,7 @@ export function useRules(
   const addRule = useCallback(async (rule: Omit<TranslationRule, "id" | "createdAt">) => {
     if (!project) return
     const newRule: TranslationRule = { ...rule, id: uuid(), createdAt: new Date().toISOString() }
-    // FRO-455: compute the cumulative array from `latestRulesRef`, NOT from
+    // AQU-455: compute the cumulative array from `latestRulesRef`, NOT from
     // `patchProject`'s return value or the `project` prop. Confirmed live
     // against the real dev stack: for AD-3 thin-client projects (the normal
     // case — see useProject.ts), the project record is never written to IDB
@@ -143,7 +143,7 @@ export function useRules(
     // carries the authoritative array either way) but keeps any legacy
     // IDB-backed project record in sync for offline/local-only projects.
     void patchProject(project.id, (p) => ({ ...p, rules: [...(p.rules || []), newRule] }))
-    // FRO-455: await the shared-settings write (D1 project_settings PATCH).
+    // AQU-455: await the shared-settings write (D1 project_settings PATCH).
     // patchShared's write is queued (useProjectSettings.patch →
     // runSerialized), so back-to-back calls don't clobber each other
     // server-side *once they're properly ordered* — but when this call was

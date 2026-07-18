@@ -8,9 +8,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * AudioRecordingModal — opens from the direct mic rail button (FRO-237).
+ * AudioRecordingModal — opens from the direct mic rail button (AQU-237).
  *
- * FRO-237: Record audio was moved from the ⋯ overflow popover to a direct
+ * AQU-237: Record audio was moved from the ⋯ overflow popover to a direct
  * mic button on the CellActionRail (aria-label="Record audio"). This spec
  * opens the modal via the rail mic button directly, without going through
  * the ⋯ popover.
@@ -40,7 +40,7 @@ test("audio recording modal opens in idle state from rail mic button", async ({ 
   await row.scrollIntoViewIfNeeded()
   await row.hover()
 
-  // FRO-237: click the direct rail mic button (aria-label="Record audio").
+  // AQU-237: click the direct rail mic button (aria-label="Record audio").
   // This replaces the old flow that opened the ⋯ popover first.
   const micRailBtn = row.locator('button[aria-label="Record audio"]')
   await expect(micRailBtn).toBeVisible({ timeout: 5_000 })

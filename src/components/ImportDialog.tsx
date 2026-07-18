@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   Upload, Library, Globe, Table2, Languages, ArrowLeft, ArrowLeftRight, Tags, StickyNote, Database,
-  BookImage, BookA, Search,
+  BookImage, BookA, Search, Cloud,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -56,7 +56,8 @@ import {
   type ImportResult,
 } from "@/lib/import"
 import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
-import { PreviewPanel } from "@/components/import/PreviewPanel"
+import { PreviewPanel, type ImportUploadProgress } from "@/components/import/PreviewPanel"
+import { formatBytesProgress } from "@/lib/format-bytes"
 import type { FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
 import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
 import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
@@ -90,10 +91,14 @@ import {
   IMPORT_COLLISION_DUPLICATED,
 } from "@/lib/event-names"
 import { SpreadsheetImportPanel } from "@/components/import/SpreadsheetImportPanel"
-import { LabelImportPanel } from "@/components/import/LabelImportPanel"
+import { LabelImportPanel, type LabelImportResult } from "@/components/import/LabelImportPanel"
 import { PairedImportPanel } from "@/components/import/PairedImportPanel"
+import { DcsCatalogBrowser } from "@/components/dcs/DcsCatalogBrowser"
+import { importDcsResource } from "@/lib/dcs/import-dcs"
+import { DcsClient } from "@/lib/dcs/catalog"
+import type { DcsCatalogEntry, DcsCursor } from "@/lib/dcs/types"
 
-type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "direction" | "result" | "collision" | "spreadsheet" | "labels" | "paired" | "sdbh"
+type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "direction" | "result" | "collision" | "spreadsheet" | "labels" | "paired" | "sdbh" | "dcs"
 
 interface ImportDialogProps {
   open: boolean
@@ -114,19 +119,41 @@ interface ImportDialogProps {
   onCastUpdated?: (settings: Partial<ProjectTtsSettings>) => void | Promise<void>
   /**
    * Optional: existing source cells to support the "into target" eBible import
-   * mode (FRO-191). When provided, the eBible panel shows a mode toggle so the
+   * mode (AQU-191). When provided, the eBible panel shows a mode toggle so the
    * user can import a translation into the target column of an existing file.
    * Each cell needs at minimum: cellId, fileId, translated, canonicalRef, and
    * the AD-2 parentId fields (targetEventId / sourceEventId).
    */
   sourceCells?: SourceCellRef[]
   /**
-   * FRO-287: files already in the project. Used by the collision guard to detect
+   * AQU-287: files already in the project. Used by the collision guard to detect
    * re-imports and offer Skip / Import as duplicate choices. Wired from
-   * ProjectWorkspace (FRO-272 glue); FileReference satisfies { name }.
+   * ProjectWorkspace (AQU-272 glue); FileReference satisfies { name }.
    * Fresh projects (empty array or absent) skip the detection step.
    */
   existingFiles?: { name: string }[]
+  /**
+   * DCS (Door43) import (spec §8/§9): persist the `dcsUpstream` cursor to the
+   * current project's settings after a successful import, pinning it to the
+   * chosen release. Wired from ProjectWorkspace to `useProject().patchSettings`.
+   * When absent, the Door43 source option is hidden (the import can't pin
+   * without a way to write settings). Returns true on a successful save.
+   */
+  patchDcsCursor?: (cursor: DcsCursor) => Promise<boolean>
+  /**
+   * AQU-314: project files for the Cell-labels panel's step-1 file picker.
+   * The panel fetches the selected file's source cells itself, so labels no
+   * longer depend on which file happens to be active in the editor.
+   */
+  projectFiles?: { id: string; name: string }[]
+  /** AQU-314: the workspace's active file — pre-selected in the picker. */
+  activeFileId?: string | null
+  /**
+   * AQU-314: called after a label apply run completes and the dialog closes.
+   * The host surfaces the result (applied/unmatched counts) as its transient
+   * status notice — the dialog itself is gone by then.
+   */
+  onLabelsImported?: (result: LabelImportResult) => void
 }
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */
@@ -147,6 +174,10 @@ export function ImportDialog({
   onCastUpdated,
   sourceCells,
   existingFiles,
+  patchDcsCursor,
+  projectFiles,
+  activeFileId,
+  onLabelsImported,
 }: ImportDialogProps) {
   const [screen, setScreen] = useState<Screen>("landing")
   // Holds refs + inferred languages while waiting for the user to set direction.
@@ -154,7 +185,7 @@ export function ImportDialog({
     refs: FileReference[]
     inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }
   } | null>(null)
-  // FRO-277: holds the partial-import result (skipped books) so the user can
+  // AQU-277: holds the partial-import result (skipped books) so the user can
   // read and copy the report before the dialog closes.
   const [importResult, setImportResult] = useState<{
     refs: FileReference[]
@@ -165,30 +196,30 @@ export function ImportDialog({
   const [directionTarget, setDirectionTarget] = useState("")
   // Guard against double-clicks on "Set direction".
   const [confirming, setConfirming] = useState(false)
-  // FRO-249 fix: inline error shown when onImported throws from the direction screen.
+  // AQU-249 fix: inline error shown when onImported throws from the direction screen.
   const [confirmError, setConfirmError] = useState<string | null>(null)
-  // FRO-287: collision state — populated when a re-import is detected.
+  // AQU-287: collision state — populated when a re-import is detected.
   const [collisionState, setCollisionState] = useState<{
     collisions: CollisionResult[]
     // Callback that continues the pending import once the user resolves collisions.
     proceed: (skipKeys: ReadonlySet<string>) => void | Promise<void>
   } | null>(null)
-  // FRO-310: preview state — parsed results waiting for user confirmation before upload.
+  // AQU-310: preview state — parsed results waiting for user confirmation before upload.
   const [previewState, setPreviewState] = useState<{
     results: ImportResult[]
     /** Commits the parsed results to the server once user confirms. */
     commit: () => void | Promise<void>
   } | null>(null)
-  // FRO-430: upload progress surfaced from UploadPanel's doCommit while the
+  // AQU-430: upload progress surfaced from UploadPanel's doCommit while the
   // preview screen is active (UploadPanel is unmounted; these live here so
   // PreviewPanel can render an in-flight indicator).
   const [previewUploadPhase, setPreviewUploadPhase] = useState("")
-  const [previewUploadProgress, setPreviewUploadProgress] = useState<{ count: number; total: number } | null>(null)
-  // FRO-430 (fix): a commit failure must be visible during the preview screen.
+  const [previewUploadProgress, setPreviewUploadProgress] = useState<ImportUploadProgress | null>(null)
+  // AQU-430 (fix): a commit failure must be visible during the preview screen.
   // UploadPanel is unmounted here, so its local error never shows — surface it
   // up to this level and pass it to PreviewPanel instead of failing silently.
   const [previewCommitError, setPreviewCommitError] = useState<string | null>(null)
-  // FRO-249 fix (Fix 3): guard against Radix delivering onOpenChange(false) twice
+  // AQU-249 fix (Fix 3): guard against Radix delivering onOpenChange(false) twice
   // in the same macrotask (closure-captured pendingImport stays non-null until
   // the re-render). Consumed synchronously so the second call is a no-op.
   const flushingRef = useRef(false)
@@ -222,7 +253,7 @@ export function ImportDialog({
         }
         flushingRef.current = true
         // Flush the pending import without language overrides (skip semantics).
-        // SWARM-TODO(FRO-274): surface this as a user-visible banner ("Import
+        // SWARM-TODO(AQU-274): surface this as a user-visible banner ("Import
         // couldn't be saved — copy your files and try again") once the
         // ImportDialog report-flow agent lands (wave collisions risk). For now
         // the error stays console-only to avoid conflicting with that refactor.
@@ -239,7 +270,7 @@ export function ImportDialog({
   // Called by child panels when they finish importing. If the language
   // direction is ambiguous (source==target or target is empty after source is
   // set), show the one-time direction prompt instead of closing immediately.
-  // FRO-277: accepts an optional `skipped` array — if any books were skipped,
+  // AQU-277: accepts an optional `skipped` array — if any books were skipped,
   // the result screen is shown FIRST so the user can read/copy the report before
   // the dialog auto-closes or they explicitly dismiss.
   const handleChildImported = useCallback(
@@ -248,7 +279,7 @@ export function ImportDialog({
       inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string },
       skippedBooks?: { book: string; reason: string }[],
     ) => {
-      // FRO-277: partial import — show result screen first, hold the close.
+      // AQU-277: partial import — show result screen first, hold the close.
       if (skippedBooks && skippedBooks.length > 0) {
         posthog.capture(IMPORT_PARTIAL, {
           imported_count: refs.length,
@@ -304,7 +335,7 @@ export function ImportDialog({
     [sourceLanguage, targetLanguage, projectId, onImported, onOpenChange],
   )
 
-  // FRO-277: called from ResultPanel when the user explicitly dismisses the
+  // AQU-277: called from ResultPanel when the user explicitly dismisses the
   // import-result screen. At this point we flush the actual onImported callback
   // and close. If the result also triggers a direction prompt, we fall through
   // the normal direction-screen path.
@@ -320,7 +351,7 @@ export function ImportDialog({
   // replace current values, not merely fill empty slots.
   async function handleDirectionConfirm() {
     if (!pendingImport || confirming) return
-    // FRO-249 fix: clear inline error from any previous attempt.
+    // AQU-249 fix: clear inline error from any previous attempt.
     setConfirmError(null)
     setConfirming(true)
     const captured = pendingImport
@@ -338,7 +369,7 @@ export function ImportDialog({
       await onImported(captured.refs, mergedLanguages)
       onOpenChange(false)
     } catch (err: unknown) {
-      // FRO-249 fix: on failure restore the direction screen so the user can
+      // AQU-249 fix: on failure restore the direction screen so the user can
       // retry or skip. The rejection MUST NOT escape as an unhandled rejection.
       setPendingImport(captured)
       const message = err instanceof Error ? err.message : String(err)
@@ -358,7 +389,7 @@ export function ImportDialog({
     }
     const captured = pendingImport
     setPendingImport(null)
-    // SWARM-TODO(FRO-274): surface this as a user-visible banner once the
+    // SWARM-TODO(AQU-274): surface this as a user-visible banner once the
     // ImportDialog report-flow agent lands — same wave-collision concern as above.
     void Promise.resolve(onImported(captured.refs, captured.inferredLanguages)).catch((err: unknown) => {
       console.warn("[ImportDialog] skip flush failed:", err)
@@ -396,6 +427,7 @@ export function ImportDialog({
                 {screen === "upload" ? "Upload Files"
                   : screen === "helloao" ? "Bible API (helloao.org)"
                   : screen === "obs" ? "Open Bible Stories"
+                  : screen === "dcs" ? "Door43 (DCS)"
                   : screen === "macula" ? "Macula Hebrew + Greek"
                   : screen === "tn" ? "Translation Notes (TSV)"
                   : screen === "spreadsheet" ? "Spreadsheet (CSV / XLSX)"
@@ -412,6 +444,7 @@ export function ImportDialog({
 
         {screen === "landing" && (
           <ImportLanding
+            allowDcs={patchDcsCursor !== undefined}
             onSelect={(s) => {
               posthog.capture(IMPORT_STARTED, { import_type: s, project_id: projectId })
               setScreen(s)
@@ -494,6 +527,18 @@ export function ImportDialog({
           />
         )}
 
+        {screen === "dcs" && patchDcsCursor && (
+          <DcsPanel
+            projectId={projectId}
+            getToken={getToken}
+            defaultLang={sourceLanguage}
+            patchDcsCursor={patchDcsCursor}
+            onImported={async (refs, inferredLanguages) => {
+              await handleChildImported(refs, inferredLanguages)
+            }}
+          />
+        )}
+
         {screen === "macula" && (
           <MaculaPanel
             projectId={projectId}
@@ -530,7 +575,7 @@ export function ImportDialog({
           />
         )}
 
-        {/* FRO-316: Spreadsheet importer (CSV / XLSX) with on-the-fly column mapping */}
+        {/* AQU-316: Spreadsheet importer (CSV / XLSX) with on-the-fly column mapping */}
         {screen === "spreadsheet" && (
           <SpreadsheetImportPanel
             projectId={projectId}
@@ -551,26 +596,28 @@ export function ImportDialog({
           />
         )}
 
-        {/* FRO-314: Cell labels / cast import via downloadable template */}
-        {screen === "labels" && sourceCells && sourceCells.length > 0 && (
+        {/* AQU-314: Cell labels / cast import via downloadable template */}
+        {screen === "labels" && projectFiles && projectFiles.length > 0 && (
           <LabelImportPanel
             projectId={projectId}
             username={username}
-            sourceCells={sourceCells}
+            files={projectFiles}
+            defaultFileId={activeFileId}
             getToken={getToken}
-            onImported={() => {
+            onImported={(result) => {
               onOpenChange(false)
+              onLabelsImported?.(result)
             }}
             onCancel={() => setScreen("landing")}
           />
         )}
-        {screen === "labels" && (!sourceCells || sourceCells.length === 0) && (
+        {screen === "labels" && (!projectFiles || projectFiles.length === 0) && (
           <div className="py-4 text-center text-sm text-muted-foreground">
             Cell labels require an existing source file in this project. Import source files first, then return here.
           </div>
         )}
 
-        {/* FRO-315: Paired source+target import (translation memory) */}
+        {/* AQU-315: Paired source+target import (translation memory) */}
         {screen === "paired" && sourceCells && sourceCells.length > 0 && (
           <PairedImportPanel
             projectId={projectId}
@@ -603,7 +650,7 @@ export function ImportDialog({
           />
         )}
 
-        {/* FRO-277: partial-import result screen */}
+        {/* AQU-277: partial-import result screen */}
         {screen === "result" && importResult && (
           <ImportResultPanel
             importedCount={importResult.refs.length}
@@ -612,8 +659,8 @@ export function ImportDialog({
           />
         )}
 
-        {/* FRO-310: preview — parsed cells waiting for user confirmation before upload */}
-        {/* FRO-430: uploadPhase/uploadProgress surfaced from UploadPanel.doCommit */}
+        {/* AQU-310: preview — parsed cells waiting for user confirmation before upload */}
+        {/* AQU-430: uploadPhase/uploadProgress surfaced from UploadPanel.doCommit */}
         {screen === "preview" && previewState && (
           <PreviewPanel
             results={previewState.results}
@@ -632,7 +679,7 @@ export function ImportDialog({
           />
         )}
 
-        {/* FRO-287: collision guard — shown when re-importing into an existing project */}
+        {/* AQU-287: collision guard — shown when re-importing into an existing project */}
         {screen === "collision" && collisionState && (
           <CollisionPanel
             collisions={collisionState.collisions}
@@ -670,7 +717,7 @@ export function ImportDialog({
 
 // ---------------------------------------------------------------------------
 // Beta badge — mirrors codex-editor's convention of flagging not-ready importers.
-// FRO-310: shown on Macula and Translation Notes importers.
+// AQU-310: shown on Macula and Translation Notes importers.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -717,6 +764,8 @@ const SPECIALIZED_OPTIONS: ImportOption[] = [
     description: "unfoldingWord notes, shown beside the matching verse as you translate." },
   { id: "obs", title: "Open Bible Stories", hint: "door43", icon: BookImage, badge: "beta",
     description: "Narrative stories with reference images, from unfoldingWord/door43." },
+  { id: "dcs", title: "Door43 (DCS)", hint: "upstream", icon: Cloud, badge: "beta",
+    description: "Import any released Door43 resource as source and pin it to a release — pull upstream changes later." },
   { id: "sdbh", title: "SDBH Hebrew Lexicon", hint: "UBS MARBLE", icon: BookA, badge: "beta",
     description: "Semantic Dictionary of Biblical Hebrew — localize definitions and glosses by semantic domain, with lossless export back to the MARBLE XML." },
   { title: "Translation Memory", hint: "TMX", icon: Database, badge: "soon", disabled: true,
@@ -794,18 +843,26 @@ function ImportSection({ label, children }: { label: string; children: ReactNode
 
 interface ImportLandingProps {
   onSelect: (screen: Screen) => void
+  /** When false, the Door43 (DCS) option is hidden — its import needs a way to
+   *  write the project settings cursor (patchDcsCursor), unavailable e.g. for
+   *  unsynced local-only projects. */
+  allowDcs: boolean
 }
 
-function ImportLanding({ onSelect }: ImportLandingProps) {
+function ImportLanding({ onSelect, allowDcs }: ImportLandingProps) {
   // The specialized tier is a growing catalogue of domain-specific importers —
   // filterable so it stays scannable as entries accumulate.
   const [filter, setFilter] = useState("")
   const q = filter.trim().toLowerCase()
+  // Hide DCS when the host can't persist the release cursor.
+  const available = allowDcs
+    ? SPECIALIZED_OPTIONS
+    : SPECIALIZED_OPTIONS.filter((o) => o.id !== "dcs")
   const specialized = q
-    ? SPECIALIZED_OPTIONS.filter((o) =>
+    ? available.filter((o) =>
         [o.title, o.hint ?? "", o.description].some((t) => t.toLowerCase().includes(q)),
       )
-    : SPECIALIZED_OPTIONS
+    : available
   return (
     <div className="space-y-5 py-1">
       <p className="text-sm text-muted-foreground">Choose the format that matches your files.</p>
@@ -852,30 +909,30 @@ interface UploadPanelProps {
   sourceLanguage: string
   targetLanguage: string
   getToken: (fileId: string) => Promise<string | null>
-  /** FRO-277: third argument carries skipped books for partial Paratext imports. */
+  /** AQU-277: third argument carries skipped books for partial Paratext imports. */
   onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }, skipped?: { book: string; reason: string }[]) => void | Promise<void>
   ttsSettings?: ProjectTtsSettings
   onCastUpdated?: (settings: Partial<ProjectTtsSettings>) => void | Promise<void>
   /**
-   * FRO-287: files already in the project. Passed to detectCollisions before
+   * AQU-287: files already in the project. Passed to detectCollisions before
    * any import starts; on collision, onCollision is called instead of proceeding.
    */
   existingFiles?: { name: string }[]
-  /** FRO-287: called when collisions are detected; parent shows the collision screen. */
+  /** AQU-287: called when collisions are detected; parent shows the collision screen. */
   onCollision?: (collisions: CollisionResult[], proceed: (skipKeys: ReadonlySet<string>) => void | Promise<void>) => void
   /**
-   * FRO-310: called after client-side parsing completes, before any upload.
+   * AQU-310: called after client-side parsing completes, before any upload.
    * Parent shows a preview screen; commit() triggers the actual bulk upload.
    */
   onPreview?: (results: ImportResult[], commit: () => Promise<void>) => void
   /**
-   * FRO-430: callbacks for the parent to receive upload progress while the
+   * AQU-430: callbacks for the parent to receive upload progress while the
    * preview screen is shown (UploadPanel is unmounted during preview). The
    * parent forwards these to PreviewPanel so an in-flight indicator is visible.
    */
   onCommitPhase?: (phase: string) => void
-  onCommitProgress?: (progress: { count: number; total: number } | null) => void
-  /** FRO-430 (fix): surface a commit failure to the parent so the unmounted
+  onCommitProgress?: (progress: ImportUploadProgress | null) => void
+  /** AQU-430 (fix): surface a commit failure to the parent so the unmounted
    *  UploadPanel's local error is still shown on the preview screen. */
   onCommitError?: (message: string | null) => void
 }
@@ -885,7 +942,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [phase, setPhase] = useState<string>("")
-  const [progress, setProgress] = useState<{ count: number; total: number } | null>(null)
+  const [progress, setProgress] = useState<ImportUploadProgress | null>(null)
   // Set when a dropped/selected set is a Paratext project — we pause to ask
   // whether it's a source text or a translation-in-progress (target) before
   // importing.
@@ -904,7 +961,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
         return
       }
 
-      // FRO-287: single-file collision check before parsing/uploading.
+      // AQU-287: single-file collision check before parsing/uploading.
       if (existingFiles && existingFiles.length > 0 && onCollision) {
         const incoming = list.map((f) => ({ name: f.name }))
         const collisions = detectCollisions(incoming, existingFiles)
@@ -928,7 +985,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
 
   /** Inner helper: import a resolved list of files (after collision resolution).
    *
-   * FRO-310: when `onPreview` is provided, this splits into two phases:
+   * AQU-310: when `onPreview` is provided, this splits into two phases:
    *   1. Parse phase — reads all files locally, shows a preview
    *   2. Commit phase — uploads after user confirms
    * Media files bypass preview (they have no text cells to show).
@@ -998,11 +1055,17 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
       const allRefs: FileReference[] = []
       // Accumulate speaker pairs across all subtitle files in this batch.
       const allSpeakerPairs: { cellId: string; speaker: string | undefined }[] = []
+      // AQU-520: byte totals so the progress UI can show "X / Y MB", not just a
+      // cell count/percentage that "feels stalled" on large partner imports.
+      // Totals come from the real File.size; within a file we scale by the cell
+      // fraction. `bytesTotal === 0` (media with no size, etc.) hides the readout.
+      const bytesTotal = list.reduce((sum, f) => sum + (f.size || 0), 0)
+      let bytesBefore = 0
       try {
         for (const file of list) {
           const filePhase = `Uploading ${file.name}…`
           setPhase(filePhase)
-          // FRO-430: surface phase to parent so PreviewPanel can show progress.
+          // AQU-430: surface phase to parent so PreviewPanel can show progress.
           onCommitPhase?.(filePhase)
           setProgress(null)
           onCommitProgress?.(null)
@@ -1018,10 +1081,14 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
               const p = `Uploading ${file.name}`
               setPhase(p)
               onCommitPhase?.(p)
-              setProgress({ count, total })
-              onCommitProgress?.({ count, total })
+              const frac = total > 0 ? Math.min(count / total, 1) : 0
+              const bytesReceived = bytesBefore + Math.round(frac * (file.size || 0))
+              const next: ImportUploadProgress = { count, total, bytesReceived, bytesTotal }
+              setProgress(next)
+              onCommitProgress?.(next)
             },
           })
+          bytesBefore += file.size || 0
           allRefs.push(...refs)
           allSpeakerPairs.push(...speakerPairs)
         }
@@ -1043,7 +1110,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
       } catch (err) {
         const message = err instanceof Error ? err.message : "Import failed"
         setError(message)
-        // FRO-430 (fix): also surface to the parent — during the preview screen
+        // AQU-430 (fix): also surface to the parent — during the preview screen
         // this UploadPanel is unmounted, so its local error would never show.
         onCommitError?.(message)
       } finally {
@@ -1115,6 +1182,14 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
               </div>
               <p className="mt-1.5 text-xs text-muted-foreground">
                 {progress.count.toLocaleString()} / {progress.total.toLocaleString()} cells
+                {progress.bytesTotal ? (
+                  <>
+                    {" · "}
+                    <span data-testid="upload-bytes">
+                      {formatBytesProgress(progress.bytesReceived, progress.bytesTotal)}
+                    </span>
+                  </>
+                ) : null}
               </p>
             </>
           ) : (
@@ -1172,17 +1247,17 @@ interface ParatextChoiceProps {
   sourceLanguage: string
   targetLanguage: string
   getToken: (fileId: string) => Promise<string | null>
-  /** FRO-277: third argument carries skipped books from a partial import so the
+  /** AQU-277: third argument carries skipped books from a partial import so the
    *  parent can show the result screen before closing. */
   onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }, skipped?: { book: string; reason: string }[]) => void | Promise<void>
   onCancel: () => void
-  /** FRO-287: files already in the project; used for collision detection. */
+  /** AQU-287: files already in the project; used for collision detection. */
   existingFiles?: { name: string }[]
-  /** FRO-287: called when collisions are detected before running the import. */
+  /** AQU-287: called when collisions are detected before running the import. */
   onCollision?: (collisions: CollisionResult[], proceed: (skipKeys: ReadonlySet<string>) => void | Promise<void>) => void
 }
 
-/** Preview + source-vs-target choice for a detected Paratext project (FRO-310:
+/** Preview + source-vs-target choice for a detected Paratext project (AQU-310:
  *  everything parses client-side up front; nothing uploads until the user
  *  confirms). Source imports the books as a reference text; target pairs the
  *  consultant's in-progress translation against an eBible source picked here
@@ -1204,7 +1279,7 @@ function ParatextChoice({
 
   const ctx = { projectId, author: username, sourceLanguage, targetLanguage, getToken }
 
-  // FRO-310: parse the whole project client-side on mount — fast (no network),
+  // AQU-310: parse the whole project client-side on mount — fast (no network),
   // so the preview appears immediately and the user confirms before any upload.
   useEffect(() => {
     let cancelled = false
@@ -1255,7 +1330,7 @@ function ParatextChoice({
 
   async function runSource() {
     if (!plan) return
-    // FRO-287: collision check before running the import.
+    // AQU-287: collision check before running the import.
     if (onCollision) {
       const collisions = detectPlanCollisions(plan)
       if (collisions.length > 0) {
@@ -1301,7 +1376,7 @@ function ParatextChoice({
 
   async function runTarget(sel: EBibleTranslation) {
     if (!plan) return
-    // FRO-287: collision check before fetching source corpus.
+    // AQU-287: collision check before fetching source corpus.
     if (onCollision) {
       const collisions = detectPlanCollisions(plan)
       if (collisions.length > 0) {
@@ -1389,7 +1464,7 @@ function ParatextChoice({
     )
   }
 
-  // Preview screen (FRO-310): everything below is parsed, nothing is uploaded.
+  // Preview screen (AQU-310): everything below is parsed, nothing is uploaded.
   const includedBooks = plan?.books.filter((b) => !excluded.has(b.book.bookId.toUpperCase())) ?? []
   const includedCells = includedBooks.reduce((n, b) => n + b.cellCount, 0)
   const language = plan ? (plan.project.settings.language || plan.project.settings.languageIsoCode || "") : ""
@@ -1490,7 +1565,7 @@ interface EBiblePanelProps {
   targetLanguage: string
   getToken: (fileId: string) => Promise<string | null>
   onImported: (ref: FileReference, inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
-  /** When provided, enables the "into target" mode toggle (FRO-191). */
+  /** When provided, enables the "into target" mode toggle (AQU-191). */
   sourceCells?: SourceCellRef[]
   /** Called after a successful target-column import (no new FileReference). */
   onTargetImported?: () => void
@@ -1566,7 +1641,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getT
         abortRef.current.signal
       )
       // Propagate the eBible translation's language code as the inferred
-      // sourceLanguage so the project can seed it when unset (FRO-249).
+      // sourceLanguage so the project can seed it when unset (AQU-249).
       await onImported(ref, { sourceLanguage: selected.languageCode || selected.id })
     } catch (err) {
       setImportErr(err instanceof Error ? err.message : "Import failed")
@@ -1582,7 +1657,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getT
   }, [])
 
   // ---------------------------------------------------------------------------
-  // Target-import handlers (FRO-191)
+  // Target-import handlers (AQU-191)
   // ---------------------------------------------------------------------------
 
   async function handlePrepareTarget() {
@@ -2132,7 +2207,7 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
 }
 
 // ---------------------------------------------------------------------------
-// Direction prompt — shown once when source/target are ambiguous (FRO-249)
+// Direction prompt — shown once when source/target are ambiguous (AQU-249)
 // ---------------------------------------------------------------------------
 
 interface DirectionPanelProps {
@@ -2143,7 +2218,7 @@ interface DirectionPanelProps {
   onConfirm: () => void
   onSkip: () => void
   confirming?: boolean
-  /** FRO-249: shown inline when onImported throws so the user can retry. */
+  /** AQU-249: shown inline when onImported throws so the user can retry. */
   error?: string | null
 }
 
@@ -2203,7 +2278,7 @@ function DirectionPanel({
       <p className="text-xs text-muted-foreground">
         You can change these later in <strong>Project Settings → Project Info</strong>.
       </p>
-      {/* FRO-249: restore direction screen on failure so the user can retry */}
+      {/* AQU-249: restore direction screen on failure so the user can retry */}
       {error && <FieldError role="alert">{error}</FieldError>}
       <div className="flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onSkip} disabled={confirming}>
@@ -2222,7 +2297,7 @@ function DirectionPanel({
 }
 
 // ---------------------------------------------------------------------------
-// Import result panel — FRO-277
+// Import result panel — AQU-277
 // Shows the full skip report after a partial Paratext import. The user must
 // explicitly dismiss (or copy and then dismiss) before the dialog closes.
 // ---------------------------------------------------------------------------
@@ -2294,7 +2369,7 @@ function ImportResultPanel({ importedCount, skipped, onDismiss }: ImportResultPa
 }
 
 // ---------------------------------------------------------------------------
-// Collision guard panel — FRO-287
+// Collision guard panel — AQU-287
 // Shown when re-importing into a project that already has matching files.
 // Offers Skip / Import as duplicate per collision. Apply-to-all toggle lets
 // the user resolve the whole batch in one click.
@@ -2563,6 +2638,143 @@ function ObsPanel({ projectId, username, sourceLanguage, targetLanguage, getToke
 }
 
 // ---------------------------------------------------------------------------
+// Door43 (DCS) panel — the catalog browser + import-as-source flow (spec §9).
+// Browse released Door43 resources, pick one, import it into the CURRENT
+// project as source cells via the DCS adapter (importDcsResource → the same
+// bulkUploadSource front door the other importers use), then pin the project
+// to that release by writing the `dcsUpstream` cursor to project settings.
+// This turns the current project into a DCS-linked source/"adapter" project;
+// downstream language projects link to it via the existing linked-projects
+// create flow (NOT built here).
+// ---------------------------------------------------------------------------
+
+interface DcsPanelProps {
+  projectId: string
+  getToken: (fileId: string) => Promise<string | null>
+  defaultLang?: string
+  /** Persist the pinned-release cursor to the project settings. Returns true on save. */
+  patchDcsCursor: (cursor: DcsCursor) => Promise<boolean>
+  /** Signal the parent to refresh the project after a successful import. DCS
+   *  writes source cells server-side (bulkUploadSource → POST /import); we pass
+   *  empty refs and let the parent's refresh()/revalidateCells() pull the fresh
+   *  projection — importDcsResource returns counts, not per-file references. */
+  onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
+}
+
+type DcsPanelStage = "browse" | "importing" | "done"
+
+function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onImported }: DcsPanelProps) {
+  const [stage, setStage] = useState<DcsPanelStage>("browse")
+  const [selected, setSelected] = useState<DcsCatalogEntry | null>(null)
+  const [progress, setProgress] = useState<{ uploaded: number; total: number } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [summary, setSummary] = useState<{ files: number; cells: number; ref: string; pinned: boolean } | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  // Cancel any in-flight import when the panel unmounts (dialog closed).
+  useEffect(() => () => abortRef.current?.abort(), [])
+
+  const runImport = useCallback(async (entry: DcsCatalogEntry) => {
+    setSelected(entry)
+    setStage("importing")
+    setError(null)
+    setProgress(null)
+    abortRef.current = new AbortController()
+    try {
+      const result = await importDcsResource({
+        entry,
+        projectId,
+        client: new DcsClient(),
+        getToken,
+        trackMode: "release",
+        onProgress: (uploaded, total) => setProgress({ uploaded, total }),
+        signal: abortRef.current.signal,
+      })
+      // Pin the project to the imported release (spec §8). A failed patch is
+      // surfaced but does NOT undo the source cells that already landed.
+      let pinned = false
+      try {
+        pinned = await patchDcsCursor(result.cursor)
+      } catch (err) {
+        console.warn("[DcsPanel] failed to persist dcsUpstream cursor:", err)
+      }
+      setSummary({ files: result.files, cells: result.cells, ref: result.cursor.ref, pinned })
+      setStage("done")
+      // Refresh the project so the new source files/cells appear. DCS imports
+      // have no FileReferences to append optimistically; the server projection
+      // is authoritative and the parent's refresh pulls it in.
+      await onImported([], entry.language ? { sourceLanguage: entry.language } : undefined)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed")
+      setStage("browse")
+    } finally {
+      abortRef.current = null
+    }
+  }, [projectId, getToken, patchDcsCursor, onImported])
+
+  if (stage === "browse") {
+    return (
+      <div className="flex flex-col gap-2">
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <DcsCatalogBrowser
+          onPick={(entry) => void runImport(entry)}
+          {...(defaultLang ? { defaultLang } : {})}
+        />
+      </div>
+    )
+  }
+
+  if (stage === "importing") {
+    const pct = progress && progress.total > 0
+      ? Math.round((progress.uploaded / progress.total) * 100)
+      : 0
+    return (
+      <div className="mx-auto w-full max-w-sm py-8 text-center">
+        <p className="text-sm font-medium">
+          Importing {selected?.fullName ?? "resource"}
+          {selected?.ref ? ` @ ${selected.ref}` : ""}…
+        </p>
+        {progress && progress.total > 0 ? (
+          <>
+            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div className="h-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              {progress.uploaded.toLocaleString()} / {progress.total.toLocaleString()} files
+            </p>
+          </>
+        ) : (
+          <p className="mt-2 text-xs text-muted-foreground">Fetching &amp; parsing from Door43…</p>
+        )}
+      </div>
+    )
+  }
+
+  // stage === "done"
+  return (
+    <div className="mx-auto w-full max-w-sm py-8 text-center">
+      <p className="text-sm font-medium">Import complete</p>
+      {summary && (
+        <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+          <p>{selected?.fullName}</p>
+          <p>
+            {summary.files.toLocaleString()} file{summary.files === 1 ? "" : "s"} ·{" "}
+            {summary.cells.toLocaleString()} cell{summary.cells === 1 ? "" : "s"}
+          </p>
+          <p>
+            {summary.pinned
+              ? <>Pinned to release <span className="font-medium text-foreground/80">{summary.ref}</span></>
+              : <span className="text-amber-600 dark:text-amber-400">
+                  Imported, but couldn&apos;t pin the release — you may lack maintainer rights on this project.
+                </span>}
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // SDBH Hebrew Lexicon panel — UBS MARBLE editions. The master (usually
 // English) edition supplies structure + source text; an optional localized
 // edition pre-fills the target column. Cell ids are the shared LEXIDs, so the
@@ -2692,7 +2904,7 @@ function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps
 }
 
 // ---------------------------------------------------------------------------
-// Macula Hebrew + Greek panel (FRO-178)
+// Macula Hebrew + Greek panel (AQU-178)
 // ---------------------------------------------------------------------------
 
 interface MaculaPanelProps {
@@ -2785,7 +2997,7 @@ function MaculaPanel({ projectId, username, getToken, onImported }: MaculaPanelP
 }
 
 // ---------------------------------------------------------------------------
-// Translation Notes (TSV) panel (FRO-179)
+// Translation Notes (TSV) panel (AQU-179)
 // ---------------------------------------------------------------------------
 
 interface TnPanelProps {
@@ -2908,11 +3120,7 @@ function ImportDialogBackButton({
   )
 }
 
-function formatProgress(received: number | undefined, total: number | undefined): string {
-  if (!received) return "0 MB"
-  const mb = (received / (1024 * 1024)).toFixed(1)
-  if (!total) return `${mb} MB`
-  const totalMb = (total / (1024 * 1024)).toFixed(1)
-  const pct = Math.round((received / total) * 100)
-  return `${mb} / ${totalMb} MB (${pct}%)`
-}
+// AQU-520: byte-transfer progress is formatted by the shared `formatBytesProgress`
+// helper (src/lib/format-bytes.ts) — kept as a thin alias so the download-phase
+// call sites below read the same and the behaviour is unit-tested in one place.
+const formatProgress = formatBytesProgress

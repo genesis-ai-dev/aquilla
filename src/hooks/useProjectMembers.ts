@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  listProjectMembers, addProjectMember, removeProjectMember,
+  fetchProjectRoster, addProjectMember, removeProjectMember,
   lookupUser,
   type ProjectMember,
 } from "@/lib/frontier/members";
@@ -11,6 +11,13 @@ export interface UseProjectMembers {
   members: ProjectMember[];
   isLoading: boolean;
   error: string | null;
+  /**
+   * AQU-485: true when the project's org rosterViewMinRole policy hides the
+   * roster from the caller — distinct from "no access" / "genuinely empty."
+   * Callers should render an explicit "hidden by org policy" state rather
+   * than an empty members list (which implies zero members).
+   */
+  rosterHidden: boolean;
   refresh: () => Promise<void>;
   /** Returns null if username not found, otherwise the new/upserted member. */
   add: (username: string, role: number) => Promise<ProjectMember | null>;
@@ -25,6 +32,7 @@ export function useProjectMembers(projectId: string | null): UseProjectMembers {
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [isLoading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rosterHidden, setRosterHidden] = useState(false);
   const aliveRef = useRef(true);
 
   // Reset aliveRef on each effect run so React StrictMode's dry-run
@@ -41,11 +49,21 @@ export function useProjectMembers(projectId: string | null): UseProjectMembers {
     setLoading(true);
     setError(null);
     try {
-      // null = caller has no server-side access OR project doesn't exist
-      // server-side. Both are expected for local-only IndexedDB projects;
-      // we render an empty members list and don't surface as an error.
-      const next = await listProjectMembers(jwt, projectId);
-      if (aliveRef.current) setMembers(next ?? []);
+      const result = await fetchProjectRoster(jwt, projectId);
+      if (!aliveRef.current) return;
+      if (result.kind === "ok") {
+        setMembers(result.members);
+        setRosterHidden(false);
+      } else if (result.kind === "roster-hidden") {
+        setMembers([]);
+        setRosterHidden(true);
+      } else {
+        // no-access: caller has no server-side access OR project doesn't
+        // exist server-side (both expected for local-only IndexedDB
+        // projects) — render an empty list, no error, same as pre-AQU-485.
+        setMembers([]);
+        setRosterHidden(false);
+      }
     } catch (e) {
       if (aliveRef.current) setError(toUserFacingError(e, "project").message);
     } finally {
@@ -70,5 +88,5 @@ export function useProjectMembers(projectId: string | null): UseProjectMembers {
     await refresh();
   }, [jwt, projectId, refresh]);
 
-  return { members, isLoading, error, refresh, add, remove, changeRole: add };
+  return { members, isLoading, error, rosterHidden, refresh, add, remove, changeRole: add };
 }

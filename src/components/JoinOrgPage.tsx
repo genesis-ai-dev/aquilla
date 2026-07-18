@@ -1,10 +1,14 @@
-import { useState, type ReactNode } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { AlertCircle, Users, CheckCircle2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { acceptOrgInvite } from "@/lib/frontier/orgs"
+import {
+  acceptOrgInvite,
+  previewOrgInvite,
+  type OrgInvitePreview,
+} from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { isJwtExpired } from "@/lib/frontier/auth"
 import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
@@ -28,9 +32,9 @@ function JoinOrgShell({ children }: { children: ReactNode }) {
  * Organization invite landing page (/join-org/:token). The token identifies an
  * org_invites row; redeeming it adds the caller to org_members at the invited
  * role. Like the project JoinPage, membership requires a signed-in account, so
- * signed-out users get inline auth first. Unlike JoinPage there is no public
- * preview endpoint (the orgs router is fully authed), so we confirm + accept in
- * one step once the user has a valid session.
+ * signed-out users get inline auth first. A public preview (AQU-471) names the
+ * org, the inviter, and the role before accepting; if it fails we fall back to
+ * the old generic copy — the accept endpoint stays the authority on validity.
  */
 export function JoinOrgPage() {
   const { token } = useParams<{ token: string }>()
@@ -40,6 +44,55 @@ export function JoinOrgPage() {
   const [error, setError] = useState<string | null>(null)
   const [orgName, setOrgName] = useState<string | null>(null)
   const [authMode, setAuthMode] = useState<AuthMode>("login")
+  const [preview, setPreview] = useState<OrgInvitePreview | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(true)
+
+  // Public preview — who invited you, to which org, at what role (AQU-471).
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+    void previewOrgInvite(token).then((p) => {
+      if (cancelled) return
+      setPreview(p)
+      setPreviewLoading(false)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [token])
+
+  const previewSummary = preview ? (
+    <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
+      <p className="text-sm">
+        Organization:{" "}
+        <strong className="font-medium">{preview.orgName ?? "Unnamed organization"}</strong>
+      </p>
+      <p className="text-xs text-muted-foreground">
+        {preview.invitedBy && (
+          <>
+            Invited by <span className="font-medium">{preview.invitedBy}</span> —{" "}
+          </>
+        )}
+        you&apos;ll join as{" "}
+        <span className="capitalize">{preview.role.name.replace(/_/g, " ")}</span>
+        {preview.email && (
+          <>
+            {" "}— invitation sent to <span className="font-mono">{preview.email}</span>
+          </>
+        )}
+        .
+      </p>
+    </div>
+  ) : previewLoading ? (
+    <div className="flex items-center gap-2 py-1">
+      <Spinner className="text-muted-foreground" />
+      <p className="text-xs text-muted-foreground">Loading invitation details…</p>
+    </div>
+  ) : (
+    <p className="text-sm text-muted-foreground">
+      You&apos;ve been invited to join an organization on Aquilla.
+    </p>
+  )
 
   const sessionExpired = !!session?.jwt && isJwtExpired(session.jwt)
   const hasValidSession = !!session?.jwt && !sessionExpired
@@ -136,13 +189,12 @@ export function JoinOrgPage() {
       <JoinOrgShell>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Users className="size-5" /> Join organization
+            <Users className="size-5" />{" "}
+            {preview?.orgName ? `Join ${preview.orgName}` : "Join organization"}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            You've been invited to join an organization on Aquilla.
-          </p>
+          {previewSummary}
           <Button
             onClick={() => session?.jwt && void accept(session.jwt)}
             disabled={phase === "redeeming"}
@@ -160,10 +212,12 @@ export function JoinOrgPage() {
     <JoinOrgShell>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Users className="size-5" /> Join organization
+          <Users className="size-5" />{" "}
+          {preview?.orgName ? `Join ${preview.orgName}` : "Join organization"}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        {previewSummary}
         <p className="text-sm text-muted-foreground">
           {authMode === "login"
             ? "Sign in to accept your invitation."

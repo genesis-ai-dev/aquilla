@@ -1,5 +1,5 @@
 /**
- * SearchResultsView.test.tsx — FRO-309
+ * SearchResultsView.test.tsx — AQU-309
  */
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"

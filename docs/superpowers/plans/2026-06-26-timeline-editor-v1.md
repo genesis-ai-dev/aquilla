@@ -14,7 +14,7 @@
 
 - **No new heavy dependency.** Only `react-player` (already in `package.json`) may be used for video. Hand-roll drag/resize/waveform; reuse `src/components/CellWaveform.tsx`.
 - **Units:** `CellData.startTime`/`endTime` are in **seconds**; DB columns `cells.start_ms`/`end_ms` are **milliseconds**. Convert only at the event boundary (`Math.round(sec * 1000)` / `ms / 1000`).
-- **Writes are event-sourced.** Emit via `src/lib/sync/events-emit.ts` → outbox → projection. Never raw-INSERT. Retime must be optimistic and clock-fenced via the existing `useCells` write-clock (FRO-247) so the dragged position holds until the projection read confirms.
+- **Writes are event-sourced.** Emit via `src/lib/sync/events-emit.ts` → outbox → projection. Never raw-INSERT. Retime must be optimistic and clock-fenced via the existing `useCells` write-clock (AQU-247) so the dragged position holds until the projection read confirms.
 - **Design taste (locked):** neutral Zinc base + a single desaturated steel-blue accent (`#2b5fa8`) for the Dialogue lane; Subtitle lane neutral. Geist UI font, Geist Mono with tabular figures for all timecodes. Inline SVG icons only — **no emoji/glyphs**. No neon glows; subtle tinted shadows. Motion: staggered card reveal, hover lift, grips-on-hover, breathing playhead, `cubic-bezier(0.16,1,0.3,1)`, animate transform/opacity only.
 - **Edit files sequentially** (the formatter hook reverts parallel edits to the same file); verify each change with `git diff`.
 - **Deferred — do NOT build:** multi-source-lane schema change, ingest split/re-join, ASR-onto-diarization, AI cleanup, uploaded-video Range streaming, clone-vs-live/template graph, split/merge/create-by-drag, drag-from-untimed-to-assign-timing, snapping, multi-track audio mixdown.
@@ -609,7 +609,7 @@ git commit -m "feat(timeline): TimelineEditor orchestrator (lanes, ruler, previe
 - Test: `src/components/EditorTable.timeline.test.tsx`
 
 **Interfaces:**
-- Consumes: `TimelineEditor` (10), `emitCellRetime` (3), the `useCells` write-clock (FRO-247).
+- Consumes: `TimelineEditor` (10), `emitCellRetime` (3), the `useCells` write-clock (AQU-247).
 - Produces: `handleRetime(cellId, startSec, endSec)` wired into `TimelineEditor.onRetime`.
 
 - [ ] **Step 1: Failing test** — render `EditorTable` for a time-ordered file in the Media lens (`audioLens` truthy); assert a `tl-track`/`TimelineEditor` root renders instead of the vertical virtual list; in the Text lens it still renders the vertical rows. (Mirror existing EditorTable test harness + mock `useCells`.)
@@ -661,6 +661,6 @@ git commit -m "polish(timeline): design-taste pass + live-verified retime persis
 
 **Spec coverage:** §3 data model → Tasks 1, 4 (lanes + coreMediaUrl). §4 events → Tasks 3, 4. §5 master clock → Task 9. §6 components + EditorRow extraction → Tasks 5–8, 10. §6 mount → Task 11. §7 edge cases → Tasks 2 (clamp), 6 (editable guard), 8 (windowing), 11 (locks via existing path), 12 (read-only/dark). §8 testing → every task is TDD + Task 12 e2e. §10 decisions → encoded (retime both sides Task 3; Media-lens-is-timeline Task 11; two events Tasks 3–4; untimed view-only Tasks 8/10; EditorRow extract Task 5). No gaps.
 
-**Placeholder scan:** Component tasks (6–11) intentionally reference "mirror the existing harness / read `emitCellAudioAttach`" because exact local helper names (outbox enqueue fn, EditorRow's full prop list, the FRO-247 write-clock API) must be read from the codebase at implementation time; every such pointer names the exact file/function to read, and all cross-task contracts (signatures, event types, payloads) are fully specified. No "TBD"/"add error handling"/"write tests for the above".
+**Placeholder scan:** Component tasks (6–11) intentionally reference "mirror the existing harness / read `emitCellAudioAttach`" because exact local helper names (outbox enqueue fn, EditorRow's full prop list, the AQU-247 write-clock API) must be read from the codebase at implementation time; every such pointer names the exact file/function to read, and all cross-task contracts (signatures, event types, payloads) are fully specified. No "TBD"/"add error handling"/"write tests for the above".
 
 **Type consistency:** `deriveLanes` → `{ subtitle, dialogue, untimed }` used identically in Tasks 8/10. `onRetime(cellId, startSec, endSec)` in **seconds** is consistent across Tasks 6/8/10/11; ms conversion happens only in Task 11's `handleRetime` and Task 3's payload. `coreMediaUrl` consistent across Tasks 4/9/10. `pxPerSec` naming consistent across Tasks 2/6/7/8/10.

@@ -8,7 +8,7 @@ import type { TranslationRule, PromotionRequest } from "@/lib/parsers/types"
  * and projects in the org. Precedence at resolution time:
  *   project key > user (browser-local) key > org key
  *
- * FRO-433: extend to new providers by adding more entries here.
+ * AQU-433: extend to new providers by adding more entries here.
  */
 export interface OrgProviderKeys {
   "gemini-tts"?: string
@@ -23,14 +23,44 @@ export interface OrgWideSettings {
   rules?: TranslationRule[]
   promotionRequests?: PromotionRequest[]
   /**
-   * FRO-253: Minimum role level required to export project deliverables.
+   * AQU-253: Minimum role level required to export project deliverables.
    * Default (when absent) = MAINTAINER (600) per spec Q32. Org owners can
    * lower it (e.g., CONTRIBUTOR = 400) or raise it (e.g., OWNER = 700).
    * Matched against the sync-token role on every export/download request.
    */
   exportMinRole?: number
   /**
-   * FRO-433: Org-scoped provider API keys. Set once by an org owner/maintainer;
+   * AQU-485: Minimum role level required to see the member roster (list +
+   * count) on org and project surfaces. Default (when absent) = MAINTAINER
+   * (600) — safe for sensitive teams that don't want to reveal who/how many
+   * are on a project, even to their own members. Independent of
+   * memberProgressViewMinRole: a team can show the roster while hiding
+   * per-member progress, or vice versa.
+   */
+  rosterViewMinRole?: number
+  /**
+   * AQU-485: Minimum role level required to see per-member progress /
+   * productivity. Default (when absent) = MAINTAINER (600). Separate from
+   * rosterViewMinRole — being allowed to see WHO is on the team does not
+   * imply being allowed to see WHAT each person did.
+   *
+   * AQU-498: consumed by ProjectOverview's Team card + the sync-worker's
+   * member-activity-read-route (server-side floor via resolveMemberProgressFloor).
+   */
+  memberProgressViewMinRole?: number
+  /**
+   * AQU-496: whether members below project_lead (500) may emit
+   * `assignment.create` for THEMSELVES (claim a book/take) — never for
+   * anyone else. Default (when absent) = false, preserving the pre-AQU-496
+   * leads-only behavior. Leads/maintainers can always assign regardless.
+   * Same OWNER-only write gate as exportMinRole/rosterViewMinRole (see
+   * EXPORT_FLOOR_WRITE_MIN_ROLE in auth-worker/src/routes/org-settings.ts) —
+   * a maintainer must not be able to unilaterally loosen who can assign work.
+   * Enforced server-side in sync-worker (authorize.ts self-assign carve-out).
+   */
+  allowSelfAssignment?: boolean
+  /**
+   * AQU-433: Org-scoped provider API keys. Set once by an org owner/maintainer;
    * used as the baseline for all members and projects in the org.
    * Precedence: project key > user (localStorage) key > org key.
    */

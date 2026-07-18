@@ -15,7 +15,7 @@ import {
   assignedCastVoiceId, getVoiceLibrary, resolveVoice,
 } from "@/lib/audio/voices"
 import type { CastMemberStats } from "@/components/VoiceLibraryPanel"
-import type { CellData } from "@/hooks/useCells"
+import type { CellSummary } from "@/hooks/useActiveCellStore"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 
 export interface ProjectTtsApi {
@@ -35,7 +35,7 @@ export interface ProjectTtsApi {
 export function useProjectTts(
   projectId: string | null | undefined,
   serverSettings: ProjectTtsSettings | undefined,
-  cells: CellData[],
+  cells: readonly CellSummary[],
   /** Persist voice profiles (minus apiKey) to the server settings blob so they
    *  sync across devices. Fire-and-forget; localStorage stays the durable
    *  client-owned source. */

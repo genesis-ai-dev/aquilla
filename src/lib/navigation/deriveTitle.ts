@@ -7,6 +7,7 @@
  * richer name (e.g. the project + file name) upgrade their entry's title via
  * `useNavHistoryTitle` once that data has loaded.
  */
+import { ORG_SETTINGS_SECTION_TITLES, type OrgSettingsSection } from "@/pages/settings/constants"
 export function deriveNavTitle(pathname: string): string {
   const p = pathname.replace(/\/+$/, "") || "/"
   if (p === "/") return "Home"
@@ -32,6 +33,12 @@ export function deriveNavTitle(pathname: string): string {
   }
 
   const seg = p.split("/").filter(Boolean)
+
+  // /settings/:section — org settings detail sub-pages.
+  if (seg[0] === "settings" && seg.length === 2) {
+    const section = seg[1] as OrgSettingsSection
+    return ORG_SETTINGS_SECTION_TITLES[section] ?? "Settings"
+  }
 
   // /projects/:id — single project card view.
   if (seg[0] === "projects" && seg.length === 2) return "Project overview"

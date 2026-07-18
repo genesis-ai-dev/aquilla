@@ -25,7 +25,7 @@ test("signup form show/hide password toggle switches input type", async ({ alice
   await accountBtn.click()
 
   // Click "Add another account…"
-  const addAccountBtn = alice.getByRole("button", { name: /Add another account/i })
+  const addAccountBtn = alice.getByRole("menuitem", { name: /Add another account/i })
   await expect(addAccountBtn).toBeVisible({ timeout: 3_000 })
   await addAccountBtn.click()
 

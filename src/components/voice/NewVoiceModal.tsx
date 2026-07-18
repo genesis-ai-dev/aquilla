@@ -16,6 +16,7 @@ import { AudioLines, Check, Plus, Sparkles, Star, Trash2, UserRound } from "luci
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -191,10 +192,17 @@ function NewVoiceModalBody({
   }, [projectId, session, update])
 
   const hasReference = Boolean(draft.referenceAudioId)
-  const nameOk = draft.name.trim().length > 0
-  const canSave = mode === "clone" ? nameOk && hasReference : nameOk
 
   const handleSave = useCallback(() => {
+    if (!draft.name.trim()) {
+      setTakeError("Name the voice")
+      return
+    }
+    if (mode === "clone" && !hasReference) {
+      setTakeError("Add a reference clip before creating a cloned voice")
+      return
+    }
+    setTakeError(null)
     const fallback = mode === "clone" ? "Cloned voice" : "New voice"
     let next: Voice = { ...draft, name: draft.name.trim() || fallback }
     if (mode === "clone") {
@@ -210,7 +218,7 @@ function NewVoiceModalBody({
     }
     onSave(next)
     onClose()
-  }, [mode, draft, projectProvider, targetLanguage, onSave, onClose])
+  }, [mode, draft, hasReference, projectProvider, targetLanguage, onSave, onClose])
 
   return (
     <>
@@ -277,11 +285,7 @@ function NewVoiceModalBody({
                         >
                           <div className="flex items-center gap-1.5">
                             <span className="text-xs font-medium">{info.shortTitle}</span>
-                            {info.badge && (
-                              <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
-                                {info.badge}
-                              </span>
-                            )}
+                            {info.badge && <Badge>{info.badge}</Badge>}
                           </div>
                           <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">{info.blurb}</p>
                           {info.caveat && (
@@ -421,14 +425,16 @@ function NewVoiceModalBody({
                 <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete
               </Button>
             )}
-            <div className="ml-auto flex gap-2">
-              <Button type="button" size="sm" variant="ghost" onClick={onClose}>Cancel</Button>
-              <Button
-                type="button" size="sm" onClick={handleSave} disabled={!canSave}
-                title={canSave ? undefined : mode === "clone" ? "Name it and add a reference clip" : "Name the voice"}
-              >
-                {isNew ? <><Plus className="mr-1 h-3.5 w-3.5" /> Create voice</> : <><Check className="mr-1 h-3.5 w-3.5" /> Save</>}
-              </Button>
+            <div className="ml-auto flex flex-col items-end gap-1">
+              {takeError && (
+                <p className="text-xs text-destructive" role="alert">{takeError}</p>
+              )}
+              <div className="flex gap-2">
+                <Button type="button" size="sm" variant="ghost" onClick={onClose}>Cancel</Button>
+                <Button type="button" size="sm" onClick={handleSave}>
+                  {isNew ? <><Plus className="mr-1 h-3.5 w-3.5" /> Create voice</> : <><Check className="mr-1 h-3.5 w-3.5" /> Save</>}
+                </Button>
+              </div>
             </div>
           </div>
         </DialogContent>

@@ -35,7 +35,7 @@ export function Homepage() {
   // Signed-in visitors (aq_hint=1 cookie — same bit the Worker reads at the
   // edge) go straight into the app at `/`; returning (unsigned-in) users go to
   // /login; brand-new visitors use the "Sign up free" button → /onboarding.
-  // FRO-282: "Open app" is the sign-in entry for returning users — it must
+  // AQU-282: "Open app" is the sign-in entry for returning users — it must
   // NOT send them through the signup wizard.
   const appHref = hasAuthHintCookie() ? "/" : "/login"
 
@@ -85,7 +85,7 @@ export function Homepage() {
         {/* ── Hero ────────────────────────────────────────────────────── */}
         <section className="aq-container aq-hero">
           <div className="aq-hero-eyebrow aq-load aq-d1">
-            <span className="aq-dot" aria-hidden="true" /> One workspace for Bible &amp; ministry translation
+            <span className="aq-dot" aria-hidden="true" /> One workspace for text, audio &amp; video translation
           </div>
           <h1 className="aq-display aq-load aq-d2">
             Translators, <span className="aq-gold-text aq-display-italic">lifted.</span>
@@ -93,7 +93,7 @@ export function Homepage() {
           <p className="aq-hero-sub aq-load aq-d3">
             The first workspace where <b style={{ color: "var(--aq-text)" }}>text and audio</b> translation
             live under one roof — with caption and subtitle translation for video coming soon. Real-time guidance and a memory
-            that learns — so Scripture reaches every language, in every medium it's heard, read, and watched.
+            that learns — so every language reaches every medium it's heard, read, and watched in.
           </p>
           <div className="aq-hero-actions aq-load aq-d4">
             <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-lg">Sign up free</a>
@@ -125,9 +125,7 @@ export function Homepage() {
             <div style={{ display: "flex", gap: 32, justifyContent: "center", flexWrap: "wrap", marginTop: 20, color: "var(--aq-dim)", fontWeight: 540, fontSize: 17 }}>
               <span>Come&nbsp;and&nbsp;See</span>
               <span style={{ opacity: 0.3 }}>·</span>
-              <span>ETEN Innovation Lab</span>
-              <span style={{ opacity: 0.3 }}>·</span>
-              <span>All-Access Goals 2033</span>
+              <span>125 languages, 2× Guinness World Record</span>
             </div>
           </div>
         </section>
@@ -136,7 +134,7 @@ export function Homepage() {
         <section className="aq-container aq-section aq-manifesto" id="multimodal">
           <div className="aq-head aq-center aq-reveal">
             <span className="aq-eyebrow">The future is multimodal</span>
-            <h2 className="aq-display">Most of the world meets Scripture by listening, not reading.</h2>
+            <h2 className="aq-display">Most of the world meets language by listening, not reading.</h2>
             <p>
               For too long, tools forced a choice between the written word and the spoken one. Aquilla refuses it.
               Translate text and audio today, with captions and subtitles for video coming soon — all drafted against one source,
@@ -170,11 +168,11 @@ export function Homepage() {
         <section className="aq-container aq-section" id="languages">
           <div className="aq-head aq-center aq-reveal">
             <span className="aq-eyebrow">Low-resource? Still in reach.</span>
-            <h2 className="aq-display">A first draft in seconds — even in languages most tools have never seen.</h2>
+            <h2 className="aq-display">Trusted translations — even in languages most tools have never seen.</h2>
             <p>
               Aquilla brings real AI assistance to the long tail: the thousands of languages with little data and,
-              often, a single translator. But a draft is a starting point, not a verdict. Here is John 3:16 across
-              the world's tongues — the kind of head start now within reach for the languages still waiting.
+              often, a single translator. Here is the UDHR's opening line across the world's tongues — the kind
+              of trusted, expert-led translation now within reach for the languages still waiting.
             </p>
           </div>
           <div className="aq-reveal">
@@ -212,7 +210,7 @@ export function Homepage() {
               </ul>
             </div>
             <div className="aq-demo-card aq-reveal">
-              <div style={{ fontSize: 12.5, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--aq-faint)", marginBottom: 14 }}>Luke 15:13 · draft</div>
+              <div style={{ fontSize: 12.5, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--aq-faint)", marginBottom: 14 }}>Doc 4.2 · draft</div>
               <p style={{ fontSize: 17, lineHeight: 1.6, color: "var(--aq-text)" }}>
                 …y allí desperdició sus{" "}
                 <AppTooltip content="Living Memory: this project renders 'goods' as 'bienes'">
@@ -239,26 +237,25 @@ export function Homepage() {
         <section className="aq-container aq-section" id="quality">
           <div className="aq-feature aq-rev">
             <div className="aq-feature-copy aq-reveal">
-              <span className="aq-eyebrow">Confidence, not guesswork</span>
-              <h3 className="aq-display" style={{ marginTop: 14 }}>Quality you can see at a glance.</h3>
+              <span className="aq-eyebrow">Evidence, not a quality certificate</span>
+              <h3 className="aq-display" style={{ marginTop: 14 }}>Review support you can inspect.</h3>
               <p>
-                Every cell carries a confidence score that reflects how well it lines up with validated, trusted work
-                around it. The system surfaces what needs a human's attention — so an expert's time goes where it matters
-                instead of re-reading every line.
+                Every cell carries a retrieval-support signal showing how it connects to approved, trusted work around it.
+                The signal helps reviewers prioritize terminology and context checks; it never replaces expert review.
               </p>
               <ul className="aq-feature-list">
-                <li><IconCheck /> A live confidence score on every cell — text <em>and</em> audio</li>
-                <li><IconCheck /> The biggest drags, ranked and one click away</li>
+                <li><IconCheck /> Explainable support evidence for every cell — text <em>and</em> audio</li>
+                <li><IconCheck /> Lower-support work surfaced for closer review</li>
                 <li><IconCheck /> Works whether one expert is steering or a whole team is — no fixed review pipeline</li>
               </ul>
             </div>
             <div className="aq-demo-card aq-reveal">
               <div className="aq-health-grid">
                 {[
-                  { l: "John 3", s: "fully validated", h: 96 },
-                  { l: "Psalm 96", s: "needs a look", h: 58 },
-                  { l: "Genesis 1", s: "in progress", h: 81 },
-                  { l: "Luke 15", s: "drafting", h: 34 },
+                  { l: "Doc 3", s: "fully validated", h: 96 },
+                  { l: "Doc 5.2", s: "needs a look", h: 58 },
+                  { l: "Doc 1", s: "in progress", h: 81 },
+                  { l: "Doc 4", s: "drafting", h: 34 },
                 ].map((c) => (
                   <div className="aq-health-item" key={c.l}>
                     <HealthRing health={c.h} size={34} strokeWidth={3.5} />
@@ -272,8 +269,8 @@ export function Homepage() {
               <div style={{ marginTop: 16, padding: "13px 15px", borderRadius: 12, border: "1px solid var(--aq-line)", background: "var(--aq-fill)" }}>
                 <div style={{ fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--aq-faint)", marginBottom: 10 }}>Biggest drags</div>
                 {[
-                  { ref: "Luke 15:30", h: 34 },
-                  { ref: "Psalm 96:5", h: 52 },
+                  { ref: "Doc 4.6", h: 34 },
+                  { ref: "Doc 5.2 · 5", h: 52 },
                 ].map((d) => (
                   <div key={d.ref} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", fontSize: 13.5, color: "var(--aq-dim)" }}>
                     <HealthRing health={d.h} size={15} strokeWidth={2.2} />
@@ -374,9 +371,8 @@ export function Homepage() {
                 carry — reaching communities that would otherwise still be waiting for a team to free up.
               </p>
               <blockquote className="aq-quote aq-display" style={{ marginTop: 26, color: "var(--aq-text)" }}>
-                People need to hear the story of Jesus in their own language — the language they speak, dream, and pray in.
+                125 languages reached. Two Guinness World Records. One workspace.
               </blockquote>
-              <div className="aq-quote-cite"><b>James Barnett</b> · CEO, Come and See</div>
               <a href="/case-studies/come-and-see" className="aq-btn aq-btn-ghost aq-btn-sm" style={{ marginTop: 24 }}>
                 Read the full story <IconArrow />
               </a>
@@ -386,7 +382,7 @@ export function Homepage() {
                 {/* Stats from the Come and See case study (codexeditor.app/case-studies/come-and-see). Verify current before launch. */}
                 <div className="aq-stat">
                   <div className="aq-stat-num aq-display aq-gold-text">125</div>
-                  <div className="aq-stat-label">languages for Season 1 of The Chosen — reaching the languages people pray in</div>
+                  <div className="aq-stat-label">languages for Season 1 of The Chosen — reaching the languages people actually speak</div>
                 </div>
                 <div className="aq-stat">
                   <div className="aq-stat-num aq-display aq-gold-text">2×</div>
@@ -401,18 +397,56 @@ export function Homepage() {
           </div>
         </section>
 
+        {/* ── Proof / Biblica ─────────────────────────────────────────── */}
+        <section className="aq-container aq-section" style={{ paddingTop: 0 }}>
+          <div className="aq-feature" style={{ alignItems: "start" }}>
+            <div className="aq-feature-copy aq-reveal">
+              <span className="aq-eyebrow">Biblica Global Publishing</span>
+              <h3 className="aq-display" style={{ marginTop: 14 }}>A 130-year publisher, now AI-first.</h3>
+              <p>
+                Biblica&apos;s Global Publishing team moved almost its entire resource-translation workflow
+                onto Aquilla — with the expert leading every step. They updated full Spanish and Portuguese
+                Bibles in twelve months, and took a Study Bible straight to a typeset, print-ready PDF.
+              </p>
+              <blockquote className="aq-quote aq-display" style={{ marginTop: 26, color: "var(--aq-text)" }}>
+                Being able to end up with a print-ready document — that&apos;s game-changing.
+              </blockquote>
+              <a href="/case-studies/biblica" className="aq-btn aq-btn-ghost aq-btn-sm" style={{ marginTop: 24 }}>
+                Read the full story <IconArrow />
+              </a>
+            </div>
+            <div className="aq-reveal" style={{ alignSelf: "center" }}>
+              <div className="aq-stats" style={{ gridTemplateColumns: "1fr" }}>
+                {/* Stats from the Biblica case study / Noeline's write-up. Verify current before launch. */}
+                <div className="aq-stat">
+                  <div className="aq-stat-num aq-display aq-gold-text">2</div>
+                  <div className="aq-stat-label">full Bibles — Spanish &amp; Portuguese — updated in twelve months</div>
+                </div>
+                <div className="aq-stat">
+                  <div className="aq-stat-num aq-display aq-gold-text">130 yrs</div>
+                  <div className="aq-stat-label">of traditional publishing experience, now working AI-first</div>
+                </div>
+                <div className="aq-stat">
+                  <div className="aq-stat-num aq-display aq-gold-text">Print-ready</div>
+                  <div className="aq-stat-label">a Study Bible taken straight to a typeset PDF — not just a draft</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* ── Pricing ─────────────────────────────────────────────────── */}
         <section className="aq-container aq-section" id="pricing">
           <div className="aq-head aq-center aq-reveal" style={{ marginBottom: 44 }}>
             <span className="aq-eyebrow">Access</span>
-            <h2 className="aq-display">Free — because the mission comes first.</h2>
-            <p>Aquilla is free for everyone. Our mission is to accelerate Bible translation, not to bill you for it.</p>
+            <h2 className="aq-display">Free to start. Simple when you scale.</h2>
+            <p>Aquilla is free for everyone today. No payment is collected on this site yet — usage-based pricing is coming, and we'll tell you before anything changes.</p>
           </div>
-          <div className="aq-price-grid aq-reveal">
+          <div className="aq-price-grid aq-reveal" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
             <div className="aq-price">
               <h4 className="aq-display">Everyone</h4>
               <div className="aq-price-tag">Free, forever</div>
-              <p>The whole workspace — no credit card, no trial clock. For every translator, church, and team.</p>
+              <p>The whole workspace — no credit card, no trial clock. For every translator and team.</p>
               <ul>
                 <li><IconCheck /> Full workspace — text and audio translation</li>
                 <li><IconCheck /> Real-time guidance &amp; back-translation</li>
@@ -421,11 +455,22 @@ export function Homepage() {
               </ul>
               <a href="/onboarding" className="aq-btn aq-btn-gold">Sign up free</a>
             </div>
+            <div className="aq-price">
+              <span className="aq-chip" style={{ position: "absolute", top: 20, right: 20 }}>Coming soon</span>
+              <h4 className="aq-display">Pro</h4>
+              <div className="aq-price-tag">Per project / month</div>
+              <p>For elevated AI usage beyond the free cap. Pay-as-you-go for usage over that — not live yet, and nothing is billed today.</p>
+              <ul>
+                <li><IconCheck /> Everything in Everyone</li>
+                <li><IconCheck /> Higher AI usage caps per project</li>
+                <li><IconCheck /> Pay-as-you-go for usage above the cap</li>
+              </ul>
+              <a href="mailto:hello@aquilla.app?subject=Pro%20waitlist" className="aq-btn aq-btn-ghost">Join the waitlist</a>
+            </div>
             <div className="aq-price" data-feature="true">
-              <span className="aq-chip aq-chip-gold" style={{ position: "absolute", top: 20, right: 20 }}><IconSparkS /> Mission, not margin</span>
               <h4 className="aq-display">Enterprise support</h4>
-              <div className="aq-price-tag">We want to see your mission succeed</div>
-              <p>Running translation at scale or need dedicated help? We're happy to support you directly — your mission matters. Just talk to us.</p>
+              <div className="aq-price-tag">Talk to us</div>
+              <p>Running translation at scale or need dedicated help? We're happy to support you directly.</p>
               <ul>
                 <li><IconCheck /> Dedicated onboarding &amp; direct support</li>
                 <li><IconCheck /> Coordination across large programs</li>
@@ -455,7 +500,7 @@ export function Homepage() {
           <div className="aq-footer-inner">
             <div className="aq-footer-brand">
               <a className="aq-brand" href="#top"><Mark className="aq-brand-mark" /><span className="aq-brand-name">{brand.app.name}</span></a>
-              <p>{brand.app.tagline} A multimodal translation workspace for the Church and the languages still waiting.</p>
+              <p>{brand.app.tagline} A multimodal translation workspace for every language still waiting.</p>
             </div>
             <div className="aq-footer-cols">
               <div className="aq-footer-col">
@@ -464,7 +509,8 @@ export function Homepage() {
                 <a href="#multimodal">Multimodal</a>
                 <a href="#quality">Quality</a>
                 <a href="#pricing">Pricing</a>
-                <a href="/case-studies/come-and-see">Case study</a>
+                <a href="/case-studies/come-and-see">Come and See</a>
+                <a href="/case-studies/biblica">Biblica</a>
               </div>
               <div className="aq-footer-col">
                 <h5>Get started</h5>
@@ -476,7 +522,6 @@ export function Homepage() {
           </div>
           <div className="aq-footer-base">
             <span>© {new Date().getFullYear()} {brand.app.name} · {brand.deploy?.domain ?? "aquilla.app"}</span>
-            <span>Made for the All-Access Goals — Scripture for every language by 2033.</span>
           </div>
         </div>
       </footer>

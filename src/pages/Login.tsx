@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from "react"
+import { useForm } from "@tanstack/react-form"
+import { z } from "zod"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import {
@@ -13,8 +14,17 @@ import { Spinner } from "@/components/ui/spinner"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { FrontierAuthError } from "@/lib/frontier/auth"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
+import { isFieldInvalid } from "@/lib/forms/field-state"
+import { requiredString } from "@/lib/forms/schemas"
+import { useSubmitError } from "@/lib/forms/submit-error"
+import { useState } from "react"
 
 type Mode = "login" | "forgot"
+
+const loginSchema = z.object({
+  username: requiredString("Username or email"),
+  password: requiredString("Password"),
+})
 
 export function Login() {
   const navigate = useNavigate()
@@ -25,24 +35,21 @@ export function Login() {
   const next = rawNext.startsWith("/") ? rawNext : "/"
 
   const [mode, setMode] = useState<Mode>("login")
-  const [username, setUsername] = useState("")
-  const [password, setPassword] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault()
-    setError(null)
-    setBusy(true)
-    try {
-      await login(username, password)
-      navigate(next, { replace: true })
-    } catch (err) {
-      setError(err instanceof FrontierAuthError ? err.message : "Login failed")
-    } finally {
-      setBusy(false)
-    }
-  }
+  const form = useForm({
+    defaultValues: { username: "", password: "" },
+    validators: { onSubmit: loginSchema },
+    onSubmit: async ({ value }) => {
+      clearSubmitError()
+      try {
+        await login(value.username, value.password)
+        navigate(next, { replace: true })
+      } catch (err) {
+        setSubmitError(err instanceof FrontierAuthError ? err.message : "Login failed")
+      }
+    },
+  })
 
   return (
     <div className="min-h-screen flex items-center justify-center p-8">
@@ -54,47 +61,72 @@ export function Login() {
         {mode === "forgot" ? (
           <FrontierForgotPasswordForm onBack={() => setMode("login")} />
         ) : (
-          <form onSubmit={onSubmit} className="flex flex-col gap-4">
+          <form
+            id="login-form"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void form.handleSubmit()
+            }}
+            className="flex flex-col gap-4"
+          >
             <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="login-user">
-                  Username or email
-                </FieldLabel>
-                <Input
-                  id="login-user"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  autoComplete="username"
-                  autoFocus
-                />
-              </Field>
-              <Field>
-                <div className="flex items-center justify-between">
-                  <FieldLabel htmlFor="login-pass">Password</FieldLabel>
-                  <button
-                    type="button"
-                    onClick={() => setMode("forgot")}
-                    className="text-xs text-muted-foreground underline-offset-4 hover:underline"
-                  >
-                    Forgot password?
-                  </button>
-                </div>
-                <RevealableInput
-                  id="login-pass"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
-                />
-              </Field>
+              <form.Field
+                name="username"
+                children={(field) => {
+                  const invalid = isFieldInvalid(field)
+                  return (
+                    <Field data-invalid={invalid}>
+                      <FieldLabel htmlFor="login-user">Username or email</FieldLabel>
+                      <Input
+                        id="login-user"
+                        name={field.name}
+                        value={field.state.value}
+                        onBlur={field.handleBlur}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        aria-invalid={invalid}
+                        autoComplete="username"
+                        autoFocus
+                      />
+                      {invalid && <FieldError errors={field.state.meta.errors} />}
+                    </Field>
+                  )
+                }}
+              />
+              <form.Field
+                name="password"
+                children={(field) => {
+                  const invalid = isFieldInvalid(field)
+                  return (
+                    <Field data-invalid={invalid}>
+                      <div className="flex items-center justify-between">
+                        <FieldLabel htmlFor="login-pass">Password</FieldLabel>
+                        <button
+                          type="button"
+                          onClick={() => setMode("forgot")}
+                          className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+                        >
+                          Forgot password?
+                        </button>
+                      </div>
+                      <RevealableInput
+                        id="login-pass"
+                        name={field.name}
+                        value={field.state.value}
+                        onBlur={field.handleBlur}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        aria-invalid={invalid}
+                        autoComplete="current-password"
+                      />
+                      {invalid && <FieldError errors={field.state.meta.errors} />}
+                    </Field>
+                  )
+                }}
+              />
             </FieldGroup>
-            {error && <FieldError>{error}</FieldError>}
-            <Button
-              type="submit"
-              disabled={busy || !username || !password}
-              className="w-full"
-            >
-              {busy && <Spinner data-icon="inline-start" />}
-              {busy ? "Signing in…" : "Sign in"}
+            {submitError && <FieldError>{submitError}</FieldError>}
+            <Button type="submit" form="login-form" className="w-full">
+              {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
+              {form.state.isSubmitting ? "Signing in…" : "Sign in"}
             </Button>
           </form>
         )}

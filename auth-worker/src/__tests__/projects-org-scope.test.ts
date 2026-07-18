@@ -19,7 +19,7 @@ describe("GET /api/v2/projects org scoping", () => {
     expect(p1?.orgId).toBe(1)
   })
 
-  // FRO-473: the org switcher needs the host org's display name (not just its
+  // AQU-473: the org switcher needs the host org's display name (not just its
   // id) to label guest orgs — the list endpoint now joins `organizations`.
   it("includes orgName on each project", async () => {
     await seedTwoOrgProjects()

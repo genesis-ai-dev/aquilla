@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { ArrowRight, Building2, ShieldAlert } from "lucide-react"
-import { Section, StatTile, EmptyState } from "@/components/ui/page"
-import { AttentionBadges, ValidatedBar } from "./shared"
+import { Section, StatTile } from "@/components/ui/page"
+import { EmptyState } from "@/components/ui/empty"
+import { ProjectStatus } from "@/components/ProjectStatus"
+import { ValidatedBar } from "./ValidatedBar"
 import { AdminActivityTimeline } from "./AdminActivityTimeline"
 import {
   projectsNeedingAttention,
@@ -92,10 +94,11 @@ export function AdminOverviewHome({
       >
         {atRisk.length === 0 ? (
           <EmptyState
+            variant="inline"
+            className="py-6"
             icon={ShieldAlert}
             title="All clear"
             description="No active project is overdue, due soon, or stalled right now."
-            className="border-0 bg-transparent py-6"
           />
         ) : (
           <ul className="divide-y">
@@ -109,7 +112,7 @@ export function AdminOverviewHome({
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
                   <ValidatedBar fraction={validatedFraction(project)} />
-                  <AttentionBadges reasons={reasons} />
+                  <ProjectStatus archived={false} reasons={reasons} />
                 </div>
               </li>
             ))}
@@ -120,7 +123,12 @@ export function AdminOverviewHome({
       <div className="grid gap-6 lg:grid-cols-2">
         <Section title="Most active organizations" description="Busiest tenants by project count.">
           {topOrgs.length === 0 ? (
-            <EmptyState icon={Building2} title="No organizations yet" className="border-0 bg-transparent py-6" />
+            <EmptyState
+              variant="inline"
+              className="py-6"
+              icon={Building2}
+              title="No organizations yet"
+            />
           ) : (
             <ul className="divide-y">
               {topOrgs.map((o) => (

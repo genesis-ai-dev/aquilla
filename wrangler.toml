@@ -58,6 +58,7 @@ enabled = true
 # so the legacy Pages deploys for other brands keep working.
 [assets]
 directory = "./dist"
+binding = "ASSETS"
 not_found_handling = "single-page-application"
 
 # ---------------------------------------------------------------------------
@@ -75,6 +76,7 @@ routes = ["aquilla.app/*"]
 
 [env.production.assets]
 directory = "./dist"
+binding = "ASSETS"
 not_found_handling = "single-page-application"
 
 # ---------------------------------------------------------------------------
@@ -90,6 +92,7 @@ routes = ["dev.aquilla.app/*"]
 
 [env.development.assets]
 directory = "./dist"
+binding = "ASSETS"
 not_found_handling = "single-page-application"
 
 # ---------------------------------------------------------------------------
@@ -105,4 +108,5 @@ routes = ["staging.aquilla.app/*"]
 
 [env.staging.assets]
 directory = "./dist"
+binding = "ASSETS"
 not_found_handling = "single-page-application"

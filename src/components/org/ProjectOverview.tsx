@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { MoreHorizontal } from "lucide-react"
+import { MoreHorizontal, ChevronRight, Copy, Check, Download } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { ExpandableName } from "@/components/ui/expandable-name"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { OrgSidebar } from "./OrgSidebar"
@@ -17,11 +18,32 @@ import { InactiveProjectBanner } from "@/components/InactiveProjectBanner"
 import { downloadProjectBundle } from "@/lib/sync/export-bundle"
 import { AssignWork } from "./AssignWork"
 import { MembersTab } from "@/components/ProjectMembersPage"
-import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { MemberActivityPanel } from "./MemberActivityPanel"
+import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
+import { OverviewLaneTable } from "./OverviewLaneTable"
 import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
+import {
+  progressToCanonicalRollup,
+  sectionProgressToVerseRollup,
+  type BookRollup,
+  type ChapterRollup,
+  type VerseRollup,
+} from "@/lib/progress/canonical-rollup"
+import { getFileProgress, getFileSectionProgress } from "@/lib/progress/file-progress-resource"
+import { sortFiles, filterFilesByName, FILE_SORT_MODES, type FileSortMode } from "@/lib/progress/file-sort"
+import { progressRowsToCsv, progressCsvFilename } from "@/lib/progress/progress-csv"
+import { downloadBlob } from "@/lib/export/export-service"
 import { getProjectAssignments, type AssigneeWorkload } from "@/lib/sync/assignments"
+import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
+import { ROLE } from "@/lib/frontier/roles"
+import {
+  SectionVisibilityBadge,
+  SectionVisibilityGate,
+  sectionTintClass,
+} from "./SectionVisibilityBadge"
 import { Badge } from "@/components/ui/badge"
+import { ProjectDeadlineStatuses, ProjectStatusChip } from "@/components/ProjectStatus"
 import {
   Dialog,
   DialogContent,
@@ -31,10 +53,80 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { DatePicker, dateToDeadlineString, deadlineStringToDate } from "@/components/ui/date-picker"
+import { cn } from "@/lib/utils"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Skeleton } from "@/components/ui/skeleton"
 
 /** Max per-file rows shown on the overview; the rest are counted as "+N more". */
 const FILE_ROW_CAP = 12
+
+type FileProgressSnapshot = Awaited<ReturnType<typeof getFileProgress>>
+type ProgressSection = FileProgressSnapshot["sections"][number]
+
+interface FlatSectionRollup {
+  key: string
+  totalCount: number
+  filledCount: number
+  approvedCount: number
+  filledPct: number
+  approvedPct: number
+}
+
+interface FileRollup {
+  books: BookRollup[] | null
+  sections: FlatSectionRollup[]
+}
+
+function ProjectOverviewSkeleton() {
+  return (
+    <div className="max-w-5xl space-y-4">
+      <div className="rounded-xl border bg-card shadow-sm p-6 space-y-2">
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-6 w-48" />
+          <Skeleton className="h-5 w-16 rounded-full" />
+        </div>
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="h-4 w-20" />
+      </div>
+      <div className="rounded-xl border bg-card shadow-sm p-5 space-y-4">
+        <Skeleton className="h-3 w-20" />
+        <div className="flex flex-wrap gap-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-14 w-24 rounded-lg" />
+          ))}
+        </div>
+        <div className="space-y-2.5">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-2.5 w-full rounded-full" />
+          ))}
+        </div>
+      </div>
+      <div className="rounded-xl border bg-card shadow-sm p-5 space-y-3">
+        <Skeleton className="h-3 w-16" />
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-3">
+            <Skeleton className="h-4 w-36" />
+            <Skeleton className="h-1.5 flex-1 rounded-full" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+        ))}
+      </div>
+      <div className="rounded-xl border bg-card shadow-sm p-5 space-y-2">
+        <Skeleton className="h-3 w-20" />
+        <Skeleton className="h-4 w-40" />
+      </div>
+    </div>
+  )
+}
 
 // ── Status chip ──────────────────────────────────────────────────────────────
 
@@ -62,42 +154,63 @@ export function deriveProjectStatus(
 }
 
 function StatusChip({ status }: { status: ProjectStatus }) {
-  if (status === "no-deadline") return null
-  const map: Record<Exclude<ProjectStatus, "no-deadline">, { label: string; cls: string }> = {
-    "on-track": { label: "On track", cls: "border-transparent bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" },
-    "due-soon": { label: "Due soon", cls: "border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300" },
-    "overdue":  { label: "Overdue",  cls: "border-transparent bg-destructive/10 text-destructive" },
-  }
-  const { label, cls } = map[status as Exclude<ProjectStatus, "no-deadline">]
-  return (
-    <Badge className={cls} data-testid="status-chip">
-      {label}
-    </Badge>
-  )
+  // Overdue / due-soon live only on the Deadline card — avoid duplicating them in the header.
+  if (status === "no-deadline" || status === "overdue" || status === "due-soon") return null
+  return <ProjectStatusChip kind="on-track" testId="status-chip" />
 }
 
 // ── Deadline chip ─────────────────────────────────────────────────────────────
 
 function DeadlineChip({ status }: { status: "overdue" | "soon" | "ok" | null }) {
-  if (!status) return null
-  const map = {
-    ok:      { cls: "border-transparent bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" },
-    soon:    { cls: "border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300" },
-    overdue: { cls: "border-transparent bg-destructive/10 text-destructive" },
-  }
-  return <Badge className={map[status].cls}>{status === "overdue" ? "Overdue" : status === "soon" ? "Due soon" : "On track"}</Badge>
+  if (status === "ok") return <ProjectStatusChip kind="on-track" />
+  return <ProjectDeadlineStatuses deadline={status} testId="status-chip" />
 }
 
 // ── Stat tiles (big %) ────────────────────────────────────────────────────────
 
-function StatTile({ label, pct, colorClass, tooltip }: { label: string; pct: number; colorClass: string; tooltip?: string }) {
+function StatTile({ label, pct, colorClass, tooltip, display }: {
+  label: string
+  pct: number
+  colorClass: string
+  tooltip?: string
+  /** AQU-490: override the rendered value (e.g. "N/A") when there is no real
+   *  metric to show a percentage for. `pct` is still required by callers but
+   *  ignored visually when `display` is set. */
+  display?: string
+}) {
   const tile = (
     <div className="flex flex-col items-center rounded-lg bg-muted/40 px-5 py-3 text-center">
-      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{Math.round(pct * 100)}%</p>
+      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{display ?? `${Math.round(pct * 100)}%`}</p>
       <p className="mt-0.5 text-[11px] text-muted-foreground">{label}</p>
     </div>
   )
   return tooltip ? <AppTooltip content={tooltip}>{tile}</AppTooltip> : tile
+}
+
+// ── Lane filter pill (AQU-538 §3.3) ───────────────────────────────────────────
+
+function LanePill({ active, onClick, testId, children }: {
+  active: boolean
+  onClick: () => void
+  testId: string
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        "rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors",
+        active
+          ? "border-transparent bg-primary text-primary-foreground"
+          : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+      )}
+    >
+      {children}
+    </button>
+  )
 }
 
 // ── Stat bar ──────────────────────────────────────────────────────────────────
@@ -140,6 +253,227 @@ function FileProgressBars({ tPct, vPct }: { tPct: number; vPct: number }) {
         <span className="block h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${vPct}%` }} />
       </span>
     </span>
+  )
+}
+
+// ── Chapter/verse rollup (AQU-493) ───────────────────────────────────────────
+
+/** Small inline "N%" bar reused for the book/chapter rows of the rollup tree. */
+function MiniRollupBar({ filledPct, approvedPct }: { filledPct: number; approvedPct: number }) {
+  return (
+    <span className="flex w-24 shrink-0 flex-col gap-[3px]">
+      <span className="block h-1 rounded-full bg-muted overflow-hidden">
+        <span className="block h-full rounded-full bg-amber-500" style={{ width: `${filledPct}%` }} />
+      </span>
+      <span className="block h-1 rounded-full bg-muted overflow-hidden">
+        <span className="block h-full rounded-full bg-emerald-500" style={{ width: `${approvedPct}%` }} />
+      </span>
+    </span>
+  )
+}
+
+function toFlatSectionRollup(section: ProgressSection): FlatSectionRollup {
+  const filledPct = section.totalCount > 0
+    ? Math.round((section.filledCount / section.totalCount) * 100)
+    : 0
+  const approvedPct = section.totalCount > 0
+    ? Math.round((section.validatedCount / section.totalCount) * 100)
+    : 0
+  return {
+    key: section.key,
+    totalCount: section.totalCount,
+    filledCount: section.filledCount,
+    approvedCount: section.validatedCount,
+    filledPct,
+    approvedPct,
+  }
+}
+
+function progressToFileRollup(progress: FileProgressSnapshot): FileRollup {
+  return {
+    books: progressToCanonicalRollup(progress),
+    sections: progress.sections.map(toFlatSectionRollup),
+  }
+}
+
+function FlatSectionRow({ section }: { section: FlatSectionRollup }) {
+  return (
+    <li
+      data-testid="section-row"
+      className="flex w-full items-center gap-2 py-0.5 text-xs"
+    >
+      <span className="w-10 shrink-0 font-medium">{section.key}</span>
+      <MiniRollupBar filledPct={section.filledPct} approvedPct={section.approvedPct} />
+      <span className="text-[10px] tabular-nums text-muted-foreground">
+        {section.filledCount}/{section.approvedCount}/{section.totalCount}
+      </span>
+    </li>
+  )
+}
+
+function ChapterRow({
+  chapter,
+  loadVerses,
+}: {
+  chapter: ChapterRollup
+  loadVerses: (sectionKey: string) => Promise<VerseRollup[]>
+}) {
+  const [open, setOpen] = useState(false)
+  const [verses, setVerses] = useState<VerseRollup[] | null>(chapter.verses.length > 0 ? chapter.verses : null)
+  const [loading, setLoading] = useState(false)
+  const [failed, setFailed] = useState(false)
+
+  const load = useCallback(async () => {
+    if (verses != null || loading) return
+    setLoading(true)
+    setFailed(false)
+    try {
+      setVerses(await loadVerses(chapter.chapter))
+    } catch {
+      setFailed(true)
+    } finally {
+      setLoading(false)
+    }
+  }, [chapter.chapter, loadVerses, loading, verses])
+
+  const toggle = useCallback(() => {
+    const nextOpen = !open
+    setOpen(nextOpen)
+    if (nextOpen) void load()
+  }, [load, open])
+
+  return (
+    <li>
+      <button
+        type="button"
+        data-testid="chapter-row"
+        className="flex w-full items-center gap-2 rounded-sm py-0.5 text-left text-xs hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={toggle}
+        aria-expanded={open}
+      >
+        <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+        <span className="w-10 shrink-0 text-muted-foreground">Ch {chapter.chapterLabel}</span>
+        <MiniRollupBar filledPct={chapter.filledPct} approvedPct={chapter.approvedPct} />
+        <span className="text-[10px] tabular-nums text-muted-foreground">
+          {chapter.filledCount}/{chapter.approvedCount}/{chapter.cellCount}
+        </span>
+      </button>
+      {open && loading && <p className="ml-5 py-1 text-[10px] text-muted-foreground">Loading verses…</p>}
+      {open && failed && (
+        <button type="button" className="ml-5 py-1 text-[10px] text-destructive underline" onClick={() => void load()}>
+          Verse progress unavailable. Retry
+        </button>
+      )}
+      {open && verses != null && (
+        <ul className="ml-5 mt-0.5 mb-1 grid grid-cols-[repeat(auto-fill,minmax(2.5rem,1fr))] gap-1" aria-label={`${chapter.chapter} verses`}>
+          {verses.map((verse, index) => (
+            <li
+              key={`${verse.ref}:${index}`}
+              data-testid="verse-cell"
+              title={verse.ref}
+              className={cn(
+                "rounded px-1.5 py-0.5 text-center text-[10px] tabular-nums",
+                verse.approved ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                  : verse.filled ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                  : "bg-muted text-muted-foreground",
+              )}
+            >
+              {verse.verseLabel}
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  )
+}
+
+function BookRow({
+  book,
+  loadVerses,
+}: {
+  book: BookRollup
+  loadVerses: (sectionKey: string) => Promise<VerseRollup[]>
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <li>
+      <button
+        type="button"
+        data-testid="book-row"
+        className="flex w-full items-center gap-2 py-0.5 text-left text-xs font-medium hover:text-foreground"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+        <span className="w-10 shrink-0">{book.book}</span>
+        <MiniRollupBar filledPct={book.filledPct} approvedPct={book.approvedPct} />
+        <span className="text-[10px] tabular-nums text-muted-foreground">
+          {book.filledCount}/{book.approvedCount}/{book.cellCount}
+        </span>
+      </button>
+      {open && (
+        <ul className="ml-5 mt-0.5" aria-label={`${book.book} chapters`}>
+          {book.chapters.map((c) => (
+            <ChapterRow key={c.chapter} chapter={c} loadVerses={loadVerses} />
+          ))}
+        </ul>
+      )}
+    </li>
+  )
+}
+
+/**
+ * Nested book › chapter progress rollup shown under a file row once expanded,
+ * with a flat section fallback for files whose sections are meaningful but
+ * not chapter-shaped. Verse progress is fetched separately only when a
+ * chapter opens.
+ */
+function FileCanonicalRollup({
+  rollup,
+  loading,
+  error,
+  onRetry,
+  loadVerses,
+}: {
+  rollup: FileRollup | undefined
+  loading: boolean
+  error: boolean
+  onRetry: () => void
+  loadVerses: (sectionKey: string) => Promise<VerseRollup[]>
+}) {
+  if (loading) {
+    return <p className="ml-7 mt-1 text-xs text-muted-foreground">Loading chapter breakdown…</p>
+  }
+  if (error) {
+    return (
+      <button type="button" className="ml-7 mt-1 text-xs text-destructive underline" onClick={onRetry}>
+        Chapter progress unavailable. Retry
+      </button>
+    )
+  }
+  if (!rollup || (rollup.books === null && rollup.sections.length === 0)) {
+    return (
+      <p className="ml-7 mt-1 text-xs text-muted-foreground">
+        No chapter structure detected for this file.
+      </p>
+    )
+  }
+  if (rollup.books === null) {
+    return (
+      <ul className="ml-7 mt-1 border-l pl-3" data-testid="flat-section-rollup" aria-label="Section breakdown">
+        {rollup.sections.map((section) => (
+          <FlatSectionRow key={section.key} section={section} />
+        ))}
+      </ul>
+    )
+  }
+  if (rollup.books.length === 0) return null
+  return (
+    <ul className="ml-7 mt-1 border-l pl-3" data-testid="canonical-rollup-books" aria-label="Chapter breakdown">
+      {rollup.books.map((b) => (
+        <BookRow key={b.book} book={b} loadVerses={loadVerses} />
+      ))}
+    </ul>
   )
 }
 
@@ -214,13 +548,76 @@ export function ProjectOverview() {
   const [showAllFiles, setShowAllFiles] = useState(false)
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
 
-  // FRO-474: project-only invitees (direct project_members grant, no org
+  // AQU-538 §3.3: the lane filter pill selection. `null` = "All" — today's
+  // cross-lane behavior, byte-identical (StatTiles read the PortfolioProject
+  // scalars, file drill-down reads with no lane param). A non-null value is a
+  // real lane tag ('' = the default lane) selected from the pill row; the tiles
+  // recompute from that lane's PortfolioLane and the drill-down re-reads with
+  // `?lane=`.
+  const [selectedLaneTag, setSelectedLaneTag] = useState<string | null>(null)
+  // The lane passed to the per-file progress reads. "All" (null) and the
+  // default lane pill both map to '' server-side (the default lane == the
+  // no-param request), so the drill-down only ever diverges for a selected
+  // non-default lane.
+  const fileLane = selectedLaneTag ?? ""
+
+  // AQU-498: which teammate's activity detail is expanded in the Team card
+  // (null = none selected). Username, not userId, since that's the events
+  // log's author key (see MemberActivityPanel's doc comment).
+  //
+  // SWARM-TODO(AQU-498): selection is scoped to `workload` (assignees with at
+  // least one open assignment) — reusing the Team card's existing, already
+  // memberProgressViewMinRole-gated roster rather than the project's full
+  // member list (MembersTab), which is gated by the INDEPENDENT
+  // rosterViewMinRole floor (AQU-485). A member with zero open assignments
+  // currently has no row to click here even though they may have historical
+  // activity. True vertical slice for now; widening selection to the full
+  // roster needs either (a) accepting the roster-floor dependency (a caller
+  // could then see progress without roster access, or vice versa — a real
+  // permission-composition question), or (b) a project-scoped "list authors
+  // who have ever committed an event" endpoint independent of both floors.
+  const [selectedMemberUsername, setSelectedMemberUsername] = useState<string | null>(null)
+
+  // AQU-499: sort/filter controls for the per-file breakdown list. Default
+  // sort is last-updated (most-recently-progressed first) per acceptance
+  // criteria — a PM opening the overview should see recent activity without
+  // configuring anything.
+  const [fileSortMode, setFileSortMode] = useState<FileSortMode>("last-updated")
+  const [fileNameFilter, setFileNameFilter] = useState("")
+
+  // AQU-500: transient "copied" feedback for the CSV-export control, mirroring
+  // the copy-affordance pattern used elsewhere (e.g. ChatMarkdown's code-block
+  // copy button).
+  const [csvCopied, setCsvCopied] = useState(false)
+
+  // AQU-493/AQU-517: compact progress rollup, lazily fetched per file on
+  // first expand. `undefined` = not yet fetched; loaded values choose between
+  // canonical book/chapter rows, flat section rows, or a true no-structure note.
+  const [expandedFileId, setExpandedFileId] = useState<string | null>(null)
+  const [rollups, setRollups] = useState<Record<string, FileRollup>>({})
+  const [rollupLoading, setRollupLoading] = useState<Record<string, boolean>>({})
+  const [rollupErrors, setRollupErrors] = useState<Record<string, boolean>>({})
+  const chapterVerseRequests = useRef(new Map<string, Promise<VerseRollup[]>>())
+
+  // AQU-474: project-only invitees (direct project_members grant, no org
   // membership) have `activeOrgId == null` or an org that doesn't include this
   // project's org. The portfolio endpoint is org-scoped, so fall back to the
   // project's own (server-verified) orgId when it differs from the active
   // org — `useProject` already gatekept access, so any orgId it returns is
   // one this user can legitimately query the portfolio for.
   const portfolioOrgId = activeOrgId ?? project?.orgId ?? null
+
+  // AQU-486: per-section visibility chrome. The roster + team-progress floors
+  // come from AQU-485's org settings; `projectRoleLevel` (not orgRoleLevel)
+  // is what gates viewing here per useOrgSettings' AD-12 max-wins contract —
+  // a project-only invitee's project.syncRole can exceed their (absent) org
+  // role. Editing the floor is still an org-role (owner-only) action, so
+  // canEditVisibility below intentionally reads the org role, not the
+  // project role.
+  const projectRoleLevel = project?.syncRole?.level ?? null
+  const orgSettings = useOrgSettings(portfolioOrgId, projectRoleLevel, projectRoleLevel)
+  const canEditVisibility = canEditRosterProgressFloor(projectRoleLevel)
+
   const loadRow = useCallback(async () => {
     if (!jwt || portfolioOrgId == null) return
     try {
@@ -239,9 +636,9 @@ export function ProjectOverview() {
   // `useProject` is server-verified per-project (not org-scoped): a
   // project-only invitee (no org membership, or org mismatch) still resolves
   // to "ready" here when they hold a direct grant. Redirecting on org
-  // mismatch alone (pre-FRO-474 behavior) sent guests right back to "/".
+  // mismatch alone (pre-AQU-474 behavior) sent guests right back to "/".
   useEffect(() => {
-    // FRO-346: "forbidden" (access revoked) leaves the overview the same way
+    // AQU-346: "forbidden" (access revoked) leaves the overview the same way
     // a missing project does — back to the dashboard.
     if (status === "not-found" || status === "forbidden") {
       navigate("/", { replace: true })
@@ -249,12 +646,27 @@ export function ProjectOverview() {
   }, [status, navigate])
 
   // Load per-project assignment roster for the Team card (maintainer+)
-  useEffect(() => {
+  // AQU-495: extracted into a callback so a fresh assignment (onAssigned) can
+  // revalidate the workload list live, not only on mount — the walkthrough bug
+  // was "No open assignments in this project yet." lingering until manual reload.
+  const loadWorkload = useCallback(async () => {
     if (!jwt || !id) return
-    getProjectAssignments(jwt, id)
-      .then(setWorkload)
-      .catch(() => setWorkload([]))
+    try {
+      setWorkload(await getProjectAssignments(jwt, id))
+    } catch {
+      setWorkload([])
+    }
   }, [jwt, id])
+
+  useEffect(() => {
+    void loadWorkload()
+  }, [loadWorkload])
+
+  // AQU-495: after a successful assign, refresh BOTH the portfolio row and the
+  // open-assignments workload list so the Team card updates without a reload.
+  const handleAssigned = useCallback(async () => {
+    await Promise.all([loadRow(), loadWorkload()])
+  }, [loadRow, loadWorkload])
 
   // Per-file rollups
   const firstFileId = project?.files[0]?.id ?? null
@@ -267,6 +679,76 @@ export function ProjectOverview() {
       .catch(() => { if (!cancelled) setFiles([]) })
     return () => { cancelled = true }
   }, [jwt, id, firstFileId, project?.name])
+
+  // AQU-498: token minter for MemberActivityPanel — same project-scoped
+  // sync-token mint used for the per-file rollups above (verifyTokenForProject
+  // only checks projectId, so any file-scoped token in this project works).
+  const getMemberActivityToken = useCallback(async (): Promise<string | null> => {
+    if (!jwt || !firstFileId) return null
+    try {
+      const tok = await fetchSyncToken(jwt, id, firstFileId, { projectName: project?.name })
+      return tok.token
+    } catch {
+      return null
+    }
+  }, [jwt, id, firstFileId, project?.name])
+
+  // AQU-517: expand/collapse a file row's compact server progress. This never
+  // downloads cell text or rich HTML.
+  const loadFileRollup = useCallback(async (file: FileSummary) => {
+    if (!jwt) return
+    setRollupLoading((s) => ({ ...s, [file.fileId]: true }))
+    setRollupErrors((s) => ({ ...s, [file.fileId]: false }))
+    try {
+      const tok = await fetchSyncToken(jwt, id, file.fileId, { projectName: project?.name })
+      const progress = await getFileProgress(id, file.fileId, async () => tok.token, fileLane)
+      setRollups((r) => ({ ...r, [file.fileId]: progressToFileRollup(progress) }))
+    } catch (e) {
+      console.warn("[ProjectOverview] chapter/verse rollup fetch failed:", e)
+      setRollupErrors((s) => ({ ...s, [file.fileId]: true }))
+    } finally {
+      setRollupLoading((s) => ({ ...s, [file.fileId]: false }))
+    }
+  }, [jwt, id, project?.name, fileLane])
+
+  const toggleFileRollup = useCallback((file: FileSummary) => {
+    if (expandedFileId === file.fileId) {
+      setExpandedFileId(null)
+      return
+    }
+    setExpandedFileId(file.fileId)
+    if (!(file.fileId in rollups)) void loadFileRollup(file)
+  }, [expandedFileId, loadFileRollup, rollups])
+
+  const loadChapterVerses = useCallback((fileId: string, sectionKey: string): Promise<VerseRollup[]> => {
+    const cacheKey = `${fileId}:${sectionKey}`
+    const existing = chapterVerseRequests.current.get(cacheKey)
+    if (existing) return existing
+    const request = (async () => {
+      if (!jwt) throw new Error("session unavailable")
+      const tok = await fetchSyncToken(jwt, id, fileId, { projectName: project?.name })
+      const detail = await getFileSectionProgress(id, fileId, sectionKey, async () => tok.token, fileLane)
+      return sectionProgressToVerseRollup(detail)
+    })().catch((error) => {
+      chapterVerseRequests.current.delete(cacheKey)
+      throw error
+    })
+    chapterVerseRequests.current.set(cacheKey, request)
+    return request
+  }, [id, jwt, project?.name, fileLane])
+
+  // AQU-538 §3.3: the per-file rollup + verse caches are lane-agnostic keys, so
+  // switching lanes must drop them (and collapse any open row) — otherwise a
+  // re-expand would show the previous lane's chapter/verse breakdown. Resetting
+  // on `fileLane` keeps the drill-down lane-true. On first mount fileLane is ''
+  // and these are already empty, so this is a no-op for the default view.
+  useEffect(() => {
+    setExpandedFileId(null)
+    setRollups({})
+    setRollupLoading({})
+    setRollupErrors({})
+    chapterVerseRequests.current.clear()
+  }, [fileLane])
 
   const isOwner = (project?.syncRole?.level ?? 0) >= 700
   const canManage = (project?.syncRole?.level ?? 0) >= 600
@@ -295,6 +777,19 @@ export function ProjectOverview() {
   const hasAudio = audio != null && audio.audioCells > 0
   const showText = hasText
   const showAudio = hasAudio
+
+  // AQU-538 §3.3: lane pills + tile recompute. Pills only surface once a project
+  // has more than one lane (N=1 stays byte-identical). `activeLane` is the
+  // PortfolioLane the pills are filtered to (null = "All"); when set, the
+  // Translated/Validated tiles + bars read that lane, and the cross-language
+  // tiles (AI Drafted, audio) grey out — they have no per-lane breakdown.
+  const projectLanes: PortfolioLane[] = audio?.lanes ?? []
+  const showLanePills = projectLanes.length > 1
+  const activeLane: PortfolioLane | null =
+    selectedLaneTag != null ? projectLanes.find((l) => l.lane === selectedLaneTag) ?? null : null
+  const tileTranslatedPct = activeLane ? laneTranslatedPct(activeLane) : audio ? translatedPct(audio) : 0
+  const tileValidatedPct = activeLane ? laneValidatedPct(activeLane) : audio ? validatedPct(audio) : 0
+  const CROSS_LANE_TOOLTIP = "Cross-language stat — not broken down per language."
 
   async function saveDeadline(value: string | null) {
     if (!jwt) return
@@ -365,10 +860,42 @@ export function ProjectOverview() {
       ? `${project.sourceLanguage} → ${project.targetLanguage}`
       : project?.targetLanguage ?? project?.sourceLanguage ?? null
 
+  const nonReadyContent =
+    status === "loading" ? (
+      <ProjectOverviewSkeleton />
+    ) : status === "unreachable" ? (
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950">
+        <span className="text-amber-800 dark:text-amber-200">
+          Can't reach the server — this project may still be available.
+        </span>
+        <Button
+          type="button"
+          size="sm"
+          onClick={refresh}
+          className="shrink-0 bg-amber-800 text-white hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600"
+        >
+          Retry
+        </Button>
+      </div>
+    ) : status === "no-session" ? (
+      <div className="rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
+        <p>Sign in to open this project from the cloud.</p>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="mt-3"
+          onClick={() => navigate(`/login?next=${encodeURIComponent(`/projects/${id}`)}`)}
+        >
+          Sign in
+        </Button>
+      </div>
+    ) : null
+
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section={project?.name ?? "Project"} />}
+      header={<OrgBreadcrumb section={project?.name ?? "Project"} orgId={project?.orgId} />}
       statusBar={null}
       main={
         <div className="h-full overflow-y-auto">
@@ -381,10 +908,10 @@ export function ProjectOverview() {
             />
           )}
           <div className="p-6">
-          {status !== "ready" ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
-          ) : (
-            <div className="max-w-5xl space-y-4">
+            {status !== "ready" ? (
+              nonReadyContent
+            ) : (
+              <div className="max-w-5xl space-y-4">
               {/* ── Header card ── */}
               <div className="rounded-xl border bg-card p-6">
                 <div className="flex items-start justify-between gap-4">
@@ -393,9 +920,7 @@ export function ProjectOverview() {
                       <h1 className="text-xl font-semibold leading-tight truncate">{project?.name}</h1>
                       {/* Compact status chip next to the title */}
                       <StatusChip status={projectStatus} />
-                      {isArchived && (
-                        <Badge variant="secondary" className="shrink-0">Archived</Badge>
-                      )}
+                      {isArchived && <ProjectStatusChip kind="archived" className="shrink-0" />}
                       {!isArchived && isFrozen && (
                         <Badge
                           className="shrink-0 border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
@@ -457,44 +982,129 @@ export function ProjectOverview() {
               </div>
 
               {/* ── Progress card ── */}
+              {/* AQU-486: progress has no configurable floor today — everyone
+                  with project access can see it. The badge is read-only
+                  (informational), matching that reality rather than implying
+                  a toggle that doesn't exist server-side. */}
+              {/*
+               * SWARM-TODO(AQU-490): verify live — open an oral/dubbed project
+               * overview with partial audio validation and confirm the Progress
+               * card shows "Has Audio" (coverage, relabeled from "Audio") and a
+               * separate "Audio Validated" tile reading "N/A" with a tooltip
+               * explaining validation isn't tracked per-medium yet; then open a
+               * text-only project and confirm neither audio tile renders (no
+               * misleading figure). Blocked on new server work — see the
+               * in-card comment above the "Audio Validated" tile for exactly
+               * what's missing.
+               */}
               {audio && audio.totalCells > 0 && (
                 <div className="rounded-xl border bg-card p-5">
-                  <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Progress</h2>
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Progress</h2>
+                    <SectionVisibilityBadge minRole={ROLE.VIEWER} />
+                  </div>
+
+                  {/* AQU-538 §3.3: lane filter pills — All + one per lane
+                      (default lane labeled with the project's targetLanguage).
+                      Only rendered when the project has >1 lane. */}
+                  {showLanePills && (
+                    <div className="mb-3 flex flex-wrap items-center gap-1.5" data-testid="lane-filter-pills">
+                      <LanePill
+                        active={selectedLaneTag === null}
+                        onClick={() => setSelectedLaneTag(null)}
+                        testId="lane-pill-all"
+                      >
+                        All
+                      </LanePill>
+                      {projectLanes.map((l) => {
+                        const tagId = l.lane === "" ? "default" : l.lane
+                        const label = l.lane === "" ? (project?.targetLanguage || "Default") : l.lane
+                        return (
+                          <LanePill
+                            key={tagId}
+                            active={selectedLaneTag === l.lane}
+                            onClick={() => setSelectedLaneTag(l.lane)}
+                            testId={`lane-pill-${tagId}`}
+                          >
+                            {label}
+                          </LanePill>
+                        )
+                      })}
+                    </div>
+                  )}
 
                   {/* Big-number tiles lead the section */}
                   <div className="flex flex-wrap gap-3 mb-4">
                     {showText && (
                       <>
-                        <StatTile label="Translated" pct={translatedPct(audio)} colorClass="text-amber-600" />
+                        <StatTile label="Translated" pct={tileTranslatedPct} colorClass="text-amber-600" />
                         {audio.aiDraftedCells > 0 && (
                           <StatTile
                             label="AI Drafted"
                             pct={aiDraftedPct(audio)}
-                            colorClass="text-violet-600"
-                            tooltip="Cells drafted by AI (via 'Translate all') that have not yet been human-edited or validated. A human edit or validation will move them into the Translated or Validated counts. Only cells committed after this marker was introduced are tracked — earlier AI commits are indistinguishable from human edits."
+                            colorClass={activeLane ? "text-muted-foreground/60" : "text-violet-600"}
+                            tooltip={activeLane ? CROSS_LANE_TOOLTIP : "Cells drafted by AI (via 'Translate all') that have not yet been human-edited or validated. A human edit or validation will move them into the Translated or Validated counts. Only cells committed after this marker was introduced are tracked — earlier AI commits are indistinguishable from human edits."}
                           />
                         )}
-                        <StatTile label="Validated" pct={validatedPct(audio)} colorClass="text-emerald-600" />
+                        <StatTile label="Validated" pct={tileValidatedPct} colorClass="text-emerald-600" />
                       </>
                     )}
                     {showAudio && (
-                      <StatTile label="Audio" pct={audioPct(audio)} colorClass="text-sky-600" />
+                      <>
+                        <StatTile
+                          label="Has Audio"
+                          pct={audioPct(audio)}
+                          colorClass={activeLane ? "text-muted-foreground/60" : "text-sky-600"}
+                          tooltip={activeLane ? CROSS_LANE_TOOLTIP : "Percentage of cells that have at least one audio recording attached. This is coverage, not validation — see 'Audio Validated' for review status."}
+                        />
+                        {/*
+                         * AQU-490 (was TODO(AQU-168)): a distinct audio-VALIDATION metric
+                         * is not reachable today. Investigated 2026-07-08:
+                         *   - `cells.validated` (db/postgres/schema.sql) is ONE boolean per
+                         *     cell, shared by text and audio review — there is no per-medium
+                         *     validated flag.
+                         *   - `cell_audio` (the per-take audio table) has no
+                         *     validated/approved column at all.
+                         *   - The `cell.validate` event payload
+                         *     (sync-worker/src/events/types.ts) is `{ editEventId }` only —
+                         *     no medium/kind field distinguishing "validated the text" from
+                         *     "validated the audio".
+                         *   - `readValidationCountAudio` (src/lib/progress/read-validation-count.ts)
+                         *     is a live, unrelated setting: the *required number of
+                         *     validators* for audio-bearing projects, not a count of
+                         *     validated audio cells. AQU-298's "possibly dead" flag was
+                         *     about a different symbol; this one is alive but doesn't help.
+                         * Needs new server work: either a `cell_audio.approved` column (or
+                         * equivalent) populated by a medium-aware validate event, or a
+                         * `validated_audio_cells` rollup column on `files`/portfolio SQL
+                         * analogous to `approved_count`. Until then this is an honest
+                         * placeholder, not a fabricated metric.
+                         */}
+                        <StatTile
+                          label="Audio Validated"
+                          pct={0}
+                          display="N/A"
+                          colorClass="text-muted-foreground"
+                          tooltip="Not tracked yet — the server does not record whether a validation applies to text or audio content (see AQU-490)."
+                        />
+                      </>
                     )}
-                    {/* TODO(FRO-168): audio VALIDATION metric — need audioCells with approved-audio count from server */}
                   </div>
 
-                  {/* Detail bars below tiles */}
+                  {/* Detail bars below tiles. AQU-538: Translated/Validated
+                      follow the active lane; the cross-language AI/audio bars
+                      only render in the "All" view (no per-lane breakdown). */}
                   <div className="space-y-2.5">
                     {showText && (
                       <>
                         <StatBar
                           label="Translated"
-                          value={audio.filledCells}
-                          total={audio.totalCells}
+                          value={activeLane ? activeLane.filledCells : audio.filledCells}
+                          total={activeLane ? activeLane.totalCells : audio.totalCells}
                           fillClass="bg-amber-500"
                           suffix=" cells"
                         />
-                        {audio.aiDraftedCells > 0 && (
+                        {!activeLane && audio.aiDraftedCells > 0 && (
                           <StatBar
                             label="AI Drafted"
                             value={audio.aiDraftedCells}
@@ -505,27 +1115,27 @@ export function ProjectOverview() {
                         )}
                         <StatBar
                           label="Validated"
-                          value={audio.validatedCells}
-                          total={audio.totalCells}
+                          value={activeLane ? activeLane.validatedCells : audio.validatedCells}
+                          total={activeLane ? activeLane.totalCells : audio.totalCells}
                           fillClass="bg-emerald-500"
                           suffix=" cells"
                         />
                       </>
                     )}
-                    {showAudio && (
+                    {showAudio && !activeLane && (
                       <>
                         <StatBar
-                          label="Audio"
+                          label="Has Audio"
                           value={audio.audioCells}
                           total={audio.totalCells}
                           fillClass="bg-sky-500"
                           suffix=" cells"
                         />
-                        {/* TODO: confirm whether legacy GitLab project import populated audio (cell_audio) — see FRO-160 data gap */}
+                        {/* TODO: confirm whether legacy GitLab project import populated audio (cell_audio) — see AQU-160 data gap */}
                       </>
                     )}
                   </div>
-                  {audio.recordedMs > 0 && (
+                  {!activeLane && audio.recordedMs > 0 && (
                     <p className="mt-3 text-xs text-muted-foreground">
                       {recordedMinutes(audio)} min recorded ·{" "}
                       {Math.round(audioPct(audio) * 100)}% of cells have audio
@@ -534,14 +1144,63 @@ export function ProjectOverview() {
                 </div>
               )}
 
+              {/* ── Languages / lane table (AQU-538 §3.3) ── */}
+              {/* Rendered only when the project has more than one target
+                  language lane — N=1 projects are byte-identical to before. */}
+              {showLanePills && audio && (
+                <OverviewLaneTable
+                  projectId={id}
+                  orgId={portfolioOrgId}
+                  jwt={jwt}
+                  lanes={projectLanes}
+                  defaultLanguageLabel={project?.targetLanguage || "Default"}
+                  extraLanes={project?.targetLanes ?? []}
+                  files={project?.files ?? []}
+                  roleLevel={project?.syncRole?.level ?? 0}
+                  author={session?.username ?? ""}
+                  canManageLanes={canAssign}
+                  canAddLanguage={canManage}
+                  onChanged={handleAssigned}
+                />
+              )}
+
               {/* ── Per-file rows (always fully visible per user decision) ── */}
               {files.length > 0 && (() => {
-                const sorted = [...files].sort((a, b) => b.cellCount - a.cellCount)
+                // AQU-499: filter by name, then sort by the selected mode.
+                // Expansion state (rollups/expandedFileId) is keyed by
+                // fileId, not row index, so re-sorting/filtering never
+                // disturbs an already-expanded row's chapter/verse rollup.
+                const filtered = filterFilesByName(files, fileNameFilter)
+                const sorted = sortFiles(filtered, fileSortMode)
                 const shown = showAllFiles ? sorted : sorted.slice(0, FILE_ROW_CAP)
                 const hidden = sorted.length - shown.length
+
+                // AQU-500: export the full sorted+filtered list (honoring
+                // AQU-499's current sort/filter), not just the `shown` slice
+                // — the FILE_ROW_CAP is a display truncation for readability,
+                // not a data filter, so a PM exporting "what I see" should
+                // get every row matching their filter/sort, not just the
+                // first FILE_ROW_CAP rows.
+                async function handleCopyCsv() {
+                  const csv = progressRowsToCsv(sorted)
+                  try {
+                    await navigator.clipboard.writeText(csv)
+                    setCsvCopied(true)
+                    setTimeout(() => setCsvCopied(false), 1500)
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : "Couldn't copy to clipboard.")
+                  }
+                }
+
+                function handleDownloadCsv() {
+                  const csv = progressRowsToCsv(sorted)
+                  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+                  downloadBlob(blob, progressCsvFilename(project?.name ?? "project"))
+                }
+
                 return (
                   <div className="rounded-xl border bg-card p-5">
-                    <div className="mb-3 flex items-center justify-between">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                       <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         Files {!showAllFiles && hidden > 0 ? `(top ${FILE_ROW_CAP} of ${sorted.length})` : `(${sorted.length})`}
                       </h2>
@@ -554,25 +1213,164 @@ export function ProjectOverview() {
                         </span>
                       </span>
                     </div>
-                    <ul className="space-y-2" aria-label="Files">
-                      {shown.map((f) => {
-                        const tPct = f.cellCount > 0 ? Math.round((f.filledCount / f.cellCount) * 100) : 0
-                        const vPct = f.cellCount > 0 ? Math.round((f.approvedCount / f.cellCount) * 100) : 0
-                        return (
-                          <li key={f.fileId} data-testid="file-row" className="flex items-center gap-3 text-sm">
-                            <AppTooltip content={f.name}>
-                              <span className="w-36 shrink-0 truncate text-sm font-medium">{f.name}</span>
-                            </AppTooltip>
-                            <FileProgressBars tPct={tPct} vPct={vPct} />
-                            <AppTooltip content="filled / approved / total cells · word count">
-                              <span className="w-36 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                                {f.filledCount}/{f.approvedCount}/{f.cellCount} · {f.wordCount}w
-                              </span>
-                            </AppTooltip>
-                          </li>
-                        )
-                      })}
-                    </ul>
+                    {/*
+                      SWARM-TODO(AQU-500): verify live — as a role WITH the org's
+                      export permission, open a Scripture project overview,
+                      change the file sort/filter (AQU-499), then click "Copy
+                      CSV" and paste into a spreadsheet: confirm the rows/columns
+                      match on-screen (file, filled, approved, total, words) in
+                      the same order as the table, and that a file name with a
+                      comma/quote lands in one cell correctly. Click "Download
+                      CSV" and confirm the .csv opens with the same rows. Then,
+                      as a role WITHOUT the org's export permission (org
+                      settings → exportMinRole set above that role), confirm
+                      neither Copy CSV nor Download CSV control renders.
+                    */}
+                    {orgSettings.canExport && sorted.length > 0 && (
+                      <div className="mb-3 flex items-center gap-2">
+                        <AppTooltip content="Copy the file list below as CSV">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void handleCopyCsv()}
+                            data-testid="export-csv-copy"
+                          >
+                            {csvCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                            {csvCopied ? "Copied" : "Copy CSV"}
+                          </Button>
+                        </AppTooltip>
+                        <AppTooltip content="Download the file list below as a .csv file">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={handleDownloadCsv}
+                            data-testid="export-csv-download"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            Download CSV
+                          </Button>
+                        </AppTooltip>
+                      </div>
+                    )}
+                    {/*
+                      SWARM-TODO(AQU-499): verify live — open a Scripture
+                      project overview, change the "Sort files by" dropdown
+                      to "Canonical order" and confirm Genesis-before-Exodus
+                      (and OT-before-NT) row order; switch to "Alphabetical"
+                      and confirm plain name order; type into the filter box
+                      and confirm rows narrow to matching file names; expand
+                      a file's chapter/verse rollup (AQU-493), change sort,
+                      and confirm the same file's rollup is still expanded
+                      after its row moves.
+                    */}
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                      <Input
+                        type="text"
+                        placeholder="Filter files by name…"
+                        aria-label="Filter files by name"
+                        value={fileNameFilter}
+                        onChange={(e) => setFileNameFilter(e.target.value)}
+                        className="max-w-56"
+                      />
+                      <Select
+                        items={FILE_SORT_MODES}
+                        value={fileSortMode}
+                        onValueChange={(v) => setFileSortMode((v as FileSortMode) ?? "last-updated")}
+                      >
+                        <SelectTrigger aria-label="Sort files by" className="w-44">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            {FILE_SORT_MODES.map((m) => (
+                              <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {sorted.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No files match “{fileNameFilter}”.</p>
+                    ) : (
+                    <>
+                      {/*
+                        AQU-492: two-level layout — a header row labels each
+                        numeric column once, so per-row values (below) never
+                        need to be re-explained. Header and row cell widths
+                        must stay in lockstep (same width + gap classes) for
+                        the columns to line up; the tooltip on each row is
+                        kept as a redundant, not load-bearing, explainer.
+                      */}
+                      <div
+                        className="mb-1.5 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                        data-testid="file-breakdown-header"
+                      >
+                        <span className="w-5 shrink-0" />
+                        <span className="w-32 shrink-0">File</span>
+                        <span className="flex-1">Progress</span>
+                        <span className="flex shrink-0 items-center gap-4">
+                          <span className="w-10 text-right">Filled</span>
+                          <span className="w-14 text-right">Approved</span>
+                          <span className="w-10 text-right">Total</span>
+                          <span className="w-12 text-right">Words</span>
+                        </span>
+                      </div>
+                      <ul className="space-y-2" aria-label="Files">
+                        {shown.map((f) => {
+                          const tPct = f.cellCount > 0 ? Math.round((f.filledCount / f.cellCount) * 100) : 0
+                          const vPct = f.cellCount > 0 ? Math.round((f.approvedCount / f.cellCount) * 100) : 0
+                          const isExpanded = expandedFileId === f.fileId
+                          return (
+                            <li key={f.fileId} data-testid="file-row">
+                              <div className="flex items-center gap-3 text-sm">
+                                <button
+                                  type="button"
+                                  aria-label={isExpanded ? `Collapse ${f.name}` : `Expand ${f.name}`}
+                                  aria-expanded={isExpanded}
+                                  onClick={() => void toggleFileRollup(f)}
+                                  className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+                                >
+                                  <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isExpanded && "rotate-90")} />
+                                </button>
+                                {/* AQU-491: full name was hover-only (tooltip); ExpandableName
+                                    adds a click-to-reveal Popover so a truncated file name is
+                                    discoverable without hovering. Tooltip kept for parity/hover
+                                    users; both read from the same fixed w-32 column. */}
+                                <AppTooltip content={f.name}>
+                                  <span className="w-32 shrink-0 text-sm font-medium">
+                                    <ExpandableName name={f.name} />
+                                  </span>
+                                </AppTooltip>
+                                <FileProgressBars tPct={tPct} vPct={vPct} />
+                                <AppTooltip content="Cells filled / cells approved / total cells · word count">
+                                  <span
+                                    className="flex shrink-0 items-center gap-4 text-xs tabular-nums text-muted-foreground"
+                                    aria-label={`${f.filledCount} filled, ${f.approvedCount} approved, ${f.cellCount} total cells, ${f.wordCount} words`}
+                                  >
+                                    <span className="w-10 text-right">{f.filledCount}</span>
+                                    <span className="w-14 text-right">{f.approvedCount}</span>
+                                    <span className="w-10 text-right">{f.cellCount}</span>
+                                    <span className="w-12 text-right">{f.wordCount}</span>
+                                  </span>
+                                </AppTooltip>
+                              </div>
+                              {isExpanded && (
+                                <FileCanonicalRollup
+                                  rollup={rollups[f.fileId]}
+                                  loading={rollupLoading[f.fileId] ?? false}
+                                  error={rollupErrors[f.fileId] ?? false}
+                                  onRetry={() => void loadFileRollup(f)}
+                                  loadVerses={(sectionKey) => loadChapterVerses(f.fileId, sectionKey)}
+                                />
+                              )}
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    </>
+                    )}
                     {!showAllFiles && hidden > 0 && (
                       <button
                         className="mt-3 text-xs text-muted-foreground hover:text-foreground underline"
@@ -678,55 +1476,123 @@ export function ProjectOverview() {
               </Dialog>
 
               {/* ── Team / Assignments card ── */}
-              <div className="rounded-xl border bg-card p-5">
-                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</h2>
-                {workload.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No open assignments in this project yet.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {workload.map((w) => {
-                      const donePct = w.cellsTotal > 0 ? Math.round((w.cellsDone / w.cellsTotal) * 100) : 0
-                      return (
-                        <li key={w.userId} className="flex items-center gap-3 text-sm">
-                          <AppTooltip content={w.username ?? String(w.userId)}>
-                            <span className="w-32 shrink-0 font-medium truncate">
-                              {w.username ?? `User ${w.userId}`}
-                            </span>
-                          </AppTooltip>
-                          <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                            <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
-                          </span>
-                          <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                            {w.openAssignments} open · {donePct}%
-                          </span>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                )}
-
-                {canAssign && !isArchived && activeOrgId != null && (project?.files.length ?? 0) > 0 && (
-                  <div className="mt-3 pt-3 border-t">
-                    <AssignWork
-                      projectId={id}
-                      files={project?.files ?? []}
-                      orgId={activeOrgId}
-                      jwt={jwt ?? ""}
-                      author={session?.username ?? ""}
-                      onAssigned={loadRow}
+              {/* AQU-486: per-assignee progress is gated by the AQU-485
+                  memberProgressViewMinRole floor (same "who sees each
+                  person's productivity" policy WorkloadRollup/UsageRollup use
+                  on the org overview) — a lower-role account must not see
+                  this card exist at all, not an empty/placeholder version. */}
+              <SectionVisibilityGate
+                minRole={orgSettings.memberProgressViewMinRole}
+                viewerRoleLevel={projectRoleLevel}
+                ready={orgSettings.hasFetched}
+              >
+                <div className={cn("relative rounded-xl border bg-card p-5", sectionTintClass(orgSettings.memberProgressViewMinRole))}>
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</h2>
+                    <SectionVisibilityBadge
+                      minRole={orgSettings.memberProgressViewMinRole}
+                      canEdit={canEditVisibility}
+                      onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
+                      description="Who can see each teammate's assignment progress on this project."
                     />
                   </div>
-                )}
-              </div>
+                  {workload.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No open assignments in this project yet.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {workload.map((w) => {
+                        const donePct = w.cellsTotal > 0 ? Math.round((w.cellsDone / w.cellsTotal) * 100) : 0
+                        const isSelected = w.username != null && w.username === selectedMemberUsername
+                        return (
+                          <li key={w.userId} className="flex items-center gap-3 text-sm">
+                            {/* AQU-491: click-to-reveal affordance, see file-name cell above. */}
+                            <AppTooltip content={w.username ?? String(w.userId)}>
+                              <span className="w-32 shrink-0 font-medium">
+                                <ExpandableName name={w.username ?? `User ${w.userId}`} />
+                              </span>
+                            </AppTooltip>
+                            <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                              <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
+                            </span>
+                            <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                              {w.openAssignments} open · {donePct}%
+                            </span>
+                            {/* AQU-498: select a teammate to see their recent actions +
+                                files-worked-on rollup. Sits inside this SAME
+                                memberProgressViewMinRole gate, so no separate
+                                permission plumbing is needed here. */}
+                            {w.username != null && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 shrink-0 px-2 text-xs text-muted-foreground"
+                                aria-label={`View activity for ${w.username}`}
+                                aria-pressed={isSelected}
+                                onClick={() => setSelectedMemberUsername(isSelected ? null : (w.username as string))}
+                              >
+                                {isSelected ? "Hide" : "Activity"}
+                              </Button>
+                            )}
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
 
-              {/* ── Members card (FRO-335) — same add / change-role / revoke
-                  surface as the in-project members page, so access can be
-                  managed from the overview without opening the workspace. ── */}
-              {canManage && !isArchived && (
-                <div className="rounded-xl border bg-card p-5" data-testid="overview-members-card">
-                  <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Members</h2>
-                  <MembersTab projectId={id} className="space-y-6" />
+                  {selectedMemberUsername && (
+                    <MemberActivityPanel
+                      projectId={id}
+                      username={selectedMemberUsername}
+                      getToken={getMemberActivityToken}
+                      onClose={() => setSelectedMemberUsername(null)}
+                    />
+                  )}
+
+                  {canAssign && !isArchived && activeOrgId != null && (project?.files.length ?? 0) > 0 && (
+                    <div className="mt-3 pt-3 border-t">
+                      <AssignWork
+                        projectId={id}
+                        files={project?.files ?? []}
+                        orgId={activeOrgId}
+                        jwt={jwt ?? ""}
+                        author={session?.username ?? ""}
+                        onAssigned={handleAssigned}
+                      />
+                    </div>
+                  )}
                 </div>
+              </SectionVisibilityGate>
+
+              {/* ── Members card (AQU-335) — same add / change-role / revoke
+                  surface as the in-project members page, so access can be
+                  managed from the overview without opening the workspace. ──
+                  AQU-486: gated by AQU-485's rosterViewMinRole — the same
+                  policy MembersTab itself enforces server-side (see its
+                  "Roster hidden" state), applied here one layer up so a
+                  below-floor caller never sees the card shell at all. */}
+              {canManage && !isArchived && (
+                <SectionVisibilityGate
+                  minRole={orgSettings.rosterViewMinRole}
+                  viewerRoleLevel={projectRoleLevel}
+                  ready={orgSettings.hasFetched}
+                >
+                  <div
+                    className={cn("relative rounded-xl border bg-card p-5", sectionTintClass(orgSettings.rosterViewMinRole))}
+                    data-testid="overview-members-card"
+                  >
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Members</h2>
+                      <SectionVisibilityBadge
+                        minRole={orgSettings.rosterViewMinRole}
+                        canEdit={canEditVisibility}
+                        onChangeMinRole={async (next) => { await orgSettings.patch({ rosterViewMinRole: next }) }}
+                        description="Who can see the member roster on this project."
+                      />
+                    </div>
+                    <MembersTab projectId={id} className="space-y-6" />
+                  </div>
+                </SectionVisibilityGate>
               )}
             </div>
           )}

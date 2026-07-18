@@ -70,9 +70,10 @@ describe("UsageRollup", () => {
       ],
     }
     mockGetOrgUsage.mockResolvedValue(zeroUsage)
-    const { container } = render(<UsageRollup jwt="mgr-jwt" orgId={1} />)
+    const { container } = render(<UsageRollup jwt="mgr-jwt" orgId={1} action={<span>Visibility control</span>} />)
     await waitFor(() => expect(mockGetOrgUsage).toHaveBeenCalled())
     expect(container).toBeEmptyDOMElement()
+    expect(screen.queryByText("Visibility control")).not.toBeInTheDocument()
   })
 
   it("hides on transient fetch errors (e.g. network failure)", async () => {

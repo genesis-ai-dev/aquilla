@@ -1,5 +1,5 @@
 /**
- * FRO-254: Shell routing — all in-project views must render inside the editor
+ * AQU-254: Shell routing — all in-project views must render inside the editor
  * shell (fixed sidebar + top bar + bottom status bar).
  *
  * These tests cover:
@@ -114,7 +114,7 @@ describe("shell-routing: back-nav contract", () => {
     expect(isOverlaySurface("/project/proj1")).toBe(false)
   })
 
-  it("overlay surface derivation covers all FRO-254 subroutes", () => {
+  it("overlay surface derivation covers all AQU-254 subroutes", () => {
     const fro254Routes = ["/comments", "/memory", "/terminology", "/rules"]
     for (const suffix of fro254Routes) {
       const path = `/project/proj1${suffix}`

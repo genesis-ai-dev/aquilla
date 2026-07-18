@@ -43,6 +43,11 @@ import { checkProjectMembership, type MembershipCheck } from './membership'
 import { ROLE } from './role-policy'
 import { sendCommentNotifications, type EmailService } from '../notification-email'
 import { laneRelevantHeadSeq } from './link-sync'
+import {
+  fileProgressRecomputeStmt,
+  fullProgressRecomputeStmts,
+  sectionsProgressRecomputeStmt,
+} from './progress-projection'
 
 // Max statements per batch() transaction — a conservative self-imposed cap (Postgres has no hard limit; keeps any single transaction bounded).
 const BATCH_LIMIT = 100
@@ -634,7 +639,7 @@ export async function handleEventsWriteRequest(
 
   for (const rawEvent of rawEvents) {
     // Authorize.
-    const authResult = await authorize(token, rawEvent, env.SYNC_SECRET_KEY)
+    const authResult = await authorize(token, rawEvent, env.SYNC_SECRET_KEY, db)
     if (!authResult.ok) {
       rejected.push({
         id: rawEvent.id ?? '(unknown)',
@@ -1038,18 +1043,40 @@ export async function handleEventsWriteRequest(
     // (A sealed chunk may exceed BATCH_LIMIT by the handful of per-file
     // recomputes; the limit is a self-imposed soft cap, not a Postgres one.)
     const sealChunk = (chunk: PendingChunk): void => {
-      const counterFiles = new Map<string, { projectId: string; fileId: string }>()
+      const counterFiles = new Map<string, {
+        projectId: string
+        fileId: string
+        fullSections: boolean
+        cellIds: Set<string>
+      }>()
       for (const entry of chunk.entries) {
         if (entry.counterFile) {
-          counterFiles.set(
-            `${entry.counterFile.projectId}|${entry.counterFile.fileId}`,
-            entry.counterFile,
-          )
+          const key = `${entry.counterFile.projectId}|${entry.counterFile.fileId}`
+          let impact = counterFiles.get(key)
+          if (!impact) {
+            impact = { ...entry.counterFile, fullSections: false, cellIds: new Set() }
+            counterFiles.set(key, impact)
+          }
+          if (entry.eventFrame.kind.startsWith('source.cell.')) {
+            impact.fullSections = true
+          } else if (entry.eventFrame.cell) {
+            impact.cellIds.add(entry.eventFrame.cell)
+          }
         }
       }
       const recomputeTs = Date.now()
       for (const f of counterFiles.values()) {
         chunk.stmts.push(fileCountersRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
+        if (f.fullSections) {
+          chunk.stmts.push(...fullProgressRecomputeStmts(db, f.projectId, f.fileId, recomputeTs))
+        } else {
+          chunk.stmts.push(fileProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
+          if (f.cellIds.size > 0) {
+            chunk.stmts.push(
+              sectionsProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs, [...f.cellIds]),
+            )
+          }
+        }
       }
       chunks.push(chunk)
     }

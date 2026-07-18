@@ -19,7 +19,15 @@ import { ensureBundle, readMeta } from "./seed-fetch"
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const DEFAULT_LOCAL_PG_URL = "postgresql://aquilla:aquilla@127.0.0.1:5432/aquilla_dev"
-const GENERATED_COLS = new Set(["value_tsv"]) // never inserted (GENERATED ALWAYS)
+// Generated columns are recomputed by Postgres from their source fields and
+// must never be included in INSERT statements from a production bundle.
+const GENERATED_COLS = new Set([
+  "source_language",
+  "target_language",
+  "validation_count",
+  "target_lanes",
+  "value_tsv",
+])
 const INSERT_CHUNK = 800
 const IDENTITY_SEQ_TABLES = ["users", "organizations", "groups"] // loaded identity tables with IDENTITY ids
 const OWNER_ROLE = 700 // ROLE.OWNER — see auth-worker/src/types.ts

@@ -1,5 +1,5 @@
 /**
- * SearchResultsView.tsx — FRO-309
+ * SearchResultsView.tsx — AQU-309
  *
  * "Expand all results" view — VS Code "open search results as editor" style.
  * Renders in the main content area as an overlay over the editor.
@@ -110,7 +110,8 @@ export function SearchResultsView({
       <div className="flex-1 overflow-y-auto">
         {results.length === 0 ? (
           <EmptyState
-            className="h-full border-0 bg-transparent"
+            variant="inline"
+            className="h-full"
             icon={Search}
             title="No results"
           />

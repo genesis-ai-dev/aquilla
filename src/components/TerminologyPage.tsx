@@ -886,7 +886,7 @@ export function TerminologyPage() {
   const [importOpen, setImportOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [drillDownConcept, setDrillDownConcept] = useState<Concept | null>(null)
-  // FRO-291: pending delete confirmation state.
+  // AQU-291: pending delete confirmation state.
   const [pendingDeleteConceptId, setPendingDeleteConceptId] = useState<string | null>(null)
   const pendingDeleteConcept = pendingDeleteConceptId
     ? concepts.find((c) => c.id === pendingDeleteConceptId) ?? null
@@ -1369,7 +1369,7 @@ export function TerminologyPage() {
         onMerge={handleMerge}
       />
 
-      {/* FRO-291: checkbox-confirm before deleting a concept */}
+      {/* AQU-291: checkbox-confirm before deleting a concept */}
       <ConfirmActionDialog
         open={pendingDeleteConceptId !== null}
         onOpenChange={(v) => { if (!v) setPendingDeleteConceptId(null) }}

@@ -1,4 +1,4 @@
-// FRO-477: mirror sync — consumes='target' (the chain case).
+// AQU-477: mirror sync — consumes='target' (the chain case).
 //
 // Covers the acceptance criteria on the issue:
 //   - merge: structural fields from upstream's SOURCE row, text from

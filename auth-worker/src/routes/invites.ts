@@ -40,7 +40,7 @@ import {
 const invites = new Hono<AuthHonoEnv>()
 
 /**
- * FRO-347: best-effort caller identity for the (otherwise public) preview
+ * AQU-347: best-effort caller identity for the (otherwise public) preview
  * route. Unlike `authMiddleware`, a missing/invalid/expired token is NOT an
  * error here — it just means "treat this preview as anonymous", since the
  * route must stay reachable for signed-out visitors following a share link.
@@ -150,8 +150,8 @@ invites.post(
 
 // ──────────────────────────────────────────────────────────────────────────
 // GET /api/v2/invites/mine — pending invites addressed to the caller
-// (FRO-326). Email-targeted invites only: open links carry no recipient
-// identity and stay out-of-band by design. Privacy per FRO-321 — a user
+// (AQU-326). Email-targeted invites only: open links carry no recipient
+// identity and stay out-of-band by design. Privacy per AQU-321 — a user
 // sees only invites whose email matches their own account email. Rows
 // sharing a token (multi-project invites) are grouped into one entry.
 //
@@ -226,7 +226,7 @@ invites.get("/mine", authMiddleware, async (c) => {
 // ──────────────────────────────────────────────────────────────────────────
 
 invites.get("/:token/preview", async (c) => {
-  // Preview responses vary by caller identity (FRO-347 usedByCaller) and 410s
+  // Preview responses vary by caller identity (AQU-347 usedByCaller) and 410s
   // are heuristically cacheable — a browser-cached anonymous 410 would mask
   // the authed 200 on the very next render. Never cache.
   c.header("Cache-Control", "no-store")
@@ -260,7 +260,7 @@ invites.get("/:token/preview", async (c) => {
   // For multi-invites we DO allow re-preview if some rows are unused.
   const allUsed = invitesForToken.every((r) => r.used_at != null)
 
-  // FRO-347: a used link isn't necessarily dead for THIS caller. If the
+  // AQU-347: a used link isn't necessarily dead for THIS caller. If the
   // authenticated caller is the original redeemer (used_by === caller.id) on
   // a row AND is still a member of that row's project, re-clicking the link
   // should read as "you're already in — continue", not a terminal error.
@@ -294,16 +294,20 @@ invites.get("/:token/preview", async (c) => {
     return c.json({ error: "Invite already used", code: "used" }, 410)
   }
 
-  // Pull project rows in one shot.
+  // Pull project rows in one shot (org name included so the JoinPage can say
+  // which workspace the invite belongs to — AQU-471).
   const placeholders = invitesForToken.map(() => "?").join(",")
   const projectRows = await c.env.AQUILLA_PG.prepare(
-    `SELECT id, name, org_id, created_by, archived_at
-       FROM projects WHERE id IN (${placeholders})`,
+    `SELECT p.id, p.name, p.org_id, p.created_by, p.archived_at,
+            o.name AS org_name
+       FROM projects p
+       LEFT JOIN organizations o ON o.id = p.org_id
+      WHERE p.id IN (${placeholders})`,
   )
     .bind(...invitesForToken.map((r) => r.project_id))
-    .all<ProjectRow>()
+    .all<ProjectRow & { org_name: string | null }>()
 
-  const byId = new Map<string, ProjectRow>()
+  const byId = new Map<string, ProjectRow & { org_name: string | null }>()
   for (const p of projectRows.results ?? []) byId.set(p.id, p)
 
   // When re-previewing a used-but-still-a-member link, only surface the rows
@@ -320,16 +324,26 @@ invites.get("/:token/preview", async (c) => {
       return {
         projectId: r.project_id,
         projectName: p.name,
+        orgName: p.org_name ?? null,
         archived: p.archived_at != null,
         usedByCaller: callerMembership.get(r.project_id) === true,
       }
     })
     .filter((x): x is NonNullable<typeof x> => x != null)
 
+  // All rows of a multi-invite are minted together by one inviter; sample the
+  // first (AQU-471: "who invited me").
+  const inviter = await c.env.AQUILLA_PG.prepare(
+    "SELECT COALESCE(display_name, username) AS name FROM users WHERE id = ?",
+  )
+    .bind(first.created_by)
+    .first<{ name: string | null }>()
+
   return c.json({
     token,
     role: { level: first.role_level, name: roleNameFor(first.role_level) },
     expiresAt: first.expires_at,
+    invitedBy: inviter?.name ?? null,
     projects,
   })
 })
@@ -370,9 +384,9 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
   }
 
   // Email-bound invites: require the redeemer's account email to match
-  // (case-insensitive), mirroring the legacy single-project accept (FRO-283).
+  // (case-insensitive), mirroring the legacy single-project accept (AQU-283).
   // JoinPage prefers THIS endpoint even for single-project tokens, so the
-  // check must live here too or the binding is a dead letter (FRO-326).
+  // check must live here too or the binding is a dead letter (AQU-326).
   // All rows share the token's email; sample the first.
   if (first.email && first.email.toLowerCase() !== user.email.toLowerCase()) {
     return c.json(
@@ -435,7 +449,7 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
         .bind(invite.project_id, user.id)
         .first<{ role_level: number }>()
 
-      // FRO-347: "idempotent-while-member" (option 2). A same-user re-accept
+      // AQU-347: "idempotent-while-member" (option 2). A same-user re-accept
       // (invite.used_at already set to this user) used to unconditionally
       // re-grant membership — including after the owner removed them from
       // this project, turning the old link into a permanent self-service

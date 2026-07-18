@@ -2,23 +2,77 @@ import { FRONTIER_BASE } from "./auth"
 import { fetchWithTimeout } from "./orgs"
 import { UserError } from "@/lib/errors/user-error"
 
+/**
+ * AQU-538: per-target-language-lane rollup for a project. `lane: ''` is the
+ * default lane (the project's configured `targetLanguage`, labeled client-side)
+ * and is present whenever the project has any file-scope progress rows.
+ * `validatedCells` counts cells meeting the project's validation threshold in
+ * that lane; `lastEditAt` is the lane's most recent progress update (null when
+ * the lane has no activity yet).
+ */
+export interface PortfolioLane {
+  lane: string
+  totalCells: number
+  filledCells: number
+  validatedCells: number
+  lastEditAt: number | null
+}
+
 export interface PortfolioProject {
   id: string
   name: string
+  /**
+   * AQU-538: per-lane rollups (default '' lane first). Optional so a client
+   * talking to an older server (no lane dimension) degrades gracefully — treat
+   * absent/empty as "single default lane" using the scalar fields.
+   */
+  lanes?: PortfolioLane[]
   totalCells: number
   validatedCells: number
   /** Target cells with content: the "translated" count (distinct from validated). */
   filledCells: number
   /**
-   * FRO-292: target cells that were machine-drafted (AI completion path) and have
+   * AQU-292: target cells that were machine-drafted (AI completion path) and have
    * not yet been human-edited or validated. 0 for projects predating this marker —
    * historical AI commits are indistinguishable from human edits (forward-only).
    */
   aiDraftedCells: number
   lastEditAt: number | null
   audioCells: number
+  /**
+   * AQU-508: cells whose selected audio take has been validated by a reviewer —
+   * distinct from `audioCells` (coverage). 0 for projects with no audio
+   * validations yet. Lets the Overview show audio-validation % separately from
+   * text-validation % (AQU-490).
+   */
+  validatedAudioCells: number
   recordedMs: number
   deadlineAt: string | null
+  /**
+   * AQU-523: the project's source/target language, surfaced on the org /
+   * all-orgs project list so the pair is visible at a glance (the
+   * single-project overview already shows it). Null when unset — the server
+   * normalizes the empty-settings default to null so the client never renders
+   * a blank/broken "→".
+   */
+  sourceLanguage?: string | null
+  targetLanguage?: string | null
+}
+
+/**
+ * AQU-523: format a project's language pair for display, e.g. "Greek → Bambara".
+ * Trims and treats empty strings as unset. Returns just the one known language
+ * when only one side is set, and null when neither is — callers render nothing
+ * in that case rather than a broken "→" or empty label.
+ */
+export function languagePairLabel(p: {
+  sourceLanguage?: string | null
+  targetLanguage?: string | null
+}): string | null {
+  const source = p.sourceLanguage?.trim() || null
+  const target = p.targetLanguage?.trim() || null
+  if (source && target) return `${source} → ${target}`
+  return target ?? source ?? null
 }
 
 export interface OrgPortfolio {
@@ -56,8 +110,18 @@ export function translatedPct(p: PortfolioProject): number {
   return p.totalCells > 0 ? p.filledCells / p.totalCells : 0
 }
 
+/** translated (has-content) fraction 0..1 for a single lane (0 when no cells). */
+export function laneTranslatedPct(lane: PortfolioLane): number {
+  return lane.totalCells > 0 ? lane.filledCells / lane.totalCells : 0
+}
+
+/** validated fraction 0..1 for a single lane (0 when no cells). */
+export function laneValidatedPct(lane: PortfolioLane): number {
+  return lane.totalCells > 0 ? lane.validatedCells / lane.totalCells : 0
+}
+
 /**
- * FRO-292: fraction of cells that are AI-drafted and awaiting human review, 0..1.
+ * AQU-292: fraction of cells that are AI-drafted and awaiting human review, 0..1.
  * 0 for projects that predate the provenance marker (forward-only, honest).
  */
 export function aiDraftedPct(p: PortfolioProject): number {
@@ -67,6 +131,17 @@ export function aiDraftedPct(p: PortfolioProject): number {
 /** fraction of cells that have audio, 0..1 (0 when no cells). */
 export function audioPct(p: PortfolioProject): number {
   return p.totalCells > 0 ? p.audioCells / p.totalCells : 0
+}
+
+/**
+ * AQU-508: fraction of audio-covered cells whose selected take is validated,
+ * 0..1 (0 when no cells have audio). Denominator is `audioCells`, not
+ * `totalCells`, so this reads as "how much of the recorded audio is validated"
+ * — the audio analogue of validated-of-translated, and meaningful only where
+ * audio exists.
+ */
+export function audioValidatedPct(p: PortfolioProject): number {
+  return p.audioCells > 0 ? p.validatedAudioCells / p.audioCells : 0
 }
 
 /** total recorded minutes (selected live clips), rounded. */

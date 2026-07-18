@@ -16,7 +16,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *
  * Clicking the button triggers requiresConfirmation → opens ConfirmActionDialog:
  *   - DialogTitle "Run completions"
- *   - DialogDescription "Generate translations for the next N untranslated cells..."
+ *   - DialogDescription names the bounded approved-example draft package and review requirement
  *   - checkbox "I understand this change will be attributed to my account."
  *   - Cancel button (closes dialog)
  *   - "Run AI completions" button (disabled until checkbox checked)
@@ -52,7 +52,7 @@ test("AI completions dialog opens with acknowledgement checkbox", async ({ alice
   // DialogDescription contains cell count text.
   await expect(
     dialog.locator("p, [role=status], .text-muted-foreground").filter({
-      hasText: /Generate translations for the next/i,
+      hasText: /Generate an approved-example draft package for the next/i,
     }).first()
   ).toBeVisible({ timeout: 5_000 })
 

@@ -1,4 +1,4 @@
-import { type Page, expect } from "@playwright/test"
+import { type Page, type Locator, expect } from "@playwright/test"
 
 export interface CreateProjectOpts {
   name?: string
@@ -29,41 +29,60 @@ export class Dashboard {
     const source = opts.source ?? "en"
     const target = opts.target ?? "fr"
 
+    const dialog = await this.openCreateProjectDialog()
+    // Anchored, case-insensitive labels: the AD-9 "Advanced: project shape"
+    // radios carry long descriptions (e.g. the "Source-only" option mentions
+    // "target language"), so we anchor with ^...$ to avoid matching those,
+    // while /i tolerates label casing ("Project name" vs "Project Name").
+    await dialog.getByLabel(/^Project name$/i).fill(name)
+    await dialog.getByLabel(/^Source language$/i).fill(source)
+    // Self-contained projects support extra target-language lanes and label
+    // the primary field "Target language(s)"; linked-target projects retain
+    // the singular label. Accept both accessible names.
+    await dialog.getByLabel(/^Target language(?:\(s\))?$/i).fill(target)
+    const createResponse = this.page.waitForResponse((response) => {
+      const request = response.request()
+      if (request.method() !== "POST" || !response.ok()) return false
+      try {
+        return new URL(response.url()).pathname.endsWith("/api/v2/projects")
+      } catch {
+        return false
+      }
+    }, { timeout: 15_000 })
+    await Promise.all([
+      createResponse,
+      dialog.getByRole("button", { name: /^Create Project$/i }).click(),
+    ])
+
+    // The project name renders in more than one place after creation (card +
+    // heading), so scope to the first match to avoid strict-mode violations.
+    await expect(dialog).toBeHidden({ timeout: 10_000 })
+    await expect(this.page).toHaveURL(/\/projects\/[^/?#]+(?:[?#].*)?$/, { timeout: 15_000 })
+    await expect(this.page.getByText(name).first()).toBeVisible({ timeout: 15_000 })
+    return name
+  }
+
+  async openCreateProjectDialog(): Promise<Locator> {
     // A freshly-reset org renders three "+ New Project" buttons on /projects:
     // the page header, the empty-state "Create your first project" CTA, and the
     // org setup checklist. They all open the same create dialog, so scope to the
     // first (the header) to avoid a strict-mode violation.
     await this.page.getByRole("button", { name: /new project/i }).first().click()
-    // Anchored, case-insensitive labels: the AD-9 "Advanced: project shape"
-    // radios carry long descriptions (e.g. the "Source-only" option mentions
-    // "target language"), so we anchor with ^...$ to avoid matching those,
-    // while /i tolerates label casing ("Project name" vs "Project Name").
-    await this.page.getByLabel(/^Project name$/i).fill(name)
-    await this.page.getByLabel(/^Source language$/i).fill(source)
-    await this.page.getByLabel(/^Target language$/i).fill(target)
-    await this.page.getByRole("button", { name: /^Create Project$/i }).click()
-
-    // The project name renders in more than one place after creation (card +
-    // heading), so scope to the first match to avoid strict-mode violations.
-    await expect(this.page.getByText(name).first()).toBeVisible({ timeout: 5_000 })
-    return name
+    const dialog = this.page.getByRole("dialog")
+    await expect(dialog).toBeVisible({ timeout: 5_000 })
+    return dialog
   }
 
   /** Click a project card by name and wait for the workspace shell to render.
    * Dismisses the per-project Setup Checklist drawer if it auto-opens. */
   async openProject(name: string): Promise<void> {
-    // Creating a project now lands directly on its Overview, where the name
-    // renders as the DISABLED current-page breadcrumb — clicking it hangs
-    // forever. Only click through the projects list when we're not already
-    // on the project's own page.
-    const currentCrumb = this.page.locator('[data-slot="breadcrumb-page"]', { hasText: name })
-    if (!(await currentCrumb.isVisible().catch(() => false))) {
-      await this.page.getByText(name).first().click()
-    }
     // A project card now lands on the project Overview (/projects/:id). Enter
     // the editor workspace (/project/:id) via its "Open project" action when
     // present (older UIs went straight to the editor).
     const openInEditor = this.page.getByRole("button", { name: /^Open project$/i })
+    if (!(await openInEditor.isVisible({ timeout: 1_000 }).catch(() => false))) {
+      await this.page.getByRole("link", { name, exact: true }).click()
+    }
     if (await openInEditor.isVisible({ timeout: 8_000 }).catch(() => false)) {
       await openInEditor.click()
     }

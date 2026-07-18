@@ -214,3 +214,34 @@ describe("rule engine — builtin variant", () => {
     expect(out).toHaveLength(1)
   })
 })
+
+describe("builtin messages name the offending content (FRO-345)", () => {
+  it("placeholder-integrity names the missing placeholder", () => {
+    const rule = makeRule({
+      id: "builtin-ph",
+      name: "Placeholder integrity",
+      source: "algorithmic",
+      check: { type: "builtin", checkId: "placeholder-integrity" },
+    })
+    const cell = makeCell({
+      id: "c1", original: "Hello {name}, age {age}", translated: "Bonjour {name}", status: "validated",
+    })
+    const out = checkRulesForCell(cell, "f1", [rule])
+    expect(out).toHaveLength(1)
+    expect(out[0].message).toContain("{age}")
+    expect(out[0].message).not.toContain("{name}")
+  })
+
+  it("static-message builtins are unaffected", () => {
+    const rule = makeRule({
+      id: "builtin-tes2",
+      name: "Target eq source",
+      source: "algorithmic",
+      check: { type: "builtin", checkId: "target-equals-source" },
+    })
+    const cell = makeCell({ id: "c1", original: "Hello", translated: "Hello", status: "validated" })
+    const out = checkRulesForCell(cell, "f1", [rule])
+    expect(out).toHaveLength(1)
+    expect(typeof out[0].message).toBe("string")
+  })
+})

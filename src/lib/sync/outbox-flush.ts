@@ -128,7 +128,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
   const batch = groupOldestFileFirst(records)
   const fileId = batch[0].event.fileId
   if (!fileId) {
-    // FRO-228: comment.* events with project scope carry no fileId in the
+    // AQU-228: comment.* events with project scope carry no fileId in the
     // envelope (the scope lives in the payload). Historically these were
     // dropped here, silently discarding resolves/edits/deletes. For comment.*
     // kinds without a fileId we use a project-sentinel so the token fetcher

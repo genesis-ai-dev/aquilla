@@ -47,6 +47,17 @@ describe("detectSuggestions — bible-book", () => {
     const p = mkProject([mkFile({ id: "6", name: "Genesis", type: "usfm" })])
     expect(detectSuggestions(p)).toHaveLength(0)
   })
+  it("drops a no-op corpus change but keeps the name rename (AQU-374)", () => {
+    // Repro: "1sa.usfm" already in corpus "OT" — the book-name rename is real,
+    // but the corpus is already "OT", so "OT → OT" must not be listed.
+    const p = mkProject([mkFile({
+      id: "8", name: "gen.usfm", type: "usfm", corpusMarker: "OT",
+    })])
+    const s = detectSuggestions(p)
+    expect(s).toHaveLength(1)
+    expect(s[0]).toMatchObject({ suggestedName: "Genesis" })
+    expect(s[0].suggestedCorpus).toBeUndefined()
+  })
   it("ignores non-scripture types", () => {
     const p = mkProject([mkFile({ id: "7", name: "gen.docx", type: "docx" })])
     expect(detectSuggestions(p)).toHaveLength(0)

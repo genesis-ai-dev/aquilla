@@ -1,5 +1,5 @@
 /**
- * FRO-251: per-file font size preference store tests.
+ * AQU-251: per-file font size preference store tests.
  *
  * Tests verify that:
  *   - getFileViewPref returns empty object when nothing is stored
@@ -24,7 +24,7 @@ beforeEach(() => {
   localStorage.clear()
 })
 
-describe("file-view-prefs store (FRO-251)", () => {
+describe("file-view-prefs store (AQU-251)", () => {
   it("returns an empty object for an unknown fileId", () => {
     const prefs = getFileViewPref("unknown-file-id")
     expect(prefs).toEqual({})

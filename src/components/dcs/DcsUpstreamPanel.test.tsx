@@ -31,9 +31,12 @@ const CURSOR: DcsCursor = {
 }
 
 const mockPatch = vi.fn()
+// refresh() re-GETs the server settings row — the repair-apply step re-checks
+// the cursor through it. Defaults to serving the live settingsBag.
+const mockRefresh = vi.fn()
 let settingsBag: Record<string, unknown>
 vi.mock("@/hooks/useProjectSettings", () => ({
-  useProjectSettings: () => ({ settings: settingsBag, patch: mockPatch }),
+  useProjectSettings: () => ({ settings: settingsBag, patch: mockPatch, refresh: mockRefresh }),
 }))
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -146,6 +149,12 @@ describe("DcsUpstreamPanel", () => {
   beforeEach(() => {
     settingsBag = { dcsUpstream: CURSOR }
     mockPatch.mockClear().mockResolvedValue({ kind: "ok" })
+    mockRefresh.mockClear().mockImplementation(async () => ({
+      version: 1,
+      updatedAt: "2026-07-01T00:00:00Z",
+      updatedBy: null,
+      settings: settingsBag,
+    }))
     mockEmitCommit.mockClear().mockResolvedValue("commit-evt")
     mockEmitDelete.mockClear().mockResolvedValue("delete-evt")
     mockEnqueue.mockClear().mockResolvedValue({ event: {}, eventId: "create-evt" })
@@ -254,26 +263,60 @@ describe("DcsUpstreamPanel", () => {
     })
   })
 
-  it("Re-sync content repairs the pinned import via the SAME apply path, without advancing the cursor", async () => {
-    // Repair targets the PINNED ref, so getCatalogEntry resolves the cursor's
-    // own entry (v88 / old-sha) — pass it as oldEntry.
+  it("Re-sync content SCANS first: shows counts and emits NOTHING until confirmed", async () => {
+    // One-click tombstoning was the adversarial-review blocker: computeRepairDelta
+    // deletes hide translations, so the scan must be side-effect free and the
+    // apply gated behind an explicit confirm.
     const pinnedEntry = { ...V89, ref: "v88", commitSha: "old-sha" }
     const client = makeClient(V89, [], pinnedEntry)
     render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
 
-    // The quiet secondary action is present for a pinned adapter project.
     fireEvent.click(screen.getByRole("button", { name: /re-sync content/i }))
 
-    await waitFor(() => {
-      expect(mockComputeRepairDelta).toHaveBeenCalledTimes(1)
-    })
+    await waitFor(() => expect(mockComputeRepairDelta).toHaveBeenCalledTimes(1))
     // Repair reads the PINNED entry, never the latest release.
     expect(mockComputeRepairDelta.mock.calls[0][0]).toMatchObject({
       entry: expect.objectContaining({ ref: "v88", commitSha: "old-sha" }),
     })
 
+    // Counts surface (1 commit to repair, 1 create, 1 delete in the canned delta)…
+    await waitFor(() => {
+      expect(screen.getByText(/1 to repair,\s*1 new,\s*1 to remove/i)).toBeInTheDocument()
+    })
+    // …the removal is called out specifically…
+    expect(
+      screen.getAllByText(/will be removed — translations attached to (them|removed cells) will be hidden/i).length,
+    ).toBeGreaterThan(0)
+    // …and NOTHING has been emitted or applied yet.
+    expect(mockApplyDelta).not.toHaveBeenCalled()
+    expect(mockEmitCommit).not.toHaveBeenCalled()
+    expect(mockEmitDelete).not.toHaveBeenCalled()
+    expect(mockEnqueue).not.toHaveBeenCalled()
+
+    // Cancelling the confirm dialog also applies nothing.
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }))
+    expect(mockApplyDelta).not.toHaveBeenCalled()
+  })
+
+  it("Re-sync confirm applies the SCANNED delta via the SAME apply path, without advancing the cursor", async () => {
+    const pinnedEntry = { ...V89, ref: "v88", commitSha: "old-sha" }
+    const client = makeClient(V89, [], pinnedEntry)
+    render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /re-sync content/i }))
+    await waitFor(() => expect(mockComputeRepairDelta).toHaveBeenCalledTimes(1))
+
+    // Confirm dialog: checkbox-gated destructive confirm (same idiom as detach).
+    const confirmButton = await screen.findByRole("button", { name: /^apply re-sync$/i })
+    expect(confirmButton).toBeDisabled()
+    fireEvent.click(screen.getByText(/I understand removed cells hide their translations/i))
+    expect(confirmButton).toBeEnabled()
+    fireEvent.click(confirmButton)
+
     // Applied through the SAME applyDelta path with the REAL emitters wired.
     await waitFor(() => expect(mockApplyDelta).toHaveBeenCalledTimes(1))
+    // The apply step re-read the settings cursor before emitting.
+    expect(mockRefresh).toHaveBeenCalled()
     expect(mockEmitCommit).toHaveBeenCalledTimes(1)
     expect(mockEmitCommit.mock.calls[0][0]).toMatchObject({
       cellId: "TIT-1-1",
@@ -311,6 +354,59 @@ describe("DcsUpstreamPanel", () => {
       expect(screen.getByText(/everything already matches/i)).toBeInTheDocument()
     })
     expect(mockEmitCommit).not.toHaveBeenCalled()
+    expect(mockEnqueue).not.toHaveBeenCalled()
+  })
+
+  it("Re-sync apply ABORTS without events when the cursor vanished between confirm and apply (detach race)", async () => {
+    // Another tab detaches the project while the confirm dialog is open. The
+    // apply step re-reads the settings cursor via refresh() and must abort —
+    // applying the stale delta would write into a detached project.
+    const pinnedEntry = { ...V89, ref: "v88", commitSha: "old-sha" }
+    const client = makeClient(V89, [], pinnedEntry)
+    render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /re-sync content/i }))
+    const confirmButton = await screen.findByRole("button", { name: /^apply re-sync$/i })
+
+    // The other tab detaches NOW — the next refresh serves no cursor.
+    mockRefresh.mockResolvedValue({
+      version: 2, updatedAt: "2026-07-02T00:00:00Z", updatedBy: null,
+      settings: { dcsUpstream: null },
+    })
+
+    fireEvent.click(screen.getByText(/I understand removed cells hide their translations/i))
+    fireEvent.click(confirmButton)
+
+    await waitFor(() => {
+      expect(screen.getByText(/upstream link changed .* nothing was applied/i)).toBeInTheDocument()
+    })
+    expect(mockApplyDelta).not.toHaveBeenCalled()
+    expect(mockEmitCommit).not.toHaveBeenCalled()
+    expect(mockEmitDelete).not.toHaveBeenCalled()
+    expect(mockEnqueue).not.toHaveBeenCalled()
+  })
+
+  it("Re-sync apply ABORTS when the cursor's commitSha changed between confirm and apply (import race)", async () => {
+    const pinnedEntry = { ...V89, ref: "v88", commitSha: "old-sha" }
+    const client = makeClient(V89, [], pinnedEntry)
+    render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /re-sync content/i }))
+    const confirmButton = await screen.findByRole("button", { name: /^apply re-sync$/i })
+
+    // Another tab imported v89 while the dialog sat open — the pin moved.
+    mockRefresh.mockResolvedValue({
+      version: 2, updatedAt: "2026-07-02T00:00:00Z", updatedBy: null,
+      settings: { dcsUpstream: { ...CURSOR, ref: "v89", commitSha: "new-sha" } },
+    })
+
+    fireEvent.click(screen.getByText(/I understand removed cells hide their translations/i))
+    fireEvent.click(confirmButton)
+
+    await waitFor(() => {
+      expect(screen.getByText(/upstream link changed .* nothing was applied/i)).toBeInTheDocument()
+    })
+    expect(mockApplyDelta).not.toHaveBeenCalled()
     expect(mockEnqueue).not.toHaveBeenCalled()
   })
 

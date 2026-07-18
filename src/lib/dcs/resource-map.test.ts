@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { ROUTES, routeFor } from "./resource-map"
+import { ROUTES, routeFor, isSupportedCatalogEntry } from "./resource-map"
 import { dcsCellId } from "./cell-id"
 import { contentHash } from "./content-hash"
 import type { DcsCatalogEntry, DcsManifest } from "./types"
@@ -67,6 +67,41 @@ describe("routeFor (spec §4 dispatch)", () => {
   it("ROUTES is ordered — first match wins", () => {
     expect(ROUTES.length).toBeGreaterThan(0)
     expect(ROUTES[0].id).toBe("usfm")
+  })
+})
+
+describe("isSupportedCatalogEntry (AQU-615 catalog pre-check)", () => {
+  // WHY: the catalog browser greys out rows PRE-import using only the catalog
+  // entry (no manifest exists yet). A false negative here hides an importable
+  // resource; a false positive re-creates the "no route" throw dead-end AFTER
+  // the user committed. Cases below are real Door43 catalog rows.
+  const row = (name: string, subject: string, contentFormat: string): DcsCatalogEntry => ({
+    ...ULT_ENTRY,
+    name,
+    fullName: `unfoldingWord/${name}`,
+    subject,
+    contentFormat,
+  })
+
+  it("accepts every resource type a route can import", () => {
+    expect(isSupportedCatalogEntry(row("en_ult", "Aligned Bible", "usfm"))).toBe(true)
+    expect(isSupportedCatalogEntry(row("en_obs", "Open Bible Stories", "markdown"))).toBe(true)
+    expect(isSupportedCatalogEntry(row("en_tn", "TSV Translation Notes", "tsv7"))).toBe(true)
+    expect(isSupportedCatalogEntry(row("en_obs-tq", "TSV OBS Translation Questions", "tsv9"))).toBe(true)
+  })
+
+  it("rejects the clearly-unrouted v1-tail resources (TW/TWL/TA/grammars)", () => {
+    expect(isSupportedCatalogEntry(row("en_twl", "TSV Translation Words Links", "tsv7"))).toBe(false)
+    expect(isSupportedCatalogEntry(row("en_tw", "Translation Words", "markdown"))).toBe(false)
+    expect(isSupportedCatalogEntry(row("en_ta", "Translation Academy", "markdown"))).toBe(false)
+    expect(isSupportedCatalogEntry(row("en_uhg", "Hebrew Grammar", "x-rst"))).toBe(false)
+  })
+
+  it("stays optimistic on unknown-but-maybe rows (usfm format, unrecognized subject)", () => {
+    // A blank/odd subject must not block a usfm resource — routeFor()'s
+    // manifest-aware dispatch is the authoritative gate at import time.
+    expect(isSupportedCatalogEntry(row("hbo_uhb", "", "usfm"))).toBe(true)
+    expect(isSupportedCatalogEntry(row("xx_odd", "Some Future Subject", ""))).toBe(true)
   })
 })
 

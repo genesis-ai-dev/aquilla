@@ -11,6 +11,7 @@ import {
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
   ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, ChevronDown, Music, Braces,
   Languages,
+  Archive,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -77,6 +78,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { isLaneArchived } from "@/components/project-lane-archive"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
@@ -516,6 +518,11 @@ interface EditorTableProps {
    * handler) the tag stays a static pill — byte-identical to the N=1 header.
    */
   lanes?: string[]
+  /** AQU-601: archived lane tags (a subset of `lanes`). Archived lanes are
+   *  hidden from the switcher by default and revealed behind a "show archived"
+   *  toggle, so a mistaken/retired lane stops cluttering the picker while
+   *  staying reachable. Absent/empty ⇒ every lane shows (pre-archive behavior). */
+  archivedLanes?: string[]
   /** Called with the chosen lane (`''` = default) when the TARGET tag dropdown
    *  is used. Omit to keep the tag non-interactive. */
   onLaneChange?: (lane: string) => void
@@ -674,7 +681,7 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, username, activeLane = "", lanes, onLaneChange, defaultLaneLabel,
+  project, cellStore, username, activeLane = "", lanes, archivedLanes, onLaneChange, defaultLaneLabel,
   onEditTargetLanguage,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews,
@@ -723,6 +730,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const [chapterVisibleIndex, setChapterVisibleIndex] = useState<number | null>(null)
   const [activeEditorCellId, setActiveEditorCellId] = useState<string | null>(null)
   const [hoveredFootnote, setHoveredFootnote] = useState<{ cellId: string; index: number } | null>(null)
+  // AQU-601: the lane switcher hides archived lanes by default; this reveals
+  // them within the open dropdown so a retired lane stays reachable.
+  const [showArchivedLanes, setShowArchivedLanes] = useState(false)
+  const laneSwitcher = useMemo(() => {
+    const all = lanes ?? []
+    return {
+      visible: all.filter((l) => !isLaneArchived(l, archivedLanes)),
+      archived: all.filter((l) => isLaneArchived(l, archivedLanes)),
+    }
+  }, [lanes, archivedLanes])
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
   const displayCellIds = useCellIds(cellStore, orderedBy, !!audioLens)
@@ -1662,7 +1679,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                   <ChevronDown className="h-2.5 w-2.5" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="min-w-[8rem]">
-                  {lanes.map((lane) => {
+                  {/* Active lanes, shown by default. */}
+                  {laneSwitcher.visible.map((lane) => {
                     const active = lane === activeLane
                     const label = lane === "" ? (defaultLaneLabel || "Target") : lane
                     return (
@@ -1678,6 +1696,47 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                       </DropdownMenuItem>
                     )
                   })}
+                  {/* AQU-601: archived lanes are hidden behind a reveal so a
+                      retired lane stops cluttering the switcher yet stays
+                      reachable. If the active lane is itself archived we expand
+                      automatically so the current selection is always visible. */}
+                  {laneSwitcher.archived.length > 0 && (
+                    <>
+                      <DropdownMenuSeparator />
+                      {showArchivedLanes || isLaneArchived(activeLane, archivedLanes) ? (
+                        laneSwitcher.archived.map((lane) => {
+                          const active = lane === activeLane
+                          return (
+                            <DropdownMenuItem
+                              key={lane}
+                              data-testid={`lane-option-${lane}`}
+                              data-active={active ? "true" : undefined}
+                              data-archived="true"
+                              onClick={() => onLaneChange(lane)}
+                              className="justify-between gap-2 text-xs text-muted-foreground"
+                            >
+                              <span className="flex items-center gap-1.5">
+                                <Archive className="h-3 w-3" />
+                                {lane}
+                              </span>
+                              {active && <Check className="h-3.5 w-3.5" />}
+                            </DropdownMenuItem>
+                          )
+                        })
+                      ) : (
+                        <DropdownMenuItem
+                          data-testid="lane-show-archived"
+                          closeOnClick={false}
+                          onClick={() => setShowArchivedLanes(true)}
+                          className="gap-1.5 text-xs text-muted-foreground"
+                        >
+                          <Archive className="h-3 w-3" />
+                          Show archived ({laneSwitcher.archived.length})
+                        </DropdownMenuItem>
+                      )}
+                    </>
+                  )}
+                  {/* AQU-583: manage the default target language from the switcher. */}
                   {onEditTargetLanguage && (
                     <>
                       <DropdownMenuSeparator />

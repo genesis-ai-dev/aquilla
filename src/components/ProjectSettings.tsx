@@ -1078,6 +1078,7 @@ export function ProjectSettings() {
           <LanguagesSection
             defaultTargetLanguage={sharedSettingsBlob?.targetLanguage ?? project?.targetLanguage ?? ""}
             targetLanes={sharedSettingsBlob?.targetLanes ?? []}
+            archivedLanes={sharedSettingsBlob?.archivedLanes ?? []}
             canEdit={canEditShared}
             disabledTooltip={sharedDisabledTooltip}
             patch={patchShared}

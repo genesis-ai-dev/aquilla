@@ -303,6 +303,12 @@ export interface ProjectRecord {
    * overlaySettings — the workspace LaneSwitcher reads this.
    */
   targetLanes?: string[]
+  /**
+   * AQU-601: archived lane tags (a subset of `targetLanes`). Overlaid from
+   * ProjectWideSettings.archivedLanes; the workspace LaneSwitcher hides these
+   * by default (still reachable via the "show archived" reveal / deep links).
+   */
+  archivedLanes?: string[]
   createdAt: string
   files: FileReference[]
   members: ProjectMember[]

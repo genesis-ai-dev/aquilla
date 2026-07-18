@@ -4613,6 +4613,7 @@ export function ProjectWorkspace() {
             username={currentUsername}
             activeLane={activeLane}
             lanes={availableLanes}
+            archivedLanes={project?.archivedLanes}
             onLaneChange={setActiveLane}
             defaultLaneLabel={activeTargetLanguage || "Target"}
             // AQU-583: the TARGET tag is the discoverable entry point to change

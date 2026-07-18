@@ -59,9 +59,11 @@ export interface EditorCapabilities {
   sourceReadOnlyReason: string | null
 }
 
-/** Shown wherever the source-edit affordance is suppressed by a DCS pin. */
+/** Shown wherever the source-edit affordance is suppressed by a DCS pin.
+ *  Detach is gated at MAINTAINER (600) — see DcsUpstreamPanel — so the copy
+ *  must not tell a project_lead (500) reader to do it themselves. */
 export const DCS_SOURCE_LOCK_REASON =
-  "Source is synced from Door43 — detach in Project Settings to edit"
+  "Source is synced from Door43 — a maintainer can detach it in Project Settings."
 
 export interface EditorCapabilityOpts {
   /**

@@ -210,6 +210,15 @@ describe("resolveEditorCapabilities — DCS upstream lockdown (hasDcsUpstream)",
     }
   });
 
+  it("lock-reason copy does not tell the reader to detach (detach needs MAINTAINER 600, but a project_lead 500 sees this copy)", () => {
+    // AQU-615 review nit: the old copy said "detach in Project Settings to
+    // edit", but the detach action is gated at MAINTAINER — a project_lead
+    // would follow the instruction and find no such control. The copy must
+    // attribute the action to a maintainer instead.
+    expect(DCS_SOURCE_LOCK_REASON).toMatch(/a maintainer can detach/i);
+    expect(DCS_SOURCE_LOCK_REASON).not.toMatch(/detach .* to edit/i);
+  });
+
   it("LOADING policy: unknown linked-state must be passed as hasDcsUpstream=true (default-locked)", () => {
     // EditorTable passes `hasDcsUpstream: loading || cursor !== null` — while
     // the settings fetch is in flight the lock is ON. Default-locked can never

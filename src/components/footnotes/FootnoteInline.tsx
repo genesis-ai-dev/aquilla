@@ -29,7 +29,8 @@ interface FootnoteInlineProps {
    * @param footnoteIndex The index of the footnote in the targetFootnotes array.
    * @param newText The new text content for the translatable part of the footnote.
    */
-  onSave: (footnoteIndex: number, newText: string) => void
+  /** Return false when the save failed (e.g. stale footnote index) so the editor stays open. FRO-472 */
+  onSave: (footnoteIndex: number, newText: string) => boolean | void
   /** Called when the user confirms deleting the full target footnote marker. */
   onDelete?: (footnoteIndex: number) => void
   /** Creates a target footnote from the corresponding source footnote. */
@@ -130,7 +131,8 @@ export function FootnotesTray({
   entries: VisibleFootnoteEntry[]
   className?: string
   editable?: boolean
-  onSave?: (cellId: string, footnoteIndex: number, newText: string) => void
+  /** Return false when the save failed (e.g. stale footnote index) so the editor stays open. FRO-472 */
+  onSave?: (cellId: string, footnoteIndex: number, newText: string) => boolean | void
   onDelete?: (cellId: string, footnoteIndex: number) => void
   onClose?: () => void
 }) {
@@ -262,7 +264,8 @@ function FootnoteRows({
   targetFootnotes: ExtractedFootnote[]
   editable: boolean
   canCreateTarget?: boolean
-  onSave: (footnoteIndex: number, newText: string) => void
+  /** Return false when the save failed (e.g. stale footnote index) so the editor stays open. FRO-472 */
+  onSave: (footnoteIndex: number, newText: string) => boolean | void
   onDelete?: (footnoteIndex: number) => void
   onCreateTarget?: (sourceFootnote: ExtractedFootnote) => void
   numberOffset?: number
@@ -305,7 +308,8 @@ interface FootnoteRowProps {
   numberOffset: number
   targetOnlyLayout: "right-half" | "fill"
   compact?: boolean
-  onSave: (footnoteIndex: number, newText: string) => void
+  /** Return false when the save failed (e.g. stale footnote index) so the editor stays open. FRO-472 */
+  onSave: (footnoteIndex: number, newText: string) => boolean | void
   onDelete?: (footnoteIndex: number) => void
   onCreateTarget?: (sourceFootnote: ExtractedFootnote) => void
 }
@@ -327,16 +331,25 @@ function FootnoteRow({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(targetFn?.text ?? "")
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [saveError, setSaveError] = useState(false)
 
   useEffect(() => {
     if (!editing) {
       setDraft(targetFn?.text ?? "")
       setConfirmDelete(false)
+      setSaveError(false)
     }
   }, [targetFn?.text, editing])
 
   function handleSave() {
-    onSave(index, draft)
+    // onSave returns false when the splice could not locate the footnote
+    // (cell text changed underneath the editor). Keep the editor open with
+    // the draft intact instead of silently dropping the edit (FRO-472).
+    if (onSave(index, draft) === false) {
+      setSaveError(true)
+      return
+    }
+    setSaveError(false)
     setEditing(false)
     setConfirmDelete(false)
   }
@@ -345,6 +358,7 @@ function FootnoteRow({
     setDraft(targetFn?.text ?? "")
     setEditing(false)
     setConfirmDelete(false)
+    setSaveError(false)
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -399,6 +413,11 @@ function FootnoteRow({
             placeholder="Translate footnote..."
             ariaLabel="Edit footnote"
           />
+          {saveError && (
+            <p role="alert" className="text-[10px] text-destructive">
+              Couldn't save — this footnote changed while you were editing. Copy your text, cancel, and reopen it.
+            </p>
+          )}
           <div className="flex gap-1">
             <button
               type="button"

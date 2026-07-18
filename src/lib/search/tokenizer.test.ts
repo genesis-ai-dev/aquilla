@@ -27,4 +27,19 @@ describe("tokenizeText", () => {
   it("filters empty strings", () => {
     expect(tokenizeText("  multiple   spaces  ")).toEqual(["multiple", "spaces"])
   })
+
+  // Unicode-aware tokenization: \w-based stripping used to delete every
+  // accented or non-Latin letter, so most projects tokenized to nothing.
+  it("keeps accented Latin letters intact", () => {
+    expect(tokenizeText("Más allá, ¡qué día!")).toEqual(["más", "allá", "qué", "día"])
+  })
+  it("tokenizes Greek text", () => {
+    expect(tokenizeText("Ἐν ἀρχῇ ἦν ὁ λόγος")).toEqual(["ἐν", "ἀρχῇ", "ἦν", "ὁ", "λόγος"])
+  })
+  it("tokenizes Hebrew text with punctuation", () => {
+    expect(tokenizeText("בְּרֵאשִׁית, בָּרָא")).toEqual(["בְּרֵאשִׁית", "בָּרָא"])
+  })
+  it("tokenizes Cyrillic text", () => {
+    expect(tokenizeText("В начале было Слово")).toEqual(["в", "начале", "было", "слово"])
+  })
 })

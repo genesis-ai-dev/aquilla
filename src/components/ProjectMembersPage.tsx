@@ -37,8 +37,10 @@ import {
   ROLE,
   LINK_ROLE_OPTIONS,
   PROJECT_ROLE_OPTIONS,
+  humanRoleName,
   roleDisplayText,
 } from "@/lib/frontier/roles"
+import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { RoleLabel } from "@/components/RoleLabel"
 import type { ProjectMember } from "@/lib/frontier/members"
 import { toUserFacingError } from "@/lib/errors/user-error"
@@ -161,6 +163,8 @@ export function MembersTab({
 
   // Revoke-all state
   const [revokeTarget, setRevokeTarget] = useState<ProjectMember | null>(null)
+  // Remove-direct-grant confirmation (FRO-368: used to remove instantly).
+  const [removeTarget, setRemoveTarget] = useState<ProjectMember | null>(null)
 
   const handleAdd = useCallback(async () => {
     const trimmed = newUsername.trim()
@@ -259,14 +263,16 @@ export function MembersTab({
 
           {/* Remove button for direct grants */}
           {!isLocked && !isSelf && m.role.source === "override" ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="text-muted-foreground"
-              onClick={() => void remove(m.userId)}
-            >
-              Remove
-            </Button>
+            <AppTooltip content={`Removes ${m.username}'s direct project access. Access via org, team, or creator status is unaffected.`}>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-muted-foreground"
+                onClick={() => setRemoveTarget(m)}
+              >
+                Remove
+              </Button>
+            </AppTooltip>
           ) : isLocked ? (
             <AppTooltip content={lockedHint}>
               <span className="text-[10px] text-muted-foreground">
@@ -277,16 +283,17 @@ export function MembersTab({
 
           {/* Revoke all — available when session exists + maintainer+ */}
           {session?.jwt && !isSelf && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="gap-1 text-destructive/70 hover:text-destructive"
-              title="Revoke all access to this project"
-              onClick={() => setRevokeTarget(m)}
-            >
-              <ShieldOff className="h-3.5 w-3.5" />
-              Revoke all
-            </Button>
+            <AppTooltip content="Review every access path this member holds (direct, org, team), then revoke with typed confirmation.">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="gap-1 text-destructive/70 hover:text-destructive"
+                onClick={() => setRevokeTarget(m)}
+              >
+                <ShieldOff className="h-3.5 w-3.5" />
+                Revoke all
+              </Button>
+            </AppTooltip>
           )}
         </div>
       </li>
@@ -457,6 +464,24 @@ export function MembersTab({
         ) : null}
       </div>
 
+      {/* Remove-direct-grant confirmation (FRO-368) */}
+      <ConfirmActionDialog
+        open={removeTarget !== null}
+        onOpenChange={(open) => { if (!open) setRemoveTarget(null) }}
+        title="Remove member"
+        description={
+          removeTarget
+            ? `Remove ${removeTarget.username}'s direct ${humanRoleName(removeTarget.role.level)} access to this project? Any access via org, team, or creator status is unaffected — use "Revoke all" to review every path.`
+            : ""
+        }
+        confirmLabel="Remove"
+        variant="destructive"
+        onConfirm={() => {
+          if (removeTarget) void remove(removeTarget.userId)
+          setRemoveTarget(null)
+        }}
+      />
+
       {/* Revoke-all dialog */}
       {revokeTarget && (
         <RevokeAllDialog
@@ -580,7 +605,6 @@ function RevokeAllDialog({
             <GrantPathRow
               source={member.role.source}
               level={member.role.level}
-              name={member.role.name}
               removable={member.role.source === "override"}
             />
             {member.secondarySources?.map((s, i) => (
@@ -588,7 +612,6 @@ function RevokeAllDialog({
                 key={i}
                 source={s.source}
                 level={s.level}
-                name={s.name}
                 removable={false}
               />
             ))}
@@ -871,11 +894,10 @@ function SourceBadge({ source }: { source: string }) {
 }
 
 function GrantPathRow({
-  source, level, name, removable,
+  source, level, removable,
 }: {
   source: string
   level: number
-  name: string
   removable: boolean
 }) {
   return (
@@ -883,7 +905,8 @@ function GrantPathRow({
       <span className={cn("font-medium capitalize", removable ? "text-foreground" : "text-muted-foreground")}>
         {source}
       </span>
-      <span className="text-muted-foreground">→ <RoleLabel name={name} /> (level {level})</span>
+      {/* Role LABEL only — numeric levels are internal (FRO-368). */}
+      <span className="text-muted-foreground">→ {humanRoleName(level)}</span>
       {removable ? (
         <span className="text-xs text-destructive/70">will be removed</span>
       ) : (

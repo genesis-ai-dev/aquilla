@@ -214,18 +214,20 @@ export function useCellAudio(
       } as AudioError
     }
 
-    if (!sessionRef.current?.jwt) {
-      throw { kind: "no-session", message: "Not signed in" } as AudioError
-    }
-
     const p = (async () => {
       try {
         // L2 cache check (CACHE-5): audio is immutable per audioId, so a hit
-        // here is always valid — no re-download needed.
+        // here is always valid — no re-download needed. Checked BEFORE the
+        // sign-in guard (FRO-355) so a locally-cached take still plays offline
+        // / signed out; only the network fetch below needs a JWT.
         const cached = await audioCacheGet(frontier.audioId, frontier.ext)
         if (cached) {
           bytesRef.current = cached
           return cached
+        }
+
+        if (!sessionRef.current?.jwt) {
+          throw { kind: "no-session", message: "Not signed in" } as AudioError
         }
 
         const bytes = await fetchCellAudio({
@@ -240,6 +242,9 @@ export function useCellAudio(
         void audioCachePut(frontier.audioId, frontier.ext, bytes)
         return bytes
       } catch (e) {
+        // Pass through already-typed AudioErrors (e.g. the no-session throw
+        // above) instead of re-wrapping them as "download-failed".
+        if (e && typeof e === "object" && "kind" in e) throw e
         // F10: distinguish permanent deletion (404) from transient errors.
         // 404 → "audio-deleted" so the UI can show "re-record" instead of
         // a generic error with a retry spinner.

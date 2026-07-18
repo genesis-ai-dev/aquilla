@@ -33,7 +33,7 @@ import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy } from "@/lib/parsers/types"
 import { hasTiming } from "@/lib/timeline/derive"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
-import { canPerform } from "@/lib/sync/role-policy"
+import { canPerform, canSwitchLanes } from "@/lib/sync/role-policy"
 import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel } from "./ExamplePanel"
@@ -1699,8 +1699,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                   "Set target language" prompt when none is set yet) opening the
                   language settings.
                 • with neither handler → the original static pill (byte-identical
-                  to the pre-AQU-583 header for callers that pass no handlers). */}
-            {project.targetLanguage && lanes && lanes.length > 1 && onLaneChange ? (
+                  to the pre-AQU-583 header for callers that pass no handlers).
+                AQU-608: lane switching is a maintainer-and-above affordance —
+                below maintainer the tag stays a static pill so translators keep
+                to their assigned lane. */}
+            {project.targetLanguage &&
+            lanes &&
+            lanes.length > 1 &&
+            onLaneChange &&
+            canSwitchLanes(project.syncRole?.level) ? (
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={

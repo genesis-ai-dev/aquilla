@@ -27,7 +27,7 @@ import { useRules } from "@/hooks/useRules"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useActiveOrg } from "@/context/OrgContext"
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
-import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
+import { completionBatchSizeFor } from "@/lib/workspace-actions/registry"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileOrderedBy, fileTypeHasSections, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
@@ -3557,11 +3557,12 @@ export function ProjectWorkspace() {
   const actionArgs = useMemo(() => ({
     openImport: openImportFlow,
     runCompletions: () => {
-      if (!activeFileId) return
+      if (!activeFileId || !project) return
       const cells = getActiveCells()
       const untranslated = cells.filter((c) => !c.translated.trim())
       if (untranslated.length === 0) return
-      completeBatch(untranslated.slice(0, MAX_BATCH_COMPLETIONS))
+      // AQU-586: honor the project's configured completion batch size (default 10).
+      completeBatch(untranslated.slice(0, completionBatchSizeFor(project)))
     },
     runCompleteAll: () => {
       if (!activeFileId) return
@@ -3580,9 +3581,14 @@ export function ProjectWorkspace() {
     runBatchValidate: () => {
       if (!project?.id || !activeFileId) return
       if (!canPerform("cell.validate", project.syncRole?.level ?? null)) return
-      const validatable = cellSummaries.filter(
+      const eligible = cellSummaries.filter(
         (c) => c.fileId === activeFileId && isBulkValidationEligible(c),
       )
+      // AQU-586: cap how many eligible cells one batch-validate processes.
+      // 0/undefined = validate all eligible (unchanged default behavior).
+      const cap = project.completionSettings?.validationBatchSize
+      const validatable =
+        typeof cap === "number" && cap > 0 ? eligible.slice(0, cap) : eligible
       if (validatable.length === 0) return
       void (async () => {
         for (const cell of validatable) {

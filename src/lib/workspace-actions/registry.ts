@@ -2,6 +2,7 @@ import { Plus, Sparkles, Download, CheckSquare, Bot, Upload, Mic, Wand2 } from "
 import type {
   WorkspaceAction, WorkspaceActionContext,
 } from "./types"
+import type { ProjectRecord } from "@/lib/parsers/types"
 import { canPerform } from "@/lib/sync/role-policy"
 
 // AQU-365: viewers (and any role below the action's server floor) must not
@@ -15,8 +16,18 @@ function roleAllows(ctx: WorkspaceActionContext, kind: string): boolean {
 
 // A deliberate human-review package, not a project scheduler. Research found
 // 5–10 consecutive items to be a practical unit for workload estimation and
-// review; larger files are advanced by running the next package.
+// review; larger files are advanced by running the next package. This is the
+// default when a project hasn't customized `completionSettings.completionBatchSize`.
 export const MAX_BATCH_COMPLETIONS = 10
+
+// AQU-586: the project can override the "Run AI completions" package size.
+// Falls back to MAX_BATCH_COMPLETIONS when unset or non-positive. Clamped to a
+// sane ceiling so a bad stored value can't request an unbounded package.
+export function completionBatchSizeFor(project: ProjectRecord): number {
+  const raw = project.completionSettings?.completionBatchSize
+  if (typeof raw === "number" && raw > 0) return Math.min(50, Math.floor(raw))
+  return MAX_BATCH_COMPLETIONS
+}
 
 export function getVisibleActions(
   actions: WorkspaceAction[], ctx: WorkspaceActionContext,
@@ -54,7 +65,7 @@ export const workspaceActions: WorkspaceAction[] = [
         if (!c.activeFileId) return ""
         const p = c.fileProgress.get(c.activeFileId)
         const untranslated = p ? p.total - p.translated : 0
-        const next = Math.min(MAX_BATCH_COMPLETIONS, untranslated)
+        const next = Math.min(completionBatchSizeFor(c.project), untranslated)
         return `Generate an approved-example draft package for the next ${next} untranslated cell${next === 1 ? "" : "s"}${untranslated > next ? ` (${untranslated - next} more after this)` : ""}. Every draft still needs individual human review.`
       },
       confirmLabel: "Run AI completions",
@@ -75,7 +86,7 @@ export const workspaceActions: WorkspaceAction[] = [
         if (!c.activeFileId) return ""
         const p = c.fileProgress.get(c.activeFileId)
         const untranslated = p ? p.total - p.translated : 0
-        return `Generate drafts for all ${untranslated} untranslated cell${untranslated === 1 ? "" : "s"}, split into packages of at most ${MAX_BATCH_COMPLETIONS}. Packaging preserves context but is not a quality guarantee; every draft remains unapproved until a human reviews it individually.`
+        return `Generate drafts for all ${untranslated} untranslated cell${untranslated === 1 ? "" : "s"}, split into packages of at most ${completionBatchSizeFor(c.project)}. Packaging preserves context but is not a quality guarantee; every draft remains unapproved until a human reviews it individually.`
       },
       confirmLabel: "Draft all",
     },
@@ -95,9 +106,16 @@ export const workspaceActions: WorkspaceAction[] = [
         if (!c.activeFileId) return ""
         const p = c.fileProgress.get(c.activeFileId)
         const unvalidated = p ? p.total - p.validated : 0
-        return `This marks eligible human-authored or human-edited cells as validated under your name. Untouched AI drafts are excluded and still need individual review. (${unvalidated} cells are currently unvalidated.)`
+        // AQU-586: a project may cap how many eligible cells one batch-validate
+        // processes. 0/undefined keeps the "all eligible" behavior.
+        const cap = c.project.completionSettings?.validationBatchSize
+        const capNote =
+          typeof cap === "number" && cap > 0
+            ? ` At most ${cap} eligible cell${cap === 1 ? "" : "s"} are validated per run (project batch size); run again to continue.`
+            : ""
+        return `This marks eligible human-authored or human-edited cells as validated under your name. Untouched AI drafts are excluded and still need individual review. (${unvalidated} cells are currently unvalidated.)${capNote}`
       },
-      confirmLabel: "Validate all",
+      confirmLabel: "Validate",
     },
     run: (_c, args) => args.runBatchValidate(),
   },

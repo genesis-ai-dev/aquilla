@@ -572,6 +572,21 @@ export interface CompletionSettings {
    * translations to imitate for style/patterns.
    */
   fewShotExampleFormat?: "source-and-target" | "target-only"
+
+  /**
+   * AQU-586: how many untranslated cells the "Run AI completions" action drafts
+   * per package. `undefined`/0 falls back to MAX_BATCH_COMPLETIONS (10). Larger
+   * files are advanced by running the next package. Clamped 1–50 at the UI.
+   */
+  completionBatchSize?: number
+
+  /**
+   * AQU-586: cap on how many eligible cells a single "Batch validate" action
+   * processes. `undefined`/0 = validate all eligible cells (default, unchanged
+   * behavior); a positive value validates only the first N eligible cells so a
+   * reviewer can approve in bounded batches. Clamped 0–500 at the UI.
+   */
+  validationBatchSize?: number
 }
 
 export interface WeightedExample {

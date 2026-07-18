@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { getDefaultAction, getVisibleActions, workspaceActions } from "./registry"
+import { getDefaultAction, getVisibleActions, workspaceActions, completionBatchSizeFor, MAX_BATCH_COMPLETIONS } from "./registry"
 import type { WorkspaceAction, WorkspaceActionContext } from "./types"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
@@ -160,6 +160,44 @@ describe("AQU-503: target import is discoverable by wording", () => {
     }
     expect(importIntoFile.isAvailable(ctx({ project: projectWithRole, activeFileId: "f1" }))).toBe(true)
     expect(importIntoFile.isAvailable(ctx({ activeFileId: null }))).toBe(false)
+  })
+})
+
+// AQU-586: configurable batch sizes for Run AI completions / Batch validate.
+describe("completionBatchSizeFor", () => {
+  it("defaults to MAX_BATCH_COMPLETIONS when unset", () => {
+    expect(completionBatchSizeFor(project)).toBe(MAX_BATCH_COMPLETIONS)
+  })
+
+  it("returns the project's configured completion batch size", () => {
+    const p: ProjectRecord = { ...project, completionSettings: { endpoint: "", model: "", maxTokens: 512, temperature: 0.3, systemPrompt: "", completionBatchSize: 25 } }
+    expect(completionBatchSizeFor(p)).toBe(25)
+  })
+
+  it("clamps an over-large stored value to 50 and ignores non-positive values", () => {
+    const big: ProjectRecord = { ...project, completionSettings: { endpoint: "", model: "", maxTokens: 512, temperature: 0.3, systemPrompt: "", completionBatchSize: 9999 } }
+    expect(completionBatchSizeFor(big)).toBe(50)
+    const zero: ProjectRecord = { ...project, completionSettings: { endpoint: "", model: "", maxTokens: 512, temperature: 0.3, systemPrompt: "", completionBatchSize: 0 } }
+    expect(completionBatchSizeFor(zero)).toBe(MAX_BATCH_COMPLETIONS)
+  })
+
+  it("the run-completions confirmation reflects the configured batch size", () => {
+    const p: ProjectRecord = { ...project, completionSettings: { endpoint: "", model: "", maxTokens: 512, temperature: 0.3, systemPrompt: "", completionBatchSize: 3 } }
+    const action = workspaceActions.find((a) => a.id === "run-completions")!
+    const desc = action.requiresConfirmation!.description(
+      ctx({ project: p, activeFileId: "f1", fileProgress: new Map([["f1", { translated: 0, validated: 0, total: 10 }]]) }),
+    )
+    expect(desc).toContain("next 3 untranslated cells")
+    expect(desc).toContain("7 more after this")
+  })
+
+  it("the batch-validate confirmation notes the per-run cap when set", () => {
+    const p: ProjectRecord = { ...project, completionSettings: { endpoint: "", model: "", maxTokens: 512, temperature: 0.3, systemPrompt: "", validationBatchSize: 5 } }
+    const action = workspaceActions.find((a) => a.id === "batch-validate")!
+    const desc = action.requiresConfirmation!.description(
+      ctx({ project: p, activeFileId: "f1", fileProgress: new Map([["f1", { translated: 10, validated: 0, total: 10 }]]) }),
+    )
+    expect(desc).toContain("At most 5 eligible cells are validated per run")
   })
 })
 

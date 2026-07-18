@@ -4813,6 +4813,7 @@ function EditorRow({
                 isDocx={isDocxFile}
                 onSave={(footnoteIndex, newText) => {
                   const updated = spliceFootnoteText(visibleTranslated ?? "", footnoteIndex, newText)
+                  if (updated === null) return false // stale index — keep the editor open (FRO-472)
                   handleEditorCommit({ value: updated, valueHtml: updated })
                 }}
                 onDelete={(footnoteIndex) => {
@@ -5403,6 +5404,7 @@ function EditorRow({
                   isDocx={isDocxFile}
                   onSave={(footnoteIndex, newText) => {
                     const updated = spliceFootnoteText(visibleTranslated ?? "", footnoteIndex, newText)
+                    if (updated === null) return false // stale index — keep the editor open (FRO-472)
                     handleEditorCommit({ value: updated, valueHtml: updated })
                   }}
                   onDelete={(footnoteIndex) => {

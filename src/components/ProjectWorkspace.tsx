@@ -3672,6 +3672,18 @@ export function ProjectWorkspace() {
     }
   }, [getTokenForProjectFile, rememberPendingTargetCommit, refreshOutboxPending, revalidateAuditStats, revalidateCellStats, revalidateCell, revalidateCells])
 
+  // AQU-616: bulk validate/unvalidate from the SelectionBar enqueues N events
+  // but has no per-cell commit callback, so without this the events would wait
+  // for the ~5s periodic flusher before syncing — the confirmed state lags for
+  // seconds. Flush + revalidate immediately, mirroring handleCellCommitted and
+  // the "validate all" workspace action.
+  const handleBulkValidationCommitted = useCallback(async () => {
+    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    await refreshOutboxPending()
+    revalidateAuditStats()
+    revalidateCells()
+  }, [getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
+
   const workspaceHeaderMenuItems = useMemo((): OverflowMenuItem[] => {
     const diarizeLabel =
       diarizePhase === "starting" || diarizePhase === "running"
@@ -4330,6 +4342,7 @@ export function ProjectWorkspace() {
                   username={currentUsername}
                   completeSingle={completeSingle}
                   completeBatch={completeBatch}
+                  onValidationCommitted={handleBulkValidationCommitted}
                   audioMode={lens === "audio"}
                   onVoiceTogether={async (sel) => {
                     if (!activeFileId || !project) return

@@ -122,6 +122,7 @@ import type { Concept } from "@/lib/terminology/types"
 import { PreAcceptanceWarningBand } from "./PreAcceptanceWarningBand"
 import { detectPreAcceptanceWarnings } from "@/lib/terminology/preacceptance"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
+import { getSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
 import { useEditorActions } from "@/context/EditorActionsContext"
 import { AddConceptDialog } from "./AddConceptDialog"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
@@ -5106,8 +5107,17 @@ function EditorRow({
                     // FRO-278: if the cell already has human text, confirm
                     // before letting the AI overwrite it. Empty cells proceed
                     // immediately (byte-identical to previous behavior).
+                    // AQU-591: users can opt out of the confirm for
+                    // non-validated cells. Validated cells always confirm —
+                    // replacing them clears validation, which is more
+                    // destructive and always deserves an explicit confirm.
                     if (visibleTranslated.trim()) {
-                      setShowGenerateConfirm(true)
+                      const isValidated = cell.status === "validated"
+                      if (!isValidated && getSkipReplaceConfirm()) {
+                        onCompleteSingle(cell)
+                      } else {
+                        setShowGenerateConfirm(true)
+                      }
                     } else {
                       onCompleteSingle(cell)
                     }
@@ -5918,12 +5928,14 @@ function EditorRow({
         />
       )}
 
-      {/* FRO-278: confirm before AI Generate overwrites non-empty cell. */}
+      {/* FRO-278: confirm before AI Generate overwrites non-empty cell.
+          AQU-591: a "Don't ask again" opt-out for non-validated cells. */}
       <GenerateOverwriteDialog
         open={showGenerateConfirm}
         isValidated={cell.status === "validated"}
-        onConfirm={() => {
+        onConfirm={(dontAskAgain) => {
           setShowGenerateConfirm(false)
+          if (dontAskAgain) setSkipReplaceConfirm(true)
           onCompleteSingle(cell)
         }}
         onCancel={() => setShowGenerateConfirm(false)}
@@ -5964,12 +5976,18 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
+import { Checkbox } from "@/components/ui/checkbox"
 
 interface GenerateOverwriteDialogProps {
   open: boolean
   /** True when cell.status === "validated" — escalates the dialog copy. */
   isValidated: boolean
-  onConfirm: () => void
+  /**
+   * Confirm replacing the translation. `dontAskAgain` is true when the user
+   * ticked "Don't ask again" (AQU-591) — the caller persists the opt-out so
+   * future non-validated replacements skip this dialog.
+   */
+  onConfirm: (dontAskAgain: boolean) => void
   onCancel: () => void
 }
 
@@ -5979,6 +5997,14 @@ export function GenerateOverwriteDialog({
   onConfirm,
   onCancel,
 }: GenerateOverwriteDialogProps) {
+  const [dontAskAgain, setDontAskAgain] = useState(false)
+
+  // Reset the checkbox each time the dialog opens so a prior tick never leaks
+  // into a later confirmation.
+  useEffect(() => {
+    if (open) setDontAskAgain(false)
+  }, [open])
+
   const title = isValidated
     ? "Replace validated translation?"
     : "Replace existing translation?"
@@ -5994,11 +6020,22 @@ export function GenerateOverwriteDialog({
           <DialogTitle id="gen-overwrite-title">{title}</DialogTitle>
           <DialogDescription id="gen-overwrite-desc">{description}</DialogDescription>
         </DialogHeader>
+        {/* AQU-591: opting out only skips the confirm for non-validated cells —
+            replacing a validated translation always confirms, so no opt-out. */}
+        {!isValidated && (
+          <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+            <Checkbox
+              checked={dontAskAgain}
+              onCheckedChange={(c) => setDontAskAgain(c === true)}
+            />
+            Don't ask again when replacing a translation
+          </label>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
             Cancel
           </Button>
-          <Button variant="destructive" onClick={onConfirm}>
+          <Button variant="destructive" onClick={() => onConfirm(dontAskAgain)}>
             Replace
           </Button>
         </DialogFooter>

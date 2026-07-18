@@ -4428,6 +4428,9 @@ function EditorRow({
         // keyboard so the focused row is clear to sighted keyboard users.
         data-grid-row
         data-cell-expanded={expanded ? "true" : undefined}
+        // AQU-590: exposes AI-translation-in-progress on the row itself so the
+        // signal is testable and not only carried by a transient CSS ring.
+        data-ai-translating={isLoading ? "true" : undefined}
         tabIndex={0}
         aria-label={`${cellRef} cell`}
         className={cn(
@@ -4459,6 +4462,14 @@ function EditorRow({
           // and bulk synth all flow through this status key.
           isSynthBusy && "bg-primary/5 ring-2 ring-primary/50 ring-inset animate-pulse",
           isSynthError && "bg-destructive/5 ring-2 ring-destructive/50 ring-inset",
+          // AQU-590: same "cell is working" treatment while an AI translation
+          // is in progress on this cell. Previously the only in-progress signal
+          // was the Queued→Synced outbox chip in the status bar (easy to miss),
+          // plus a target-column overlay that is suppressed once the cell
+          // already has text (the sparkle regenerate/replace case). A colored,
+          // pulsing inset ring anchored to the exact row makes progress evident
+          // regardless of existing text or whether the action rail is hovered.
+          isLoading && "bg-primary/5 ring-2 ring-primary/50 ring-inset animate-pulse",
           gridCols,
         )}
         onMouseEnter={handleRowMouseEnter}

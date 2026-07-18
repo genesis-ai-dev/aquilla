@@ -1541,6 +1541,25 @@ export function ProjectWorkspace() {
     author: currentUsername,
   })
 
+  // AQU-599: per-cell "has comment" indicator. useHealth also exposes a
+  // cellOpenCommentCount, but it derives from cell.threads which useCells
+  // leaves empty in Phase 2a — so it never lit up from live data. Derive the
+  // real per-cell count from the live comments feed instead: count open
+  // (unresolved, non-deleted) root threads (replies don't open a thread) keyed
+  // by cellId. This feeds EditorTable's existing ring + rail-dot affordance so
+  // cells carrying comments are discoverable without opening each one.
+  const liveCellOpenCommentCount = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const c of allProjectComments) {
+      if (c.scopeKind !== "cell" || !c.cellId) continue
+      if (c.parentCommentId) continue
+      if (c.deletedAt !== null) continue
+      if (c.resolved) continue
+      map.set(c.cellId, (map.get(c.cellId) ?? 0) + 1)
+    }
+    return map
+  }, [allProjectComments])
+
   const addThread = useCallback(async (cellId: string, text: string) => {
     if (!project?.id || !activeFileId) return
     await addCommentEvent({
@@ -2252,7 +2271,10 @@ export function ProjectWorkspace() {
     rules,
     { decaySettings: project?.decaySettings, requiredValidations },
   )
-  const { healthMap, fileHealth: _fileHealth, projectHealth, fileProgress: liveFileProgress, infractions, openCommentCount, cellOpenCommentCount } = health
+  // AQU-599: cellOpenCommentCount from useHealth is intentionally not consumed
+  // here — see liveCellOpenCommentCount above (health's copy is empty in Phase
+  // 2a). openCommentCount (file-level) is still health-derived.
+  const { healthMap, fileHealth: _fileHealth, projectHealth, fileProgress: liveFileProgress, infractions, openCommentCount } = health
 
   // AQU-516: useHealth (above) only ever sees the currently-open file, so
   // fileProgress historically had an entry for at most one file — every
@@ -4653,7 +4675,7 @@ export function ProjectWorkspace() {
             backtranslating={backtranslating}
             backtranslationErrors={backtranslationErrors}
             backtranslationByCellId={backtranslationCache}
-            cellOpenCommentCount={cellOpenCommentCount}
+            cellOpenCommentCount={liveCellOpenCommentCount}
             getTokenForFile={getTokenForFile}
             getAlignmentModel={getAlignmentModel}
             getStatisticalBt={getStatisticalBt}

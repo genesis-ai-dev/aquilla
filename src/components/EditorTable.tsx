@@ -4485,7 +4485,7 @@ function EditorRow({
             is the single issue surface (severity tint + title); no
             stripe/dot/warning. Selection lives on the source/target divider so
             range selection follows the text. */}
-        <div className="flex h-full w-full items-start justify-center gap-1 pt-5">
+        <div className="flex h-full w-full flex-wrap items-start justify-center gap-1 pt-5">
           {numberPill}
           {/* Validation circle — single bare icon until validated, with a
               health ring appearing around it once there's a substantive score. */}
@@ -4565,6 +4565,23 @@ function EditorRow({
           )}
           {(isSynthBusy || isSynthError) && (
             <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
+          )}
+          {/* AQU-599: persistent "has comment" indicator. Unlike the action-rail
+              comment button (which only appears on hover/focus), this icon stays
+              visible in the gutter whenever the cell carries an open comment, so
+              comments are discoverable without opening each cell. Clicking it
+              opens the comments panel for the cell. */}
+          {onOpenComments && openCommentCount > 0 && (
+            <AppTooltip content={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}`}>
+              <button
+                type="button"
+                aria-label={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""} — open comments`}
+                className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-blue-500 transition-colors hover:bg-blue-500/10 hover:text-blue-600"
+                onClick={() => onOpenComments(cell.id)}
+              >
+                <MessageCircle className="h-3.5 w-3.5" fill="currentColor" fillOpacity={0.15} />
+              </button>
+            </AppTooltip>
           )}
         </div>
 

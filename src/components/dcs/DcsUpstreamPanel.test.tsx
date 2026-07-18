@@ -85,6 +85,7 @@ const cannedDelta: DeltaResult = {
 }
 
 const mockComputeDelta = vi.fn().mockResolvedValue(cannedDelta)
+const mockComputeRepairDelta = vi.fn().mockResolvedValue(cannedDelta)
 const mockApplyDelta = vi.fn(
   async (delta: DeltaResult, emitters: DeltaEmitters, ctx: { repo: string; sha: string }) => {
     for (const { cell, fileId } of delta.creates) {
@@ -102,6 +103,7 @@ const mockApplyDelta = vi.fn(
 vi.mock("@/lib/dcs/delta", async (i) => ({
   ...(await i<typeof import("@/lib/dcs/delta")>()),
   computeDelta: (arg: unknown) => mockComputeDelta(arg),
+  computeRepairDelta: (arg: unknown) => mockComputeRepairDelta(arg),
   applyDelta: (delta: DeltaResult, emitters: DeltaEmitters, ctx: { repo: string; sha: string }) =>
     mockApplyDelta(delta, emitters, ctx),
 }))
@@ -148,6 +150,7 @@ describe("DcsUpstreamPanel", () => {
     mockEmitDelete.mockClear().mockResolvedValue("delete-evt")
     mockEnqueue.mockClear().mockResolvedValue({ event: {}, eventId: "create-evt" })
     mockComputeDelta.mockClear().mockResolvedValue(cannedDelta)
+    mockComputeRepairDelta.mockClear().mockResolvedValue(cannedDelta)
     mockApplyDelta.mockClear()
   })
 
@@ -249,6 +252,72 @@ describe("DcsUpstreamPanel", () => {
     await waitFor(() => {
       expect(screen.getByText(/1 created, 1 updated, 1 removed/i)).toBeInTheDocument()
     })
+  })
+
+  it("Re-sync content repairs the pinned import via the SAME apply path, without advancing the cursor", async () => {
+    // Repair targets the PINNED ref, so getCatalogEntry resolves the cursor's
+    // own entry (v88 / old-sha) — pass it as oldEntry.
+    const pinnedEntry = { ...V89, ref: "v88", commitSha: "old-sha" }
+    const client = makeClient(V89, [], pinnedEntry)
+    render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
+
+    // The quiet secondary action is present for a pinned adapter project.
+    fireEvent.click(screen.getByRole("button", { name: /re-sync content/i }))
+
+    await waitFor(() => {
+      expect(mockComputeRepairDelta).toHaveBeenCalledTimes(1)
+    })
+    // Repair reads the PINNED entry, never the latest release.
+    expect(mockComputeRepairDelta.mock.calls[0][0]).toMatchObject({
+      entry: expect.objectContaining({ ref: "v88", commitSha: "old-sha" }),
+    })
+
+    // Applied through the SAME applyDelta path with the REAL emitters wired.
+    await waitFor(() => expect(mockApplyDelta).toHaveBeenCalledTimes(1))
+    expect(mockEmitCommit).toHaveBeenCalledTimes(1)
+    expect(mockEmitCommit.mock.calls[0][0]).toMatchObject({
+      cellId: "TIT-1-1",
+      parentId: "src-head-1",
+      value: "new verse 1",
+    })
+    expect(mockEmitDelete).toHaveBeenCalledTimes(1)
+    expect(mockEnqueue).toHaveBeenCalledTimes(1)
+    expect(mockEnqueue.mock.calls[0][0]).toMatchObject({
+      kind: "source.cell.create",
+      fileId: "file-57-TIT",
+    })
+
+    // The revision token is NOT the bare pinned sha — the original import
+    // already minted event ids there; a bare-sha repair would be silently
+    // dropped by the server's idempotent event PK.
+    const ctx = mockApplyDelta.mock.calls[0][2] as { projectId: string; repo: string; sha: string }
+    expect(ctx.repo).toBe("unfoldingWord/en_ult")
+    expect(ctx.sha).toMatch(/^old-sha#repair-/)
+
+    // Summary: 1 create + 1 commit + 1 delete = 3 repaired cells.
+    await waitFor(() => {
+      expect(screen.getByText(/repaired 3 cells/i)).toBeInTheDocument()
+    })
+    // The pin did NOT move — repair never advances the cursor.
+    expect(mockPatch).not.toHaveBeenCalled()
+  })
+
+  it("Re-sync content reports 'already matches' when the repair delta is empty", async () => {
+    mockComputeRepairDelta.mockResolvedValue({ creates: [], commits: [], deletes: [] })
+    const client = makeClient(V89, [])
+    render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
+    fireEvent.click(screen.getByRole("button", { name: /re-sync content/i }))
+    await waitFor(() => {
+      expect(screen.getByText(/everything already matches/i)).toBeInTheDocument()
+    })
+    expect(mockEmitCommit).not.toHaveBeenCalled()
+    expect(mockEnqueue).not.toHaveBeenCalled()
+  })
+
+  it("hides Re-sync content below maintainer (600)", () => {
+    const client = makeClient(V89, [])
+    render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={500} client={client} />)
+    expect(screen.queryByRole("button", { name: /re-sync content/i })).not.toBeInTheDocument()
   })
 
   it("disables Import changes below maintainer (600)", async () => {

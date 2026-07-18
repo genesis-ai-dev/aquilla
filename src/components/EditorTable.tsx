@@ -10,6 +10,7 @@ import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
   ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, ChevronDown, Music, Braces,
+  Languages,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -72,6 +73,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -521,6 +523,14 @@ interface EditorTableProps {
    *  project/file's default target-language name. Non-default lanes label
    *  themselves with their own tag string. */
   defaultLaneLabel?: string
+  /** AQU-583: opens the project's language settings so the target language is
+   *  changeable from the TARGET column header. When provided, the target-language
+   *  tag is always actionable — a single-lane project shows a clickable pill, a
+   *  multi-lane project appends a "Change target language…" item under the lane
+   *  switcher, and a project with no target language yet shows a "Set target
+   *  language" affordance. Omit to keep the tag a static pill (the pre-AQU-583
+   *  behaviour). */
+  onEditTargetLanguage?: () => void
   /** When set, each row shows the Audio-lens strip (speaker chip + generate). */
   audioLens?: AudioLensContext | null
   /** Timeline-segment-model: the active file's order lens. When `'time'`, the
@@ -665,6 +675,7 @@ interface EditorTableProps {
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
   project, cellStore, username, activeLane = "", lanes, onLaneChange, defaultLaneLabel,
+  onEditTargetLanguage,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews,
   onCompleteSingle, onCompleteBatch, healthMap,
@@ -1623,10 +1634,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </div>
           <div className="flex items-center gap-2 pl-3">
             Target
-            {/* AQU-602: the target-language tag doubles as the lane switcher.
-                With >1 lane (and a change handler) it's a dropdown that switches
-                the active target lane; otherwise it's a static pill. `''` = the
-                default lane, labelled with the project/file default language. */}
+            {/* AQU-602 / AQU-583: the target-language tag doubles as the lane
+                switcher AND the entry point to change the target language.
+                • >1 lane (+ change handler) → a dropdown that switches the active
+                  lane; with `onEditTargetLanguage` it also gets a "Change target
+                  language…" item so the language is reachable here, not buried in
+                  Settings.
+                • otherwise, with `onEditTargetLanguage` → a clickable pill (or a
+                  "Set target language" prompt when none is set yet) opening the
+                  language settings.
+                • with neither handler → the original static pill (byte-identical
+                  to the pre-AQU-583 header for callers that pass no handlers). */}
             {project.targetLanguage && lanes && lanes.length > 1 && onLaneChange ? (
               <DropdownMenu>
                 <DropdownMenuTrigger
@@ -1660,8 +1678,32 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                       </DropdownMenuItem>
                     )
                   })}
+                  {onEditTargetLanguage && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        data-testid="edit-target-language"
+                        onClick={onEditTargetLanguage}
+                        className="gap-2 text-xs"
+                      >
+                        <Languages className="h-3.5 w-3.5" />
+                        Change target language…
+                      </DropdownMenuItem>
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
+            ) : onEditTargetLanguage ? (
+              <button
+                type="button"
+                data-testid="edit-target-language"
+                onClick={onEditTargetLanguage}
+                aria-label={project.targetLanguage ? "Change target language" : "Set target language"}
+                className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                {project.targetLanguage || "Set target language"}
+                <Languages className="h-2.5 w-2.5" />
+              </button>
             ) : project.targetLanguage ? (
               <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
                 {project.targetLanguage}

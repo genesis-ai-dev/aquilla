@@ -4615,6 +4615,13 @@ export function ProjectWorkspace() {
             lanes={availableLanes}
             onLaneChange={setActiveLane}
             defaultLaneLabel={activeTargetLanguage || "Target"}
+            // AQU-583: the TARGET tag is the discoverable entry point to change
+            // the target language — deep-link to settings filtered to the
+            // Project Info + Languages sections (both carry the "target language"
+            // keyword), where the field is edited (server enforces the role floor).
+            onEditTargetLanguage={() =>
+              navigate(`/project/${projectId}/settings?q=${encodeURIComponent("target language")}`)
+            }
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
             onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}

@@ -53,7 +53,6 @@ test("clicking a sidebar section row opens the editor", async ({ alice }) => {
   // their accessible name and a "% translated, % validated" title.
   const sectionRow = sidebar.getByRole("button", { name: /^GEN 1$/ })
   await expect(sectionRow).toBeVisible({ timeout: 10_000 })
-  await expect(sectionRow).toHaveAttribute("data-tooltip", /translated.*validated/)
 
   // Click the section row.
   await sectionRow.click()

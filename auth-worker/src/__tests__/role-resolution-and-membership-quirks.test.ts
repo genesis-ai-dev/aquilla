@@ -1,13 +1,13 @@
-// FRO-268 — Characterization tests: freeze role-resolution max-wins semantics
+// AQU-268 — Characterization tests: freeze role-resolution max-wins semantics
 // and known membership-endpoint privilege quirks.
 //
 // Covers:
 //   1. Role resolution: AD-12 max-wins across override / group / org / creator paths
 //      (project-permissions.ts:103-186)
 //   2. CHARACTERIZATION (audit F-B6): project_lead can demote a peer via the
-//      add-member upsert (projects.ts:598-621) — FRO-285 will flip this.
+//      add-member upsert (projects.ts:598-621) — AQU-285 will flip this.
 //   3. CHARACTERIZATION (audit F-B6): maintainer can delete an owner's project_members
-//      row (projects.ts:647-669) — FRO-285 will flip this.
+//      row (projects.ts:647-669) — AQU-285 will flip this.
 
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
@@ -188,13 +188,13 @@ describe("AD-12 max-wins role resolution (project-permissions.ts:103-186)", () =
   })
 })
 
-// ─── Suite 2: Membership endpoint privilege holes — FRO-285 FIXED ────────────
+// ─── Suite 2: Membership endpoint privilege holes — AQU-285 FIXED ────────────
 //
-// These tests were CHARACTERIZATION tests in FRO-268 that pinned the old
-// (buggy) behavior. FRO-285 intentionally flips them to assert the new
+// These tests were CHARACTERIZATION tests in AQU-268 that pinned the old
+// (buggy) behavior. AQU-285 intentionally flips them to assert the new
 // secure behavior: target-level caps enforced.
 
-describe("FRO-285: membership endpoint target-level caps (was: F-B6 privilege holes)", () => {
+describe("AQU-285: membership endpoint target-level caps (was: F-B6 privilege holes)", () => {
   async function seedForMembershipTests() {
     await seedBase()
     // project_lead_user (user 2) — project_lead(500)
@@ -216,7 +216,7 @@ describe("FRO-285: membership endpoint target-level caps (was: F-B6 privilege ho
     ).run()
   }
 
-  // FLIPPED (was: FRO-268 characterization of the bug).
+  // FLIPPED (was: AQU-268 characterization of the bug).
   // project_lead(500) CANNOT upsert-demote a peer project_lead(500) — the
   // target's current level (500) equals the caller's level (500), so 403.
   it("project_lead(500) cannot upsert-demote a peer project_lead(500) to viewer(100) — 403", async () => {
@@ -231,7 +231,7 @@ describe("FRO-285: membership endpoint target-level caps (was: F-B6 privilege ho
       },
       env,
     )
-    // FRO-285: must be 403 — target current level (500) >= caller level (500)
+    // AQU-285: must be 403 — target current level (500) >= caller level (500)
     expect(res.status).toBe(403)
 
     // Confirm the DB row was NOT changed
@@ -241,7 +241,7 @@ describe("FRO-285: membership endpoint target-level caps (was: F-B6 privilege ho
     expect(Number(row?.role_level)).toBe(500)
   })
 
-  // FLIPPED (was: FRO-268 characterization of the bug).
+  // FLIPPED (was: AQU-268 characterization of the bug).
   // maintainer(600) CANNOT DELETE the project_members row of an owner(700) — 403.
   it("maintainer(600) cannot DELETE the project_members row of an owner(700) — 403", async () => {
     await seedForMembershipTests()
@@ -254,7 +254,7 @@ describe("FRO-285: membership endpoint target-level caps (was: F-B6 privilege ho
       },
       env,
     )
-    // FRO-285: must be 403 — target level (700) > caller level (600)
+    // AQU-285: must be 403 — target level (700) > caller level (600)
     expect(res.status).toBe(403)
 
     // Confirm the row is still present
@@ -378,9 +378,9 @@ describe("FRO-285: membership endpoint target-level caps (was: F-B6 privilege ho
   })
 })
 
-// ─── Suite 3: Frozen project — sync-token mint block (FRO-285) ───────────────
+// ─── Suite 3: Frozen project — sync-token mint block (AQU-285) ───────────────
 
-describe("FRO-285: frozen project blocks sync-token mint, reads still work", () => {
+describe("AQU-285: frozen project blocks sync-token mint, reads still work", () => {
   async function seedFrozenProject() {
     await seedBase()
     // project_member_user (user 2) with direct grant at 400

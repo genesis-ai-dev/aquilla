@@ -39,6 +39,14 @@ function formatDate(date: Date | undefined) {
   })
 }
 
+function parseInputDate(value: string): Date | undefined {
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+  const deadlineDate = deadlineStringToDate(trimmed)
+  if (deadlineDate) return deadlineDate
+  return new Date(trimmed)
+}
+
 function isValidDate(date: Date | undefined) {
   if (!date) return false
   return !Number.isNaN(date.getTime())
@@ -94,7 +102,7 @@ export function DatePicker({
             onChange(undefined)
             return
           }
-          const parsed = new Date(next)
+          const parsed = parseInputDate(next)
           if (isValidDate(parsed)) {
             onChange(parsed)
             setMonth(parsed)

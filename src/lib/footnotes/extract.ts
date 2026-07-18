@@ -104,7 +104,7 @@ export function hasUsfmFootnotes(text: string): boolean {
   return /\\f\s/.test(text)
 }
 
-// TRACE FRO-317: DOCX footnote round-trip is NOT yet safe.
+// TRACE AQU-317: DOCX footnote round-trip is NOT yet safe.
 //
 // The current docx.ts parser (src/lib/parsers/docx.ts) uses mammoth.js
 // to convert Word XML to HTML; footnotes are present in word/footnotes.xml

@@ -11,7 +11,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * Next-unfinished navigation action.
  *
  * `useNextUnfinished` scans cells for any that are unfinished (no translated
- * text, or fewer than validationCount validators). FRO-331 moved the action
+ * text, or fewer than validationCount validators). AQU-331 moved the action
  * from a toolbar button into the workspace header "More" overflow menu as the
  * "Next unfinished" menu item; it is disabled when there is no active file or
  * no unfinished cell. Selecting it scrolls the list to the next
@@ -40,7 +40,7 @@ test("next-unfinished menu item is enabled when unfinished cells exist and jumps
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Open the header ⋯ overflow menu — "Next unfinished" lives there (FRO-331).
+  // Open the header ⋯ overflow menu — "Next unfinished" lives there (AQU-331).
   await ws.openHeaderOverflowMenu()
   const jumpItem = alice.getByRole("menuitem", { name: /Next unfinished/i })
   await expect(jumpItem).toBeVisible({ timeout: 5_000 })

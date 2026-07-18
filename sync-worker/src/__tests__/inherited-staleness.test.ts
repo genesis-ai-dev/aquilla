@@ -1,4 +1,4 @@
-// FRO-477: inherited staleness — the per-hop chain walk (design spec §6).
+// AQU-477: inherited staleness — the per-hop chain walk (design spec §6).
 //
 // The canonical three-project chain from the issue: A (English, source) ->
 // B (French, live-linked to A, consumes='source') -> C (Chaluba, live-
@@ -43,7 +43,7 @@ async function nextSeqFor(t: TestDb, projectId: string): Promise<number> {
 
 /** Emit one event directly into `projectId`'s log through the front-door
  *  projection, with a real allocated server_seq + strictly increasing ts
- *  (see FRO-477's link-sync-target-consumption.test.ts for why: cell.validate's
+ *  (see AQU-477's link-sync-target-consumption.test.ts for why: cell.validate's
  *  re-decision guard needs decided_ts to strictly increase). */
 async function emit(
   t: TestDb,

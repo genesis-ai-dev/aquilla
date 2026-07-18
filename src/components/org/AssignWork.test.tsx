@@ -82,7 +82,10 @@ describe("AssignWork", () => {
       ),
     )
     expect(onAssigned).toHaveBeenCalled()
-    expect(await screen.findByText(/Assigned John to anna/)).toBeInTheDocument()
+    // On success the panel collapses back to the "Assign…" button (AQU-336);
+    // the expanded form (and its assignee select) is gone.
+    expect(await screen.findByRole("button", { name: "Assign…" })).toBeInTheDocument()
+    expect(screen.queryByRole("group", { name: "Assign work" })).not.toBeInTheDocument()
   })
 
   it("emits a chapter-scope assignment when a chapter is picked from the dropdown", async () => {
@@ -127,5 +130,55 @@ describe("AssignWork", () => {
 
     expect(await screen.findByText(/role too low/)).toBeInTheDocument()
     expect(mockCreate).toHaveBeenCalled()
+    // On failure the panel must stay open so the error is visible and the
+    // assign can be retried (AQU-336 must not collapse on the error path).
+    expect(screen.getByRole("group", { name: "Assign work" })).toBeInTheDocument()
+  })
+})
+
+// ── AQU-496: self-assign carve-out ──────────────────────────────────────────
+describe("AssignWork — self-assign carve-out (AQU-496)", () => {
+  function renderSelfAssign(onAssigned = vi.fn()) {
+    return render(
+      <AssignWork
+        projectId="p1"
+        files={files}
+        orgId={1}
+        jwt="jwt"
+        author="anna"
+        roleLevel={400} // ROLE.CONTRIBUTOR — below lead
+        allowSelfAssignment={true}
+        callerUserId={2} // matches members[0] (anna)
+        onAssigned={onAssigned}
+      />,
+    )
+  }
+
+  it("locks the assignee picker to the caller and emits assignment.create for their own userId", async () => {
+    mockList.mockResolvedValue(members)
+    mockCreate.mockResolvedValue("as-self")
+    const onAssigned = vi.fn()
+    renderSelfAssign(onAssigned)
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    const trigger = await screen.findByRole("combobox", { name: /^assignee$/i })
+    expect(trigger.textContent).toMatch(/anna/i)
+    expect((trigger as HTMLButtonElement).disabled).toBe(true)
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }))
+
+    await waitFor(() =>
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ assigneeUserId: 2 }),
+      ),
+    )
+    expect(onAssigned).toHaveBeenCalled()
+  })
+
+  it("shows explanatory copy that self-assignment is on", async () => {
+    mockList.mockResolvedValue(members)
+    renderSelfAssign()
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    expect(await screen.findByText(/self-assignment is on/i)).toBeInTheDocument()
   })
 })

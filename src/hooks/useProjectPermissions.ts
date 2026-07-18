@@ -27,6 +27,25 @@ export interface EditorCapabilities {
   /** Whether the user may cast validation votes (cell.validate path). */
   canValidate: boolean
   /**
+   * Whether the user may edit SOURCE cell text (source.cell.commit path) —
+   * e.g. a template owner fixing an English line that propagates to downstream
+   * linked projects. Gated at the sync-worker source.cell.commit floor
+   * (PROJECT_LEAD, 500) and suppressed on live-linked downstreams, whose
+   * mirrored source lane is read-only (the lock is server-enforced; the client
+   * only surfaces the affordance where editing is actually permitted, i.e.
+   * self-contained / template / source-only / clone-linked projects).
+   *
+   * Cloud-only: local/git projects (no syncRole) never expose it — the feature
+   * targets the cloud linked-projects workflow.
+   *
+   * NOTE (v1 scope): a live-linked downstream MAY hold downstream-added local
+   * source cells (no upstream_event_id) that the spec allows editing, but the
+   * client cell read-model doesn't yet carry per-cell upstream provenance, so
+   * the whole affordance is gated off for live projects. The server stays
+   * authoritative (409 on locked cells) regardless.
+   */
+  canEditSource: boolean
+  /**
    * Human-readable role label for the read-only badge.
    * Null when the user has full edit access (no badge shown).
    */
@@ -35,6 +54,9 @@ export interface EditorCapabilities {
 
 export function resolveEditorCapabilities(project: ProjectRecord | null | undefined): EditorCapabilities {
   const level = project?.syncRole?.level ?? null
+  // Source editing: cloud project_lead+ (500), never on a live-linked downstream.
+  const canEditSource =
+    level !== null && level >= ROLE.PROJECT_LEAD && project?.sourceLinkMode !== "live"
 
   // Local project (no syncRole): full edit, no badge.
   // Also covers git-imported projects that carry a ProjectPermissions object.
@@ -44,20 +66,22 @@ export function resolveEditorCapabilities(project: ProjectRecord | null | undefi
       return {
         canEdit: perms.canEditContent,
         canValidate: perms.canEditContent,  // legacy: validation was gated on edit
+        canEditSource,  // false for local/git projects (level === null)
         readOnlyLabel: perms.canEditContent ? null : "Read-only (imported from git)",
       }
     }
-    return { canEdit: true, canValidate: true, readOnlyLabel: null }
+    return { canEdit: true, canValidate: true, canEditSource, readOnlyLabel: null }
   }
 
   // Cloud project with a live syncRole level.
   if (level >= ROLE.CONTRIBUTOR) {
-    return { canEdit: true, canValidate: true, readOnlyLabel: null }
+    return { canEdit: true, canValidate: true, canEditSource, readOnlyLabel: null }
   }
   if (level >= ROLE.REVIEWER) {
     return {
       canEdit: false,
       canValidate: true,
+      canEditSource,
       readOnlyLabel: "Viewing as reviewer — you can validate and comment",
     }
   }
@@ -65,6 +89,7 @@ export function resolveEditorCapabilities(project: ProjectRecord | null | undefi
     return {
       canEdit: false,
       canValidate: false,
+      canEditSource,
       readOnlyLabel: "Viewing as commenter — you can comment",
     }
   }
@@ -72,6 +97,7 @@ export function resolveEditorCapabilities(project: ProjectRecord | null | undefi
   return {
     canEdit: false,
     canValidate: false,
+    canEditSource,
     readOnlyLabel: "Viewing as viewer — read only",
   }
 }

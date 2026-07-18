@@ -16,7 +16,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * every save, racing UI fill→blur→click) and tests only what this spec
  * is meant to verify: when configured to point at a custom OpenAI-
  * compatible endpoint, the sparkle button populates a target cell with
- * the LLM's response.
+ * the LLM's response and marks it as requiring individual human review.
  *
  * IDB layout: db "codex" v4, store "projects" keyed by id.
  */
@@ -68,4 +68,15 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
   await expect(
     alice.locator("[data-cell-id]").first().locator('[data-cell-type="target"]'),
   ).toContainText("Traducción de prueba", { timeout: 15_000 })
+  await expect(
+    alice.getByLabel("AI draft — individual human review required").first(),
+  ).toBeVisible({ timeout: 15_000 })
+
+  // Individual review is the approval boundary for an AI draft. The button
+  // must visibly acknowledge the click immediately while the validator
+  // projection catches up, then remain pressed after the server round-trip.
+  await ws.validateCell(0)
+  await expect(
+    ws.cellRow(0).getByRole("button", { name: /Validated/i }).first(),
+  ).toHaveAttribute("aria-pressed", "true", { timeout: 15_000 })
 })

@@ -1,5 +1,5 @@
 /**
- * FRO-267: Unit tests for funnel instrumentation.
+ * AQU-267: Unit tests for funnel instrumentation.
  *
  * Verifies:
  * 1. Event names match the constants in event-names.ts.

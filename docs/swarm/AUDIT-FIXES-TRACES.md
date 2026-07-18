@@ -85,7 +85,7 @@ Recommended fix (wave-2 `aud-lock-client` scope or standalone):
 ## UI-QA verdict (post-promotion, 2026-06-10 evening)
 
 - Delta reads (M2-1/PERF-4): **PASS** — initial load `?since=7`, blur/focus = ONE `?since=9` request, post-commit revalidate is `?cellIds=`-scoped; zero full re-streams observed.
-- Error boundary (FRO-266): **PASS** — `?__crash=1` renders branded recovery screen; crash captured.
+- Error boundary (AQU-266): **PASS** — `?__crash=1` renders branded recovery screen; crash captured.
 - RES-5 unreachable: **FAIL → fixed** in `fix/res5-orgs-unreachable` — orgs-fetch failure left activeOrgId null so ProjectsList fell to false "No projects"; now gated on org-load success with Retry → refreshOrgs().
 
 Same-class follow-ups (open):

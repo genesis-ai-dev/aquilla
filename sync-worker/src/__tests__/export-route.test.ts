@@ -1,14 +1,42 @@
 // The export route gates at the org's exportMinRole (default MAINTAINER 600
 // per spec Q32). Org owners can raise or lower the floor via org settings
-// (FRO-253). A viewer who can read a project should NOT be able to pull a full
+// (AQU-253). A viewer who can read a project should NOT be able to pull a full
 // deliverable export unless the org has explicitly lowered the floor.
 //
-// FRO-276: the route also counts verses whose original span contained
+// AQU-276: the route also counts verses whose original span contained
 // intra-verse markers that plain-text substitution drops, and surfaces that
 // count as the X-Usfm-Lossy-Verse-Count response header.
 import { describe, it, expect } from "vitest"
 import { sign } from "hono/jwt"
 import { handleExportSourceRequest, type ExportRouteEnv } from "../events/export-route"
+
+function makeStubBucket(): R2Bucket {
+  const store = new Map<string, ArrayBuffer>()
+  return {
+    async put(key: string, value: ArrayBuffer | Uint8Array | string) {
+      const body =
+        typeof value === "string"
+          ? new TextEncoder().encode(value).buffer
+          : value instanceof Uint8Array
+            ? value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength)
+            : value
+      store.set(key, body as ArrayBuffer)
+    },
+    async get(key: string) {
+      const obj = store.get(key)
+      if (!obj) return null
+      return { arrayBuffer: async () => obj }
+    },
+    async delete(keys: string | string[]) {
+      const list = Array.isArray(keys) ? keys : [keys]
+      for (const k of list) store.delete(k)
+    },
+    async list({ prefix }: { prefix?: string } = {}) {
+      const keys = Array.from(store.keys()).filter((k) => !prefix || k.startsWith(prefix))
+      return { objects: keys.map((k) => ({ key: k })), truncated: false }
+    },
+  } as unknown as R2Bucket
+}
 
 const SECRET = "export-tests-secret"
 
@@ -78,31 +106,32 @@ function exportReq(token: string): Request {
 
 describe("export role gate (Q32 — maintainer 600 default)", () => {
   it("403s a viewer (100) with default org floor", async () => {
-    const env: ExportRouteEnv = { SYNC_SECRET_KEY: SECRET, AQUILLA_PG: makeStubDb() }
+    const env: ExportRouteEnv = { SYNC_SECRET_KEY: SECRET, AQUILLA_PG: makeStubDb(), SNAPSHOTS: makeStubBucket() }
     const viewer = await handleExportSourceRequest(exportReq(await makeToken(100)), env)
     expect(viewer?.status).toBe(403)
   })
 
   it("403s a contributor (400) with default org floor", async () => {
-    const env: ExportRouteEnv = { SYNC_SECRET_KEY: SECRET, AQUILLA_PG: makeStubDb() }
+    const env: ExportRouteEnv = { SYNC_SECRET_KEY: SECRET, AQUILLA_PG: makeStubDb(), SNAPSHOTS: makeStubBucket() }
     const contributor = await handleExportSourceRequest(exportReq(await makeToken(400)), env)
     expect(contributor?.status).toBe(403)
   })
 
   it("lets a maintainer (600) past the default gate (404 = no blob seeded, gate passed)", async () => {
-    const env: ExportRouteEnv = { SYNC_SECRET_KEY: SECRET, AQUILLA_PG: makeStubDb() }
+    const env: ExportRouteEnv = { SYNC_SECRET_KEY: SECRET, AQUILLA_PG: makeStubDb(), SNAPSHOTS: makeStubBucket() }
     const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
     // 404 because no blob seeded, but gate was passed
     expect(res?.status).toBe(404)
   })
 })
 
-describe("export role gate with org exportMinRole (FRO-253)", () => {
+describe("export role gate with org exportMinRole (AQU-253)", () => {
   it("allows a contributor (400) when org sets exportMinRole=400", async () => {
     const settings = JSON.stringify({ exportMinRole: 400 })
     const env: ExportRouteEnv = {
       SYNC_SECRET_KEY: SECRET,
       AQUILLA_PG: makeStubDb({ orgSettings: settings }),
+      SNAPSHOTS: makeStubBucket(),
     }
     const res = await handleExportSourceRequest(exportReq(await makeToken(400)), env)
     // 404 = no blob seeded but gate was passed
@@ -114,6 +143,7 @@ describe("export role gate with org exportMinRole (FRO-253)", () => {
     const env: ExportRouteEnv = {
       SYNC_SECRET_KEY: SECRET,
       AQUILLA_PG: makeStubDb({ orgSettings: settings }),
+      SNAPSHOTS: makeStubBucket(),
     }
     const res = await handleExportSourceRequest(exportReq(await makeToken(100)), env)
     expect(res?.status).toBe(403)
@@ -124,6 +154,7 @@ describe("export role gate with org exportMinRole (FRO-253)", () => {
     const env: ExportRouteEnv = {
       SYNC_SECRET_KEY: SECRET,
       AQUILLA_PG: makeStubDb({ orgSettings: settings }),
+      SNAPSHOTS: makeStubBucket(),
     }
     const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
     expect(res?.status).toBe(403)
@@ -134,6 +165,7 @@ describe("export role gate with org exportMinRole (FRO-253)", () => {
     const env: ExportRouteEnv = {
       SYNC_SECRET_KEY: SECRET,
       AQUILLA_PG: makeStubDb({ orgSettings: settings }),
+      SNAPSHOTS: makeStubBucket(),
     }
     // Maintainer should still pass (fallback to 600 default)
     const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
@@ -142,7 +174,7 @@ describe("export role gate with org exportMinRole (FRO-253)", () => {
 })
 
 // ---------------------------------------------------------------------------
-// FRO-276: X-Usfm-Lossy-Verse-Count response header
+// AQU-276: X-Usfm-Lossy-Verse-Count response header
 // ---------------------------------------------------------------------------
 
 const FOOTNOTED_USFM = `\\id MAT
@@ -155,7 +187,7 @@ const PLAIN_USFM = `\\id GEN
 \\v 1 In the beginning.
 \\v 2 The earth was without form.`
 
-describe("X-Usfm-Lossy-Verse-Count header (FRO-276)", () => {
+describe("X-Usfm-Lossy-Verse-Count header (AQU-276)", () => {
   it("emits header=0 when export has no translated verses (all fall back to source)", async () => {
     const env: ExportRouteEnv = {
       SYNC_SECRET_KEY: SECRET,
@@ -163,6 +195,7 @@ describe("X-Usfm-Lossy-Verse-Count header (FRO-276)", () => {
         blob: { format: "usfm", raw_source: FOOTNOTED_USFM },
         cells: [], // no translated cells
       }),
+      SNAPSHOTS: makeStubBucket(),
     }
     const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
     expect(res?.status).toBe(200)
@@ -179,6 +212,7 @@ describe("X-Usfm-Lossy-Verse-Count header (FRO-276)", () => {
           { canonical_ref: "GEN 1:2", value: "La terre était informe." },
         ],
       }),
+      SNAPSHOTS: makeStubBucket(),
     }
     const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
     expect(res?.status).toBe(200)
@@ -195,6 +229,7 @@ describe("X-Usfm-Lossy-Verse-Count header (FRO-276)", () => {
           { canonical_ref: "MAT 1:4", value: "translated footnoted verse" },
         ],
       }),
+      SNAPSHOTS: makeStubBucket(),
     }
     const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
     expect(res?.status).toBe(200)
@@ -211,6 +246,7 @@ describe("X-Usfm-Lossy-Verse-Count header (FRO-276)", () => {
           { canonical_ref: "MAT 1:5", value: "translated plain verse" },
         ],
       }),
+      SNAPSHOTS: makeStubBucket(),
     }
     const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
     expect(res?.status).toBe(200)

@@ -1,10 +1,10 @@
 /**
- * FRO-243: Product tour persistence logic.
+ * AQU-243: Product tour persistence logic.
  *
  * Persistence key: `codex:productTourDone` (localStorage "1").
  * Auto-start condition: onboarding wizard completed (`codex:onboardingComplete`)
  * AND tour not yet done. This fires once per browser profile, user-wide (not
- * per-project like FRO-244's setup checklist flag).
+ * per-project like AQU-244's setup checklist flag).
  *
  * The hook is pure — no React state, so it can be called deterministically in
  * tests without a render cycle.

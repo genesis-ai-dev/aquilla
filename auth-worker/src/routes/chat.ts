@@ -46,7 +46,7 @@ const chatCompletionRequestSchema = z.object({
   stream: z.boolean().optional().default(false),
   max_tokens: z.number().optional(),
   response_format: z.record(z.unknown()).optional(),
-  // FRO-414 follow-up: chat invoked from a project-editing context carries the
+  // AQU-414 follow-up: chat invoked from a project-editing context carries the
   // project id so its credit spend counts against that project's org (same
   // attribution as agent.ts). Optional — project-less chat stays at org 0.
   // NOT forwarded to OpenRouter (see buildOpenRouterBody).
@@ -74,7 +74,7 @@ function resolveModel(env: Env, requested: string, settings: PlatformSettings): 
 }
 
 /**
- * Resolve the org whose credit ledger this chat spend belongs to (FRO-414
+ * Resolve the org whose credit ledger this chat spend belongs to (AQU-414
  * follow-up). Membership-gated: the caller must actually have a role on the
  * project — otherwise a client could bill its chat to an arbitrary org by
  * passing someone else's projectId. Attribution is best-effort and never
@@ -138,13 +138,13 @@ chat.post(
     const ab = isDefaultRequest(request.model) ? pickAbArm(settings, model) : null
     if (ab) model = ab.model
 
-    // AI guard: model allowlist + per-user/global daily budget (FRO-265).
+    // AI guard: model allowlist + per-user/global daily budget (AQU-265).
     const guard = await runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env)
     if (!guard.ok) {
       return c.json(guard.body, guard.status)
     }
 
-    // Credit guard + attribution (FRO-414 follow-up): chat invoked from a
+    // Credit guard + attribution (AQU-414 follow-up): chat invoked from a
     // project context bills that project's org; project-less chat falls back
     // to org 0 as before. The guard uses the same org so chat respects the
     // org's caps once an admin turns enforcement on (log-only by default).

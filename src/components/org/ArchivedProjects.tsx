@@ -53,7 +53,7 @@ export function ArchivedProjects() {
       header={<OrgBreadcrumb section="Archived" />}
       statusBar={null}
       main={
-        // FRO-366: see ProjectsList.tsx for why `h-full overflow-y-auto` is the
+        // AQU-366: see ProjectsList.tsx for why `h-full overflow-y-auto` is the
         // correct (and only) scroll surface inside AppShell's main slot;
         // `overscroll-contain` prevents wheel/trackpad chaining to an ancestor.
         <div className="h-full overflow-y-auto overscroll-contain p-6 space-y-3" data-testid="archived-projects-scroll">

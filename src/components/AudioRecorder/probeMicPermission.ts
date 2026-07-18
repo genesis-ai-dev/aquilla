@@ -9,7 +9,7 @@
 //
 // This is exported for testing. The modal calls it before starting the countdown
 // so permission is confirmed (or the error surfaced) before the 3-2-1 sequence
-// begins. This prevents counting down into a failed recording. (FRO-155)
+// begins. This prevents counting down into a failed recording. (AQU-155)
 
 export async function probeMicPermission(): Promise<"granted" | "denied" | "prompt"> {
   // Permissions API path — does not trigger a browser prompt on its own.

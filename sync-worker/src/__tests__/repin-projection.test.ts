@@ -1,4 +1,4 @@
-// FRO-478: target.cell.repin projection tests.
+// AQU-478: target.cell.repin projection tests.
 //
 // WHY: repin ("accept upstream change as-is") is the bulk-review-panel
 // action that must NOT clobber validation state. The rules that must hold,

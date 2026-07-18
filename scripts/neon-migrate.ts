@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 // Migration guard for the live Neon Postgres DB.
 //
-// Closes the recurring prod-500 class (FRO-135, FRO-150, FRO-158, 2026-06-10
+// Closes the recurring prod-500 class (AQU-135, AQU-150, AQU-158, 2026-06-10
 // projects.is_active): a migration file lands in db/postgres/migrations/ but
 // is never applied to live Neon, and a worker deploy that references the new
 // column silently outruns the schema. Mirrors what scripts/dev-stack.ts

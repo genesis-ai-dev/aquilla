@@ -1,5 +1,5 @@
 /**
- * Group (team) API helpers for E2E specs (FRO-144).
+ * Group (team) API helpers for E2E specs (AQU-144).
  *
  * All endpoints require maintainer (600)+ on the org unless noted.
  * See aquilla-specs/05-user-stories/access-control-permission-semantics.md

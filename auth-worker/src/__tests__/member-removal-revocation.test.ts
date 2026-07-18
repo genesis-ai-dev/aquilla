@@ -1,4 +1,4 @@
-// FRO-346: removing a member must actually revoke their access.
+// AQU-346: removing a member must actually revoke their access.
 //
 // WHY these tests exist: in the 2026-06-12 group session, an owner removed a
 // member and the removed user kept full access ("you didn't kick me").
@@ -52,7 +52,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe("FRO-346 — revocation bites at the sync-token mint", () => {
+describe("AQU-346 — revocation bites at the sync-token mint", () => {
   it("mints for a member, then 403s the same user after their row is removed", async () => {
     await seedProjectWithMember()
     const jwt = await jwtFor("bob")
@@ -97,7 +97,7 @@ describe("FRO-346 — revocation bites at the sync-token mint", () => {
   })
 })
 
-describe("FRO-346 — removal routes notify the sync-worker (live-session eject)", () => {
+describe("AQU-346 — removal routes notify the sync-worker (live-session eject)", () => {
   it("DELETE /members/:userId notifies when no grant path survives", async () => {
     await seedProjectWithMember()
     const fetchSpy = stubFetch()

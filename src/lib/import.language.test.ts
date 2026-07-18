@@ -1,4 +1,4 @@
-// FRO-249: Imported projects load with no source/target language direction set.
+// AQU-249: Imported projects load with no source/target language direction set.
 // These tests verify that:
 //  1. importParatextProject returns settings.languageIsoCode from Settings.xml
 //  2. importParatextAsTarget returns both the eBible source ID and the Paratext
@@ -54,9 +54,9 @@ function makeVerse(id: string, text: string): TranslatableString {
   return { id, original: text, translated: "", context: "", group: "GEN 1", type: "verse" }
 }
 
-// ── FRO-249: language threading via ImportContext ──────────────────────────
+// ── AQU-249: language threading via ImportContext ──────────────────────────
 
-describe("FRO-249 — source/target language threading", () => {
+describe("AQU-249 — source/target language threading", () => {
   it("emitParsedFile passes sourceLanguage and targetLanguage into the file.create payload", async () => {
     await emitParsedFile(
       { name: "Genesis", strings: [makeVerse("GEN 1:1", "In the beginning")] },
@@ -121,9 +121,9 @@ describe("FRO-249 — source/target language threading", () => {
   })
 })
 
-// ── FRO-249: language normalizer (WARN e) ─────────────────────────────────
+// ── AQU-249: language normalizer (WARN e) ─────────────────────────────────
 
-describe("languagesEqual — normalizer equality (FRO-249 WARN e)", () => {
+describe("languagesEqual — normalizer equality (AQU-249 WARN e)", () => {
   it('"French" equals "fra" after normalization', () => {
     expect(languagesEqual("French", "fra")).toBe(true)
   })
@@ -175,7 +175,7 @@ describe("languagesEqual — normalizer equality (FRO-249 WARN e)", () => {
   })
 })
 
-describe("normalizeLanguageTag — individual cases (FRO-249 WARN e)", () => {
+describe("normalizeLanguageTag — individual cases (AQU-249 WARN e)", () => {
   it("lowercases and normalizes English name to ISO 639-2 code", () => {
     expect(normalizeLanguageTag("French")).toBe("fra")
     expect(normalizeLanguageTag("Spanish")).toBe("spa")
@@ -195,13 +195,13 @@ describe("normalizeLanguageTag — individual cases (FRO-249 WARN e)", () => {
   })
 })
 
-// ── FRO-249: explicit-confirm-wins contract (BLOCKER 1) ───────────────────
+// ── AQU-249: explicit-confirm-wins contract (BLOCKER 1) ───────────────────
 //
 // Tests the decision logic extracted from ProjectWorkspace.handleImported —
 // we test the pure decision function rather than the React component itself
 // (which needs a full render environment) but the contract is identical.
 
-describe("explicit-confirm-wins — handleImported logic contract (FRO-249 BLOCKER 1)", () => {
+describe("explicit-confirm-wins — handleImported logic contract (AQU-249 BLOCKER 1)", () => {
   /**
    * Simulates the handleImported decision for language patch without the React
    * and IDB layers. Returns { newSource, newTarget } after applying the logic.

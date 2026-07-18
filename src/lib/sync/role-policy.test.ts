@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { ROLE, requiredRoleFor, canPerform } from "./role-policy"
+import { ROLE, requiredRoleFor, canPerform, canOpenAssignUi, canSubmitAssignment } from "./role-policy"
 
 describe("role-policy (client mirror)", () => {
   it("mirrors the server's required roles for the kinds that broke in prod", () => {
@@ -30,6 +30,62 @@ describe("role-policy (client mirror)", () => {
 
     it("fails open for unmapped kinds even with a low role", () => {
       expect(canPerform("some.future.kind", ROLE.VIEWER)).toBe(true)
+    })
+  })
+
+  // AQU-496: self-assignment carve-out for assignment.create.
+  describe("canOpenAssignUi", () => {
+    it("leads/maintainers/owners can always open the UI, regardless of allowSelfAssignment", () => {
+      expect(canOpenAssignUi(ROLE.PROJECT_LEAD, false)).toBe(true)
+      expect(canOpenAssignUi(ROLE.MAINTAINER, false)).toBe(true)
+      expect(canOpenAssignUi(ROLE.OWNER, false)).toBe(true)
+      expect(canOpenAssignUi(ROLE.PROJECT_LEAD, true)).toBe(true)
+    })
+
+    it("CONTRIBUTOR can open the UI only when allowSelfAssignment is on", () => {
+      expect(canOpenAssignUi(ROLE.CONTRIBUTOR, false)).toBe(false)
+      expect(canOpenAssignUi(ROLE.CONTRIBUTOR, true)).toBe(true)
+    })
+
+    it("below CONTRIBUTOR (viewer/commenter/reviewer) can never open the UI, even with allowSelfAssignment on", () => {
+      expect(canOpenAssignUi(ROLE.VIEWER, true)).toBe(false)
+      expect(canOpenAssignUi(ROLE.COMMENTER, true)).toBe(false)
+      expect(canOpenAssignUi(ROLE.REVIEWER, true)).toBe(false)
+    })
+
+    it("fails closed (not open) when role is unknown — unlike canPerform's fail-open default", () => {
+      expect(canOpenAssignUi(null, true)).toBe(false)
+      expect(canOpenAssignUi(undefined, true)).toBe(false)
+    })
+  })
+
+  describe("canSubmitAssignment", () => {
+    it("leads/maintainers can assign to ANYONE, regardless of allowSelfAssignment", () => {
+      expect(canSubmitAssignment(ROLE.PROJECT_LEAD, false, 1, 999)).toBe(true)
+      expect(canSubmitAssignment(ROLE.MAINTAINER, false, 1, 999)).toBe(true)
+    })
+
+    it("CONTRIBUTOR can self-assign only when allowSelfAssignment is on", () => {
+      expect(canSubmitAssignment(ROLE.CONTRIBUTOR, true, 1, 1)).toBe(true)
+      expect(canSubmitAssignment(ROLE.CONTRIBUTOR, false, 1, 1)).toBe(false)
+    })
+
+    it("CONTRIBUTOR can NEVER assign to another user, even with allowSelfAssignment on", () => {
+      expect(canSubmitAssignment(ROLE.CONTRIBUTOR, true, 1, 2)).toBe(false)
+    })
+
+    it("below CONTRIBUTOR can never self-assign, even with allowSelfAssignment on", () => {
+      expect(canSubmitAssignment(ROLE.REVIEWER, true, 1, 1)).toBe(false)
+      expect(canSubmitAssignment(ROLE.VIEWER, true, 1, 1)).toBe(false)
+    })
+
+    it("fails closed when callerUserId is unknown, even in self-assign mode", () => {
+      expect(canSubmitAssignment(ROLE.CONTRIBUTOR, true, null, 1)).toBe(false)
+      expect(canSubmitAssignment(ROLE.CONTRIBUTOR, true, undefined, 1)).toBe(false)
+    })
+
+    it("fails closed when roleLevel is unknown", () => {
+      expect(canSubmitAssignment(null, true, 1, 1)).toBe(false)
     })
   })
 })

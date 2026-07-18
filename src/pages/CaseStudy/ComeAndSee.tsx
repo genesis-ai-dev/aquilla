@@ -96,7 +96,7 @@ export function ComeAndSeeCaseStudy() {
             </p>
           </div>
           <div className="aq-reveal" style={{ maxWidth: "min(760px, 90vw)", margin: "36px auto 0" }}>
-            <blockquote className="aq-quote aq-display" style={{ color: "var(--aq-text)", textAlign: "center" }}>
+            <blockquote className="aq-quote aq-display" style={{ color: "var(--aq-text)", textAlign: "center", marginInline: "auto" }}>
               People need to hear the story in the language they speak, dream, and pray in.
             </blockquote>
           </div>
@@ -240,7 +240,7 @@ export function ComeAndSeeCaseStudy() {
         <section className="aq-container aq-section" style={{ paddingTop: 0 }}>
           <div className="aq-reveal" style={{ maxWidth: "min(760px, 90vw)", margin: "0 auto", textAlign: "center" }}>
             <span className="aq-eyebrow">The road to 600</span>
-            <blockquote className="aq-quote aq-display" style={{ marginTop: 22, color: "var(--aq-text)" }}>
+            <blockquote className="aq-quote aq-display" style={{ marginTop: 22, color: "var(--aq-text)", marginInline: "auto" }}>
               People need to hear the story of Jesus in their own language — the language they speak, dream, and pray in.
             </blockquote>
             <div className="aq-quote-cite"><b>James Barnett</b> · CEO, Come and See</div>
@@ -258,8 +258,8 @@ export function ComeAndSeeCaseStudy() {
             <h2 className="aq-display">Scale your translation, <span className="aq-gold-text aq-display-italic">not your team.</span></h2>
             <p>Whether you're reaching into low-resource languages or speeding up the work you already do, Aquilla gives one expert maximum leverage. It's free, and it's live today.</p>
             <div className="aq-cta-actions">
-              <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-lg">Start translating free</a>
-              <a href="/homepage" className="aq-btn aq-btn-ghost aq-btn-lg">Back to homepage</a>
+              <a href="https://calendar.app.google/etybAvBtu7Vm6BDb8" target="_blank" rel="noopener noreferrer" className="aq-btn aq-btn-gold aq-btn-lg">Book a call with our team</a>
+              <a href="/onboarding" className="aq-btn aq-btn-ghost aq-btn-lg">Or start free today</a>
             </div>
           </div>
         </section>

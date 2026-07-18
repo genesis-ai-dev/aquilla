@@ -1,4 +1,4 @@
-// Tests for the client-side PPTX export with translation injection (FRO-152a).
+// Tests for the client-side PPTX export with translation injection (AQU-152a).
 //
 // A minimal 2-slide fixture is built in-test with JSZip (fixture shape copied
 // from parity/corpus/generate.ts buildPptx) and we verify:
@@ -99,7 +99,7 @@ function fixtureCells(): CellData[] {
   ]
 }
 
-describe("exportPptx — translation injection (FRO-152a)", () => {
+describe("exportPptx — translation injection (AQU-152a)", () => {
   let buffer: ArrayBuffer
 
   beforeEach(async () => {

@@ -1,4 +1,4 @@
-// FRO-478: linked-project creation flow tests.
+// AQU-478: linked-project creation flow tests.
 //
 // Verifies: picking the "Linked target" shape shows the upstream picker +
 // clone/live + consumes choice, and submitting calls createCloudProject →
@@ -176,7 +176,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     expect(linkOrder).toBeLessThan(healOrder)
   })
 
-  it("disables submit until an upstream project is chosen for linked-target", () => {
+  it("shows validation when upstream project is missing for linked-target", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByText("+ New Project"))
     fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "X" } })
@@ -185,7 +185,9 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
 
-    const submit = screen.getByRole("button", { name: /Create & Link/i })
-    expect(submit).toBeDisabled()
+    fireEvent.submit(document.getElementById("project-create-form")!)
+    await waitFor(() => {
+      expect(screen.getByText(/choose an upstream project/i)).toBeInTheDocument()
+    })
   })
 })

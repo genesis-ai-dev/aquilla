@@ -2,12 +2,16 @@ import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import { ensureAuthState } from "../../helpers/auth"
-import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
+import { addOrgMember, createOrg, ROLE } from "../../helpers/frontier-api"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
 
 /**
  * SharePanel (Members tab) — change a member's project role.
@@ -16,18 +20,17 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * role") next to each non-locked, non-self member. Changing the value
  * calls onChangeRole.
  *
- * This spec: seeds bob in alice's org → creates a project → opens
- * SharePanel → adds bob → changes his role via the select →
- * verifies the trigger now shows the new role.
+ * This spec: seeds bob into a separate alice-owned org so scoped search can find
+ * him, creates a project, opens SharePanel, adds bob, changes his role via the
+ * select, then verifies the trigger now shows the new role.
  */
 test("share panel members tab role select changes member's role", async ({ alice }) => {
   const aliceSession = await ensureAuthState("alice")
-  const acme = await getMyOrg(aliceSession.jwt)
-  // Seed bob at VIEWER so the direct CONTRIBUTOR grant added below is
-  // STRICTLY higher than his org role. With an equal-level org role the
-  // effective-access list keeps source=org and the row renders locked
-  // ("Remove from org to revoke") with no "Change role" select.
-  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.VIEWER)
+  // Seed bob into a different alice-owned org. That keeps AQU-321 scoped user
+  // search meaningful without making bob an existing member of this project's
+  // Members panel.
+  const searchScopeOrg = await createOrg(aliceSession.jwt, `Z Role Change Search Scope ${Date.now()}`)
+  await addOrgMember(aliceSession.jwt, searchScopeOrg.id, "bob", ROLE.VIEWER)
 
   const dash = new Dashboard(alice)
   await dash.goto()
@@ -56,7 +59,7 @@ test("share panel members tab role select changes member's role", async ({ alice
 
   // Pick the "bob" suggestion — this closes the typeahead dropdown (which
   // would otherwise overlay the controls below it).
-  const suggestion = dialog.getByRole("button", { name: "bob", exact: true })
+  const suggestion = alice.getByRole("button", { name: "bob", exact: true })
   await expect(suggestion).toBeVisible({ timeout: 8_000 })
   await suggestion.click()
 
@@ -89,7 +92,7 @@ test("share panel members tab role select changes member's role", async ({ alice
   const newRole = (await otherOption.textContent())?.trim() ?? ""
   await otherOption.click()
   await expect(listbox).toBeHidden({ timeout: 3_000 })
-  await expect(roleSelect).toContainText(newRole, { timeout: 3_000 })
+  await expect(roleSelect).toContainText(new RegExp(escapeRegExp(newRole), "i"), { timeout: 3_000 })
 
   // Dismiss.
   await alice.keyboard.press("Escape")

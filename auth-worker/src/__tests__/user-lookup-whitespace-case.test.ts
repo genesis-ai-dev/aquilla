@@ -1,4 +1,4 @@
-// FRO-457: GET /api/v2/users/lookup falsely reported "user not found" when
+// AQU-457: GET /api/v2/users/lookup falsely reported "user not found" when
 // the queried username had leading/trailing whitespace (e.g. pasted from
 // elsewhere), or differed only in case, even though a matching user exists.
 //
@@ -13,7 +13,7 @@ import { describe, it, expect } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
-describe("GET /api/v2/users/lookup — whitespace/case robustness (FRO-457)", () => {
+describe("GET /api/v2/users/lookup — whitespace/case robustness (AQU-457)", () => {
   it("resolves a user when the query has trailing whitespace", async () => {
     await seedUser(300, "wsuser-trail")
     await seedUser(301, "caller-ws-1")

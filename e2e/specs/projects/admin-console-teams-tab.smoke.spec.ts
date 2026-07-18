@@ -2,12 +2,11 @@ import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
- * AdminConsole — Teams tab.
+ * AdminConsole — nested Teams column.
  *
- * AdminConsole.tsx has tabs: Overview, Users, Projects, Teams, Activity.
- * The Teams tab renders a Table with head ["Team", "Members", "Projects", "Created"].
+ * AdminConsole.tsx nests teams under the Tenants tab.
  *
- * This spec: navigate to /admin → click "Teams" tab → verify the "Team"
+ * This spec: navigate to /admin → click "Tenants" tab → verify the "Teams"
  * column header is visible.
  */
 test("admin console Teams tab renders Team column header", async ({ alice }) => {
@@ -22,15 +21,14 @@ test("admin console Teams tab renders Team column header", async ({ alice }) => 
     timeout: 10_000,
   })
 
-  // Click the Teams tab.
-  const teamsTab = alice.getByRole("button", { name: /^Teams$/i })
-  await expect(teamsTab).toBeVisible({ timeout: 5_000 })
-  await teamsTab.click()
+  const tenantsTab = alice.getByRole("tab", { name: /^Tenants$/i })
+  await expect(tenantsTab).toBeVisible({ timeout: 5_000 })
+  await tenantsTab.click()
 
   // The Teams table shows "Team" as a column header. Role-scoped + .first():
   // the table renders one header row per org section, so a bare getByText
   // trips strict mode.
   await expect(
-    alice.getByRole("columnheader", { name: "Team" }).first(),
+    alice.getByRole("columnheader", { name: "Teams" }).first(),
   ).toBeVisible({ timeout: 5_000 })
 })

@@ -1,18 +1,18 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { ensureAuthState } from "../../helpers/auth"
-import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
+import { addOrgMember, getMyOrg, createProjectServerSide, ROLE } from "../../helpers/frontier-api"
 
 /**
  * MultiProjectInviteDialog — fill recipient + select project + submit.
  *
- * FRO-322 renamed the flow to "Add to projects". The dialog (opened from
+ * AQU-322 renamed the flow to "Add to projects". The dialog (opened from
  * /members via the "Add to projects" button) has:
  *   - UsernameTypeahead input (id="invite-recipient"); suggestions are
  *     plain buttons labelled with the username
  *   - Project rows with role=checkbox toggles (aria-label="Select <name>")
  *   - Role select per selected project
- *   - "Add to projects" submit button (disabled until a user + project chosen)
+ *   - "Add to projects" submit button (stays enabled; validates on click)
  *   - On success the dialog STAYS OPEN, shows an "added" chip per project,
  *     and the Cancel button becomes "Close".
  *
@@ -48,7 +48,7 @@ test("multi-project invite submits and closes the dialog", async ({ alice }) => 
   await usernameInput.fill("bob")
 
   // Pick "bob" from the typeahead suggestions (plain buttons, no listbox role).
-  const suggestion = dialog.getByRole("button", { name: /^bob$/ })
+  const suggestion = alice.getByRole("button", { name: /^bob$/ })
   await expect(suggestion).toBeVisible({ timeout: 5_000 })
   await suggestion.click()
 
@@ -73,4 +73,41 @@ test("multi-project invite submits and closes the dialog", async ({ alice }) => 
     .and(alice.locator(':not([data-slot="dialog-close"])'))
   await footerClose.click()
   await expect(dialog).not.toBeVisible({ timeout: 3_000 })
+})
+
+/**
+ * AQU-471 — email mode actually sends per-project invites from the org view
+ * (it used to punt the operator to each project's Share panel). Selecting
+ * projects + a recipient email and hitting "Send invites" mints one
+ * email-bound invite per project and shows an "invited" chip.
+ */
+test("email mode sends per-project invites from the org view", async ({ alice }) => {
+  const aliceSession = await ensureAuthState("alice")
+  const proj = await createProjectServerSide(aliceSession.jwt, {
+    id: `email-inv-${Date.now()}`,
+    name: `EmailInv ${Date.now()}`,
+  })
+
+  await alice.goto("/members")
+  await alice.waitForLoadState("networkidle")
+
+  const inviteBtn = alice.getByRole("button", { name: /Add to projects/i })
+  await expect(inviteBtn).toBeEnabled({ timeout: 10_000 })
+  await inviteBtn.click()
+
+  const dialog = alice.getByRole("dialog")
+  await expect(dialog).toBeVisible({ timeout: 5_000 })
+
+  // Switch the recipient to email mode and enter an address.
+  await dialog.getByRole("button", { name: /^email$/ }).click()
+  await dialog.locator("#invite-recipient").fill("newcomer@example.com")
+
+  // Select the project and send.
+  await dialog.getByRole("checkbox", { name: `Select ${proj.name}` }).click()
+  const sendBtn = dialog.getByRole("button", { name: /^Send invites$/i })
+  await expect(sendBtn).toBeEnabled({ timeout: 3_000 })
+  await sendBtn.click()
+
+  // Per-project confirmation chip; direct-grant "added" chip must not appear.
+  await expect(dialog.getByText("invited")).toBeVisible({ timeout: 8_000 })
 })

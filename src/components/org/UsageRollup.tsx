@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { getOrgUsage, type OrgUsage } from "@/lib/sync/usage"
 import { Section } from "@/components/ui/page"
 
@@ -11,7 +11,7 @@ import { Section } from "@/components/ui/page"
  *
  * Mirrors WorkloadRollup exactly: same effect pattern, same self-hiding logic.
  */
-export function UsageRollup({ jwt, orgId }: { jwt: string; orgId: number }) {
+export function UsageRollup({ jwt, orgId, action }: { jwt: string; orgId: number; action?: ReactNode }) {
   const [data, setData] = useState<OrgUsage | null>(null)
 
   useEffect(() => {
@@ -31,7 +31,7 @@ export function UsageRollup({ jwt, orgId }: { jwt: string; orgId: number }) {
   if (!hasUsage) return null
 
   return (
-    <Section title="Team usage" contentClassName="pt-0">
+    <Section title="Team usage" action={action} contentClassName="pt-0">
       <div className="divide-y">
         {data.members.map((m) => {
           const mins = Math.floor(m.audioSeconds / 60)

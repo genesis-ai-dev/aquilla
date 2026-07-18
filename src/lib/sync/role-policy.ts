@@ -64,7 +64,7 @@ const REQUIRED_ROLE: Record<string, number> = {
   "cell.retime": ROLE.CONTRIBUTOR,
   "file.video.set": ROLE.CONTRIBUTOR,
 
-  // FRO-478: repin ("accept upstream change as-is") — same authority bar
+  // AQU-478: repin ("accept upstream change as-is") — same authority bar
   // as validating (spec §12). Bulk repin is gated higher (project_lead 500)
   // in the review-panel UI itself, not here.
   "target.cell.repin": ROLE.REVIEWER,
@@ -94,4 +94,44 @@ export function canPerform(kind: string, roleLevel: number | null | undefined): 
   const required = requiredRoleFor(kind)
   if (required == null) return true
   return roleLevel >= required
+}
+
+/**
+ * AQU-496: whether the assign-work UI (AssignModal / AssignWork) should be
+ * offered at all, given the caller's role and the org's `allowSelfAssignment`
+ * setting. Mirrors the self-assign carve-out enforced server-side in
+ * `sync-worker/src/events/authorize.ts` — UX gate only, never the security
+ * boundary; the server re-checks independently on every `assignment.create`.
+ *
+ * Leads/maintainers (>= PROJECT_LEAD) can always open it, regardless of the
+ * setting. Below that, a member (CONTRIBUTOR+) can open it ONLY when the org
+ * has opted into `allowSelfAssignment` — and even then, `canSubmitAssignment`
+ * below still restricts what they can submit to themselves only.
+ */
+export function canOpenAssignUi(
+  roleLevel: number | null | undefined,
+  allowSelfAssignment: boolean,
+): boolean {
+  if (roleLevel == null) return false
+  if (roleLevel >= ROLE.PROJECT_LEAD) return true
+  return allowSelfAssignment && roleLevel >= ROLE.CONTRIBUTOR
+}
+
+/**
+ * AQU-496: whether `roleLevel` may submit `assignment.create` assigning
+ * `assigneeUserId`. Leads/maintainers may assign anyone. Below-lead callers
+ * may ONLY self-assign (assigneeUserId === callerUserId), and only when
+ * `allowSelfAssignment` is on — mirrors the server's `isSelfAssignCreate`
+ * check in `sync-worker/src/events/authorize.ts`.
+ */
+export function canSubmitAssignment(
+  roleLevel: number | null | undefined,
+  allowSelfAssignment: boolean,
+  callerUserId: number | null | undefined,
+  assigneeUserId: number,
+): boolean {
+  if (roleLevel == null) return false
+  if (roleLevel >= ROLE.PROJECT_LEAD) return true
+  if (!allowSelfAssignment || roleLevel < ROLE.CONTRIBUTOR) return false
+  return callerUserId != null && callerUserId === assigneeUserId
 }

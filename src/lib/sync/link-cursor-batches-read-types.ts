@@ -1,4 +1,4 @@
-// Types for the sync-worker link-cursor-batches read API (FRO-478).
+// Types for the sync-worker link-cursor-batches read API (AQU-478).
 //
 // Mirror of `sync-worker/src/events/link-cursor-batches-route.ts`.
 

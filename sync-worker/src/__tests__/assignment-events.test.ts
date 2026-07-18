@@ -128,6 +128,69 @@ describe('assignment.create — book scope', () => {
   })
 })
 
+describe('assignment.create — lane (AQU-538 §3.5)', () => {
+  it('writes targetLang to assignments.target_lang', async () => {
+    const { db, snapshot } = await makeTestDb({ cells: seededCells() })
+    const authed = await authorizeAssignment('assignment.create', {
+      assignmentId: 'as-lane',
+      scopeKind: 'books',
+      scope: [{ fileId: 'file-gen' }],
+      scopeLabel: 'Genesis',
+      assigneeUserId: 42,
+      targetLang: 'es',
+    })
+
+    const result = handleAssignmentEvent(db, authed, 2100)
+    await db.batch(result.stmts)
+
+    const row = (await snapshot()).assignments.find((a) => a.assignment_id === 'as-lane')
+    expect(row!.target_lang).toBe('es')
+  })
+
+  it('defaults target_lang to the empty string when the lane is absent', async () => {
+    const { db, snapshot } = await makeTestDb({ cells: seededCells() })
+    const authed = await authorizeAssignment('assignment.create', {
+      assignmentId: 'as-nolane',
+      scopeKind: 'books',
+      scope: [{ fileId: 'file-gen' }],
+      scopeLabel: 'Genesis',
+      assigneeUserId: 42,
+    })
+
+    const result = handleAssignmentEvent(db, authed, 2200)
+    await db.batch(result.stmts)
+
+    const row = (await snapshot()).assignments.find((a) => a.assignment_id === 'as-nolane')
+    expect(row!.target_lang).toBe('')
+  })
+
+  it('assignment.reassign re-pins the lane when targetLang is provided, and leaves it when absent', async () => {
+    const { db, snapshot } = await makeTestDb({
+      assignments: [{ ...seededAssignment({ assignment_id: 'as-re', assignee_user_id: 1 }), target_lang: 'es' }],
+    })
+
+    // Plain reassign (no targetLang) leaves the stored lane untouched.
+    const plain = await authorizeAssignment('assignment.reassign', {
+      assignmentId: 'as-re',
+      assigneeUserId: 55,
+    })
+    await db.batch(handleAssignmentEvent(db, plain, 4100).stmts)
+    let row = (await snapshot()).assignments.find((a) => a.assignment_id === 'as-re')
+    expect(row!.assignee_user_id).toBe(55)
+    expect(row!.target_lang).toBe('es')
+
+    // A reassign carrying a lane re-pins it.
+    const repin = await authorizeAssignment('assignment.reassign', {
+      assignmentId: 'as-re',
+      assigneeUserId: 55,
+      targetLang: 'fr',
+    })
+    await db.batch(handleAssignmentEvent(db, repin, 4200).stmts)
+    row = (await snapshot()).assignments.find((a) => a.assignment_id === 'as-re')
+    expect(row!.target_lang).toBe('fr')
+  })
+})
+
 describe('assignment.create — chapter scope', () => {
   it('resolves only the cells whose canonical_ref matches the chapter', async () => {
     const { db, snapshot } = await makeTestDb({ cells: seededCells() })

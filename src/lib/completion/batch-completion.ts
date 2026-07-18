@@ -16,7 +16,7 @@
 //   - This matches the audio batch pattern: "in-flight cells may still
 //     complete" (audio) vs. here "in-flight request is actively aborted".
 //
-// Run-identity semantics (FRO-235 fix):
+// Run-identity semantics (AQU-235 fix):
 //   - resetBatchCompletionState() returns a numeric run ID (monotonic counter).
 //   - Every stateful mutation (clearBatchCompletionProgress, incrementBatchCompletionDone,
 //     isBatchCompletionCancelled, getBatchCompletionSignal) takes an optional runId.
@@ -40,14 +40,14 @@ export interface CompletionBatchProgress {
   cancelled: boolean
   /**
    * Cells that failed after retry and were skipped so the rest of the run
-   * could continue (FRO-361). Included in the end-of-run summary so a
+   * could continue (AQU-361). Included in the end-of-run summary so a
    * partial failure is never silent.
    */
   failed: number
   /**
    * True once the run has finished (successfully or with failures) and this
    * progress object is being retained only to show the end-of-run summary
-   * (FRO-361). False while cells are still actively being generated.
+   * (AQU-361). False while cells are still actively being generated.
    */
   finished: boolean
 }
@@ -166,7 +166,7 @@ export function resetBatchCompletionState(total: number): number {
  * Called when the batch finishes (success, cancel, or error) to clear the banner.
  * The runId guard prevents a finishing run A from clearing run B's banner.
  *
- * FRO-361: if the run ended with any failed (skipped) cells, the progress is
+ * AQU-361: if the run ended with any failed (skipped) cells, the progress is
  * NOT cleared here — it is left in place (with `cancelled: false`) so the
  * banner can render an honest "X of N cells failed" summary instead of the
  * run going quiet. The caller dismisses it explicitly via
@@ -208,7 +208,7 @@ export function incrementBatchCompletionDone(runId?: number) {
 
 /**
  * Record cells that failed (after retry) and were skipped so the run could
- * continue (FRO-361). Same run-id guard as incrementBatchCompletionDone: a
+ * continue (AQU-361). Same run-id guard as incrementBatchCompletionDone: a
  * superseded run's failures must not pollute the live run's summary.
  */
 export function incrementBatchCompletionFailed(runId?: number, count = 1) {

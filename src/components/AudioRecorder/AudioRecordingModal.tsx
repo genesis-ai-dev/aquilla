@@ -135,7 +135,7 @@ export function AudioRecordingModal({
     }
     // Probe mic permission BEFORE starting the countdown so we never count
     // down into a failed recording. If permission is denied, surface a clear
-    // message instead of starting the 3-2-1 sequence. (FRO-155)
+    // message instead of starting the 3-2-1 sequence. (AQU-155)
     setErrorMessage(null)
     void probeMicPermission().then((permState) => {
       if (permState === "denied") {
@@ -322,7 +322,7 @@ export function AudioRecordingModal({
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
-      {/* FRO-230: max-h constrains the dialog to the viewport (with 4vh margin)
+      {/* AQU-230: max-h constrains the dialog to the viewport (with 4vh margin)
           so it never clips at 100% zoom on 1280×800 or smaller viewports.
           The dialog is split into a fixed header, a scrollable stage+takes
           middle, and a fixed footer so navigation buttons stay reachable. */}

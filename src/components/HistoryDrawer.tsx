@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { X, User, Bot, Check, BookOpen, ChevronDown, ChevronRight, GitBranch } from "lucide-react"
+import { X, User, Bot, Check, BookOpen, ChevronDown, ChevronRight, GitBranch, CloudOff, LoaderCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import type { CellData } from "@/hooks/useCells"
@@ -74,6 +74,7 @@ function isSameEditSession(a: CellHistoryEntry, b: CellHistoryEntry): boolean {
   // versa). A "session" collapses keystroke-level edits that ended in one
   // committed value — mixing a bumped branch into that obscures both.
   if ((a.isStale ?? false) !== (b.isStale ?? false)) return false
+  if (a.syncState !== b.syncState) return false
   // Within 2 minutes
   const aTime = new Date(a.timestamp).getTime()
   const bTime = new Date(b.timestamp).getTime()
@@ -138,9 +139,9 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
     currentEventId,
   })
 
-  // Prefer D1 history when available; fall back to Y.Doc history when D1 is
-  // loading, errored, or returned no entries (cell may not have D1 records yet).
-  const history = enabled && !d1Loading && !d1Error && d1History.length > 0
+  // Prefer server + locally durable outbox history whenever either has an
+  // entry. Fall back only for legacy cells without event-log history.
+  const history = enabled && d1History.length > 0
     ? d1History
     : cell.history || []
 
@@ -151,7 +152,9 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
   // head (offline-reconnect scenario) — calling that the current value
   // would be a lie. Falls back to the first group if no on-chain group
   // exists (legacy entries without an `isStale` flag).
-  const currentGroupIndex = groups.findIndex((g) => !(g.terminal.isStale ?? false))
+  const currentGroupIndex = groups.findIndex((g) => (
+    !(g.terminal.isStale ?? false) && g.terminal.syncState !== "failed"
+  ))
   const hasAnyStale = groups.some((g) => g.terminal.isStale ?? false)
   const firstStaleGroupRef = useRef<HTMLLIElement | null>(null)
   // When the drawer opens with a stale-branch commit present (typical
@@ -177,7 +180,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
         <h3 className="text-sm font-semibold">
           Edit history {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}
         </h3>
-        <Button variant="ghost" size="sm" onClick={onClose}>
+        <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close history">
           <X className="h-4 w-4" />
         </Button>
       </div>
@@ -314,6 +317,20 @@ function GroupItem({
             <span className="flex items-center gap-0.5 rounded bg-amber-200/60 px-1.5 py-0.5 font-medium text-amber-900 dark:bg-amber-800/50 dark:text-amber-200">
               <GitBranch className="h-3 w-3" />
               stale branch
+            </span>
+          </AppTooltip>
+        )}
+        {terminal.syncState === "pending" && (
+          <span className="flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 font-medium text-muted-foreground">
+            <LoaderCircle className="h-3 w-3 animate-spin" />
+            syncing
+          </span>
+        )}
+        {terminal.syncState === "failed" && (
+          <AppTooltip content="This edit is safe in this browser, but it could not sync to the server. Use the sync indicator to retry or inspect the failure.">
+            <span className="flex items-center gap-0.5 rounded bg-destructive/10 px-1.5 py-0.5 font-medium text-destructive">
+              <CloudOff className="h-3 w-3" />
+              sync failed
             </span>
           </AppTooltip>
         )}

@@ -1,5 +1,5 @@
 /**
- * FRO-144 — Org-level business logic E2E
+ * AQU-144 — Org-level business logic E2E
  *
  * Covers the full access-control journey documented in
  * aquilla-specs/05-user-stories/access-control-permission-semantics.md:

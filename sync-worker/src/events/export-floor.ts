@@ -1,4 +1,4 @@
-// Shared export-floor resolver for sync-worker routes (FRO-253).
+// Shared export-floor resolver for sync-worker routes (AQU-253).
 //
 // Both export-route.ts (single-file USFM) and export-bundle-route.ts (project
 // zip) need the same org-level floor lookup. Extracting it here ensures:
@@ -10,7 +10,7 @@
 // NOTE: this floor gates DELIVERABLE / server-rendered formats (USFM, zip).
 // Client-side formats (txt/md/tsv/csv/xlf/tmx/vtt) run over already-fetched
 // cells and cannot be enforced server-side here. True per-cell read-API gating
-// is explicitly out of scope for FRO-253; the floor is an affordance gate only.
+// is explicitly out of scope for AQU-253; the floor is an affordance gate only.
 // Document this wherever callers enforce it.
 
 import { ROLE } from "./role-policy"

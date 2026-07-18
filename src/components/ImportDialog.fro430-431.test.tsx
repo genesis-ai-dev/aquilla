@@ -1,8 +1,8 @@
 /**
- * FRO-430 — Import progress visible after Confirm
- * FRO-431 — .doc file acceptance
+ * AQU-430 — Import progress visible after Confirm
+ * AQU-431 — .doc file acceptance
  *
- * FRO-430 WHY: Before the fix, clicking "Confirm import" in PreviewPanel switched
+ * AQU-430 WHY: Before the fix, clicking "Confirm import" in PreviewPanel switched
  * the button to "Uploading…" but showed no further progress; the dialog appeared
  * frozen because UploadPanel (where phase/progress state lives) was unmounted
  * during the preview screen. The fix surfaces phase+progress from UploadPanel's
@@ -10,7 +10,7 @@
  * clicking Confirm, the preview list is replaced by an in-progress view with the
  * phase label and (when cell counts are available) a progress bar.
  *
- * FRO-431 WHY: The file picker and detectFileType() only accepted ".docx"; users
+ * AQU-431 WHY: The file picker and detectFileType() only accepted ".docx"; users
  * with ".doc" files were silently unable to import without manual conversion. The
  * fix maps ".doc" → "docx" in detectFileType() and adds ".doc" to the file
  * picker's accept attribute. True legacy OLE2 .doc files may still fail at parse
@@ -32,7 +32,7 @@ vi.mock("@/lib/import", () => ({
   importParatextAsTarget: vi.fn(),
   prepareEBibleTargetImport: vi.fn(),
   applyEBibleTargetImport: vi.fn(),
-  // FRO-310: parseFile is called during the parse phase before preview.
+  // AQU-310: parseFile is called during the parse phase before preview.
   parseFile: vi.fn(async () => [
     { name: "test.docx", strings: [{ id: "s1", original: "Hello world", context: "Paragraph", group: "1" }] },
   ]),
@@ -97,9 +97,9 @@ async function dropFileAndWaitForPreview(file: File) {
   await screen.findByText(/preview.*cell/i)
 }
 
-// ── FRO-430 tests ────────────────────────────────────────────────────────────
+// ── AQU-430 tests ────────────────────────────────────────────────────────────
 
-describe("FRO-430 — import progress visible after Confirm", () => {
+describe("AQU-430 — import progress visible after Confirm", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     setupTextFileMocks()
@@ -189,9 +189,9 @@ describe("FRO-430 — import progress visible after Confirm", () => {
   })
 })
 
-// ── FRO-431 tests ────────────────────────────────────────────────────────────
+// ── AQU-431 tests ────────────────────────────────────────────────────────────
 
-describe("FRO-431 — .doc file acceptance", () => {
+describe("AQU-431 — .doc file acceptance", () => {
   it("detectFileType maps .doc extension to 'docx' type", () => {
     expect(detectFileType("myfile.doc")).toBe("docx")
   })

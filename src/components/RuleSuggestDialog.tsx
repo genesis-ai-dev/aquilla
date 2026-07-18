@@ -38,9 +38,16 @@ interface RuleSuggestDialogProps {
    * shows "No human-validated translations found."
    */
   cells?: { status: string; original: string; translated: string }[]
+  /**
+   * AQU-480: accepted suggestions are written via `onAdd` (addRule → project_settings,
+   * MAINTAINER-gated). When false, the trigger is disabled-with-tooltip so a
+   * below-floor user can't add rules that silently 403 and vanish. Defaults true.
+   */
+  canManage?: boolean
+  deniedReason?: string | null
 }
 
-export function RuleSuggestDialog({ files: _files, completionSettings, onAdd, projectId, cells }: RuleSuggestDialogProps) {
+export function RuleSuggestDialog({ files: _files, completionSettings, onAdd, projectId, cells, canManage = true, deniedReason }: RuleSuggestDialogProps) {
   const { session } = useFrontierSession()
   const { available: frontierAvailable } = useFrontierHealth()
   const [open, setOpen] = useState(false)
@@ -144,8 +151,14 @@ export function RuleSuggestDialog({ files: _files, completionSettings, onAdd, pr
           <Button
             variant="outline"
             size="sm"
-            disabled={!isConfigured}
-            title={isConfigured ? "Analyze validated edits with LLM" : "Configure LLM in settings first"}
+            disabled={!isConfigured || !canManage}
+            title={
+              !canManage
+                ? (deniedReason ?? "You don't have permission to add rules")
+                : isConfigured
+                  ? "Analyze validated edits with LLM"
+                  : "Configure LLM in settings first"
+            }
           >
             <Sparkles className="mr-1 h-3.5 w-3.5" />
             Suggest from edits

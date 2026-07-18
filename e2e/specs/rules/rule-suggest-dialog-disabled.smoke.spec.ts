@@ -36,9 +36,5 @@ test("rule suggest button is disabled when LLM is not configured", async ({ alic
   await expect(suggestBtn).toBeVisible({ timeout: 10_000 })
   await expect(suggestBtn).toBeDisabled({ timeout: 3_000 })
 
-  // The tooltip trigger wrapper says "Configure LLM in settings first".
-  const suggestTooltip = alice
-    .locator('[data-tooltip*="Configure LLM"]')
-    .filter({ has: alice.getByRole("button", { name: /Suggest from edits/i }) })
-  await expect(suggestTooltip).toBeVisible({ timeout: 3_000 })
+  await expect(suggestBtn).toHaveAttribute("title", /Configure LLM in .*settings first/, { timeout: 3_000 })
 })

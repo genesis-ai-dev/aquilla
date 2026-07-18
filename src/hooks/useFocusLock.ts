@@ -38,6 +38,24 @@ import type { ProjectWsServerMessage, WsReconciler } from "@/lib/sync/ws-reconci
 /** Default lease duration in ms; renewed at half-time. */
 export const DEFAULT_LEASE_MS = 30_000
 
+/**
+ * AQU-538: compose the DO focus-lock key from a cellId and an active lane.
+ *
+ * The project Durable Object treats the lock key as an OPAQUE string — it
+ * never parses it. That lets us partition focus leases PER LANE entirely on
+ * the client, with zero server changes: two translators editing the same
+ * `cellId` in different target lanes compose different keys, so neither sees
+ * the other as "editing", while two translators in the SAME lane still
+ * contend on one lease exactly as before.
+ *
+ * The default lane (`''` / undefined) composes to the bare `cellId`, so with
+ * no non-default lanes the key is byte-identical to the pre-lane behaviour —
+ * N=1 back-compat is preserved on the wire and in presence snapshots.
+ */
+export function focusLockKey(cellId: string, lane: string | undefined): string {
+  return lane ? `${cellId}@lane:${lane}` : cellId
+}
+
 export interface LockHolder {
   userId: string
   ts: number
@@ -48,6 +66,12 @@ export interface UseFocusLockArgs {
   reconciler: WsReconciler | null
   /** Cell to lock. `null` means no cell is focused. */
   cellId: string | null
+  /**
+   * AQU-538: the active target lane. Composed into the DO lock key via
+   * {@link focusLockKey} so leases are per-lane. `''`/undefined = default
+   * lane → the key is the bare cellId (byte-identical to pre-lane behaviour).
+   */
+  lane?: string
   /** Current user's id (matches what the server stamps on `lock.claimed`). */
   currentUserId: string
   /** Lease duration; renewed every half-period. */
@@ -62,7 +86,7 @@ export interface UseFocusLockResult {
   /** Present iff another client holds the lock for this cell. */
   heldBy: LockHolder | null
   /** Request the lock + start renewal. Safe to call repeatedly. */
-  claim(): void
+  claim(cellIdOverride?: string): void
   /** Release the lock + stop renewal. Safe to call repeatedly. */
   release(): void
 }
@@ -78,21 +102,29 @@ export function useFocusLock(
   const {
     reconciler,
     cellId,
+    lane,
     currentUserId,
     leaseMs = DEFAULT_LEASE_MS,
     onLockEvent,
   } = args
 
+  // AQU-538: the composed lock key is what actually crosses the wire and what
+  // every server frame (`lock.claimed`/`lock.released`/`presence.focusedCell`)
+  // is compared against — never the bare cellId. For the default lane this is
+  // exactly the cellId, so no on-wire behaviour changes with N=1.
+  const lockKey = cellId != null ? focusLockKey(cellId, lane) : null
+
   const [isHeld, setIsHeld] = useState(false)
   const [heldBy, setHeldBy] = useState<LockHolder | null>(null)
   const renewTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const claimedCellRef = useRef<string | null>(null)
-  const cellIdRef = useRef(cellId)
+  // Holds the composed lock key for the currently-focused cell (see lockKey).
+  const cellIdRef = useRef(lockKey)
   const onLockEventRef = useRef(onLockEvent)
 
   useEffect(() => {
-    cellIdRef.current = cellId
-  }, [cellId])
+    cellIdRef.current = lockKey
+  }, [lockKey])
 
   useEffect(() => {
     onLockEventRef.current = onLockEvent
@@ -105,11 +137,15 @@ export function useFocusLock(
     }
   }, [])
 
-  const claim = useCallback(() => {
-    if (!reconciler || !cellId) return
-    claimedCellRef.current = cellId
+  const claim = useCallback((cellIdOverride?: string) => {
+    // `cellIdOverride` is a RAW cellId (callers don't know the lane); compose
+    // it into the lane-qualified key here so claim/renew/release all agree.
+    const rawCellId = cellIdOverride ?? cellId
+    const targetCellId = rawCellId != null ? focusLockKey(rawCellId, lane) : null
+    if (!reconciler || !targetCellId) return
+    claimedCellRef.current = targetCellId
     setIsHeld(true)
-    reconciler.send({ t: "focus.claim", cellId, leaseMs })
+    reconciler.send({ t: "focus.claim", cellId: targetCellId, leaseMs })
     stopRenewal()
     // Half-period renewal — a single dropped frame shouldn't expire the lease.
     renewTimerRef.current = setInterval(() => {
@@ -117,7 +153,7 @@ export function useFocusLock(
       if (!target) return
       reconciler.send({ t: "focus.renew", cellId: target })
     }, Math.max(1_000, Math.floor(leaseMs / 2)))
-  }, [reconciler, cellId, leaseMs, stopRenewal])
+  }, [reconciler, cellId, lane, leaseMs, stopRenewal])
 
   const release = useCallback(() => {
     stopRenewal()
@@ -135,10 +171,12 @@ export function useFocusLock(
   // the WS state, not deriving new state from props.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (claimedCellRef.current && claimedCellRef.current !== cellId) {
+    // Compare against the composed key: switching cell OR lane must release
+    // the prior lease (otherwise the renewal timer keeps firing the old key).
+    if (claimedCellRef.current && claimedCellRef.current !== lockKey) {
       release()
     }
-  }, [cellId, release])
+  }, [lockKey, release])
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Drop the lock on unmount so a refresh or navigate-away doesn't strand a

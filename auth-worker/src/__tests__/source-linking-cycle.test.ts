@@ -1,4 +1,4 @@
-// FRO-477: cycle rejection in a 3-hop chain.
+// AQU-477: cycle rejection in a 3-hop chain.
 //
 // chainContains (source-linking.ts) walks the prospective source's OWN
 // source_project_id chain upstream looking for the project that's trying to

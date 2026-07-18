@@ -1,4 +1,4 @@
-// Tests for server-side enforcement of project-level validation configuration (FRO-189):
+// Tests for server-side enforcement of project-level validation configuration (AQU-189):
 //
 //   cell.validate:
 //     - validationRoleFloor: reject if caller's role < floor

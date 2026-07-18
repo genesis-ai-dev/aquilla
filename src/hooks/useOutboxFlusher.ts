@@ -4,6 +4,47 @@ import { outboxPendingCount, outboxFailedCount, subscribeToOutbox, requeueTransi
 
 const BASE_INTERVAL_MS = 5000
 const MAX_BACKOFF_MS = 60_000
+const MAX_DRAIN_ITERATIONS = 200 // backstop: 200 × ≤100 = up to ~20k events/cycle
+
+// ---------------------------------------------------------------------------
+// drainCycle — pure bounded drain loop; exported for unit testing.
+// Calls `flush` repeatedly until the queue stops making forward progress
+// (posted===0 or accepted===0) or authError occurs, bounded by MAX_DRAIN_ITERATIONS.
+// ---------------------------------------------------------------------------
+
+export interface DrainCycleResult {
+  iterations: number
+  madeProgress: boolean
+  /** True if at least one call returned posted > 0 (i.e. there was a queue
+   *  to drain, even if ultimately nothing was accepted). Used to distinguish
+   *  "empty queue" (no backoff needed) from "tried but all rejected" (backoff). */
+  postedAny: boolean
+  sawAuthError: boolean
+}
+
+type FlushResult = Awaited<ReturnType<typeof import("@/lib/sync/outbox-flush").flushOutboxBatch>>
+
+export async function drainCycle(
+  flush: () => Promise<FlushResult>,
+): Promise<DrainCycleResult> {
+  let madeProgress = false
+  let postedAny = false
+  let sawAuthError = false
+  let calls = 0
+  while (calls < MAX_DRAIN_ITERATIONS) {
+    const result = await flush()
+    calls++
+    if (result.authError) {
+      sawAuthError = true
+      break
+    }
+    if (result.posted === 0) break          // nothing left to send
+    postedAny = true
+    if (result.accepted === 0) break         // batch made no forward progress
+    madeProgress = true
+  }
+  return { iterations: calls, madeProgress, postedAny, sawAuthError }
+}
 
 export interface UseOutboxFlusherOptions {
   enabled: boolean
@@ -106,28 +147,32 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
     let cancelled = false
 
     const runFlushCycle = async () => {
-      const result = await flushOutboxBatch({
-        getTokenForFile: (pid, fid) => tokenRef.current(pid, fid),
-        onStaleSiblings: (entries) => {
-          if (entries.length === 0) return
-          setStaleSiblingCount((n) => n + entries.length)
-          // Latest-batch wins. We deliberately don't merge with prior entries:
-          // the banner shows one click-through target at a time, and stacking
-          // ancient stale entries on top of fresh ones makes the action
-          // ambiguous. The user dismisses (or clicks through) to clear.
-          setStaleSiblingEntries(entries)
-        },
-        onStaleSource: (entries) => {
-          setStaleSourceCount((n) => n + entries.length)
-        },
-      })
+      const { madeProgress, postedAny, sawAuthError } = await drainCycle(() =>
+        flushOutboxBatch({
+          getTokenForFile: (pid, fid) => tokenRef.current(pid, fid),
+          onStaleSiblings: (entries) => {
+            if (entries.length === 0) return
+            setStaleSiblingCount((n) => n + entries.length)
+            // Latest-batch wins. We deliberately don't merge with prior entries:
+            // the banner shows one click-through target at a time, and stacking
+            // ancient stale entries on top of fresh ones makes the action
+            // ambiguous. The user dismisses (or clicks through) to clear.
+            setStaleSiblingEntries(entries)
+          },
+          onStaleSource: (entries) => {
+            setStaleSourceCount((n) => n + entries.length)
+          },
+        }),
+      )
       await refreshPending()
-      const failedHard = result.posted > 0 && result.accepted === 0
+      // failedHard: we attempted to post something but accepted nothing.
+      // An empty queue (postedAny=false) is NOT a failure — no backoff needed.
+      const failedHard = postedAny && !madeProgress
       // `authError` fires when there are queued rows but the token mint
       // failed. Without backoff this loop would re-mint every BASE_INTERVAL_MS
       // and hammer the auth-worker — visible to the user as constant token
       // requests / a "refreshing" feel even though nothing is succeeding.
-      if (failedHard || result.authError) {
+      if (failedHard || sawAuthError) {
         setFailureStreak((s) => s + 1)
         backoffExp.current = Math.min(8, backoffExp.current + 1)
       } else {

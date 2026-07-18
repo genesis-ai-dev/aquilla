@@ -26,7 +26,8 @@ describe("builtin-registry", () => {
       expect(["major", "minor"]).toContain(def.defaultSeverity)
       expect(typeof def.defaultEnabled).toBe("boolean")
       expect(typeof def.run).toBe("function")
-      expect(typeof def.message).toBe("string")
+      // message is static copy, or a builder deriving copy from spans (FRO-345)
+      expect(["string", "function"]).toContain(typeof def.message)
     }
   })
 

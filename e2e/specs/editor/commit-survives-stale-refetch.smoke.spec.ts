@@ -1,4 +1,4 @@
-// FRO-247 regression: a committed edit must stay visible even when a
+// AQU-247 regression: a committed edit must stay visible even when a
 // full-file cells refetch that STARTED before the commit resolves after it.
 // The route shim below snapshots the stream response immediately (so its
 // data genuinely predates the commit) but delivers it seconds later — the

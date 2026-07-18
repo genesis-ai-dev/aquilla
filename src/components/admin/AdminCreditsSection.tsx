@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { type ColumnDef } from "@tanstack/react-table"
 import {
   listOrgCredits,
   setOrgCreditConfig,
@@ -8,6 +9,10 @@ import {
 import { formatCredits, capUsagePct } from "@/lib/credits"
 import { SegmentedCapBar, RailLegend } from "@/components/credits/credit-visuals"
 import { pctTextClass } from "@/components/credits/rails"
+import { DataTable } from "@/components/ui/data-table"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 
 /**
  * Platform-admin "Compute / Credits" section for the AdminConsole.
@@ -34,11 +39,16 @@ export function AdminCreditsSection({ jwt }: { jwt: string }) {
 
   useEffect(() => {
     aliveRef.current = true
-    return () => { aliveRef.current = false }
+    return () => {
+      aliveRef.current = false
+    }
   }, [])
 
   const refresh = useCallback(async () => {
-    if (aliveRef.current) { setLoading(true); setError(null) }
+    if (aliveRef.current) {
+      setLoading(true)
+      setError(null)
+    }
     try {
       const data = await listOrgCredits(jwt)
       if (aliveRef.current) setRows(data)
@@ -49,7 +59,9 @@ export function AdminCreditsSection({ jwt }: { jwt: string }) {
     }
   }, [jwt])
 
-  useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
 
   const patch = useCallback(
     async (orgId: number, update: CreditConfigPatch) => {
@@ -63,13 +75,106 @@ export function AdminCreditsSection({ jwt }: { jwt: string }) {
     [jwt, refresh],
   )
 
+  const columns = useMemo<ColumnDef<AdminOrgCredits>[]>(
+    () => [
+      {
+        id: "org",
+        accessorFn: (row) => row.orgName ?? `#${row.orgId}`,
+        header: "Org",
+        cell: ({ row }) => (
+          <div>
+            <div className="min-w-[120px] font-medium">
+              {row.original.orgName ?? `#${row.original.orgId}`}
+            </div>
+            <div className="text-[10px] tabular-nums text-muted-foreground">
+              #{row.original.orgId}
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: "today",
+        header: () => (
+          <span title="Total spend today across all rails (agent + chat + TTS).">Today</span>
+        ),
+        cell: ({ row }) => (
+          <SpendWindow
+            total={row.original.day.totalCredits}
+            cap={row.original.config.dailyCap}
+            byRail={row.original.day.byRail}
+            agentTestId={`agent-day-${row.original.orgId}`}
+            totalTestId={`cap-day-${row.original.orgId}`}
+          />
+        ),
+      },
+      {
+        id: "week",
+        header: () => (
+          <span title="Total spend this week across all rails.">This week</span>
+        ),
+        cell: ({ row }) => (
+          <SpendWindow
+            total={row.original.week.totalCredits}
+            cap={row.original.config.weeklyCap}
+            byRail={row.original.week.byRail}
+            agentTestId={`agent-week-${row.original.orgId}`}
+            totalTestId={`cap-week-${row.original.orgId}`}
+          />
+        ),
+      },
+      {
+        id: "caps",
+        header: "Caps",
+        cell: ({ row }) => (
+          <div className="flex flex-col gap-1.5">
+            <CapInput
+              value={row.original.config.dailyCap}
+              onCommit={(v) => void patch(row.original.orgId, { dailyCap: v })}
+              label="daily cap"
+              prefix="Day"
+            />
+            <CapInput
+              value={row.original.config.weeklyCap}
+              onCommit={(v) => void patch(row.original.orgId, { weeklyCap: v })}
+              label="weekly cap"
+              prefix="Wk"
+            />
+          </div>
+        ),
+      },
+      {
+        id: "controls",
+        header: "Controls",
+        cell: ({ row }) => (
+          <div className="flex flex-col gap-1.5">
+            <Toggle
+              checked={row.original.config.enforce}
+              onChange={(v) => void patch(row.original.orgId, { enforce: v })}
+              label="enforce caps"
+              caption="Enforce"
+              testId={`enforce-toggle-${row.original.orgId}`}
+            />
+            <Toggle
+              checked={row.original.config.showToOrg}
+              onChange={(v) => void patch(row.original.orgId, { showToOrg: v })}
+              label="show to org maintainers"
+              caption="Show org"
+              testId={`show-org-toggle-${row.original.orgId}`}
+            />
+          </div>
+        ),
+      },
+    ],
+    [patch],
+  )
+
   if (loading) return <p className="text-sm text-muted-foreground">Loading credits…</p>
   if (error) return <p className="text-sm text-destructive">{error}</p>
   if (rows === null) return <p className="text-sm text-muted-foreground">No credits data available.</p>
   if (rows.length === 0) return <p className="text-sm text-muted-foreground">No orgs found.</p>
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
         <span>Credit = 1¢ customer price · agent rail 5× markup, others 4×.</span>
         <span className="inline-flex items-center gap-3">
@@ -78,28 +183,13 @@ export function AdminCreditsSection({ jwt }: { jwt: string }) {
           <RailKey label="TTS" dot="bg-violet-500" />
         </span>
       </div>
-      <div className="overflow-x-auto rounded-xl border">
-        <table className="w-full text-sm" data-testid="admin-credits-table">
-          <thead>
-            <tr className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-              <th className="px-3 py-2 font-medium">Org</th>
-              <th className="px-3 py-2 font-medium" title="Total spend today across all rails (agent + chat + TTS).">
-                Today
-              </th>
-              <th className="px-3 py-2 font-medium" title="Total spend this week across all rails.">
-                This week
-              </th>
-              <th className="px-3 py-2 font-medium">Caps</th>
-              <th className="px-3 py-2 font-medium">Controls</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <AdminCreditsRow key={row.orgId} row={row} onPatch={patch} />
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        data={rows}
+        getRowId={(row) => String(row.orgId)}
+        testId="admin-credits-table"
+        rowClassName="align-top"
+      />
     </div>
   )
 }
@@ -107,92 +197,14 @@ export function AdminCreditsSection({ jwt }: { jwt: string }) {
 function RailKey({ label, dot }: { label: string; dot: string }) {
   return (
     <span className="inline-flex items-center gap-1">
-      <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+      <span className={`size-1.5 rounded-full ${dot}`} />
       {label}
     </span>
   )
 }
 
-function AdminCreditsRow({
-  row,
-  onPatch,
-}: {
-  row: AdminOrgCredits
-  onPatch: (orgId: number, patch: CreditConfigPatch) => Promise<void>
-}) {
-  return (
-    <tr className="border-t align-top">
-      {/* Org name */}
-      <td className="px-3 py-3 font-medium">
-        <div className="min-w-[120px]">{row.orgName ?? `#${row.orgId}`}</div>
-        <div className="text-[10px] text-muted-foreground tabular-nums">#{row.orgId}</div>
-      </td>
-
-      {/* Today — total vs cap + segmented rail bar + legend */}
-      <td className="px-3 py-3">
-        <SpendWindow
-          total={row.day.totalCredits}
-          cap={row.config.dailyCap}
-          byRail={row.day.byRail}
-          agentTestId={`agent-day-${row.orgId}`}
-          totalTestId={`cap-day-${row.orgId}`}
-        />
-      </td>
-
-      {/* This week */}
-      <td className="px-3 py-3">
-        <SpendWindow
-          total={row.week.totalCredits}
-          cap={row.config.weeklyCap}
-          byRail={row.week.byRail}
-          agentTestId={`agent-week-${row.orgId}`}
-          totalTestId={`cap-week-${row.orgId}`}
-        />
-      </td>
-
-      {/* Editable caps (daily / weekly) */}
-      <td className="px-3 py-3">
-        <div className="space-y-1.5">
-          <CapInput
-            value={row.config.dailyCap}
-            onCommit={(v) => onPatch(row.orgId, { dailyCap: v })}
-            label="daily cap"
-            prefix="Day"
-          />
-          <CapInput
-            value={row.config.weeklyCap}
-            onCommit={(v) => onPatch(row.orgId, { weeklyCap: v })}
-            label="weekly cap"
-            prefix="Wk"
-          />
-        </div>
-      </td>
-
-      {/* Controls (enforce / show to org) */}
-      <td className="px-3 py-3">
-        <div className="space-y-1.5">
-          <Toggle
-            checked={row.config.enforce}
-            onChange={(v) => onPatch(row.orgId, { enforce: v })}
-            label="enforce caps"
-            caption="Enforce"
-            testId={`enforce-toggle-${row.orgId}`}
-          />
-          <Toggle
-            checked={row.config.showToOrg}
-            onChange={(v) => onPatch(row.orgId, { showToOrg: v })}
-            label="show to org maintainers"
-            caption="Show org"
-            testId={`show-org-toggle-${row.orgId}`}
-          />
-        </div>
-      </td>
-    </tr>
-  )
-}
-
 /** One spend window in the admin table: total/cap + % + segmented rail bar +
- *  legend. The agent chip carries `agentTestId` so the FRO-414 anti-transposition
+ *  legend. The agent chip carries `agentTestId` so the AQU-414 anti-transposition
  *  tests can pin the agent value distinctly from the total. */
 function SpendWindow({
   total,
@@ -209,8 +221,11 @@ function SpendWindow({
 }) {
   const pct = capUsagePct(total, cap)
   return (
-    <div className="min-w-[150px] space-y-1.5">
-      <div className="flex items-baseline justify-between gap-2 text-xs tabular-nums" data-testid={totalTestId}>
+    <div className="flex min-w-[150px] flex-col gap-1.5">
+      <div
+        className="flex items-baseline justify-between gap-2 text-xs tabular-nums"
+        data-testid={totalTestId}
+      >
         <span className="font-semibold">{formatCredits(total)}</span>
         <span className={`font-medium ${pctTextClass(pct)}`}>{pct}%</span>
       </div>
@@ -234,15 +249,18 @@ function CapInput({
 }) {
   const [local, setLocal] = useState(String(value))
 
-  // Keep local in sync if the row refreshes from server
-  useEffect(() => { setLocal(String(value)) }, [value])
+  useEffect(() => {
+    setLocal(String(value))
+  }, [value])
 
   return (
-    <label className="flex items-center gap-1.5">
+    <Label className="flex items-center gap-1.5">
       {prefix ? (
-        <span className="w-6 shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">{prefix}</span>
+        <span className="w-6 shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
+          {prefix}
+        </span>
       ) : null}
-      <input
+      <Input
         type="number"
         aria-label={label}
         value={local}
@@ -251,10 +269,10 @@ function CapInput({
           const n = Number(local)
           if (!Number.isNaN(n) && n >= 0 && n !== value) onCommit(n)
         }}
-        className="w-20 rounded-md border bg-background px-2 py-0.5 text-xs tabular-nums focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="h-7 w-20 text-xs tabular-nums"
         min={0}
       />
-    </label>
+    </Label>
   )
 }
 
@@ -274,23 +292,13 @@ function Toggle({
 }) {
   return (
     <div className="flex items-center gap-1.5">
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
+      <Switch
+        checked={checked}
+        onCheckedChange={onChange}
         aria-label={label}
         data-testid={testId}
-        onClick={() => onChange(!checked)}
-        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
-          checked ? "bg-primary" : "bg-muted"
-        }`}
-      >
-        <span
-          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
-            checked ? "translate-x-4" : "translate-x-0.5"
-          }`}
-        />
-      </button>
+        size="sm"
+      />
       {caption ? <span className="text-[11px] text-muted-foreground">{caption}</span> : null}
     </div>
   )

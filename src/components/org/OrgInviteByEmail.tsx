@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { createOrgInvite } from "@/lib/frontier/orgs"
-import { ROLE, ORG_ROLE_PICKER, roleName } from "@/lib/frontier/roles"
+import { ROLE, ORG_ROLE_PICKER, roleName, roleDisplayText } from "@/lib/frontier/roles"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import posthog from "@/lib/posthog"
 import { INVITE_SENT } from "@/lib/event-names"
@@ -99,7 +99,7 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
           >
             {ORG_ROLE_PICKER.map((level) => (
               <option key={level} value={level}>
-                {roleName(level)}
+                {roleDisplayText(roleName(level))}
               </option>
             ))}
           </select>

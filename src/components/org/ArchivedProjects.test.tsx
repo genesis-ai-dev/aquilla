@@ -55,7 +55,7 @@ describe("ArchivedProjects", () => {
     expect(screen.getByText("No archived projects.")).toBeInTheDocument()
   })
 
-  // FRO-366: guard against the list clipping instead of scrolling — see
+  // AQU-366: guard against the list clipping instead of scrolling — see
   // ProjectsList.tsx for the full explanation of the flex chain this depends on.
   it("renders the list in a scrollable container (h-full + overflow-y-auto, no clipping)", async () => {
     fetchArchivedProjects.mockResolvedValue([

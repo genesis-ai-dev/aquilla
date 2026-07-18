@@ -1,13 +1,13 @@
-// FRO-181: health-rollup route unit tests.
+// AQU-181: health-rollup route unit tests.
 //
 // Tests the confidence-based health rollup at the propagate-health level
 // (the pure function) and the route's integration with a mock DB/auth.
 // We keep these DB-free where possible (propagate-health is pure), and test
 // the route at the HTTP boundary with a mock DB for integration coverage.
 //
-// FRO-190 addition: token auth tests — a properly minted sync-token (aud=sync,
+// AQU-190 addition: token auth tests — a properly minted sync-token (aud=sync,
 // correct projectId) MUST pass; a raw auth-worker JWT (no aud=sync) MUST be
-// rejected with 401. These tests are the sync-worker half of the FRO-190 fix.
+// rejected with 401. These tests are the sync-worker half of the AQU-190 fix.
 
 import { describe, it, expect } from 'vitest'
 import { propagateHealth, type PropNode, type PropEdges } from '../lib/confidence/propagate-health'
@@ -16,7 +16,7 @@ import { propagateHealth, type PropNode, type PropEdges } from '../lib/confidenc
 // Confidence-derived health rollup (pure, DB-free)
 // ---------------------------------------------------------------------------
 
-describe('confidence-derived health rollup (FRO-181)', () => {
+describe('confidence-derived health rollup (AQU-181)', () => {
   const OPTS = { perHopDecay: 0.8, maxHops: 4 }
 
   it('a project of all validated cells has health 100', () => {
@@ -141,7 +141,7 @@ const FAKE_PROJECT_ID = 'proj-test-123'
 // Here we verify the route returns null for non-matching paths and 401 when
 // the Authorization header is missing.
 
-describe('handleHealthRollupRequest (FRO-181)', () => {
+describe('handleHealthRollupRequest (AQU-181)', () => {
   it('returns null for non-matching paths', async () => {
     const req = new Request('https://example.com/api/v1/projects/p/cells')
     const env = { AQUILLA_PG: makeMockDb({}), SYNC_SECRET_KEY: FAKE_SECRET }
@@ -193,18 +193,18 @@ describe('handleHealthRollupRequest (FRO-181)', () => {
 })
 
 // ---------------------------------------------------------------------------
-// FRO-190: Token auth — sync-token passes, raw auth JWT rejected
+// AQU-190: Token auth — sync-token passes, raw auth JWT rejected
 // ---------------------------------------------------------------------------
 //
 // The health-rollup route uses verifyTokenForProject which requires aud=sync
-// and the correct projectId. This is the server-side half of the FRO-190 fix:
+// and the correct projectId. This is the server-side half of the AQU-190 fix:
 // a properly minted sync-token must succeed while a raw auth-worker JWT (which
 // has no aud=sync claim) is rejected with 401 "wrong audience".
 
 import { makeTestToken } from './helpers/auth'
 import { sign } from 'hono/jwt'
 
-describe('handleHealthRollupRequest — token auth (FRO-190)', () => {
+describe('handleHealthRollupRequest — token auth (AQU-190)', () => {
   it('accepts a valid minted sync-token with aud=sync and correct projectId', async () => {
     const token = await makeTestToken(FAKE_SECRET, {
       projectId: FAKE_PROJECT_ID,
@@ -225,7 +225,7 @@ describe('handleHealthRollupRequest — token auth (FRO-190)', () => {
   })
 
   it('accepts a sync-token with the __project__ sentinel fileId (as useProjectHealth mints)', async () => {
-    // This is the exact scenario the FRO-190 fix enables: mint with __project__
+    // This is the exact scenario the AQU-190 fix enables: mint with __project__
     // sentinel fileId, pass to /health-rollup. verifyTokenForProject must accept it.
     const token = await makeTestToken(FAKE_SECRET, {
       projectId: FAKE_PROJECT_ID,

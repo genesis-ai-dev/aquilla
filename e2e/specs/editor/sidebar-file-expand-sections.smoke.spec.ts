@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import type { Request } from "@playwright/test"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import path from "node:path"
@@ -22,8 +23,9 @@ const SAMPLE_USFM = path.resolve(__dirname, "../../fixtures/sample.usfm")
  *   2. Waits for the file to appear in the sidebar.
  *   3. Clicks the "Expand" button on the file row.
  *   4. Verifies the section rows (GEN 1, GEN 2) become visible.
- *   5. Clicks "GEN 2" — verifies no error (scroll request fires).
- *   6. Clicks "Collapse" — section rows disappear.
+ *   5. Proves expansion does not request full cell pages.
+ *   6. Edits and validates a cell, then verifies both progress bars update.
+ *   7. Clicks "Collapse" — section rows disappear.
  */
 test("expanding a file row reveals section rows in the sidebar", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -40,6 +42,20 @@ test("expanding a file row reveals section rows in the sidebar", async ({ alice 
   await expect(
     sidebar.locator("div").filter({ hasText: /sample/i }).first()
   ).toBeVisible({ timeout: 10_000 })
+  // The imported file is also the active editor file, so its normal initial
+  // cell load is expected. Start measuring only after that independent work
+  // has settled; requests observed below are attributable to expansion.
+  await ws.waitForEditor()
+  await alice.waitForLoadState("networkidle")
+
+  const cellPageReads: string[] = []
+  const trackCellReads = (request: Request) => {
+    const url = new URL(request.url())
+    if (request.method() === "GET" && /\/files\/[^/]+\/cells$/.test(url.pathname)) {
+      cellPageReads.push(request.url())
+    }
+  }
+  alice.on("request", trackCellReads)
 
   // Click the "Expand" button on the file row (chevron icon).
   const expandBtn = sidebar.locator('[aria-label="Expand"]').first()
@@ -54,11 +70,25 @@ test("expanding a file row reveals section rows in the sidebar", async ({ alice 
   await expect(
     sidebar.getByText(/^GEN 2$/).first()
   ).toBeVisible({ timeout: 3_000 })
+  expect(cellPageReads).toEqual([])
+  alice.off("request", trackCellReads)
 
-  // Click "GEN 2" — requestScrollToSection fires (no error expected).
-  await sidebar.getByText(/^GEN 2$/).first().click()
-  // Editor should still be visible (no crash).
+  // Open chapter 1 and verify optimistic progress is reflected immediately.
+  const gen1 = sidebar.getByRole("button", { name: /GEN 1/i }).first()
+  const translatedBar = gen1.locator("span.bg-amber-500")
+  const validatedBar = gen1.locator("span.bg-emerald-500")
+  await gen1.click()
   await ws.waitForEditor()
+  // The first two USFM rows are book/chapter headings; row 2 is GEN 1:1.
+  await ws.editCell(2, "Bonjour")
+  await expect.poll(async () => Number.parseFloat((await translatedBar.getAttribute("style"))?.match(/[\d.]+/)?.[0] ?? "0"), {
+    timeout: 10_000,
+  }).toBeGreaterThan(0)
+
+  await ws.validateCell(2)
+  await expect.poll(async () => Number.parseFloat((await validatedBar.getAttribute("style"))?.match(/[\d.]+/)?.[0] ?? "0"), {
+    timeout: 10_000,
+  }).toBeGreaterThan(0)
 
   // Collapse the file row — sections disappear.
   const collapseBtn = sidebar.locator('[aria-label="Collapse"]').first()

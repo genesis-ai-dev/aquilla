@@ -8,7 +8,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * next to a "More save options" dropdown trigger (aria-label="More save options").
  * The dropdown contains "Close without saving" which opens a discard dialog.
  *
- * This spec: navigate to project settings → change the project name (makes
+ * This spec: navigate to project settings → change the source language (makes
  * settings dirty) → click "More save options" → verify "Close without saving"
  * appears → click it → verify a discard/confirm dialog appears.
  */
@@ -22,13 +22,12 @@ test("project settings More save options shows Close without saving", async ({ a
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}/settings`)
+  await alice.goto(`/project/${projectId}/settings?section=general`)
   await alice.waitForLoadState("networkidle")
 
-  // Make the form dirty by changing the project name.
-  const nameInput = alice.locator("#pname")
-  await expect(nameInput).toBeVisible({ timeout: 10_000 })
-  await nameInput.fill("Modified Name")
+  const sourceLanguage = alice.locator("#sl")
+  await expect(sourceLanguage).toBeVisible({ timeout: 10_000 })
+  await sourceLanguage.fill("English (US)")
 
   // "Save changes" button should appear.
   const saveBtn = alice.getByRole("button", { name: /Save changes/i })

@@ -1,5 +1,5 @@
 /**
- * edit-miner.ts — FRO-198
+ * edit-miner.ts — AQU-198
  *
  * Mines candidate rule patterns from the currently-available cell snapshot.
  *

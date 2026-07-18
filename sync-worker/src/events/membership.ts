@@ -1,4 +1,4 @@
-// FRO-346: live membership re-check for the write perimeter.
+// AQU-346: live membership re-check for the write perimeter.
 //
 // Sync-token verification (auth.ts) is pure JWT: it proves the user had
 // project access AT MINT TIME. Removing a member deletes their
@@ -13,7 +13,7 @@
 //   - Writes (POST /events): refused immediately by THIS check — the removed
 //     user's next flush 403s even with a still-valid token.
 //   - Reads: bounded by the 15-minute token TTL (no per-read DB round-trip;
-//     matches the FRO-285 frozen-project reasoning in sync-token.ts).
+//     matches the AQU-285 frozen-project reasoning in sync-token.ts).
 //   - Live WS session: ejected by the ProjectSync DO on the member-removed
 //     admin notification (see member-removed.ts / project-do.ts).
 //

@@ -157,29 +157,30 @@ function StatusBadge({
 }) {
   if (status.kind === "ready") {
     return (
-      <Badge variant="secondary" className="gap-1 text-emerald-600 dark:text-emerald-400">
-        <CheckCircle2 className="h-3 w-3" /> Downloaded
+      <Badge variant="secondary">
+        <CheckCircle2 data-icon="inline-start" />
+        Downloaded
       </Badge>
     )
   }
   if (status.kind === "error") {
     return (
-      <Badge variant="destructive" className="gap-1">
-        <AlertCircle className="h-3 w-3" /> Failed
+      <Badge variant="destructive">
+        <AlertCircle data-icon="inline-start" />
+        Failed
       </Badge>
     )
   }
   if (status.kind === "downloading") {
     return (
-      <Badge variant="secondary" className="gap-1">
-        <Spinner className="h-3 w-3" /> Downloading
+      <Badge variant="secondary">
+        <Spinner data-icon="inline-start" />
+        Downloading
       </Badge>
     )
   }
   return (
-    <Badge variant="outline" className="text-muted-foreground">
-      {sizeMb} MB · not downloaded
-    </Badge>
+    <Badge variant="outline">{sizeMb} MB · not downloaded</Badge>
   )
 }
 

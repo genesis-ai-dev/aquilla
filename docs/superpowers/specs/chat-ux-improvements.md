@@ -61,7 +61,7 @@ Every item below is implemented once, in the shared components.
   (`currentCell` prop already flows into both panels). Inserts the
   message's plain text (markdown stripped) into the focused cell via the
   same commit path single-cell AI completion uses (see
-  `useCompletion`/EditorTable commit flow) so FRO-247 write-clock
+  `useCompletion`/EditorTable commit flow) so AQU-247 write-clock
   semantics hold. If the cell already has text, confirm
   ("Replace current translation?") before committing. Keep the action's
   label consistent with UI-GLOSSARY conventions.

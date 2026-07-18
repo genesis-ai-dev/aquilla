@@ -300,7 +300,8 @@ export function Dashboard() {
             <ProjectCardGridSkeleton count={3} />
           ) : filteredProjects.length === 0 ? (
             <EmptyState
-              className="border-0 bg-transparent py-6"
+              variant="inline"
+              className="py-6"
               icon={projects.length === 0 ? FolderOpen : Filter}
               title={
                 projects.length === 0

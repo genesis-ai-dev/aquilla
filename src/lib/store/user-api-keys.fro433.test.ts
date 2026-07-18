@@ -1,6 +1,6 @@
-// FRO-433 — resolveApiKey precedence: project > user > org
+// AQU-433 — resolveApiKey precedence: project > user > org
 //
-// Verifies the three-tier fallback chain introduced in FRO-433.
+// Verifies the three-tier fallback chain introduced in AQU-433.
 //   1. project key beats user key and org key
 //   2. user key beats org key when no project key is set
 //   3. org key is used as last resort when neither project nor user key is set
@@ -19,7 +19,7 @@ afterEach(() => {
   localStorage.clear()
 })
 
-describe("resolveApiKey — three-tier precedence (FRO-433)", () => {
+describe("resolveApiKey — three-tier precedence (AQU-433)", () => {
   it("returns the project key when all three are set (project wins)", () => {
     setUserApiKey("gemini-tts", "user-key")
     const result = resolveApiKey("gemini-tts", "project-key", "org-key")

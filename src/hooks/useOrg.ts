@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  getOrCreateMyOrg, listOrgMembers, addOrgMember, removeOrgMember,
+  getOrCreateMyOrg, fetchOrgRoster, addOrgMember, removeOrgMember,
   listOrgMemberProjects, type MyOrg, type OrgMember, type OrgMemberProject,
 } from "@/lib/frontier/orgs";
 import { useFrontierSession } from "./useFrontierSession";
@@ -86,6 +86,14 @@ export interface UseOrgMembers {
   members: OrgMember[];
   isLoading: boolean;
   error: string | null;
+  /**
+   * AQU-485: true when the org's rosterViewMinRole policy hides the roster
+   * from the caller (a distinct condition from a fetch error or genuine
+   * "no members"). Callers should render an explicit "hidden by org policy"
+   * state, not an empty roster — an empty list implies zero members, which
+   * is not what a hidden roster means.
+   */
+  rosterHidden: boolean;
   refresh: () => Promise<void>;
   add: (username: string, role: number) => Promise<OrgMember | null>;
   remove: (userId: number) => Promise<void>;
@@ -99,6 +107,7 @@ export function useOrgMembers(orgId: number | null): UseOrgMembers {
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [isLoading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rosterHidden, setRosterHidden] = useState(false);
   const aliveRef = useRef(true);
 
   // See useOrg above for the StrictMode rationale — same pattern.
@@ -112,8 +121,24 @@ export function useOrgMembers(orgId: number | null): UseOrgMembers {
     setLoading(true);
     setError(null);
     try {
-      const next = await listOrgMembers(jwt, orgId);
-      if (aliveRef.current) setMembers(next);
+      const result = await fetchOrgRoster(jwt, orgId);
+      if (!aliveRef.current) return;
+      if (result.kind === "ok") {
+        setMembers(result.members);
+        setRosterHidden(false);
+      } else if (result.kind === "roster-hidden") {
+        // AQU-485: don't render an empty shell that leaks "zero members" —
+        // clear the list AND flag the distinct hidden state so the page can
+        // show "Roster hidden by org policy" instead.
+        setMembers([]);
+        setRosterHidden(true);
+      } else {
+        // no-access: not an org member. Keep pre-AQU-485 behavior (empty,
+        // no error surfaced) — this route already requires org membership
+        // to reach this hook in practice.
+        setMembers([]);
+        setRosterHidden(false);
+      }
     } catch (e) {
       if (aliveRef.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -145,5 +170,5 @@ export function useOrgMembers(orgId: number | null): UseOrgMembers {
     return listOrgMemberProjects(jwt, orgId, userId);
   }, [jwt, orgId]);
 
-  return { members, isLoading, error, refresh, add, remove, listMemberProjects };
+  return { members, isLoading, error, rosterHidden, refresh, add, remove, listMemberProjects };
 }

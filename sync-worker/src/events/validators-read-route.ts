@@ -38,11 +38,24 @@ export async function handleValidatorsReadRequest(
 
   const projectId = auth.claims.projectId
 
+  // AQU-538: validations are per target-language lane. Each row carries its
+  // lane (target_lang; '' = default lane, returned as targetLang). Without a
+  // ?lane= param we return every lane's validators (N=1 is byte-identical bar
+  // the additive targetLang field); an explicit ?lane=<tag> filters to it.
+  const lane = url.searchParams.get('lane')
+
   // DELETE-on-unvalidate: a row's presence IS "active". No is_active column.
-  const sql = `
-    SELECT event_id, username, decided_ts
+  const sql = lane === null
+    ? `
+    SELECT event_id, username, decided_ts, target_lang
     FROM cell_validators
     WHERE project_id = ? AND file_id = ? AND cell_id = ?
+    ORDER BY decided_ts DESC
+  `
+    : `
+    SELECT event_id, username, decided_ts, target_lang
+    FROM cell_validators
+    WHERE project_id = ? AND file_id = ? AND cell_id = ? AND target_lang = ?
     ORDER BY decided_ts DESC
   `
 
@@ -50,16 +63,20 @@ export async function handleValidatorsReadRequest(
     event_id: string
     username: string
     decided_ts: number
+    target_lang: string
   }
 
-  const res = await env.AQUILLA_PG.prepare(sql)
-    .bind(projectId, fileId, cellId)
-    .all<Row>()
+  const stmt = env.AQUILLA_PG.prepare(sql)
+  const res = await (lane === null
+    ? stmt.bind(projectId, fileId, cellId)
+    : stmt.bind(projectId, fileId, cellId, lane)
+  ).all<Row>()
 
   const validators = res.results.map((r) => ({
     editEventId: r.event_id,
     username: r.username,
     decidedTs: r.decided_ts,
+    targetLang: r.target_lang ?? '',
   }))
 
   return Response.json({ validators })

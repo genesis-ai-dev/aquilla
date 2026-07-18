@@ -1,7 +1,7 @@
 import { test, expect } from "../../helpers/multi-user"
-import { pickSelectOption } from "../../helpers/base-ui"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
+import { Glossary } from "../../helpers/page-objects/Glossary"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -46,31 +46,9 @@ test("wildcard source term creates chip matches in the editor", async ({ alice }
   // Navigate to Terminology page.
   const projectId = alice.url().match(/\/project\/([^/]+)/)?.[1]
   expect(projectId).toBeTruthy()
-  await alice.goto(`/project/${projectId}/terminology`)
-  await alice.waitForLoadState("networkidle")
-
-  // Create a new APPROVED concept with a wildcard source term "samp*".
-  const newConceptBtn = alice.getByRole("button", { name: /new concept|add concept|\+ concept/i }).first()
-  await expect(newConceptBtn).toBeVisible({ timeout: 8_000 })
-  await newConceptBtn.click()
-
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
-
-  // Fill the source term field (#concept-source-term) with a wildcard pattern.
-  const sourceTermInput = dialog.locator("#concept-source-term")
-  await expect(sourceTermInput).toBeVisible({ timeout: 5_000 })
-  await sourceTermInput.fill("samp*")
-
-  // A rendering is required to save; fill the pre-populated row.
-  await dialog.locator('input[aria-label="Rendering 1 text"]').fill("échantillon")
-
-  // Chips only render for ACTIVE concepts — set status to approved.
-  await pickSelectOption(alice, dialog.locator("#concept-status"), "approved")
-
-  // Save — footer button is "Add concept" for new concepts.
-  await dialog.getByRole("button", { name: /^Add concept$/i }).click()
-  await expect(dialog).not.toBeVisible({ timeout: 5_000 })
+  const glossary = new Glossary(alice)
+  await glossary.goto(projectId!)
+  await glossary.addTerm("samp*", "échantillon")
 
   // Navigate back to the editor / file.
   await alice.goto(`/project/${projectId}`)

@@ -1,4 +1,4 @@
-// FRO-476: source.cell.mirror / file.mirror projection tests.
+// AQU-476: source.cell.mirror / file.mirror projection tests.
 //
 // WHY: mirror events are the propagation primitive for live source links.
 // The rules that must hold, byte-for-byte, per the design spec §4/§5:

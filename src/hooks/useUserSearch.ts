@@ -43,7 +43,7 @@ const DEFAULT_LIMIT = 10
  * - Treats network or HTTP errors as "no results" silently — the
  *   typeahead degrades to a plain input without erroring loudly.
  *
- * FRO-321: When `scoped=true` (default), results are scoped to org/project-
+ * AQU-321: When `scoped=true` (default), results are scoped to org/project-
  * overlap users. Pass `scoped=false` only for surfaces that intentionally
  * allow global search (none currently).
  */

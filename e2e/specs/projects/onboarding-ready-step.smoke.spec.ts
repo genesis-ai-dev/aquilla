@@ -18,13 +18,15 @@ import { test, expect } from "../../helpers/multi-user"
  * shows a bypass option.
  */
 test("ReadyStep 'Start Translating' navigates to the created project", async ({ alice }) => {
+  await alice.goto("/")
+  await alice.evaluate(() => localStorage.removeItem("codex:onboardingComplete"))
   await alice.goto("/onboarding")
   await alice.waitForLoadState("networkidle")
 
   // Advance through wizard steps until we reach ReadyStep.
   // We drive generically — click Continue/Next/Get started/Skip until
   // we encounter the project fields (step 5) or the ReadyStep (step 6).
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 10; i++) {
     const url = alice.url()
 
     // If we're already on a project page, we went past ReadyStep.
@@ -58,7 +60,7 @@ test("ReadyStep 'Start Translating' navigates to the created project", async ({ 
 
     // Other steps: click the primary forward button.
     const fwdBtn = alice.getByRole("button", {
-      name: /Get started|Continue|Next|Skip|Already have|Sign in/i,
+      name: /Get started|Continue|Next|Skip|Already have|Sign in|Just me/i,
     }).first()
     if (await fwdBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {
       await fwdBtn.click()

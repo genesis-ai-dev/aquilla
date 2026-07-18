@@ -80,4 +80,34 @@ describe("AppShell main-content error containment", () => {
     expect(screen.getByTestId("content")).toBeInTheDocument()
     expect(screen.queryByText("Something went wrong")).not.toBeInTheDocument()
   })
+
+  it("keeps the header in the same fixed-height band with or without tabs", () => {
+    const { container, rerender } = render(
+      <MemoryRouter>
+        <AppShell
+          header={<div>header</div>}
+          statusBar={null}
+          sidebar={<div>sidebar</div>}
+          main={<div>main</div>}
+        />
+      </MemoryRouter>,
+    )
+
+    const header = container.querySelector('[data-slot="app-shell-header"]')
+    expect(header).toHaveClass("h-[52px]", "min-h-[52px]", "justify-center")
+
+    rerender(
+      <MemoryRouter>
+        <AppShell
+          header={<div>header</div>}
+          statusBar={null}
+          sidebar={<div>sidebar</div>}
+          aboveCard={<div>tabs</div>}
+          main={<div>main</div>}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(container.querySelector('[data-slot="app-shell-header"]')).toHaveClass("h-[52px]", "min-h-[52px]", "justify-center")
+  })
 })

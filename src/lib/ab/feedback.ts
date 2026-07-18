@@ -10,7 +10,7 @@
 //
 // Alongside the outcome we send the NORMALIZED EDIT DISTANCE [0,1] between
 // the AI draft and the human's text (same character-level Levenshtein as the
-// FRO-311 post-edit metrics): 0 = validated verbatim, 1 = fully rewritten.
+// AQU-311 post-edit metrics): 0 = validated verbatim, 1 = fully rewritten.
 // The outcome is first-write-wins server-side; the distance refines with each
 // further commit (last write wins) so it converges on the final repair cost.
 //

@@ -228,7 +228,7 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
               />
             </Field>
             {error && <FieldError>{error}</FieldError>}
-            <Button onClick={handleSaveUrl} disabled={!urlInput.trim()} className="w-full">
+            <Button onClick={handleSaveUrl} className="w-full">
               Save URL
             </Button>
           </FieldGroup>

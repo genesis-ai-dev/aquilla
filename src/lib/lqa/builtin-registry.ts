@@ -18,7 +18,9 @@ export interface BuiltinCheckDefinition {
   /** True if the check should run even when target is empty. */
   runsOnEmptyTarget: boolean
   run: (source: string, target: string) => InfractionSpan[] | null
-  message: string
+  /** Static copy, or a builder that derives copy from the offending spans
+   *  (e.g. placeholder-integrity names the missing token). */
+  message: string | ((spans: InfractionSpan[]) => string)
 }
 
 export const BUILTIN_CHECKS: Record<BuiltinCheckId, BuiltinCheckDefinition> = {
@@ -50,7 +52,7 @@ export const BUILTIN_CHECKS: Record<BuiltinCheckId, BuiltinCheckDefinition> = {
     defaultEnabled: true,
     runsOnEmptyTarget: false,
     run: placeholderIntegrity.runCheck,
-    message: placeholderIntegrity.MESSAGE,
+    message: placeholderIntegrity.buildMessage,
   },
   "number-integrity": {
     id: "number-integrity",

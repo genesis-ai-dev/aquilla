@@ -20,7 +20,7 @@ import { test, expect } from "../../helpers/multi-user"
  *   5. Restore original state so the test leaves no side-effects.
  */
 test("preferences analytics consent setting persists across page reload", async ({ alice }) => {
-  await alice.goto("/preferences")
+  await alice.goto("/preferences/privacy")
   await alice.waitForLoadState("networkidle")
 
   const toggle = alice.getByRole("switch", { name: "Share usage data" })

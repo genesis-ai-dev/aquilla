@@ -7,6 +7,7 @@ import {
   audioCacheGet,
   audioCacheEvict,
   audioCachePut,
+  audioCachePutBlob,
 } from "./bytes-cache"
 import {
   __resetOpfsAvailabilityForTests,
@@ -167,5 +168,15 @@ describe("OPFS unavailability", () => {
         configurable: true,
       })
     }
+  })
+})
+
+describe("audioCachePutBlob (FRO-355)", () => {
+  it("caches bytes straight from a Blob so it round-trips via audioCacheGet", async () => {
+    const blob = new Blob([new Uint8Array([7, 8, 9])], { type: "audio/webm" })
+    await audioCachePutBlob("audio-blob-1", "webm", blob)
+    const back = await audioCacheGet("audio-blob-1", "webm")
+    expect(back).not.toBeNull()
+    expect(Array.from(back!)).toEqual([7, 8, 9])
   })
 })

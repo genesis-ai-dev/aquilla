@@ -15,6 +15,7 @@ import {
   fetchCellAudio,
   parseFrontierAudioUrl,
 } from "./upload"
+import { audioCachePutBlob } from "./bytes-cache"
 import { decodeToMono48k } from "./decode-mono"
 import { denoiseMono48k } from "./denoise"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
@@ -72,9 +73,11 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
   // 2. Run RNNoise → WebM/Opus blob.
   const { blob, durationMs, mimeType } = await denoiseMono48k(samples)
 
-  // 3. Upload as a new (denoised) take.
+  // 3. Upload as a new (denoised) take. Warm the byte cache first (FRO-355)
+  //    so the new take is transcribable/playable locally straight away.
   const ext = extForMime(mimeType)
   const newId = buildDenoisedAudioId(cellId)
+  await audioCachePutBlob(newId, ext, blob)
   const result = await uploadCellAudio({ projectId, fileId, audioId: newId, ext, blob, getSyncToken })
   const fullAudioId = `${result.audioId}.${result.ext}`
 

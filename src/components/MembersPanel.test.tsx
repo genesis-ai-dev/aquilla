@@ -138,3 +138,27 @@ describe("MembersPanel scopes editor", () => {
     expect(onSave).toHaveBeenCalledWith(2, [{ kind: "lane", value: "es" }])
   })
 })
+
+// AQU-625: the add-member row (username search + role + Add) must be inert for
+// callers who can't add members, so the typeahead can't be used to enumerate
+// co-members even when the roster itself is permission-hidden.
+describe("MembersPanel add-member gate (canAddMembers)", () => {
+  it("disables the username search and Add, and shows a permission reason, when canAddMembers is false", () => {
+    renderPanel(
+      <MembersPanel {...baseProps()} callerMaxRole={400} canAddMembers={false} />,
+    )
+    expect(screen.getByPlaceholderText("Aquilla username")).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled()
+    expect(
+      screen.getByText(/project lead or above required to add members/i),
+    ).toBeInTheDocument()
+  })
+
+  it("leaves the username search enabled and shows no reason when canAddMembers is true (default)", () => {
+    renderPanel(<MembersPanel {...baseProps()} callerMaxRole={500} />)
+    expect(screen.getByPlaceholderText("Aquilla username")).not.toBeDisabled()
+    expect(
+      screen.queryByText(/project lead or above required to add members/i),
+    ).not.toBeInTheDocument()
+  })
+})

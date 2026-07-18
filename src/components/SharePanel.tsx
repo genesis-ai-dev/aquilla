@@ -44,6 +44,15 @@ interface SharePanelProps {
   /** Fires after a server invite is successfully minted so the parent can
    * refresh any "you have outstanding shares" UI (onboarding checklist). */
   onSharesChanged?: () => void
+  /**
+   * AQU-625: whether the caller may manage/add project members (project_lead+
+   * server-side). Threaded from the caller's authoritative project role so the
+   * Members-tab add/search field can be disabled for callers who can't add
+   * members — otherwise the username typeahead lets them enumerate users even
+   * when the roster itself is permission-hidden. Omitted ⇒ fall back to the
+   * roster-derived caller role (kept for callers without role context).
+   */
+  canManageMembers?: boolean
 }
 
 // Roles visible in the share-link UI come from LINK_ROLE_OPTIONS (capped at
@@ -54,7 +63,7 @@ const DEFAULT_INVITE_ROLE = ROLE.CONTRIBUTOR
 
 type Tab = "members" | "link"
 
-export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: SharePanelProps) {
+export function SharePanel({ open, onOpenChange, projectId, onSharesChanged, canManageMembers }: SharePanelProps) {
   const [tab, setTab] = useState<Tab>("members")
 
   return (
@@ -91,7 +100,7 @@ export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: S
 
         <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-1.5 pb-1.5">
           {tab === "members" ? (
-            <MembersTab projectId={projectId} />
+            <MembersTab projectId={projectId} canManageMembers={canManageMembers} />
           ) : (
             <InviteLinkTab
               projectId={projectId}
@@ -104,7 +113,7 @@ export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: S
   )
 }
 
-function MembersTab({ projectId }: { projectId: string }) {
+function MembersTab({ projectId, canManageMembers }: { projectId: string; canManageMembers?: boolean }) {
   // FrontierSession has no userId — server enforces self-grant rejection so we
   // pass null and skip the local self-block.
   const callerUserId = null
@@ -142,6 +151,12 @@ function MembersTab({ projectId }: { projectId: string }) {
   // never scopable — so the fetches below are skipped entirely for anyone
   // who wouldn't see the editor MembersPanel renders.
   const canManageScopes = callerMaxRole >= ROLE.PROJECT_LEAD
+
+  // AQU-625: gate the add/search field on the caller's authoritative project
+  // role when the parent provides it (project.syncRole); otherwise fall back to
+  // the roster-derived role. Adding a member is project_lead+ server-side, so
+  // below that the typeahead is disabled to stop co-member enumeration.
+  const canAddMembers = canManageMembers ?? (callerMaxRole >= ROLE.PROJECT_LEAD)
 
   const [scopeLanes, setScopeLanes] = useState<Array<{ value: string; label: string }>>([
     { value: "", label: "Default" },
@@ -222,6 +237,7 @@ function MembersTab({ projectId }: { projectId: string }) {
           newMemberDefaultRole={ROLE.CONTRIBUTOR}
           callerUserId={callerUserId}
           callerMaxRole={callerMaxRole}
+          canAddMembers={canAddMembers}
           onAdd={async (username, role) => {
             const result = await add(username, role)
             return result ? { ok: true } : { ok: false, error: "No user with that username" }

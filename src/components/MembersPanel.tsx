@@ -80,6 +80,14 @@ interface MembersPanelProps {
   /** Disable for org membership, where search should find any Aquilla user. */
   scopedUserSearch?: boolean;
   /**
+   * AQU-625: gate the add-member row (username search + role picker + Add).
+   * When false, the username-search field is disabled with a permission
+   * reason so a caller who can't manage members can't enumerate users via
+   * the typeahead (a privacy leak even when the roster itself is hidden).
+   * Defaults to true, preserving org-membership and other existing callers.
+   */
+  canAddMembers?: boolean;
+  /**
    * AQU-553: when provided (and callerMaxRole >= 500), renders a per-member
    * lane/file scopes editor for scopable members (roleLevel < 500).
    */
@@ -96,6 +104,7 @@ export function MembersPanel({
   callerUserId,
   callerMaxRole,
   scopedUserSearch = true,
+  canAddMembers = true,
   scopeConfig,
 }: MembersPanelProps) {
   // AQU-553: the scopes editor is shown only when project context is supplied
@@ -222,7 +231,7 @@ export function MembersPanel({
             <UsernameTypeahead
               value={recipient}
               onChange={setRecipient}
-              disabled={adding}
+              disabled={adding || !canAddMembers}
               showModeToggle={false}
               placeholder={{ username: "Aquilla username" }}
               excludedUserIds={existingUserIds}
@@ -233,7 +242,7 @@ export function MembersPanel({
             items={grantableRoles.map((r) => ({ value: String(r.level), label: roleDisplayText(r.name) }))}
             value={String(role)}
             onValueChange={(v) => setRole(parseInt(v ?? "", 10))}
-            disabled={adding}
+            disabled={adding || !canAddMembers}
           >
             <SelectTrigger aria-label="Role">
               <SelectValue />
@@ -251,11 +260,18 @@ export function MembersPanel({
           <Button
             className="sm:whitespace-nowrap"
             onClick={handleAdd}
-            disabled={adding || !recipient.raw.trim()}
+            disabled={adding || !canAddMembers || !recipient.raw.trim()}
           >
             Add
           </Button>
         </div>
+        {/* AQU-625: permission-vocabulary reason so the disabled search field
+            explains why it's inert, rather than silently accepting no input. */}
+        {!canAddMembers && (
+          <p className="text-xs text-muted-foreground">
+            Project lead or above required to add members.
+          </p>
+        )}
         {addError && <p className="text-xs text-destructive">{addError}</p>}
       </div>
     </div>

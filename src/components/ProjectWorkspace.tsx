@@ -5017,6 +5017,10 @@ export function ProjectWorkspace() {
         open={shareOpen} onOpenChange={setShareOpen}
         projectId={projectId!}
         onSharesChanged={refreshChecklistShares}
+        // AQU-625: gate the Members-tab add/search field on the caller's real
+        // project role (project_lead+ can add members server-side), so a
+        // lower-role caller can't enumerate users via the username typeahead.
+        canManageMembers={(project?.syncRole?.level ?? 0) >= ROLE.PROJECT_LEAD}
       />
       <VideoAttachmentDialog
         open={videoDialogOpen} onOpenChange={setVideoDialogOpen}

@@ -11,10 +11,12 @@ import type { MembersPanelScopeConfig } from "./MembersPanel"
 
 // ─── Mocks ────────────────────────────────────────────────────────────────
 
-let lastMembersPanelProps: { scopeConfig?: MembersPanelScopeConfig } | null = null
+let lastMembersPanelProps:
+  | { scopeConfig?: MembersPanelScopeConfig; canAddMembers?: boolean }
+  | null = null
 
 vi.mock("./MembersPanel", () => ({
-  MembersPanel: (props: { scopeConfig?: MembersPanelScopeConfig }) => {
+  MembersPanel: (props: { scopeConfig?: MembersPanelScopeConfig; canAddMembers?: boolean }) => {
     lastMembersPanelProps = props
     return null
   },
@@ -76,9 +78,14 @@ vi.mock("@/lib/sync/member-scopes", () => ({
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
-function renderPanel(projectId = "proj-1") {
+function renderPanel(projectId = "proj-1", canManageMembers?: boolean) {
   return render(
-    <SharePanel open={true} onOpenChange={() => {}} projectId={projectId} />,
+    <SharePanel
+      open={true}
+      onOpenChange={() => {}}
+      projectId={projectId}
+      canManageMembers={canManageMembers}
+    />,
   )
 }
 
@@ -192,5 +199,45 @@ describe("SharePanel — member scopes wiring", () => {
     expect(lastMembersPanelProps!.scopeConfig!.lanes).toEqual([
       { value: "", label: "Default" },
     ])
+  })
+})
+
+// AQU-625: the caller's authoritative project role (project.syncRole, threaded
+// as canManageMembers) decides whether the Members-tab add/search field is
+// usable. This must not depend on the roster (which is hidden for the exact
+// low-role callers we're protecting against).
+describe("SharePanel — add-member gate wiring (AQU-625)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    lastMembersPanelProps = null
+    mockMembers = leadMembers
+    mockFetchProjectSettings.mockResolvedValue({
+      version: 3,
+      updatedAt: "2026-07-01T00:00:00Z",
+      updatedBy: null,
+      settings: { targetLanguage: "fr", targetLanes: ["es", "de"] },
+    })
+    mockResolveCloudProjectResult.mockResolvedValue({ ok: true, project: { id: "proj-1", files: [] } })
+    mockFetchMemberScopes.mockResolvedValue([])
+  })
+
+  it("passes canAddMembers=false to MembersPanel when the caller can't manage members", async () => {
+    renderPanel("proj-1", false)
+    await waitFor(() => expect(lastMembersPanelProps).not.toBeNull())
+    expect(lastMembersPanelProps?.canAddMembers).toBe(false)
+  })
+
+  it("passes canAddMembers=true when the caller can manage members", async () => {
+    renderPanel("proj-1", true)
+    await waitFor(() => expect(lastMembersPanelProps).not.toBeNull())
+    expect(lastMembersPanelProps?.canAddMembers).toBe(true)
+  })
+
+  it("falls back to the roster-derived caller role when canManageMembers is omitted", async () => {
+    // alice (the mocked caller) is a contributor (400) < project_lead in this roster.
+    mockMembers = contributorMembers
+    renderPanel("proj-1")
+    await waitFor(() => expect(lastMembersPanelProps).not.toBeNull())
+    expect(lastMembersPanelProps?.canAddMembers).toBe(false)
   })
 })

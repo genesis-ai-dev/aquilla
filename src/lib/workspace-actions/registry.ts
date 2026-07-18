@@ -117,7 +117,10 @@ export const workspaceActions: WorkspaceAction[] = [
     run: (_c, args) => args.runAgentInput(),
   },
   {
-    id: "import-into-file", label: "Import translations into this file", icon: Upload, group: "secondary",
+    // AQU-503: the label must carry the word "target" so PMs looking for the
+    // "Target Import" option can find it — this file-scoped importer populates
+    // the open file's TARGET column, distinct from the primary "Import" (source).
+    id: "import-into-file", label: "Import target translations into this file", icon: Upload, group: "secondary",
     isAvailable: (c) => c.activeFileId != null,
     run: (_c, args) => args.runImportIntoFile(),
   },

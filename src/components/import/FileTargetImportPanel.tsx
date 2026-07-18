@@ -167,7 +167,7 @@ export function FileTargetImportPanel({
     return (
       <div className="flex flex-col gap-4 py-2">
         <div>
-          <p className="text-sm font-medium">Import translations into "{fileName}"</p>
+          <p className="text-sm font-medium">Import target translations into "{fileName}"</p>
           <p className="text-xs text-muted-foreground">
             Fills this file's target column from a USFM file or spreadsheet.
             Source text is never changed. You'll review every match before anything is saved.

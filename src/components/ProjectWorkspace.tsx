@@ -654,7 +654,7 @@ export function ProjectWorkspace() {
     redirectTo,
   ])
   const [importOpen, setImportOpen] = useState(false)
-  // File-scoped target import dialog ("Import translations into this file").
+  // File-scoped target import dialog ("Import target translations into this file").
   const [fileImportOpen, setFileImportOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)

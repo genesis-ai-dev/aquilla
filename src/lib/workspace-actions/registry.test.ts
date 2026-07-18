@@ -140,6 +140,29 @@ describe("AQU-365: header actions hidden for below-floor roles", () => {
   })
 })
 
+describe("AQU-503: target import is discoverable by wording", () => {
+  const importIntoFile = workspaceActions.find((a) => a.id === "import-into-file")!
+
+  it("labels the file-scoped target importer with the word 'target'", () => {
+    // A PM (Anna) searching for the "Target Import" option must recognize this
+    // entry by its wording. The label must name the TARGET column so it is not
+    // confused with the primary "Import" (source) action.
+    expect(importIntoFile.label.toLowerCase()).toContain("target")
+  })
+
+  it("shows the target importer whenever a file is open, for any role (not permission-gated)", () => {
+    // Investigation found this action has no role floor — the discoverability
+    // gap was wording/location, not permissions. Guard that it stays visible
+    // once a file is open, even for a viewer-level role.
+    const projectWithRole: ProjectRecord = {
+      ...project,
+      syncRole: { level: ROLE.VIEWER, name: "viewer", source: "server", fetchedAt: "2026-01-01T00:00:00Z" },
+    }
+    expect(importIntoFile.isAvailable(ctx({ project: projectWithRole, activeFileId: "f1" }))).toBe(true)
+    expect(importIntoFile.isAvailable(ctx({ activeFileId: null }))).toBe(false)
+  })
+})
+
 describe("getVisibleActions", () => {
   it("filters out unavailable actions", () => {
     const acts: WorkspaceAction[] = [

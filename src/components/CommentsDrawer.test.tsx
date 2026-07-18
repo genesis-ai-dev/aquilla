@@ -1,5 +1,5 @@
 /**
- * FRO-427 — Tests that CommentsDrawer correctly gates the comment UI
+ * AQU-427 — Tests that CommentsDrawer correctly gates the comment UI
  * by role level and shows a human-readable denial for unpermitted roles.
  */
 import { describe, it, expect, vi } from "vitest"
@@ -65,7 +65,7 @@ function renderDrawer(project: ProjectRecord) {
   )
 }
 
-describe("CommentsDrawer — comment input gating (FRO-427)", () => {
+describe("CommentsDrawer — comment input gating (AQU-427)", () => {
   it("shows New-thread textarea for COMMENTER (200) — can comment", () => {
     renderDrawer(makeProject(ROLE.COMMENTER))
     expect(screen.getByRole("textbox")).toBeInTheDocument()

@@ -1,4 +1,4 @@
-// FRO-179 fix: the sidebar must mint its project-level token with the
+// AQU-179 fix: the sidebar must mint its project-level token with the
 // established "__project__" sentinel (shared with useComments /
 // sync-worker authorize.ts), NOT an ad-hoc placeholder like "list". An ad-hoc
 // fileId mints a token scoped to a nonexistent file — accepted by some
@@ -17,7 +17,7 @@ vi.mock("@/lib/sync/cells-read", () => ({
 
 import { TranslationNotesSidebar } from "./TranslationNotesSidebar"
 
-describe("TranslationNotesSidebar token acquisition (FRO-179)", () => {
+describe("TranslationNotesSidebar token acquisition (AQU-179)", () => {
   beforeEach(() => {
     fetchProjectFiles.mockReset()
     fetchFileCells.mockReset()

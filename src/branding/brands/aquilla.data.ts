@@ -6,7 +6,6 @@ import type { BrandData } from "../types"
 // near-neutral; text is darkened for content contrast; the muted blue accent is
 // reserved for the primary action and selected states. Mirrors the index.css
 // base so the initial paint matches before the brand stylesheet injects.
-// Color-theme presets (branding/ColorTheme.tsx) override these via [data-color-theme].
 export const aquillaData: BrandData = {
   id: "aquilla",
   app: {

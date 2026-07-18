@@ -176,11 +176,11 @@ describe("makeSyncTokenFetcher", () => {
     warn.mockRestore()
   })
 
-  // FRO-159 regression: a stale session JWT (401 from /sync-token) must fire
+  // AQU-159 regression: a stale session JWT (401 from /sync-token) must fire
   // `onUnauthorized` exactly once and return null so the caller can redirect
   // to login — the user should never have to manually log out/in after a
   // backend migration (e.g. Postgres switch) invalidates stored tokens.
-  it("FRO-159: fires onUnauthorized exactly once on 401 and returns null (no manual re-auth needed)", async () => {
+  it("AQU-159: fires onUnauthorized exactly once on 401 and returns null (no manual re-auth needed)", async () => {
     global.fetch = mockFetch({ status: 401, body: "Unauthorized" }) as unknown as typeof fetch
     vi.spyOn(console, "warn").mockImplementation(() => undefined)
 
@@ -211,7 +211,7 @@ describe("makeSyncTokenFetcher", () => {
     ;(console.warn as ReturnType<typeof vi.spyOn>).mockRestore()
   })
 
-  it("FRO-159: does NOT fire onUnauthorized on 403 (forbidden != stale token)", async () => {
+  it("AQU-159: does NOT fire onUnauthorized on 403 (forbidden != stale token)", async () => {
     global.fetch = mockFetch({ status: 403, body: "Forbidden" }) as unknown as typeof fetch
     vi.spyOn(console, "warn").mockImplementation(() => undefined)
 

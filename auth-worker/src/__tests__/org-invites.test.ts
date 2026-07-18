@@ -129,6 +129,44 @@ describe("POST /api/v2/orgs/accept-invite (redeem)", () => {
   })
 })
 
+describe("GET /api/v2/orgs/invite-preview/:token (AQU-347 still-member re-click)", () => {
+  beforeEach(seedOrg)
+
+  async function preview(token: string, username?: string): Promise<Response> {
+    return app.request(
+      `/api/v2/orgs/invite-preview/${token}`,
+      username ? { headers: authHeader(await jwtFor(username)) } : {},
+      env,
+    )
+  }
+
+  it("returns a continue-preview (200) for the still-member redeemer re-clicking a used invite", async () => {
+    const minted = (await (await mint("wendi", { role: 400 })).json()) as { token: string }
+    await accept("bob", minted.token) // bob is now a member; token is stamped used
+    const res = await preview(minted.token, "bob")
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { orgId: number }
+    expect(body.orgId).toBe(1)
+  })
+
+  it("returns 410 for a used invite previewed by a different user", async () => {
+    const minted = (await (await mint("wendi", { role: 400 })).json()) as { token: string }
+    await accept("bob", minted.token)
+    const res = await preview(minted.token, "carol")
+    expect(res.status).toBe(410)
+  })
+
+  it("returns 410 for the redeemer once they've been removed from the org", async () => {
+    const minted = (await (await mint("wendi", { role: 400 })).json()) as { token: string }
+    await accept("bob", minted.token)
+    await env.AQUILLA_PG.prepare(
+      "DELETE FROM org_members WHERE org_id = 1 AND user_id = 3",
+    ).run()
+    const res = await preview(minted.token, "bob")
+    expect(res.status).toBe(410)
+  })
+})
+
 describe("GET + DELETE /api/v2/orgs/:orgId/invites", () => {
   beforeEach(seedOrg)
 

@@ -33,7 +33,7 @@ test("search panel content side toggle changes aria-selected", async ({ alice })
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Open the search panel. FRO-308 removed the toolbar "Search & replace"
+  // Open the search panel. AQU-308 removed the toolbar "Search & replace"
   // button; Cmd/Ctrl+K is the documented project-wide search shortcut
   // (ProjectWorkspace keydown handler: mode "search", scope "project").
   await alice.keyboard.press("ControlOrMeta+k")

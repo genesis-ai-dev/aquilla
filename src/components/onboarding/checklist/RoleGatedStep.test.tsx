@@ -16,7 +16,7 @@ vi.mock("@/components/ui/tooltip", () => ({
   ),
 }))
 
-// FRO-334: Project Setup sidebar rows must render read-only (grayed +
+// AQU-334: Project Setup sidebar rows must render read-only (grayed +
 // tooltip naming the required role) for below-floor callers, never hidden
 // and never fronted by a 403 as the primary signal — per
 // aquilla-specs/05-user-stories/customize-ai-settings.md Persona section.
@@ -69,7 +69,7 @@ describe("RoleGatedStep", () => {
         <button>Add</button>
       </RoleGatedStep>,
     )
-    expect(screen.getByTestId("tooltip-content")).toHaveTextContent(/project_lead/i)
+    expect(screen.getByTestId("tooltip-content")).toHaveTextContent(/Project Lead/i)
   })
 
   it("blocks a contributor (400) from the project_lead (500) invite floor", () => {

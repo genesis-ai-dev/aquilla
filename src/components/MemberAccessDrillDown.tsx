@@ -5,7 +5,7 @@
  *
  * Opened by clicking a member's name in MembersMatrixView (or any surface
  * that passes orgId + a selected member). Self-contained so it doesn't
- * collide with the FRO-170 org-vs-project legibility redesign.
+ * collide with the AQU-170 org-vs-project legibility redesign.
  */
 import { X, FolderX } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
@@ -13,7 +13,8 @@ import { EmptyState } from "@/components/ui/page"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useMemberAccess } from "@/hooks/useMemberAccess"
 import type { ProjectAccessBreakdown } from "@/lib/frontier/orgs"
-import { roleName } from "@/lib/frontier/roles"
+import { roleName, roleDisplayText } from "@/lib/frontier/roles"
+import { RoleLevelLabel } from "@/components/RoleLabel"
 
 interface Props {
   orgId: number
@@ -61,8 +62,8 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
             {state.data.orgRole != null && (
               <div className="rounded-md border bg-muted/30 px-3 py-2">
                 <p className="text-xs text-muted-foreground">Org-level baseline</p>
-                <p className="text-sm font-medium capitalize">
-                  {roleName(state.data.orgRole).replace(/_/g, " ")}
+                <p className="text-sm font-medium">
+                  <RoleLevelLabel level={state.data.orgRole} />
                 </p>
               </div>
             )}
@@ -70,7 +71,8 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
             {/* Project list */}
             {state.data.projects.length === 0 ? (
               <EmptyState
-                className="border-0 bg-muted/30 py-8"
+                variant="inline"
+                className="bg-muted/30 py-8"
                 icon={FolderX}
                 title={`${username} has no access to any project in this org.`}
               />
@@ -95,7 +97,7 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
 }
 
 function ProjectRow({ breakdown }: { breakdown: ProjectAccessBreakdown }) {
-  const resolvedRole = roleName(breakdown.resolved).replace(/_/g, " ")
+  const resolvedRole = roleDisplayText(roleName(breakdown.resolved))
   const paths = grantPaths(breakdown)
 
   return (
@@ -106,7 +108,7 @@ function ProjectRow({ breakdown }: { breakdown: ProjectAccessBreakdown }) {
             {breakdown.projectName}
           </span>
         </AppTooltip>
-        <span className="shrink-0 text-xs rounded bg-primary/10 text-primary px-1.5 py-0.5 capitalize font-medium">
+        <span className="shrink-0 text-xs rounded bg-primary/10 text-primary px-1.5 py-0.5 font-medium">
           {resolvedRole}
         </span>
       </div>
@@ -129,19 +131,19 @@ function grantPaths(b: ProjectAccessBreakdown): { label: string; detail: string 
 
   if (b.direct != null) {
     paths.push({
-      label: `direct · ${roleName(b.direct).replace(/_/g, " ")}`,
+      label: `direct · ${roleDisplayText(roleName(b.direct))}`,
       detail: "Explicitly added to this project (direct grant / override)",
     })
   }
   for (const g of b.groups) {
     paths.push({
-      label: `group "${g.name}" · ${roleName(g.roleLevel).replace(/_/g, " ")}`,
+      label: `group "${g.name}" · ${roleDisplayText(roleName(g.roleLevel))}`,
       detail: `Member of group "${g.name}" which has a project grant`,
     })
   }
   if (b.org != null) {
     paths.push({
-      label: `org-level · ${roleName(b.org).replace(/_/g, " ")}`,
+      label: `org-level · ${roleDisplayText(roleName(b.org))}`,
       detail: "Org-level membership applies to all projects in this org",
     })
   }

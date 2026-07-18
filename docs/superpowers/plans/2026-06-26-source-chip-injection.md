@@ -16,7 +16,7 @@
 - **Source-side only** for v1 (`side: 'source'`).
 - **Hybrid wire rule:** if `selection.length <= 280` the legend quotes the full selection; else a `200`-char truncated preview. Max **8** chips/message (drop extras with a `…+N more` legend line); legend capped at ~`1500` chars.
 - **shadcn rules:** semantic tokens only (`bg-card`, `text-muted-foreground`), `gap-*` not `space-*`, `size-*` for square, `Badge variant="secondary"`, `AppTooltip` for hover text.
-- **Preserve FRO-260/FRO-248 selection guard:** toolbar buttons call `onMouseDown` → `preventDefault()` + `onToolbarMouseDown`; `onMouseUp`/`onMouseLeave` → `onToolbarMouseUp`.
+- **Preserve AQU-260/AQU-248 selection guard:** toolbar buttons call `onMouseDown` → `preventDefault()` + `onToolbarMouseDown`; `onMouseUp`/`onMouseLeave` → `onToolbarMouseUp`.
 - Run a single test file with: `pnpm exec vitest run <path>`. Typecheck with `pnpm exec tsc --noEmit -p tsconfig.json`.
 
 ---
@@ -309,7 +309,7 @@ git commit -m "feat(agent): context-chip model + serialization"
   - `interface SourceSelectionToolbarProps { sourceSelection: string; concepts: Concept[]; onAskAi: () => void; onAddToTermbase?: () => void; onTermApply: (rendering: string) => void; onToolbarMouseDown?: () => void; onToolbarMouseUp?: () => void }`
   - `function SourceSelectionToolbar(props): JSX.Element`
 
-**Note:** This replaces the inline `SelectionTermActions` markup in `EditorTable.tsx` (lines ~1591–1676). Move the existing `hasMatch`/`activeConcepts` logic and the `TermLookupPopover` "View term" branch into this file verbatim; add the new "Ask AI" button. Keep the FRO-260 `handleButtonMouseDown` (`preventDefault` + `onToolbarMouseDown`).
+**Note:** This replaces the inline `SelectionTermActions` markup in `EditorTable.tsx` (lines ~1591–1676). Move the existing `hasMatch`/`activeConcepts` logic and the `TermLookupPopover` "View term" branch into this file verbatim; add the new "Ask AI" button. Keep the AQU-260 `handleButtonMouseDown` (`preventDefault` + `onToolbarMouseDown`).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -391,9 +391,9 @@ export interface SourceSelectionToolbarProps {
   onAskAi: () => void
   onAddToTermbase?: () => void
   onTermApply: (rendering: string) => void
-  /** FRO-260: called on mousedown so the parent suppresses selectionchange clearing. */
+  /** AQU-260: called on mousedown so the parent suppresses selectionchange clearing. */
   onToolbarMouseDown?: () => void
-  /** FRO-260: called on mouseup/mouseleave so the parent resets the guard. */
+  /** AQU-260: called on mouseup/mouseleave so the parent resets the guard. */
   onToolbarMouseUp?: () => void
 }
 
@@ -423,7 +423,7 @@ export function SourceSelectionToolbar({
     [activeConcepts, sourceSelection],
   )
 
-  // FRO-260: preserve the browser selection + suppress the selectionchange guard.
+  // AQU-260: preserve the browser selection + suppress the selectionchange guard.
   const handleButtonMouseDown = (e: React.MouseEvent) => {
     e.preventDefault()
     onToolbarMouseDown?.()

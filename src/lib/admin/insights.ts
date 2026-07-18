@@ -5,6 +5,11 @@
 // cleanly. Deadline semantics mirror src/lib/frontier/portfolio.ts (AoE grace).
 
 import type { AdminProject, AdminOrg, AdminUser } from "@/lib/frontier/admin"
+import {
+  PROJECT_STATUS_LABEL,
+  type ProjectAttentionKind,
+  type ProjectAttentionReason,
+} from "@/lib/project-status"
 
 const DAY_MS = 24 * 60 * 60 * 1000
 /** No target edit in this long ⇒ "stalled". Matches the org portfolio's 14d. */
@@ -37,11 +42,8 @@ export function isStalled(p: Pick<AdminProject, "totalCells" | "lastEditAt">, no
   return now - p.lastEditAt > STALE_MS
 }
 
-export type AttentionKind = "overdue" | "soon" | "stalled"
-export interface AttentionReason {
-  kind: AttentionKind
-  label: string
-}
+export type AttentionKind = ProjectAttentionKind
+export type AttentionReason = ProjectAttentionReason
 
 /**
  * Why a project needs attention, most-urgent first. Empty ⇒ healthy. Archived
@@ -51,9 +53,9 @@ export function attentionReasons(p: AdminProject, now: number): AttentionReason[
   if (p.archived) return []
   const reasons: AttentionReason[] = []
   const dl = deadlineState(p, now)
-  if (dl === "overdue") reasons.push({ kind: "overdue", label: "Overdue" })
-  else if (dl === "soon") reasons.push({ kind: "soon", label: "Due soon" })
-  if (isStalled(p, now)) reasons.push({ kind: "stalled", label: "Stalled" })
+  if (dl === "overdue") reasons.push({ kind: "overdue", label: PROJECT_STATUS_LABEL.overdue })
+  else if (dl === "soon") reasons.push({ kind: "soon", label: PROJECT_STATUS_LABEL.soon })
+  if (isStalled(p, now)) reasons.push({ kind: "stalled", label: PROJECT_STATUS_LABEL.stalled })
   return reasons
 }
 

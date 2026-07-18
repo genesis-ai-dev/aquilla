@@ -1,25 +1,29 @@
 ---
 description: Drive a Linear issue through the prototype debug→staging→QA lifecycle
-argument-hint: [FRO-### | next | debug "desc" | improve "desc"] [--deploy] [--no-verify]
+argument-hint: [AQU-### | next | debug "desc" | improve "desc"] [--deploy] [--no-verify]
 ---
 
 You are running the **issue lifecycle workflow** for codex-web-app. Every bug fix,
 improvement, validation, and QA hand-off in this repo flows through the Linear board
-(team `FrontierR&D`, key `FRO`, project `Prototype Debugging`). This command is the
+(team `Aquilla`, key `AQU`, project `Prototype Debugging`). This command is the
 single entry point — it figures out *where the issue is* and does *the next right thing*.
 
 Arguments: $ARGUMENTS
 
 ## Constants
 
-- Linear team: `FrontierR&D` (id `de0f5d29-418f-4f62-ade7-02f77974c598`)
+- Linear team: `Aquilla` (id `de0f5d29-418f-4f62-ade7-02f77974c598`)
 - Linear project: `Prototype Debugging` (id `215cff7b-1a95-443d-9343-1f1528754462`)
 - Status pipeline (see AGENTS.md → "Issue workflow"):
-  `Backlog → Todo → Dispatched → Fixed → Dev Verification Needed → Ready for QA → Deployed/Done`
+  `Triage → Backlog → Todo → Dispatched → Fixed → Dev Verification Needed → Ready for QA → Deployed/Done`
+  - **`Triage`** (id `086173c5-e3e4-4f37-93d5-ae2f069ab6a6`) is the **human / HITL queue** — it sits
+    outside the normal flow. `/issue next` never pulls from it. If you're working a specific `AQU-###`
+    that's still in `Triage`, it isn't agent-ready: surface that and stop, unless the user is explicitly
+    telling you to take it on.
   - `Ready for QA` is the **dev→QA hand-off**; **QA owns the merge to `main`** and sets
     `Deployed`/`Done`. Don't set those yourself unless you're doing the QA merge.
-  - **Every commit must carry its `FRO-###`** so QA can scan a PR-to-main and see which
-    tickets it covers. The `prepare-commit-msg` hook auto-injects it from a `…/fro-###-…`
+  - **Every commit must carry its `AQU-###`** so QA can scan a PR-to-main and see which
+    tickets it covers. The `prepare-commit-msg` hook auto-injects it from a `…/aqu-###-…`
     branch. Prototyping may merge straight to `main` with `--no-verify` — the ref is still required.
 - **Spec repo (source of truth):** `~/frontierrnd/aquilla-specs`
   - Features: `04-features/<feature>.md` (carry a `revisions:` frontmatter log)
@@ -35,12 +39,15 @@ Arguments: $ARGUMENTS
 
 Parse `$ARGUMENTS`:
 
-- **`FRO-###`** → operate on that specific issue. `get_issue` to read its current status.
-- **`next`** (or empty) → `list_issues` filtered to project + status `Todo`, pick the
-  highest-priority / lowest-numbered one, and operate on it.
+- **`AQU-###`** → operate on that specific issue. `get_issue` to read its current status.
+- **`next`** (or empty) → `list_issues` filtered to project + status `Todo` (the agent-ready
+  queue — **never `Triage`/`Backlog`**), pick the highest-priority / lowest-numbered one, and
+  operate on it.
 - **`debug "<desc>"`** or **`improve "<desc>"`** → this is *new* work not yet tracked.
-  Create the issue first (`save_issue` into the project, team, status `Todo`, priority
-  from your judgment), then proceed as if the user passed that `FRO-###`.
+  Create the issue first (`save_issue` into the project, team, priority from your judgment) and
+  set the status by readiness: if it's fully specified and agent-ready, **`Todo`**; if it needs a
+  human decision/review first (HITL), **`Triage`** (`086173c5-…`) — then hand off rather than
+  working it. Once created and agent-ready, proceed as if the user passed that `AQU-###`.
 - **`--deploy`** → after marking `Fixed`, deploy for dev validation and advance to
   `Dev Verification Needed` (see Step 3). Without it, stop at `Fixed` and tell the user.
 - **`--no-verify`** → skip the dev-stack verification gate (only if the user insists).
@@ -72,10 +79,10 @@ If the issue is in `Backlog` or `Todo`:
    screenshot. For multi-user/permission issues, use the e2e harness.
 3. If the change touches a journey in `e2e/JOURNEYS.md`, extend/add the spec and run
    `npm run test:e2e:smoke`.
-4. Commit referencing the issue — **`FRO-###` MUST be in the message** so QA can map the
+4. Commit referencing the issue — **`AQU-###` MUST be in the message** so QA can map the
    commit to a ticket at PR-to-main time. Branch with the suggested name from `get_issue`
    (`gitBranchName`) and the `prepare-commit-msg` hook injects the ref automatically; on a
-   non-`fro-` branch, add it by hand (the hook will warn).
+   non-`aqu-` branch, add it by hand (the hook will warn).
 5. Move the issue to **`Fixed`** and post a Linear comment summarizing the fix +
    how it was verified.
 
@@ -99,15 +106,15 @@ the behavior should actually be, which may differ from your Step 1 hunch.
      not the specific CSS fix (the fix lives in code + Linear).
    - Refactor / consolidate / append as the truth demands — don't just bolt on a line if a
      section now reads incoherently. The end state matters more than your first draft.
-   - Bump `last-updated` and add a dated `revisions:` entry citing the `FRO-###`.
+   - Bump `last-updated` and add a dated `revisions:` entry citing the `AQU-###`.
    - Touch `04-features/<feature>.md` and `09-design-and-ux.md` too if the behavior spans them.
-3. **Commit in the spec repo** (`~/frontierrnd/aquilla-specs`) referencing `FRO-###`.
+3. **Commit in the spec repo** (`~/frontierrnd/aquilla-specs`) referencing `AQU-###`.
    That repo's `main` may be dirty — stage only your files; never touch unrelated changes.
 4. Comment on the Linear issue: what spec files changed (with paths) or why none did.
 
 Do not advance past `Fixed` until the spec decision is made and recorded.
 
-If `--deploy` was NOT passed, **stop here** and report: "FRO-### is Fixed (verified
+If `--deploy` was NOT passed, **stop here** and report: "AQU-### is Fixed (verified
 locally), spec reconciled, not yet on staging. Re-run with `--deploy` to push and advance."
 
 ## Step 3 — Deploy for dev validation (→ Dev Verification Needed)  [only with `--deploy`]
@@ -122,7 +129,7 @@ bypass — sign in with a real staging account.
      same as prod — CI's token can't sync routes).
    - If the staging Hyperdrive id is still `REPLACE_WITH_STAGING_HYPERDRIVE_ID` in the
      worker `wrangler.toml`s, staging isn't provisioned yet — stop, leave the issue at
-     `Fixed`, and point at **FRO-146** (one-time provisioning) instead of guessing.
+     `Fixed`, and point at **AQU-146** (one-time provisioning) instead of guessing.
 2. Move the issue to **`Dev Verification Needed`** (deployed to the dev branch, awaiting
    dev-team validation).
 3. Comment the dev URL (`https://dev.aquilla.app`) + what to validate.
@@ -135,7 +142,7 @@ When the fix is validated by the dev team and the functionality is on **staging*
 
 **Stop at `Ready for QA`.** **QA owns the merge to `main`** and sets `Deployed`/`Done` as
 part of that merge — they test against the staging tickets and scan each PR-to-main for the
-`FRO-###` refs its commits carry. Don't set `Deployed`/`Done` yourself unless you're doing
+`AQU-###` refs its commits carry. Don't set `Deployed`/`Done` yourself unless you're doing
 the QA merge.
 
 ## Step 5 — Report

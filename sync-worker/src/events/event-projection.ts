@@ -67,6 +67,20 @@ function countWords(text: string): number {
   return trimmed.split(/\s+/).length
 }
 
+/**
+ * AQU-538: the target-language lane a target-side cell event addresses.
+ * '' for the default lane (absent/empty `targetLang` — every pre-lane
+ * event), and always '' for non-target kinds (source rows are shared by
+ * all lanes and never carry a lane). Part of the cells row key and, for
+ * non-default lanes, of the AD-2 chain slot (chain-claims.ts
+ * laneQualifiedParentKey).
+ */
+export function laneOfEvent(kind: string, payload: unknown): string {
+  if (!kind.startsWith('target.cell.')) return ''
+  const lang = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
+  return typeof lang === 'string' ? lang : ''
+}
+
 // FTS index maintenance: none. Postgres auto-maintains the cells.value_tsv
 // generated column + GIN index on every cells write, so the projection emits no
 // FTS statements (the old SQLite FTS5 cells_fts shadow-table upkeep is gone).
@@ -102,22 +116,31 @@ export function fileCountersRecomputeStmt(
 ): AquillaStatement {
   return db
     .prepare(
-      `UPDATE files SET
-        cell_count = (SELECT COUNT(DISTINCT cell_id) FROM cells WHERE project_id = ? AND file_id = ?),
-        approved_count = (SELECT COUNT(*) FROM cells WHERE project_id = ? AND file_id = ? AND validated = 1),
-        filled_count = (SELECT COUNT(*) FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target' AND TRIM(value) != ''),
-        word_count = (SELECT COALESCE(SUM(word_count), 0) FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target'),
-        last_edit_at = (SELECT MAX(last_edit_at) FROM cells WHERE project_id = ? AND file_id = ?),
-        ai_drafted_count = (SELECT COUNT(*) FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target' AND ai_drafted = 1),
-        updated_at = ?
-      WHERE id = ? AND project_id = ?`,
+      `WITH counters AS (
+         SELECT COUNT(DISTINCT cell_id)::integer AS cell_count,
+                COUNT(*) FILTER (WHERE validated = 1)::integer AS approved_count,
+                COUNT(*) FILTER (
+                  WHERE side = 'target' AND TRIM(value) != ''
+                )::integer AS filled_count,
+                COALESCE(SUM(word_count) FILTER (WHERE side = 'target'), 0)::integer AS word_count,
+                MAX(last_edit_at) AS last_edit_at,
+                COUNT(*) FILTER (
+                  WHERE side = 'target' AND ai_drafted = 1
+                )::integer AS ai_drafted_count
+           FROM cells
+          WHERE project_id = ? AND file_id = ?
+       )
+       UPDATE files SET cell_count = counters.cell_count,
+         approved_count = counters.approved_count,
+         filled_count = counters.filled_count,
+         word_count = counters.word_count,
+         last_edit_at = counters.last_edit_at,
+         ai_drafted_count = counters.ai_drafted_count,
+         updated_at = ?
+        FROM counters
+       WHERE files.id = ? AND files.project_id = ?`,
     )
     .bind(
-      projectId, fileId,
-      projectId, fileId,
-      projectId, fileId,
-      projectId, fileId,
-      projectId, fileId,
       projectId, fileId,
       serverTs,
       fileId, projectId,
@@ -179,19 +202,21 @@ export function buildBulkSourceCellCreateStmt(
       p.metadata != null ? JSON.stringify(p.metadata) : null,
     )
   }
+  // AQU-538: bulk import is source-only; source rows always live on the
+  // default lane (target_lang = '', a literal — no bind).
   const placeholders = Array(rows.length)
-    .fill('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .fill("(?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
     .join(',\n')
   return db
     .prepare(
       `INSERT INTO cells (
-        project_id, file_id, cell_id, side, value, value_html, type,
+        project_id, file_id, cell_id, side, target_lang, value, value_html, type,
         canonical_ref, anchor_cell_id, event_id, source_event_id,
         last_editor, last_edit_at, validated, word_count, content_hash,
         start_ms, end_ms,
         medium, sequence_index, transcription, camera_state, metadata
       ) VALUES ${placeholders}
-      ON CONFLICT(project_id, file_id, cell_id, side) DO UPDATE SET
+      ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
         side           = excluded.side,
         value          = excluded.value,
         value_html     = excluded.value_html,
@@ -241,7 +266,7 @@ export function buildEventProjectionStmts(
      */
     chainGate?: ChainSlot
     /**
-     * FRO-279: project-level threshold for cells.validated.
+     * AQU-279: project-level threshold for cells.validated.
      * `cells.validated` flips to 1 when the cell has at least this many
      * current-head validators. Default 1 (N=1 projects: byte-identical behavior).
      */
@@ -309,17 +334,21 @@ export function buildEventProjectionStmts(
       // row already exists for this key. No-op when this is a genuine first
       // insert.
 
+      // AQU-538: the lane is part of the row key. '' for source creates and
+      // default-lane target creates; a non-'' target lane creates that lane's
+      // own row beside its siblings.
+      const lane = laneOfEvent(event.kind, p)
       stmts.push(
         db
           .prepare(
             `INSERT INTO cells (
-              project_id, file_id, cell_id, side, value, value_html, type,
+              project_id, file_id, cell_id, side, target_lang, value, value_html, type,
               canonical_ref, anchor_cell_id, event_id, source_event_id,
               last_editor, last_edit_at, validated, word_count, content_hash,
               start_ms, end_ms,
               medium, sequence_index, transcription, camera_state, metadata
-            ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?${gateWhere}
-            ON CONFLICT(project_id, file_id, cell_id, side) DO UPDATE SET
+            ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?${gateWhere}
+            ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
               side           = excluded.side,
               value          = excluded.value,
               value_html     = excluded.value_html,
@@ -345,6 +374,7 @@ export function buildEventProjectionStmts(
             event.fileId,
             cellId,
             side,
+            lane,
             value,
             valueHtml,
             type,
@@ -392,9 +422,12 @@ export function buildEventProjectionStmts(
       if (event.kind === 'target.cell.commit') {
         const tp = p as EventPayloads['target.cell.commit']
         const sourceEventId = tp.sourceEventId ?? null
-        // FRO-292: set ai_drafted=1 when the commit carries ai_suggestion, clear to 0
+        // AQU-292: set ai_drafted=1 when the commit carries ai_suggestion, clear to 0
         // on any human commit (ai_suggestion absent). Human edit reclassifies the cell.
         const aiDrafted = tp.ai_suggestion ? 1 : 0
+        // AQU-538: the lane this commit addresses ('' = default lane). Part of
+        // the row key — each lane's first commit INSERTs that lane's row.
+        const lane = laneOfEvent(event.kind, tp)
 
         // NOTE: start_ms/end_ms are intentionally NOT written here — they are set once at
         // *.cell.create time and never overwritten by target commits.
@@ -415,12 +448,12 @@ export function buildEventProjectionStmts(
           db
             .prepare(
               `INSERT INTO cells (
-                project_id, file_id, cell_id, side, value, value_html, type,
+                project_id, file_id, cell_id, side, target_lang, value, value_html, type,
                 canonical_ref, anchor_cell_id, event_id, source_event_id,
                 last_editor, last_edit_at, validated, word_count, content_hash,
                 ai_drafted
-              ) SELECT ?, ?, ?, 'target', ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?${gateWhere}
-              ON CONFLICT(project_id, file_id, cell_id, side) DO UPDATE SET
+              ) SELECT ?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?${gateWhere}
+              ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
                 value             = excluded.value,
                 value_html        = excluded.value_html,
                 event_id          = excluded.event_id,
@@ -437,6 +470,7 @@ export function buildEventProjectionStmts(
               event.projectId,
               event.fileId,
               event.cellId,
+              lane,
               value,
               valueHtml,
               event.id,
@@ -498,7 +532,11 @@ export function buildEventProjectionStmts(
       }
       // Cell row leaves the projection; events stay queryable.
       // Only the side this event targets — the opposite side stays put.
+      // AQU-538: and only the LANE this event targets — a target delete on
+      // lane 'fr' leaves the default lane and every sibling lane intact.
+      // Source deletes bind lane '' (source rows always live on '').
       const side = event.kind === 'target.cell.delete' ? 'target' : 'source'
+      const lane = laneOfEvent(event.kind, event.payload)
 
       // FTS5 maintenance (pre-DML): remove the indexed value BEFORE deleting
       // the cells row so the OLD value is still readable for the 'delete'
@@ -508,9 +546,9 @@ export function buildEventProjectionStmts(
         db
           .prepare(
             `DELETE FROM cells
-             WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?${gateAnd}`,
+             WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ? AND target_lang = ?${gateAnd}`,
           )
-          .bind(event.projectId, event.fileId, event.cellId, side, ...gateBinds),
+          .bind(event.projectId, event.fileId, event.cellId, side, lane, ...gateBinds),
       )
       if (!opts?.deferFileCounters)
         stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
@@ -524,6 +562,9 @@ export function buildEventProjectionStmts(
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
       const side = event.kind === 'target.cell.reorder' ? 'target' : 'source'
+      // AQU-538: reorder advances one lane's chain head; source reorders bind
+      // lane '' (source rows always live on '').
+      const lane = laneOfEvent(event.kind, p)
       stmts.push(
         db
           .prepare(
@@ -532,7 +573,7 @@ export function buildEventProjectionStmts(
               event_id       = ?,
               last_editor    = ?,
               last_edit_at   = ?
-            WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?${gateAnd}`,
+            WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ? AND target_lang = ?${gateAnd}`,
           )
           .bind(
             p.anchorCellId ?? null,
@@ -543,6 +584,7 @@ export function buildEventProjectionStmts(
             event.fileId,
             event.cellId,
             side,
+            lane,
             ...gateBinds,
           ),
       )
@@ -558,9 +600,18 @@ export function buildEventProjectionStmts(
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
 
+      // AQU-538: the lane this validation addresses. Absent/'' = default lane
+      // (byte-identical for N=1). A user's standing validation is per-lane —
+      // the cell_validators PK carries target_lang — so validating a cell in
+      // lane A leaves lane B's validators (and validated flag) untouched.
+      const lane =
+        typeof (p as { targetLang?: unknown }).targetLang === 'string'
+          ? (p as { targetLang?: string }).targetLang!
+          : ''
+
       // DELETE-on-unvalidate (spec §"Validator record"): a row exists iff
       // the validator currently endorses the cell. `cell.validate` upserts
-      // one row per (cell, validator) carrying the validated commit's
+      // one row per (cell, lane, validator) carrying the validated commit's
       // `event_id`; `cell.unvalidate` deletes it. The decided_ts guard keeps
       // out-of-order replays from clobbering a newer decision.
       if (event.kind === 'cell.validate') {
@@ -568,9 +619,9 @@ export function buildEventProjectionStmts(
           db
             .prepare(
               `INSERT INTO cell_validators (
-                project_id, file_id, cell_id, event_id, username, decided_ts
-              ) VALUES (?, ?, ?, ?, ?, ?)
-              ON CONFLICT(project_id, file_id, cell_id, username)
+                project_id, file_id, cell_id, target_lang, event_id, username, decided_ts
+              ) VALUES (?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(project_id, file_id, cell_id, target_lang, username)
               DO UPDATE SET
                 event_id   = excluded.event_id,
                 decided_ts = excluded.decided_ts
@@ -580,6 +631,7 @@ export function buildEventProjectionStmts(
               event.projectId,
               event.fileId,
               event.cellId,
+              lane,
               p.editEventId,
               event.author,
               event.serverTs,
@@ -604,13 +656,14 @@ export function buildEventProjectionStmts(
           db
             .prepare(
               `DELETE FROM cell_validators
-                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND username = ?`,
+                WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                  AND target_lang = ? AND username = ?`,
             )
-            .bind(event.projectId, event.fileId, event.cellId, targetUsername),
+            .bind(event.projectId, event.fileId, event.cellId, lane, targetUsername),
         )
       }
 
-      // FRO-292: validation supersedes AI-drafted status. Once a reviewer
+      // AQU-292: validation supersedes AI-drafted status. Once a reviewer
       // validates a cell, it moves to "Validated" — the "AI-drafted awaiting
       // review" label no longer applies regardless of the commit provenance.
       // Clear ai_drafted = 0 on cell.validate so the file counter reflects
@@ -620,9 +673,10 @@ export function buildEventProjectionStmts(
           db
             .prepare(
               `UPDATE cells SET ai_drafted = 0
-               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'`,
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                 AND side = 'target' AND target_lang = ?`,
             )
-            .bind(event.projectId, event.fileId, event.cellId),
+            .bind(event.projectId, event.fileId, event.cellId, lane),
         )
       }
 
@@ -630,7 +684,7 @@ export function buildEventProjectionStmts(
       // CURRENT chain head (`cells.event_id`). A cell is "validated" when
       // the number of current-head validators meets the project threshold.
       //
-      // FRO-279: threshold is `opts.validationCount` (default 1). N=1
+      // AQU-279: threshold is `opts.validationCount` (default 1). N=1
       // projects are byte-identical to the old COUNT(*) > 0 behavior.
       // The threshold is bound as a parameter so no SQL string interpolation.
       const validationThreshold = Math.max(1, opts?.validationCount ?? 1)
@@ -641,21 +695,25 @@ export function buildEventProjectionStmts(
             SET validated = (
               SELECT CASE WHEN COUNT(*) >= ? THEN 1 ELSE 0 END
               FROM cell_validators
-              WHERE project_id = ?
-                AND file_id    = ?
-                AND cell_id    = ?
-                AND event_id   = cells.event_id
+              WHERE project_id  = ?
+                AND file_id     = ?
+                AND cell_id     = ?
+                AND target_lang = ?
+                AND event_id    = cells.event_id
             )
-            WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'`,
+            WHERE project_id = ? AND file_id = ? AND cell_id = ?
+              AND side = 'target' AND target_lang = ?`,
           )
           .bind(
             validationThreshold,
             event.projectId,
             event.fileId,
             event.cellId,
+            lane,
             event.projectId,
             event.fileId,
             event.cellId,
+            lane,
           ),
       )
 
@@ -690,20 +748,24 @@ export function buildEventProjectionStmts(
             SET endorsement_count = (
               SELECT COUNT(*)
               FROM cell_validators
-              WHERE project_id = ?
-                AND file_id    = ?
-                AND cell_id    = ?
-                AND event_id   = cells.event_id
+              WHERE project_id  = ?
+                AND file_id     = ?
+                AND cell_id     = ?
+                AND target_lang = ?
+                AND event_id    = cells.event_id
             )
-            WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'`,
+            WHERE project_id = ? AND file_id = ? AND cell_id = ?
+              AND side = 'target' AND target_lang = ?`,
           )
           .bind(
             event.projectId,
             event.fileId,
             event.cellId,
+            lane,
             event.projectId,
             event.fileId,
             event.cellId,
+            lane,
           ),
       )
       if (!opts?.deferFileCounters)
@@ -862,6 +924,40 @@ case 'cell.audio.attach': {
       )
       return ['cell_audio']
     }
+
+    case 'cell.audio.validate':
+    case 'cell.audio.unvalidate': {
+      // AQU-508: audio validation, distinct from the text-side cell.validate.
+      // A reviewer approves (or withdraws approval of) one clip — the cell's
+      // selected take. Approval is keyed by audio_id, so re-recording (which
+      // attaches + selects a new clip) leaves the old take approved but no
+      // longer selected; the rollup requires selected = 1, so the cell drops
+      // back to "needs re-validation" until the new take is approved.
+      const p = event.payload as EventPayloads['cell.audio.validate']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      if (event.kind === 'cell.audio.validate') {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cell_audio SET approved = 1, approved_by = ?, approved_ts = ?
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+            )
+            .bind(event.author, event.serverTs, event.projectId, event.fileId, event.cellId, p.audioId),
+        )
+      } else {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cell_audio SET approved = 0, approved_by = NULL, approved_ts = NULL
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+            )
+            .bind(event.projectId, event.fileId, event.cellId, p.audioId),
+        )
+      }
+      return ['cell_audio']
+    }
     case 'file.create': {
       const p = event.payload as EventPayloads['file.create']
       if (!event.fileId) {
@@ -874,6 +970,8 @@ case 'cell.audio.attach': {
       const langMeta: Record<string, string> = {}
       if (p.sourceLanguage) langMeta.sourceLanguage = p.sourceLanguage
       if (p.targetLanguage) langMeta.targetLanguage = p.targetLanguage
+      if (p.sourceTextDirection) langMeta.sourceTextDirection = p.sourceTextDirection
+      if (p.targetTextDirection) langMeta.targetTextDirection = p.targetTextDirection
       // Timeline-segment-model: the file's order lens lives in meta (JSON),
       // alongside languages — no files-table column needed.
       if (p.orderedBy) langMeta.orderedBy = p.orderedBy
@@ -936,7 +1034,7 @@ case 'cell.audio.attach': {
     }
 
     case 'file.delete': {
-      // FRO-272: replay-safe soft-delete tombstone. Mirrors handlers/file-delete-restore.ts.
+      // AQU-272: replay-safe soft-delete tombstone. Mirrors handlers/file-delete-restore.ts.
       // Idempotent on double-delete (WHERE deleted_at IS NULL).
       if (!event.fileId) {
         throw new Error(`file.delete event ${event.id} is missing fileId`)
@@ -954,7 +1052,7 @@ case 'cell.audio.attach': {
     }
 
     case 'file.restore': {
-      // FRO-272: replay-safe restore. Mirrors handlers/file-delete-restore.ts.
+      // AQU-272: replay-safe restore. Mirrors handlers/file-delete-restore.ts.
       // Idempotent on double-restore (WHERE deleted_at IS NOT NULL).
       if (!event.fileId) {
         throw new Error(`file.restore event ${event.id} is missing fileId`)
@@ -1149,11 +1247,11 @@ case 'cell.audio.attach': {
     }
 
     case 'cast.assign': {
-      // FRO-438: non-chain-mutating label assignment. Merges cast_name into
+      // AQU-438: non-chain-mutating label assignment. Merges cast_name into
       // cells.metadata JSONB without touching value, event_id, or validated.
       // Applies to the SOURCE-side row (the cell's canonical reference lives
       // on the source side); the same cell_id lookup works for both sides.
-      // FRO-439: also updates camera_state column when cameraState is present
+      // AQU-439: also updates camera_state column when cameraState is present
       // in the payload, so angle-embedded labels are split cleanly on import.
       const p = event.payload as EventPayloads['cast.assign']
       if (!event.fileId || !event.cellId) {
@@ -1185,7 +1283,7 @@ case 'cell.audio.attach': {
             .bind(event.projectId, event.fileId, event.cellId),
         )
       }
-      // FRO-439: optionally update camera_state when the payload carries it.
+      // AQU-439: optionally update camera_state when the payload carries it.
       // Null clears the column; undefined = not provided = no-op.
       if (p.cameraState !== undefined) {
         stmts.push(
@@ -1235,7 +1333,7 @@ case 'cell.audio.attach': {
     }
 
     case 'source.cell.mirror': {
-      // FRO-476: advance a downstream source cell to match the upstream.
+      // AQU-476: advance a downstream source cell to match the upstream.
       // UPSERT (the target.cell.commit INSERT…ON CONFLICT shape), NOT the
       // UPDATE-only source.cell.commit shape — mirrors routinely hit cells
       // with no local row yet (new upstream cells post-seed, first-ever
@@ -1267,12 +1365,12 @@ case 'cell.audio.attach': {
           db
             .prepare(
               `INSERT INTO cells (
-                project_id, file_id, cell_id, side, value, value_html, type,
+                project_id, file_id, cell_id, side, target_lang, value, value_html, type,
                 canonical_ref, anchor_cell_id, event_id, source_event_id,
                 last_editor, last_edit_at, validated, word_count, content_hash,
                 upstream_event_id, upstream_seq, tombstoned_at
-              ) VALUES (?, ?, ?, 'source', ?, NULL, NULL, NULL, NULL, ?, NULL, ?, ?, 0, 0, ?, ?, ?, ?)
-              ON CONFLICT (project_id, file_id, cell_id, side) DO UPDATE SET
+              ) VALUES (?, ?, ?, 'source', '', ?, NULL, NULL, NULL, NULL, ?, NULL, ?, ?, 0, 0, ?, ?, ?, ?)
+              ON CONFLICT (project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
                 event_id          = excluded.event_id,
                 last_editor       = excluded.last_editor,
                 last_edit_at      = excluded.last_edit_at,
@@ -1295,7 +1393,9 @@ case 'cell.audio.attach': {
               event.serverTs,
             ),
         )
-        return ['cells']
+        if (!opts?.deferFileCounters)
+          stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
+        return ['cells', 'files']
       }
 
       const value = p.value ?? ''
@@ -1306,17 +1406,17 @@ case 'cell.audio.attach': {
         db
           .prepare(
             `INSERT INTO cells (
-              project_id, file_id, cell_id, side, value, value_html, type,
+              project_id, file_id, cell_id, side, target_lang, value, value_html, type,
               canonical_ref, anchor_cell_id, event_id, source_event_id,
               last_editor, last_edit_at, validated, word_count, content_hash,
               start_ms, end_ms, medium, sequence_index, transcription, camera_state, metadata,
               upstream_event_id, upstream_seq, tombstoned_at
             ) VALUES (
-              ?, ?, ?, 'source', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?,
+              ?, ?, ?, 'source', '', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?,
               ?, ?, ?, ?, ?, ?, ?,
               ?, ?, NULL
             )
-            ON CONFLICT (project_id, file_id, cell_id, side) DO UPDATE SET
+            ON CONFLICT (project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
               value             = excluded.value,
               value_html        = excluded.value_html,
               type              = COALESCE(excluded.type, cells.type),
@@ -1370,7 +1470,7 @@ case 'cell.audio.attach': {
     }
 
     case 'file.mirror': {
-      // FRO-476: downstream `files` row for an upstream file created
+      // AQU-476: downstream `files` row for an upstream file created
       // post-seed. Idempotent upsert — no per-cell fold can conjure the file
       // row, so the mirror sync emits this explicitly for any new upstream
       // file id it hasn't seen. Not chain-mutating; no monotonic guard needed
@@ -1417,7 +1517,7 @@ case 'cell.audio.attach': {
     }
 
     case 'link.cursor.advance': {
-      // FRO-476: pure audit-trail record — no cells/files projection. The
+      // AQU-476: pure audit-trail record — no cells/files projection. The
       // events row itself (already inserted by the caller) IS the record;
       // this case exists only so the exhaustiveness check + dispatch table
       // stay complete. Nothing to add to `stmts`.
@@ -1425,7 +1525,7 @@ case 'cell.audio.attach': {
     }
 
     case 'target.cell.repin': {
-      // FRO-478: "accept upstream change as-is." Updates ONLY the target
+      // AQU-478: "accept upstream change as-is." Updates ONLY the target
       // row's source_event_id — value, event_id (chain head), validated,
       // and endorsement_count are all deliberately untouched (spec §7:
       // "validators are the scarce bilingual experts; a stale flag plus an
@@ -1513,7 +1613,7 @@ export function buildFileVideoSetStmt(
  * `cells.event_id`). Validation and file-level events don't move the
  * chain pointer, so they're excluded from the AD-2 guard.
  *
- * FRO-476: `source.cell.mirror` is deliberately NOT in this set. A mirror
+ * AQU-476: `source.cell.mirror` is deliberately NOT in this set. A mirror
  * replicates an ordering the UPSTREAM already arbitrated — running it
  * through the downstream's first-child claims would let an older sync's
  * fold win the chain slot over a newer one's, stranding a cell on stale
@@ -1575,33 +1675,53 @@ export async function isWinningChild(
   // Build the SQL with a NULL-aware parent_id predicate. We also filter
   // to chain-mutating kinds so a sibling validation event doesn't block a
   // legitimate commit from advancing the projection.
+  //
+  // AQU-538 lanes: siblings only compete WITHIN a lane — two lanes' first
+  // commits share the same parent (the source head) but must both project.
+  // `payload` is TEXT, so the lane filter runs in JS (dialect-portable; no
+  // jsonb cast): scan the earliest siblings in seq order and arbitrate
+  // against the first one on the candidate's lane. The LIMIT bounds the
+  // scan; a truncated scan can only produce a false "winner", which is safe
+  // — the atomic chain_claims gate (lane-qualified, see chain-claims.ts)
+  // remains authoritative for in-flight races.
   const parentIsNull = candidate.parentId === null || candidate.parentId === undefined
   const kindList = [...CHAIN_MUTATING_KINDS].map((k) => `'${k}'`).join(', ')
   const sql = parentIsNull
-    ? `SELECT id, server_seq FROM events
+    ? `SELECT id, server_seq, kind, payload FROM events
        WHERE project_id = ? AND file_id = ? AND cell_id = ?
          AND parent_id IS NULL
          AND kind IN (${kindList})
        ORDER BY server_seq ASC, id ASC
-       LIMIT 1`
-    : `SELECT id, server_seq FROM events
+       LIMIT 100`
+    : `SELECT id, server_seq, kind, payload FROM events
        WHERE project_id = ? AND file_id = ? AND cell_id = ? AND parent_id = ?
          AND kind IN (${kindList})
        ORDER BY server_seq ASC, id ASC
-       LIMIT 1`
+       LIMIT 100`
 
   const stmt = parentIsNull
     ? db.prepare(sql).bind(candidate.projectId, candidate.fileId, candidate.cellId)
     : db.prepare(sql).bind(candidate.projectId, candidate.fileId, candidate.cellId, candidate.parentId)
 
-  const row = await stmt.first<{ id: string; server_seq: number }>()
+  const { results } = await stmt.all<{ id: string; server_seq: number; kind: string; payload: string }>()
 
-  // No existing event yet → this one is the first child, wins.
-  if (!row) return true
+  const candidateLane = laneOfEvent(candidate.kind, candidate.payload)
+  for (const row of results ?? []) {
+    let rowLane = ''
+    if (row.kind.startsWith('target.cell.')) {
+      try {
+        rowLane = laneOfEvent(row.kind, JSON.parse(row.payload))
+      } catch {
+        rowLane = ''
+      }
+    }
+    if (rowLane !== candidateLane) continue
 
-  // The earliest-seq winner is this candidate → idempotent replay.
-  if (row.id === candidate.id) return true
+    // The earliest same-lane sibling is this candidate → first child (or an
+    // idempotent replay of the winner); anything else beat us to the slot.
+    return row.id === candidate.id
+  }
 
-  // Some chain-mutating sibling beat us to the chain slot — stale branch.
-  return false
+  // No same-lane sibling yet → this one is the first child, wins.
+  return true
 }

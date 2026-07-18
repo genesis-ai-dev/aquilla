@@ -8,7 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * ViewSettingsMenu — opened from the workspace header ⋯ overflow (FRO-331).
+ * ViewSettingsMenu — opened from the workspace header ⋯ overflow (AQU-331).
  *
  * Menu contains toggleable items:
  *   - "Show line numbers" (Pill toggle)

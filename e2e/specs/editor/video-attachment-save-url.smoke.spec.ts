@@ -8,15 +8,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const VTT_FIXTURE = path.resolve(__dirname, "../../fixtures/voices-roundtrip.vtt")
 
 /**
- * Video attachment dialog — fills a direct media URL and attaches it.
- *
- * VideoAttachmentDialog.tsx has:
- *   - Video URL input
- *   - "Save URL" button (disabled while URL is empty; enabled once URL is filled)
- *
- * This spec: open Attach video → type a URL → verify "Save URL" is enabled.
+ * Video attachment dialog — Save URL stays enabled and validates empty URL.
  */
-test("video attachment dialog Save URL enables after entering a URL", async ({ alice }) => {
+test("video attachment dialog Save URL validates empty URL on click", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `VideoURL ${Date.now()}`
@@ -44,7 +38,10 @@ test("video attachment dialog Save URL enables after entering a URL", async ({ a
   const urlInput = dialog.getByLabel("Video URL")
   await expect(urlInput).toBeVisible({ timeout: 5_000 })
   const saveUrlBtn = dialog.getByRole("button", { name: /^Save URL$/i })
-  await expect(saveUrlBtn).toBeDisabled()
+  await expect(saveUrlBtn).toBeEnabled()
+
+  await saveUrlBtn.click()
+  await expect(dialog.getByText(/enter a video url/i)).toBeVisible({ timeout: 2_000 })
 
   await urlInput.fill("https://example.com/video.mp4")
   await expect(saveUrlBtn).toBeEnabled({ timeout: 3_000 })

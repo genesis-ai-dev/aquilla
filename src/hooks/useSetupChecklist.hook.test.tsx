@@ -8,7 +8,7 @@ import { createProject, getProject, _resetDbForTesting } from "@/lib/store/proje
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 // useSetupChecklist reaches useAccounts (via useFrontierSession), which needs
-// a QueryClientProvider since FRO-212 — same as the app root in main.tsx.
+// a QueryClientProvider since AQU-212 — same as the app root in main.tsx.
 const wrapper = ({ children }: { children: ReactNode }) => (
   <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>
 )

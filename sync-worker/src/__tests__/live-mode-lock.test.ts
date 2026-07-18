@@ -1,4 +1,4 @@
-// FRO-476: live-mode lock tests — reject local `source.cell.commit` on cells
+// AQU-476: live-mode lock tests — reject local `source.cell.commit` on cells
 // mirrored from a live-linked upstream (upstream_event_id set); downstream-
 // added cells (no upstream_event_id) stay editable.
 

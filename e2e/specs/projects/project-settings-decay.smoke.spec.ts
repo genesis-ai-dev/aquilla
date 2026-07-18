@@ -2,10 +2,10 @@ import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
- * ProjectSettings — Staleness & health (decay) section.
+ * ProjectSettings — Retrieval support section.
  *
  * DecaySettingsSection renders as a <details> element:
- *   - <summary>Staleness & health</summary>
+ *   - <summary>Retrieval support</summary>
  *   - Input id="decay-max-hops" (confidence propagation radius — replaced the
  *     retired endorsement-target field, AD-14 amendment 2026-06-04)
  *   - Input id="decay-warn" (attention threshold)
@@ -23,11 +23,10 @@ test("project settings decay section expands and changing target marks form dirt
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}/settings`)
+  await alice.goto(`/project/${projectId}/settings?section=validation`)
   await alice.waitForLoadState("networkidle")
 
-  // The <summary> "Staleness & health" is visible.
-  const summary = alice.locator("summary").filter({ hasText: /Staleness.*health/i })
+  const summary = alice.locator("summary").filter({ hasText: /Retrieval support/i })
   await expect(summary).toBeVisible({ timeout: 10_000 })
 
   // Click to expand.

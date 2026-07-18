@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useForm } from "@tanstack/react-form"
+import { z } from "zod"
 import { useNavigate, useParams } from "react-router-dom"
 import { Check, ChevronDown, FolderGit2, Search, Users } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
@@ -6,7 +8,9 @@ import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Spinner } from "@/components/ui/spinner"
 import {
   InputGroup,
   InputGroupAddon,
@@ -31,6 +35,9 @@ import {
 } from "@/lib/frontier/teams"
 import { listOrgMembers, addOrgMember, type OrgMember } from "@/lib/frontier/orgs"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
+import { isFieldInvalid } from "@/lib/forms/field-state"
+import { optionalString, requiredString } from "@/lib/forms/schemas"
+import { useSubmitError } from "@/lib/forms/submit-error"
 import {
   Select,
   SelectContent,
@@ -39,6 +46,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { roleDisplayText } from "@/lib/frontier/roles"
+import { RoleLabel } from "@/components/RoleLabel"
 
 const ROLE_OPTIONS = [
   { level: 100, name: "viewer" },
@@ -50,8 +59,13 @@ const ROLE_OPTIONS = [
   { level: 700, name: "owner" },
 ] as const
 
+const editTeamSchema = z.object({
+  name: requiredString("Team name"),
+  description: optionalString,
+})
+
 /**
- * Canonical descriptions for each access level (from AD-6 / permission-semantics.md, FRO-138).
+ * Canonical descriptions for each access level (from AD-6 / permission-semantics.md, AQU-138).
  * Shown as tooltips next to the member's role display.
  */
 const ROLE_DESCRIPTIONS: Record<number, string> = {
@@ -67,7 +81,8 @@ const ROLE_DESCRIPTIONS: Record<number, string> = {
 function roleLabel(roleLevel: number | null | undefined): string {
   if (roleLevel == null) return "Unknown"
   // Fall back to the canonical humanized name — never a raw numeric (FRO-368).
-  return ROLE_OPTIONS.find((role) => role.level === roleLevel)?.name ?? humanRoleName(roleLevel)
+  const name = ROLE_OPTIONS.find((role) => role.level === roleLevel)?.name
+  return name ? roleDisplayText(name) : humanRoleName(roleLevel)
 }
 
 function lockedOrgRoleTooltip(roleLevel: number | null | undefined): string {
@@ -104,8 +119,27 @@ export function TeamDetail() {
 
   // Edit state
   const [editing, setEditing] = useState(false)
-  const [editName, setEditName] = useState("")
-  const [editDescription, setEditDescription] = useState("")
+  const { submitError: editSubmitError, setSubmitError: setEditSubmitError, clearSubmitError: clearEditSubmitError } = useSubmitError()
+
+  const editTeamForm = useForm({
+    defaultValues: { name: "", description: "" },
+    validators: { onSubmit: editTeamSchema },
+    onSubmit: async ({ value }) => {
+      if (!jwt || activeOrgId == null || groupIdNum == null) return
+      clearEditSubmitError()
+      const patch: { name: string; description?: string } = { name: value.name.trim() }
+      if (team?.description !== undefined || value.description.trim() !== "") {
+        patch.description = value.description.trim()
+      }
+      try {
+        await updateTeam(jwt, activeOrgId, groupIdNum, patch)
+        setEditing(false)
+        await refetch()
+      } catch (err) {
+        setEditSubmitError(err instanceof Error ? err.message : "Couldn't save team.")
+      }
+    },
+  })
 
   // Delete confirm state
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -157,21 +191,6 @@ export function TeamDetail() {
       setSelectedUsername("")
     }
   }, [availableOrgMembers, selectedUsername])
-
-  async function handleSave() {
-    if (!jwt || activeOrgId == null || groupIdNum == null) return
-    // Defensive: only include description in the PATCH payload if the server already
-    // returned one (team.description !== undefined) OR the user explicitly typed a
-    // non-empty value. This prevents a name-only rename silently wiping the description
-    // on older server builds that don't yet return description in the detail payload.
-    const patch: { name: string; description?: string } = { name: editName }
-    if (team?.description !== undefined || editDescription !== "") {
-      patch.description = editDescription
-    }
-    await updateTeam(jwt, activeOrgId, groupIdNum, patch)
-    setEditing(false)
-    await refetch()
-  }
 
   async function handleDelete() {
     if (!jwt || activeOrgId == null || groupIdNum == null) return
@@ -225,9 +244,18 @@ export function TeamDetail() {
     await refetch()
   }
 
+  function handleEditOpenChange(nextOpen: boolean) {
+    if (!nextOpen) {
+      editTeamForm.reset()
+      clearEditSubmitError()
+    }
+    setEditing(nextOpen)
+  }
+
   function handleEditOpen() {
-    setEditName(team?.name ?? "")
-    setEditDescription(team?.description ?? "")
+    editTeamForm.setFieldValue("name", team?.name ?? "")
+    editTeamForm.setFieldValue("description", team?.description ?? "")
+    clearEditSubmitError()
     setEditing(true)
   }
 
@@ -277,36 +305,72 @@ export function TeamDetail() {
               />
 
               {isAdmin && (
-                <Dialog open={editing} onOpenChange={(o) => { if (!o) setEditing(false) }}>
+                <Dialog open={editing} onOpenChange={handleEditOpenChange}>
                   <DialogContent className="max-w-md">
                     <DialogHeader>
                       <DialogTitle>Edit team</DialogTitle>
                     </DialogHeader>
                     <form
                       id="edit-team-form"
-                      onSubmit={async (e) => {
+                      onSubmit={(e) => {
                         e.preventDefault()
-                        await handleSave()
+                        void editTeamForm.handleSubmit()
                       }}
-                      className="space-y-2"
                     >
-                      <Input
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        placeholder="Team name"
-                        autoFocus
-                      />
-                      <Input
-                        value={editDescription}
-                        onChange={(e) => setEditDescription(e.target.value)}
-                        placeholder="Description (optional)"
-                      />
+                      <FieldGroup>
+                        <editTeamForm.Field
+                          name="name"
+                          children={(field) => {
+                            const invalid = isFieldInvalid(field)
+                            return (
+                              <Field data-invalid={invalid}>
+                                <FieldLabel htmlFor="edit-team-name">Team name</FieldLabel>
+                                <Input
+                                  id="edit-team-name"
+                                  name={field.name}
+                                  value={field.state.value}
+                                  onBlur={field.handleBlur}
+                                  onChange={(e) => field.handleChange(e.target.value)}
+                                  placeholder="Team name"
+                                  aria-invalid={invalid}
+                                  autoFocus
+                                />
+                                {invalid && <FieldError errors={field.state.meta.errors} />}
+                              </Field>
+                            )
+                          }}
+                        />
+                        <editTeamForm.Field
+                          name="description"
+                          children={(field) => (
+                            <Field>
+                              <FieldLabel htmlFor="edit-team-desc">Description (optional)</FieldLabel>
+                              <Input
+                                id="edit-team-desc"
+                                name={field.name}
+                                value={field.state.value}
+                                onBlur={field.handleBlur}
+                                onChange={(e) => field.handleChange(e.target.value)}
+                                placeholder="Description (optional)"
+                              />
+                            </Field>
+                          )}
+                        />
+                      </FieldGroup>
+                      {editSubmitError && (
+                        <FieldError role="alert" className="mt-3">
+                          {editSubmitError}
+                        </FieldError>
+                      )}
                     </form>
                     <DialogFooter>
-                      <Button type="button" variant="outline" onClick={() => setEditing(false)}>
+                      <Button type="button" variant="outline" onClick={() => handleEditOpenChange(false)}>
                         Cancel
                       </Button>
-                      <Button type="submit" form="edit-team-form" disabled={!editName.trim()}>Save</Button>
+                      <Button type="submit" form="edit-team-form">
+                        {editTeamForm.state.isSubmitting && <Spinner data-icon="inline-start" />}
+                        {editTeamForm.state.isSubmitting ? "Saving…" : "Save"}
+                      </Button>
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
@@ -398,6 +462,7 @@ export function TeamDetail() {
 
                   {team.members.length === 0 ? (
                     <EmptyState
+                      variant="inline"
                       icon={Users}
                       title="No members."
                       description={isAdmin ? "Add org members to this team to grant them shared project access." : undefined}
@@ -411,7 +476,7 @@ export function TeamDetail() {
                             {isOwner ? (
                               /* Owners can change the member's org-level role via the upsert endpoint */
                               <Select
-                                items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: r.name }))}
+                                items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: roleDisplayText(r.name) }))}
                                 value={m.roleLevel != null ? String(m.roleLevel) : ""}
                                 onValueChange={(v) => { if (v) void handleChangeMemberRole(m.username, Number(v)) }}
                               >
@@ -426,7 +491,7 @@ export function TeamDetail() {
                                   <SelectGroup>
                                     {ROLE_OPTIONS.map((r) => (
                                       <SelectItem key={r.level} value={String(r.level)}>
-                                        {r.name}
+                                        <RoleLabel name={r.name} />
                                       </SelectItem>
                                     ))}
                                   </SelectGroup>
@@ -514,7 +579,7 @@ export function TeamDetail() {
                           </SelectContent>
                         </Select>
                         <Select
-                          items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: r.name }))}
+                          items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: roleDisplayText(r.name) }))}
                           value={selectedRole}
                           onValueChange={(v) => setSelectedRole(v ?? "")}
                         >
@@ -524,7 +589,7 @@ export function TeamDetail() {
                           <SelectContent>
                             <SelectGroup>
                               {ROLE_OPTIONS.map((r) => (
-                                <SelectItem key={r.level} value={String(r.level)}>{r.name}</SelectItem>
+                                <SelectItem key={r.level} value={String(r.level)}><RoleLabel name={r.name} /></SelectItem>
                               ))}
                             </SelectGroup>
                           </SelectContent>
@@ -543,6 +608,7 @@ export function TeamDetail() {
 
                     {(team?.projects ?? []).length === 0 && !loading ? (
                       <EmptyState
+                        variant="inline"
                         icon={FolderGit2}
                         title="No projects."
                         description={isAdmin ? "Attach a project to grant this team access at a chosen role." : undefined}
@@ -562,7 +628,7 @@ export function TeamDetail() {
                               {isAdmin ? (
                                 <>
                                   <Select
-                                    items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: r.name }))}
+                                    items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: roleDisplayText(r.name) }))}
                                     value={String(p.grantedRoleLevel)}
                                     onValueChange={(v) => { if (v) void handleChangeProjectRole(p.id, Number(v)) }}
                                   >
@@ -572,7 +638,7 @@ export function TeamDetail() {
                                     <SelectContent>
                                       <SelectGroup>
                                         {ROLE_OPTIONS.map((r) => (
-                                          <SelectItem key={r.level} value={String(r.level)}>{r.name}</SelectItem>
+                                          <SelectItem key={r.level} value={String(r.level)}><RoleLabel name={r.name} /></SelectItem>
                                         ))}
                                       </SelectGroup>
                                     </SelectContent>

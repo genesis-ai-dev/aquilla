@@ -222,7 +222,7 @@ export async function synthesizeForCell(
     speed?: number
     geminiContext?: GeminiTtsContext
     onProgress?: SynthOptions["onProgress"]
-    /** FRO-433: Org-level baseline key; used when neither project nor user key is set. */
+    /** AQU-433: Org-level baseline key; used when neither project nor user key is set. */
     orgApiKey?: string
   },
 ): Promise<Blob> {

@@ -21,7 +21,7 @@
 // Caveat: `?`→`$n` is textual; it assumes `?` appears only as a placeholder
 // (true for this codebase — string literals use single quotes).
 //
-// RLS / identity threading (FRO-289)
+// RLS / identity threading (AQU-289)
 // ------------------------------------
 // In production, workers connect as the `app_runtime` Postgres role (see
 // db/postgres/migrations/0034_rls_backstop.sql).  RLS policies on the
@@ -216,7 +216,7 @@ export class PostgresDb implements AquillaDb {
    * a non-DB mechanism (SYNC_SECRET_KEY, DIARIZATION_SHARED_SECRET,
    * PLATFORM_ADMINS gate, etc.).
    *
-   * Named call sites (FRO-289 audit — see db/postgres/RLS.md §Named asAdmin call sites):
+   * Named call sites (AQU-289 audit — see db/postgres/RLS.md §Named asAdmin call sites):
    *   sync-worker: rebuild, rebuild-fts, migrate-*, import, import-morph,
    *                diarization callback, admin/files
    *   auth-worker: routes/admin.ts (platform-admin cross-tenant reads)

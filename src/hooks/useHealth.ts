@@ -5,6 +5,15 @@ import type { CellData } from "./useCells"
 import type { TranslationRule, RuleInfraction, DecaySettings } from "@/lib/parsers/types"
 import { perfMark, memMark } from "@/lib/perf-log"
 
+export interface HealthCell {
+  id: string
+  status: CellData["status"]
+  original: string
+  translated: string
+  endorsementCount?: number
+  threads?: CellData["threads"]
+}
+
 interface HealthDispatchOptions {
   /**
    * AD-14 decay tunables. endorsementTarget is deprecated (superseded by
@@ -102,12 +111,12 @@ function healthStatsEqual(a: HealthStats, b: HealthStats): boolean {
 // Health derives from decay (endorsement_count). File progress + comment
 // counts are a cheap O(N) auxiliary derivation — no rule checks, no scoring.
 //
-// FRO-280 (audit F-P2): deriveAuxStats counts `cell.status === "validated"` for
+// AQU-280 (audit F-P2): deriveAuxStats counts `cell.status === "validated"` for
 // the validated tally. `cell.status` is derived in useCells.buildCellData from
 // the server-projected `target.validated` flag (via deriveStatus → validatedForStatus),
-// which FRO-279 made threshold-aware. This function therefore already consumes
+// which AQU-279 made threshold-aware. This function therefore already consumes
 // the authoritative server flag — no client-side threshold re-derivation here.
-function deriveAuxStats(fileCells: Map<string, CellData[]>): {
+function deriveAuxStats(fileCells: Map<string, readonly HealthCell[]>): {
   fileProgress: HealthStats["fileProgress"]
   openCommentCount: HealthStats["openCommentCount"]
   projectOpenCommentCount: HealthStats["projectOpenCommentCount"]
@@ -140,7 +149,7 @@ function deriveAuxStats(fileCells: Map<string, CellData[]>): {
 }
 
 export function useHealth(
-  fileCells: Map<string, CellData[]>,
+  fileCells: Map<string, readonly HealthCell[]>,
   rules: TranslationRule[] = [],
   options: HealthDispatchOptions = {},
 ): HealthStats {
@@ -206,7 +215,7 @@ export function useHealth(
         const prev = rulesChanged ? undefined : cache.byCell.get(cell.id)
         const entry = prev && prev.sig === sig
           ? prev
-          : { sig, infractions: checkRulesForCell(cell, fileId, enabledRules) }
+          : { sig, infractions: checkRulesForCell(cell as CellData, fileId, enabledRules) }
         nextByCell.set(cell.id, entry)
         if (entry.infractions.length > 0) result.set(cell.id, entry.infractions)
       }

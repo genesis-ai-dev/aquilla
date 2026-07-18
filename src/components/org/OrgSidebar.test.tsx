@@ -4,10 +4,12 @@ import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { OrgSidebar } from "./OrgSidebar"
 
-// FRO-474: project-only invitees (direct project_members grant, no org
+// AQU-474: project-only invitees (direct project_members grant, no org
 // membership) have no org-scoped nav surface to reach their shared project.
-// These tests verify the sidebar's "Shared with you" section renders those
-// projects and stays hidden when there's nothing to share.
+// AQU-417: the sidebar no longer lists each shared project inline (that
+// scattered the same list under every org). It now shows ONE "Shared with you"
+// link to the dedicated /shared page, and stays hidden when there's nothing to
+// share. These tests pin that single-entry behavior + the reachability guard.
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }),
@@ -44,8 +46,8 @@ beforeEach(() => {
 })
 afterEach(() => vi.clearAllMocks())
 
-describe("OrgSidebar shared-projects nav (FRO-474)", () => {
-  it("shows a 'Shared with you' section listing projects outside the user's orgs", async () => {
+describe("OrgSidebar shared-projects nav (AQU-474 / AQU-417)", () => {
+  it("shows a single 'Shared with you' link to /shared when the user has cross-org grants", async () => {
     // No org membership at all — the canonical project-only-invitee scenario.
     listMyOrgs.mockResolvedValue([])
     fetchAccessibleProjects.mockResolvedValue([
@@ -54,8 +56,11 @@ describe("OrgSidebar shared-projects nav (FRO-474)", () => {
 
     renderSidebar()
 
-    await waitFor(() => expect(screen.getByText("Shared with you")).toBeInTheDocument())
-    expect(screen.getByRole("link", { name: "Genesis Draft" })).toHaveAttribute("href", "/projects/p1")
+    // AQU-417: one dedicated entry point — not the project listed inline.
+    const link = await screen.findByRole("link", { name: "Shared with you" })
+    expect(link).toHaveAttribute("href", "/shared")
+    // The individual shared project now lives on the /shared page, not the nav.
+    expect(screen.queryByRole("link", { name: "Genesis Draft" })).not.toBeInTheDocument()
   })
 
   it("does not render the section when all accessible projects are within the user's active org", async () => {

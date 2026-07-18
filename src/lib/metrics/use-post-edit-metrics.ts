@@ -61,11 +61,11 @@ async function fetchFileCommitEvents(
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return []
   const body = (await res.json()) as { events: RawEventRow[] }
-  // Keep only target.cell.commit and target.cell.create events that have a cellId.
+  // Keep target commits plus the approval events that make a draft measurable.
   return body.events
     .filter(
       (e) =>
-        (e.kind === "target.cell.commit" || e.kind === "target.cell.create") &&
+        (e.kind === "target.cell.commit" || e.kind === "target.cell.create" || e.kind === "cell.validate") &&
         e.cellId !== null,
     )
     .map((e) => ({
@@ -76,6 +76,7 @@ async function fetchFileCommitEvents(
       serverTs: e.serverTs,
       serverSeq: e.serverSeq,
       payload: e.payload,
+      cellId: e.cellId ?? undefined,
     }))
 }
 
@@ -153,9 +154,7 @@ export function usePostEditMetrics({
         // Group by cellId.
         const byCellId = new Map<string, CommitEvent[]>()
         for (const ev of events) {
-          const payload = ev.payload as { value?: string } | null
-          if (!payload?.value && payload?.value !== "") continue
-          const key = (ev as CommitEvent & { cellId?: string }).cellId ?? ""
+          const key = ev.cellId ?? ""
           if (!key) continue
           const arr = byCellId.get(key) ?? []
           arr.push(ev)

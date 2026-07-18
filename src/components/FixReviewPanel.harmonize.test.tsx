@@ -1,5 +1,5 @@
 /**
- * FRO-186: FixReviewPanel typed-confirmation gate tests.
+ * AQU-186: FixReviewPanel typed-confirmation gate tests.
  *
  * Verifies:
  *  1. Apply is disabled until the user types the exact confirmPhrase.
@@ -34,7 +34,7 @@ function twoPreviewProposal(): FixProposal {
 
 // ── Typed confirmation gate ────────────────────────────────────────────────
 
-describe("FixReviewPanel — typed confirmation gate (FRO-186)", () => {
+describe("FixReviewPanel — typed confirmation gate (AQU-186)", () => {
   it("Apply is disabled until the correct phrase is typed", () => {
     render(
       <FixReviewPanel
@@ -144,7 +144,7 @@ function makeInfractions(ruleId: string, count: number): Map<string, RuleInfract
   return m
 }
 
-describe("BuiltinChecksList — harmonize trigger (FRO-186)", () => {
+describe("BuiltinChecksList — harmonize trigger (AQU-186)", () => {
   it("renders 'Harmonize all (N)' button when onHarmonize is provided and violations > 0", () => {
     render(
       <BuiltinChecksList

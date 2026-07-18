@@ -92,6 +92,9 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
         const active = tab.id === activeTabId
         const sectionLabel =
           tab.sectionLabel && !looksLikeUuid(tab.sectionLabel) ? tab.sectionLabel : null
+        // Prefer chapter/section over the book/file name so tabs stay short
+        // (e.g. "GEN 1" instead of "GEN 1 Genesis").
+        const label = sectionLabel ?? name
         return (
           <div
             key={tab.id}
@@ -113,12 +116,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
                   onClick={() => onActivate(tab.id)}
                   className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden p-0 text-left leading-none"
                 >
-                  {sectionLabel && (
-                    <span className="shrink-0 whitespace-nowrap text-muted-foreground/80">
-                      {sectionLabel}
-                    </span>
-                  )}
-                  <span className="whitespace-nowrap font-medium">{name}</span>
+                  <span className="whitespace-nowrap font-medium">{label}</span>
                 </button>
               </AppTooltip>
               <span aria-hidden className={tabLabelFadeClasses(active)} />
@@ -131,7 +129,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
                 e.stopPropagation()
                 onClose(tab.id)
               }}
-              aria-label={`Close ${name}`}
+              aria-label={`Close ${label}`}
               className="absolute right-1 top-1/2 z-10 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/70 opacity-0 hover:bg-muted hover:text-foreground group-hover/tab:opacity-100 group-focus-within/tab:opacity-100"
             >
               <X className="h-3 w-3" />

@@ -8,7 +8,7 @@
  * NOT affected.
  *
  * Usage: wire into TranslatedEditor via the optional `terminologyConcepts` prop.
- * Chip click is annotated with `data-source-term` for FRO-204 (TermLookupPopover).
+ * Chip click is annotated with `data-source-term` for AQU-204 (TermLookupPopover).
  */
 
 import { Plugin, PluginKey } from "@tiptap/pm/state"

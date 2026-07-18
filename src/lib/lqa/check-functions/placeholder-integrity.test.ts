@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { runCheck, extractPlaceholders } from "./placeholder-integrity"
+import { runCheck, extractPlaceholders, buildMessage } from "./placeholder-integrity"
 
 describe("extractPlaceholders", () => {
   it("extracts curly placeholders", () => {
@@ -46,5 +46,21 @@ describe("placeholder-integrity", () => {
   it("does not flag duplicates as missing", () => {
     expect(runCheck("{x} {x}", "{x} {x}")).toBeNull()
     expect(runCheck("{x} {x}", "{x}")).toBeNull() // count mismatch tolerated in v1
+  })
+})
+
+describe("buildMessage (FRO-345)", () => {
+  it("names a single missing placeholder", () => {
+    const spans = runCheck("Hello {name}, age {age}", "Bonjour {name}")
+    expect(buildMessage(spans!)).toBe("Placeholder {age} missing in translation")
+  })
+
+  it("names every missing placeholder", () => {
+    const spans = runCheck("Click <a>here</a> for %s", "Cliquez ici")
+    expect(buildMessage(spans!)).toBe("Placeholders <a>, </a>, %s missing in translation")
+  })
+
+  it("falls back to the generic copy for empty spans", () => {
+    expect(buildMessage([])).toBe("Placeholder missing in translation")
   })
 })

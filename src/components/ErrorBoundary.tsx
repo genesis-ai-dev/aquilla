@@ -1,5 +1,5 @@
 /**
- * FRO-266: Global error boundary + crash telemetry.
+ * AQU-266: Global error boundary + crash telemetry.
  *
  * Wraps the router output so that any unhandled render throw shows a branded
  * recovery screen rather than a white screen of death. Also registers
@@ -7,7 +7,7 @@
  * posthog.captureException (consent-gated via the posthog module which already
  * respects isAnalyticsEnabled() on init and responds to onAnalyticsConsentChange).
  *
- * SWARM-TODO(FRO-266): UI-QA — force a render throw (e.g. via a dev-only query
+ * SWARM-TODO(AQU-266): UI-QA — force a render throw (e.g. via a dev-only query
  * param ?__crash=1 or React devtools) and confirm the branded recovery screen
  * appears (not a white screen) AND a PostHog "app_crash" exception event lands
  * in the PostHog event stream.

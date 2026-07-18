@@ -1,4 +1,4 @@
-// AI budget + allowlist guard — FRO-265
+// AI budget + allowlist guard — AQU-265
 //
 // Enforces two controls on the OpenRouter chat-completion proxy:
 //

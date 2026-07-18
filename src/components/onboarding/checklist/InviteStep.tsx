@@ -1,12 +1,22 @@
 import { useState } from "react"
+import { useForm } from "@tanstack/react-form"
+import { z } from "zod"
 import { Copy, Plus, UserPlus, Check, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { FieldLabel } from "@/components/ui/field"
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Spinner } from "@/components/ui/spinner"
 import { createServerInvite } from "@/lib/sync/invites"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { ROLE } from "@/lib/frontier/roles"
+import { isFieldInvalid } from "@/lib/forms/field-state"
+import { requiredString } from "@/lib/forms/schemas"
+import { useSubmitError } from "@/lib/forms/submit-error"
+
+const inviteSchema = z.object({
+  username: requiredString("Username"),
+})
 
 interface InviteStepProps {
   projectId: string
@@ -30,52 +40,40 @@ interface InviteStepProps {
 export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
   const { session } = useFrontierSession()
   const { add, error: memberError } = useProjectMembers(projectId)
+  const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
 
-  const [inviteUsername, setInviteUsername] = useState("")
-  const [inviteBusy, setInviteBusy] = useState(false)
-  const [inviteResult, setInviteResult] = useState<
-    { kind: "ok"; username: string } | { kind: "error"; message: string } | null
-  >(null)
+  const [addedUsername, setAddedUsername] = useState<string | null>(null)
 
   const [linkBusy, setLinkBusy] = useState(false)
   const [linkError, setLinkError] = useState<string | null>(null)
   const [issuedUrl, setIssuedUrl] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
-  async function handleAddMember(e: React.FormEvent) {
-    e.preventDefault()
-    if (!session?.jwt) {
-      setInviteResult({
-        kind: "error",
-        message: "Sign in to invite by username.",
-      })
-      return
-    }
-    const trimmed = inviteUsername.trim()
-    if (!trimmed) return
-    setInviteBusy(true)
-    setInviteResult(null)
-    try {
-      const member = await add(trimmed, ROLE.CONTRIBUTOR)
-      if (!member) {
-        setInviteResult({
-          kind: "error",
-          message: `No Aquilla user named "${trimmed}".`,
-        })
-      } else {
-        setInviteResult({ kind: "ok", username: member.username })
-        setInviteUsername("")
-        onSharesChanged()
+  const form = useForm({
+    defaultValues: { username: "" },
+    validators: { onSubmit: inviteSchema },
+    onSubmit: async ({ value }) => {
+      clearSubmitError()
+      setAddedUsername(null)
+      if (!session?.jwt) {
+        setSubmitError("Sign in to invite by username.")
+        return
       }
-    } catch (err) {
-      setInviteResult({
-        kind: "error",
-        message: err instanceof Error ? err.message : "Couldn't add member.",
-      })
-    } finally {
-      setInviteBusy(false)
-    }
-  }
+      const trimmed = value.username.trim()
+      try {
+        const member = await add(trimmed, ROLE.CONTRIBUTOR)
+        if (!member) {
+          setSubmitError(`No Aquilla user named "${trimmed}".`)
+        } else {
+          setAddedUsername(member.username)
+          form.reset()
+          onSharesChanged()
+        }
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : "Couldn't add member.")
+      }
+    },
+  })
 
   async function handleCreateLink() {
     setLinkError(null)
@@ -104,7 +102,7 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <p className="text-xs text-muted-foreground">
         Add teammates as <strong>contributors</strong> — they can read, comment,
         and edit cells. You can change roles or upgrade them in Project →
@@ -112,52 +110,80 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
       </p>
 
       {/* Direct username invite */}
-      <form onSubmit={handleAddMember} className="space-y-2">
-        <FieldLabel htmlFor="invite-user" className="text-xs">
-          Invite by Aquilla username
-        </FieldLabel>
-        <div className="flex gap-1.5">
-          <Input
-            id="invite-user"
-            value={inviteUsername}
-            onChange={(e) => setInviteUsername(e.target.value)}
-            placeholder="e.g. mariad"
-            className="text-sm"
-            disabled={inviteBusy || !session?.jwt}
+      <form
+        id="invite-member-form"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void form.handleSubmit()
+        }}
+        className="flex flex-col gap-2"
+      >
+        <FieldGroup>
+          <form.Field
+            name="username"
+            children={(field) => {
+              const invalid = isFieldInvalid(field)
+              return (
+                <Field data-invalid={invalid}>
+                  <FieldLabel htmlFor="invite-user" className="text-xs">
+                    Invite by Aquilla username
+                  </FieldLabel>
+                  <div className="flex gap-1.5">
+                    <Input
+                      id="invite-user"
+                      name={field.name}
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      placeholder="e.g. mariad"
+                      className="text-sm"
+                      aria-invalid={invalid}
+                      disabled={form.state.isSubmitting || !session?.jwt}
+                    />
+                    <Button
+                      type="submit"
+                      form="invite-member-form"
+                      size="sm"
+                      disabled={form.state.isSubmitting || !session?.jwt}
+                    >
+                      {form.state.isSubmitting ? (
+                        <Spinner data-icon="inline-start" />
+                      ) : (
+                        <UserPlus className="mr-1 h-3.5 w-3.5" />
+                      )}
+                      Add
+                    </Button>
+                  </div>
+                  {invalid && <FieldError errors={field.state.meta.errors} className="text-xs" />}
+                </Field>
+              )
+            }}
           />
-          <Button
-            type="submit"
-            size="sm"
-            disabled={inviteBusy || !inviteUsername.trim() || !session?.jwt}
-          >
-            <UserPlus className="mr-1 h-3.5 w-3.5" />
-            Add
-          </Button>
-        </div>
+        </FieldGroup>
         {!session?.jwt && (
           <p className="text-[11px] text-muted-foreground">
             Sign in to invite by username.
           </p>
         )}
-        {inviteResult?.kind === "ok" && (
+        {addedUsername && (
           <p className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
-            <Check className="h-3 w-3" /> Added <strong>{inviteResult.username}</strong>{" "}
+            <Check className="h-3 w-3" /> Added <strong>{addedUsername}</strong>{" "}
             as contributor.
           </p>
         )}
-        {inviteResult?.kind === "error" && (
+        {submitError && (
           <p className="flex items-start gap-1 text-xs text-destructive">
             <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
-            <span>{inviteResult.message}</span>
+            <span>{submitError}</span>
           </p>
         )}
-        {memberError && !inviteResult && (
+        {memberError && !submitError && !addedUsername && (
           <p className="text-xs text-destructive">{memberError}</p>
         )}
       </form>
 
       {/* Share-link path */}
-      <div className="space-y-2 rounded-md border bg-muted/20 p-2.5">
+      <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-2.5">
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium">Or share a link</span>
           {!issuedUrl && (
@@ -175,7 +201,7 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
           )}
         </div>
         {issuedUrl ? (
-          <div className="space-y-1.5">
+          <div className="flex flex-col gap-1.5">
             <div className="flex items-center gap-1">
               <Input value={issuedUrl} readOnly className="h-7 text-[11px] font-mono" />
               <Button

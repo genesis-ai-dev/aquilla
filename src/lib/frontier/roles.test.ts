@@ -7,10 +7,15 @@ import {
   ORG_ROLE_PICKER,
   roleName,
   humanRoleName,
+  formatRoleDisplay,
+  roleDisplayText,
+  roleDisplayLabel,
   roleDescription,
   PROJECT_ROLE_OPTIONS,
   ORG_ROLE_OPTIONS,
   LINK_ROLE_OPTIONS,
+  VALIDATION_FLOOR_ROLES,
+  VALIDATION_FLOOR_ROLE_OPTIONS,
 } from "./roles"
 
 // These assertions are the contract between the codex-web-app client and
@@ -96,5 +101,55 @@ describe("humanRoleName (FRO-368)", () => {
 
   it("never emits a bare numeric for unknown levels", () => {
     expect(humanRoleName(450)).toBe("Level 450")
+  })
+})
+
+describe("VALIDATION_FLOOR_ROLE_OPTIONS (AQU-352)", () => {
+  // Regression guard for AQU-352: the "Minimum validator role" dropdown must
+  // draw its labels from the canonical role source, so they read identically to
+  // the member / invite / share surfaces (which render `roleName`). Any future
+  // re-hardcoding of prettified labels ("Project Lead", "Reviewer (default)")
+  // is exactly the taxonomy drift this ticket fixed.
+  it("offers reviewer and up as an intentional subset (reviewer/project_lead/maintainer)", () => {
+    expect(VALIDATION_FLOOR_ROLES).toEqual([
+      ROLE.REVIEWER,
+      ROLE.PROJECT_LEAD,
+      ROLE.MAINTAINER,
+    ])
+  })
+
+  it("labels each option with the canonical role name — no renaming", () => {
+    expect(VALIDATION_FLOOR_ROLE_OPTIONS.map((o) => o.name)).toEqual([
+      "reviewer",
+      "project_lead",
+      "maintainer",
+    ])
+    for (const opt of VALIDATION_FLOOR_ROLE_OPTIONS) {
+      expect(opt.name).toBe(roleName(opt.level))
+    }
+  })
+
+  it("is a strict subset of the project role taxonomy shown on member surfaces", () => {
+    const projectNames = new Set(PROJECT_ROLE_OPTIONS.map((o) => o.name))
+    for (const opt of VALIDATION_FLOOR_ROLE_OPTIONS) {
+      expect(projectNames.has(opt.name)).toBe(true)
+    }
+  })
+})
+
+describe("role display helpers", () => {
+  it("formatRoleDisplay replaces underscores with spaces", () => {
+    expect(formatRoleDisplay("project_lead")).toBe("project lead")
+    expect(formatRoleDisplay("owner")).toBe("owner")
+  })
+
+  it("roleDisplayText title-cases each word", () => {
+    expect(roleDisplayText("project_lead")).toBe("Project Lead")
+    expect(roleDisplayText("owner")).toBe("Owner")
+  })
+
+  it("roleDisplayLabel maps levels to title-cased labels", () => {
+    expect(roleDisplayLabel(500)).toBe("Project Lead")
+    expect(roleDisplayLabel(700)).toBe("Owner")
   })
 })

@@ -1,4 +1,4 @@
-// FRO-346: admin handler for project-member-removal notifications. Called by
+// AQU-346: admin handler for project-member-removal notifications. Called by
 // identity right after it deletes a project_members row so the live
 // ProjectSync DO can eject the removed user's sockets and denylist their
 // still-valid (≤15 min) tokens. Mirrors project-archive.ts.

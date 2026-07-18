@@ -1,3 +1,5 @@
+import { Badge } from "@/components/ui/badge"
+
 export function ComingSoonStep({
   title,
   description,
@@ -13,9 +15,7 @@ export function ComingSoonStep({
       <div>
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-muted-foreground">{title}</span>
-          <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-            Coming soon
-          </span>
+          <Badge variant="secondary">Coming soon</Badge>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">{description}</p>
       </div>

@@ -5,7 +5,7 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 
 /**
- * FRO-455: "Suggest from edits" (and rule-import) dialogs commit N accepted
+ * AQU-455: "Suggest from edits" (and rule-import) dialogs commit N accepted
  * suggestions by calling `onAdd` (= `addRule`) once per suggestion in a
  * sequential loop:
  *
@@ -66,7 +66,7 @@ function acceptedRule(name: string) {
   }
 }
 
-describe("useRules — addRule under sequential multi-accept commit (FRO-455)", () => {
+describe("useRules — addRule under sequential multi-accept commit (AQU-455)", () => {
   it("happy path: patchShared is called once per accepted rule with the full cumulative array (does not by itself distinguish void vs await patchShared — see the out-of-order-server test below for the actual regression)", async () => {
     store = { p1: baseProject() }
     const patchShared = vi.fn(async (_partial: ProjectWideSettings) => ({ kind: "ok" as const }))
@@ -95,7 +95,7 @@ describe("useRules — addRule under sequential multi-accept commit (FRO-455)", 
   })
 
   it("OUTCOME REGRESSION: server ends up with ALL N rules even when patchShared responses land out of order (not just the mechanism, the actual observable outcome)", async () => {
-    // FRO-455's real failure mode: each addRule() call's `patchShared` payload
+    // AQU-455's real failure mode: each addRule() call's `patchShared` payload
     // already carries the correct full cumulative `rules` array at *dispatch*
     // time (it reads the just-updated IDB snapshot via `patchProject`'s
     // return value) — so a mock that resolves synchronously/in-order can
@@ -172,7 +172,7 @@ describe("useRules — addRule under sequential multi-accept commit (FRO-455)", 
   })
 
   it("REGRESSION: addRule's returned promise does not resolve until patchShared's write lands", async () => {
-    // This is the precise mechanism behind FRO-455: RuleSuggestFromEditsDialog /
+    // This is the precise mechanism behind AQU-455: RuleSuggestFromEditsDialog /
     // RuleImportDialog commit accepted suggestions via
     // `for (const i of accepted) { await onAdd(...) }`. That loop's safety
     // depends entirely on `onAdd` (== addRule) not resolving until its
@@ -232,7 +232,7 @@ describe("useRules — addRule under sequential multi-accept commit (FRO-455)", 
   })
 
   it("REAL-WORLD REGRESSION (AD-3 thin client): server ends up with ALL N rules even when patchProject never finds an IDB record and the caller's `project` closure is stale across the loop", async () => {
-    // This is the test the prior swarm-fixed FRO-455 pass was missing, and
+    // This is the test the prior swarm-fixed AQU-455 pass was missing, and
     // the reason unit tests went green while live-UI QA against the real dev
     // stack still showed only the last accepted rule surviving.
     //

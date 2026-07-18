@@ -1,9 +1,15 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { bulkUploadSource, type BulkImportCell } from "./bulk-import"
+import * as sourceUpload from "./source-upload"
 
 // Stub syncWorkerHttpOrigin so no VITE env lookup is needed.
 vi.mock("./sync-worker-url", () => ({
   syncWorkerHttpOrigin: () => "https://sync.example",
+}))
+
+// Stub source-upload so rawBytes tests don't need a real worker.
+vi.mock("./source-upload", () => ({
+  uploadSourceOriginal: vi.fn().mockResolvedValue(undefined),
 }))
 
 function makeCell(i: number): BulkImportCell {
@@ -17,7 +23,9 @@ function makeCell(i: number): BulkImportCell {
 
 describe("bulkUploadSource", () => {
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
+    vi.clearAllMocks()
   })
 
   it("throws if getToken returns null", async () => {
@@ -48,13 +56,14 @@ describe("bulkUploadSource", () => {
       fetchImpl: fetchMock,
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
     const body = bodies[0] as Record<string, unknown>
     expect(body.projectId).toBe("p1")
     expect(body.fileId).toBe("f1")
     expect((body.cells as unknown[]).length).toBe(3)
     // file meta included on first (only) chunk
     expect(body.file).toBeDefined()
+    expect((bodies[1] as Record<string, unknown>).complete).toBe(true)
   })
 
   it("sends multiple chunks for > 1500 cells", async () => {
@@ -74,8 +83,8 @@ describe("bulkUploadSource", () => {
       fetchImpl: fetchMock,
     })
 
-    // 3200 cells / 1500 per chunk → 3 requests (1500 + 1500 + 200)
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    // 3200 cells / 1500 per chunk → 3 data requests, then one completion hint.
+    expect(fetchMock).toHaveBeenCalledTimes(4)
     // file meta only on first chunk
     expect((bodies[0] as Record<string, unknown>).file).toBeDefined()
     expect((bodies[1] as Record<string, unknown>).file).toBeUndefined()
@@ -128,7 +137,8 @@ describe("bulkUploadSource", () => {
       )
     }) as typeof fetch
 
-    // 6500 cells / 1500 per chunk → 5 chunks (1 first + 4 that can overlap).
+    // 6500 cells / 1500 per chunk → 5 chunks (1 first + 4 that can overlap),
+    // followed by one completion hint after they have all settled.
     const cells = Array.from({ length: 6500 }, (_, i) => makeCell(i))
     await bulkUploadSource({
       projectId: "p1",
@@ -139,7 +149,7 @@ describe("bulkUploadSource", () => {
       fetchImpl: fetchMock,
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(5)
+    expect(fetchMock).toHaveBeenCalledTimes(6)
     // Ordering invariant: the file.create chunk completes before any other starts.
     expect(nonFirstStartedBeforeFirstResolved).toBe(false)
     // Concurrency: the 4 trailing chunks overlap instead of running one-at-a-time.
@@ -161,5 +171,195 @@ describe("bulkUploadSource", () => {
         fetchImpl: fetchMock,
       }),
     ).rejects.toThrow(/403/)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("retries a data chunk after a transient network failure", async () => {
+    vi.useFakeTimers()
+    let dataAttempts = 0
+    const progress = vi.fn()
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(init?.body as string) as Record<string, unknown>
+      if (body.complete) {
+        return new Response(JSON.stringify({ accepted: 0, fileId: "f1" }), { status: 200 })
+      }
+      dataAttempts++
+      if (dataAttempts === 1) throw new TypeError("Failed to fetch")
+      return new Response(JSON.stringify({ accepted: 1, fileId: "f1" }), { status: 200 })
+    }) as typeof fetch
+
+    const upload = bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: "test.txt" },
+      cells: [makeCell(0)],
+      getToken: async () => "tok",
+      onProgress: progress,
+      fetchImpl: fetchMock,
+    })
+    await vi.runAllTimersAsync()
+    await expect(upload).resolves.toBeUndefined()
+
+    expect(dataAttempts).toBe(2)
+    expect(progress).toHaveBeenCalledTimes(1)
+    expect(progress).toHaveBeenCalledWith(1, 1)
+  })
+
+  it("retries a data chunk after a retryable HTTP response", async () => {
+    vi.useFakeTimers()
+    let dataAttempts = 0
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(init?.body as string) as Record<string, unknown>
+      if (body.complete) {
+        return new Response(JSON.stringify({ accepted: 0, fileId: "f1" }), { status: 200 })
+      }
+      dataAttempts++
+      if (dataAttempts === 1) return new Response("temporary", { status: 503 })
+      return new Response(JSON.stringify({ accepted: 1, fileId: "f1" }), { status: 200 })
+    }) as typeof fetch
+
+    const upload = bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: "test.txt" },
+      cells: [makeCell(0)],
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+    await vi.runAllTimersAsync()
+    await expect(upload).resolves.toBeUndefined()
+    expect(dataAttempts).toBe(2)
+  })
+
+  it("retries transient finalization failures without re-uploading data", async () => {
+    vi.useFakeTimers()
+    let finalizeAttempts = 0
+    let dataAttempts = 0
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(init?.body as string) as Record<string, unknown>
+      if (body.complete) {
+        finalizeAttempts++
+        if (finalizeAttempts < 3) return new Response("temporary", { status: 503 })
+        return new Response(JSON.stringify({ accepted: 0, fileId: "f1" }), { status: 200 })
+      }
+      dataAttempts++
+      return new Response(JSON.stringify({ accepted: 1, fileId: "f1" }), { status: 200 })
+    }) as typeof fetch
+
+    const upload = bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: "test.txt" },
+      cells: [makeCell(0)],
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+    await vi.runAllTimersAsync()
+    await expect(upload).resolves.toBeUndefined()
+
+    expect(dataAttempts).toBe(1)
+    expect(finalizeAttempts).toBe(3)
+  })
+
+  it("does not retry a terminal finalization rejection", async () => {
+    let finalizeAttempts = 0
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(init?.body as string) as Record<string, unknown>
+      if (body.complete) {
+        finalizeAttempts++
+        return new Response("invalid completion", { status: 400 })
+      }
+      return new Response(JSON.stringify({ accepted: 1, fileId: "f1" }), { status: 200 })
+    }) as typeof fetch
+
+    await expect(
+      bulkUploadSource({
+        projectId: "p1",
+        fileId: "f1",
+        file: { id: "file-evt", name: "test.txt" },
+        cells: [makeCell(0)],
+        getToken: async () => "tok",
+        fetchImpl: fetchMock,
+      }),
+    ).rejects.toThrow(/HTTP 400/)
+    expect(finalizeAttempts).toBe(1)
+  })
+
+  it("waits for concurrent chunks and finalizes partial state after a chunk fails", async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(init?.body as string) as Record<string, unknown>
+      bodies.push(body)
+      if (body.complete) {
+        return new Response(JSON.stringify({ accepted: 0, fileId: "f1" }), { status: 200 })
+      }
+      const cells = body.cells as BulkImportCell[]
+      if (cells[0]?.cellId === "cell-1500") {
+        return new Response("chunk failed", { status: 500 })
+      }
+      return new Response(JSON.stringify({ accepted: cells.length, fileId: "f1" }), { status: 200 })
+    }) as typeof fetch
+
+    const cells = Array.from({ length: 3200 }, (_, i) => makeCell(i))
+    await expect(
+      bulkUploadSource({
+        projectId: "p1",
+        fileId: "f1",
+        file: { id: "file-evt", name: "big.txt" },
+        cells,
+        getToken: async () => "tok",
+        fetchImpl: fetchMock,
+      }),
+    ).rejects.toThrow(/HTTP 500/)
+
+    expect(bodies.at(-1)?.complete).toBe(true)
+    expect(bodies.filter((body) => body.complete)).toHaveLength(1)
+  })
+
+  it("calls uploadSourceOriginal once with correct args when rawBytes is provided", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ accepted: 1, fileId: "f1" }), { status: 200 }),
+    ) as typeof fetch
+
+    const rawBytes = new ArrayBuffer(4)
+    await bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: "test.docx" },
+      cells: [makeCell(0)],
+      rawBytes,
+      rawSourceFormat: "docx",
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+
+    const uploadMock = vi.mocked(sourceUpload.uploadSourceOriginal)
+    expect(uploadMock).toHaveBeenCalledTimes(1)
+    expect(uploadMock).toHaveBeenCalledWith({
+      projectId: "p1",
+      fileId: "f1",
+      bytes: rawBytes,
+      format: "docx",
+      getToken: expect.any(Function),
+    })
+  })
+
+  it("does NOT call uploadSourceOriginal when rawBytes is absent (USFM path)", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ accepted: 1, fileId: "f1" }), { status: 200 }),
+    ) as typeof fetch
+
+    await bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: "test.usfm" },
+      cells: [makeCell(0)],
+      rawSource: "\\id GEN",
+      rawSourceFormat: "usfm",
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+
+    expect(vi.mocked(sourceUpload.uploadSourceOriginal)).not.toHaveBeenCalled()
   })
 })

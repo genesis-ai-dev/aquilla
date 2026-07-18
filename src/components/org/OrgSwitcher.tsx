@@ -7,6 +7,7 @@ import { fetchAccessibleProjects } from "@/lib/sync/cloud-projects"
 import { isOrgScopedRoute } from "./org-route-scope"
 import { OrgCreateDialog } from "./OrgCreateDialog"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { RoleLabel } from "@/components/RoleLabel"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -71,7 +72,7 @@ export function OrgSwitcher() {
   const [open, setOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
 
-  // FRO-473: a project-only invitee has zero member orgs but may still have
+  // AQU-473: a project-only invitee has zero member orgs but may still have
   // guest orgs to switch into — don't hide the whole switcher for them.
   if (!activeOrg && !isAllOrgs && guestOrgs.length === 0) return null
 
@@ -92,7 +93,7 @@ export function OrgSwitcher() {
     }
   }
 
-  // FRO-473: guest orgs are not activatable (no org membership, so
+  // AQU-473: guest orgs are not activatable (no org membership, so
   // setActiveOrg/org:active would misrepresent the user's role) — clicking
   // one just navigates. Single accessible project in that org → straight to
   // it; multiple → the all-orgs overview, which surfaces "Shared with you".
@@ -160,7 +161,7 @@ export function OrgSwitcher() {
                   <OrgMark name={name} />
                   <span className="truncate">{name}</span>
                   <span className="flex shrink-0 items-center gap-1.5">
-                    <span className="text-xs text-muted-foreground">{o.role.name}</span>
+                    <RoleLabel name={o.role.name} className="text-xs text-muted-foreground" />
                     {selected && <Check className="size-4 opacity-60" />}
                   </span>
                 </DropdownMenuItem>
@@ -180,7 +181,7 @@ export function OrgSwitcher() {
                     <OrgMark name={g.name ?? `Org #${g.id}`} />
                     <span className="truncate">{g.name ?? `Org #${g.id}`}</span>
                     <span className="flex shrink-0 items-center gap-1.5">
-                      <span className="text-xs text-muted-foreground">Guest</span>
+                      <RoleLabel name="guest" className="text-xs text-muted-foreground" />
                     </span>
                   </DropdownMenuItem>
                 ))}

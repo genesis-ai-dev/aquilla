@@ -1,4 +1,4 @@
-// FRO-479 push accelerator: `link.upstream-changed` notify hook tests.
+// AQU-479 push accelerator: `link.upstream-changed` notify hook tests.
 //
 // The hook (route.ts's notifyLiveDownstreamsOfUpstreamChanges, wired via
 // ctx.waitUntil after the ProjectSync event.applied fan-out) must:
@@ -135,7 +135,7 @@ function upstreamChangedFrames(
     .filter((b) => b.t === "link.upstream-changed")
 }
 
-describe("FRO-479 link.upstream-changed notify hook", () => {
+describe("AQU-479 link.upstream-changed notify hook", () => {
   beforeEach(() => {
     __resetLinkNotifyDownstreamCacheForTests()
   })
@@ -322,7 +322,7 @@ describe("FRO-479 link.upstream-changed notify hook", () => {
       )
       expect(res?.status).toBe(200)
       // No throw, no rejected events — the commit path is unaffected by the
-      // absent binding. FRO-476's lazy-pull mirror sync remains the floor.
+      // absent binding. AQU-476's lazy-pull mirror sync remains the floor.
       const body = (await res!.json()) as { accepted: unknown[]; rejected: unknown[] }
       expect(body.accepted).toHaveLength(1)
       expect(body.rejected).toHaveLength(0)

@@ -22,11 +22,18 @@ import { AliasMap, compressRows } from "../lib/agent/compress"
 import { runGuardedSql, type SqlVarContext } from "../lib/agent/sql-guard"
 import { stageEvents, type AgentProposal, type EmitStageContext } from "../lib/agent/emit-stage"
 import { getCookbook } from "../lib/agent/docs"
+import { readModelTurn, type ToolCall, type UpstreamMessage } from "../lib/agent/upstream"
+import { compactConvo, loadSession, saveSession, type StoredMessage } from "../lib/agent/sessions"
+import { executeRead, type ReadArgs } from "../lib/agent/tools/read"
+import { executeExamples, type ExamplesArgs } from "../lib/agent/tools/examples"
+import { executeSearch, type SearchArgs } from "../lib/agent/tools/search"
+import { executeDraft, type DraftArgs } from "../lib/agent/tools/draft"
+import type { ToolResultData } from "../lib/agent/tools/types"
 import { parseAquiferOp } from "../lib/agent/aquifer-guard"
 import { aquiferSearch, aquiferReadPage, type AquiferCitation } from "../lib/aquifer/client"
 import { isBibleResourcesEnabled } from "../lib/aquifer/gate"
 import { buildSystemPrompt } from "../lib/agent/schema-card"
-import { insertAgentRun, finishAgentRun } from "../lib/agent/runs"
+import { insertAgentRun, finishAgentRun, listAgentRuns } from "../lib/agent/runs"
 import { makePostgres } from "../../../db/shim/postgres"
 
 const agent = new Hono<{ Bindings: Env; Variables: Variables }>()
@@ -46,17 +53,23 @@ const DEFAULT_AGENT_MODEL = "anthropic/claude-haiku-4-5"
 function resolveAgentModel(env: Env, settings: PlatformSettings): string {
   return settings.agentModel || env.AGENT_MODEL_DEFAULT || DEFAULT_AGENT_MODEL
 }
-// Counted per model round that runs sql/emit (docs-only rounds are free).
-// Sized for: recipe query + exemplars + draft emit + one lint-redraft emit,
-// with headroom for error recovery (battery case 2 capped at 8 mid-redraft).
+/** The draft tool's translation model — may be stronger than the orchestrator. */
+function resolveDraftModel(env: Env, settings: PlatformSettings, agentModel: string): string {
+  return settings.agentDraftModel || env.AGENT_DRAFT_MODEL_DEFAULT || agentModel
+}
+// Iteration budget counts model rounds that WRITE or run raw SQL (draft /
+// propose|emit / sql). Read-shaped rounds (read/examples/search/docs/aquifer)
+// are free — each is one bounded, recipe-encoded call — but a hard round cap
+// backstops a model looping on free tools.
 const MAX_TOOL_ITERATIONS = 12
-const TOKEN_CEILING = 60_000
+const MAX_TOTAL_ROUNDS = 30
+const TOKEN_CEILING = 100_000
 /** code_result summaries are truncated for the UI per the contract. */
 const RESULT_SUMMARY_MAX = 2000
 
 // ── SSE frame types (wire contract — keep byte-identical to the plan doc) ──
 
-type CodeKind = "sql" | "emit" | "docs" | "aquifer"
+type CodeKind = "sql" | "emit" | "docs" | "aquifer" | "read" | "examples" | "search" | "draft"
 
 /** A researched Q&A the agent wants to publish back to bibletranslation.org.
  *  Unlike an event AgentProposal, applying this does NOT go through the
@@ -72,63 +85,181 @@ export interface AquiferPublishProposal {
 }
 
 type AgentFrame =
-  | { type: "run_start"; runId: string }
+  | { type: "run_start"; runId: string; sessionId?: string }
   | { type: "assistant_delta"; text: string }
   | { type: "code_start"; step: number; kind: CodeKind; summary: string }
-  | { type: "code_result"; step: number; ok: boolean; summary: string }
+  | { type: "code_result"; step: number; ok: boolean; summary: string; data?: ToolResultData }
   | { type: "proposal"; proposal: AgentProposal }
   | { type: "aquifer_proposal"; proposal: AquiferPublishProposal }
+  | { type: "progress"; label: string; done: number; total: number }
   | { type: "usage"; promptTokens: number; completionTokens: number; costCents: number }
   | { type: "done"; runId: string; status: "ok" | "capped" | "error" }
   | { type: "error"; message: string }
 
-// ── The one tool (OpenAI tool-calling schema, served to the model) ─────────
+// ── Tool schema (OpenAI tool-calling, served to the model) ──────────────────
+// Semantic tools carry the recipes in CODE (design 2026-07-02 §3); `sql` stays
+// as the guarded escape hatch and `execute` as a back-compat shim (scripted
+// mocks + old transcripts in stored sessions still call it).
 
-const EXECUTE_TOOL = {
-  type: "function",
-  function: {
-    name: "execute",
-    description:
-      "Run read-only SQL, stage events, fetch docs, or consult Bible reference data. Exactly one field per call.",
-    parameters: {
-      type: "object",
-      properties: {
-        sql: {
-          type: "string",
-          description:
-            "One read-only SELECT (CTEs allowed). Bind vars: :project, :user, :file, :cell. Max 200 rows surfaced.",
-        },
-        emit: {
-          type: "array",
-          items: { type: "object" },
-          description:
-            "Events to STAGE for user approval. Each: {kind, fileId?, cellId?, parentId?, payload}. Aliases (#c1/#e1/#f1) and :vars accepted.",
-        },
-        docs: {
-          type: "string",
-          description:
-            "Fetch a cookbook: drafting | checking | terminology | validation | history | assignments | files-and-refs | brief",
-        },
-        aquifer: {
+const SCOPE_PROPS = {
+  fileId: { type: "string", description: "File id, #f-alias, or :file (the focused file)." },
+  ref: { type: "string", description: 'Scripture scope: "MRK", "MRK 4", or "MRK 4:1-20". Resolves the file by book code when fileId is omitted.' },
+} as const
+
+const AQUIFER_PROPS = {
+  op: { type: "string", enum: ["search", "read", "publish"] },
+  q: { type: "string" },
+  limit: { type: "number" },
+  path: { type: "string", description: "Site path from a search result url, e.g. /en/passages/RUT/1/8/" },
+  maxChars: { type: "number" },
+  question: { type: "string" },
+  answer: { type: "string" },
+  status: { type: "string", enum: ["answered", "undetermined"] },
+  citations: { type: "array", items: { type: "object" } },
+} as const
+
+function buildTools(bibleResourcesEnabled: boolean) {
+  const tools: Record<string, unknown>[] = [
+    {
+      type: "function",
+      function: {
+        name: "read",
+        description:
+          "Aligned source/target rows for a file or ref range, in display order, with per-cell status (untranslated | drafted | stale | validated | translated). Start most tasks here.",
+        parameters: {
           type: "object",
-          description:
-            "Consult bibletranslation.org scholarly reference data. {op:'search',q,limit?} | {op:'read',path,maxChars?} | {op:'publish',question,answer,status,citations}. search→read by url path; publish STAGES a Q&A for user approval (free).",
           properties: {
-            op: { type: "string", enum: ["search", "read", "publish"] },
-            q: { type: "string" },
-            limit: { type: "number" },
-            path: { type: "string", description: "Site path from a search result url, e.g. /en/passages/RUT/1/8/" },
-            maxChars: { type: "number" },
-            question: { type: "string" },
-            answer: { type: "string" },
-            status: { type: "string", enum: ["answered", "undetermined"] },
-            citations: { type: "array", items: { type: "object" } },
+            ...SCOPE_PROPS,
+            filter: { type: "string", enum: ["all", "untranslated", "stale", "flagged", "validated", "drafted"] },
+            limit: { type: "number", description: "Max rows (default 50, cap 200)." },
+            offset: { type: "number" },
           },
         },
       },
     },
-  },
-} as const
+    {
+      type: "function",
+      function: {
+        name: "examples",
+        description:
+          "Few-shot translation pairs to imitate: validated pairs first, then similarity-retrieved. Give the source text you are about to translate (or cellIds).",
+        parameters: {
+          type: "object",
+          properties: {
+            text: { type: "string", description: "Source text to find similar pairs for." },
+            cellIds: { type: "array", items: { type: "string" }, description: "Alternative: cell ids / #c-aliases whose source text seeds the query." },
+            n: { type: "number", description: "Max pairs (default 6, cap 12)." },
+          },
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "search",
+        description:
+          "Full-text search across the project. side: cells (default, source+target) | source | target | comments | terms.",
+        parameters: {
+          type: "object",
+          properties: {
+            q: { type: "string" },
+            side: { type: "string", enum: ["cells", "source", "target", "comments", "terms"] },
+            fileId: SCOPE_PROPS.fileId,
+            limit: { type: "number" },
+          },
+          required: ["q"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "draft",
+        description:
+          "Draft untranslated cells in scope with the project's drafting pipeline (exemplars + discourse context + rule lint) and STAGE the results as a proposal for user approval. Preferred over writing translations yourself. One call handles up to 50 cells; the result says how many remain.",
+        parameters: {
+          type: "object",
+          properties: {
+            ...SCOPE_PROPS,
+            cellIds: { type: "array", items: { type: "string" }, description: "Draft exactly these cells (ids or #c-aliases) instead of every untranslated cell in scope." },
+            limit: { type: "number", description: "Max cells this call (default 20, cap 50)." },
+            instructions: { type: "string", description: "Extra guidance for this batch (tone, term choices, fixes from lint)." },
+          },
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "propose",
+        description:
+          "STAGE events for user approval (nothing writes until they Apply): validations, comments, renames, back-translations, or hand-written cell commits. Each: {kind, fileId?, cellId?, parentId?, payload}. Aliases (#c1/#e1/#f1) and :vars accepted.",
+        parameters: {
+          type: "object",
+          properties: {
+            events: { type: "array", items: { type: "object" } },
+          },
+          required: ["events"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "sql",
+        description:
+          "Escape hatch: one read-only SELECT (CTEs allowed) against the project schema, when no other tool fits. Bind vars: :project, :user, :file, :cell. Max 200 rows.",
+        parameters: {
+          type: "object",
+          properties: { query: { type: "string" } },
+          required: ["query"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "docs",
+        description:
+          "Fetch a cookbook: checking | terminology | validation | history | assignments | files-and-refs | brief.",
+        parameters: {
+          type: "object",
+          properties: { topic: { type: "string" } },
+          required: ["topic"],
+        },
+      },
+    },
+    // Back-compat shim — scripted mocks and stored v1 sessions call this.
+    {
+      type: "function",
+      function: {
+        name: "execute",
+        description: "Legacy combined tool. Prefer the dedicated tools. Exactly one field per call.",
+        parameters: {
+          type: "object",
+          properties: {
+            sql: { type: "string" },
+            emit: { type: "array", items: { type: "object" } },
+            docs: { type: "string" },
+            ...(bibleResourcesEnabled ? { aquifer: { type: "object", properties: AQUIFER_PROPS } } : {}),
+          },
+        },
+      },
+    },
+  ]
+  if (bibleResourcesEnabled) {
+    tools.splice(5, 0, {
+      type: "function",
+      function: {
+        name: "aquifer",
+        description:
+          "Consult bibletranslation.org scholarly reference data. {op:'search',q,limit?} | {op:'read',path,maxChars?} | {op:'publish',question,answer,status,citations}. publish STAGES a Q&A for user approval (free).",
+        parameters: { type: "object", properties: AQUIFER_PROPS, required: ["op"] },
+      },
+    })
+  }
+  return tools
+}
 
 // ── Request body ────────────────────────────────────────────────────────────
 
@@ -152,6 +283,10 @@ const translatorProfileSchema = z
 
 const runRequestSchema = z.object({
   projectId: z.string().min(1),
+  /** Session-native (v2): the server holds the conversation (incl. tool
+   *  results) under this client-generated UUID; `messages` then carries only
+   *  the new user turn. Absent → v1 behavior (client sends the whole convo). */
+  sessionId: z.string().uuid().optional(),
   messages: z
     .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string() }))
     .min(1)
@@ -161,28 +296,10 @@ const runRequestSchema = z.object({
 })
 
 // ── OpenRouter message plumbing ─────────────────────────────────────────────
+// ToolCall / UpstreamMessage and the streaming/JSON turn reader live in
+// lib/agent/upstream.ts; the persisted-session shapes in lib/agent/sessions.ts.
 
-interface ToolCall {
-  id: string
-  type: string
-  function: { name: string; arguments: string }
-}
-
-interface UpstreamMessage {
-  role: string
-  content: string | null
-  tool_calls?: ToolCall[]
-}
-
-interface UpstreamResponse {
-  choices?: { message?: UpstreamMessage }[]
-  usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number }
-}
-
-type ConvoMessage =
-  | { role: "system" | "user" | "assistant"; content: string }
-  | (UpstreamMessage & { role: "assistant" })
-  | { role: "tool"; tool_call_id: string; content: string }
+type ConvoMessage = { role: "system"; content: string } | StoredMessage
 
 // ── Route ───────────────────────────────────────────────────────────────────
 
@@ -204,7 +321,7 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
   const platformSettings = await getPlatformSettingsCached(c.env)
   const agentModel = resolveAgentModel(c.env, platformSettings)
 
-  // AI guard: model allowlist + per-user/global daily budget (FRO-265).
+  // AI guard: model allowlist + per-user/global daily budget (AQU-265).
   const guard = await runAiGuard(agentModel, user.id, c.env.AQUILLA_PG, c.env)
   if (!guard.ok) {
     return c.json(guard.body, guard.status)
@@ -230,6 +347,18 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
     )
   }
 
+  // Session-native conversation (v2): load the stored convo — including tool
+  // results — so a follow-up reuses what prior runs discovered. Ownership is
+  // enforced here; an unknown id just starts a fresh session under that id.
+  let storedConvo: StoredMessage[] = []
+  if (body.sessionId) {
+    const session = await loadSession(c.env.AQUILLA_PG, body.sessionId)
+    if (session && (session.projectId !== body.projectId || session.userId !== user.id)) {
+      return c.json({ error: "forbidden", message: "Session belongs to another project or user" }, 403)
+    }
+    storedConvo = session?.convo ?? []
+  }
+
   // The request-scoped AQUILLA_PG shim is closed when this Response returns
   // (index.ts finally) — before the SSE body finishes. The run owns its own
   // connection for the loop's lifetime; tests (no PG_CONNECTION_STRING)
@@ -247,6 +376,7 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
     username: user.username,
     prompt: lastUserMessage?.content ?? "",
     model: agentModel,
+    sessionId: body.sessionId ?? null,
   })
 
   const encoder = new TextEncoder()
@@ -255,7 +385,7 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
       const send = (frame: AgentFrame) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`))
       }
-      runAgentLoop({ env, body, user: { id: user.id, username: user.username }, roleLevel: role.level, runId, orgId, model: agentModel, signal, send })
+      runAgentLoop({ env, body, storedConvo, user: { id: user.id, username: user.username }, roleLevel: role.level, runId, orgId, model: agentModel, draftModel: resolveDraftModel(c.env, platformSettings, agentModel), signal, send })
         .catch((err) => {
           // Last-resort: surface, then settle the ledger as error.
           try {
@@ -292,19 +422,43 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
   })
 })
 
+// ── GET /runs — the per-project acceptance ledger (design §7 health metrics:
+//    "≥40% of staged writes applied"). staged_count lives on agent_runs; the
+//    applied/undone counts come from event-log provenance (agent_run_id /
+//    undo_of_agent_run_id), so this is a read-only rollup — no extra write path.
+agent.get("/runs", authMiddleware, async (c) => {
+  const projectId = c.req.query("projectId")
+  if (!projectId) {
+    return c.json({ error: "bad_request", message: "projectId is required" }, 400)
+  }
+  const user = c.get("user")
+  const role = await resolveProjectRole(c.env, user, projectId)
+  if (!role) {
+    return c.json({ error: "forbidden", message: "No access to this project" }, 403)
+  }
+  const limitRaw = Number(c.req.query("limit"))
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : 50
+  const runs = await listAgentRuns(c.env.AQUILLA_PG, projectId, limit)
+  return c.json({ runs })
+})
+
 interface LoopArgs {
   env: Env
   body: z.infer<typeof runRequestSchema>
+  /** Prior turns from agent_sessions (incl. tool results); [] when sessionless. */
+  storedConvo: StoredMessage[]
   user: { id: number; username: string }
   roleLevel: number
   runId: string
   orgId: number
   model: string
+  /** The draft tool's translation model (resolveDraftModel). */
+  draftModel: string
   signal: AbortSignal
   send: (frame: AgentFrame) => void
 }
 
-async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, model, signal, send }: LoopArgs): Promise<void> {
+async function runAgentLoop({ env, body, storedConvo, user, roleLevel, runId, orgId, model, draftModel, signal, send }: LoopArgs): Promise<void> {
   const aliases = new AliasMap()
   const sqlVars: SqlVarContext = {
     projectId: body.projectId,
@@ -363,7 +517,7 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, model, s
 
   const convo: ConvoMessage[] = [
     {
-      role: "system",
+      role: "system" as const,
       content: buildSystemPrompt({
         projectId: body.projectId,
         username: user.username,
@@ -384,6 +538,7 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, model, s
         briefSummary,
       }),
     },
+    ...storedConvo,
     ...body.messages,
   ]
 
@@ -391,25 +546,29 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, model, s
   let completionTokens = 0
   let costCents = 0
   let steps = 0
+  let stagedCount = 0
   let status: "ok" | "capped" | "error" = "ok"
 
-  send({ type: "run_start", runId })
+  send({ type: "run_start", runId, ...(body.sessionId ? { sessionId: body.sessionId } : {}) })
+
+  const tools = buildTools(bibleResourcesEnabled)
 
   try {
     let iteration = 0
+    let rounds = 0
     for (;;) {
       if (signal.aborted) {
         status = "error"
         break
       }
-      if (iteration >= MAX_TOOL_ITERATIONS) {
+      if (iteration >= MAX_TOOL_ITERATIONS || rounds >= MAX_TOTAL_ROUNDS) {
         status = "capped"
-        send({ type: "error", message: `Tool-iteration cap reached (${MAX_TOOL_ITERATIONS}) — run stopped.` })
+        send({ type: "error", message: `Tool-iteration cap reached — run stopped.` })
         break
       }
       if (promptTokens + completionTokens > TOKEN_CEILING) {
         status = "capped"
-        send({ type: "error", message: "Token ceiling reached (60k) — run stopped." })
+        send({ type: "error", message: `Token ceiling reached (${Math.round(TOKEN_CEILING / 1000)}k) — run stopped.` })
         break
       }
 
@@ -422,8 +581,8 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, model, s
         body: JSON.stringify({
           model,
           messages: convo,
-          tools: [EXECUTE_TOOL],
-          stream: false,
+          tools,
+          stream: true,
           usage: { include: true },
           reasoning: { effort: "none" },
         }),
@@ -437,21 +596,20 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, model, s
         break
       }
 
-      const data = (await upstream.json()) as UpstreamResponse
-      promptTokens += data.usage?.prompt_tokens ?? 0
-      completionTokens += data.usage?.completion_tokens ?? 0
-      costCents += (data.usage?.cost ?? 0) * 100
-
-      const message = data.choices?.[0]?.message
-      if (!message) {
-        send({ type: "error", message: "openrouter returned no message" })
+      // Streaming (SSE) upstream forwards prose token by token; JSON bodies
+      // (scripted mocks) forward the whole content once. Either way `message`
+      // is the complete assistant turn for the transcript.
+      let message: UpstreamMessage
+      try {
+        const turn = await readModelTurn(upstream, (text) => send({ type: "assistant_delta", text }))
+        message = turn.message
+        promptTokens += turn.usage?.prompt_tokens ?? 0
+        completionTokens += turn.usage?.completion_tokens ?? 0
+        costCents += (turn.usage?.cost ?? 0) * 100
+      } catch (err) {
+        send({ type: "error", message: err instanceof Error ? err.message : String(err) })
         status = "error"
         break
-      }
-
-      // Acceptable v1: buffer model text per step, one assistant_delta per step.
-      if (message.content) {
-        send({ type: "assistant_delta", text: message.content })
       }
 
       convo.push({ ...message, role: "assistant" })
@@ -459,19 +617,11 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, model, s
       const toolCalls = message.tool_calls ?? []
       if (toolCalls.length === 0) break // final prose — the run is complete
 
-      // Cookbook fetches are constant-cost and risk-free — a docs-only round
-      // does not consume iteration budget. Otherwise a run that reads the
-      // cookbook, explores, and then gets a NEEDS REVIEW lint verdict on its
-      // first emit can be capped before the redraft (battery case 2).
-      const docsOnly = toolCalls.every((call) => {
-        try {
-          const args = JSON.parse(call.function.arguments ?? "{}") as Record<string, unknown>
-          return typeof args.docs === "string" && args.sql === undefined && args.emit === undefined
-        } catch {
-          return false
-        }
-      })
-      if (!docsOnly) iteration++
+      // Budget: only rounds that WRITE or run raw SQL consume iterations —
+      // read-shaped tools (read/examples/search/docs/aquifer) are bounded,
+      // recipe-encoded calls and stay free (MAX_TOTAL_ROUNDS backstops loops).
+      rounds++
+      if (toolCalls.some((call) => budgetedCall(call))) iteration++
       for (const call of toolCalls) {
         steps++
         const result = await executeToolCall(call, {
@@ -481,6 +631,25 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, model, s
           stageCtx,
           send,
           step: steps,
+          signal,
+          draft: {
+            model: draftModel,
+            apiKey: env.OPENROUTER_API_KEY ?? "",
+            url: resolveOpenRouterUrl(env),
+            sourceLanguage: languages.sourceLanguage,
+            targetLanguage: languages.targetLanguage,
+            briefSummary,
+          },
+          addUsage: (u) => {
+            promptTokens += u.prompt_tokens ?? 0
+            completionTokens += u.completion_tokens ?? 0
+            costCents += (u.cost ?? 0) * 100
+          },
+          // Acceptance-rate denominator (0051): staged commits per run. The
+          // numerator lands in the event log when the user Applies.
+          countStaged: (n) => {
+            stagedCount += n
+          },
         })
         convo.push({ role: "tool", tool_call_id: call.id, content: result })
       }
@@ -496,9 +665,26 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, orgId, model, s
   send({ type: "done", runId, status })
 
   try {
-    await finishAgentRun(env.AQUILLA_PG, { runId, status, promptTokens, completionTokens, costCents, steps })
+    await finishAgentRun(env.AQUILLA_PG, { runId, status, promptTokens, completionTokens, costCents, steps, stagedCount })
   } catch (err) {
     console.error("[agent] failed to finalise agent_runs row:", err)
+  }
+
+  // Persist the session convo (minus the per-run system prompt), compacted so
+  // old tool results shrink to digests. Best-effort — a failed save costs the
+  // next turn its shared context, never the run itself.
+  if (body.sessionId) {
+    try {
+      const stored = convo.filter((m): m is StoredMessage => m.role !== "system")
+      await saveSession(env.AQUILLA_PG, {
+        sessionId: body.sessionId,
+        projectId: body.projectId,
+        userId: user.id,
+        convo: compactConvo(stored),
+      })
+    } catch (err) {
+      console.error("[agent] failed to persist agent_sessions row:", err)
+    }
   }
 
   // Record agent cost in org credit ledger (graceful-degrade — never throws).
@@ -513,70 +699,263 @@ interface ToolCallEnv {
   stageCtx: EmitStageContext
   send: (frame: AgentFrame) => void
   step: number
+  signal: AbortSignal
+  /** Config for the draft tool's internal model call. */
+  draft: {
+    model: string
+    apiKey: string
+    url: string
+    sourceLanguage?: string
+    targetLanguage?: string
+    briefSummary?: string
+  }
+  /** Folds a tool-internal model call's usage into the run totals. */
+  addUsage: (usage: { prompt_tokens?: number; completion_tokens?: number; cost?: number }) => void
+  /** Folds staged target.cell.commit events into the run's staged_count. */
+  countStaged: (n: number) => void
 }
 
-/** Run one `execute` call; emits code_start/code_result (+ proposal) frames
- *  and returns the tool-result text the model sees. */
-async function executeToolCall(call: ToolCall, t: ToolCallEnv): Promise<string> {
-  let args: { sql?: unknown; emit?: unknown; docs?: unknown; aquifer?: unknown }
+/** Does this tool call consume the write/SQL iteration budget? */
+function budgetedCall(call: ToolCall): boolean {
+  const name = call.function.name
+  if (name === "draft" || name === "propose" || name === "sql") return true
+  if (name !== "execute") return false
   try {
-    args = JSON.parse(call.function.arguments || "{}")
+    const args = JSON.parse(call.function.arguments ?? "{}") as Record<string, unknown>
+    return args.sql !== undefined || args.emit !== undefined
   } catch {
-    t.send({ type: "code_start", step: t.step, kind: "sql", summary: "(unparseable arguments)" })
+    return true
+  }
+}
+
+// ── Per-tool handlers (each sends code_start/code_result and returns the
+//    tool-result text the model sees) ────────────────────────────────────────
+
+async function runSqlTool(sql: string, t: ToolCallEnv): Promise<string> {
+  t.send({ type: "code_start", step: t.step, kind: "sql", summary: sql.slice(0, 120) })
+  const run = await runGuardedSql(t.env.AQUILLA_PG, sql, t.sqlVars, t.aliases)
+  const text = run.ok
+    ? compressRows(run.rows, t.aliases, { projectId: t.sqlVars.projectId })
+    : `error: ${run.error}`
+  t.send({ type: "code_result", step: t.step, ok: run.ok, summary: text.slice(0, RESULT_SUMMARY_MAX) })
+  return text
+}
+
+async function runEmitTool(events: unknown[], t: ToolCallEnv): Promise<string> {
+  t.send({ type: "code_start", step: t.step, kind: "emit", summary: `${events.length} events` })
+  const { proposal, modelVerdictBlock } = await stageEvents(t.env.AQUILLA_PG, events, t.stageCtx)
+  if (proposal) {
+    t.send({ type: "proposal", proposal })
+    t.countStaged(proposal.events.filter((ev) => ev.kind === "target.cell.commit").length)
+  }
+  t.send({
+    type: "code_result",
+    step: t.step,
+    ok: proposal !== null,
+    summary: modelVerdictBlock.slice(0, RESULT_SUMMARY_MAX),
+  })
+  return modelVerdictBlock
+}
+
+function runDocsTool(topic: string, t: ToolCallEnv): string {
+  t.send({ type: "code_start", step: t.step, kind: "docs", summary: topic })
+  const book = getCookbook(topic)
+  t.send({
+    type: "code_result",
+    step: t.step,
+    ok: book.ok,
+    summary: book.ok ? `cookbook: ${topic} (${book.text.length} chars)` : book.text,
+  })
+  return book.text
+}
+
+function scopeSummary(args: { ref?: unknown; fileId?: unknown }): string {
+  if (typeof args.ref === "string") return args.ref
+  if (typeof args.fileId === "string") return args.fileId
+  return ":file"
+}
+
+async function runReadTool(args: ReadArgs, t: ToolCallEnv): Promise<string> {
+  const filter = typeof args.filter === "string" ? args.filter : "all"
+  t.send({ type: "code_start", step: t.step, kind: "read", summary: `${scopeSummary(args)} · ${filter}` })
+  const outcome = await executeRead(t.env.AQUILLA_PG, args, {
+    projectId: t.stageCtx.projectId,
+    focusedFileId: t.stageCtx.fileId,
+    aliases: t.aliases,
+  })
+  t.send({
+    type: "code_result",
+    step: t.step,
+    ok: outcome.ok,
+    summary: outcome.text.slice(0, RESULT_SUMMARY_MAX),
+    ...(outcome.data ? { data: outcome.data } : {}),
+  })
+  return outcome.text
+}
+
+async function runExamplesTool(args: ExamplesArgs, t: ToolCallEnv): Promise<string> {
+  const seed = typeof args.text === "string" ? args.text.slice(0, 80) : `${Array.isArray(args.cellIds) ? args.cellIds.length : 0} cells`
+  t.send({ type: "code_start", step: t.step, kind: "examples", summary: seed })
+  const outcome = await executeExamples(t.env.AQUILLA_PG, args, {
+    projectId: t.stageCtx.projectId,
+    aliases: t.aliases,
+  })
+  t.send({
+    type: "code_result",
+    step: t.step,
+    ok: outcome.ok,
+    summary: outcome.text.slice(0, RESULT_SUMMARY_MAX),
+    ...(outcome.data ? { data: outcome.data } : {}),
+  })
+  return outcome.text
+}
+
+async function runSearchTool(args: SearchArgs, t: ToolCallEnv): Promise<string> {
+  const q = typeof args.q === "string" ? args.q.slice(0, 80) : "(no q)"
+  t.send({ type: "code_start", step: t.step, kind: "search", summary: q })
+  const outcome = await executeSearch(t.env.AQUILLA_PG, args, {
+    projectId: t.stageCtx.projectId,
+    focusedFileId: t.stageCtx.fileId,
+    aliases: t.aliases,
+  })
+  t.send({
+    type: "code_result",
+    step: t.step,
+    ok: outcome.ok,
+    summary: outcome.text.slice(0, RESULT_SUMMARY_MAX),
+    ...(outcome.data ? { data: outcome.data } : {}),
+  })
+  return outcome.text
+}
+
+/** target.cell.commit's role floor (schema-card AGENT_REQUIRED_ROLE). */
+const AGENT_REQUIRED_ROLE_COMMIT = 400
+
+async function runDraftTool(args: DraftArgs, t: ToolCallEnv): Promise<string> {
+  t.send({ type: "code_start", step: t.step, kind: "draft", summary: scopeSummary(args) })
+  // Fail fast BEFORE the (paid) internal model call — stageEvents would
+  // reject each event anyway, but only after drafting.
+  if (t.stageCtx.roleLevel < AGENT_REQUIRED_ROLE_COMMIT) {
+    const msg = "error: drafting needs the contributor role — you act below it"
+    t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
+    return msg
+  }
+  const outcome = await executeDraft(
+    t.env.AQUILLA_PG,
+    args,
+    {
+      projectId: t.stageCtx.projectId,
+      focusedFileId: t.stageCtx.fileId,
+      aliases: t.aliases,
+      stageCtx: t.stageCtx,
+      sourceLanguage: t.draft.sourceLanguage,
+      targetLanguage: t.draft.targetLanguage,
+      briefSummary: t.draft.briefSummary,
+      signal: t.signal,
+      sendProgress: (label, done, total) => t.send({ type: "progress", label, done, total }),
+      addUsage: t.addUsage,
+    },
+    { model: t.draft.model, apiKey: t.draft.apiKey, url: t.draft.url },
+  )
+  if (outcome.proposal) {
+    t.send({ type: "proposal", proposal: outcome.proposal })
+    t.countStaged(outcome.proposal.events.filter((ev) => ev.kind === "target.cell.commit").length)
+  }
+  t.send({
+    type: "code_result",
+    step: t.step,
+    ok: outcome.ok,
+    summary: outcome.text.slice(0, RESULT_SUMMARY_MAX),
+    ...(outcome.data ? { data: outcome.data } : {}),
+  })
+  return outcome.text
+}
+
+/** Run one tool call; emits code_start/code_result (+ proposal/progress)
+ *  frames and returns the tool-result text the model sees. */
+async function executeToolCall(call: ToolCall, t: ToolCallEnv): Promise<string> {
+  let args: Record<string, unknown>
+  try {
+    args = JSON.parse(call.function.arguments || "{}") as Record<string, unknown>
+  } catch {
+    t.send({ type: "code_start", step: t.step, kind: "sql", summary: `(${call.function.name}: unparseable arguments)` })
     const msg = "error: tool arguments were not valid JSON"
     t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
     return msg
   }
 
+  switch (call.function.name) {
+    case "read":
+      return runReadTool(args as ReadArgs, t)
+    case "examples":
+      return runExamplesTool(args as ExamplesArgs, t)
+    case "search":
+      return runSearchTool(args as SearchArgs, t)
+    case "draft":
+      return runDraftTool(args as DraftArgs, t)
+    case "propose": {
+      if (!Array.isArray(args.events)) {
+        t.send({ type: "code_start", step: t.step, kind: "emit", summary: "(invalid call)" })
+        const msg = "error: propose needs {events: [...]}"
+        t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
+        return msg
+      }
+      return runEmitTool(args.events, t)
+    }
+    case "sql": {
+      if (typeof args.query !== "string") {
+        t.send({ type: "code_start", step: t.step, kind: "sql", summary: "(invalid call)" })
+        const msg = "error: sql needs {query: \"SELECT …\"}"
+        t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
+        return msg
+      }
+      return runSqlTool(args.query, t)
+    }
+    case "docs": {
+      if (typeof args.topic !== "string") {
+        t.send({ type: "code_start", step: t.step, kind: "docs", summary: "(invalid call)" })
+        const msg = "error: docs needs {topic: \"…\"}"
+        t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
+        return msg
+      }
+      return runDocsTool(args.topic, t)
+    }
+    case "aquifer":
+      return runAquiferCall(args, t)
+    case "execute":
+      return executeLegacyCall(args, t)
+    default: {
+      t.send({ type: "code_start", step: t.step, kind: "sql", summary: `(unknown tool ${call.function.name})` })
+      const msg = `error: unknown tool "${call.function.name}"`
+      t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
+      return msg
+    }
+  }
+}
+
+/** v1 combined tool — one of sql | emit | docs | aquifer per call.
+ *
+ *  DEPRECATED (2026-07-06): kept only for scripted mocks and stored v1
+ *  session transcripts. Remove the tool + this handler once (a) the mocks
+ *  call the semantic tools and (b) stored sessions predating v2 have aged
+ *  out — check the warn below in worker logs for residual callers first. */
+async function executeLegacyCall(
+  args: { sql?: unknown; emit?: unknown; docs?: unknown; aquifer?: unknown },
+  t: ToolCallEnv,
+): Promise<string> {
+  console.warn("[agent] legacy execute tool called — see executeLegacyCall deprecation note")
   const fields = (["sql", "emit", "docs", "aquifer"] as const).filter((f) => args[f] !== undefined)
-  if (call.function.name !== "execute" || fields.length !== 1) {
+  if (fields.length !== 1) {
     const kind = fields[0] ?? "sql"
     t.send({ type: "code_start", step: t.step, kind, summary: "(invalid call)" })
     const msg = "error: call the `execute` tool with exactly one of sql | emit | docs | aquifer"
     t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
     return msg
   }
-
-  if (fields[0] === "sql" && typeof args.sql === "string") {
-    t.send({ type: "code_start", step: t.step, kind: "sql", summary: args.sql.slice(0, 120) })
-    const run = await runGuardedSql(t.env.AQUILLA_PG, args.sql, t.sqlVars, t.aliases)
-    const text = run.ok
-      ? compressRows(run.rows, t.aliases, { projectId: t.sqlVars.projectId })
-      : `error: ${run.error}`
-    t.send({ type: "code_result", step: t.step, ok: run.ok, summary: text.slice(0, RESULT_SUMMARY_MAX) })
-    return text
-  }
-
-  if (fields[0] === "emit" && Array.isArray(args.emit)) {
-    t.send({ type: "code_start", step: t.step, kind: "emit", summary: `${args.emit.length} events` })
-    const { proposal, modelVerdictBlock } = await stageEvents(t.env.AQUILLA_PG, args.emit, t.stageCtx)
-    if (proposal) {
-      t.send({ type: "proposal", proposal })
-    }
-    t.send({
-      type: "code_result",
-      step: t.step,
-      ok: proposal !== null,
-      summary: modelVerdictBlock.slice(0, RESULT_SUMMARY_MAX),
-    })
-    return modelVerdictBlock
-  }
-
-  if (fields[0] === "docs" && typeof args.docs === "string") {
-    t.send({ type: "code_start", step: t.step, kind: "docs", summary: args.docs })
-    const book = getCookbook(args.docs)
-    t.send({
-      type: "code_result",
-      step: t.step,
-      ok: book.ok,
-      summary: book.ok ? `cookbook: ${args.docs} (${book.text.length} chars)` : book.text,
-    })
-    return book.text
-  }
-
-  if (fields[0] === "aquifer") {
-    return runAquiferCall(args.aquifer, t)
-  }
+  if (fields[0] === "sql" && typeof args.sql === "string") return runSqlTool(args.sql, t)
+  if (fields[0] === "emit" && Array.isArray(args.emit)) return runEmitTool(args.emit, t)
+  if (fields[0] === "docs" && typeof args.docs === "string") return runDocsTool(args.docs, t)
+  if (fields[0] === "aquifer") return runAquiferCall(args.aquifer, t)
 
   const kind = fields[0] as "sql" | "emit" | "docs"
   t.send({ type: "code_start", step: t.step, kind, summary: "(wrong argument type)" })

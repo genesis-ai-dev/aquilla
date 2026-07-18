@@ -66,10 +66,63 @@ function parseJson(content: string, label: string): unknown {
   }
 }
 
-export function extractJsonStrings(content: string): TranslatableString[] {
+/** A translatable string leaf: its JSON path (`app.title`, `messages[2]`) and value. */
+export interface JsonStringLeaf {
+  path: string
+  value: string
+}
+
+/**
+ * Enumerate every non-empty string leaf in a JSON document as `{ path, value }`
+ * in the same deterministic depth-first order `extractJsonStrings` uses. This is
+ * the primitive a key-picker UI consumes to let the user choose which paths are
+ * translatable (AQU-525) — group by top-level key, show `value` as a sample.
+ */
+export function listJsonStringPaths(content: string): JsonStringLeaf[] {
+  const parsed = parseJson(content, "JSON source file")
+  const leaves: JsonStringLeaf[] = []
+  walkStringLeaves(parsed, "", (path, value) => {
+    leaves.push({ path, value })
+    return undefined
+  })
+  return leaves
+}
+
+/**
+ * Does `leafPath` fall under one of the selected paths? A selection entry
+ * matches its own leaf exactly OR any descendant — the boundary after the
+ * prefix must be a path separator (`.` for object keys, `[` for array
+ * indices / bracketed keys) so `app` selects `app.title` and `messages[0]`
+ * but never `application.title`. An empty selection matches nothing.
+ */
+export function matchesJsonSelection(leafPath: string, include: readonly string[]): boolean {
+  return include.some(
+    (sel) =>
+      leafPath === sel ||
+      leafPath.startsWith(`${sel}.`) ||
+      leafPath.startsWith(`${sel}[`),
+  )
+}
+
+/** Options for {@link extractJsonStrings}. */
+export interface ExtractJsonOptions {
+  /**
+   * Path selection: only string leaves under these paths become translatable
+   * cells (see {@link matchesJsonSelection}). Omit to extract every string leaf
+   * (back-compat default). An empty array yields no cells.
+   */
+  include?: readonly string[]
+}
+
+export function extractJsonStrings(
+  content: string,
+  options: ExtractJsonOptions = {},
+): TranslatableString[] {
   const parsed = parseJson(content, "i18n resource file")
+  const { include } = options
   const results: TranslatableString[] = []
   walkStringLeaves(parsed, "", (path, value) => {
+    if (include && !matchesJsonSelection(path, include)) return undefined
     results.push({
       id: uuid(),
       original: value,
@@ -94,22 +147,57 @@ function detectIndent(content: string): string | number {
   return match[1].startsWith("\t") ? "\t" : match[1].length
 }
 
+/** Options for {@link exportJson}. */
+export interface ExportJsonOptions {
+  /**
+   * Align cells to leaves by JSON path (`cell.context`) instead of positionally.
+   * REQUIRED when the cells came from a filtered `extractJsonStrings({ include })`:
+   * only leaves whose path matches a cell are replaced, every other leaf (the
+   * un-selected structure) is preserved untouched. Falls back to positional when
+   * false/omitted so full-document exports keep their existing behavior.
+   */
+  keyed?: boolean
+}
+
 /**
- * Re-serialize the original JSON with each string leaf replaced by the
- * corresponding cell's `translated` (falling back to `cell.original`).
- * Alignment is positional: the export walk is identical to the extract walk,
- * so the Nth visited leaf pairs with the Nth cell. If the cell list is
- * shorter than the leaf count, remaining leaves keep their original value.
+ * Re-serialize the original JSON with translated string leaves substituted in.
+ *
+ * Default (positional): the export walk is identical to the extract walk, so the
+ * Nth visited leaf pairs with the Nth cell; leaves beyond the cell list keep
+ * their original value.
+ *
+ * Keyed (`{ keyed: true }`): each cell is placed by its `context` JSON path, so a
+ * partial selection round-trips correctly — only the selected leaves change and
+ * the rest of the structure (including string leaves the user chose NOT to
+ * translate) is preserved byte-for-byte. A cell falls back to `cell.original`
+ * when its translation is empty.
  */
-export function exportJson(originalContent: string, cells: CellData[]): Blob {
+export function exportJson(
+  originalContent: string,
+  cells: CellData[],
+  options: ExportJsonOptions = {},
+): Blob {
   const parsed = parseJson(originalContent, "original i18n resource file")
-  let index = 0
-  const replaced = walkStringLeaves(parsed, "", () => {
-    if (index >= cells.length) return undefined
-    const cell = cells[index]
-    index += 1
-    return cell.translated || cell.original
-  })
+
+  let replaced: unknown
+  if (options.keyed) {
+    const byPath = new Map<string, CellData>()
+    for (const cell of cells) byPath.set(cell.context, cell)
+    replaced = walkStringLeaves(parsed, "", (path) => {
+      const cell = byPath.get(path)
+      if (!cell) return undefined
+      return cell.translated || cell.original
+    })
+  } else {
+    let index = 0
+    replaced = walkStringLeaves(parsed, "", () => {
+      if (index >= cells.length) return undefined
+      const cell = cells[index]
+      index += 1
+      return cell.translated || cell.original
+    })
+  }
+
   const json = JSON.stringify(replaced, null, detectIndent(originalContent)) + "\n"
   return new Blob([json], { type: "application/json;charset=utf-8" })
 }

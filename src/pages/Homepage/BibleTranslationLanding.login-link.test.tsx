@@ -1,5 +1,5 @@
 /**
- * FRO-282: Homepage "Open app" link target
+ * AQU-282: Homepage "Open app" link target
  *
  * Verifies that:
  *  - When no auth-hint cookie is present, "Open app" links point to /login
@@ -67,7 +67,7 @@ beforeEach(() => {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("BibleTranslationLanding — Open app link target (FRO-282)", () => {
+describe("BibleTranslationLanding — Open app link target (AQU-282)", () => {
   it("points to /login when the user is not signed in", () => {
     mockHasAuthHintCookie.mockReturnValue(false)
     renderHomepage()

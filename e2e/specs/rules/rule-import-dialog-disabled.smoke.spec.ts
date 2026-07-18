@@ -37,9 +37,5 @@ test("rule import button is disabled when LLM is not configured", async ({ alice
   await expect(importBtn).toBeVisible({ timeout: 10_000 })
   await expect(importBtn).toBeDisabled({ timeout: 3_000 })
 
-  // The tooltip trigger wrapper says "Configure LLM in settings first".
-  const importTooltip = alice
-    .locator('[data-tooltip*="Configure LLM"]')
-    .filter({ has: alice.getByRole("button", { name: /Import from doc/i }) })
-  await expect(importTooltip).toBeVisible({ timeout: 3_000 })
+  await expect(importBtn).toHaveAttribute("title", /Configure LLM in settings first/, { timeout: 3_000 })
 })

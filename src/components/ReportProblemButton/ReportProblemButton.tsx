@@ -1,5 +1,5 @@
 /**
- * FRO-307: Always-available "Report a problem" trigger.
+ * AQU-307: Always-available "Report a problem" trigger.
  *
  * Mounted once in the AppShell left-rail footer (alongside VersionTag).
  * Small, unobtrusive — icon + tooltip on hover.

@@ -8,6 +8,51 @@ import { fileURLToPath } from "node:url"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+const FRONTIER_BASE = process.env.VITE_FRONTIER_BASE ?? "http://127.0.0.1:8787"
+
+function syncWorkerOrigin(): string {
+  const rawHost = process.env.VITE_SYNC_WORKER_HOST ?? "127.0.0.1:8788"
+  if (/^https?:\/\//.test(rawHost)) return rawHost.replace(/\/+$/, "")
+  const host = rawHost.replace(/\/+$/, "")
+  const protocol = /^(127\.|localhost|0\.0\.0\.0)/.test(host) ? "http" : "https"
+  return `${protocol}://${host}`
+}
+
+async function hasPersistedBacktranslation(
+  jwt: string,
+  projectId: string,
+  fileId: string,
+  cellId: string,
+): Promise<boolean> {
+  try {
+    const tokenRes = await fetch(`${FRONTIER_BASE}/api/v2/sync-token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${jwt}`,
+      },
+      body: JSON.stringify({ projectId, fileId }),
+    })
+    if (!tokenRes.ok) return false
+    const { token } = (await tokenRes.json()) as { token?: string }
+    if (!token) return false
+
+    const btRes = await fetch(
+      `${syncWorkerOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
+        `/files/${encodeURIComponent(fileId)}/backtranslations?cellIds=${encodeURIComponent(cellId)}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    if (!btRes.ok) return false
+    const data = (await btRes.json()) as {
+      backtranslations?: Array<{ cellId: string; btText: string }>
+    }
+    return (data.backtranslations ?? []).some(
+      (bt) => bt.cellId === cellId && bt.btText.includes("Traducción de prueba"),
+    )
+  } catch {
+    return false
+  }
+}
 
 /**
  * EditorTable — BT "Edit" button is locked for Reviewer role.
@@ -58,6 +103,12 @@ test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice,
   await ws.importFile(SAMPLE_MD)
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
+  const projectId = alice.url().split("/project/")[1]?.split("/")[0]
+  const fileId = alice.url().match(/\/file\/([^/?#]+)/)?.[1]
+  const firstCellId = await ws.cellRow(0).getAttribute("data-cell-id")
+  expect(projectId).toBeTruthy()
+  expect(fileId).toBeTruthy()
+  expect(firstCellId).toBeTruthy()
   // Edit cell 0 so there's a translation (BT requires translated text).
   await ws.editCell(0, "Translation for BT locked test")
 
@@ -79,10 +130,10 @@ test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice,
   // Mock LLM's default response — proves generation completed. The
   // `cell.backtranslation.set` event drains via the outbox flusher (~5s).
   await expect(aliceBtPanel).toContainText("Traducción de prueba", { timeout: 15_000 })
-
-  // Extract project ID so bob can navigate to it.
-  const projectId = alice.url().split("/project/")[1]?.split("/")[0]
-  expect(projectId).toBeTruthy()
+  await expect.poll(
+    () => hasPersistedBacktranslation(aliceSession.jwt, projectId!, fileId!, firstCellId!),
+    { timeout: 30_000 },
+  ).toBe(true)
 
   // Add bob to this project directly with Reviewer role.
   await addProjectMember(aliceSession.jwt, projectId!, "bob", ROLE.REVIEWER)

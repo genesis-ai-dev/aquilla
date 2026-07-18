@@ -1,6 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
-import { pickSelectOption } from "../../helpers/base-ui"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { Glossary } from "../../helpers/page-objects/Glossary"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -61,37 +61,10 @@ test("violations inbox concept group expands to show infraction list", async ({ 
   // Navigate to Terminology page.
   const projectId = alice.url().match(/\/project\/([^/]+)/)?.[1]
   expect(projectId).toBeTruthy()
-  await alice.goto(`/project/${projectId}/terminology`)
-  await alice.waitForLoadState("networkidle")
-
-  // Create an APPROVED concept with sourceTerm="sample" and a preferred
-  // rendering — cells bearing "sample" whose target lacks the rendering
-  // then violate.
-  const newConceptBtn = alice.getByRole("button", { name: /new concept|add concept|\+ concept/i }).first()
-  await expect(newConceptBtn).toBeVisible({ timeout: 8_000 })
-  await newConceptBtn.click()
-
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
-
-  const sourceTermInput = dialog.locator("#concept-source-term")
-  await expect(sourceTermInput).toBeVisible({ timeout: 5_000 })
-  await sourceTermInput.fill("sample")
-
-  // Fill the pre-populated rendering row (required to save).
-  await dialog.locator('input[aria-label="Rendering 1 text"]').fill("échantillon")
-
-  // Only approved (active) concepts compile to rules — default is suggested.
-  await pickSelectOption(alice, dialog.locator("#concept-status"), "approved")
-
-  // Save — footer button is "Add concept" for new concepts.
-  await dialog.getByRole("button", { name: /^Add concept$/i }).click()
-  await expect(dialog).not.toBeVisible({ timeout: 5_000 })
-
-  // Navigate to Violations tab.
-  const violationsTab = alice.getByRole("button", { name: /^Violations$/i })
-  await expect(violationsTab).toBeVisible({ timeout: 10_000 })
-  await violationsTab.click()
+  const glossary = new Glossary(alice)
+  await glossary.goto(projectId!)
+  await glossary.addTerm("sample", "échantillon")
+  await glossary.openViolations()
 
   // A concept group row should appear for "sample" (violations > 0).
   // The group button has aria-expanded attribute.

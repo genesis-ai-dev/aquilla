@@ -10,13 +10,17 @@
 //   OPENROUTER_API_KEY=mock
 //
 // Flows:
-//   * read   (default)            : sql → answer quoting the result block
-//   * draft  ("draft"/"translate"): sql for untranslated cells → emit drafts
-//                                   → closing prose
+//   * read   (default)            : read tool → answer quoting the result
+//   * draft  ("draft"/"translate"): draft tool → closing prose (the draft
+//                                   tool's INTERNAL model call is answered
+//                                   here too — strict [{i,t}] JSON)
+//   * check/validate/aquifer      : legacy execute flows (sql/emit/aquifer)
 //
 // Run: npx tsx scripts/mock-openrouter.ts [port]
 
 import http from "node:http"
+import { resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 
 const PORT = Number(process.argv[2]) || 9456
 
@@ -26,9 +30,15 @@ interface ChatMessage {
   tool_calls?: { id: string; function: { name: string; arguments: string } }[]
 }
 
+interface MockToolCall {
+  id: string
+  type: "function"
+  function: { name: string; arguments: string }
+}
+
 let callSeq = 0
 
-function toolCall(args: Record<string, unknown>) {
+function toolCall(args: Record<string, unknown>): MockToolCall {
   return {
     id: `mock-call-${++callSeq}`,
     type: "function",
@@ -36,7 +46,16 @@ function toolCall(args: Record<string, unknown>) {
   }
 }
 
-function respond(content: string | null, tool_calls?: unknown[]) {
+/** A v2 semantic-tool call (read / draft / search / propose …). */
+function namedToolCall(name: string, args: Record<string, unknown>): MockToolCall {
+  return {
+    id: `mock-call-${++callSeq}`,
+    type: "function",
+    function: { name, arguments: JSON.stringify(args) },
+  }
+}
+
+function respond(content: string | null, tool_calls?: MockToolCall[]) {
   return {
     id: `mock-${Date.now()}-${callSeq}`,
     choices: [
@@ -48,26 +67,6 @@ function respond(content: string | null, tool_calls?: unknown[]) {
     usage: { prompt_tokens: 1200, completion_tokens: 180, cost: 0.0004 },
   }
 }
-
-const READ_SQL = `SELECT s.cell_id, s.canonical_ref, s.value AS source_text, t.value AS target_text
-FROM cells s
-JOIN files f ON f.id = s.file_id
-LEFT JOIN cells t
-  ON t.project_id = s.project_id AND t.file_id = s.file_id
- AND t.cell_id = s.cell_id AND t.side = 'target'
-WHERE s.project_id = :project AND s.side = 'source' AND f.name = 'Ruth'
-ORDER BY s.canonical_ref`
-
-const DRAFT_SQL = `SELECT s.cell_id, s.file_id, s.canonical_ref, s.value AS source_text
-FROM cells s
-JOIN files f ON f.id = s.file_id
-LEFT JOIN cells t
-  ON t.project_id = s.project_id AND t.file_id = s.file_id
- AND t.cell_id = s.cell_id AND t.side = 'target'
-WHERE s.project_id = :project AND s.side = 'source' AND f.name = 'Ruth'
-  AND s.canonical_ref IS NOT NULL
-  AND (t.value IS NULL OR t.value = '')
-ORDER BY s.canonical_ref`
 
 /** Parse the compressed pipe table: header row with named columns, then rows. */
 function parseTable(block: string): Record<string, string>[] {
@@ -97,16 +96,46 @@ WHERE s.project_id = :project AND s.side = 'source' AND f.name = 'Ruth'
   AND t.value <> ''
 ORDER BY s.canonical_ref`
 
-function script(messages: ChatMessage[]) {
-  const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? ""
+export function scriptMockResponse(messages: ChatMessage[]) {
+  const lastUserIndex = messages.findLastIndex((message) => message.role === "user")
+  const lastUser = lastUserIndex >= 0 ? messages[lastUserIndex]?.content ?? "" : ""
   const userText = typeof lastUser === "string" ? lastUser : ""
-  const wantsDraft = /draft|translate/i.test(userText)
-  const wantsComment = /check|comment|review/i.test(userText)
-  const wantsValidate = /validate/i.test(userText)
+
+  // The draft tool's INTERNAL model call: numbered source segments in, strict
+  // [{i,t}] JSON out. Detected by the user-turn shape the tool builds.
+  const translateMatch = userText.match(/^Translate these \d+ segments:/)
+  if (translateMatch) {
+    const drafts: { i: number; t: string }[] = []
+    for (const line of userText.split("\n")) {
+      const m = line.match(/^(\d+)\.\s*(?:\[[^\]]*\]\s*)?(.+)$/)
+      if (m) drafts.push({ i: Number(m[1]), t: `[bozza] ${m[2].trim()}` })
+    }
+    return respond(JSON.stringify(drafts))
+  }
+  // Match action words, not status adjectives: "translated" and "validated"
+  // appear in the expanded /status prompt and must not trigger write flows.
+  const wantsDraft = /\b(?:draft|translate)\b/i.test(userText)
+  const wantsComment = /\b(?:check|comment|review)\b/i.test(userText)
+  const wantsValidate = /\bvalidate\b/i.test(userText)
   const wantsAquifer = /aquifer|bible resource|look up|reference data|abraham|chesed/i.test(userText)
-  const toolResults = messages.filter((m) => m.role === "tool")
+  // Only tool results produced for THIS user turn belong to the current loop.
+  // Counting the full conversation made a later "hello" reuse the previous
+  // turn's read result and print the same working-set dump again.
+  const toolResults = messages.slice(lastUserIndex + 1).filter((m) => m.role === "tool")
   const lastTool = toolResults[toolResults.length - 1]
   const lastToolContent = typeof lastTool?.content === "string" ? lastTool.content : ""
+
+  if (/^\s*(?:hi|hello|hey|howdy|good\s+(?:morning|afternoon|evening))[!.?\s]*$/i.test(userText)) {
+    return respond(
+      "Hi! The local Aquilla agent is ready. Try asking me to draft untranslated cells, review a translation, find something, or show status.",
+    )
+  }
+
+  if (/^\s*(?:help|what can you do|how do i use (?:this|the agent))[?.!\s]*$/i.test(userText)) {
+    return respond(
+      "In local scripted mode I can exercise the real read, draft, review, validate, search, and proposal flows. Try `/draft`, `/check`, `/find grace`, or `/status`.",
+    )
+  }
 
   // Bible-resources flow: search → read the top hit → stage a publish proposal.
   // Exercises the execute.aquifer branch + the aquifer_publish proposal card.
@@ -162,34 +191,36 @@ function script(messages: ChatMessage[]) {
     return respond("Staged — review and apply.")
   }
 
-  if (!wantsDraft) {
+  const wantsRead = /(?:\/status\b|\bstatus\b|\bcurrent state\b|\bworking set\b|\bprogress\b|\bshow\b|\blist\b|\bread\b|\bfind\b|open file|what(?:'s| is).*(?:file|cell|translated|untranslated))/i.test(userText)
+
+  if (!wantsDraft && wantsRead) {
+    // Default read flow — exercises the semantic read tool and its typed
+    // working-set payload.
     if (toolResults.length === 0) {
-      return respond("Let me check the cells in this file.", [toolCall({ sql: READ_SQL })])
+      return respond("Let me look at the open file.", [
+        namedToolCall("read", { filter: "all", limit: 30 }),
+      ])
     }
     return respond(
-      `Here's the current state of Ruth (rows with target_text ∅ still need translation):\n\n\`\`\`\n${lastToolContent.slice(0, 1500)}\n\`\`\``,
+      `Here's the current state (status untranslated = still needs work):\n\n\`\`\`\n${lastToolContent.slice(0, 1500)}\n\`\`\``,
     )
   }
 
-  // Draft flow.
-  if (toolResults.length === 0) {
-    return respond("Reading the untranslated cells first.", [toolCall({ sql: DRAFT_SQL })])
+  if (!wantsDraft) {
+    return respond(
+      "I'm running in deterministic local mode, so open-ended conversation is limited. Try `/draft`, `/check`, `/find …`, or `/status` to exercise the agent tools; configure a real OpenRouter key for unrestricted conversation.",
+    )
   }
-  if (toolResults.length === 1) {
-    const rows = parseTable(lastToolContent).slice(0, 10)
-    if (rows.length === 0) {
-      return respond("Every cell in Ruth already has a translation — nothing to draft.")
-    }
-    const events = rows.map((r) => ({
-      kind: "target.cell.commit",
-      fileId: r.file_id,
-      cellId: r.cell_id,
-      payload: { value: `[bozza] ${r.source_text.replace(/…$/, "")}` },
-    }))
-    return respond(`Drafting ${events.length} cells.`, [toolCall({ emit: events })])
+
+  // Draft flow — one call to the drafting pipeline; the tool's internal model
+  // call loops back to this mock (the Translate-these branch above).
+  if (toolResults.length === 0) {
+    return respond("Drafting the untranslated cells with the project's own patterns.", [
+      namedToolCall("draft", {}),
+    ])
   }
   return respond(
-    "I staged the drafts — review them in the proposal card and click Apply to commit.",
+    "I staged the drafts — review them in the proposal card (or the workbench working set) and apply the ones you want.",
   )
 }
 
@@ -203,7 +234,7 @@ const server = http.createServer((req, res) => {
   req.on("end", () => {
     try {
       const parsed = JSON.parse(body) as { messages: ChatMessage[] }
-      const out = script(parsed.messages ?? [])
+      const out = scriptMockResponse(parsed.messages ?? [])
       res.writeHead(200, { "Content-Type": "application/json" })
       res.end(JSON.stringify(out))
     } catch (err) {
@@ -213,6 +244,12 @@ const server = http.createServer((req, res) => {
   })
 })
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`[mock-openrouter] listening on http://127.0.0.1:${PORT}/api/v1/chat/completions`)
-})
+const isDirectRun = process.argv[1]
+  ? resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))
+  : false
+
+if (isDirectRun) {
+  server.listen(PORT, "127.0.0.1", () => {
+    console.log(`[mock-openrouter] listening on http://127.0.0.1:${PORT}/api/v1/chat/completions`)
+  })
+}

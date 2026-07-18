@@ -1,8 +1,10 @@
 import { useMemo } from "react"
 import type { CellData } from "./useCells"
 
+type UnfinishedCellShape = Pick<CellData, "translated" | "activeValidators">
+
 function isUnfinished(
-  cell: Pick<CellData, "translated" | "activeValidators">,
+  cell: UnfinishedCellShape,
   validationCount: number,
 ): boolean {
   if (!cell.translated || !cell.translated.trim()) return true
@@ -15,7 +17,7 @@ function isUnfinished(
  * `fromIndex` itself. Returns -1 if no other cell is unfinished.
  */
 export function findNextUnfinishedIndex(
-  cells: Array<Pick<CellData, "translated" | "activeValidators">>,
+  cells: readonly UnfinishedCellShape[],
   fromIndex: number,
   validationCount: number,
 ): number {
@@ -33,7 +35,7 @@ export function findNextUnfinishedIndex(
  * click. Kept separate from the pure function so the pure path is
  * independently testable.
  */
-export function useNextUnfinished(cells: CellData[], validationCount: number) {
+export function useNextUnfinished(cells: readonly UnfinishedCellShape[], validationCount: number) {
   return useMemo(() => {
     const hasAny = cells.some((c) => isUnfinished(c, validationCount))
     return {

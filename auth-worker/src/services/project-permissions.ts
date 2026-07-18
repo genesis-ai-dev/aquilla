@@ -16,6 +16,14 @@
 // Mirrored on the client at `src/lib/frontier/roles.ts` (ROLE.* and
 // ROLE_NAMES). Tests will fail if these drift apart — early-warning signal
 // that a coordinated update is needed.
+//
+// AQU-487: there is intentionally NO fifth "project-wide default role" path
+// here. A blanket per-project default that could silently overwrite an
+// individual member's explicit grant was identified as an over-permission
+// footgun (e.g. setting the project default to "reviewer" would make
+// everybody a reviewer, clobbering intentional per-member roles). Every
+// contribution above is an explicit, per-member grant — do not add a
+// project-level fallback that isn't tied to a specific member.
 
 import type { Env } from "../types"
 import type { AuthUser, RoleResolution } from "../types"

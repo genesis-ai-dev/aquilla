@@ -279,11 +279,11 @@ describe("useFocusLock", () => {
     expect(result.current[0].isHeld).toBe(false)
   })
 
-  // FRO-288: renewal keeps the lock alive past the 30s DO lease boundary.
+  // AQU-288: renewal keeps the lock alive past the 30s DO lease boundary.
   // Without renewal the DO expires the lease and a second claimant can steal
   // the lock silently. With the half-period timer, focus.renew fires every 15s
   // and the server resets the clock; isHeld stays true on our side.
-  it("FRO-288: renewal fires past the 30s lease boundary, keeping the lock", () => {
+  it("AQU-288: renewal fires past the 30s lease boundary, keeping the lock", () => {
     const ws = makeFakeReconciler()
     const { result } = renderHook(() =>
       useFocusLock({
@@ -308,9 +308,9 @@ describe("useFocusLock", () => {
     expect(renewals.length).toBeGreaterThanOrEqual(2)
   })
 
-  // FRO-288: takeover (another user grabs the cell) must surface heldBy
+  // AQU-288: takeover (another user grabs the cell) must surface heldBy
   // and stop our renewal timer so we don't keep sending stale renewals.
-  it("FRO-288: takeover sets heldBy and stops the renewal timer", () => {
+  it("AQU-288: takeover sets heldBy and stops the renewal timer", () => {
     const ws = makeFakeReconciler()
     const { result } = renderHook(() =>
       useFocusLock({

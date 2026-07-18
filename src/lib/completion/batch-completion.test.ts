@@ -1,4 +1,4 @@
-// FRO-235: Tests for the batch-completion progress store and cancel flag.
+// AQU-235: Tests for the batch-completion progress store and cancel flag.
 
 import { describe, it, expect, beforeEach } from "vitest"
 import {
@@ -64,10 +64,10 @@ describe("clearBatchCompletionProgress", () => {
 })
 
 // ---------------------------------------------------------------------------
-// FRO-361: sub-batch failure summary must survive run completion
+// AQU-361: sub-batch failure summary must survive run completion
 // ---------------------------------------------------------------------------
 
-describe("incrementBatchCompletionFailed (FRO-361)", () => {
+describe("incrementBatchCompletionFailed (AQU-361)", () => {
   beforeEach(() => {
     clearBatchCompletionProgress()
     dismissBatchCompletionSummary()
@@ -95,7 +95,7 @@ describe("incrementBatchCompletionFailed (FRO-361)", () => {
   })
 })
 
-describe("clearBatchCompletionProgress retains a failed-run summary (FRO-361)", () => {
+describe("clearBatchCompletionProgress retains a failed-run summary (AQU-361)", () => {
   beforeEach(() => {
     dismissBatchCompletionSummary()
   })
@@ -227,7 +227,7 @@ describe("abort mid-stream does not commit partial text", () => {
 })
 
 // ---------------------------------------------------------------------------
-// FRO-235: Run-identity / interleaving tests (adversarial-panel demands)
+// AQU-235: Run-identity / interleaving tests (adversarial-panel demands)
 // ---------------------------------------------------------------------------
 
 describe("run ID — cancel→restart: old run cannot resurrect after Stop", () => {

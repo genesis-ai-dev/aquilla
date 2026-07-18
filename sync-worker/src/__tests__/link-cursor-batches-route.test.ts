@@ -1,4 +1,4 @@
-// FRO-478: GET /api/v1/projects/:projectId/link/cursor-batches tests.
+// AQU-478: GET /api/v1/projects/:projectId/link/cursor-batches tests.
 //
 // `link.cursor.advance` is project-level (fileId/cellId both NULL) so
 // neither `read-route.ts` (requires fileId) nor `cell-history-read-route.ts`

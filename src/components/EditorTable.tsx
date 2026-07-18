@@ -9,7 +9,7 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, ChevronDown, Music, Braces,
+  ArrowRight, Activity, NotebookPen, Info, Pencil, Lock, ChevronRight, ChevronDown, Music, Braces,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -31,6 +31,7 @@ import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy } from "@/lib/parsers/types"
 import { hasTiming } from "@/lib/timeline/derive"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
+import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
 import { canPerform } from "@/lib/sync/role-policy"
 import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
@@ -702,7 +703,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onVisibleFootnotesChange,
   onFootnoteCreated,
 }, ref) {
-  const { canEdit, canValidate, canEditSource, readOnlyLabel } = useEditorCapabilities(project)
+  // DCS lockdown: while this project is pinned to a Door43 upstream, the
+  // repair path treats any hand-edited source cell as damage and overwrites
+  // it, so the "Edit source" affordance must stay off. Loading counts as
+  // linked (default-locked) — see useDcsUpstreamCursor.
+  const { cursor: dcsCursor, loading: dcsCursorLoading } = useDcsUpstreamCursor(
+    project.id,
+    project.syncRole?.level ?? null,
+  )
+  const { canEdit, canValidate, canEditSource, sourceReadOnlyReason, readOnlyLabel } = useEditorCapabilities(project, {
+    hasDcsUpstream: dcsCursorLoading || dcsCursor !== null,
+  })
   // Probe mic permission once (shared across all rows) so the help affordance
   // on CellAudioRecordButton activates when the user has blocked the mic.
   const { micDenied } = useMicPermission(audioLens !== null)
@@ -1470,6 +1481,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           editable={canEdit}
           canValidate={canValidate}
           canEditSource={canEditSource}
+          sourceReadOnlyReason={sourceReadOnlyReason}
           onCellCommitted={onCellCommitted}
           getPendingTargetEventId={getPendingTargetEventId}
           onOptimisticEdit={onOptimisticEdit}
@@ -1812,6 +1824,10 @@ interface MemoizedRowProps {
   /** True when the user may edit SOURCE text (source.cell.commit): cloud
    *  project_lead+ (500) on a non-live-linked project. See canEditSource. */
   canEditSource: boolean
+  /** Why the source lane is force-locked (DCS pin), or null. Shown where the
+   *  pencil would be, and surfaced when a mid-edit capability flip force-closes
+   *  an open source editor. See useProjectPermissions.sourceReadOnlyReason. */
+  sourceReadOnlyReason: string | null
   /** Phase 5 / AD-9: source has advanced since this target was last committed.
    *  Resolved once per file by the parent (membership look-up) so this prop
    *  is just a stable boolean — preserves the row's React.memo invariant. */
@@ -1929,7 +1945,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     isEditorActive,
     onActivateEditor,
     onDeactivateEditor,
-    project, username, activeLane, editable, canValidate, canEditSource, isCompletionConfigured, isCompletionAvailable,
+    project, username, activeLane, editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
     getFootnoteDetails,
@@ -2026,6 +2042,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         editable={editable}
         canValidate={canValidate}
         canEditSource={canEditSource}
+        sourceReadOnlyReason={sourceReadOnlyReason}
         isStaleSource={isStaleSource}
         isUpstreamStaleSource={isUpstreamStaleSource}
         isCompletionConfigured={isCompletionConfigured}
@@ -2122,6 +2139,10 @@ interface EditorRowProps {
    *  project_lead+ (500) on a non-live-linked project. Surfaces the per-cell
    *  "Edit source" affordance. See useProjectPermissions.canEditSource. */
   canEditSource: boolean
+  /** Why the source lane is force-locked (DCS pin), or null. Renders a lock
+   *  hint where the pencil would be and is the message shown when a mid-edit
+   *  capability flip force-closes the source editor. */
+  sourceReadOnlyReason: string | null
   /** Phase 5 / AD-9 — true when the source has advanced since the last
    *  target commit. Renders a small warning badge next to the validation
    *  status. Computed once-per-file by the parent. */
@@ -3036,7 +3057,7 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
 
 function EditorRow({
   project, cell, isEditorActive, onActivateEditor, onDeactivateEditor,
-  username, activeLane = "", editable, canValidate, canEditSource, isCompletionConfigured, isCompletionAvailable, isLoading,
+  username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, highlights, error, health,
   cellInfractions, waivedInfractions, ruleMap,
@@ -3475,6 +3496,20 @@ function EditorRow({
   useEffect(() => {
     if (sourceDraft && (cell.original ?? "") === sourceDraft.value) setSourceDraft(null)
   }, [cell.original, sourceDraft])
+
+  // Force-close an OPEN source editor when canEditSource flips false mid-edit
+  // (e.g. a settings revalidate delivers a DCS cursor). Without this the editor
+  // stayed mounted but handleSourceCommit's guard silently dropped every commit
+  // — the user kept typing into a void. Closing is bounded loss (only the text
+  // since the flip moment); the writeError banner says WHY so it isn't silent.
+  useEffect(() => {
+    if (!sourceEditing || canEditSource) return
+    setSourceEditing(false)
+    setWriteError(
+      sourceReadOnlyReason ??
+        "Source editing is no longer available on this project — the source editor was closed.",
+    )
+  }, [sourceEditing, canEditSource, sourceReadOnlyReason])
 
   // Focus the inline source editor when entering edit mode (mirrors the target
   // editor's focus effect, but scoped to the source column so it can't grab the
@@ -4533,7 +4568,7 @@ function EditorRow({
               {/* Source-edit affordance (project_lead+, non-live projects). Emits
                   source.cell.commit — the template-owner correction that propagates
                   downstream. Read-only source stays the default; editing is explicit. */}
-              {canEditSource && (
+              {canEditSource ? (
                 <AppTooltip content={sourceEditing ? "Done editing source" : "Edit source text"}>
                   <button
                     type="button"
@@ -4550,7 +4585,19 @@ function EditorRow({
                     <Pencil className="h-3 w-3" />
                   </button>
                 </AppTooltip>
-              )}
+              ) : sourceReadOnlyReason ? (
+                // Force-locked source lane (DCS pin): keep an explained
+                // affordance where the pencil would be instead of letting it
+                // silently vanish (AQU-615 review nit).
+                <AppTooltip content={sourceReadOnlyReason} className="max-w-xs">
+                  <span
+                    aria-label="Source is locked"
+                    className="ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground/50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                  >
+                    <Lock className="h-3 w-3" />
+                  </span>
+                </AppTooltip>
+              ) : null}
             </div>
             <SourceReferenceAttachments metadata={cell.metadata} />
             {sourceEditing ? (

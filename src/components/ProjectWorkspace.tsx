@@ -114,6 +114,7 @@ import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
+import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
 import { EditorModeToggle } from "./EditorModeToggle"
 import { audioLensLabel, audioLensIcon } from "@/lib/editor/audio-lens-label"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
@@ -4185,6 +4186,17 @@ export function ProjectWorkspace() {
             overviewHref={projectId ? `/projects/${projectId}` : undefined}
             surfaceLabel={workspaceBreadcrumb.surfaceLabel}
           >
+            {/* AQU-615: Door43 upstream-sync badge — visible hint that source
+                cells are managed by a DCS link. Self-gated: renders nothing
+                when project_settings has no dcsUpstream cursor. */}
+            {project && projectId && (
+              <DcsSyncBadgeMount
+                projectId={projectId}
+                roleLevel={serverRoleLevel}
+                onClick={() => navigate(`/project/${projectId}/settings`)}
+              />
+            )}
+
             {project && centerSurface === "rules" && (
               <>
                 <Button variant="outline" size="sm" onClick={() => navigate(`/project/${projectId}/terminology`)}>

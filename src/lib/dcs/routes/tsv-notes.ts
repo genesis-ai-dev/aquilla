@@ -10,7 +10,13 @@
 import type { DcsFile, DcsCell, ResourceRoute, DcsCatalogEntry, DcsManifest } from "../types"
 import { dcsCellId, dcsFileId } from "../cell-id"
 import { contentHash } from "../content-hash"
-import { parseResourceTsv, bookCodeFromTsv, canonicalRefFromTsv } from "./tsv-common"
+import {
+  parseResourceTsv,
+  bookCodeFromTsv,
+  canonicalRefFromTsv,
+  unescapeTsvProse,
+  tsvMarkdownToHtml,
+} from "./tsv-common"
 
 const NOTES_SUBJECTS = [
   "tsv translation notes",
@@ -50,7 +56,11 @@ export const tsvNotesRoute: ResourceRoute = {
 
       for (const row of rows) {
         // The translatable unit is strictly the `Note` column (spec §4).
-        const note = row.prose["note"] ?? ""
+        // Unescape TSV `\n`/`\t`/`\\` so the value is real markdown text, and
+        // render that markdown to valueHtml so the editor shows prose, not
+        // `#`/`**` syntax. Unescaping changes value → contentHash, so a
+        // re-import over old escaped cells correctly emits content commits.
+        const note = unescapeTsvProse(row.prose["note"] ?? "")
         const cell: DcsCell = {
           cellId: dcsCellId(`${repo}|${book}|${row.rowId}`),
           value: note,
@@ -58,6 +68,7 @@ export const tsvNotesRoute: ResourceRoute = {
           canonicalRef: canonicalRefFromTsv(book, row.reference),
           contentHash: contentHash(note),
         }
+        if (note) cell.valueHtml = tsvMarkdownToHtml(note)
         if (Object.keys(row.metadata).length > 0) cell.metadata = row.metadata
         cells.push(cell)
       }

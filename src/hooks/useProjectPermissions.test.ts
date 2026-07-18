@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defaultLocalPermissions, resolvePermissions, resolveEditorCapabilities } from "./useProjectPermissions";
+import { defaultLocalPermissions, resolvePermissions, resolveEditorCapabilities, DCS_SOURCE_LOCK_REASON } from "./useProjectPermissions";
 import type { ProjectRecord } from "@/lib/parsers/types";
 import { ROLE } from "@/lib/frontier/roles";
 
@@ -177,5 +177,56 @@ describe("resolveEditorCapabilities — canEditSource (source.cell.commit gate)"
   it("null/undefined project cannot edit source", () => {
     expect(resolveEditorCapabilities(null).canEditSource).toBe(false);
     expect(resolveEditorCapabilities(undefined).canEditSource).toBe(false);
+  });
+});
+
+describe("resolveEditorCapabilities — DCS upstream lockdown (hasDcsUpstream)", () => {
+  // WHY: while a project is pinned to a Door43 upstream, the DCS repair path
+  // treats ANY local source divergence as damage and silently overwrites it.
+  // A hand-edit would therefore be destroyed on the next re-sync — so the
+  // affordance must be locked for EVERY role; detaching in Project Settings
+  // is the only sanctioned way out.
+
+  it("cursor present forces canEditSource=false regardless of role", () => {
+    for (const level of [ROLE.PROJECT_LEAD, ROLE.MAINTAINER, ROLE.OWNER]) {
+      const caps = resolveEditorCapabilities(withRole(level), { hasDcsUpstream: true });
+      expect(caps.canEditSource).toBe(false);
+      expect(caps.sourceReadOnlyReason).toBe(DCS_SOURCE_LOCK_REASON);
+    }
+  });
+
+  it("does not disturb target-side capabilities (canEdit/canValidate/readOnlyLabel)", () => {
+    const caps = resolveEditorCapabilities(withRole(ROLE.MAINTAINER), { hasDcsUpstream: true });
+    expect(caps.canEdit).toBe(true);
+    expect(caps.canValidate).toBe(true);
+    expect(caps.readOnlyLabel).toBeNull();
+  });
+
+  it("cursor absent preserves prior behavior and carries no source lock reason", () => {
+    for (const opts of [undefined, {}, { hasDcsUpstream: false }]) {
+      const caps = resolveEditorCapabilities(withRole(ROLE.PROJECT_LEAD), opts);
+      expect(caps.canEditSource).toBe(true);
+      expect(caps.sourceReadOnlyReason).toBeNull();
+    }
+  });
+
+  it("lock-reason copy does not tell the reader to detach (detach needs MAINTAINER 600, but a project_lead 500 sees this copy)", () => {
+    // AQU-615 review nit: the old copy said "detach in Project Settings to
+    // edit", but the detach action is gated at MAINTAINER — a project_lead
+    // would follow the instruction and find no such control. The copy must
+    // attribute the action to a maintainer instead.
+    expect(DCS_SOURCE_LOCK_REASON).toMatch(/a maintainer can detach/i);
+    expect(DCS_SOURCE_LOCK_REASON).not.toMatch(/detach .* to edit/i);
+  });
+
+  it("LOADING policy: unknown linked-state must be passed as hasDcsUpstream=true (default-locked)", () => {
+    // EditorTable passes `hasDcsUpstream: loading || cursor !== null` — while
+    // the settings fetch is in flight the lock is ON. Default-locked can never
+    // let a doomed source edit through; the only cost is that a project_lead+
+    // user on an ordinary cloud project sees the affordance one settings GET
+    // late. This test pins the contract that `true` locks even when the caller
+    // has no cursor in hand yet.
+    const caps = resolveEditorCapabilities(withRole(ROLE.OWNER), { hasDcsUpstream: true });
+    expect(caps.canEditSource).toBe(false);
   });
 });

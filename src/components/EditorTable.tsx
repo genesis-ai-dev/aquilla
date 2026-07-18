@@ -592,7 +592,7 @@ interface EditorTableProps {
    *  so the user sees progress immediately instead of waiting for the
    *  commit + outbox flush to land. */
   previews: Map<string, string>
-  onCompleteSingle: (cell: CellData) => void
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void
   onCompleteBatch: (cells: CellData[]) => void
   healthMap: Map<string, number>
   infractions?: Map<string, RuleInfraction[]>
@@ -1949,7 +1949,7 @@ interface MemoizedRowProps {
   healthMap: Map<string, number>
   infractions: Map<string, RuleInfraction[]>
   ruleMap: Map<string, TranslationRule>
-  onCompleteSingle: (cell: CellData) => void
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void
   isBacktranslationConfigured?: boolean
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
@@ -2267,7 +2267,7 @@ interface EditorRowProps {
   cellInfractions: RuleInfraction[]
   waivedInfractions: RuleInfraction[]
   ruleMap: Map<string, TranslationRule>
-  onCompleteSingle: (cell: CellData) => void
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void
   isBacktranslationConfigured?: boolean
   isBacktranslating?: boolean
   backtranslationError?: string
@@ -5162,6 +5162,44 @@ function EditorRow({
                 onMouseDown={onDragStart}
                 onMouseEnter={onDragEnter}
               />
+
+              {/* AQU-620: Regenerate — ask the AI for another iteration of an
+                  existing prediction. Shown only for a NON-validated cell that
+                  already has a draft (validated cells route through the Sparkles
+                  overwrite confirm instead — clearing validation is destructive).
+                  Regenerate raises the sampling temperature (useCompletion) so
+                  the new candidate differs, and overwrites the current draft
+                  (last-write-wins; the prior text stays in cell history). */}
+              {editable && !isAnonymous && cell.status !== "validated" && visibleTranslated.trim() && (
+                <RailButton
+                  icon={<RefreshCw className="h-3.5 w-3.5" />}
+                  tooltip={
+                    !isCompletionConfigured
+                      ? "Set up AI to enable"
+                      : !isCompletionAvailable
+                        ? "AI service unavailable — try again shortly"
+                        : isLoading
+                          ? "Generating…"
+                          : "Regenerate — another AI variation"
+                  }
+                  onClick={() => {
+                    if (isLoading) return
+                    if (!isCompletionConfigured) {
+                      onAiSetupNeeded?.()
+                      return
+                    }
+                    if (isCompletionAvailable) {
+                      onCompleteSingle(cell, { regenerate: true })
+                    }
+                  }}
+                  disabled={
+                    (!isCompletionConfigured && !onAiSetupNeeded) ||
+                    !isCompletionAvailable ||
+                    isLoading
+                  }
+                  pulsing={isLoading}
+                />
+              )}
 
               {/* FRO-237: Direct mic button on the rail when no audio — one-click
                   action without needing to open a popover ("just hit the record

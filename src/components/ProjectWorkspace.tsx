@@ -1835,6 +1835,15 @@ export function ProjectWorkspace() {
     project?.draftContext ?? DEFAULT_DRAFT_CONTEXT,
   )
 
+  // AQU-620: adapter so the editor's per-cell AI action can request a plain
+  // draft (`onCompleteSingle(cell)`) or an explicit regenerate
+  // (`onCompleteSingle(cell, { regenerate: true })`) — the latter maps to the
+  // hook's third argument so a second iteration samples at a higher temperature.
+  const handleCompleteSingle = useCallback(
+    (cell: CellData, opts?: { regenerate?: boolean }) => { void completeSingle(cell, undefined, opts) },
+    [completeSingle],
+  )
+
   // Translation agent (chat dock Agent mode): live cell lookup for proposal
   // lint + chain heads, and the post-apply flush/revalidate sequence — the
   // same steps commitCompletedCell runs after its own enqueue.
@@ -4667,7 +4676,7 @@ export function ProjectWorkspace() {
             }
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
-            onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}
+            onCompleteSingle={handleCompleteSingle} onCompleteBatch={completeBatch}
             healthMap={effectiveHealthMap} infractions={infractions} rules={rules}
             isBacktranslationConfigured={isBacktranslationConfigured}
             onBacktranslate={runBacktranslation}

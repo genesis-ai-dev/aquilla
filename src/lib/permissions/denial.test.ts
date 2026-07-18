@@ -29,6 +29,13 @@ describe("denialMessage", () => {
     expect(msg).toContain(roleDisplayText(roleName(ROLE.COMMENTER)))
     expect(msg).toMatch(/need at least/i)
   })
+
+  it("AQU-623: names the current role with the plural permission vocabulary", () => {
+    const msg = denialMessage(ROLE.CONTRIBUTOR, ROLE.VIEWER)
+    // "Viewers cannot perform this action …" — plural role noun, not "your current role"
+    expect(msg).toContain("Viewers cannot perform this action")
+    expect(msg).toMatch(/need at least Contributor access/i)
+  })
 })
 
 describe("actionGateProps", () => {

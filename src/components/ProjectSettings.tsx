@@ -68,6 +68,7 @@ import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
+import { humanRoleName } from "@/lib/frontier/roles"
 import { usePostEditMetrics } from "@/lib/metrics/use-post-edit-metrics"
 import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSection"
 
@@ -996,6 +997,9 @@ export function ProjectSettings() {
           <PermissionDeniedAlert
             action="change shared settings"
             requiredRole="Maintainer or higher"
+            currentRole={
+              project?.syncRole ? humanRoleName(project.syncRole.level) : undefined
+            }
           />
         )}
         {sharedConflict && (

@@ -33,6 +33,26 @@ const ALIGNED_MARKUP = /\\zaln-s|\\w[\s*]/
 // sof pasuq ׃ and maqqef ־, which trail outside the \w wrapper).
 const LEADING_PUNCT = /^[,.;:!?)׃־]/
 
+// Poetry/paragraph-flow markers are CONTAINERS, not content: drop the marker token
+// and keep the remainder — either a mid-line verse start ("\q1 \v 2 …") or
+// continuation text of the open verse. \b (blank line) and \nb (no-break) carry no
+// text, so stripping them leaves an empty line that is skipped.
+const CONTAINER_MARKER = /^\\(?:qr|qc|q[1-4]?|mi|m|pi[1-3]?|li[1-3]?|nb|b)(?=\s|$)/
+
+// Footnotes (\f + \ft …\f*, possibly containing \fqa etc. and spanning lines) and
+// cross-references (\x …\x*) are apparatus, not verse text: strip whole spans before
+// line parsing. Files without notes pass through byte-identical — the per-line space
+// cleanup only runs when a note was actually removed.
+function stripNotes(section: string): string {
+  if (!/\\[fx]\s/.test(section)) return section
+  return section
+    .replace(/\\f\s[\s\S]*?\\f\*/g, " ")
+    .replace(/\\x\s[\s\S]*?\\x\*/g, " ")
+    .split("\n")
+    .map((l) => l.replace(/\s{2,}/g, " ").replace(/\s+([,.;:!?)׃])/g, "$1").trimEnd())
+    .join("\n")
+}
+
 function normalizeAlignedUsfm(section: string): string {
   if (!ALIGNED_MARKUP.test(section)) return section
 
@@ -45,7 +65,11 @@ function normalizeAlignedUsfm(section: string): string {
 
   const merged: string[] = []
   for (const raw of stripped.split("\n")) {
-    const line = raw.trim()
+    let line = raw.trim()
+    // Poetry lines ("\q1 \v 2 …", "\q2 <words>") continue the verse: unwrap the
+    // container so word lines merge into the open "\v" line below.
+    const container = line.match(CONTAINER_MARKER)
+    if (container) line = line.slice(container[0].length).trim()
     if (!line) continue
     const prev = merged[merged.length - 1]
     if (!line.startsWith("\\") && prev !== undefined && /^\\v\s/.test(prev)) {
@@ -55,19 +79,26 @@ function normalizeAlignedUsfm(section: string): string {
     merged.push(line)
   }
 
-  // Safety net: collapse runs of spaces and any space that landed before punctuation.
+  // Safety net: collapse runs of spaces, any space that landed before punctuation,
+  // and padding inside ULT's {curly braces} (implied words — the braces and their
+  // inner text are part of the translatable text and are kept).
   return merged
     .map((l) =>
-      /^\\v\s/.test(l) ? l.replace(/\s{2,}/g, " ").replace(/\s+([,.;:!?)׃])/g, "$1") : l,
+      /^\\v\s/.test(l)
+        ? l
+            .replace(/\s{2,}/g, " ")
+            .replace(/\s+([,.;:!?)׃])/g, "$1")
+            .replace(/\{\s+/g, "{")
+            .replace(/\s+\}/g, "}")
+        : l,
     )
     .join("\n")
 }
 
 function parseBookSection(section: string, bookId: string): UsfmBookResult {
-  const lines = normalizeAlignedUsfm(section).split("\n")
+  const lines = normalizeAlignedUsfm(stripNotes(section)).split("\n")
   const strings: TranslatableString[] = []
   let chapter = 0
-  let verse = 0
 
   function addString(
     text: string,
@@ -92,7 +123,7 @@ function parseBookSection(section: string, bookId: string): UsfmBookResult {
   }
 
   for (const line of lines) {
-    const trimmed = line.trim()
+    let trimmed = line.trim()
     if (!trimmed) continue
 
     if (trimmed.startsWith("\\id ")) continue
@@ -100,17 +131,32 @@ function parseBookSection(section: string, bookId: string): UsfmBookResult {
     const chapterMatch = trimmed.match(/^\\c\s+(\d+)/)
     if (chapterMatch) {
       chapter = parseInt(chapterMatch[1])
-      verse = 0
       continue
     }
 
+    // Poetry/paragraph-flow containers (plain USFM keeps them on the line): unwrap
+    // the marker, then fall through — the remainder is either a mid-line "\v N"
+    // start or continuation text appended to the open verse below.
+    const container = trimmed.match(CONTAINER_MARKER)
+    if (container) {
+      trimmed = trimmed.slice(container[0].length).trim()
+      if (!trimmed) continue
+    }
+
     // Text is optional: aligned corpora (hbo_uhb) emit bare "\v N" lines whose
-    // words arrive on the following lines and get appended below.
-    const verseMatch = trimmed.match(/^\\v\s+(\d+)(?:\s+(.*))?$/)
+    // words arrive on the following lines and get appended below. Verse ranges
+    // ("\v 1-2") keep the full range token in the ref.
+    const verseMatch = trimmed.match(/^\\v\s+(\d+(?:-\d+)?)(?:\s+(.*))?$/)
     if (verseMatch) {
-      verse = parseInt(verseMatch[1])
-      const vref = `${bookId} ${chapter}:${verse}`
+      const vref = `${bookId} ${chapter}:${verseMatch[1]}`
       addString(verseMatch[2] ?? "", vref, "verse", `${bookId} ${chapter}`, [vref])
+      continue
+    }
+
+    // \d — psalm superscription ("A psalm of David."): a heading, not verse text.
+    const descriptorMatch = trimmed.match(/^\\d\s+(.*)/)
+    if (descriptorMatch) {
+      addString(descriptorMatch[1], `${bookId} ${chapter}`, "heading", `${bookId} ${chapter}`)
       continue
     }
 

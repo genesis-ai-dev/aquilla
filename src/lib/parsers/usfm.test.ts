@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { extractUsfmStrings } from "./usfm"
 import ultTitRaw from "./__fixtures__/ult-tit-1.usfm?raw"
+import ultPsaRaw from "./__fixtures__/ult-psa-1.usfm?raw"
 import uhbExoRaw from "./__fixtures__/uhb-exo-1.usfm?raw"
 
 describe("extractUsfmStrings", () => {
@@ -197,6 +198,93 @@ the heavens , and the earth.
       "In the beginning God created the heavens , and the earth.",
       "The earth was without form.",
     ])
+  })
+})
+
+// Real unfoldingWord OT content: verse text flows across \q1/\q2 poetry lines, the
+// \v marker itself sits mid-line after the poetry marker, zaln milestones nest, and
+// {curly braces} mark implied words that ARE part of ULT's translatable text.
+// Before this fix every \q* line was dropped and Psalm 1:2 was not even detected.
+describe("extractUsfmStrings — poetry (aligned ULT Psalm 1)", () => {
+  it("reconstructs a full verse whose text spans \\q1/\\q2 poetry lines", () => {
+    const [book] = extractUsfmStrings(ultPsaRaw)
+    expect(book.bookId).toBe("PSA")
+    const v1 = book.strings.find((s) => s.context === "PSA 1:1")
+    expect(v1?.original).toBe(
+      "The happinesses of the man who walks not in the advice of the wicked, and stands not in the pathway of sinners, and sits not in the seat of scoffers,",
+    )
+  })
+
+  it("detects a verse whose \\v marker sits mid-line after \\q1, and keeps {braces}", () => {
+    const [book] = extractUsfmStrings(ultPsaRaw)
+    const v2 = book.strings.find((s) => s.context === "PSA 1:2")
+    expect(v2).toBeDefined()
+    expect(v2?.original).toContain("in the instruction of Yahweh")
+    // Nested \zaln-s pairs around "but" must strip cleanly; the {is} implied-word
+    // braces are ULT's translatable-text convention and must survive.
+    expect(v2?.original).toContain("but in the instruction of Yahweh {is} his delight,")
+    expect(v2?.original?.endsWith("he meditates day and night.")).toBe(true)
+  })
+
+  it("leaves no alignment or poetry markup in any cell", () => {
+    const [book] = extractUsfmStrings(ultPsaRaw)
+    for (const s of book.strings) {
+      expect(s.original).not.toMatch(/\\zaln|\\w|\\q|x-occurrence|x-strong|\|/)
+    }
+  })
+})
+
+describe("extractUsfmStrings — footnotes, verse ranges, plain poetry", () => {
+  it("strips \\f …\\f* footnotes (incl. inner \\fqa) leaving clean verse text", () => {
+    const usfm = `\\id MAT
+\\c 5
+\\v 11 Blessed are you when they persecute you \\f + \\ft A few manuscripts do not include \\fqa lying.\\fqa*\\f* for my sake.`
+    const [book] = extractUsfmStrings(usfm)
+    const v11 = book.strings.find((s) => s.context === "MAT 5:11")
+    expect(v11?.original).toBe("Blessed are you when they persecute you for my sake.")
+    expect(v11?.original).not.toMatch(/\\f|\\ft|\\fqa/)
+  })
+
+  it("strips footnotes that span multiple lines, and \\x …\\x* cross-references", () => {
+    const usfm = `\\id MAT
+\\c 1
+\\v 1 The book of the genealogy \\f + \\ft a note
+that continues on the next line\\f* of Jesus Christ \\x + \\xo 1:1 \\xt Luke 3:23\\x* the son of David.`
+    const [book] = extractUsfmStrings(usfm)
+    expect(book.strings[0].original).toBe(
+      "The book of the genealogy of Jesus Christ the son of David.",
+    )
+  })
+
+  it("emits ref 'BOOK C:1-2' for verse ranges with clean text", () => {
+    const usfm = `\\id MRK
+\\c 1
+\\v 1-2 The beginning of the gospel of Jesus Christ.`
+    const [book] = extractUsfmStrings(usfm)
+    const v = book.strings[0]
+    expect(v.context).toBe("MRK 1:1-2")
+    expect(v.globalReferences).toEqual(["MRK 1:1-2"])
+    expect(v.original).toBe("The beginning of the gospel of Jesus Christ.")
+  })
+
+  it("keeps plain-USFM \\q continuation text and treats \\d as heading, \\b as skip", () => {
+    const usfm = `\\id PSA
+\\c 23
+\\d A psalm of David.
+\\q1
+\\v 1 Yahweh is my shepherd;
+\\q2 I shall not want.
+\\b
+\\q1
+\\v 2 He makes me lie down in green pastures.`
+    const [book] = extractUsfmStrings(usfm)
+    const heading = book.strings.find((s) => s.type === "heading")
+    expect(heading?.original).toBe("A psalm of David.")
+    const v1 = book.strings.find((s) => s.context === "PSA 23:1")
+    // The \q2 line's text is verse continuation, not a dropped marker line.
+    expect(v1?.original).toBe("Yahweh is my shepherd; I shall not want.")
+    const v2 = book.strings.find((s) => s.context === "PSA 23:2")
+    expect(v2?.original).toBe("He makes me lie down in green pastures.")
   })
 })
 

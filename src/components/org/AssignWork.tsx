@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
+import { compareByCanonicalBookOrder } from "@/lib/file-labeling/bible-book-names"
 import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
 import { canSubmitAssignment } from "@/lib/sync/role-policy"
 import { Button } from "@/components/ui/button"
@@ -72,6 +73,14 @@ export function AssignWork({
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // AQU-582: list books in canonical Bible reading order (Genesis → Revelation)
+  // rather than the incoming prop order, matching the sidebar and the Assign
+  // modal. Non-book files fall back to alphabetic via the shared comparator.
+  const sortedFiles = useMemo(
+    () => [...files].sort((a, b) => compareByCanonicalBookOrder(a.name, b.name)),
+    [files],
+  )
 
   useEffect(() => {
     if (!open) return
@@ -198,7 +207,7 @@ export function AssignWork({
           <Field>
             <FieldLabel htmlFor="assign-work-book">Book</FieldLabel>
             <Select
-              items={files.map((f) => ({ value: f.id, label: f.name }))}
+              items={sortedFiles.map((f) => ({ value: f.id, label: f.name }))}
               value={fileId}
               onValueChange={(v) => setFileId(v ?? "")}
               disabled={busy}
@@ -208,7 +217,7 @@ export function AssignWork({
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  {files.map((f) => (
+                  {sortedFiles.map((f) => (
                     <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
                   ))}
                 </SelectGroup>

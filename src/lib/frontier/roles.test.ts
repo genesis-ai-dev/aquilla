@@ -6,6 +6,7 @@ import {
   PROJECT_ROLE_PICKER,
   ORG_ROLE_PICKER,
   roleName,
+  humanRoleName,
   formatRoleDisplay,
   roleDisplayText,
   roleDisplayLabel,
@@ -88,6 +89,18 @@ describe("ROLE_OPTIONS shapes", () => {
       expect(opt.name).not.toBe("")
       expect(opt.description).not.toBe("")
     }
+  })
+})
+
+describe("humanRoleName (FRO-368)", () => {
+  it("humanizes snake_case role names", () => {
+    expect(humanRoleName(500)).toBe("Project lead")
+    expect(humanRoleName(400)).toBe("Contributor")
+    expect(humanRoleName(100)).toBe("Viewer")
+  })
+
+  it("never emits a bare numeric for unknown levels", () => {
+    expect(humanRoleName(450)).toBe("Level 450")
   })
 })
 
